@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS users (
     status TEXT NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'inactive', 'banned')),
     last_login_at TEXT,
+    must_change_password INTEGER NOT NULL DEFAULT 0
+        CHECK (must_change_password IN (0, 1)),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -118,6 +120,29 @@ class UserDatabase:
     def initialize(self) -> None:
         with self.connect() as connection:
             connection.executescript(SCHEMA_SQL)
+            # CREATE TABLE IF NOT EXISTS 不会为已存在的表补列，因此老库需要显式迁移。
+            self._ensure_column(
+                connection,
+                "users",
+                "must_change_password",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+
+    def _ensure_column(
+        self,
+        connection: sqlite3.Connection,
+        table_name: str,
+        column_name: str,
+        column_definition: str,
+    ) -> None:
+        existing = {
+            row["name"]
+            for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        if column_name not in existing:
+            connection.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
+            )
 
     def table_names(self) -> set[str]:
         with self.connect() as connection:

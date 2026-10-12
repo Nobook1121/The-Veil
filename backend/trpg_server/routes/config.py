@@ -8,7 +8,12 @@ import requests
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.ai_capabilities import chat_completions_endpoint, probe_responses_api
-from trpg_server.ai_platform_config import load_platform_config, load_public_platform_config, save_platform_config
+from trpg_server.ai_platform_config import (
+    load_platform_config,
+    load_public_platform_config,
+    ordered_platform_paths,
+    save_platform_config,
+)
 from trpg_server.json_store import write_json_atomic
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.permission_config import load_permission_config, permission_config_path, save_permission_config
@@ -200,7 +205,8 @@ def list_ai_platform_configs():
         secret_dir = _get_ai_platform_secret_dir()
         platforms = []
         # 平台目录里还放着 default-request.json（模型请求模板），它不是平台配置，跳过。
-        for public_path in sorted(platform_dir.glob("*.json")):
+        # ordered_platform_paths 已按各平台配置的 order 升序返回，前端据此展示拖动顺序。
+        for public_path in ordered_platform_paths(platform_dir):
             if public_path.name == "default-request.json":
                 continue
             try:
@@ -246,6 +252,48 @@ def save_ai_platform_config(platform):
         return success_response(message="Config saved successfully")
     except Exception as exc:
         logger.exception("Failed to save AI platform config: %s", platform)
+        return server_error("Save failed")
+
+
+@bp.route("/api/config/aiplatform/order", methods=["POST"])
+@require_permission_node("settings.ai_models")
+def reorder_ai_platform_configs():
+    """保存大模型供应商的加载顺序（管理员拖动排序的结果）。
+
+    请求体 ``{"order": [platform_id, ...]}``，数组下标即加载优先级：下标越小越先加载。
+    运行时房间对话据此顺序加载启用平台，失败时按同一顺序回退到下一个。
+    """
+    try:
+        payload = request.get_json(silent=True) or {}
+        order = payload.get("order")
+        if not isinstance(order, list) or not order:
+            return error_response("Invalid order data", 400)
+
+        platform_dir = _get_ai_platform_dir()
+        secret_dir = _get_ai_platform_secret_dir()
+        updated = []
+        for index, platform in enumerate(order):
+            platform_id = str(platform or "").strip()
+            if not platform_id:
+                continue
+            config_path = safe_join(platform_dir, f"{platform_id}.json")
+            secret_path = safe_join(secret_dir, f"{platform_id}.json")
+            if not config_path.exists():
+                continue
+            config = load_platform_config(config_path, secret_path)
+            config["order"] = index
+            save_platform_config(config_path, secret_path, config)
+            updated.append(platform_id)
+
+        log_user_action(
+            logger,
+            user_action_text(session.get("username"), "调整了 AI 平台加载顺序"),
+            用户ID=session.get("user_id"),
+            顺序=",".join(updated),
+        )
+        return success_response(message="Order saved successfully")
+    except Exception:
+        logger.exception("Failed to save AI platform order")
         return server_error("Save failed")
 
 

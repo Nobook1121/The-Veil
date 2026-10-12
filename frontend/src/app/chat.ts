@@ -1248,6 +1248,12 @@ function initWebSocket(): void {
         socket.on("room_members_changed", () => { void window.refreshCurrentRoomMembers?.(); });
         socket.on("room_autosave_created", () => { void window.refreshRoomNodes?.(); });
         socket.on("role_changed", (data) => handleRoleChanged(data));
+        // 平台自动切换等仅面向管理员的提示：服务端只推给在线管理员，前端以通知条展示（不用 alert）。
+        socket.on("admin_notification", (payload: unknown) => {
+            const data = (payload || {}) as { message?: unknown; level?: unknown };
+            const message = typeof data.message === "string" ? data.message : "";
+            if (message) showNotification(message, data.level === "error" ? "error" : "warning");
+        });
     } catch (error) {
         console.warn("WebSocket 连接失败，消息同步不可用:", error);
     }

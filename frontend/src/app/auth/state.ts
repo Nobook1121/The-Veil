@@ -22,6 +22,7 @@ namespace AuthModule {
         nickname?: string;
         presence?: "online" | "dnd" | "invisible";
         two_factor_enabled?: boolean;
+        must_change_password?: boolean;
         csrf_token?: string;
         impersonation_mode?: boolean;
         impersonated_by?: number | string;

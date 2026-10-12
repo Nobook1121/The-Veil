@@ -11,6 +11,35 @@ def _platform_config_copy(config: dict[str, Any] | None) -> dict[str, Any]:
     return deepcopy(config) if isinstance(config, dict) else {}
 
 
+def platform_load_order(config: dict[str, Any] | None) -> float | None:
+    """读取平台的显式加载顺序（``order``）；缺失或非法时返回 ``None``。"""
+    if not isinstance(config, dict):
+        return None
+    order = config.get("order")
+    if isinstance(order, bool) or not isinstance(order, (int, float)):
+        return None
+    return float(order)
+
+
+def ordered_platform_paths(platform_dir: Path) -> list[Path]:
+    """返回平台配置文件列表，按显式 ``order`` 升序；无 ``order`` 的排在其后并按文件名。
+
+    ``order`` 由管理员在前端拖动排序后写入各平台配置，决定「已启用平台」的加载顺序：
+    先加载 order 最小的启用平台，请求失败时再按序回退到下一个。
+    ``default-request.json`` 是模型请求模板而非平台配置，始终排除。
+    """
+    if not platform_dir.exists():
+        return []
+
+    paths = [path for path in platform_dir.glob("*.json") if path.name != "default-request.json"]
+
+    def _sort_key(path: Path):
+        order = platform_load_order(read_json(path, default={}))
+        return (0, order, path.name) if order is not None else (1, 0.0, path.name)
+
+    return sorted(paths, key=_sort_key)
+
+
 def split_platform_config(config: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any] | None]:
     public_config = _platform_config_copy(config)
     config_section = public_config.get("config")

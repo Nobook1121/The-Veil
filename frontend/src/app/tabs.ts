@@ -14,6 +14,9 @@ interface AdminUserRecord {
 const USER_ROLE_RANK: Record<string, number> = { USER: 1, ADMIN: 2, OWNER: 3 };
 const USER_ROLE_OPTIONS = ["USER", "ADMIN", "OWNER"];
 
+// 用户管理列表的完整数据缓存，过滤/搜索都基于它在前端进行。
+let allUserRecords: AdminUserRecord[] = [];
+
 function initTabs(): void {
     try {
         const navLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>("#sidebar .nav-link"));
@@ -247,22 +250,21 @@ function initSettingsTabs(): void {
         });
     }
 
-    const themeSelect = document.getElementById("themeSelect") as HTMLSelectElement | null;
-    if (themeSelect) {
-        themeSelect.dataset.savedValue = themeSelect.value;
-        themeSelect.addEventListener("change", () => updateDefaultThemePendingState());
-    }
-    document.getElementById("saveDefaultThemeChange")?.addEventListener("click", () => {
-        void saveDefaultThemeChange();
+    document.getElementById("saveGeneralSettingsChanges")?.addEventListener("click", () => {
+        void saveGeneralSettingsChanges();
     });
-    document.getElementById("cancelDefaultThemeChange")?.addEventListener("click", cancelDefaultThemeChange);
-    window.addEventListener("trpg:locale-changed", () => {
-        const generalConfig = configManager.getConfig("general");
-        const language = isConfigObject(generalConfig.language) ? generalConfig.language : {};
-        language.language = window.TrpgI18n?.getLocale() === "en_us" ? "en-US" : "zh-CN";
-        generalConfig.language = language;
-        void configManager.saveConfig("general", generalConfig);
-    });
+    document.getElementById("cancelGeneralSettingsChanges")?.addEventListener("click", cancelGeneralSettingsChanges);
+
+    bindGeneralSelectSetting("themeSelect", "appearance", "theme");
+    bindGeneralSelectSetting("languageSelect", "language", "language");
+
+    bindGeneralCheckboxSetting("enableSound", "notification", "enable_sound");
+    bindGeneralCheckboxSetting("enableNotification", "notification", "enable_desktop_notification");
+    bindGeneralCheckboxSetting("enableAutosave", "autosave", "enabled");
+    bindGeneralCheckboxSetting("showTimestamp", "chat", "show_timestamp");
+    bindGeneralNumberSetting("messageFontSize", "chat", "message_font_size", 10, 24);
+    bindGeneralCheckboxSetting("enableAIResponseLock", "ai", "enable_ai_response_lock");
+    bindGeneralNumberSetting("messageRateLimit", "chat", "message_rate_limit", 0, 60);
 
     bindGeneralCheckboxSetting("streamOutput", "ai", "stream_output");
     bindGeneralCheckboxSetting("scenarioImportStreamOutput", "scenario_import", "stream_output");
@@ -273,6 +275,12 @@ function initSettingsTabs(): void {
     bindGeneralNumberSetting("triggerMaxFileSize", "scenario", "trigger_max_file_size", 1024, 52428800);
     bindGeneralNumberSetting("maxToolRounds", "ai", "max_tool_rounds", 1, 30);
     bindGeneralNumberSetting("aiRequestTimeout", "ai", "ai_request_timeout", 30, 1800);
+    bindGeneralNumberSetting("aiRequestMaxRetries", "ai", "ai_request_max_retries", 0, 20);
+    bindGeneralCheckboxSetting("dedupeToolCalls", "ai.prompt", "dedupe_tool_calls");
+    bindGeneralCheckboxSetting("semanticCacheEnabled", "ai.cache", "semantic_enabled");
+    bindGeneralNumberSetting("semanticCacheTtl", "ai.cache", "semantic_ttl_seconds", 30, 86400);
+    bindGeneralNumberSetting("exactCacheTtl", "ai.cache", "exact_ttl_seconds", 30, 86400);
+    bindGeneralCheckboxSetting("recordPromptSegments", "ai", "record_prompt_segments");
     bindGeneralNumberSetting("diceCriticalThresholdDefault", "ai", "dice_critical_threshold", 0, 100);
     bindGeneralNumberSetting("diceFumbleThresholdDefault", "ai", "dice_fumble_threshold", 0, 100);
     bindGeneralNumberSetting("retrievalTopKDefault", "ai.knowledge", "top_k_default", 1, 32);
@@ -291,6 +299,7 @@ function initSettingsTabs(): void {
     document.getElementById("refreshUserManagement")?.addEventListener("click", () => {
         void loadUserManagement(true);
     });
+    bindUserManagementFilters();
     document.getElementById("refreshAITokenDashboard")?.addEventListener("click", () => {
         void loadAITokenDashboard();
     });
@@ -369,81 +378,161 @@ async function uploadRulesetSource(): Promise<void> {
 async function loadAITokenDashboard(): Promise<void> {
     const body = document.getElementById("aiTokenDashboardBody");
     const dateLabel = document.getElementById("aiTokenDashboardDate");
+    const segmentSummary = document.getElementById("aiTokenSegmentSummary");
     if (!body) return;
     try {
-        const response = await TrpgApi.get<ApiResponse<{ day: string; roles: Record<string, { request_count?: number; prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; cache_hit_rate?: number }> }>>("/api/telemetry/ai/daily");
+        const response = await TrpgApi.get<ApiResponse<{ day: string; prompt_segments?: Record<string, number>; roles: Record<string, { request_count?: number; prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; cache_hit_rate?: number; prefix_cache_hit_rate?: number }> }>>("/api/telemetry/ai/daily");
         if (!response.success || !response.data) throw new Error(response.message || "无法加载 Token 用量");
         if (dateLabel) dateLabel.textContent = `日期：${response.data.day}`;
         const entries = Object.entries(response.data.roles || {});
-        body.innerHTML = entries.length ? entries.map(([role, usage]) => `<tr><td>${settingsEscapeHtml(role)}</td><td>${usage.request_count || 0}</td><td>${usage.prompt_tokens || 0}</td><td>${usage.completion_tokens || 0}</td><td>${usage.total_tokens || 0}</td><td>${usage.cache_hit_rate || 0}%</td></tr>`).join("") : '<tr><td colspan="6" class="text-muted">暂无用量记录</td></tr>';
+        body.innerHTML = entries.length ? entries.map(([role, usage]) => `<tr><td>${settingsEscapeHtml(role)}</td><td>${usage.request_count || 0}</td><td>${usage.prompt_tokens || 0}</td><td>${usage.completion_tokens || 0}</td><td>${usage.total_tokens || 0}</td><td>${usage.cache_hit_rate || 0}%</td><td>${usage.prefix_cache_hit_rate || 0}%</td></tr>`).join("") : '<tr><td colspan="7" class="text-muted">暂无用量记录</td></tr>';
+        if (segmentSummary) {
+            segmentSummary.innerHTML = renderPromptSegmentSummary(response.data.prompt_segments || {});
+        }
     } catch (error) {
-        body.innerHTML = `<tr><td colspan="6" class="text-danger">${settingsEscapeHtml(settingsErrorMessage(error))}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="7" class="text-danger">${settingsEscapeHtml(settingsErrorMessage(error))}</td></tr>`;
+        if (segmentSummary) segmentSummary.textContent = "无法加载分段数据";
     }
 }
 
-function bindGeneralCheckboxSetting(elementId: string, sectionName: string, key: string): void {
-    const input = document.getElementById(elementId) as HTMLInputElement | null;
-    if (!input) return;
-    input.addEventListener("change", async () => {
-        const generalConfig = configManager.getConfig("general");
-        const section = isConfigObject(generalConfig[sectionName]) ? generalConfig[sectionName] : {};
-        section[key] = input.checked;
-        generalConfig[sectionName] = section;
-        await configManager.saveConfig("general", generalConfig);
-    });
+// 输入 token 分段标签与展示顺序，需与后端 token_accounting.SEGMENT_LABELS 保持一致。
+const PROMPT_SEGMENT_LABELS: Array<[string, string]> = [
+    ["rules", "系统规则"],
+    ["scenario_static", "剧本静态核心"],
+    ["scene_static", "场景静态卡"],
+    ["knowledge", "知识库检索"],
+    ["room_state", "房间动态状态"],
+    ["history", "历史对话"],
+    ["user_input", "本轮输入"],
+];
+
+function renderPromptSegmentSummary(segments: Record<string, number>): string {
+    const parts = PROMPT_SEGMENT_LABELS.filter(([key]) => Number(segments[key]) > 0).map(
+        ([key, label]) => `<span class="badge bg-secondary me-2 mb-1">${label} ${Number(segments[key])}</span>`,
+    );
+    // 兜底展示后端可能新增、前端尚未登记的分段键，避免数据存在却不显示。
+    Object.entries(segments)
+        .filter(([key, value]) => Number(value) > 0 && !PROMPT_SEGMENT_LABELS.some(([known]) => known === key))
+        .forEach(([key, value]) => parts.push(`<span class="badge bg-secondary me-2 mb-1">${settingsEscapeHtml(key)} ${Number(value)}</span>`));
+    return parts.length ? parts.join("") : "暂无分段数据（可能未开启分段记录）";
 }
+
+// 常规设置项：所有改动只更新「草稿」，统一由保存条询问是否保存，
+// 点「保存」后才写回配置并生效，点「取消」则回退到上次已保存的值。
+type GeneralSettingKind = "checkbox" | "number" | "select";
+
+interface GeneralSettingControl {
+    element: HTMLInputElement | HTMLSelectElement;
+    kind: GeneralSettingKind;
+    section: string;
+    key: string;
+    minimum?: number;
+    maximum?: number;
+    savedValue: string;
+}
+
+const generalSettingControls: GeneralSettingControl[] = [];
 
 function isConfigObject(value: unknown): value is TomlConfig {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function readGeneralSettingValue(control: GeneralSettingControl): string {
+    return control.kind === "checkbox"
+        ? String((control.element as HTMLInputElement).checked)
+        : control.element.value;
+}
+
+function registerGeneralSetting(control: GeneralSettingControl): void {
+    generalSettingControls.push(control);
+    control.element.addEventListener("change", updateGeneralPendingState);
+}
+
+function bindGeneralCheckboxSetting(elementId: string, sectionName: string, key: string): void {
+    const input = document.getElementById(elementId) as HTMLInputElement | null;
+    if (!input) return;
+    registerGeneralSetting({ element: input, kind: "checkbox", section: sectionName, key, savedValue: String(input.checked) });
+}
+
 function bindGeneralNumberSetting(elementId: string, sectionName: string, key: string, minimum: number, maximum: number): void {
     const input = document.getElementById(elementId) as HTMLInputElement | null;
     if (!input) return;
-    input.addEventListener("change", async () => {
+    input.addEventListener("change", () => {
         const value = Math.max(minimum, Math.min(maximum, Number.parseInt(input.value || "0", 10) || minimum));
         input.value = String(value);
-        const generalConfig = configManager.getConfig("general");
-        const section = isConfigObject(generalConfig[sectionName]) ? generalConfig[sectionName] : {};
-        section[key] = value;
-        generalConfig[sectionName] = section;
-        await configManager.saveConfig("general", generalConfig);
     });
+    registerGeneralSetting({ element: input, kind: "number", section: sectionName, key, minimum, maximum, savedValue: input.value });
 }
 
-function updateDefaultThemePendingState(): void {
-    const themeSelect = document.getElementById("themeSelect") as HTMLSelectElement | null;
-    const pendingBar = document.getElementById("defaultThemePendingSaveBar");
-    const count = document.getElementById("defaultThemePendingChangeCount");
-    const themeSetting = themeSelect?.closest<HTMLElement>(".form-group");
-    if (!themeSelect || !pendingBar || !count) return;
-
-    const isDirty = themeSelect.value !== (themeSelect.dataset.savedValue || "");
-    pendingBar.hidden = !isDirty;
-    count.textContent = isDirty ? "1" : "0";
-    themeSetting?.classList.toggle("setting-dirty", isDirty);
+function bindGeneralSelectSetting(elementId: string, sectionName: string, key: string): void {
+    const select = document.getElementById(elementId) as HTMLSelectElement | null;
+    if (!select) return;
+    registerGeneralSetting({ element: select, kind: "select", section: sectionName, key, savedValue: select.value });
 }
 
-async function saveDefaultThemeChange(): Promise<void> {
-    const themeSelect = document.getElementById("themeSelect") as HTMLSelectElement | null;
-    if (!themeSelect) return;
+/** 配置加载并回填 UI 之后调用：把当前界面值记为「已保存基线」。 */
+function refreshGeneralSettingsBaseline(): void {
+    generalSettingControls.forEach((control) => {
+        control.savedValue = readGeneralSettingValue(control);
+    });
+    updateGeneralPendingState();
+}
+window.refreshGeneralSettingsBaseline = refreshGeneralSettingsBaseline;
 
+function updateGeneralPendingState(): void {
+    const pendingBar = document.getElementById("generalSettingsPendingSaveBar");
+    const count = document.getElementById("generalSettingsPendingChangeCount");
+    let dirtyCount = 0;
+    generalSettingControls.forEach((control) => {
+        const isDirty = readGeneralSettingValue(control) !== control.savedValue;
+        if (isDirty) dirtyCount += 1;
+        control.element.closest<HTMLElement>(".form-group")?.classList.toggle("setting-dirty", isDirty);
+    });
+    if (!pendingBar || !count) return;
+    pendingBar.hidden = dirtyCount === 0;
+    count.textContent = String(dirtyCount);
+}
+
+async function saveGeneralSettingsChanges(): Promise<void> {
     const generalConfig = configManager.getConfig("general");
-    const appearance = isConfigObject(generalConfig.appearance) ? generalConfig.appearance : {};
-    appearance.theme = themeSelect.value;
-    generalConfig.appearance = appearance;
-    if (await configManager.saveConfig("general", generalConfig)) {
-        themeSelect.dataset.savedValue = themeSelect.value;
-        updateDefaultThemePendingState();
-        configManager.applyTheme();
-    }
+    generalSettingControls.forEach((control) => {
+        const existing = generalConfig[control.section];
+        const section: TomlConfig = isConfigObject(existing) ? existing : {};
+        if (control.kind === "checkbox") {
+            section[control.key] = readGeneralSettingValue(control) === "true";
+        } else if (control.kind === "number") {
+            section[control.key] = Number.parseInt(readGeneralSettingValue(control), 10) || control.minimum || 0;
+        } else {
+            section[control.key] = readGeneralSettingValue(control);
+        }
+        generalConfig[control.section] = section;
+    });
+    if (!(await configManager.saveConfig("general", generalConfig))) return;
+    generalSettingControls.forEach((control) => {
+        control.savedValue = readGeneralSettingValue(control);
+    });
+    configManager.applyTheme();
+    syncGeneralSettingsLocale();
+    updateGeneralPendingState();
 }
 
-function cancelDefaultThemeChange(): void {
-    const themeSelect = document.getElementById("themeSelect") as HTMLSelectElement | null;
-    if (!themeSelect) return;
-    themeSelect.value = themeSelect.dataset.savedValue || "light";
-    updateDefaultThemePendingState();
+function cancelGeneralSettingsChanges(): void {
+    generalSettingControls.forEach((control) => {
+        if (control.kind === "checkbox") {
+            (control.element as HTMLInputElement).checked = control.savedValue === "true";
+        } else {
+            control.element.value = control.savedValue;
+        }
+    });
+    configManager.applyTheme();
+    syncGeneralSettingsLocale();
+    updateGeneralPendingState();
+}
+
+/** 语言选项改动后同步界面语言（保存与取消都需要回放最终选择）。 */
+function syncGeneralSettingsLocale(): void {
+    const select = document.getElementById("languageSelect") as HTMLSelectElement | null;
+    if (select) void window.TrpgI18n?.setLocale(select.value);
 }
 
 async function loadPermissionConfig(): Promise<void> {
@@ -479,13 +568,15 @@ async function loadUserManagement(forceReload = false): Promise<void> {
         if (!response.success || !response.data) {
             throw new Error(response.message || response.error || "用户信息加载失败");
         }
-        renderUserManagementList(response.data);
+        allUserRecords = response.data;
         list.dataset.loaded = "true";
+        applyUserManagementFilter();
         if (message) {
             message.textContent = `已加载 ${response.data.length} 名用户`;
             message.className = "settings-message success";
         }
     } catch (error) {
+        allUserRecords = [];
         list.innerHTML = `<tr><td colspan="8" class="text-muted">${settingsEscapeHtml(settingsErrorMessage(error))}</td></tr>`;
         if (message) {
             message.textContent = settingsErrorMessage(error);
@@ -494,11 +585,100 @@ async function loadUserManagement(forceReload = false): Promise<void> {
     }
 }
 
+function parseFilterDate(value: string): number | null {
+    if (!value) return null;
+    const date = new Date(`${value}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? null : date.getTime();
+}
+
+function isWithinDateRange(value: string | undefined, from: string, to: string): boolean {
+    const fromTime = parseFilterDate(from);
+    const toTime = parseFilterDate(to);
+    if (fromTime === null && toTime === null) return true;
+    // 未登录/无记录的账号在按时间过滤时应被排除，而不是当成任意时间都命中。
+    if (!value) return false;
+    const time = new Date(value).getTime();
+    if (Number.isNaN(time)) return false;
+    if (fromTime !== null && time < fromTime) return false;
+    // 结束日期按“当天 23:59:59”包含，避免漏掉当天的记录。
+    if (toTime !== null && time > toTime + 24 * 60 * 60 * 1000 - 1) return false;
+    return true;
+}
+
+function applyUserManagementFilter(): void {
+    const list = document.getElementById("userManagementList");
+    if (!list) return;
+
+    const role = (document.getElementById("userFilterRole") as HTMLSelectElement | null)?.value || "";
+    const createdFrom = (document.getElementById("userFilterCreatedFrom") as HTMLInputElement | null)?.value || "";
+    const createdTo = (document.getElementById("userFilterCreatedTo") as HTMLInputElement | null)?.value || "";
+    const lastLoginFrom = (document.getElementById("userFilterLastLoginFrom") as HTMLInputElement | null)?.value || "";
+    const lastLoginTo = (document.getElementById("userFilterLastLoginTo") as HTMLInputElement | null)?.value || "";
+    const keyword = ((document.getElementById("userManagementSearch") as HTMLInputElement | null)?.value || "").trim().toLowerCase();
+
+    const filtered = allUserRecords.filter((user) => {
+        if (role && String(user.role).toUpperCase() !== role) return false;
+        if (!isWithinDateRange(user.created_at, createdFrom, createdTo)) return false;
+        if (!isWithinDateRange(user.last_login, lastLoginFrom, lastLoginTo)) return false;
+        if (keyword) {
+            const haystack = [user.username, user.email, user.role, user.status]
+                .map((item) => String(item || "").toLowerCase())
+                .join(" ");
+            if (!haystack.includes(keyword)) return false;
+        }
+        return true;
+    });
+
+    renderUserManagementList(filtered);
+
+    const summary = document.getElementById("userFilterSummary");
+    const hasFilter = Boolean(role || createdFrom || createdTo || lastLoginFrom || lastLoginTo || keyword);
+    if (summary) {
+        summary.textContent = hasFilter ? `已筛选 ${filtered.length} / ${allUserRecords.length} 名用户` : "";
+        summary.className = "settings-message";
+    }
+    const toggle = document.getElementById("toggleUserFilter");
+    if (toggle) {
+        toggle.classList.toggle("active", hasFilter);
+        toggle.setAttribute("aria-expanded", String(hasFilter || !(document.getElementById("userFilterPanel") as HTMLElement | null)?.hidden));
+    }
+}
+
+function resetUserManagementFilter(): void {
+    ["userFilterRole", "userFilterCreatedFrom", "userFilterCreatedTo", "userFilterLastLoginFrom", "userFilterLastLoginTo", "userManagementSearch"].forEach((id) => {
+        const element = document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null;
+        if (element) element.value = "";
+    });
+    applyUserManagementFilter();
+}
+
+function bindUserManagementFilters(): void {
+    const toggle = document.getElementById("toggleUserFilter");
+    const panel = document.getElementById("userFilterPanel");
+    if (toggle && panel && toggle.dataset.bound !== "true") {
+        toggle.dataset.bound = "true";
+        toggle.addEventListener("click", () => {
+            panel.hidden = !panel.hidden;
+            toggle.setAttribute("aria-expanded", String(!panel.hidden));
+        });
+    }
+    document.getElementById("applyUserFilter")?.addEventListener("click", applyUserManagementFilter);
+    document.getElementById("resetUserFilter")?.addEventListener("click", resetUserManagementFilter);
+    const search = document.getElementById("userManagementSearch") as HTMLInputElement | null;
+    search?.addEventListener("input", applyUserManagementFilter);
+    // 时间范围一旦变化立即重算，管理员无需额外点击“应用筛选”。
+    ["userFilterCreatedFrom", "userFilterCreatedTo", "userFilterLastLoginFrom", "userFilterLastLoginTo"].forEach((id) => {
+        document.getElementById(id)?.addEventListener("change", applyUserManagementFilter);
+    });
+    document.getElementById("userFilterRole")?.addEventListener("change", applyUserManagementFilter);
+}
+
 function renderUserManagementList(users: AdminUserRecord[]): void {
     const list = document.getElementById("userManagementList");
     if (!list) return;
     if (!users.length) {
-        list.innerHTML = `<tr><td colspan="8" class="text-muted">暂无用户</td></tr>`;
+        const emptyText = allUserRecords.length ? "没有符合筛选条件的用户" : "暂无用户";
+        list.innerHTML = `<tr><td colspan="8" class="text-muted">${emptyText}</td></tr>`;
         return;
     }
 
@@ -517,6 +697,12 @@ function renderUserManagementRow(user: AdminUserRecord): string {
     const currentUserId = window.currentUser?.user_id;
     const isCurrentUser = String(currentUserId) === String(user.id);
     const canImpersonate = user.status === "active" && !isCurrentUser;
+    // 是否在线不影响模拟：仅当账号非 active（停用/封禁）或目标是自己时才禁用。
+    const impersonateTitle = canImpersonate
+        ? `模拟登录 ${user.username}`
+        : isCurrentUser
+            ? "不能模拟自己"
+            : "仅可模拟状态为 active 的账号";
     return `
         <tr>
             <td>${settingsEscapeHtml(user.username)}</td>
@@ -528,7 +714,7 @@ function renderUserManagementRow(user: AdminUserRecord): string {
             <td>${settingsEscapeHtml(formatTimestamp(user.last_login))}</td>
             <td class="text-end">
                 <div class="user-management-actions">
-                    <button type="button" class="btn btn-sm btn-outline-primary" data-impersonate-user-id="${user.id}" ${canImpersonate ? "" : "disabled"}>
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-impersonate-user-id="${user.id}" title="${settingsEscapeHtml(impersonateTitle)}" ${canImpersonate ? "" : "disabled"}>
                         <i class="fa fa-user-secret" aria-hidden="true"></i> 模拟
                     </button>
                 </div>

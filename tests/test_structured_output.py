@@ -62,3 +62,26 @@ def test_validate_structured_response_rejects_unknown_next_scene():
     response = parse_kp_response('{"narration":"ok","next_scene":"forged"}')
     validated = validate_structured_response(response, {"scene_manifest": [{"id": "scene-1"}]})
     assert validated.next_scene is None
+
+
+def test_validate_structured_response_logs_dropped_out_of_scenario_references(caplog):
+    """KP 引用剧本外的场景/NPC 被丢弃时必须留痕，便于管理员发现编造。"""
+    response = parse_kp_response(
+        '{"narration":"ok","next_scene":"forged","npc_actions":[{"npc_id":"guard","action":"wait"},{"npc_id":"forged","action":"steal"}]}'
+    )
+    with caplog.at_level("WARNING"):
+        validate_structured_response(response, {"scene_manifest": [{"id": "scene-1"}], "modules": [{"id": "guard", "module_type": "npc"}]})
+    assert "剧本外的场景" in caplog.text
+    assert "剧本外的 NPC 行动" in caplog.text
+
+
+def test_validate_state_updates_logs_dropped_out_of_scenario_entities(caplog):
+    """状态更新丢弃剧本外实体时必须留痕。"""
+    with caplog.at_level("WARNING"):
+        validate_state_updates(
+            {"active_scene_id": "scene-x", "clues": ["clue-1", "forged"]},
+            {},
+            {"scene_manifest": [{"id": "scene-1"}], "modules": [{"id": "clue-1", "module_type": "custom", "card_type": "clue"}]},
+        )
+    assert "剧本外的 active_scene_id" in caplog.text
+    assert "剧本外的线索/物品/NPC" in caplog.text

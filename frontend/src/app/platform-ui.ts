@@ -108,6 +108,66 @@ function renderPlatforms(platforms: AIPlatformConfig[]): void {
     if (!container) return;
     container.innerHTML = "";
     platforms.forEach((platform) => container.appendChild(createPlatformCard(platform)));
+    bindPlatformDragAndDrop(container);
+}
+
+// 正在被拖动的平台卡片：拖动期间据此在容器内实时重排。
+let draggedPlatformCard: HTMLElement | null = null;
+
+// 平台卡片的拖动排序：拖动结束后把新顺序提交给后端，决定运行时的平台加载顺序。
+function bindPlatformDragAndDrop(container: HTMLElement): void {
+    container.querySelectorAll<HTMLElement>(".ai-platform-card").forEach((card) => {
+        card.addEventListener("dragstart", (event) => {
+            draggedPlatformCard = card;
+            card.classList.add("is-dragging");
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", card.dataset.platform || "");
+            }
+        });
+        card.addEventListener("dragend", () => {
+            card.classList.remove("is-dragging");
+            draggedPlatformCard = null;
+        });
+    });
+
+    // 容器级监听只需绑定一次（卡片每次渲染都会重建，但容器是固定的）。
+    if (container.dataset.dndBound === "true") return;
+    container.dataset.dndBound = "true";
+
+    container.addEventListener("dragover", (event) => {
+        if (!draggedPlatformCard) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        const others = Array.from(container.querySelectorAll<HTMLElement>(".ai-platform-card:not(.is-dragging)"));
+        const after = others.find((card) => {
+            const rect = card.getBoundingClientRect();
+            return event.clientY < rect.top + rect.height / 2;
+        });
+        if (after) container.insertBefore(draggedPlatformCard, after);
+        else container.appendChild(draggedPlatformCard);
+    });
+
+    container.addEventListener("drop", (event) => {
+        event.preventDefault();
+        void persistPlatformOrder(container);
+    });
+}
+
+async function persistPlatformOrder(container: HTMLElement): Promise<void> {
+    const order = Array.from(container.querySelectorAll<HTMLElement>(".ai-platform-card"))
+        .map((card) => card.dataset.platform || "")
+        .filter(Boolean);
+    if (!order.length) return;
+    try {
+        await aiPlatformManager.savePlatformOrder(order);
+        showNotification(platformT("platform.order.saved", "平台加载顺序已保存"), "success");
+    } catch (error) {
+        showNotification(
+            platformT("platform.order.save_failed", "保存平台顺序失败：{detail}", { detail: platformErrorMessage(error) }),
+            "error",
+        );
+    }
 }
 
 function bindRoleConfigSettings(): void {
@@ -278,9 +338,15 @@ function setRoleConfigMessage(message: string, isError = false): void {
 function createPlatformCard(platform: AIPlatformConfig): HTMLElement {
     const card = document.createElement("div");
     card.className = "ai-platform-card";
+    // 可拖动排序：卡片顺序即平台加载顺序（越靠上越先加载）。
+    card.draggable = true;
+    card.dataset.platform = platform.platform;
     const enabledClass = platform.enabled ? " is-enabled" : "";
     card.innerHTML = `
         <div class="platform-card-row">
+            <span class="platform-drag-handle" title="${platformEscapeHtml(platformT("platform.card.drag", "拖动排序（顺序即平台加载顺序）"))}" aria-label="${platformEscapeHtml(platformT("platform.card.drag", "拖动排序（顺序即平台加载顺序）"))}">
+                <i class="fa fa-grip-vertical" aria-hidden="true"></i>
+            </span>
             <div class="platform-card-avatar">${platformAvatarHTML(platform)}</div>
             <div class="platform-card-info">
                 <h5>${platformEscapeHtml(platform.name)}</h5>
@@ -648,12 +714,11 @@ async function testPlatformFromModal(config: AIPlatformConfig, isNew: boolean): 
         const saved = await savePlatformModal(config, isNew, false);
         if (!saved) return;
     }
-    if (config.models.length === 0) {
-        showNotification(platformT("platform.form.need_model", "请先添加一个模型"), "error");
+    const modelId = resolveTestModelId(config.platform, config);
+    if (!config.platform || !modelId) {
+        showNotification(platformT("platform.form.need_model", "请先添加一个模型，或填写默认模型后再测试连接"), "error");
         return;
     }
-    const modelId = config.config.default_model || config.models.find((item) => item.enabled)?.id || config.models[0]?.id || "";
-    if (!config.platform || !modelId) return;
     await testModelAPI(config.platform, modelId);
 }
 
@@ -920,11 +985,22 @@ function resetTestModal(): void {
 async function testAPI(platform: string): Promise<void> {
     const platformConfig = aiPlatformManager.getPlatform(platform);
     if (!platformConfig) return;
-    // 本地 LM Studio 无需要求配置具体模型，直接用占位 id；其他平台优先取已启用模型，其次取第一个。
-    const model = platform === "lmstudio"
-        ? { id: LMSTUDIO_DEFAULT_MODEL_ID }
-        : platformConfig.models.find((item) => item.enabled) || platformConfig.models[0];
-    if (model) await testModelAPI(platform, model.id);
+    const modelId = resolveTestModelId(platform, platformConfig);
+    if (!modelId) {
+        // 自定义平台可能还没添加任何模型：给出明确反馈，而不是像旧实现那样「点了没反应」。
+        showNotification(platformT("platform.test.need_model", "请先为该平台添加一个模型，或填写默认模型后再测试连接"), "error");
+        return;
+    }
+    await testModelAPI(platform, modelId);
+}
+
+// 测试连接时选用的模型 id：LM Studio 用占位 id；其余优先已启用模型、其次第一个模型，
+// 再回退到配置里的默认模型，从而让「尚未添加模型但填了默认模型」的自定义平台也能测试。
+function resolveTestModelId(platform: string, config: AIPlatformConfig): string {
+    if (platform === "lmstudio") return LMSTUDIO_DEFAULT_MODEL_ID;
+    const model = config.models.find((item) => item.enabled) || config.models[0];
+    if (model?.id) return model.id;
+    return (config.config.default_model || "").trim();
 }
 
 async function testModelAPI(platform: string, modelId: string): Promise<void> {

@@ -4,8 +4,13 @@ from dataclasses import dataclass
 import logging
 import shlex
 import threading
+from datetime import date, timedelta
+from pathlib import Path
 from typing import Any, Callable, TextIO
 
+from trpg_server.agents.telemetry import load_daily_ai_usage
+from trpg_server.agents.token_accounting import format_segment_summary, merge_segment_totals
+from trpg_server.settings import LOGS_DIR
 from trpg_server.users.manager import user_manager as default_user_manager
 
 logger = logging.getLogger(__name__)
@@ -72,6 +77,7 @@ def execute_console_command(
     command_line: str,
     user_manager: Any = default_user_manager,
     shutdown_callback: Callable[[], None] | None = None,
+    log_dir: Any = None,
 ) -> ConsoleCommandResult:
     try:
         parts = shlex.split(command_line)
@@ -108,6 +114,11 @@ def execute_console_command(
                     allowed_roles=DEMOTE_TARGETS,
                 )
             )
+        if subcommand == "reset-password":
+            return _log_result(_force_password_reset(parts[2:], user_manager))
+
+    if parts[0] == "ai" and len(parts) >= 2 and parts[1].lower() == "usage":
+        return _log_result(_report_ai_usage(parts[2:], log_dir))
 
     return _log_result(ConsoleCommandResult(False, f"Unknown command: {parts[0]}"))
 
@@ -119,6 +130,8 @@ def command_help_text() -> str:
             "  help",
             "  user promote <username-or-id> [USER|ADMIN|OWNER]   （升级，缺省为 ADMIN）",
             "  user demote <username-or-id> [USER|ADMIN]          （降级，缺省为 USER）",
+            "  user reset-password <username-or-id>               （重置为随机临时密码，并强制下次登录改密）",
+            "  ai usage [days]                                    （打印最近 N 天 AI 用量与输入 token 分段，默认 1 天，1-90）",
             "  shutdown (aliases: stop, quit, exit, server shutdown)",
         ]
     )
@@ -204,6 +217,100 @@ def _change_user_role(
     if role == current_role:
         return ConsoleCommandResult(True, f"{name} already has role {role}")
     return ConsoleCommandResult(True, f"Updated {name} role {current_role} -> {role}")
+
+
+def _force_password_reset(args: list[str], user_manager: Any) -> ConsoleCommandResult:
+    """把用户密码重置为随机临时密码，并强制其下次登录后修改密码。
+
+    临时密码只在此处返回并打印到控制台，不会写入任何持久化日志之外的存储。
+    """
+
+    if not args:
+        return ConsoleCommandResult(False, "Usage: user reset-password <username-or-id>")
+
+    identifier = args[0]
+    user = _find_user(identifier, user_manager)
+    if not user:
+        return ConsoleCommandResult(False, f"User not found: {identifier}")
+
+    reset = getattr(user_manager, "force_password_reset", None)
+    if not callable(reset):
+        return ConsoleCommandResult(False, "Password reset is not supported by the current user manager")
+
+    result = reset(int(user["id"]))
+    success, message = result[0], result[1]
+    temp_password = result[2] if len(result) > 2 else None
+    if not success:
+        return ConsoleCommandResult(False, message)
+
+    name = user.get("username") or user["id"]
+    return ConsoleCommandResult(
+        True,
+        f"Temporary password for {name}: {temp_password}  "
+        f"({name} must change the password on next login)",
+    )
+
+
+def _report_ai_usage(args: list[str], log_dir: Any = None) -> ConsoleCommandResult:
+    """汇总最近 N 天的 AI 用量并打印，含输入 token 的分段估算。
+
+    分段 token 是本地粗估（见 :mod:`trpg_server.agents.token_accounting`），真实计费
+    以上游 usage 为准；分段用于快速判断输入成本花在静态前缀、知识库还是历史上。
+    """
+    days = 1
+    if args:
+        try:
+            days = int(args[0])
+        except ValueError:
+            return ConsoleCommandResult(False, f"Usage: ai usage [days] (1-90), got {args[0]!r}")
+        if not 1 <= days <= 90:
+            return ConsoleCommandResult(False, "Usage: ai usage [days] (days must be 1-90)")
+
+    target_dir = Path(log_dir) if log_dir is not None else Path(LOGS_DIR)
+    totals = {"request_count": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    roles: dict[str, dict[str, int]] = {}
+    segments: dict[str, int] = {}
+    rate_sum = 0.0
+    rate_count = 0
+    for offset in range(days):
+        day = (date.today() - timedelta(days=offset)).isoformat()
+        report = load_daily_ai_usage(target_dir, day=day)
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            totals[key] += int(report.get(key) or 0)
+        rate_sum += float(report.get("cache_hit_rate") or 0)
+        rate_count += 1
+        # 只累加日级分段，避免与角色级分段重复计数（两者是同一批请求的不同切面）。
+        merge_segment_totals(segments, report.get("prompt_segments"))
+        report_roles = report.get("roles") or {}
+        for role, bucket in report_roles.items():
+            if not isinstance(bucket, dict):
+                continue
+            totals["request_count"] += int(bucket.get("request_count") or 0)
+            role_totals = roles.setdefault(
+                role, {"request_count": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            )
+            role_totals["request_count"] += int(bucket.get("request_count") or 0)
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                role_totals[key] += int(bucket.get(key) or 0)
+
+    lines = [f"AI 用量（最近 {days} 天，截至 {date.today().isoformat()}）:"]
+    lines.append(
+        f"  请求 {totals['request_count']} 次 · 输入 {totals['prompt_tokens']} · "
+        f"输出 {totals['completion_tokens']} · 总计 {totals['total_tokens']}"
+    )
+    average_rate = round(rate_sum / rate_count, 2) if rate_count else 0.0
+    lines.append(f"  平均缓存命中率 {average_rate}%")
+    lines.append(f"  输入分段（估算）: {format_segment_summary(segments)}")
+    if roles:
+        lines.append("  按角色:")
+        for role, bucket in sorted(roles.items(), key=lambda item: item[1]["total_tokens"], reverse=True):
+            lines.append(
+                f"    {role}: 请求 {bucket['request_count']} · 输入 {bucket['prompt_tokens']} · "
+                f"输出 {bucket['completion_tokens']} · 总计 {bucket['total_tokens']}"
+            )
+    else:
+        lines.append("  （窗口内没有用量记录）")
+    return ConsoleCommandResult(True, "\n".join(lines))
 
 
 def _find_user(identifier: str, user_manager: Any) -> dict[str, Any] | None:

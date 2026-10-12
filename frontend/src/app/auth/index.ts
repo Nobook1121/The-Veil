@@ -23,6 +23,7 @@ namespace AuthModule {
         document.getElementById("personalHomeSettingsLink")?.addEventListener("click", openUserSettings);
         document.getElementById("saveUserSettings")?.addEventListener("click", saveUserSettings);
         document.getElementById("changePasswordButton")?.addEventListener("click", changePassword);
+        document.getElementById("forcePasswordSubmit")?.addEventListener("click", submitForcedPasswordChange);
         document.querySelectorAll<HTMLButtonElement>(".profile-quick-link[data-target-tab]").forEach((button) => {
             button.addEventListener("click", () => {
                 window.switchMainTab?.(button.dataset.targetTab || "", { clearNav: false });

@@ -535,6 +535,76 @@
     flex-wrap: wrap;
 }
 
+.user-management-legend {
+    font-size: 0.8rem;
+    line-height: 1.5;
+}
+
+.user-management-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.user-management-filter {
+    position: relative;
+}
+
+.user-management-filter .btn.active {
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+}
+
+.user-management-filter-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 20;
+    display: grid;
+    gap: 12px;
+    min-width: 320px;
+    padding: 16px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-panel);
+    box-shadow: var(--shadow-md);
+}
+
+/* 作者样式的 display 会覆盖 UA 的 [hidden]{display:none}，需显式声明。 */
+.user-management-filter-panel[hidden] {
+    display: none;
+}
+
+.user-filter-field {
+    display: grid;
+    gap: 6px;
+    color: var(--color-text);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.user-filter-range {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.user-filter-range input {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.user-filter-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.user-management-search {
+    flex: 1 1 220px;
+    max-width: 360px;
+}
+
 .permission-role-list {
     display: flex;
     flex-wrap: wrap;
@@ -821,6 +891,27 @@
     display: flex;
     align-items: center;
     gap: 14px;
+}
+
+/* 拖动排序手柄：卡片顺序即平台加载顺序。 */
+.platform-drag-handle {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 2px;
+    color: var(--color-text-muted);
+    cursor: grab;
+    user-select: none;
+}
+
+.platform-drag-handle:active {
+    cursor: grabbing;
+}
+
+.ai-platform-card.is-dragging {
+    opacity: 0.5;
+    border-style: dashed;
 }
 
 .platform-card-avatar {

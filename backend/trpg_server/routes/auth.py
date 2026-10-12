@@ -66,6 +66,7 @@ def _user_payload(user):
         "nickname": user.get("nickname") or user.get("username", ""),
         "presence": user.get("presence", "online"),
         "two_factor_enabled": user.get("two_factor_enabled", False),
+        "must_change_password": bool(user.get("must_change_password")),
         "csrf_token": session.get(CSRF_SESSION_KEY),
     }
 

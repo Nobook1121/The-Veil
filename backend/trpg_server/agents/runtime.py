@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -41,6 +42,17 @@ FOLDABLE_TOOL_NAMES = frozenset(
 )
 # 最近 N 条工具结果始终保留原文，避免刚拿到的数据马上被折叠掉。
 TOOL_RESULT_KEEP_RECENT = 2
+# 这些工具的结果会随房间/剧本状态变化：同一轮内可去重，但跨轮必须允许重新调用，
+# 否则 KP 在检定/触发器/转场改变了状态后拿到的仍是过期快照，会误判剧情。
+STATEFUL_REFETCH_TOOL_NAMES = frozenset(
+    {
+        "room.get_room_snapshot",
+        "room.get_scenario_context",
+        "room.get_scenario_module",
+        "room.get_character_cards",
+        "room.get_memory",
+    }
+)
 FOLDED_TOOL_RESULT_NOTICE = (
     '{"folded": true, "note": "较早的工具结果已折叠以节省上下文，不代表当前状态；'
     '如需该数据请重新调用该工具。"}'
@@ -158,6 +170,77 @@ def _tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
+def _extract_json_dict(content: str) -> dict[str, Any] | None:
+    """从可能带 Markdown 围栏或前后缀文字的正文里取出一个 JSON 对象。"""
+    text = str(content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+    candidates = [text]
+    start, end = text.find("{"), text.rfind("}")
+    if start >= 0 and end > start:
+        candidates.append(text[start : end + 1])
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            value = json.loads(candidate)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
+
+
+def _coerce_tool_call(raw: Any, index: int) -> dict[str, Any] | None:
+    """把正文里内嵌的调用项规范化为原生 ``tool_calls`` 形状。"""
+    if isinstance(raw, str):
+        raw = {"name": raw, "arguments": {}}
+    if not isinstance(raw, dict):
+        return None
+    function = raw.get("function")
+    if isinstance(function, dict):
+        name = str(function.get("name") or "").strip()
+        arguments = function.get("arguments")
+    else:
+        name = str(raw.get("name") or raw.get("tool") or raw.get("tool_name") or "").strip()
+        arguments = raw.get("arguments")
+        if arguments is None:
+            arguments = raw.get("parameters", raw.get("args"))
+    if not name:
+        return None
+    if isinstance(arguments, (dict, list)):
+        arguments = json.dumps(arguments, ensure_ascii=False)
+    elif not isinstance(arguments, str):
+        arguments = "{}"
+    return {
+        "id": str(raw.get("id") or f"embedded-call-{index + 1}"),
+        "type": "function",
+        "function": {"name": name, "arguments": arguments},
+    }
+
+
+def _embedded_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
+    """回收被写进正文 JSON 的工具调用（部分厂商在强制 JSON 输出时会这样）。
+
+    期望形状（无 ``function`` 包装）::
+
+        {"reply": "...", "tool_calls": [{"name": "room.x", "arguments": {...}}]}
+
+    也兼容标准 ``{"id":..., "type":"function", "function": {...}}`` 形状。正文里的
+    叙事文本会被丢弃（它早于工具结果生成、已过期），并与原生工具调用语义保持一致。
+    """
+    content = message.get("content")
+    if not isinstance(content, str) or "{" not in content:
+        return []
+    data = _extract_json_dict(content)
+    if not isinstance(data, dict):
+        return []
+    raw_calls = data.get("tool_calls") or data.get("toolCalls")
+    if not isinstance(raw_calls, list) or not raw_calls:
+        return []
+    return [call for call in (_coerce_tool_call(raw, index) for index, raw in enumerate(raw_calls)) if call]
+
+
 def _resolve_tool(tool_name: str, enabled_by_name: dict[str, Any]) -> tuple[str, Any] | tuple[None, None]:
     tool = enabled_by_name.get(tool_name)
     if tool:
@@ -212,6 +295,32 @@ def _fallback_tool_summary(
     return "本次工具调用较多，但没有生成可显示的回复，请补充你的行动后重试。"
 
 
+def _canonical_call_signature(tool_name: str, arguments: Any) -> str:
+    """同一工具 + 同一参数的稳定签名，用于检测本轮内的重复调用。
+
+    ``arguments`` 可能是已解析的字典，也可能是模型给出的原始 JSON 字符串；
+    两者都归一化成「排序后的紧凑 JSON」，保证同样的调用得到同样的签名。
+    """
+    if isinstance(arguments, str):
+        normalized = arguments.strip()
+    else:
+        normalized = json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return f"{tool_name}:{normalized}"
+
+
+def _dedupe_reuse_notice(tool_name: str) -> str:
+    """重复调用被短路时回传给模型的说明，避免它以为"没调用成功"而反复重试。"""
+    return (
+        json.dumps(
+            {
+                "reused": True,
+                "note": f"{tool_name} 已用相同参数调用过，本次未重复执行；请直接使用上一条同名工具结果继续。",
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
 def run_agent_completion(
     requester: Callable[[dict[str, Any]], dict[str, Any]],
     base_payload: dict[str, Any],
@@ -221,6 +330,7 @@ def run_agent_completion(
     max_tool_rounds: int = 8,
     max_tool_result_chars: int | None = None,
     excluded_tools: set[str] | None = None,
+    dedupe_tool_calls: bool = True,
 ) -> AgentCompletionResult:
     payload = {**base_payload}
     messages = list(payload.get("messages", []))
@@ -255,6 +365,12 @@ def run_agent_completion(
     }
     tool_state = getattr(context, "tool_state", None)
     stage_callback = tool_state.get("thinking_stage_callback") if isinstance(tool_state, dict) else None
+    # 本轮发言内已执行过的 「工具+参数」 签名：重复调用直接短路，避免重复掷骰 /
+    # 重复触发导致状态错乱，也省掉重复执行的往返与 token。
+    # ``executed_calls`` 跨轮生效；``round_signatures`` 每轮清空，让「随状态变化的
+    # 读取类工具」在场景推进后仍能被重新调用、拿到最新数据。
+    executed_calls: dict[str, str] = {}
+    round_signatures: set[str] = set()
 
     def _record_usage(response_data: dict[str, Any] | None) -> None:
         """累计单次请求的 token 用量（含最终的无工具收尾请求）。"""
@@ -283,6 +399,7 @@ def run_agent_completion(
             has_token_count = True
 
     for _round in range(max_tool_rounds + 1):
+        round_signatures.clear()
         if isinstance(tool_state, dict):
             tool_state["agent_request_rounds"] = _round + 1
         _fold_stale_tool_results(messages)
@@ -311,6 +428,13 @@ def run_agent_completion(
         _record_usage(response_data)
         message = _extract_message(response_data)
         calls = _tool_calls(message)
+        if not calls:
+            embedded_calls = _embedded_tool_calls(message)
+            if embedded_calls:
+                # 部分厂商在强制 JSON 输出时会把工具调用写进正文 JSON。这里把它还原成
+                # 原生调用继续执行，避免工具被静默丢弃、原始 JSON 被当成 KP 回复展示。
+                calls = embedded_calls
+                message = {**message, "tool_calls": embedded_calls}
         if not calls:
             content = str(message.get("content") or "")
             # Some providers occasionally return an empty assistant message
@@ -356,6 +480,24 @@ def run_agent_completion(
                 trace = tool_state.setdefault("tool_call_trace", [])
                 if isinstance(trace, list):
                     trace.append(resolved_name)
+            # 重复调用（同工具同参数）短路：不再执行，只回一条说明让模型继续用上次结果。
+            # 随状态变化的读取类工具只在同一轮内去重，跨轮允许重新取最新数据。
+            signature = _canonical_call_signature(resolved_name, function.get("arguments"))
+            refetchable = resolved_name in STATEFUL_REFETCH_TOOL_NAMES
+            already_called = signature in round_signatures or (
+                not refetchable and signature in executed_calls
+            )
+            if dedupe_tool_calls and already_called:
+                logger.info("Agent tool %s called again with identical arguments; reused", resolved_name)
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.get("id") or tool_name,
+                        "name": resolved_name,
+                        "content": _dedupe_reuse_notice(resolved_name),
+                    }
+                )
+                continue
             try:
                 arguments = _parse_arguments(function.get("arguments"))
                 result = tool.handler(arguments, context)
@@ -404,6 +546,11 @@ def run_agent_completion(
                     "content": result_payload,
                 }
             )
+            # 只登记成功结果：工具报错时允许模型用相同参数重试，避免把失败固定下来。
+            if not (isinstance(result, dict) and result.get("error")):
+                round_signatures.add(signature)
+                if not refetchable:
+                    executed_calls[signature] = result_payload
 
     # 工具轮次用尽：先移除工具、强制模型给出最终叙事；若仍无内容，则用工具结果兜底，
     # 保证玩家一定能收到一条回复，而不是空响应或 500 错误。

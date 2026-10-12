@@ -314,6 +314,32 @@
                     </div>
                 </div>
 
+                <!-- 强制修改密码弹窗：由控制台命令 user reset-password 触发，不提供关闭入口 -->
+                <div id="force-password-modal" class="auth-modal">
+                    <div class="auth-modal-content">
+                        <div class="auth-modal-header">
+                            <h2 data-i18n="password.force.title">需要修改密码</h2>
+                        </div>
+                        <div class="auth-modal-body">
+                            <p class="profile-section-hint" data-i18n="password.force.hint">管理员已重置您的密码，请使用临时密码登录后设置新密码，修改成功前无法继续使用其他功能。</p>
+                            <div class="auth-floating-field">
+                                <input type="password" class="auth-floating-input" id="forceCurrentPassword" autocomplete="current-password">
+                                <label class="auth-floating-label" for="forceCurrentPassword" data-i18n="password.field.current">当前密码</label>
+                            </div>
+                            <div class="auth-floating-field">
+                                <input type="password" class="auth-floating-input" id="forceNewPassword" autocomplete="new-password">
+                                <label class="auth-floating-label" for="forceNewPassword" data-i18n="password.field.new">新密码</label>
+                            </div>
+                            <div class="auth-floating-field">
+                                <input type="password" class="auth-floating-input" id="forceConfirmPassword" autocomplete="new-password">
+                                <label class="auth-floating-label" for="forceConfirmPassword" data-i18n="password.field.confirm">确认新密码</label>
+                            </div>
+                            <button class="btn btn-primary mt-3 w-100" id="forcePasswordSubmit" data-i18n="password.force.submit">设置新密码</button>
+                            <div class="login-message mt-2" id="forcePasswordMessage" aria-live="polite"></div>
+                        </div>
+                    </div>
+                </div>
+
                 <div id="user-card-popover" class="user-card-popover" aria-hidden="true">
                     <div class="user-card-summary">
                         <img id="userCardAvatar" src="/assets/avatars/default.jpg" alt="用户头像" data-i18n-alt="nav.user_avatar" width="48" height="48">
@@ -571,6 +597,14 @@
                             <button class="settings-tab" data-settings="knowledge" data-admin-only="true">知识库管理</button>
                             <button class="settings-tab" data-settings="about" data-i18n="settings.tab.about">关于应用</button>
                         </div>
+                        <!-- 常规设置统一保存条：本页任何设置改动都不会立即生效，需点「保存」后才会应用 -->
+                        <div class="settings-pending-save-bar" id="generalSettingsPendingSaveBar" hidden>
+                            <span><strong id="generalSettingsPendingChangeCount">0</strong> <span data-i18n="settings.pending.general">项设置更改未保存</span></span>
+                            <div>
+                                <button type="button" class="btn btn-secondary" id="cancelGeneralSettingsChanges" data-i18n="common.cancel">取消</button>
+                                <button type="button" class="btn btn-primary" id="saveGeneralSettingsChanges" data-i18n="common.save">保存</button>
+                            </div>
+                        </div>
                         
                         <!-- 常规设置内容 -->
                         <div id="general-settings-content" class="settings-content active">
@@ -585,13 +619,6 @@
                                         <option value="pattern_tome" data-i18n="profile.theme.tome">秘典·羊皮纸</option>
                                         <option value="system" data-i18n="profile.theme.system">跟随系统</option>
                                     </select>
-                                </div>
-                                <div class="settings-pending-save-bar" id="defaultThemePendingSaveBar" hidden>
-                                    <span><strong id="defaultThemePendingChangeCount">0</strong> <span data-i18n="settings.pending.default_theme">项默认主题更改未保存</span></span>
-                                    <div>
-                                        <button type="button" class="btn btn-secondary" id="cancelDefaultThemeChange" data-i18n="common.cancel">取消</button>
-                                        <button type="button" class="btn btn-primary" id="saveDefaultThemeChange" data-i18n="common.save">保存</button>
-                                    </div>
                                 </div>
                                 <div class="form-group mt-2">
                                     <label data-i18n="Language">语言</label>
@@ -691,6 +718,50 @@
                                     <label for="aiRequestTimeout">单次 AI 请求等待时间（秒）</label>
                                     <input type="number" class="form-control" id="aiRequestTimeout" value="300" min="30" max="1800">
                                     <small class="text-muted">超过该时间判定为超时并提示（30-1800）。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="aiRequestMaxRetries">连接中断重试次数</label>
+                                    <input type="number" class="form-control" id="aiRequestMaxRetries" value="5" min="0" max="20">
+                                    <small class="text-muted">请求被网络中断（未收到响应）时自动重试的最大次数，重试进度会显示在聊天框；0 表示不重试（0-20）。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="dedupeToolCalls" checked>
+                                        <label class="form-check-label" for="dedupeToolCalls">重复工具调用短路</label>
+                                    </div>
+                                    <small class="text-muted">同一轮发言内用相同参数重复调用同一工具时不再执行，直接复用上次结果，避免重复掷骰/重复触发。</small>
+                                </div>
+                            </div>
+                            <div class="mb-4">
+                                <h4>本地响应缓存</h4>
+                                <p class="text-muted">相同输入 + 相同剧情状态下直接复用本地回复，命中即整次跳过上游请求，是最省 token 的方式。仅对无副作用输入（非检定/非触发/非转场）生效，不会让 KP 忽略剧本推进。</p>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="semanticCacheEnabled" checked>
+                                        <label class="form-check-label" for="semanticCacheEnabled">启用房间内语义缓存</label>
+                                    </div>
+                                    <small class="text-muted">关闭后房间内对话每次都直连上游（主页聊天仍使用精确缓存）。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="semanticCacheTtl">语义缓存有效期（秒）</label>
+                                    <input type="number" class="form-control" id="semanticCacheTtl" value="120" min="30" max="86400">
+                                    <small class="text-muted">越大命中越多、越省 token，但过期内容被复用的窗口也越长（30-86400）。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="exactCacheTtl">精确缓存有效期（秒）</label>
+                                    <input type="number" class="form-control" id="exactCacheTtl" value="300" min="30" max="86400">
+                                    <small class="text-muted">主页聊天（无房间状态）的精确缓存有效期（30-86400）。</small>
+                                </div>
+                            </div>
+                            <div class="mb-4">
+                                <h4>AI 用量观测</h4>
+                                <p class="text-muted">把每次请求的输入 token 按分段做本地估算并记入用量日志，用于分析成本结构，不改变 AI 行为。</p>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="recordPromptSegments" checked>
+                                        <label class="form-check-label" for="recordPromptSegments">记录提示词分段 token（成本归因）</label>
+                                    </div>
+                                    <small class="text-muted">关闭后不再做分段估算，用量仪表盘只显示总量。</small>
                                 </div>
                             </div>
                             <div class="mb-4">
@@ -909,7 +980,12 @@
                                 </div>
                                 <p class="text-muted" id="aiTokenDashboardDate"></p>
                                 <div class="table-responsive">
-                                    <table class="table table-sm"><thead><tr><th>AI 角色</th><th>请求数</th><th>输入</th><th>输出</th><th>总计</th><th>缓存命中率</th></tr></thead><tbody id="aiTokenDashboardBody"><tr><td colspan="6" class="text-muted">加载中…</td></tr></tbody></table>
+                                    <table class="table table-sm"><thead><tr><th>AI 角色</th><th>请求数</th><th>输入</th><th>输出</th><th>总计</th><th>缓存命中率</th><th title="本地记录：同一剧本/场景的前缀重复出现的比例。上游未上报缓存读取时，用它可以判断提示词前缀是否稳定复用。">前缀复用率</th></tr></thead><tbody id="aiTokenDashboardBody"><tr><td colspan="7" class="text-muted">加载中…</td></tr></tbody></table>
+                                </div>
+                                <div class="mt-3">
+                                    <h5 class="h6">输入 token 分段（估算）</h5>
+                                    <p class="text-muted small mb-1">本地粗估，用于判断输入成本花在静态前缀、知识库还是历史对话上；真实计费以上游 usage 为准。</p>
+                                    <div id="aiTokenSegmentSummary" class="small text-muted">加载中…</div>
                                 </div>
                             </section>
                             <div class="character-roll-settings-grid" aria-label="属性随机生成公式">
@@ -951,10 +1027,54 @@
                                     <div>
                                         <h4>用户管理</h4>
                                         <p class="text-muted">查看全站用户、在线状态与登录信息，并可直接模拟登录到指定账号。</p>
+                                        <p class="text-muted user-management-legend mb-0">
+                                            「状态」表示账号是否可用：<strong>active</strong> 正常、<strong>inactive</strong> 停用、<strong>banned</strong> 封禁；
+                                            「在线情况」表示该用户当前是否有活跃连接（在线 / 离线）。二者相互独立，<strong>离线用户同样可以模拟登录</strong>。
+                                        </p>
                                     </div>
                                     <button class="btn btn-primary" id="refreshUserManagement" type="button">
                                         <i class="fa fa-refresh" aria-hidden="true"></i> 刷新列表
                                     </button>
+                                </div>
+                                <div class="user-management-toolbar">
+                                    <div class="user-management-filter">
+                                        <button class="btn btn-outline-secondary" id="toggleUserFilter" type="button" aria-expanded="false">
+                                            <i class="fa fa-filter" aria-hidden="true"></i> 筛选
+                                        </button>
+                                        <div class="user-management-filter-panel" id="userFilterPanel" hidden>
+                                            <label class="user-filter-field">
+                                                <span>用户组</span>
+                                                <select id="userFilterRole" class="form-select form-select-sm">
+                                                    <option value="">全部用户组</option>
+                                                    <option value="USER">USER</option>
+                                                    <option value="ADMIN">ADMIN</option>
+                                                    <option value="OWNER">OWNER</option>
+                                                </select>
+                                            </label>
+                                            <div class="user-filter-field">
+                                                <span>注册时间</span>
+                                                <div class="user-filter-range">
+                                                    <input type="date" id="userFilterCreatedFrom" class="form-control form-control-sm">
+                                                    <span>至</span>
+                                                    <input type="date" id="userFilterCreatedTo" class="form-control form-control-sm">
+                                                </div>
+                                            </div>
+                                            <div class="user-filter-field">
+                                                <span>最近登录</span>
+                                                <div class="user-filter-range">
+                                                    <input type="date" id="userFilterLastLoginFrom" class="form-control form-control-sm">
+                                                    <span>至</span>
+                                                    <input type="date" id="userFilterLastLoginTo" class="form-control form-control-sm">
+                                                </div>
+                                            </div>
+                                            <div class="user-filter-actions">
+                                                <button class="btn btn-sm btn-primary" id="applyUserFilter" type="button">应用筛选</button>
+                                                <button class="btn btn-sm btn-outline-secondary" id="resetUserFilter" type="button">重置</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <input type="search" class="form-control user-management-search" id="userManagementSearch" placeholder="搜索用户名 / 邮箱 / 用户组 / 状态">
+                                    <div class="settings-message" id="userFilterSummary" aria-live="polite"></div>
                                 </div>
                                 <div class="table-responsive">
                                     <table class="table table-sm align-middle user-management-table mb-0">

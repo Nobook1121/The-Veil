@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from trpg_server.ai_platform_config import ordered_platform_paths
 from trpg_server.json_store import read_json, write_json_atomic
 
 
@@ -16,11 +17,9 @@ MODULE_SUMMARIZER_PROMPT = """你是剧本模块摘要助手。
 
 
 def enabled_providers(platform_dir: Path) -> dict[str, dict[str, Any]]:
-    if not platform_dir.exists():
-        return {}
-
+    # 按管理员拖动排序后的加载顺序返回，使下拉选项与运行时故障转移顺序一致。
     providers: dict[str, dict[str, Any]] = {}
-    for path in sorted(platform_dir.glob("*.json")):
+    for path in ordered_platform_paths(platform_dir):
         config = read_json(path, default={})
         if config.get("enabled", False):
             providers[path.stem] = config
@@ -51,6 +50,26 @@ def provider_small_model_config(provider_config: dict[str, Any], task: str) -> d
             if isinstance(model, dict) and model.get("id"):
                 return dict(model)
     return {"id": "local-model"}
+
+
+def resolve_task_model(
+    runtime_config: Any,
+    provider_config: dict[str, Any],
+    task: str,
+    primary_model: str,
+) -> str:
+    """解析某个 AI 任务的模型，优先级：管理员显式覆盖 > 平台声明的小模型 > 主模型。
+
+    管理员可在 general.toml 的 ``[ai.small_models]`` 里按任务强制指定模型（留空表示
+    不覆盖）；否则使用平台 JSON ``small_models`` 为该任务声明的小模型（如 qwen-turbo）；
+    再没有则回退到本次请求的主模型。这样摘要/状态/意图等低成本任务可以稳定走经济模型。
+    """
+    overrides = getattr(runtime_config, "small_model_tasks", None)
+    if isinstance(overrides, dict):
+        override = str(overrides.get(task) or "").strip()
+        if override:
+            return override
+    return str(provider_small_model_config(provider_config, task).get("id") or primary_model)
 
 
 def load_prompt_text(prompt_file: Path) -> str:

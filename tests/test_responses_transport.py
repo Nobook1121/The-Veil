@@ -5,6 +5,7 @@ from trpg_server.agents.responses_transport import (
     response_to_chat_completion,
     tools_to_responses,
 )
+import requests
 
 
 class FakeResponse:
@@ -203,3 +204,38 @@ def test_responses_requester_latches_to_fallback_after_a_failure():
     assert first["choices"][0]["message"]["content"] == "fb"
     assert second["choices"][0]["message"]["content"] == "fb"
     assert len(fallback_calls) == 2
+
+
+def test_responses_requester_retries_transient_timeout_before_falling_back():
+    """一次瞬时超时不应立刻锁定回退，否则会白白丢掉增量传输的省 token 收益。"""
+    calls = []
+
+    def post(url, headers=None, json=None, timeout=None):
+        calls.append(json)
+        if len(calls) == 1:
+            raise requests.exceptions.Timeout("boom")
+        return FakeResponse(
+            200,
+            {
+                "id": "resp-1",
+                "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}],
+                "usage": {},
+            },
+        )
+
+    fallback_calls = []
+    requester = ResponsesRequester(
+        "https://x/v1/responses",
+        {},
+        "model-x",
+        30,
+        lambda payload: fallback_calls.append(payload) or {"choices": [{"message": {"content": "fb"}}]},
+        post=post,
+        max_retries=1,
+    )
+
+    result = requester({"messages": [{"role": "user", "content": "hi"}]})
+
+    assert result["choices"][0]["message"]["content"] == "ok"
+    assert len(calls) == 2
+    assert fallback_calls == []

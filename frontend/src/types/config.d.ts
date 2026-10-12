@@ -30,6 +30,8 @@ interface AIPlatformConfig {
     description: string;
     icon: string;
     enabled: boolean;
+    // 管理员拖动排序后写入的加载顺序：数值越小越先加载、越靠前展示。
+    order?: number | undefined;
     config: {
         api_key?: string;
         base_url: string;
@@ -72,6 +74,7 @@ interface AIPlatformManager {
     addModel(platform: string, model: Pick<AIModelConfig, "id" | "name"> & Partial<Pick<AIModelConfig, "description">>): Promise<boolean>;
     removeModel(platform: string, modelId: string): Promise<boolean>;
     testAPI(platform: string, modelId: string): Promise<AITestResult>;
+    savePlatformOrder(order: string[]): Promise<boolean>;
 }
 
 interface AITestResult {

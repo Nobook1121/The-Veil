@@ -71,6 +71,28 @@ class SemanticCache(_TTLCache):
         return super().set(self._key(intent, state), value, ttl=ttl)
 
 
+# 缓存指纹里必须剔除的易变字段：事件日志/触发记录的随机 id 与时间戳每轮都会变，
+# 但它们并不改变「相同输入是否应复用同一回复」的判断。保留它们会让指纹几乎永不重复、
+# 本地缓存形同虚设。剔除后只保留真正代表剧情推进的内容字段。
+VOLATILE_STATE_KEYS = frozenset({"id", "created_at", "updated_at", "timestamp"})
+
+
+def stable_state_for_cache(value: Any) -> Any:
+    """递归剔除易变字段，得到跨请求稳定的状态投影，专用于生成缓存指纹。
+
+    只作用于缓存键，不改变实际返回给模型/前端的原始状态，因此不会影响 KP 判断。
+    """
+    if isinstance(value, dict):
+        return {
+            str(key): stable_state_for_cache(item)
+            for key, item in value.items()
+            if str(key) not in VOLATILE_STATE_KEYS
+        }
+    if isinstance(value, (list, tuple)):
+        return [stable_state_for_cache(item) for item in value]
+    return value
+
+
 def build_exact_response_key(
     scenario_id: Any,
     scenario_version: Any,

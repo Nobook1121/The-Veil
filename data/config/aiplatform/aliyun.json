@@ -4,16 +4,20 @@
   "description": "阿里云AI大模型服务平台",
   "icon": "/assets/aiplatform/aliyun.png",
   "enabled": true,
+  "order": 0,
   "config": {
     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-    "timeout": 20,
+    "base_url_full": true,
+    "default_model": "qwen3.5-plus",
     "headers": {
       "Content-Type": "application/json"
     },
-    "use_previous_response_id": false,
-    "responses_api_supported": false,
+    "provider_type": "openai-compatible",
     "responses_api_checked_at": "2026-10-05 01:26:24",
-    "responses_api_detail": "previous_response_id is not accepted: HTTPSConnectionPool(host='dashscope.aliyuncs.com', port=443): Read timed out. (read timeout=15)"
+    "responses_api_detail": "previous_response_id is not accepted: HTTPSConnectionPool(host='dashscope.aliyuncs.com', port=443): Read timed out. (read timeout=15)",
+    "responses_api_supported": false,
+    "timeout": 20,
+    "use_previous_response_id": false
   },
   "models": [
     {
@@ -23,11 +27,10 @@
       "enabled": true,
       "params": {
         "context_window": 128000,
+        "max_tokens": 4096,
         "temperature": 0.7,
-        "top_p": 0.95,
-        "max_tokens": 4096
-      },
-      "doc_url": "https://help.aliyun.com/zh/model-studio/developer-reference/qwen3-5-model-api-reference"
+        "top_p": 0.95
+      }
     },
     {
       "id": "qwen-turbo",
@@ -36,39 +39,37 @@
       "enabled": true,
       "params": {
         "context_window": 1000000,
+        "max_tokens": 2048,
         "temperature": 0.2,
-        "top_p": 0.8,
-        "max_tokens": 2048
+        "top_p": 0.8
       }
     }
   ],
-  "embedding": {
-    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings",
-    "model": "text-embedding-v3",
-    "dimensions": 1024
-  },
   "small_models": {
     "intent_classification": {
       "id": "qwen-turbo",
-      "name": "Qwen Turbo",
+      "name": "Qwen Turbo（经济型）",
       "enabled": true
     },
     "state_update": {
       "id": "qwen-turbo",
-      "name": "Qwen Turbo",
+      "name": "Qwen Turbo（经济型）",
       "enabled": true
     },
     "summarization": {
       "id": "qwen-turbo",
-      "name": "Qwen Turbo",
+      "name": "Qwen Turbo（经济型）",
       "enabled": true
     },
     "schema_repair": {
       "id": "qwen-turbo",
-      "name": "Qwen Turbo",
+      "name": "Qwen Turbo（经济型）",
       "enabled": true
     }
   },
-  "auth_method": "api_key",
-  "version": "1.0.0"
+  "embedding": {
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings",
+    "model": "text-embedding-v3",
+    "dimensions": 1024
+  }
 }

@@ -5,6 +5,7 @@ import hashlib
 import re
 import secrets
 import sqlite3
+import string
 from pathlib import Path
 from typing import Any
 
@@ -148,6 +149,7 @@ class UserService:
                     role,
                     status,
                     last_login_at,
+                    must_change_password,
                     created_at,
                     updated_at
                 FROM users
@@ -232,6 +234,7 @@ class UserService:
                     role,
                     status,
                     last_login_at,
+                    must_change_password,
                     created_at,
                     updated_at
                 FROM users
@@ -289,6 +292,8 @@ class UserService:
                     users.username,
                     users.email,
                     users.role,
+                    users.status,
+                    users.must_change_password,
                     user_profiles.nickname,
                     user_profiles.avatar,
                     user_profiles.presence
@@ -433,6 +438,7 @@ class UserService:
                 """
                 UPDATE users
                 SET password_hash = ?,
+                    must_change_password = 0,
                     updated_at = ?
                 WHERE id = ?
                 """,
@@ -440,6 +446,42 @@ class UserService:
             )
 
         return True, "Password changed"
+
+    def force_password_reset(self, user_id: int) -> tuple[bool, str, str | None]:
+        """强制用户下次登录修改密码。
+
+        生成一个满足密码强度要求的随机临时密码并覆盖原密码，同时把
+        ``must_change_password`` 置 1，并撤销该用户所有活跃会话，使其必须用
+        临时密码重新登录后再修改密码。返回的临时密码由调用方（控制台命令）
+        打印给管理员。
+        """
+
+        temp_password = _generate_temp_password()
+        now_iso = _to_iso(_utc_now())
+        with self.db.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE users
+                SET password_hash = ?,
+                    must_change_password = 1,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (hash_password(temp_password), now_iso, user_id),
+            )
+            if cursor.rowcount == 0:
+                return False, "User not found", None
+            connection.execute(
+                """
+                UPDATE user_sessions
+                SET revoked_at = ?
+                WHERE user_id = ?
+                    AND revoked_at IS NULL
+                """,
+                (now_iso, user_id),
+            )
+
+        return True, "Password reset; user must change it on next login", temp_password
 
     def update_presence(self, user_id: int, presence: str) -> tuple[bool, str]:
         if presence not in {"online", "dnd", "invisible"}:
@@ -690,6 +732,19 @@ def _write_audit_log(
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _generate_temp_password(length: int = 12) -> str:
+    """生成满足密码强度要求（长度、含字母、含数字）的随机临时密码。"""
+
+    length = max(8, length)
+    letters = string.ascii_letters
+    digits = string.digits
+    alphabet = letters + digits
+    chars = [secrets.choice(letters), secrets.choice(digits)]
+    chars.extend(secrets.choice(alphabet) for _ in range(length - len(chars)))
+    secrets.SystemRandom().shuffle(chars)
+    return "".join(chars)
 
 
 def _utc_now() -> datetime:
