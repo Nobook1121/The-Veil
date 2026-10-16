@@ -1,6 +1,17 @@
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+# 各厂商对 function name 的校验规则统一为 ^[a-zA-Z0-9_-]+$（如 DeepSeek、OpenAI）。
+# 内部工具 id 用点号做命名空间（如 room.get_room_snapshot），对外发送前必须规整化，
+# 解析模型调用时再映射回内部 id。
+_FUNCTION_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def sanitize_function_name(name: str) -> str:
+    """把内部工具 id 规整为符合各厂商校验规则的 function name。"""
+    return _FUNCTION_NAME_PATTERN.sub("_", str(name or ""))
 
 
 class ToolExecutionError(ValueError):
@@ -18,7 +29,7 @@ class AgentTool:
         return {
             "type": "function",
             "function": {
-                "name": self.name,
+                "name": sanitize_function_name(self.name),
                 "description": self.description,
                 "parameters": self.parameters,
             },

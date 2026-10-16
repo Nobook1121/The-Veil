@@ -389,6 +389,18 @@ def test_kp_default_tools_include_suggest_actions_function():
     assert registry.get("room.suggest_actions") is not None
 
 
+def test_default_tool_schemas_use_provider_safe_function_names():
+    """DeepSeek/OpenAI 要求 function name 匹配 ^[a-zA-Z0-9_-]+$；内部点号命名空间
+    （如 room.get_room_snapshot）必须在对外 schema 里被规整化，否则请求会被平台 400 拒绝。"""
+    import re
+
+    registry = default_tool_registry()
+    for name in DEFAULT_KP_TOOLS:
+        tool = registry.get(name)
+        assert tool is not None
+        assert re.fullmatch(r"[a-zA-Z0-9_-]+", tool.schema()["function"]["name"])
+
+
 def test_suggest_actions_blocked_when_gate_disabled(tmp_path):
     context = AgentRequestContext(
         room_id="room-1",

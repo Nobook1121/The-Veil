@@ -112,7 +112,7 @@ def test_runtime_executes_enabled_tool_and_finishes():
     assert result.content == "final answer"
     assert result.token_count == 9
     assert len(requester.calls) == 2
-    assert requester.calls[0]["tools"][0]["function"]["name"] == "test.echo"
+    assert requester.calls[0]["tools"][0]["function"]["name"] == "test_echo"
     assert requester.calls[1]["messages"][-1]["role"] == "tool"
 
 

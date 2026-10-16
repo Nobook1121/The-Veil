@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from trpg_server.agents.profiles import AgentProfile
-from trpg_server.agents.tools.base import ToolRegistry
+from trpg_server.agents.tools.base import ToolRegistry, sanitize_function_name
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,8 @@ FOLDABLE_TOOL_NAMES = frozenset(
 )
 # 最近 N 条工具结果始终保留原文，避免刚拿到的数据马上被折叠掉。
 TOOL_RESULT_KEEP_RECENT = 2
+# 回传模型的工具消息 name 使用规整化后的 function name，折叠判定也按同一形态比较。
+_FOLDABLE_FUNCTION_NAMES = frozenset(sanitize_function_name(name) for name in FOLDABLE_TOOL_NAMES)
 FOLDED_TOOL_RESULT_NOTICE = (
     '{"folded": true, "note": "较早的工具结果已折叠以节省上下文，不代表当前状态；'
     '如需该数据请重新调用该工具。"}'
@@ -57,7 +59,7 @@ def _fold_stale_tool_results(messages: list[dict[str, Any]]) -> None:
     foldable_indexes = [
         index
         for index, message in enumerate(messages)
-        if message.get("role") == "tool" and str(message.get("name") or "") in FOLDABLE_TOOL_NAMES
+        if message.get("role") == "tool" and str(message.get("name") or "") in _FOLDABLE_FUNCTION_NAMES
     ]
     stale_count = len(foldable_indexes) - TOOL_RESULT_KEEP_RECENT
     for index in foldable_indexes[: max(0, stale_count)]:
@@ -159,14 +161,13 @@ def _tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _resolve_tool(tool_name: str, enabled_by_name: dict[str, Any]) -> tuple[str, Any] | tuple[None, None]:
+    # 模型可能回传内部 id（room.get_room_snapshot）或对外规整化的 function name
+    # （room_get_room_snapshot），两者都要能映射回同一个工具。
     tool = enabled_by_name.get(tool_name)
-    if tool:
-        return tool_name, tool
-    if "_" in tool_name:
-        alias_name = tool_name.replace("_", ".", 1)
-        tool = enabled_by_name.get(alias_name)
-        if tool:
-            return alias_name, tool
+    if tool is None:
+        tool = enabled_by_name.get(sanitize_function_name(tool_name))
+    if tool is not None:
+        return tool.name, tool
     return None, None
 
 
@@ -231,7 +232,11 @@ def run_agent_completion(
         payload["tools"] = [tool.schema() for tool in enabled_tools]
         payload["tool_choice"] = "auto"
 
+    # 同时以内部 id（room.get_room_snapshot）和规整化后的 function name
+    # （room_get_room_snapshot）登记，便于把模型的调用稳定映射回同一个工具。
     enabled_by_name = {tool.name: tool for tool in enabled_tools}
+    for tool in enabled_tools:
+        enabled_by_name.setdefault(sanitize_function_name(tool.name), tool)
     last_response = None
     tool_messages: list[dict[str, Any]] = []
     direct_messages: list[dict[str, Any]] = []
@@ -350,6 +355,10 @@ def run_agent_completion(
             resolved_name, tool = _resolve_tool(tool_name, enabled_by_name)
             if not tool:
                 return AgentCompletionResult(error=f"Tool {tool_name} is not enabled for agent {profile.id}")
+            # 回传给模型的 assistant 消息也必须只含合规范的 function name：模型可能按
+            # 提示词里的内部 id（带点号）发起调用，这里就地规整化，避免下一轮请求被平台拒绝。
+            function_name = sanitize_function_name(resolved_name)
+            function["name"] = function_name
             if callable(stage_callback):
                 stage_callback("tool_call", f"正在执行工具：{resolved_name}")
             if isinstance(tool_state, dict):
@@ -400,7 +409,7 @@ def run_agent_completion(
                 {
                     "role": "tool",
                     "tool_call_id": call.get("id") or tool_name,
-                    "name": resolved_name,
+                    "name": function_name,
                     "content": result_payload,
                 }
             )
