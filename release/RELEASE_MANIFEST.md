@@ -1,10 +1,10 @@
-# 帷幕 The Veil · AI 跑团平台 v0.4.3b
+# 帷幕 The Veil · AI 跑团平台 v0.5.0
 
 这是可用于 GitHub Release 的源码发布包，包含后端源码、前端源码、已构建的 `dist/public`、默认配置与运行脚本。
 
 ## 发布前检查
 
-- `scripts/verify.ps1`：通过（Python 语法检查、前端 TypeScript 类型检查与生产构建、`node --check` 产物校验、`pytest` 311 passed）
+- `scripts/verify.ps1`：通过（Python 语法检查、前端 TypeScript 类型检查与生产构建、`node --check` 产物校验、`pytest` 312 passed）
 - 发布包敏感信息扫描：不应包含本地 `.env`、运行时密钥、日志、缓存、本地数据库或依赖目录
 - 发布包内容核对：不应包含 `.gitignore`、`.gitattributes`、`docs/`
 
@@ -26,4 +26,4 @@ AI 平台 API key 仅应通过运行时配置写入 `data/runtime/config/aiplatf
 
 ## 本次更新
 
-详见仓库 `release/changelog/v0.4.3b.md`。
+详见仓库 `release/changelog/v0.5.0.md`。
