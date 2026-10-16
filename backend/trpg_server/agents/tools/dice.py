@@ -250,7 +250,7 @@ def _resolve_check_display_name(card: dict[str, Any], check_name: str) -> str:
             return str(skill.get("name") or "").strip() or localized
     return localized
 def _result_message(summary: str, tool_name: str, **metadata: Any) -> dict[str, Any]:
-    return {"type": "dice", "sender_name": "骰娘", "avatar": "/assets/avatars/default_dice.jpg", "content": summary, "metadata": {"tool_name": tool_name, **metadata}}
+    return {"type": "dice", "sender_name": "骰娘", "avatar": "", "content": summary, "metadata": {"tool_name": tool_name, **metadata}}
 
 
 def _attach_trigger_reveal(result: dict[str, Any], arguments: dict[str, Any], context: Any) -> dict[str, Any]:

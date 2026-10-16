@@ -143,13 +143,15 @@ def test_editing_imported_basic_info_keeps_version_and_knowledge(tmp_path, monke
         "author": "New author",
         "playerCount": 4,
         "notes": "New notes",
-        "cover": "/assets/scenario_covers/default_cover.png",
+        "cover": "",
         "modules": [],
     }, headers={"X-CSRF-Token": "csrf"})
     assert updated.status_code == 200, updated.get_json()
     data = updated.get_json()["data"]
     assert data["title"] == "New title"
     assert data["playerCount"] == 4
+    # 项目已不再使用默认封面图：未提供封面时 cover 必须保持为空，由前端渲染剧本名文字封面。
+    assert data["cover"] == ""
     # 基础信息不属于内容，版本号必须保持原样。
     assert data["scenario_version"] == "1.0.0"
     # 已切分的文档知识块必须原样保留，不能被空 modules 覆盖。
@@ -202,7 +204,7 @@ def test_editing_basic_info_keeps_module_scenario_embeddings(tmp_path, monkeypat
         "author": "B",
         "playerCount": 5,
         "notes": "updated notes",
-        "cover": "/assets/scenario_covers/default_cover.png",
+        "cover": "",
         "modules": scenario["modules"],
     }, headers={"X-CSRF-Token": "csrf"})
     assert updated.status_code == 200, updated.get_json()

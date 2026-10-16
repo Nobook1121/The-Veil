@@ -28,6 +28,7 @@ max_tool_rounds = 8
 ai_request_timeout = 1800
 ai_request_max_retries = 5
 record_prompt_segments = true
+cloud_embedding_enabled = false
 
 [ai.small_models]
 intent_classification = ""

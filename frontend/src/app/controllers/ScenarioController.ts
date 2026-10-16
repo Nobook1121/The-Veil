@@ -209,7 +209,7 @@ class ScenarioController {
 
             const coverUrl = inputValue("scenarioCoverUrl");
             await this.renameScenarioCover(scenario, coverUrl);
-            scenarioData.cover = scenario.cover || DEFAULT_SCENARIO_COVER;
+            scenarioData.cover = scenario.cover || "";
             const savedScenario = await this.model.updateScenario(scenario.id, {
                 ...scenarioData,
                 id: scenario.id,
@@ -276,10 +276,10 @@ class ScenarioController {
                     const tempScenario: Pick<Scenario, "id" | "cover" | "title"> = {
                         id,
                         title: scenarioData.title,
-                        cover: scenarioData.cover || DEFAULT_SCENARIO_COVER,
+                        cover: scenarioData.cover || "",
                     };
                     await this.renameScenarioCover(tempScenario, scenarioData.cover || "");
-                    scenarioData.cover = tempScenario.cover || DEFAULT_SCENARIO_COVER;
+                    scenarioData.cover = tempScenario.cover || "";
 
                     const updatedScenario = await this.model.updateScenario(id, scenarioData);
                     void updatedScenario;
@@ -378,13 +378,10 @@ class ScenarioController {
         scenario: T,
         coverUrl: string,
     ): Promise<T> {
-        if (!coverUrl || coverUrl === DEFAULT_SCENARIO_COVER) {
-            scenario.cover = DEFAULT_SCENARIO_COVER;
-            return scenario;
-        }
-
-        if (!coverUrl.startsWith("/assets/scenarios/") && !coverUrl.startsWith("/assets/scenario_covers/")) {
-            scenario.cover = DEFAULT_SCENARIO_COVER;
+        // 无封面（或封面地址不在受支持的目录下）时统一按「无封面」处理，
+        // 由前端渲染剧本名文字封面；项目已不再有内置默认封面图。
+        if (!coverUrl || (!coverUrl.startsWith("/assets/scenarios/") && !coverUrl.startsWith("/assets/scenario_covers/"))) {
+            scenario.cover = "";
             return scenario;
         }
 
@@ -393,7 +390,7 @@ class ScenarioController {
                 ? coverUrl.replace("/assets/scenarios/", "")
                 : coverUrl.replace("/assets/scenario_covers/", "scenario-covers/");
             if (!oldCoverPath) {
-                scenario.cover = DEFAULT_SCENARIO_COVER;
+                scenario.cover = "";
                 return scenario;
             }
 
@@ -411,17 +408,15 @@ class ScenarioController {
 
             scenario.cover = data.success
                 ? `/assets/scenarios/${newCoverPath}`
-                : DEFAULT_SCENARIO_COVER;
+                : "";
         } catch (error) {
             console.error("重命名封面文件时出错:", error);
-            scenario.cover = DEFAULT_SCENARIO_COVER;
+            scenario.cover = "";
         }
 
         return scenario;
     }
 }
-
-const DEFAULT_SCENARIO_COVER = "/assets/scenario_covers/default_cover.png";
 
 function inputValue(id: string): string {
     return (document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement | null)?.value || "";

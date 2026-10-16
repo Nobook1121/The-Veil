@@ -41,6 +41,20 @@ class _TTLCache:
         entry = self._entries.get(str(key))
         return {"hits": entry.hits if entry else 0, "present": bool(self._get(str(key)))}
 
+    def clear(self) -> int:
+        """清空全部条目，返回被清除的条目数（含已过期但尚未回收的）。"""
+
+        count = len(self._entries)
+        self._entries.clear()
+        return count
+
+    def snapshot(self) -> dict[str, Any]:
+        """返回当前存活条目数与累计命中数，用于控制台查看缓存状态。"""
+
+        now = time.time()
+        live = [entry for entry in self._entries.values() if entry.expires_at > now]
+        return {"entries": len(live), "hits": sum(entry.hits for entry in live)}
+
 
 class ProviderPrefixCache(_TTLCache):
     """Tracks stable provider prefixes; provider remains the source of truth for billing hits."""

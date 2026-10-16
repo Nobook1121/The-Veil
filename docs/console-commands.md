@@ -8,6 +8,23 @@
 - 参数包含空格时使用英文双引号，例如 `"user name"`。
 - 输入 `help` 查看当前可用命令。
 
+## 破坏性命令与确认机制
+
+涉及**删除 / 覆盖 / 清空**的命令（`user delete`、`scenario delete`、`scenario reindex`、
+`vector prune`、`knowledge reindex`、`room archive`、`room prune`、`ai cache clear`、
+`ai usage reset`、`backup create`、`owner transfer`）统一遵循同一套保护约定：
+
+1. **缺省为「预演」**：直接执行时只打印「将发生的变更」，**不改动任何数据**；
+2. **交互确认**：若当前是交互式控制台，会弹出 `是否执行(y/N)` 提示，输入 `y` 才真正执行；
+3. **`--yes` / `-y`**：跳过提示直接执行，适合脚本化批处理。
+
+```text
+user delete alice            # 预演：只打印将要删除什么
+user delete alice --yes      # 直接执行
+vector prune                 # 预演：列出将被清理的孤儿向量
+vector prune --yes           # 直接执行
+```
+
 ## 用户权限
 
 ```text
@@ -67,3 +84,201 @@ ai usage [days]
 ai usage
 ai usage 7
 ```
+
+## 探测上游前缀缓存
+
+```text
+ai cache_probe [platform-id]
+```
+
+把同一段足够长的 payload **连发两次**到当前启用的 AI 平台，比较第二次响应 `usage`
+里是否出现缓存命中 token，用来判断这个平台的前缀缓存是否**可观测**。
+
+- 省略 `platform-id` 时使用「加载顺序最靠前」的已启用平台；
+- 指定 `platform-id`（配置文件主名，如 `aliyun`、`inkstone`）时探测该平台。
+
+结论有三种：
+
+- **命中**：第二次 `cached_tokens > 0` —— 平台支持且确实复用了前缀缓存；
+- **未命中**：平台回报了 `cached_tokens` 字段但为 0 —— 说明该前缀本轮没被复用；
+- **无法判定**：`usage` 里根本没有 `cached_tokens` 字段 —— 该平台不回报缓存信息，
+  界面上的「0% 命中率」属于正常现象，不能据此判断缓存是否生效。
+
+示例：
+
+```text
+ai cache_probe
+ai cache_probe aliyun
+```
+
+输出形如：
+
+```text
+AI 前缀缓存探针:
+  平台: aliyun · 模型: qwen-max
+  端点: https://.../v1/chat/completions
+  第一次: HTTP 200 · prompt_tokens=1204 · cached_tokens=未回报
+  第二次: HTTP 200 · prompt_tokens=1204 · cached_tokens=未回报
+  结论: 平台未在 usage 中回报 cached_tokens，无法判定（该平台的前缀缓存不可观测）
+```
+
+## 剧本管理
+
+### 列出剧本
+
+```text
+scenario list [search]
+```
+
+列出全部剧本（可按 ID/标题模糊过滤），显示 ID、标题、所有者、版本、向量数与是否已归档。
+
+```text
+scenario list
+scenario list 灯塔
+```
+
+### 更改剧本所有者
+
+```text
+scenario owner <scenario-id> <username-or-id>
+```
+
+改写剧本记录的 `owner_id`（决定谁有编辑权限，包括世界书字段）。用户可用用户名或数字 ID 指定。
+
+```text
+scenario owner 12 alice
+scenario owner 12 3
+```
+
+### 删除剧本
+
+```text
+scenario delete <scenario-id> [--vectors-only] [--force]
+```
+
+默认行为与网页一致：**仍有房间占用时归档**，否则删除剧本本体 + 知识库（向量与索引）+ 封面。
+
+| 参数 | 作用 |
+|---|---|
+| （无） | 默认：有房间占用 → 归档；无占用 → 删除整个剧本 |
+| `--vectors-only` | 只删向量库与知识索引，**保留剧本本体** |
+| `--force` | 即使仍有房间占用，也**强制删除剧本本体** |
+
+`--vectors-only` 与 `--force` 不能同时使用。
+
+```text
+scenario delete 12
+scenario delete 12 --vectors-only
+scenario delete 12 --force
+```
+
+以上操作都会写入用户操作日志（操作者记为「控制台」）。
+
+### 校验剧本
+
+```text
+scenario validate <scenario-id>
+```
+
+只读校验剧本 JSON / 知识索引 / 向量库三者是否一致：索引分块数与向量条数是否对上、
+索引文件是否存在、JSON 能否解析。输出 `三者一致 ✅` 或列出具体问题。
+
+```text
+scenario validate 12
+```
+
+### 重建剧本知识索引
+
+```text
+scenario reindex <scenario-id> [--yes]
+```
+
+重建某剧本的知识索引与向量。优先复用磁盘上已有的索引分块（为**直接导入、无场景卡**的
+剧本保留分块），仅当索引缺失时才从场景卡 `modules` 重建，**不会把已导入的知识覆盖为空**。
+会调用 embedding，可能较慢。
+
+## 用户管理
+
+```text
+user list [search]                 列出用户（ID/用户名/角色/状态/邮箱/最近登录）
+user ban <username-or-id>          封禁账号（状态 -> banned，无法登录）
+user unban <username-or-id>        解封账号（状态 -> active）
+user sessions revoke <username-or-id>   撤销该用户全部会话，强制下线
+user create <username> [角色]      本地建号，返回一次性临时密码（角色缺省 USER）
+user delete <username-or-id> [--force]  删除账号（破坏性，需确认）
+```
+
+- `user create` 生成的临时密码只打印一次，请立即转交用户并提醒修改；
+- `user delete` 默认拒绝删除**系统 OWNER** 或**仍持有剧本**的用户；加 `--force` 可强制删除；
+  该用户的会话、资料、审计关联会被级联清理。
+
+## AI 平台与缓存
+
+### 平台管理
+
+```text
+ai platform list                        列出平台：ID/启用状态/顺序/模型
+ai platform test [id]                   连通性冒烟测试（省略 id 时要求当前只有一个平台）
+ai platform enable <id> / disable <id>  启用 / 停用平台
+ai platform detect-responses [id]       探测是否支持 Responses API
+```
+
+### 本地缓存与用量
+
+```text
+ai cache stats                  本地前缀/精确/语义缓存的存活条数与命中次数
+ai cache clear [--yes]          清空本地缓存（破坏性，需确认）
+ai usage reset <all|agent-id> [--yes]   删除当天的用量记录（all 为全部）
+```
+
+## 向量库与知识库
+
+```text
+vector health                   向量库后端 / 向量总数 / embedding / OCR 状态
+vector prune [--yes]            清理「孤儿向量」：库中 scenario_id 已不存在于剧本目录
+knowledge list [search]         列出规则集，以及各剧本的知识索引块数与向量数
+knowledge reindex [ruleset] [--yes]     重建规则集索引，省略 ruleset 时重建全部
+```
+
+说明：剧本被删除时控制台/网页**不会**自动清理其向量条目，这些残留即「孤儿向量」，
+可用 `vector prune` 发现并清理；后端不支持枚举 `scenario_id`（如 Qdrant）时会明确提示无法判定。
+
+## 房间管理
+
+```text
+room list [search]              列出房间：ID/名称/房间码/剧本/成员数/是否归档
+room members <room-id>          查看房间成员（账号角色 + 房间角色）
+room archive <room-id> [--yes]  归档房间（要求已到达结局，与网页规则一致）
+room prune [--days N] [--yes]   清理僵尸房间：未归档、无有效成员、且 >N 天（默认 30）无活动
+```
+
+`room archive` 会生成与网页一致的不可变归档快照（需要运行体注入的 Flask app 上下文；
+若未注入则只落盘归档标记）。
+
+## 网络、存档与备份
+
+```text
+network status                  本地 IP / 端口可用性 / 发现与穿透开关
+network test                    端口绑定与 UDP 发现连通性测试
+autosave                        立即触发一次自动存档检查（为到期房间写入自动存档）
+backup create [--out <dir>] [--yes]     打包 config/剧本/房间/知识库/用户库/日志为 zip
+```
+
+`backup create` 默认输出到 `data/backups`，可用 `--out` 指定目录。
+
+## 系统 OWNER 转移
+
+```text
+owner transfer <username-or-id> [--yes]
+```
+
+把系统 OWNER 身份转移给目标用户，**原 OWNER 自动降为 ADMIN**。用于换人接手站点管理。
+
+## 服务信息与日志
+
+```text
+server health [--json]          向量库/embedding/OCR/AI 平台/用户库健康检查
+server info                     版本/Python/运行平台/数据目录及各目录占用
+log tail [n]                    打印最新日志文件末尾 n 行（默认 50）
+```
+

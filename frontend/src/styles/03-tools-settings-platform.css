@@ -176,11 +176,16 @@
 /* 设置子标签样式 - 与小工具标签样式保持一致 */
 .settings-tabs {
     display: flex;
+    /* 设置子标签有 8 个，窄屏（手机）一行放不下；换行成多行比横向滚动更易发现，
+       避免最后几个标签被挤出屏幕、看起来像被裁切 */
+    flex-wrap: wrap;
     border-bottom: 1px solid var(--border-subtle);
     margin-bottom: 20px;
+    gap: 4px;
 }
 
 .settings-tab {
+    flex: 0 0 auto;
     padding: 10px 20px;
     border: none;
     background: none;
@@ -1234,6 +1239,14 @@
     .col-10 {
         margin-left: 0;
         width: 100%;
+    }
+
+    /* 房间详情/列表页头为多按钮行，窄屏下允许换行并按左排列，避免横向溢出 */
+    #save-detail-view > .d-flex,
+    #save-list-view > .d-flex {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 8px;
     }
 }
 

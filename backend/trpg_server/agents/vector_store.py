@@ -39,6 +39,10 @@ class VectorStore:
     def health(self) -> dict[str, Any]:
         return {"available": False}
 
+    def scenario_ids(self) -> set[str] | None:
+        """枚举当前库中出现过的 scenario_id；后端不支持时返回 ``None``。"""
+        return None
+
     def search(self, collection: str, vector: list[float], limit: int = 5) -> list[dict[str, Any]]:
         """Compatibility shim for the former search(collection, vector, limit) API."""
         return self.query(vector, {"collection": collection}, limit)
@@ -274,6 +278,14 @@ class EmbeddedVectorStore(VectorStore):
             return {"available": True, "backend": "embedded", "path": str(self.db_path)}
         except Exception:
             return {"available": False, "backend": "embedded"}
+
+    def scenario_ids(self) -> set[str] | None:
+        with self._lock, self._session() as connection:
+            rows = connection.execute(
+                "SELECT DISTINCT scenario_id FROM vectors "
+                "WHERE scenario_id IS NOT NULL AND scenario_id <> ''"
+            ).fetchall()
+        return {str(row[0]) for row in rows}
 
 
 class QdrantVectorStore(VectorStore):

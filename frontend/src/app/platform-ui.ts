@@ -17,8 +17,7 @@ interface DebugPromptResponse {
     content: string;
 }
 
-// 角色卡默认头像路径：用户未填写头像时作为兜底，需与后端角色配置默认值保持一致。
-const DEFAULT_ROLE_AVATAR_PATH = "/assets/avatars/default_kp.jpg";
+// 角色卡默认头像：留空即由前端按角色名称首字生成文字头像，不再有内置默认图。
 // LM Studio 等本地服务默认使用的模型 id：与 config/aiplatform、TestRequestConfig 中的约定一致。
 const LMSTUDIO_DEFAULT_MODEL_ID = "local-model";
 // 默认模型请求配置的兜底文件路径（新建模型时作为请求模板来源）。
@@ -50,18 +49,9 @@ function platformAvatarHTML(config: { icon?: string; name: string }, extraClass 
     if (icon) {
         return `<img src="${platformEscapeHtml(icon)}" alt="${platformEscapeHtml(config.name)}" class="platform-avatar-img ${extraClass}">`;
     }
-    const letter = (config.name || "?").trim().charAt(0).toUpperCase() || "?";
-    return `<span class="platform-avatar-text ${extraClass}" style="--avatar-hue:${platformAvatarHue(config.name || "?")}">${platformEscapeHtml(letter)}</span>`;
-}
-
-// 由名称首字推导一个稳定的色相，让不同供应商的文字头像颜色区分开。
-function platformAvatarHue(name: string): number {
-    const text = name || "?";
-    let hash = 0;
-    for (let index = 0; index < text.length; index += 1) {
-        hash = (hash * 31 + text.charCodeAt(index)) % 360;
-    }
-    return hash;
+    // 首字与色相复用全局文字头像工具，保证与用户头像、角色卡头像同一套规则。
+    const letter = TrpgAvatar.initial(config.name);
+    return `<span class="platform-avatar-text ${extraClass}" style="--avatar-hue:${TrpgAvatar.hue(config.name)}">${platformEscapeHtml(letter)}</span>`;
 }
 
 function clonePlatformConfig(config: AIPlatformConfig): AIPlatformConfig {
@@ -278,7 +268,7 @@ function renderRoleConfigCards(roles: RoleConfig[], providers: Array<{ id: strin
                 <label class="form-label" for="roleName-${platformEscapeHtml(role.id)}">${platformEscapeHtml(platformT("platform.role_config.name", "角色名称"))}</label>
                 <input class="form-control role-name-input" id="roleName-${platformEscapeHtml(role.id)}" value="${platformEscapeHtml(role.name)}" placeholder="KP">
                 <label class="form-label" for="roleAvatar-${platformEscapeHtml(role.id)}">${platformEscapeHtml(platformT("platform.role_config.avatar", "头像 URL"))}</label>
-                <input class="form-control role-avatar-input" id="roleAvatar-${platformEscapeHtml(role.id)}" value="${platformEscapeHtml(role.avatar || "")}" placeholder="${platformEscapeHtml(DEFAULT_ROLE_AVATAR_PATH)}">
+                <input class="form-control role-avatar-input" id="roleAvatar-${platformEscapeHtml(role.id)}" value="${platformEscapeHtml(role.avatar || "")}" placeholder="留空则显示角色名称首字">
                 <label class="form-label" for="roleWakeWords-${platformEscapeHtml(role.id)}">${platformEscapeHtml(platformT("platform.role_config.wake_words", "唤醒词"))}</label>
                 <input class="form-control role-wake-input" id="roleWakeWords-${platformEscapeHtml(role.id)}" value="${platformEscapeHtml(wakeWords)}" placeholder="@KP, @Keeper">
                 <label class="form-label" for="roleProvider-${platformEscapeHtml(role.id)}">${platformEscapeHtml(platformT("platform.role_config.provider", "大模型提供商"))}</label>
@@ -302,7 +292,7 @@ async function saveRoleConfig(roleId: string): Promise<void> {
     const provider = card.querySelector<HTMLSelectElement>(".role-provider-select")?.value || "";
     const prompt = card.querySelector<HTMLTextAreaElement>(".role-config-prompt")?.value || "";
     const name = card.querySelector<HTMLInputElement>(".role-name-input")?.value.trim() || roleId;
-    const avatar = card.querySelector<HTMLInputElement>(".role-avatar-input")?.value.trim() || DEFAULT_ROLE_AVATAR_PATH;
+    const avatar = card.querySelector<HTMLInputElement>(".role-avatar-input")?.value.trim() || "";
     const description = card.querySelector<HTMLInputElement>(".role-description-input")?.value.trim() || "";
 
     try {

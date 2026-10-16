@@ -5,6 +5,7 @@ from flask import Blueprint, current_app, request, session
 
 from trpg_server.json_store import read_json
 from trpg_server.logging_config import log_user_action, user_action_text
+from trpg_server.media_defaults import normalize_avatar
 from trpg_server.responses import error_response, server_error, success_response
 from trpg_server.security import get_user_manager, is_socket_user_online, require_permission_node
 from trpg_server.settings import ROOMS_DIR
@@ -69,7 +70,7 @@ def _profile_payload(user):
         "username": user.get("username", ""),
         "email": user.get("email", ""),
         "role": user.get("role", "USER"),
-        "avatar": user.get("avatar", "/assets/avatars/default.jpg"),
+        "avatar": normalize_avatar(user.get("avatar")),
         "nickname": user.get("nickname") or user.get("username", ""),
         "presence": user.get("presence", "online"),
         "two_factor_enabled": user.get("two_factor_enabled", False),

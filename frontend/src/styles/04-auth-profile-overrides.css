@@ -929,6 +929,11 @@
     object-fit: cover;
 }
 
+/* 文字封面（SVG data URI）是横向比例，容器不再固定 300px 高，避免出现大片空白。 */
+.cover-preview:has(img[src^="data:image/svg+xml"]) {
+    height: auto;
+}
+
 .cover-upload-input {
     display: none;
 }

@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from flask import Blueprint, Response, current_app, request, session
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
+from trpg_server.media_defaults import normalize_cover
 from trpg_server.responses import error_response, success_response
 from trpg_server.scenario_import_jobs import public_job_payload, submit_import_job
 from trpg_server.scenario_documents import validate_scenario_upload, ScenarioDocumentError
@@ -155,8 +156,7 @@ def publish_import(script_id):
     timestamp = _current_timestamp()
     scenario.setdefault("createdAt", timestamp)
     scenario["updatedAt"] = timestamp
-    if not scenario.get("cover"):
-        scenario["cover"] = "/assets/scenario_covers/default_cover.png"
+    scenario["cover"] = normalize_cover(scenario.get("cover"))
     descriptor = save_scenario_record(root, scenario)
     stored = load_scenario_record(descriptor, root)
     vector_store = current_app.extensions.get("vector_store")

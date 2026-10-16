@@ -211,8 +211,20 @@ def run_server(argv=None):
     # command always targets the actual listening socket.
     set_shutdown_callback(lambda: _request_graceful_shutdown(port))
     # 控制台必须复用 Web 应用正在使用的 user_manager 实例，否则控制台
-    # 对用户组的修改可能落到另一份数据源上而“不生效”。
-    start_console_command_loop(user_manager=app.config.get("USER_MANAGER"))
+    # 对用户组的修改可能落到另一份数据源上而“不生效”。剧本命令同理需要
+    # 复用同一份 scenarios/rooms 路径与向量库实例。
+    start_console_command_loop(
+        user_manager=app.config.get("USER_MANAGER"),
+        scenarios_dir=app.config.get("SCENARIOS_DIR"),
+        rooms_dir=app.config.get("ROOMS_DIR"),
+        vector_store=app.extensions.get("vector_store"),
+        embedding_provider=app.extensions.get("embedding_provider"),
+        ocr_provider=app.extensions.get("ocr_provider"),
+        app=app,
+        log_dir=app.config.get("LOGS_DIR"),
+        ai_platform_dir=app.config.get("AI_PLATFORM_DIR"),
+        ai_platform_secret_dir=app.config.get("AI_PLATFORM_SECRET_DIR"),
+    )
 
     try:
         _serve_http(port)

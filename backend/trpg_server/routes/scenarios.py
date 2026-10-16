@@ -8,6 +8,7 @@ import requests
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.json_store import read_json
+from trpg_server.media_defaults import normalize_cover
 from trpg_server.logging_config import log_user_action, redact_sensitive, user_action_text
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, server_error, success_response
@@ -542,8 +543,7 @@ def create_scenario():
         )
         scenario_data["createdAt"] = _current_timestamp()
         scenario_data["updatedAt"] = scenario_data["createdAt"]
-        if not scenario_data.get("cover"):
-            scenario_data["cover"] = "/assets/scenario_covers/default_cover.png"
+        scenario_data["cover"] = normalize_cover(scenario_data.get("cover"))
 
         file_path = save_scenario_record(_scenarios_dir(), scenario_data, trigger_max_file_size=_trigger_size_limit())
         draft_path = _draft_path()
@@ -795,12 +795,6 @@ def delete_scenario_cover():
             return error_response("Please provide cover path", 400, "No data")
 
         filename = _cover_filename(Path(data["cover_path"]).name)
-        if filename == "default_cover.png":
-            return error_response(
-                "Default cover cannot be deleted",
-                400,
-                "Default cover cannot be deleted",
-            )
 
         file_path = safe_join(SCENARIO_COVERS_DIR, filename)
         scenario_file_path = safe_join(_scenarios_dir(), data["cover_path"].replace("/assets/scenarios/", ""))
@@ -841,12 +835,6 @@ def rename_scenario_cover():
         old_value = str(data.get("old_path") or data.get("old_filename") or "")
         new_value = str(data.get("new_path") or data.get("new_filename") or "")
         old_filename = _cover_filename(Path(old_value).name)
-        if old_filename == "default_cover.png":
-            return error_response(
-                "Default cover cannot be renamed",
-                400,
-                "Default cover cannot be renamed",
-            )
 
         old_candidates = [
             safe_join(SCENARIO_COVERS_DIR, old_filename),

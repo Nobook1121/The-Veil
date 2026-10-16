@@ -57,6 +57,10 @@ class AIRuntimeConfig:
     recursive_scanning: bool = True
     max_recursion_depth: int = 3
     lorebook_token_budget: int = 0
+    # 云端 embedding 接口（OpenAI 兼容）默认关闭。只有管理员在设置页显式开启后，
+    # 才会在本地模型不可用时改用 AI 平台配置里的 embedding 接口；关闭时一律回落到
+    # 本地模型（可用的话）或确定性的哈希向量，避免静默产生云端调用费用。
+    cloud_embedding_enabled: bool = False
 
 
 def _toml_int(value: str, fallback: int) -> int:
@@ -130,6 +134,7 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
     recursive_scanning = AIRuntimeConfig.recursive_scanning
     max_recursion_depth = AIRuntimeConfig.max_recursion_depth
     lorebook_token_budget = AIRuntimeConfig.lorebook_token_budget
+    cloud_embedding_enabled = AIRuntimeConfig.cloud_embedding_enabled
     for raw_line in general_file.read_text(encoding="utf-8").splitlines():
         line = raw_line.split("#", 1)[0].strip()
         if not line:
@@ -198,6 +203,8 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
                 ai_request_max_retries = max(0, min(20, _toml_int(value, AIRuntimeConfig.ai_request_max_retries)))
             elif key == "record_prompt_segments":
                 record_prompt_segments = value.lower() == "true"
+            elif key == "cloud_embedding_enabled":
+                cloud_embedding_enabled = value.lower() == "true"
             elif key == "dice_critical_threshold":
                 dice_critical_threshold = max(0, min(100, _toml_int(value, AIRuntimeConfig.dice_critical_threshold)))
             elif key == "dice_fumble_threshold":
@@ -231,4 +238,5 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
         recursive_scanning=recursive_scanning,
         max_recursion_depth=max_recursion_depth,
         lorebook_token_budget=lorebook_token_budget,
+        cloud_embedding_enabled=cloud_embedding_enabled,
     )

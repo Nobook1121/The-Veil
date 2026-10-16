@@ -13,6 +13,16 @@ function initScenarioManagement(): void {
             void handleCoverUpload(event);
         }
     });
+
+    // 未上传封面时，封面预览跟随剧本标题实时刷新为「剧本名」文字封面。
+    document.addEventListener("input", (event) => {
+        const target = event.target as HTMLInputElement | null;
+        if (target?.id !== "scenarioTitle") return;
+        const coverUrl = (document.getElementById("scenarioCoverUrl") as HTMLInputElement | null)?.value.trim();
+        if (coverUrl) return;
+        const preview = document.getElementById("coverPreview") as HTMLImageElement | null;
+        if (preview) preview.src = TrpgAvatar.scenarioCoverTextDataUri(target.value);
+    });
 }
 
 function refreshScenarioManagement(): void {

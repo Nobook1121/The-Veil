@@ -153,6 +153,25 @@ def test_general_config_has_no_escaped_section_names():
     assert '\\"' not in content
 
 
+def test_runtime_config_reads_cloud_embedding_flag(tmp_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "general.toml").write_text(
+        "[ai]\ncloud_embedding_enabled = true\n",
+        encoding="utf-8",
+    )
+
+    config = load_ai_runtime_config(config_dir)
+
+    assert config.cloud_embedding_enabled is True
+
+
+def test_shipped_general_config_disables_cloud_embedding_by_default():
+    config = load_ai_runtime_config(Path("data/config/general.toml").parent)
+
+    assert config.cloud_embedding_enabled is False
+
+
 def test_shipped_general_config_exposes_knowledge_settings():
     config = load_ai_runtime_config(Path("data/config/general.toml").parent)
 

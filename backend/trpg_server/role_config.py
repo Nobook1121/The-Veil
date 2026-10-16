@@ -5,6 +5,7 @@ from typing import Any
 
 from trpg_server.ai_platform_config import ordered_platform_paths
 from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.media_defaults import normalize_avatar
 
 
 DEFAULT_ROLE_ID = "kp"
@@ -87,7 +88,7 @@ def default_roles(prompt_file: Path, platform_dir: Path) -> list[dict[str, Any]]
         {
             "id": DEFAULT_ROLE_ID,
             "name": "KP",
-            "avatar": "/assets/avatars/default_kp.jpg",
+            "avatar": "",
             "wake_words": ["@KP"],
             "prompt": load_prompt_text(prompt_file),
             "provider": provider,
@@ -96,7 +97,7 @@ def default_roles(prompt_file: Path, platform_dir: Path) -> list[dict[str, Any]]
             "id": MODULE_SUMMARIZER_ROLE_ID,
             "name": "模块摘要助手",
             "description": "为剧本编辑器生成短小、可检索的模块摘要。",
-            "avatar": "/assets/avatars/default.jpg",
+            "avatar": "",
             "wake_words": ["@模块摘要"],
             "prompt": MODULE_SUMMARIZER_PROMPT,
             "provider": provider,
@@ -131,7 +132,7 @@ def normalize_roles(
             {
                 "id": role_id,
                 "name": str(role.get("name") or role_id.upper()).strip(),
-                "avatar": str(role.get("avatar") or ("/assets/avatars/default_kp.jpg" if role_id == DEFAULT_ROLE_ID else "/assets/avatars/default.jpg")).strip(),
+                "avatar": normalize_avatar(role.get("avatar")),
                 "wake_words": wake_words or [f"@{role_id.upper()}"],
                 "prompt": str(role.get("prompt") or load_prompt_text(prompt_file)),
                 "provider": provider or fallback_provider,
@@ -145,7 +146,7 @@ def normalize_roles(
                 "id": MODULE_SUMMARIZER_ROLE_ID,
                 "name": "模块摘要助手",
                 "description": "为剧本编辑器生成短小、可检索的模块摘要。",
-                "avatar": "/assets/avatars/default.jpg",
+                "avatar": "",
                 "wake_words": ["@模块摘要"],
                 "prompt": MODULE_SUMMARIZER_PROMPT,
                 "provider": fallback_provider,
@@ -192,7 +193,7 @@ def save_role(
     existing.update(
         {
             "name": str(update.get("name") or existing.get("name") or role_id.upper()).strip(),
-            "avatar": str(update.get("avatar") or existing.get("avatar") or ("/assets/avatars/default_kp.jpg" if role_id == DEFAULT_ROLE_ID else "/assets/avatars/default.jpg")).strip(),
+            "avatar": normalize_avatar(update.get("avatar") or existing.get("avatar")),
             "wake_words": [str(item).strip() for item in wake_words if str(item).strip()],
             "prompt": prompt,
             "provider": provider,

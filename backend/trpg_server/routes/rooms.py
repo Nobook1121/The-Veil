@@ -8,6 +8,7 @@ from uuid import uuid4
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.media_defaults import normalize_avatar
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, success_response
@@ -307,9 +308,9 @@ def _current_member(character_card=None):
 
         user = user_manager.get_user_by_id(user_id)
 
-    avatar = "/assets/avatars/default.jpg"
+    avatar = ""
     if user:
-        avatar = user.get("avatar") or avatar
+        avatar = normalize_avatar(user.get("avatar"))
 
     member = {
         "user_id": user_id,
@@ -1399,19 +1400,19 @@ def create_room_message(room_id):
         role = _configured_role((message.get("metadata") or {}).get("roleId") or data.get("role_id") or "kp")
         message["sender_id"] = None
         message["sender_name"] = data.get("sender_name") or role.get("name") or "KP"
-        message["avatar"] = data.get("avatar") or role.get("avatar") or "/assets/avatars/default_kp.jpg"
+        message["avatar"] = normalize_avatar(data.get("avatar") or role.get("avatar"))
     elif message["type"] == "dice":
         message["sender_id"] = None
         message["sender_name"] = data.get("sender_name", "骰娘")
-        message["avatar"] = "/assets/avatars/default_dice.jpg"
+        message["avatar"] = ""
     elif message["type"] == "system":
         message["sender_id"] = None
         message["sender_name"] = data.get("sender_name", "系统")
-        message["avatar"] = "/assets/avatars/default_system.jpg"
+        message["avatar"] = ""
     elif message["type"] == "trigger":
         message["sender_id"] = None
         message["sender_name"] = data.get("sender_name") or "触发器"
-        message["avatar"] = data.get("avatar") or "/assets/avatars/default_system.jpg"
+        message["avatar"] = normalize_avatar(data.get("avatar"))
 
     messages = _read_messages(room_dir)
     messages.append(message)
@@ -1481,7 +1482,7 @@ def trigger_room_scenario(room_id):
         "type": "trigger",
         "sender_id": None,
         "sender_name": trigger_message.get("sender_name", "触发器"),
-        "avatar": trigger_message.get("avatar", "/assets/avatars/default_system.jpg"),
+        "avatar": normalize_avatar(trigger_message.get("avatar")),
         "content": trigger_message.get("content", ""),
         "time": data.get("time") or time.strftime("%H:%M"),
         "created_at": _timestamp(),

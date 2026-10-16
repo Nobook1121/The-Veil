@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.media_defaults import LEGACY_DEFAULT_COVERS, normalize_cover
 from trpg_server.security import normalize_filename, safe_join
 from trpg_server.agents.trigger_system import normalize_attachment
 
@@ -60,6 +61,31 @@ def scenario_descriptor_paths(scenarios_dir: Path) -> list[Path]:
 
 def scenario_storage_dir(descriptor_path: Path) -> Path:
     return descriptor_path.parent
+
+
+def clear_legacy_default_covers(scenarios_dir: Path) -> int:
+    """一次性清理历史剧本封面：把 JSON 里指向默认封面图的 cover 字段清空。
+
+    项目已不再内置默认封面图（剧本封面改由前端用剧本名渲染），因此历史默认路径
+    应视为「无封面」。返回被改写的文件数量；语句幂等，重复执行不会产生副作用。
+    """
+
+    cleaned = 0
+    for descriptor_path in scenario_descriptor_paths(Path(scenarios_dir)):
+        targets = [descriptor_path]
+        versions_dir = descriptor_path.parent / SCENARIO_VERSIONS_DIR_NAME
+        if versions_dir.is_dir():
+            targets.extend(sorted(versions_dir.glob("*.json")))
+        for target in targets:
+            data = read_json(target, default=None)
+            if not isinstance(data, dict):
+                continue
+            if str(data.get("cover") or "").strip() not in LEGACY_DEFAULT_COVERS:
+                continue
+            data["cover"] = ""
+            write_json_atomic(target, data)
+            cleaned += 1
+    return cleaned
 
 
 def find_scenario_descriptor_by_id(scenarios_dir: Path, scenario_id: int | str) -> Path | None:
@@ -581,6 +607,8 @@ def normalize_scenario_payload(scenario: dict[str, Any], storage_dir: Path | Non
         return None
 
     normalized = dict(scenario)
+    # 默认封面图已废弃：历史默认路径一律归一化为「无封面」，由前端渲染剧本名文字封面。
+    normalized["cover"] = normalize_cover(scenario.get("cover"))
     from trpg_server.agents.versioning import normalize_semver
     normalized["scenario_version"] = normalize_semver(
         scenario.get("scenario_version") or scenario.get("version") or scenario.get("version_id") or "1.0.0"
@@ -930,7 +958,7 @@ def build_trigger_message(scenario: dict[str, Any], trigger_id: int | str) -> di
     return {
         "type": "trigger",
         "sender_name": display_name or f"触发器{trigger_id}",
-        "avatar": "/assets/avatars/default_system.jpg",
+        "avatar": "",
         "content": content,
         "metadata": {
             "trigger_id": trigger.get("id"),

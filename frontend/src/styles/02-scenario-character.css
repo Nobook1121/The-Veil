@@ -2303,8 +2303,16 @@
 
 @media (max-width: 768px) {
     .character-command-header,
+    .page-command-header,
     .character-inspector-header {
         flex-direction: column;
+    }
+
+    /* 页头右侧的多按钮操作组在窄屏下允许换行，避免横向溢出挤压标题 */
+    .page-command-header .d-flex,
+    .character-command-header .character-command-actions {
+        width: 100%;
+        flex-wrap: wrap;
     }
 
     .scenario-basic-layout,

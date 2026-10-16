@@ -53,7 +53,7 @@ namespace AuthModule {
         const presenceButtonLabel = document.querySelector<HTMLElement>("#presence-menu-button .presence-current-label");
         if (user) {
             if (name) name.textContent = user.username;
-            if (avatar) avatar.src = user.avatar || "/assets/avatars/default.jpg";
+            if (avatar) avatar.src = TrpgAvatar.resolveAvatarSrc(user.username, user.avatar);
             if (cardName) cardName.textContent = user.username;
             if (cardRole) cardRole.textContent = user.role || "USER";
             if (cardImpersonation) cardImpersonation.hidden = !user.impersonation_mode;
@@ -62,8 +62,8 @@ namespace AuthModule {
                     ? `${authText("auth.status.impersonating", "模拟登录中")}${user.impersonated_by_username ? ` · ${authText("auth.status.original_account", "原账号 {name}", { name: user.impersonated_by_username })}` : ""}`
                     : "";
             }
-            if (cardAvatar) cardAvatar.src = user.avatar || "/assets/avatars/default.jpg";
-            if (homeAvatar) homeAvatar.src = user.avatar || "/assets/avatars/default.jpg";
+            if (cardAvatar) cardAvatar.src = TrpgAvatar.resolveAvatarSrc(user.username, user.avatar);
+            if (homeAvatar) homeAvatar.src = TrpgAvatar.resolveAvatarSrc(user.username, user.avatar);
             if (homeName) homeName.textContent = user.nickname || user.username;
             if (homeRole) homeRole.textContent = user.role || "USER";
             if (homeMeta) {
@@ -75,13 +75,13 @@ namespace AuthModule {
             if (presenceButtonLabel) presenceButtonLabel.textContent = presenceLabel(user.presence || "online");
         } else {
             if (name) name.textContent = authText("auth.status.guest", "未登录");
-            if (avatar) avatar.src = "/assets/avatars/default.jpg";
+            if (avatar) avatar.src = TrpgAvatar.avatarTextDataUri("?");
             if (cardName) cardName.textContent = authText("auth.status.guest", "未登录");
             if (cardRole) cardRole.textContent = "USER";
             if (cardImpersonation) cardImpersonation.hidden = true;
             if (cardImpersonationText) cardImpersonationText.textContent = "";
-            if (cardAvatar) cardAvatar.src = "/assets/avatars/default.jpg";
-            if (homeAvatar) homeAvatar.src = "/assets/avatars/default.jpg";
+            if (cardAvatar) cardAvatar.src = TrpgAvatar.avatarTextDataUri("?");
+            if (homeAvatar) homeAvatar.src = TrpgAvatar.avatarTextDataUri("?");
             if (homeName) homeName.textContent = authText("auth.status.guest", "未登录");
             if (homeRole) homeRole.textContent = "USER";
             if (homeMeta) homeMeta.textContent = authText("auth.status.guest", "未登录");

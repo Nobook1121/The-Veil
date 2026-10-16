@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from trpg_server.media_defaults import LEGACY_DEFAULT_AVATARS
+
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS users (
@@ -127,6 +129,20 @@ class UserDatabase:
                 "must_change_password",
                 "INTEGER NOT NULL DEFAULT 0",
             )
+            self._clear_legacy_default_avatars(connection)
+
+    def _clear_legacy_default_avatars(self, connection: sqlite3.Connection) -> None:
+        """一次性清理历史默认头像路径。
+
+        项目已不再内置默认头像（头像改由前端按用户名首字生成），因此旧的默认图
+        路径应视为「未设置头像」。语句幂等，重复执行不会产生副作用。
+        """
+
+        placeholders = ", ".join("?" for _ in LEGACY_DEFAULT_AVATARS)
+        connection.execute(
+            f"UPDATE user_profiles SET avatar = '' WHERE avatar IN ({placeholders})",
+            tuple(sorted(LEGACY_DEFAULT_AVATARS)),
+        )
 
     def _ensure_column(
         self,

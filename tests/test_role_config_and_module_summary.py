@@ -66,7 +66,7 @@ def test_role_config_save_persists_description(tmp_path: Path):
         "/api/config/roles/kp",
         json={
             "name": "KP",
-            "avatar": "/assets/avatars/default_kp.jpg",
+            "avatar": "",
             "description": "模块摘要、调试 KP 或检定助手",
             "wake_words": ["@KP"],
             "provider": "deepseek",

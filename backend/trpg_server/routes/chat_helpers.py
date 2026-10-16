@@ -95,7 +95,7 @@ def _deliver_structured_triggers(room_dir, room_info, scenario, requests):
                     body.append(str(resource["content"]))
                 elif resource.get("url"):
                     body.append(f"[{resource.get('alt')}]({resource.get('url')})")
-            message = {"type": "trigger", "sender_id": None, "sender_name": definition.get("text") or f"触发器{trigger_id}", "avatar": "/assets/avatars/default_system.jpg", "content": "\n\n".join(body), "time": time.strftime("%H:%M"), "created_at": _timestamp(), "metadata": {"trigger_id": trigger_id, "reason": requested.get("reason", "")}}
+            message = {"type": "trigger", "sender_id": None, "sender_name": definition.get("text") or f"触发器{trigger_id}", "avatar": "", "content": "\n\n".join(body), "time": time.strftime("%H:%M"), "created_at": _timestamp(), "metadata": {"trigger_id": trigger_id, "reason": requested.get("reason", "")}}
         else:
             message = build_trigger_message(scenario, trigger_id)
             if not message:

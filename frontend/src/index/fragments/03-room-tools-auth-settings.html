@@ -342,7 +342,7 @@
 
                 <div id="user-card-popover" class="user-card-popover" aria-hidden="true">
                     <div class="user-card-summary">
-                        <img id="userCardAvatar" src="/assets/avatars/default.jpg" alt="用户头像" data-i18n-alt="nav.user_avatar" width="48" height="48">
+                        <img id="userCardAvatar" alt="用户头像" data-i18n-alt="nav.user_avatar" width="48" height="48">
                         <div>
                             <div id="userCardName" class="user-card-name" data-i18n="auth.status.guest">未登录</div>
                             <div id="userCardRole" class="user-card-role">USER</div>
@@ -402,7 +402,7 @@
                     <div class="member-profile-banner" aria-hidden="true"></div>
                     <div class="member-profile-body">
                         <span class="member-profile-avatar">
-                            <img id="memberProfileAvatar" src="/assets/avatars/default.jpg" alt="">
+                            <img id="memberProfileAvatar" alt="">
                             <span class="member-profile-presence" id="memberProfilePresence" aria-hidden="true"></span>
                         </span>
                         <div class="home-room-member-name member-profile-name-row" id="memberProfileNameRow">
@@ -475,7 +475,7 @@
                                     <p class="profile-section-hint" data-i18n="profile.note.account_info">头像、用户名和昵称会展示给房间内的其他成员。</p>
                                     <div class="avatar-upload-container">
                                         <div class="avatar-preview">
-                                            <img id="avatarPreview" src="/assets/avatars/default.jpg" alt="用户头像" data-i18n-alt="nav.user_avatar" width="96" height="96">
+                                            <img id="avatarPreview" alt="用户头像" data-i18n-alt="nav.user_avatar" width="96" height="96">
                                         </div>
                                         <input type="file" id="avatarUpload" class="avatar-upload-input" accept="image/*">
                                         <label for="avatarUpload" class="avatar-upload-label" data-i18n="profile.action.change_avatar">更换头像</label>
@@ -884,6 +884,11 @@
                             <section class="tool-panel mb-4">
                                 <div class="tool-panel-header"><h4>知识库管理</h4><span>查看剧本与规则知识库状态、位置及向量数量</span></div>
                                 <div id="embeddingModelStatus" class="alert alert-secondary" role="status">正在检查 Embedding 模型…</div>
+                                <div class="form-check mb-3">
+                                    <input type="checkbox" class="form-check-input" id="cloudEmbeddingEnabled">
+                                    <label class="form-check-label" for="cloudEmbeddingEnabled">本地模型不可用时改用云端 Embedding 接口</label>
+                                    <small class="text-muted d-block">默认关闭。开启后会改用 AI 平台配置中的 Embedding 接口（产生接口调用费用），向量维度随云端模型变化，需要重建知识库索引。</small>
+                                </div>
                                 <p class="text-muted">COC7 使用独立索引；未来可接入 COC6、D&amp;D 等规则集。</p>
                                 <div class="d-flex gap-2 align-items-center mb-3">
                                     <select class="form-select" id="rulesetSelect" aria-label="规则集"></select>

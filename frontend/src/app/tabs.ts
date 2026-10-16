@@ -293,6 +293,7 @@ function initSettingsTabs(): void {
     bindGeneralCheckboxSetting("recursiveScanning", "ai.knowledge", "recursive_scanning");
     bindGeneralNumberSetting("maxRecursionDepth", "ai.knowledge", "max_recursion_depth", 0, 10);
     bindGeneralNumberSetting("lorebookTokenBudget", "ai.knowledge", "lorebook_token_budget", 0, 200000);
+    bindGeneralCheckboxSetting("cloudEmbeddingEnabled", "ai", "cloud_embedding_enabled");
     document.getElementById("savePermissionConfig")?.addEventListener("click", () => {
         void savePermissionConfig();
     });

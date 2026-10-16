@@ -44,16 +44,11 @@ htmlcov/
 /data/users/ip_configs/
 /data/scenarios/*
 
-# User-uploaded avatars; keep bundled defaults tracked
+# User-uploaded avatars
 /data/assets/avatars/*
-!/data/assets/avatars/default.jpg
-!/data/assets/avatars/default_kp.jpg
-!/data/assets/avatars/default_dice.jpg
-!/data/assets/avatars/default_system.jpg
 
-# User-uploaded scenario covers; keep bundled default tracked
+# User-uploaded scenario covers
 /data/assets/scenario_covers/*
-!/data/assets/scenario_covers/default_cover.png
 
 # Local worktrees
 /.worktrees/
