@@ -1,6 +1,7 @@
 """Embedding providers with deterministic offline fallback."""
 from __future__ import annotations
 import hashlib, math
+from importlib.util import find_spec
 from typing import Sequence
 from pathlib import Path
 
@@ -74,7 +75,21 @@ class LocalSentenceTransformerEmbedding:
             self.dimensions = len(vectors[0])
         return vectors
 
+def _local_backend_available(model_path: str|Path|None) -> bool:
+    """本地模型后端仅在「模型目录存在 且 sentence-transformers 可导入」时才算可用。
+
+    只判断目录是否存在是不够的：目录在、依赖没装时会选中一个必然加载失败的本地后端，
+    启动时报 embedding_model_load_failed，检索时再静默退回哈希向量。这里显式跳过，
+    让 select_embedding_provider 继续往下选云端接口或哈希兜底。
+    """
+    if not model_path or not Path(model_path).is_dir():
+        return False
+    try:
+        return find_spec("sentence_transformers") is not None
+    except (ImportError, ValueError):
+        return False
+
 def select_embedding_provider(*, local_model_path: str|Path|None=None, base_url: str|None=None, api_key: str|None=None, model: str|None=None, dimensions: int=256):
-    if local_model_path and Path(local_model_path).is_dir(): return LocalSentenceTransformerEmbedding(local_model_path, dimensions)
+    if _local_backend_available(local_model_path): return LocalSentenceTransformerEmbedding(local_model_path, dimensions)
     if base_url and api_key and model: return OpenAICompatibleEmbeddingProvider(base_url, api_key, model, dimensions)
     return HashedTokenEmbedding(dimensions)

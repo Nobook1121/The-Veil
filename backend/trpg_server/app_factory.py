@@ -19,6 +19,7 @@ from trpg_server.settings import SCENARIO_IMPORTS_DIR, SCENARIO_IMPORT_MAX_BYTES
 from trpg_server.settings import VECTOR_DB_URL, VECTOR_DB_PATH, VECTOR_DB_API_KEY, VECTOR_BACKEND, VECTOR_BACKEND_EXPLICIT, EMBEDDED_VECTOR_DB_PATH, SCENARIOS_DIR, EMBEDDING_BASE_URL, EMBEDDING_API_KEY, EMBEDDING_MODEL, EMBEDDING_DIMENSIONS, OCR_ENABLED, OCR_LANG, LOCAL_EMBEDDING_MODEL_PATH, PADDLEOCR_HOME, AI_PLATFORM_SECRET_DIR, CONFIG_DIR
 from trpg_server.agents.vector_store import create_vector_store
 from trpg_server.agents.embedding_provider import select_embedding_provider
+from trpg_server.agents.config import load_ai_runtime_config
 from trpg_server.ai_capabilities import chat_completions_endpoint
 from trpg_server.ai_platform_config import load_platform_config
 from trpg_server.agents.ocr_provider import PaddleOcrProvider
@@ -82,6 +83,7 @@ def create_app(config=None):
     configure_logging(app.config.get("LOGS_DIR", LOGS_DIR), app.config.get("CONFIG_DIR", CONFIG_DIR))
     if "USER_MANAGER" not in app.config:
         _configure_user_service(app)
+    _clear_legacy_default_scenario_covers(app)
     CORS(app)
     socketio.init_app(app)
     app.extensions["socketio"] = socketio
@@ -90,8 +92,11 @@ def create_app(config=None):
     app.extensions["scenario_import_store"] = ImportJobStore(app.config["SCENARIO_IMPORTS_DIR"])
     app.extensions["scenario_import_store"].recover_interrupted()
     app.extensions["scenario_import_executor"] = ThreadPoolExecutor(max_workers=app.config["SCENARIO_IMPORT_WORKERS"])
+    # 云端 embedding 接口默认关闭：环境变量没显式配置时，只有管理员在设置页开启后才会读取
+    # AI 平台配置里的 embedding 段；关闭时一律回落到本地模型（可用时）或哈希向量。
+    cloud_embedding_enabled = load_ai_runtime_config(CONFIG_DIR).cloud_embedding_enabled
     embedding_url, embedding_key, embedding_model, embedding_dimensions = app.config["EMBEDDING_BASE_URL"], app.config["EMBEDDING_API_KEY"], app.config["EMBEDDING_MODEL"], app.config["EMBEDDING_DIMENSIONS"]
-    if not (embedding_url and embedding_key and embedding_model):
+    if cloud_embedding_enabled and not (embedding_url and embedding_key and embedding_model):
         platform_dir = Path(app.config.get("AI_PLATFORM_DIR", CONFIG_DIR / "aiplatform"))
         secret_dir = Path(app.config.get("AI_PLATFORM_SECRET_DIR", AI_PLATFORM_SECRET_DIR))
         for public_path in sorted(platform_dir.glob("*.json")):
@@ -106,6 +111,9 @@ def create_app(config=None):
     embedding_health = app.extensions["embedding_provider"].health()
     if embedding_health.get("loaded"):
         logger.info("embedding_model_loaded backend=%s model=%s dimensions=%s", embedding_health.get("backend"), embedding_health.get("model", ""), embedding_health.get("dimensions"))
+        if embedding_health.get("backend") == "hashed":
+            # 已降级到哈希向量：给出可操作的补救方式，而不是只报一条含混的“已加载”。
+            logger.warning("embedding_backend_degraded backend=hashed hint=install_sentence_transformers_or_enable_cloud_embedding")
     else:
         logger.warning("embedding_model_load_failed backend=%s model=%s error=%s", embedding_health.get("backend"), embedding_health.get("model", ""), embedding_health.get("error", "unknown"))
     provider_dimensions = getattr(app.extensions["embedding_provider"], "dimensions", None) or embedding_dimensions
@@ -265,6 +273,20 @@ def _configure_user_service(app):
         db,
         ip_config_dir=app.config["USER_IP_CONFIG_DIR"],
     )
+
+
+def _clear_legacy_default_scenario_covers(app):
+    """一次性清理历史剧本封面：项目已不再使用内置默认封面图。"""
+
+    from trpg_server.scenario_store import clear_legacy_default_covers
+
+    try:
+        cleaned = clear_legacy_default_covers(Path(app.config["SCENARIOS_DIR"]))
+    except Exception:
+        logger.debug("Skipping legacy scenario cover cleanup", exc_info=True)
+        return
+    if cleaned:
+        logger.info("cleared_legacy_default_scenario_covers count=%s", cleaned)
 
 
 def register_blueprints(app):

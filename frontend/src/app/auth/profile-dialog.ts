@@ -26,7 +26,7 @@ namespace AuthModule {
             if (username) username.value = user.username || "";
             if (email) email.value = user.email || "";
             if (nickname) nickname.value = user.nickname || "";
-            if (avatar) avatar.src = user.avatar || "/assets/avatars/default.jpg";
+            if (avatar) avatar.src = TrpgAvatar.resolveAvatarSrc(user.username || "", user.avatar);
         } catch (error) {
             console.error("获取用户资料失败:", error);
         }

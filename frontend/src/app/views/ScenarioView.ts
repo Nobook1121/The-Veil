@@ -51,8 +51,7 @@ class ScenarioView {
             card.dataset.scenarioId = String(scenario.id);
             if (selectable) card.dataset.batchSelectable = "true";
             card.innerHTML = window.TrpgTemplates.render("scenario-card", {
-                coverPath: safeScenarioCover(scenario.cover),
-                fallbackCover: DEFAULT_SCENARIO_COVER,
+                coverHtml: scenarioCoverHtml(scenario.title, scenario.cover),
                 title: scenario.title,
                 author: scenario.author,
                 createdBy: scenario.creator_username || scenario.author || "Unknown",
@@ -723,7 +722,7 @@ class ScenarioView {
         textarea("scenarioNotes").value = "";
         checkbox("scenarioAllowOpenEnding").checked = false;
         input("scenarioCoverUrl").value = "";
-        image("coverPreview").src = DEFAULT_SCENARIO_COVER;
+        image("coverPreview").src = TrpgAvatar.scenarioCoverTextDataUri(input("scenarioTitle").value);
         renderModuleList(requiredElement("scenarioModules"), [
             createModule("scene", 1),
             createModule("ending", 1),
@@ -744,7 +743,7 @@ class ScenarioView {
         textarea("scenarioNotes").value = scenario.notes || "";
         checkbox("scenarioAllowOpenEnding").checked = Boolean(scenario.allow_open_ending);
         input("scenarioCoverUrl").value = scenario.cover || "";
-        image("coverPreview").src = safeScenarioCover(scenario.cover);
+        image("coverPreview").src = safeScenarioCover(scenario.title, scenario.cover);
 
         renderModuleList(requiredElement("scenarioModules"), normalizeScenarioModules(scenario));
         void this.loadResourceList(scenario.id);

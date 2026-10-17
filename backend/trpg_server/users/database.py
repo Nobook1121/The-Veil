@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from trpg_server.media_defaults import LEGACY_DEFAULT_AVATARS
+
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS users (
@@ -17,6 +19,8 @@ CREATE TABLE IF NOT EXISTS users (
     status TEXT NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'inactive', 'banned')),
     last_login_at TEXT,
+    must_change_password INTEGER NOT NULL DEFAULT 0
+        CHECK (must_change_password IN (0, 1)),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -118,6 +122,43 @@ class UserDatabase:
     def initialize(self) -> None:
         with self.connect() as connection:
             connection.executescript(SCHEMA_SQL)
+            # CREATE TABLE IF NOT EXISTS 不会为已存在的表补列，因此老库需要显式迁移。
+            self._ensure_column(
+                connection,
+                "users",
+                "must_change_password",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            self._clear_legacy_default_avatars(connection)
+
+    def _clear_legacy_default_avatars(self, connection: sqlite3.Connection) -> None:
+        """一次性清理历史默认头像路径。
+
+        项目已不再内置默认头像（头像改由前端按用户名首字生成），因此旧的默认图
+        路径应视为「未设置头像」。语句幂等，重复执行不会产生副作用。
+        """
+
+        placeholders = ", ".join("?" for _ in LEGACY_DEFAULT_AVATARS)
+        connection.execute(
+            f"UPDATE user_profiles SET avatar = '' WHERE avatar IN ({placeholders})",
+            tuple(sorted(LEGACY_DEFAULT_AVATARS)),
+        )
+
+    def _ensure_column(
+        self,
+        connection: sqlite3.Connection,
+        table_name: str,
+        column_name: str,
+        column_definition: str,
+    ) -> None:
+        existing = {
+            row["name"]
+            for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        if column_name not in existing:
+            connection.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
+            )
 
     def table_names(self) -> set[str]:
         with self.connect() as connection:

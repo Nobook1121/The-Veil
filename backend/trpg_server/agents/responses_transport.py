@@ -12,7 +12,7 @@ import json
 import logging
 from typing import Any, Callable
 
-import requests
+from trpg_server.agents.http_retry import post_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +125,9 @@ class ResponsesRequester:
     复用服务端的会话（``previous_response_id``），避免每轮把静态层、历史、
     工具结果整包重发。构造时传入的 ``fallback`` 是原本的 chat/completions 请求器，
     一旦本路径失败就整体回退给它。
+
+    请求本身走 :func:`trpg_server.agents.http_retry.post_with_retry`：瞬时网络抖动
+    会先在预算内重试，只有重试耗尽才锁定并回退，避免一次卡顿就永久丢掉增量收益。
     """
 
     def __init__(
@@ -135,13 +138,15 @@ class ResponsesRequester:
         timeout: int,
         fallback: Callable[[dict[str, Any]], dict[str, Any]],
         post: Callable[..., Any] | None = None,
+        max_retries: int = 0,
     ) -> None:
         self.endpoint = endpoint
         self.headers = headers
         self.model = model
         self.timeout = timeout
         self._fallback = fallback
-        self._post = post or requests.post
+        self._post = post
+        self._max_retries = max(0, max_retries)
         self._previous_response_id: str | None = None
         self._sent = 0
         self._disabled = False
@@ -171,7 +176,14 @@ class ResponsesRequester:
             body.update(extra_body)
 
         logger.info("Responses API request: %s", json.dumps({"round_input_items": len(body["input"]), "has_previous": bool(self._previous_response_id)}, ensure_ascii=False))
-        response = self._post(self.endpoint, headers=self.headers, json=body, timeout=self.timeout)
+        response = post_with_retry(
+            self.endpoint,
+            headers=self.headers,
+            payload=body,
+            timeout=self.timeout,
+            max_retries=self._max_retries,
+            post=self._post,
+        )
         if not response.ok:
             raise RuntimeError(f"Responses API returned HTTP {response.status_code}")
 

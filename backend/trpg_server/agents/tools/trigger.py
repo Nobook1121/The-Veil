@@ -59,7 +59,7 @@ def _reveal_library_trigger(
     message = {
         "type": "trigger",
         "sender_name": str(approved.get("text") or f"触发器{trigger_id}"),
-        "avatar": "/assets/avatars/default_system.jpg",
+        "avatar": "",
         "content": "\n\n".join(contents),
         "metadata": {
             "trigger_id": str(trigger_id),

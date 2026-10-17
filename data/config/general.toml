@@ -25,7 +25,10 @@ show_ai_hints = true
 dice_critical_threshold = 1
 dice_fumble_threshold = 96
 max_tool_rounds = 8
-ai_request_timeout = 300
+ai_request_timeout = 1800
+ai_request_max_retries = 5
+record_prompt_segments = true
+cloud_embedding_enabled = false
 
 [ai.small_models]
 intent_classification = ""
@@ -38,6 +41,12 @@ snapshot_manifest_summary_cap = 140
 max_snapshot_scene_manifest = 30
 snapshot_include_entity_manifest = false
 max_tool_result_chars = 4000
+dedupe_tool_calls = true
+
+[ai.cache]
+semantic_enabled = true
+semantic_ttl_seconds = 120
+exact_ttl_seconds = 300
 
 [ai.knowledge]
 top_k_default = 5

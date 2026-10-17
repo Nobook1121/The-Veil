@@ -5,10 +5,12 @@ import hashlib
 import re
 import secrets
 import sqlite3
+import string
 from pathlib import Path
 from typing import Any
 
 from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.media_defaults import normalize_avatar
 from trpg_server.settings import USERS_DIR
 from trpg_server.users.database import UserDatabase
 from trpg_server.users.passwords import (
@@ -18,7 +20,6 @@ from trpg_server.users.passwords import (
 )
 
 
-DEFAULT_AVATAR = "/assets/avatars/default.jpg"
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -97,7 +98,7 @@ class UserService:
                 )
                 VALUES (?, ?, ?, ?)
                 """,
-                (user_id, username, DEFAULT_AVATAR, "online"),
+                (user_id, username, "", "online"),
             )
             connection.execute(
                 """
@@ -148,6 +149,7 @@ class UserService:
                     role,
                     status,
                     last_login_at,
+                    must_change_password,
                     created_at,
                     updated_at
                 FROM users
@@ -232,6 +234,7 @@ class UserService:
                     role,
                     status,
                     last_login_at,
+                    must_change_password,
                     created_at,
                     updated_at
                 FROM users
@@ -280,6 +283,21 @@ class UserService:
 
         return cursor.rowcount > 0
 
+    def revoke_all_sessions(self, user_id: int) -> int:
+        """撤销该用户全部未撤销的会话（强制下线，但不改动账号角色/状态）。"""
+
+        with self.db.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE user_sessions
+                SET revoked_at = ?
+                WHERE user_id = ?
+                    AND revoked_at IS NULL
+                """,
+                (_to_iso(_utc_now()), user_id),
+            )
+        return cursor.rowcount
+
     def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
         with self.db.connect() as connection:
             row = connection.execute(
@@ -289,6 +307,8 @@ class UserService:
                     users.username,
                     users.email,
                     users.role,
+                    users.status,
+                    users.must_change_password,
                     user_profiles.nickname,
                     user_profiles.avatar,
                     user_profiles.presence
@@ -304,7 +324,7 @@ class UserService:
             return None
 
         user = dict(row)
-        user["avatar"] = user.get("avatar") or DEFAULT_AVATAR
+        user["avatar"] = normalize_avatar(user.get("avatar"))
         user["nickname"] = user.get("nickname") or user.get("username", "")
         user["presence"] = user.get("presence") or "online"
         user["two_factor_enabled"] = False
@@ -386,8 +406,7 @@ class UserService:
             avatar_value = avatar
             if avatar_value is None and current_profile is not None:
                 avatar_value = current_profile["avatar"]
-            if avatar_value is None:
-                avatar_value = DEFAULT_AVATAR
+            avatar_value = normalize_avatar(avatar_value)
 
             connection.execute(
                 """
@@ -433,6 +452,7 @@ class UserService:
                 """
                 UPDATE users
                 SET password_hash = ?,
+                    must_change_password = 0,
                     updated_at = ?
                 WHERE id = ?
                 """,
@@ -440,6 +460,42 @@ class UserService:
             )
 
         return True, "Password changed"
+
+    def force_password_reset(self, user_id: int) -> tuple[bool, str, str | None]:
+        """强制用户下次登录修改密码。
+
+        生成一个满足密码强度要求的随机临时密码并覆盖原密码，同时把
+        ``must_change_password`` 置 1，并撤销该用户所有活跃会话，使其必须用
+        临时密码重新登录后再修改密码。返回的临时密码由调用方（控制台命令）
+        打印给管理员。
+        """
+
+        temp_password = _generate_temp_password()
+        now_iso = _to_iso(_utc_now())
+        with self.db.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE users
+                SET password_hash = ?,
+                    must_change_password = 1,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (hash_password(temp_password), now_iso, user_id),
+            )
+            if cursor.rowcount == 0:
+                return False, "User not found", None
+            connection.execute(
+                """
+                UPDATE user_sessions
+                SET revoked_at = ?
+                WHERE user_id = ?
+                    AND revoked_at IS NULL
+                """,
+                (now_iso, user_id),
+            )
+
+        return True, "Password reset; user must change it on next login", temp_password
 
     def update_presence(self, user_id: int, presence: str) -> tuple[bool, str]:
         if presence not in {"online", "dnd", "invisible"}:
@@ -468,7 +524,7 @@ class UserService:
                     presence = excluded.presence,
                     updated_at = excluded.updated_at
                 """,
-                (user_id, user["username"], DEFAULT_AVATAR, presence, now_iso),
+                (user_id, user["username"], "", presence, now_iso),
             )
 
         return True, "Presence updated"
@@ -524,6 +580,13 @@ class UserService:
         if status not in {"active", "inactive", "banned"}:
             return False, "Invalid status"
         return self._update_user_field(user_id, "status", status, "Status updated successfully")
+
+    def delete_user(self, user_id: int) -> bool:
+        """删除账号。关联表由外键 ``ON DELETE CASCADE`` 清理，审计日志改为保留但解除关联。"""
+
+        with self.db.connect() as connection:
+            cursor = connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        return cursor.rowcount > 0
 
     def check_permission(self, user_id: int, required_role: str) -> bool:
         hierarchy = {"USER": 1, "ADMIN": 2, "OWNER": 3}
@@ -690,6 +753,19 @@ def _write_audit_log(
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _generate_temp_password(length: int = 12) -> str:
+    """生成满足密码强度要求（长度、含字母、含数字）的随机临时密码。"""
+
+    length = max(8, length)
+    letters = string.ascii_letters
+    digits = string.digits
+    alphabet = letters + digits
+    chars = [secrets.choice(letters), secrets.choice(digits)]
+    chars.extend(secrets.choice(alphabet) for _ in range(length - len(chars)))
+    secrets.SystemRandom().shuffle(chars)
+    return "".join(chars)
 
 
 def _utc_now() -> datetime:

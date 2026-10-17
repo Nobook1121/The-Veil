@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from trpg_server.ai_platform_config import ordered_platform_paths
 from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.media_defaults import normalize_avatar
 
 
 DEFAULT_ROLE_ID = "kp"
@@ -16,11 +18,9 @@ MODULE_SUMMARIZER_PROMPT = """你是剧本模块摘要助手。
 
 
 def enabled_providers(platform_dir: Path) -> dict[str, dict[str, Any]]:
-    if not platform_dir.exists():
-        return {}
-
+    # 按管理员拖动排序后的加载顺序返回，使下拉选项与运行时故障转移顺序一致。
     providers: dict[str, dict[str, Any]] = {}
-    for path in sorted(platform_dir.glob("*.json")):
+    for path in ordered_platform_paths(platform_dir):
         config = read_json(path, default={})
         if config.get("enabled", False):
             providers[path.stem] = config
@@ -53,6 +53,26 @@ def provider_small_model_config(provider_config: dict[str, Any], task: str) -> d
     return {"id": "local-model"}
 
 
+def resolve_task_model(
+    runtime_config: Any,
+    provider_config: dict[str, Any],
+    task: str,
+    primary_model: str,
+) -> str:
+    """解析某个 AI 任务的模型，优先级：管理员显式覆盖 > 平台声明的小模型 > 主模型。
+
+    管理员可在 general.toml 的 ``[ai.small_models]`` 里按任务强制指定模型（留空表示
+    不覆盖）；否则使用平台 JSON ``small_models`` 为该任务声明的小模型（如 qwen-turbo）；
+    再没有则回退到本次请求的主模型。这样摘要/状态/意图等低成本任务可以稳定走经济模型。
+    """
+    overrides = getattr(runtime_config, "small_model_tasks", None)
+    if isinstance(overrides, dict):
+        override = str(overrides.get(task) or "").strip()
+        if override:
+            return override
+    return str(provider_small_model_config(provider_config, task).get("id") or primary_model)
+
+
 def load_prompt_text(prompt_file: Path) -> str:
     if not prompt_file.exists():
         return "你是KP（守秘人），负责主持TRPG游戏，引导玩家进行游戏。"
@@ -68,7 +88,7 @@ def default_roles(prompt_file: Path, platform_dir: Path) -> list[dict[str, Any]]
         {
             "id": DEFAULT_ROLE_ID,
             "name": "KP",
-            "avatar": "/assets/avatars/default_kp.jpg",
+            "avatar": "",
             "wake_words": ["@KP"],
             "prompt": load_prompt_text(prompt_file),
             "provider": provider,
@@ -77,7 +97,7 @@ def default_roles(prompt_file: Path, platform_dir: Path) -> list[dict[str, Any]]
             "id": MODULE_SUMMARIZER_ROLE_ID,
             "name": "模块摘要助手",
             "description": "为剧本编辑器生成短小、可检索的模块摘要。",
-            "avatar": "/assets/avatars/default.jpg",
+            "avatar": "",
             "wake_words": ["@模块摘要"],
             "prompt": MODULE_SUMMARIZER_PROMPT,
             "provider": provider,
@@ -112,7 +132,7 @@ def normalize_roles(
             {
                 "id": role_id,
                 "name": str(role.get("name") or role_id.upper()).strip(),
-                "avatar": str(role.get("avatar") or ("/assets/avatars/default_kp.jpg" if role_id == DEFAULT_ROLE_ID else "/assets/avatars/default.jpg")).strip(),
+                "avatar": normalize_avatar(role.get("avatar")),
                 "wake_words": wake_words or [f"@{role_id.upper()}"],
                 "prompt": str(role.get("prompt") or load_prompt_text(prompt_file)),
                 "provider": provider or fallback_provider,
@@ -126,7 +146,7 @@ def normalize_roles(
                 "id": MODULE_SUMMARIZER_ROLE_ID,
                 "name": "模块摘要助手",
                 "description": "为剧本编辑器生成短小、可检索的模块摘要。",
-                "avatar": "/assets/avatars/default.jpg",
+                "avatar": "",
                 "wake_words": ["@模块摘要"],
                 "prompt": MODULE_SUMMARIZER_PROMPT,
                 "provider": fallback_provider,
@@ -173,7 +193,7 @@ def save_role(
     existing.update(
         {
             "name": str(update.get("name") or existing.get("name") or role_id.upper()).strip(),
-            "avatar": str(update.get("avatar") or existing.get("avatar") or ("/assets/avatars/default_kp.jpg" if role_id == DEFAULT_ROLE_ID else "/assets/avatars/default.jpg")).strip(),
+            "avatar": normalize_avatar(update.get("avatar") or existing.get("avatar")),
             "wake_words": [str(item).strip() for item in wake_words if str(item).strip()],
             "prompt": prompt,
             "provider": provider,

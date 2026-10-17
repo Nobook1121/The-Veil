@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from trpg_server.agents.config import load_ai_runtime_config
-from trpg_server.role_config import provider_small_model_config
+from trpg_server.role_config import provider_small_model_config, resolve_task_model
 from trpg_server.routes.config import convert_to_toml
 
 
@@ -153,6 +153,25 @@ def test_general_config_has_no_escaped_section_names():
     assert '\\"' not in content
 
 
+def test_runtime_config_reads_cloud_embedding_flag(tmp_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "general.toml").write_text(
+        "[ai]\ncloud_embedding_enabled = true\n",
+        encoding="utf-8",
+    )
+
+    config = load_ai_runtime_config(config_dir)
+
+    assert config.cloud_embedding_enabled is True
+
+
+def test_shipped_general_config_disables_cloud_embedding_by_default():
+    config = load_ai_runtime_config(Path("data/config/general.toml").parent)
+
+    assert config.cloud_embedding_enabled is False
+
+
 def test_shipped_general_config_exposes_knowledge_settings():
     config = load_ai_runtime_config(Path("data/config/general.toml").parent)
 
@@ -185,6 +204,25 @@ def test_provider_small_model_config_prefers_task_model_and_falls_back():
 
     assert provider_small_model_config(provider, "summarization")["id"] == "small-summary"
     assert provider_small_model_config(provider, "state_update")["id"] == "primary"
+
+
+def test_resolve_task_model_prefers_override_then_small_then_primary():
+    """优先级：general.toml 显式覆盖 > 平台 small_models > 主模型。"""
+    from trpg_server.agents.config import AIRuntimeConfig
+
+    provider = {
+        "models": [{"id": "primary", "enabled": True}],
+        "small_models": {"summarization": {"id": "small-summary", "enabled": True}},
+    }
+    default_runtime = AIRuntimeConfig()
+    # 未覆盖 → 用平台声明的小模型
+    assert resolve_task_model(default_runtime, provider, "summarization", "primary") == "small-summary"
+    # 平台未声明 → 回退主模型
+    assert resolve_task_model(default_runtime, provider, "state_update", "primary") == "primary"
+    # 管理员显式覆盖 → 覆盖两者
+    overridden = AIRuntimeConfig(small_model_tasks={"summarization": "pinned-model", "state_update": ""})
+    assert resolve_task_model(overridden, provider, "summarization", "primary") == "pinned-model"
+    assert resolve_task_model(overridden, provider, "state_update", "primary") == "primary"
 
 
 def test_openai_provider_template_is_openai_compatible():

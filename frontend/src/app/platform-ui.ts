@@ -17,8 +17,7 @@ interface DebugPromptResponse {
     content: string;
 }
 
-// 角色卡默认头像路径：用户未填写头像时作为兜底，需与后端角色配置默认值保持一致。
-const DEFAULT_ROLE_AVATAR_PATH = "/assets/avatars/default_kp.jpg";
+// 角色卡默认头像：留空即由前端按角色名称首字生成文字头像，不再有内置默认图。
 // LM Studio 等本地服务默认使用的模型 id：与 config/aiplatform、TestRequestConfig 中的约定一致。
 const LMSTUDIO_DEFAULT_MODEL_ID = "local-model";
 // 默认模型请求配置的兜底文件路径（新建模型时作为请求模板来源）。
@@ -50,18 +49,9 @@ function platformAvatarHTML(config: { icon?: string; name: string }, extraClass 
     if (icon) {
         return `<img src="${platformEscapeHtml(icon)}" alt="${platformEscapeHtml(config.name)}" class="platform-avatar-img ${extraClass}">`;
     }
-    const letter = (config.name || "?").trim().charAt(0).toUpperCase() || "?";
-    return `<span class="platform-avatar-text ${extraClass}" style="--avatar-hue:${platformAvatarHue(config.name || "?")}">${platformEscapeHtml(letter)}</span>`;
-}
-
-// 由名称首字推导一个稳定的色相，让不同供应商的文字头像颜色区分开。
-function platformAvatarHue(name: string): number {
-    const text = name || "?";
-    let hash = 0;
-    for (let index = 0; index < text.length; index += 1) {
-        hash = (hash * 31 + text.charCodeAt(index)) % 360;
-    }
-    return hash;
+    // 首字与色相复用全局文字头像工具，保证与用户头像、角色卡头像同一套规则。
+    const letter = TrpgAvatar.initial(config.name);
+    return `<span class="platform-avatar-text ${extraClass}" style="--avatar-hue:${TrpgAvatar.hue(config.name)}">${platformEscapeHtml(letter)}</span>`;
 }
 
 function clonePlatformConfig(config: AIPlatformConfig): AIPlatformConfig {
@@ -108,6 +98,66 @@ function renderPlatforms(platforms: AIPlatformConfig[]): void {
     if (!container) return;
     container.innerHTML = "";
     platforms.forEach((platform) => container.appendChild(createPlatformCard(platform)));
+    bindPlatformDragAndDrop(container);
+}
+
+// 正在被拖动的平台卡片：拖动期间据此在容器内实时重排。
+let draggedPlatformCard: HTMLElement | null = null;
+
+// 平台卡片的拖动排序：拖动结束后把新顺序提交给后端，决定运行时的平台加载顺序。
+function bindPlatformDragAndDrop(container: HTMLElement): void {
+    container.querySelectorAll<HTMLElement>(".ai-platform-card").forEach((card) => {
+        card.addEventListener("dragstart", (event) => {
+            draggedPlatformCard = card;
+            card.classList.add("is-dragging");
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", card.dataset.platform || "");
+            }
+        });
+        card.addEventListener("dragend", () => {
+            card.classList.remove("is-dragging");
+            draggedPlatformCard = null;
+        });
+    });
+
+    // 容器级监听只需绑定一次（卡片每次渲染都会重建，但容器是固定的）。
+    if (container.dataset.dndBound === "true") return;
+    container.dataset.dndBound = "true";
+
+    container.addEventListener("dragover", (event) => {
+        if (!draggedPlatformCard) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        const others = Array.from(container.querySelectorAll<HTMLElement>(".ai-platform-card:not(.is-dragging)"));
+        const after = others.find((card) => {
+            const rect = card.getBoundingClientRect();
+            return event.clientY < rect.top + rect.height / 2;
+        });
+        if (after) container.insertBefore(draggedPlatformCard, after);
+        else container.appendChild(draggedPlatformCard);
+    });
+
+    container.addEventListener("drop", (event) => {
+        event.preventDefault();
+        void persistPlatformOrder(container);
+    });
+}
+
+async function persistPlatformOrder(container: HTMLElement): Promise<void> {
+    const order = Array.from(container.querySelectorAll<HTMLElement>(".ai-platform-card"))
+        .map((card) => card.dataset.platform || "")
+        .filter(Boolean);
+    if (!order.length) return;
+    try {
+        await aiPlatformManager.savePlatformOrder(order);
+        showNotification(platformT("platform.order.saved", "平台加载顺序已保存"), "success");
+    } catch (error) {
+        showNotification(
+            platformT("platform.order.save_failed", "保存平台顺序失败：{detail}", { detail: platformErrorMessage(error) }),
+            "error",
+        );
+    }
 }
 
 function bindRoleConfigSettings(): void {
@@ -218,7 +268,7 @@ function renderRoleConfigCards(roles: RoleConfig[], providers: Array<{ id: strin
                 <label class="form-label" for="roleName-${platformEscapeHtml(role.id)}">${platformEscapeHtml(platformT("platform.role_config.name", "角色名称"))}</label>
                 <input class="form-control role-name-input" id="roleName-${platformEscapeHtml(role.id)}" value="${platformEscapeHtml(role.name)}" placeholder="KP">
                 <label class="form-label" for="roleAvatar-${platformEscapeHtml(role.id)}">${platformEscapeHtml(platformT("platform.role_config.avatar", "头像 URL"))}</label>
-                <input class="form-control role-avatar-input" id="roleAvatar-${platformEscapeHtml(role.id)}" value="${platformEscapeHtml(role.avatar || "")}" placeholder="${platformEscapeHtml(DEFAULT_ROLE_AVATAR_PATH)}">
+                <input class="form-control role-avatar-input" id="roleAvatar-${platformEscapeHtml(role.id)}" value="${platformEscapeHtml(role.avatar || "")}" placeholder="留空则显示角色名称首字">
                 <label class="form-label" for="roleWakeWords-${platformEscapeHtml(role.id)}">${platformEscapeHtml(platformT("platform.role_config.wake_words", "唤醒词"))}</label>
                 <input class="form-control role-wake-input" id="roleWakeWords-${platformEscapeHtml(role.id)}" value="${platformEscapeHtml(wakeWords)}" placeholder="@KP, @Keeper">
                 <label class="form-label" for="roleProvider-${platformEscapeHtml(role.id)}">${platformEscapeHtml(platformT("platform.role_config.provider", "大模型提供商"))}</label>
@@ -242,7 +292,7 @@ async function saveRoleConfig(roleId: string): Promise<void> {
     const provider = card.querySelector<HTMLSelectElement>(".role-provider-select")?.value || "";
     const prompt = card.querySelector<HTMLTextAreaElement>(".role-config-prompt")?.value || "";
     const name = card.querySelector<HTMLInputElement>(".role-name-input")?.value.trim() || roleId;
-    const avatar = card.querySelector<HTMLInputElement>(".role-avatar-input")?.value.trim() || DEFAULT_ROLE_AVATAR_PATH;
+    const avatar = card.querySelector<HTMLInputElement>(".role-avatar-input")?.value.trim() || "";
     const description = card.querySelector<HTMLInputElement>(".role-description-input")?.value.trim() || "";
 
     try {
@@ -278,9 +328,15 @@ function setRoleConfigMessage(message: string, isError = false): void {
 function createPlatformCard(platform: AIPlatformConfig): HTMLElement {
     const card = document.createElement("div");
     card.className = "ai-platform-card";
+    // 可拖动排序：卡片顺序即平台加载顺序（越靠上越先加载）。
+    card.draggable = true;
+    card.dataset.platform = platform.platform;
     const enabledClass = platform.enabled ? " is-enabled" : "";
     card.innerHTML = `
         <div class="platform-card-row">
+            <span class="platform-drag-handle" title="${platformEscapeHtml(platformT("platform.card.drag", "拖动排序（顺序即平台加载顺序）"))}" aria-label="${platformEscapeHtml(platformT("platform.card.drag", "拖动排序（顺序即平台加载顺序）"))}">
+                <i class="fa fa-grip-vertical" aria-hidden="true"></i>
+            </span>
             <div class="platform-card-avatar">${platformAvatarHTML(platform)}</div>
             <div class="platform-card-info">
                 <h5>${platformEscapeHtml(platform.name)}</h5>
@@ -648,12 +704,11 @@ async function testPlatformFromModal(config: AIPlatformConfig, isNew: boolean): 
         const saved = await savePlatformModal(config, isNew, false);
         if (!saved) return;
     }
-    if (config.models.length === 0) {
-        showNotification(platformT("platform.form.need_model", "请先添加一个模型"), "error");
+    const modelId = resolveTestModelId(config.platform, config);
+    if (!config.platform || !modelId) {
+        showNotification(platformT("platform.form.need_model", "请先添加一个模型，或填写默认模型后再测试连接"), "error");
         return;
     }
-    const modelId = config.config.default_model || config.models.find((item) => item.enabled)?.id || config.models[0]?.id || "";
-    if (!config.platform || !modelId) return;
     await testModelAPI(config.platform, modelId);
 }
 
@@ -920,11 +975,22 @@ function resetTestModal(): void {
 async function testAPI(platform: string): Promise<void> {
     const platformConfig = aiPlatformManager.getPlatform(platform);
     if (!platformConfig) return;
-    // 本地 LM Studio 无需要求配置具体模型，直接用占位 id；其他平台优先取已启用模型，其次取第一个。
-    const model = platform === "lmstudio"
-        ? { id: LMSTUDIO_DEFAULT_MODEL_ID }
-        : platformConfig.models.find((item) => item.enabled) || platformConfig.models[0];
-    if (model) await testModelAPI(platform, model.id);
+    const modelId = resolveTestModelId(platform, platformConfig);
+    if (!modelId) {
+        // 自定义平台可能还没添加任何模型：给出明确反馈，而不是像旧实现那样「点了没反应」。
+        showNotification(platformT("platform.test.need_model", "请先为该平台添加一个模型，或填写默认模型后再测试连接"), "error");
+        return;
+    }
+    await testModelAPI(platform, modelId);
+}
+
+// 测试连接时选用的模型 id：LM Studio 用占位 id；其余优先已启用模型、其次第一个模型，
+// 再回退到配置里的默认模型，从而让「尚未添加模型但填了默认模型」的自定义平台也能测试。
+function resolveTestModelId(platform: string, config: AIPlatformConfig): string {
+    if (platform === "lmstudio") return LMSTUDIO_DEFAULT_MODEL_ID;
+    const model = config.models.find((item) => item.enabled) || config.models[0];
+    if (model?.id) return model.id;
+    return (config.config.default_model || "").trim();
 }
 
 async function testModelAPI(platform: string, modelId: string): Promise<void> {

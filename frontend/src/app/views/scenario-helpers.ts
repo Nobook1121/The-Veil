@@ -1,7 +1,16 @@
 // 剧本通用助手：国际化、HTML 转义、权限判断、弹窗与通用表单工具。
 
-function safeScenarioCover(cover?: string): string {
-    return cover && (cover.startsWith("/assets/scenarios/") || cover.startsWith("/assets/scenario_covers/")) ? cover : DEFAULT_SCENARIO_COVER;
+// 剧本封面地址：合法的上传封面直接用，否则回退为「剧本名」文字封面。
+function safeScenarioCover(title: string, cover?: string): string {
+    if (cover && (cover.startsWith("/assets/scenarios/") || cover.startsWith("/assets/scenario_covers/"))) {
+        return cover;
+    }
+    return TrpgAvatar.scenarioCoverTextDataUri(title);
+}
+
+// 剧本卡封面 HTML：模板引擎不支持条件分支，因此在这里预先拼好再整段注入。
+function scenarioCoverHtml(title: string, cover?: string): string {
+    return `<img src="${scenarioEscapeHtml(safeScenarioCover(title, cover))}" alt="${scenarioEscapeHtml(title)}" data-user-content="true">`;
 }
 
 /**

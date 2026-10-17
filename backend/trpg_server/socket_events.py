@@ -4,12 +4,16 @@ from flask import current_app, request, session
 from flask_socketio import disconnect, emit, join_room, leave_room
 
 from trpg_server.logging_config import log_user_action, user_action_text
-from trpg_server.security import ACTIVE_SESSION_REGISTRY_KEY, SESSION_TOKEN_KEY
+from trpg_server.security import (
+    ACTIVE_SESSION_REGISTRY_KEY,
+    SESSION_TOKEN_KEY,
+    USER_ROOM_MEMBERSHIP_KEY,
+)
 
 logger = logging.getLogger(__name__)
 
 # 记录每个用户当前加入的 Socket.IO 房间，便于断线时通知相关房间刷新成员在线状态。
-USER_ROOM_MEMBERSHIP_KEY = "USER_ROOM_MEMBERSHIP"
+# 常量定义在 security 中（房间内在线/自动存档判定也要读它），这里直接复用避免重复。
 
 
 def register_socket_events(socketio):

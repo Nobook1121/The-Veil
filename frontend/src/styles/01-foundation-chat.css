@@ -57,6 +57,13 @@
     border-left: 4px solid color-mix(in srgb, var(--color-danger) 72%, black);
 }
 
+/* 警告/提醒类通知：如平台余额不足自动切换，使用较浅底色，文字改用正面色保证可读。 */
+.notification-warning {
+    background-color: var(--theme-warning);
+    border-left: 4px solid color-mix(in srgb, var(--theme-warning) 72%, black);
+    color: var(--theme-text-primary);
+}
+
 @keyframes slideDown {
     from {
         transform: translateY(-100%);

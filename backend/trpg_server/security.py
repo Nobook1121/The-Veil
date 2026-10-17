@@ -10,6 +10,8 @@ from trpg_server.permission_config import is_role_allowed, permission_config_pat
 from trpg_server.responses import error_response
 
 ACTIVE_SESSION_REGISTRY_KEY = "ACTIVE_USER_SESSIONS"
+# 记录每个用户当前加入的房间集合（由 socket_events 维护），用于判定「在房间内」。
+USER_ROOM_MEMBERSHIP_KEY = "USER_ROOM_MEMBERSHIP"
 SESSION_TOKEN_KEY = "session_token"
 CSRF_SESSION_KEY = "csrf_token"
 IMPERSONATION_SESSION_PREFIX = "impersonation:"
@@ -108,6 +110,20 @@ def clear_session_token(user_id, token):
 def is_socket_user_online(user_id):
     active_sockets = current_app.config.setdefault("ACTIVE_SOCKET_SESSIONS", {})
     return str(user_id) in active_sockets
+
+
+def is_user_in_room(user_id, room_id):
+    """用户当前是否「停留在该房间内」。
+
+    仅凭全局在线（``is_socket_user_online``）不足以判断用户是否在某个房间里：
+    用户可能在线却停留在别的页面/房间。这里以 Socket.IO 的 join_room/leave_room
+    维护的 membership 为准，用于房间内在线列表与自动存档判定。
+    """
+    if room_id in (None, "") or user_id is None:
+        return False
+    membership = current_app.config.get(USER_ROOM_MEMBERSHIP_KEY) or {}
+    rooms = membership.get(str(user_id))
+    return bool(rooms) and str(room_id) in rooms
 
 
 def _is_session_current(manager, user_id, token):

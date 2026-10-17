@@ -13,8 +13,9 @@ from uuid import uuid4
 
 from flask import current_app
 from trpg_server.ai_capabilities import responses_endpoint
-from trpg_server.ai_platform_config import load_platform_config
+from trpg_server.ai_platform_config import load_platform_config, ordered_platform_paths
 from trpg_server.agents.profiles import AgentProfile
+from trpg_server.agents.prompt_builder import wrap_user_input
 from trpg_server.agents.responses_transport import ResponsesRequester
 from trpg_server.agents.memory import remember_room_fact
 from trpg_server.agents.room_state import append_room_event, project_room_state
@@ -23,6 +24,7 @@ from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.logging_config import redact_sensitive
 from trpg_server.responses import success_response
 from trpg_server.role_config import load_roles, select_role_for_content
+from trpg_server.security import get_user_manager
 from trpg_server.settings import AI_PLATFORM_SECRET_DIR, CONFIG_DIR, HISTORY_DIR
 
 logger = logging.getLogger(__name__)
@@ -93,7 +95,7 @@ def _deliver_structured_triggers(room_dir, room_info, scenario, requests):
                     body.append(str(resource["content"]))
                 elif resource.get("url"):
                     body.append(f"[{resource.get('alt')}]({resource.get('url')})")
-            message = {"type": "trigger", "sender_id": None, "sender_name": definition.get("text") or f"触发器{trigger_id}", "avatar": "/assets/avatars/default_system.jpg", "content": "\n\n".join(body), "time": time.strftime("%H:%M"), "created_at": _timestamp(), "metadata": {"trigger_id": trigger_id, "reason": requested.get("reason", "")}}
+            message = {"type": "trigger", "sender_id": None, "sender_name": definition.get("text") or f"触发器{trigger_id}", "avatar": "", "content": "\n\n".join(body), "time": time.strftime("%H:%M"), "created_at": _timestamp(), "metadata": {"trigger_id": trigger_id, "reason": requested.get("reason", "")}}
         else:
             message = build_trigger_message(scenario, trigger_id)
             if not message:
@@ -148,14 +150,20 @@ def _get_role_config_file():
     return current_app.config.get("ROLE_CONFIG_FILE", CONFIG_DIR / "roles" / "roles.json")
 
 
-def _load_enabled_platform(provider_id=None):
+def _load_enabled_platforms(provider_id=None):
+    """返回按加载顺序排列的「已启用」平台列表：``[(platform_id, config), ...]``。
+
+    顺序由各平台配置的 ``order`` 决定（管理员在设置页拖动排序）。房间内 AI 对话
+    依次尝试：先加载 order 最小的启用平台，失败（报错、余额不足等）时回退到下一个。
+    """
     platform_dir = _get_ai_platform_dir()
     secret_dir = _get_ai_platform_secret_dir()
     if not platform_dir.exists():
         logger.warning("AI platform config directory does not exist: %s", platform_dir)
-        return None, None
+        return []
 
-    for path in platform_dir.glob("*.json"):
+    platforms = []
+    for path in ordered_platform_paths(platform_dir):
         if provider_id and path.stem != provider_id:
             continue
         try:
@@ -166,9 +174,65 @@ def _load_enabled_platform(provider_id=None):
             continue
 
         if config.get("enabled", False):
-            return path.stem, config
+            platforms.append((path.stem, config))
 
-    return None, None
+    return platforms
+
+
+def _load_enabled_platform(provider_id=None):
+    platforms = _load_enabled_platforms(provider_id)
+    return platforms[0] if platforms else (None, None)
+
+
+def _platform_display_name(platform_id):
+    try:
+        config = read_json(_get_ai_platform_dir() / f"{platform_id}.json", default={})
+        name = config.get("name") if isinstance(config, dict) else None
+        if name:
+            return str(name)
+    except (OSError, ValueError):
+        pass
+    return str(platform_id)
+
+
+def _notify_platform_switch(from_platform, to_platform, reason):
+    """房间内 AI 对话自动切换平台时通知在线管理员。
+
+    明确不使用网页 ``alert``：改为向在线的 ADMIN/OWNER 各自的 ``user:{id}`` 房间推送
+    ``admin_notification`` 事件，前端以顶部提示条展示切换原因。
+    """
+    socketio = current_app.extensions.get("socketio")
+    active_sockets = current_app.config.get("ACTIVE_SOCKET_SESSIONS") or {}
+    from_name = _platform_display_name(from_platform)
+    to_name = _platform_display_name(to_platform)
+    detail = str(reason or "").strip()[:200] or "未知原因"
+    message = f"「{from_name}」无法加载（{detail}），已自动切换至「{to_name}」平台"
+    logger.warning("AI platform auto-switch: %s", message)
+    if socketio is None or not active_sockets:
+        return
+
+    try:
+        manager = get_user_manager()
+    except Exception:  # noqa: BLE001 - 通知失败不影响主对话流程
+        logger.debug("Unable to resolve user manager for platform switch notice", exc_info=True)
+        return
+
+    payload = {
+        "type": "ai_platform_switch",
+        "level": "warning",
+        "message": message,
+        "from_platform": from_platform,
+        "to_platform": to_platform,
+        "reason": detail,
+    }
+    for user_key in list(active_sockets.keys()):
+        try:
+            user = manager.get_user_by_id(int(user_key))
+        except Exception:  # noqa: BLE001 - 忽略无法解析的会话
+            continue
+        if str((user or {}).get("role") or "").upper() not in {"ADMIN", "OWNER"}:
+            continue
+        socketio.emit("admin_notification", payload, room=f"user:{user_key}")
 
 
 def _load_role_for_content(content):
@@ -276,11 +340,12 @@ def _emit_thinking_stage(room_id, ai_request_id, stage, label):
         logger.debug("Unable to emit AI thinking stage", exc_info=True)
 
 
-def _build_agent_requester(platform_config, base_url, headers, model, timeout, fallback):
+def _build_agent_requester(platform_config, base_url, headers, model, timeout, fallback, max_retries=0):
     """多轮工具调用用的请求器。
 
     当平台被探测为支持 Responses API、且用户显式开启了 ``previous_response_id`` 时，
     改用有状态续答（只发增量，省掉轮间重复上下文）；否则保持原本的 chat/completions。
+    ``max_retries`` 与 chat/completions 路径共用，保证瞬时抖动不会立刻锁定回退。
     """
     config = platform_config.get("config") if isinstance(platform_config, dict) else None
     config = config if isinstance(config, dict) else {}
@@ -290,7 +355,7 @@ def _build_agent_requester(platform_config, base_url, headers, model, timeout, f
     if not endpoint:
         return fallback
     logger.info("Using Responses API with previous_response_id for agent tool rounds")
-    return ResponsesRequester(endpoint, headers, model, timeout, fallback)
+    return ResponsesRequester(endpoint, headers, model, timeout, fallback, max_retries=max_retries)
 
 
 def _load_kp_prompt():
@@ -366,16 +431,6 @@ def _format_user_content(content, speaker=None):
     if character_name:
         parts.append(f"character={character_name}")
     return f"[{'; '.join(parts)}]\n{content}"
-
-
-def _wrap_user_input(content):
-    return "\n".join(
-        [
-            "---->USER_INPUT<----",
-            str(content or ""),
-            "---->END_USER_INPUT<----",
-        ]
-    )
 
 
 def _is_compact_command(content):
@@ -696,9 +751,9 @@ def _build_messages(system_prompt, history, content, room_snapshot_message=None)
         item_content = item["content"]
         if item.get("role") == "user":
             item_content = _format_user_content(item_content, item.get("speaker"))
-            item_content = _wrap_user_input(item_content)
+            item_content = wrap_user_input(item_content)
         messages.append({"role": item["role"], "content": item_content})
-    messages.append({"role": "user", "content": _wrap_user_input(content)})
+    messages.append({"role": "user", "content": wrap_user_input(content)})
     return messages
 
 

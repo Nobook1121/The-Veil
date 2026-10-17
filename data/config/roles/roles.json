@@ -3,7 +3,7 @@
     {
       "id": "kp",
       "name": "KP",
-      "avatar": "/assets/avatars/default_kp.jpg",
+      "avatar": "",
       "wake_words": ["@KP"],
       "provider": "aliyun"
     }

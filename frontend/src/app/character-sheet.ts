@@ -1539,7 +1539,7 @@ interface Window {
             return `
             <article class="character-card${batch.mode ? " batch-mode" : ""}${selected ? " batch-selected" : ""}" data-gallery-character-id="${escapeHtml(card.id)}"${selectable ? ' data-batch-selectable="true"' : ""}>
                 ${selectable ? `<span class="batch-card-check" aria-hidden="true"><i class="fa ${selected ? "fa-check-square-o" : "fa-square-o"}"></i></span>` : ""}
-                <div class="character-card-avatar">${card.avatar ? `<img src="${escapeHtml(card.avatar)}" alt="">` : `<i class="fa fa-id-card-o"></i>`}</div>
+                <div class="character-card-avatar"><img src="${escapeHtml(TrpgAvatar.resolveAvatarSrc(card.name, card.avatar))}" alt=""></div>
                 <h5>${escapeHtml(card.name)}</h5>
                 <p>${escapeHtml(getOccupation(card).name)} · ${escapeHtml(card.residence || "未知居住地")}</p>
                 <p class="character-card-summary">${escapeHtml(card.background.story || card.background.appearance || "暂无角色简介")}</p>
@@ -2773,7 +2773,9 @@ interface Window {
     function updateAvatarPreview(src: string): void {
         const image = byId<HTMLImageElement>("characterAvatarPreviewImage");
         if (!image) return;
-        image.src = src || "/assets/avatars/default.jpg";
+        // 未设置头像时回退为「角色名首字」文字头像，项目已不再有内置默认头像图。
+        const nameField = byId<HTMLInputElement>("characterName");
+        image.src = TrpgAvatar.resolveAvatarSrc(nameField?.value || "?", src);
     }
 
     function setInputValue(id: string, value: unknown): void {
@@ -3243,7 +3245,7 @@ interface Window {
         return `
             <article class="character-card ${card.id === activeCardId ? "active" : ""}${batch.mode ? " batch-mode" : ""}${selected ? " batch-selected" : ""}" data-character-id="${escapeHtml(card.id)}"${batch.mode ? ' data-batch-selectable="true"' : ""}>
                 ${batch.mode ? `<span class="batch-card-check" aria-hidden="true"><i class="fa ${selected ? "fa-check-square-o" : "fa-square-o"}"></i></span>` : ""}
-                <div class="character-card-avatar">${card.avatar ? `<img src="${escapeHtml(card.avatar)}" alt="">` : `<i class="fa fa-id-card-o"></i>`}</div>
+                <div class="character-card-avatar"><img src="${escapeHtml(TrpgAvatar.resolveAvatarSrc(card.name, card.avatar))}" alt=""></div>
                 <h5>${escapeHtml(card.name)}</h5>
                 <p>${escapeHtml(getOccupation(card).name)} · ${escapeHtml(card.residence || "未知居住地")}</p>
                 <div class="character-card-metrics">

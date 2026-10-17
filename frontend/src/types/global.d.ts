@@ -47,6 +47,7 @@ interface Window {
     reloadCharacterManagement?: () => Promise<void>;
     switchMainTab?: (tabId: string, options?: { clearNav?: boolean }) => void;
     refreshAdminNavigation?: () => void;
+    refreshGeneralSettingsBaseline?: () => void;
     refreshScenarioManagement?: () => void;
     openCreateRoomWithScenario?: (scenarioId: number) => Promise<void>;
 }

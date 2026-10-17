@@ -80,7 +80,6 @@ let chatReadOnly = false;
 let messageTimestamps: number[] = [];
 let pendingMessages: PendingAIMessage[] = [];
 let aiName = "KP";
-let aiAvatar = "/assets/avatars/default_kp.jpg";
 let aiRoles: ChatRoleConfig[] = [{ id: "kp", name: "KP", wake_words: ["@KP"] }];
 let socket: SocketLike | null = null;
 let activeSuggestions: string[] | null = null;
@@ -606,7 +605,8 @@ async function sendVisibleMessage(
         type,
         sender_name: sender,
         content,
-        avatar: getAvatarSrc(type),
+        // 头像留空：由各客户端按发送者名称统一渲染文字头像，避免把生成的 data URI 写进消息记录。
+        avatar: "",
     });
     return null;
 }
@@ -655,7 +655,6 @@ async function loadAIRoles(): Promise<void> {
         if (response.success && response.data?.roles?.length) {
             aiRoles = response.data.roles;
             aiName = aiRoles[0]?.name || "KP";
-            aiAvatar = aiRoles[0]?.avatar || "/assets/avatars/default_kp.jpg";
             updateAIHint();
         }
     } catch (error) {
@@ -694,20 +693,15 @@ function renderMarkdown(content: string): string {
     }
 }
 
-function getAvatarSrc(type: string, message: ChatMessage | null = null): string {
+// 头像解析：优先用消息自带头像；玩家消息若属于当前登录用户，沿用导航栏头像，
+// 其余情况一律回退为「发送者名称首字」文字头像，项目已不再有内置默认头像图。
+function getAvatarSrc(type: string, message: ChatMessage | null, sender: string): string {
     if (message?.avatar) return message.avatar;
-    switch (type) {
-        case "player":
-            return document.querySelector<HTMLImageElement>(".user-avatar img")?.src || "/assets/avatars/default.jpg";
-        case "kp":
-            return "/assets/avatars/default_kp.jpg";
-        case "dice":
-            return "/assets/avatars/default_dice.jpg";
-        case "system":
-            return "/assets/avatars/default_system.jpg";
-        default:
-            return "/assets/avatars/default.jpg";
+    if (type === "player" && sender === getCurrentUsername()) {
+        const currentSrc = document.querySelector<HTMLImageElement>(".user-avatar img")?.src;
+        if (currentSrc) return currentSrc;
     }
+    return TrpgAvatar.avatarTextDataUri(sender);
 }
 
 function defaultSenderName(type: string): string {
@@ -867,7 +861,7 @@ function addMessage(
 
     const displayTime = message?.time || message?.timestamp || new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const renderedContent = isThinking ? renderThinkingContent(content) : renderMarkdown(content);
-    const avatarSrc = getAvatarSrc(type, message);
+    const avatarSrc = getAvatarSrc(type, message, sender);
 
     messageDiv.innerHTML = window.TrpgTemplates.render("chat-message", {
         avatarSrc,
@@ -1248,6 +1242,12 @@ function initWebSocket(): void {
         socket.on("room_members_changed", () => { void window.refreshCurrentRoomMembers?.(); });
         socket.on("room_autosave_created", () => { void window.refreshRoomNodes?.(); });
         socket.on("role_changed", (data) => handleRoleChanged(data));
+        // 平台自动切换等仅面向管理员的提示：服务端只推给在线管理员，前端以通知条展示（不用 alert）。
+        socket.on("admin_notification", (payload: unknown) => {
+            const data = (payload || {}) as { message?: unknown; level?: unknown };
+            const message = typeof data.message === "string" ? data.message : "";
+            if (message) showNotification(message, data.level === "error" ? "error" : "warning");
+        });
     } catch (error) {
         console.warn("WebSocket 连接失败，消息同步不可用:", error);
     }

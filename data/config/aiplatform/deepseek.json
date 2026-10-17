@@ -27,11 +27,28 @@
     }
   ],
   "small_models": {
-    "intent_classification": {"id": "deepseek-chat", "name": "DeepSeek Chat", "enabled": true},
-    "state_update": {"id": "deepseek-chat", "name": "DeepSeek Chat", "enabled": true},
-    "summarization": {"id": "deepseek-chat", "name": "DeepSeek Chat", "enabled": true},
-    "schema_repair": {"id": "deepseek-chat", "name": "DeepSeek Chat", "enabled": true}
+    "intent_classification": {
+      "id": "deepseek-chat",
+      "name": "DeepSeek Chat",
+      "enabled": true
+    },
+    "state_update": {
+      "id": "deepseek-chat",
+      "name": "DeepSeek Chat",
+      "enabled": true
+    },
+    "summarization": {
+      "id": "deepseek-chat",
+      "name": "DeepSeek Chat",
+      "enabled": true
+    },
+    "schema_repair": {
+      "id": "deepseek-chat",
+      "name": "DeepSeek Chat",
+      "enabled": true
+    }
   },
   "auth_method": "api_key",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "order": 3
 }

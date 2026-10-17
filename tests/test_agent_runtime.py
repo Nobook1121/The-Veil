@@ -65,6 +65,114 @@ def test_runtime_folds_only_stale_refetchable_tool_results():
     assert all(message["content"] != FOLDED_TOOL_RESULT_NOTICE for message in checks)
 
 
+def test_runtime_short_circuits_repeated_identical_tool_calls():
+    """同一轮内用相同参数重复调用同一工具：只执行一次，第二次回一条复用说明。
+
+    这既避免重复掷骰/重复触发把状态搞乱，也省掉一次多余的执行与往返。
+    """
+    executions = {"count": 0}
+
+    def handler(arguments, context):
+        executions["count"] += 1
+        return {"value": arguments.get("value"), "seq": executions["count"]}
+
+    tool = AgentTool(
+        name="dice.roll_coc_check",
+        description="roll",
+        parameters={"type": "object", "properties": {"value": {"type": "string"}}},
+        handler=handler,
+    )
+
+    class TwoIdenticalCallsRequester:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, payload):
+            self.calls.append(payload)
+            if len(self.calls) == 1:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [
+                                    {"id": "call-1", "type": "function", "function": {"name": "dice.roll_coc_check", "arguments": "{\"value\":\"listen\"}"}},
+                                    {"id": "call-2", "type": "function", "function": {"name": "dice.roll_coc_check", "arguments": "{\"value\":\"listen\"}"}},
+                                ],
+                            }
+                        }
+                    ]
+                }
+            return {"choices": [{"message": {"role": "assistant", "content": "done"}}]}
+
+    requester = TwoIdenticalCallsRequester()
+    result = run_agent_completion(
+        requester=requester,
+        base_payload={"model": "fake-model", "messages": [{"role": "user", "content": "listen"}]},
+        profile=AgentProfile(id="kp", name="KP", prompt="prompt", tool_names=["dice.roll_coc_check"]),
+        registry=ToolRegistry([tool]),
+        context=AgentRequestContext(room_id="room-1"),
+    )
+    assert executions["count"] == 1
+    assert result.content == "done"
+    tool_messages = [m for m in requester.calls[-1]["messages"] if m.get("role") == "tool"]
+    assert len(tool_messages) == 2
+    assert "reused" in tool_messages[1]["content"]
+
+    # 关闭短路后两次调用都会真正执行（保留可配置性）。
+    executions["count"] = 0
+    run_agent_completion(
+        requester=TwoIdenticalCallsRequester(),
+        base_payload={"model": "fake-model", "messages": [{"role": "user", "content": "listen"}]},
+        profile=AgentProfile(id="kp", name="KP", prompt="prompt", tool_names=["dice.roll_coc_check"]),
+        registry=ToolRegistry([tool]),
+        context=AgentRequestContext(room_id="room-1"),
+        dedupe_tool_calls=False,
+    )
+    assert executions["count"] == 2
+
+
+def test_runtime_allows_refetching_stateful_tools_across_rounds():
+    """随状态变化的读取类工具（房间/剧本快照）跨轮允许重新调用，拿到最新数据。
+
+    这是「省 token」不能牺牲剧本遵守度的关键：场景推进后 KP 必须能重新取快照。
+    """
+    executions = {"count": 0}
+
+    def handler(arguments, context):
+        executions["count"] += 1
+        return {"snapshot": executions["count"]}
+
+    tool = AgentTool(
+        name="room.get_room_snapshot",
+        description="snapshot",
+        parameters={"type": "object", "properties": {}},
+        handler=handler,
+    )
+
+    class RefetchRequester:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, payload):
+            self.calls.append(payload)
+            if len(self.calls) <= 2:
+                return {"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": [
+                    {"id": f"call-{len(self.calls)}", "type": "function", "function": {"name": "room.get_room_snapshot", "arguments": "{}"}}
+                ]}}]}
+            return {"choices": [{"message": {"role": "assistant", "content": "done"}}]}
+
+    run_agent_completion(
+        requester=RefetchRequester(),
+        base_payload={"model": "fake-model", "messages": [{"role": "user", "content": "look"}]},
+        profile=AgentProfile(id="kp", name="KP", prompt="prompt", tool_names=["room.get_room_snapshot"]),
+        registry=ToolRegistry([tool]),
+        context=AgentRequestContext(room_id="room-1"),
+    )
+    assert executions["count"] == 2
+
+
 class FakeRequester:
     def __init__(self):
         self.calls = []
@@ -458,6 +566,54 @@ def test_runtime_sanitizes_assistant_content_when_tool_calls_are_present():
     assert replayed_assistant_message["role"] == "assistant"
     assert replayed_assistant_message["content"] == ""
     assert "noisy protocol text" not in str(requester.calls[1]["messages"])
+
+
+def test_runtime_recovers_tool_calls_embedded_in_json_content():
+    """部分厂商在强制 JSON 输出时会把 tool_calls 写进正文，必须还原并执行。"""
+
+    class EmbeddedCallRequester:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, payload):
+            self.calls.append(payload)
+            if len(self.calls) == 1:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": (
+                                    '{"reply": "你推开了门。",'
+                                    ' "tool_calls": [{"name": "test.echo", "arguments": {"value": "hello"}}]}'
+                                ),
+                            }
+                        }
+                    ]
+                }
+            return {"choices": [{"message": {"role": "assistant", "content": "final answer"}}]}
+
+    tool = AgentTool(
+        name="test.echo",
+        description="Echo value",
+        parameters={"type": "object", "properties": {"value": {"type": "string"}}},
+        handler=lambda arguments, context: {"echo": arguments["value"]},
+    )
+    requester = EmbeddedCallRequester()
+
+    result = run_agent_completion(
+        requester=requester,
+        base_payload={"model": "fake-model", "messages": [{"role": "user", "content": "@KP hi"}]},
+        profile=AgentProfile(id="kp", name="KP", prompt="prompt", tool_names=["test.echo"]),
+        registry=ToolRegistry([tool]),
+        context=AgentRequestContext(room_id="room-1"),
+    )
+
+    assert len(requester.calls) == 2
+    assert result.content == "final answer"
+    tool_message = requester.calls[1]["messages"][-1]
+    assert tool_message["role"] == "tool"
+    assert '"hello"' in tool_message["content"]
 
 
 def test_runtime_treats_non_object_tool_arguments_as_empty_dict():

@@ -20,10 +20,22 @@ class AIRuntimeConfig:
     max_snapshot_scene_manifest: int = 30
     snapshot_include_entity_manifest: bool = False
     max_tool_result_chars: int = 4000
+    # 同一轮 KP 发言里，用相同参数重复调用同一工具时是否短路复用上次结果。
+    # 避免重复掷骰/重复触发造成状态错乱，也省掉重复执行的往返与 token。
+    dedupe_tool_calls: bool = True
+    # 本地响应缓存：命中即跳过整次上游请求，是最直接的省 token 手段。
+    # TTL 越大命中越多，但过期内容被复用的窗口也越长；两者都可从设置页调整。
+    semantic_cache_enabled: bool = True
+    semantic_cache_ttl: int = 120
+    exact_cache_ttl: int = 300
     # KP 单次发言允许的最大工具调用轮数，以及每次 AI 请求的等待时间（秒）。
     # 超过后不会静默丢回复，而是给出明确的收尾叙事与提示。
     max_tool_rounds: int = 8
     ai_request_timeout: int = 300
+    # 连接被网络层中断（防火墙/NAT 空闲超时等）时，单次 AI 请求最多重试几次。
+    ai_request_max_retries: int = 5
+    # 是否把每次请求的提示词按分段估算 token 并记入用量日志，供成本归因与仪表盘展示。
+    record_prompt_segments: bool = True
     # 骰娘大成功 / 大失败的全局默认阈值（管理员设置页可改，房规可覆盖）。
     dice_critical_threshold: int = 1
     dice_fumble_threshold: int = 96
@@ -45,6 +57,10 @@ class AIRuntimeConfig:
     recursive_scanning: bool = True
     max_recursion_depth: int = 3
     lorebook_token_budget: int = 0
+    # 云端 embedding 接口（OpenAI 兼容）默认关闭。只有管理员在设置页显式开启后，
+    # 才会在本地模型不可用时改用 AI 平台配置里的 embedding 接口；关闭时一律回落到
+    # 本地模型（可用的话）或确定性的哈希向量，避免静默产生云端调用费用。
+    cloud_embedding_enabled: bool = False
 
 
 def _toml_int(value: str, fallback: int) -> int:
@@ -98,8 +114,14 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
     max_snapshot_scene_manifest = AIRuntimeConfig.max_snapshot_scene_manifest
     snapshot_include_entity_manifest = AIRuntimeConfig.snapshot_include_entity_manifest
     max_tool_result_chars = AIRuntimeConfig.max_tool_result_chars
+    dedupe_tool_calls = AIRuntimeConfig.dedupe_tool_calls
+    semantic_cache_enabled = AIRuntimeConfig.semantic_cache_enabled
+    semantic_cache_ttl = AIRuntimeConfig.semantic_cache_ttl
+    exact_cache_ttl = AIRuntimeConfig.exact_cache_ttl
     max_tool_rounds = AIRuntimeConfig.max_tool_rounds
     ai_request_timeout = AIRuntimeConfig.ai_request_timeout
+    ai_request_max_retries = AIRuntimeConfig.ai_request_max_retries
+    record_prompt_segments = AIRuntimeConfig.record_prompt_segments
     dice_critical_threshold = AIRuntimeConfig.dice_critical_threshold
     dice_fumble_threshold = AIRuntimeConfig.dice_fumble_threshold
     retrieval_top_k_default = AIRuntimeConfig.retrieval_top_k_default
@@ -112,6 +134,7 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
     recursive_scanning = AIRuntimeConfig.recursive_scanning
     max_recursion_depth = AIRuntimeConfig.max_recursion_depth
     lorebook_token_budget = AIRuntimeConfig.lorebook_token_budget
+    cloud_embedding_enabled = AIRuntimeConfig.cloud_embedding_enabled
     for raw_line in general_file.read_text(encoding="utf-8").splitlines():
         line = raw_line.split("#", 1)[0].strip()
         if not line:
@@ -119,7 +142,7 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
         if line.startswith("[") and line.endswith("]"):
             current_section = _unquote_toml_name(line[1:-1])
             continue
-        if current_section in {"ai", "ai.small_models", "ai.prompt", "ai.knowledge"} and "=" in line:
+        if current_section in {"ai", "ai.small_models", "ai.prompt", "ai.knowledge", "ai.cache"} and "=" in line:
             key, value = [part.strip() for part in line.split("=", 1)]
             key = _unquote_toml_name(key)
             quoted_value = bool(value.startswith(('"', "'")))
@@ -136,6 +159,15 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
                     snapshot_include_entity_manifest = value.lower() == "true"
                 elif key == "max_tool_result_chars":
                     max_tool_result_chars = max(500, _toml_int(value, AIRuntimeConfig.max_tool_result_chars))
+                elif key == "dedupe_tool_calls":
+                    dedupe_tool_calls = value.lower() == "true"
+            elif current_section == "ai.cache":
+                if key == "semantic_enabled":
+                    semantic_cache_enabled = value.lower() == "true"
+                elif key == "semantic_ttl_seconds":
+                    semantic_cache_ttl = max(30, min(86400, _toml_int(value, AIRuntimeConfig.semantic_cache_ttl)))
+                elif key == "exact_ttl_seconds":
+                    exact_cache_ttl = max(30, min(86400, _toml_int(value, AIRuntimeConfig.exact_cache_ttl)))
             elif current_section == "ai.knowledge":
                 if key == "top_k_default":
                     retrieval_top_k_default = max(1, min(32, _toml_int(value, AIRuntimeConfig.retrieval_top_k_default)))
@@ -167,6 +199,12 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
                 max_tool_rounds = max(1, min(30, _toml_int(value, AIRuntimeConfig.max_tool_rounds)))
             elif key == "ai_request_timeout":
                 ai_request_timeout = max(30, min(1800, _toml_int(value, AIRuntimeConfig.ai_request_timeout)))
+            elif key == "ai_request_max_retries":
+                ai_request_max_retries = max(0, min(20, _toml_int(value, AIRuntimeConfig.ai_request_max_retries)))
+            elif key == "record_prompt_segments":
+                record_prompt_segments = value.lower() == "true"
+            elif key == "cloud_embedding_enabled":
+                cloud_embedding_enabled = value.lower() == "true"
             elif key == "dice_critical_threshold":
                 dice_critical_threshold = max(0, min(100, _toml_int(value, AIRuntimeConfig.dice_critical_threshold)))
             elif key == "dice_fumble_threshold":
@@ -180,8 +218,14 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
         max_snapshot_scene_manifest=max_snapshot_scene_manifest,
         snapshot_include_entity_manifest=snapshot_include_entity_manifest,
         max_tool_result_chars=max_tool_result_chars,
+        dedupe_tool_calls=dedupe_tool_calls,
+        semantic_cache_enabled=semantic_cache_enabled,
+        semantic_cache_ttl=semantic_cache_ttl,
+        exact_cache_ttl=exact_cache_ttl,
         max_tool_rounds=max_tool_rounds,
         ai_request_timeout=ai_request_timeout,
+        ai_request_max_retries=ai_request_max_retries,
+        record_prompt_segments=record_prompt_segments,
         dice_critical_threshold=dice_critical_threshold,
         dice_fumble_threshold=dice_fumble_threshold,
         retrieval_top_k_default=retrieval_top_k_default,
@@ -194,4 +238,5 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
         recursive_scanning=recursive_scanning,
         max_recursion_depth=max_recursion_depth,
         lorebook_token_budget=lorebook_token_budget,
+        cloud_embedding_enabled=cloud_embedding_enabled,
     )

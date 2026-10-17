@@ -4,10 +4,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from trpg_server.media_defaults import normalize_avatar
 from trpg_server.users.database import UserDatabase
 
 
-DEFAULT_AVATAR = "/assets/avatars/default.jpg"
 VALID_ROLES = {"OWNER", "ADMIN", "USER"}
 VALID_STATUSES = {"active", "inactive", "banned"}
 MAPPED_USER_KEYS = {
@@ -115,7 +115,7 @@ def _insert_profile(conn, user_id: int, legacy_user: dict[str, Any]) -> None:
         (
             user_id,
             legacy_user.get("nickname"),
-            legacy_user.get("avatar") or DEFAULT_AVATAR,
+            normalize_avatar(legacy_user.get("avatar")),
             legacy_user.get("bio"),
             extra_json,
         ),

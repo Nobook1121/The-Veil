@@ -1067,7 +1067,7 @@ function renderRoomMemberListItem(room: Room, member: RoomMember): string {
         userId: String(member.user_id || ""),
         selfClass: isSelf ? " is-self" : "",
         roleClass: roleKind === "member" ? "" : ` is-${roleKind}`,
-        avatar: member.avatar || "/assets/avatars/default.jpg",
+        avatar: TrpgAvatar.resolveAvatarSrc(member.username || "", member.avatar),
         presenceClass: isOnline ? "is-online" : "is-offline",
         presenceTitle: roomText(isOnline ? "home.members.online" : "home.members.offline", isOnline ? "在线" : "离线"),
         username: member.username || "-",

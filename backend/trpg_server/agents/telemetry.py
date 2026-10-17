@@ -6,6 +6,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from trpg_server.agents.token_accounting import merge_segment_totals
+
 
 USAGE_FILENAME = "ai_usage.jsonl"
 
@@ -43,7 +45,10 @@ def record_ai_usage(log_dir: Path, usage: dict[str, Any]) -> dict[str, Any]:
     item.setdefault("completion_tokens", 0)
     item.setdefault("total_tokens", int(item["prompt_tokens"] or 0) + int(item["completion_tokens"] or 0))
     item.setdefault("cached_tokens", 0)
-    item["cache_hit_rate"] = calculate_cache_hit_rate(item["prompt_tokens"], item["cached_tokens"])
+    # 本地（语义/精确）缓存命中没有调用上游，prompt/cached token 都是 0；调用方会显式
+    # 传入 cache_hit_rate=100。此时不能再用 0/0 覆盖成 0，否则缓存命中会被记成未命中。
+    if "cache_hit_rate" not in item:
+        item["cache_hit_rate"] = calculate_cache_hit_rate(item["prompt_tokens"], item["cached_tokens"])
     path = _usage_path(Path(log_dir))
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -62,7 +67,14 @@ def load_daily_ai_usage(log_dir: Path, day: str | None = None) -> dict[str, Any]
     retrieval_topics: dict[str, int] = {}
     retrieval_chunks = 0
     retrieval_latency_total = 0.0
+    segment_totals: dict[str, int] = {}
     totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cached_tokens": 0}
+    # 命中率按「每次请求的命中率取平均」统计：本地缓存命中记为 100%，上游请求按厂商
+    # 上报的 cached/prompt 计算。若沿用「总 cached / 总 prompt」，本地命中（token 全为
+    # 0）会白白拉低平均，甚至让整体命中率永远显示 0。
+    rate_sum = 0.0
+    rate_count = 0
+    role_rate_sum: dict[str, float] = {}
     path = _usage_path(Path(log_dir))
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -75,12 +87,20 @@ def load_daily_ai_usage(log_dir: Path, day: str | None = None) -> dict[str, Any]
             agent_id = str(item.get("agent_id") or "unknown")
             bucket = roles.setdefault(
                 agent_id,
-                {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cached_tokens": 0, "request_count": 0},
+                {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cached_tokens": 0, "request_count": 0, "prompt_segments": {}},
             )
             for key in totals:
                 bucket[key] += int(item.get(key) or 0)
                 totals[key] += int(item.get(key) or 0)
             bucket["request_count"] += 1
+            # 提示词分段估算：把输入 token 拆到静态前缀/知识库/历史等分段，便于判断
+            # 成本结构。汇总到角色桶与全局，两者都由 token_accounting 统一累加。
+            merge_segment_totals(bucket["prompt_segments"], item.get("prompt_segments"))
+            merge_segment_totals(segment_totals, item.get("prompt_segments"))
+            request_rate = float(item.get("cache_hit_rate") or 0)
+            rate_sum += request_rate
+            rate_count += 1
+            role_rate_sum[agent_id] = role_rate_sum.get(agent_id, 0.0) + request_rate
             if item.get("prefix_cache_hit"):
                 bucket["prefix_cache_hits"] = bucket.get("prefix_cache_hits", 0) + 1
                 prefix_hits += 1
@@ -99,11 +119,13 @@ def load_daily_ai_usage(log_dir: Path, day: str | None = None) -> dict[str, Any]
                 retrieval_topics[str(topic)] = retrieval_topics.get(str(topic), 0) + 1
             retrieval_chunks += int(item.get("retrieval_chunk_count") or 0)
             retrieval_latency_total += float(item.get("retrieval_latency_ms") or 0)
-    for bucket in roles.values():
-        bucket["cache_hit_rate"] = calculate_cache_hit_rate(bucket["prompt_tokens"], bucket["cached_tokens"])
-        bucket["prefix_cache_hit_rate"] = round((bucket.get("prefix_cache_hits", 0) / bucket["request_count"]) * 100, 2) if bucket["request_count"] else 0.0
-    totals["cache_hit_rate"] = calculate_cache_hit_rate(totals["prompt_tokens"], totals["cached_tokens"])
+    for agent_id, bucket in roles.items():
+        count = bucket["request_count"]
+        bucket["cache_hit_rate"] = round(role_rate_sum.get(agent_id, 0.0) / count, 2) if count else 0.0
+        bucket["prefix_cache_hit_rate"] = round((bucket.get("prefix_cache_hits", 0) / count) * 100, 2) if count else 0.0
+    totals["cache_hit_rate"] = round(rate_sum / rate_count, 2) if rate_count else 0.0
     totals["prefix_cache_hit_rate"] = round((prefix_hits / prefix_requests) * 100, 2) if prefix_requests else 0.0
     return {"day": target_day, **totals, "roles": roles, "scenario_distribution": scenario_distribution, "room_costs": room_costs,
             "ruleset_distribution": ruleset_distribution, "retrieval_topics": retrieval_topics,
-            "retrieval_chunk_count": retrieval_chunks, "retrieval_latency_ms": round(retrieval_latency_total, 2)}
+            "retrieval_chunk_count": retrieval_chunks, "retrieval_latency_ms": round(retrieval_latency_total, 2),
+            "prompt_segments": segment_totals}

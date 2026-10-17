@@ -20,6 +20,7 @@ namespace AuthModule {
             if (response.success && response.data) {
                 setCurrentUser(response.data);
                 closeAuthModal();
+                maybeShowForcePasswordModal(response.data);
                 return true;
             }
         } catch (error) {
@@ -64,8 +65,58 @@ namespace AuthModule {
 
         setCurrentUser(response.data);
         closeAuthModal();
+        maybeShowForcePasswordModal(response.data);
         TrpgCookies.set("trpg_last_username", response.data.username);
         await restorePostLoginState();
+    }
+
+    export function maybeShowForcePasswordModal(user: CurrentUser | null): void {
+        const modal = document.getElementById("force-password-modal");
+        if (!modal) return;
+        if (!user?.must_change_password) {
+            modal.style.display = "none";
+            return;
+        }
+        modal.style.display = "flex";
+        const message = document.getElementById("forcePasswordMessage");
+        if (message) message.textContent = "";
+        (document.getElementById("forceNewPassword") as HTMLInputElement | null)?.focus();
+    }
+
+    export async function submitForcedPasswordChange(): Promise<void> {
+        const currentPassword = (document.getElementById("forceCurrentPassword") as HTMLInputElement | null)?.value || "";
+        const newPassword = (document.getElementById("forceNewPassword") as HTMLInputElement | null)?.value || "";
+        const confirmPassword = (document.getElementById("forceConfirmPassword") as HTMLInputElement | null)?.value || "";
+        if (!currentPassword || !newPassword || !confirmPassword) {
+            showMessage("forcePasswordMessage", authText("profile.error.password_required", "请完整填写密码信息"), true);
+            return;
+        }
+        if (newPassword !== confirmPassword) {
+            showMessage("forcePasswordMessage", authText("auth.error.password_mismatch", "两次输入的新密码不一致"), true);
+            return;
+        }
+        try {
+            const response = await TrpgApi.post<ApiResponse>("/api/auth/password/change", {
+                current_password: currentPassword,
+                new_password: newPassword,
+                confirm_password: confirmPassword,
+            });
+            if (!response.success) {
+                showMessage("forcePasswordMessage", localizedAuthMessage(response, authText("profile.error.password_change_failed", "密码修改失败")), true);
+                return;
+            }
+            const updated = window.currentUser ? { ...window.currentUser, must_change_password: false } : null;
+            setCurrentUser(updated);
+            maybeShowForcePasswordModal(updated);
+            ["forceCurrentPassword", "forceNewPassword", "forceConfirmPassword"].forEach((id) => {
+                const input = document.getElementById(id) as HTMLInputElement | null;
+                if (input) input.value = "";
+            });
+            showNotification(authText("password.force.success", "密码已修改，可继续使用"), "success");
+        } catch (error) {
+            console.error("强制修改密码失败:", error);
+            showMessage("forcePasswordMessage", authText("profile.error.password_change_failed_retry", "密码修改失败，请稍后重试"), true);
+        }
     }
 
     async function restorePostLoginState(): Promise<void> {

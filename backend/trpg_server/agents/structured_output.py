@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from trpg_server.agents.room_state import load_room_state, save_room_state
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -37,16 +40,31 @@ def _extract_json_object(content: str) -> dict[str, Any] | None:
             return None
 
 
+def _narration_text(data: dict[str, Any]) -> str:
+    """提取叙事正文，兼容不同厂商的字段命名（narration/reply/content/...）。"""
+    for key in ("narration", "reply", "content", "message", "text"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def parse_kp_response(content: str) -> StructuredKPResponse | None:
     data = _extract_json_object(content)
-    if not data or not any(key in data for key in ("narration", "options", "state_updates", "next_scene", "npc_actions", "triggered_files")):
+    if not data or not any(
+        key in data
+        for key in (
+            "narration", "reply", "content", "message", "text",
+            "options", "state_updates", "next_scene", "npc_actions", "triggered_files",
+        )
+    ):
         return None
     options = data.get("options") if isinstance(data.get("options"), list) else []
     actions = data.get("npc_actions") if isinstance(data.get("npc_actions"), list) else []
     updates = data.get("state_updates") if isinstance(data.get("state_updates"), dict) else {}
     triggered = data.get("triggered_files") if isinstance(data.get("triggered_files"), list) else []
     return StructuredKPResponse(
-        narration=str(data.get("narration") or "").strip(),
+        narration=_narration_text(data),
         options=[str(item).strip()[:200] for item in options if str(item).strip()][:8],
         state_updates=updates,
         next_scene=str(data.get("next_scene")).strip() if data.get("next_scene") not in (None, "") else None,
@@ -113,6 +131,17 @@ def validate_structured_response(
         text = str(action.get("action") or "").strip()
         if text and (not npc_ids or str(npc_id) in npc_ids):
             actions.append({"npc_id": str(npc_id), "action": text[:500]})
+    # 守剧本护栏的「丢弃」必须可见：否则 KP 引用了剧本外的场景/角色，只是被静默忽略，
+    # 管理员既看不到 KP 在编造，也无法据此调整提示词。这里把丢弃原因写进日志。
+    if response.next_scene and scene_ids and response.next_scene not in scene_ids:
+        logger.warning(
+            "KP 结构化响应引用了剧本外的场景 next_scene=%s，已忽略（已知场景数=%d）",
+            response.next_scene,
+            len(scene_ids),
+        )
+    dropped_actions = len(response.npc_actions) - len(actions)
+    if dropped_actions > 0:
+        logger.warning("KP 结构化响应引用了 %d 个剧本外的 NPC 行动，已忽略", dropped_actions)
     return StructuredKPResponse(
         narration=response.narration,
         options=response.options,
@@ -170,24 +199,36 @@ def validate_state_updates(
             entity_ids["items"].add(str(item["id"]))
         elif kind in {"npc", "npcs", "character"}:
             entity_ids["npc_attitudes"].add(str(item["id"]))
+    dropped_scene = None
+    dropped_entities = 0
     for key, value in updates.items():
         if key not in ALLOWED_STATE_FIELDS:
             continue
         if key == "active_scene_id":
             if value not in (None, "") and str(value) not in scene_ids:
+                dropped_scene = str(value)
                 continue
             result[key] = str(value) if value not in (None, "") else None
         elif key == "npc_attitudes":
             if isinstance(value, dict):
                 allowed = entity_ids["npc_attitudes"]
-                result[key] = {str(k)[:100]: str(v)[:200] for k, v in value.items() if not allowed or str(k) in allowed}
+                kept = {str(k)[:100]: str(v)[:200] for k, v in value.items() if not allowed or str(k) in allowed}
+                dropped_entities += len(value) - len(kept)
+                result[key] = kept
         elif key == "rolling_summary":
             result[key] = str(value or "")[:4000]
         elif key in {"completed", "ending_reached"}:
             result[key] = bool(value)
         elif isinstance(value, list):
             allowed = entity_ids.get(key, set())
-            result[key] = [item for item in value[:50] if not allowed or str(item) in allowed]
+            kept = [item for item in value[:50] if not allowed or str(item) in allowed]
+            dropped_entities += len(value[:50]) - len(kept)
+            result[key] = kept
+    # 状态更新里引用了剧本外实体的部分被丢弃时必须留痕，便于排查 KP 是否在编造。
+    if dropped_scene:
+        logger.warning("KP 状态更新引用了剧本外的 active_scene_id=%s，已忽略", dropped_scene)
+    if dropped_entities:
+        logger.warning("KP 状态更新引用了 %d 个剧本外的线索/物品/NPC，已忽略", dropped_entities)
     return result
 
 

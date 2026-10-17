@@ -11,7 +11,7 @@ import re
 
 from flask import current_app
 
-from trpg_server.ai_platform_config import load_platform_config
+from trpg_server.ai_platform_config import load_platform_config, ordered_platform_paths
 from trpg_server.role_config import MODULE_SUMMARIZER_ROLE_ID, load_roles
 from trpg_server.settings import AI_PLATFORM_SECRET_DIR, CONFIG_DIR
 
@@ -44,7 +44,7 @@ def load_enabled_platform(provider_id=None):
     if not platform_dir.exists():
         return None, None
 
-    for path in sorted(platform_dir.glob("*.json")):
+    for path in ordered_platform_paths(platform_dir):
         if provider_id and path.stem != provider_id:
             continue
         try:

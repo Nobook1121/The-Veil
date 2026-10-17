@@ -294,10 +294,13 @@ class AIPlatformManager implements AIPlatformManager {
         try {
             const config = this.getPlatform(platform);
             if (!config) throw new Error("平台配置不存在");
-            if (!config.enabled) throw new Error("平台未启用");
 
+            // 自定义平台可能尚未添加任何模型（models 为空）或处于未启用状态，
+            // 这两种情况都仍应允许测试连接：只要 base_url/密钥齐全即可发起请求。
             const model = config.models.find((item) => item.id === modelId);
-            if (!model) throw new Error("模型不存在");
+            const timeoutSeconds = typeof config.config.timeout === "number" && config.config.timeout > 0
+                ? config.config.timeout
+                : 30;
 
             const startTime = Date.now();
             const testRequest = {
@@ -311,7 +314,7 @@ class AIPlatformManager implements AIPlatformManager {
                 {
                     method: "POST",
                     body: testRequest,
-                    timeout: config.config.timeout * 1000,
+                    timeout: timeoutSeconds * 1000,
                 },
             );
 
@@ -327,7 +330,7 @@ class AIPlatformManager implements AIPlatformManager {
             return {
                 success: true,
                 time: new Date().toLocaleString(),
-                model: model.name,
+                model: model?.name || modelId,
                 speed: `${tokenSpeed.toFixed(2)} token/s`,
                 consumption: `${totalTokens} tokens`,
                 duration: `${duration.toFixed(2)}s`,
@@ -340,6 +343,22 @@ class AIPlatformManager implements AIPlatformManager {
                 error: aiPlatformErrorMessage(error),
             };
         }
+    }
+
+    async savePlatformOrder(order: string[]): Promise<boolean> {
+        const { response, data } = await TrpgApi.requestWithResponse<ApiResponse>(
+            "/api/config/aiplatform/order",
+            { method: "POST", body: { order } },
+        );
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || data.error || "保存排序失败");
+        }
+        // 同步本地缓存里的 order，避免重新加载前顺序错乱。
+        order.forEach((platformId, index) => {
+            const config = this.platforms[platformId];
+            if (config) config.order = index;
+        });
+        return true;
     }
 
     private async loadPlatform(platform: string): Promise<AIPlatformConfig | null> {
@@ -403,6 +422,7 @@ function normalizeAIPlatformConfig(value: unknown): AIPlatformConfig | null {
         description: typeof value.description === "string" ? value.description : "",
         icon: typeof value.icon === "string" ? value.icon : "",
         enabled: value.enabled === true,
+        order: typeof value.order === "number" && Number.isFinite(value.order) ? value.order : undefined,
         config,
         models,
     };
@@ -420,8 +440,18 @@ function normalizeAIModelConfig(value: unknown): AIModelConfig | null {
     return model;
 }
 
-// 排序：内置供应商按模板顺序排在前，自定义供应商按名称排在后面。
+// 排序：管理员拖动排序写入的 order 优先；未设置 order 的排在最后，再按内置模板顺序 + 名称。
 function comparePlatformOrder(left: AIPlatformConfig, right: AIPlatformConfig): number {
+    const leftOrder = typeof left.order === "number" ? left.order : null;
+    const rightOrder = typeof right.order === "number" ? right.order : null;
+    if (leftOrder !== null && rightOrder !== null) {
+        if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    } else if (leftOrder !== null) {
+        return -1;
+    } else if (rightOrder !== null) {
+        return 1;
+    }
+
     const leftIndex = BUILTIN_PLATFORM_ORDER.indexOf(left.platform);
     const rightIndex = BUILTIN_PLATFORM_ORDER.indexOf(right.platform);
     const leftRank = leftIndex === -1 ? BUILTIN_PLATFORM_ORDER.length : leftIndex;

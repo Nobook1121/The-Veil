@@ -127,12 +127,23 @@ class ConfigManager {
         configSetInputValue("autosaveMaxNodes", this.get("general", "autosave", "max_nodes", 3));
         configSetInputValue("triggerMaxFileSize", this.get("general", "scenario", "trigger_max_file_size", 5242880));
         configSetCheckboxValue("showTimestamp", this.get("general", "chat", "show_timestamp", true));
-        configSetCheckboxValue("streamOutput", this.get("general", "ai", "stream_output", false));
-        configSetCheckboxValue("showAIHints", this.get("general", "ai", "show_ai_hints", true));
         configSetInputValue("messageFontSize", this.get("general", "chat", "message_font_size", 14));
+        configSetInputValue("messageRateLimit", this.get("general", "chat", "message_rate_limit", 10));
+        configSetCheckboxValue("enableAIResponseLock", this.get("general", "ai", "enable_ai_response_lock", false));
+        configSetCheckboxValue("streamOutput", this.get("general", "ai", "stream_output", false));
+        configSetCheckboxValue("scenarioImportStreamOutput", this.get("general", "scenario_import", "stream_output", true));
+        configSetCheckboxValue("debugMode", this.get("general", "ai", "debug_mode", false));
+        configSetCheckboxValue("showAIHints", this.get("general", "ai", "show_ai_hints", true));
         // KP 请求限制（达到后自动收尾并提示，不静默无响应）
         configSetInputValue("maxToolRounds", this.get("general", "ai", "max_tool_rounds", 8));
         configSetInputValue("aiRequestTimeout", this.get("general", "ai", "ai_request_timeout", 300));
+        configSetInputValue("aiRequestMaxRetries", this.get("general", "ai", "ai_request_max_retries", 5));
+        configSetCheckboxValue("dedupeToolCalls", this.get("general", "ai.prompt", "dedupe_tool_calls", true));
+        // 本地响应缓存（命中即跳过上游请求，直接省 token）
+        configSetCheckboxValue("semanticCacheEnabled", this.get("general", "ai.cache", "semantic_enabled", true));
+        configSetInputValue("semanticCacheTtl", this.get("general", "ai.cache", "semantic_ttl_seconds", 120));
+        configSetInputValue("exactCacheTtl", this.get("general", "ai.cache", "exact_ttl_seconds", 300));
+        configSetCheckboxValue("recordPromptSegments", this.get("general", "ai", "record_prompt_segments", true));
         // 骰娘默认阈值（房间规则未单独设置时生效）
         configSetInputValue("diceCriticalThresholdDefault", this.get("general", "ai", "dice_critical_threshold", 1));
         configSetInputValue("diceFumbleThresholdDefault", this.get("general", "ai", "dice_fumble_threshold", 96));
@@ -148,6 +159,8 @@ class ConfigManager {
         configSetInputValue("maxRecursionDepth", this.get("general", "ai.knowledge", "max_recursion_depth", 3));
         configSetInputValue("lorebookTokenBudget", this.get("general", "ai.knowledge", "lorebook_token_budget", 0));
 
+        // UI 回填完成后记录「已保存基线」，让设置页的保存条据此判断未保存改动。
+        window.refreshGeneralSettingsBaseline?.();
         console.log("常规设置已应用到 UI");
     }
 

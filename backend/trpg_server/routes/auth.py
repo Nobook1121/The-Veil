@@ -21,6 +21,7 @@ from trpg_server.security import (
     safe_join,
 )
 from trpg_server.settings import AVATARS_DIR
+from trpg_server.media_defaults import normalize_avatar
 from trpg_server.users.smtp import get_auth_settings, public_auth_settings
 from trpg_server.users.tokens import (
     disabled_message,
@@ -62,10 +63,11 @@ def _user_payload(user):
         "username": user.get("username", ""),
         "role": user.get("role", "USER"),
         "email": user.get("email", ""),
-        "avatar": user.get("avatar", "/assets/avatars/default.jpg"),
+        "avatar": normalize_avatar(user.get("avatar")),
         "nickname": user.get("nickname") or user.get("username", ""),
         "presence": user.get("presence", "online"),
         "two_factor_enabled": user.get("two_factor_enabled", False),
+        "must_change_password": bool(user.get("must_change_password")),
         "csrf_token": session.get(CSRF_SESSION_KEY),
     }
 
@@ -387,7 +389,7 @@ def update_user():
         if not username:
             return error_response("Please provide username", 400, "Incomplete data")
 
-        avatar_path = user.get("avatar", "/assets/avatars/default.jpg")
+        avatar_path = normalize_avatar(user.get("avatar"))
         if "avatar" in request.files:
             avatar_path, saved_avatar_file = _save_avatar(request.files["avatar"], user_id)
 

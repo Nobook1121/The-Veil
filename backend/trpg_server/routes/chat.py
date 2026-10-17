@@ -19,7 +19,9 @@ from trpg_server.agents.runtime import run_agent_completion
 from trpg_server.agents.structured_output import apply_state_updates, parse_kp_response, validate_state_updates, validate_structured_response
 from trpg_server.agents.telemetry import build_provider_cache_key, calculate_cache_hit_rate, record_ai_usage
 from trpg_server.agents.prompt_builder import build_prompt_layers
-from trpg_server.agents.cache import ExactResponseCache, ProviderPrefixCache, SemanticCache, build_exact_response_key
+from trpg_server.agents.token_accounting import attribute_prompt_segments
+from trpg_server.agents.cache import ExactResponseCache, ProviderPrefixCache, SemanticCache, build_exact_response_key, stable_state_for_cache
+from trpg_server.agents.http_retry import post_with_retry
 from trpg_server.agents.knowledge_base import KnowledgeBaseService
 from trpg_server.agents.ruleset_knowledge import RulesetKnowledgeStore, search_ruleset
 from trpg_server.agents.tools import default_tool_registry
@@ -28,7 +30,7 @@ from trpg_server.agents.room_state import append_room_event, project_room_state
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
 from trpg_server.responses import error_response, server_error, success_response
-from trpg_server.role_config import load_roles, provider_small_model_config
+from trpg_server.role_config import load_roles, resolve_task_model
 from trpg_server.settings import (
     CONFIG_DIR,
     ROOMS_DIR,
@@ -54,11 +56,13 @@ from trpg_server.routes.chat_helpers import (
     _json_for_log,
     _load_debug_kp_prompt,
     _load_enabled_platform,
+    _load_enabled_platforms,
     _load_history,
     _load_kp_prompt,
     _mark_scenario_started,
     _maybe_remember_important_action,
     _message_response,
+    _notify_platform_switch,
     _profile_for_request,
     _request_allows_check,
     _request_allows_manual_trigger,
@@ -81,11 +85,15 @@ _EXACT_CACHE = ExactResponseCache(default_ttl=300)
 _SEMANTIC_CACHE = SemanticCache(default_ttl=120)
 
 
-def _post_ai_request(base_url, headers, timeout=300, debug=False):
+def _post_ai_request(base_url, headers, timeout=300, debug=False, max_retries=5, on_retry=None):
     """构造发送 chat/completions 请求的可调用对象。
 
     ``debug`` 为真时才会把完整的请求/响应体写进日志——这些内容包含整段提示词与
     模型输出，正常运行下会把日志刷满，因此默认只在调试模式开启。
+
+    ``max_retries`` 控制「连接被网络层中断」时的重试上限，``on_retry`` 会在每次重试
+    前被调用（用于在聊天框里提示重试进度）。重试与预算逻辑集中在
+    :func:`trpg_server.agents.http_retry.post_with_retry`，与 Responses 路径共用。
     """
 
     def response_detail(response):
@@ -106,14 +114,14 @@ def _post_ai_request(base_url, headers, timeout=300, debug=False):
         )
 
     def post(payload):
-        try:
-            return requests.post(base_url, headers=headers, json=payload, timeout=timeout)
-        except requests.exceptions.Timeout as exc:
-            logger.warning("AI API request timed out after %ss", timeout)
-            raise RuntimeError(f"AI 平台请求超时（等待 {timeout} 秒未响应）") from exc
-        except requests.exceptions.RequestException as exc:
-            logger.warning("AI API request failed: %s", exc)
-            raise RuntimeError(f"AI 平台连接失败：{exc}") from exc
+        return post_with_retry(
+            base_url,
+            headers=headers,
+            payload=payload,
+            timeout=timeout,
+            max_retries=max_retries,
+            on_retry=on_retry,
+        )
 
     def requester(payload):
         if debug:
@@ -148,6 +156,55 @@ def _post_ai_request(base_url, headers, timeout=300, debug=False):
         return response_data
 
     return requester
+
+
+def _build_platform_request_state(platform_id, platform_config, runtime_config, on_retry=None):
+    """为某个已启用平台构造一次请求所需的全部状态；配置不完整时返回 ``None``。
+
+    房间内 AI 对话在首个平台失败后，会用它重新构造下一个候选平台的
+    ``base_url``/``headers``/``model``/``requester``，实现顺序加载与自动切换。
+    """
+    section = platform_config.get("config") if isinstance(platform_config, dict) else None
+    section = section if isinstance(section, dict) else {}
+    api_key = section.get("api_key")
+    base_url = chat_completions_endpoint(section.get("base_url"))
+    if not base_url:
+        return None
+    if not api_key and platform_id == "lmstudio":
+        api_key = "lm-studio"
+    elif not api_key:
+        return None
+
+    model = _select_model(platform_config)
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    requester = _post_ai_request(
+        base_url,
+        headers,
+        runtime_config.ai_request_timeout,
+        debug=runtime_config.debug_mode,
+        max_retries=runtime_config.ai_request_max_retries,
+        on_retry=on_retry,
+    )
+    agent_requester = _build_agent_requester(
+        platform_config,
+        base_url,
+        headers,
+        model,
+        runtime_config.ai_request_timeout,
+        requester,
+        max_retries=runtime_config.ai_request_max_retries,
+    )
+    return {
+        "platform": platform_id,
+        "base_url": base_url,
+        "headers": headers,
+        "model": model,
+        "requester": requester,
+        "agent_requester": agent_requester,
+    }
 
 
 @bp.route("/api/chat", methods=["POST"])
@@ -276,6 +333,10 @@ def chat():
                 room_id, ai_request_id, stage, label
             )
         runtime_config = load_ai_runtime_config(_get_config_dir())
+        # 本地响应缓存的 TTL 可在设置页调整：命中即整次跳过上游请求，是最直接的省 token
+        # 手段。这里把配置回写到模块级单例，保证新写入的条目使用新的过期时间。
+        _SEMANTIC_CACHE.default_ttl = runtime_config.semantic_cache_ttl
+        _EXACT_CACHE.default_ttl = runtime_config.exact_cache_ttl
         room_snapshot_message = None
         room_snapshot = None
         # Action suggestions are gated by the global hint switch (authoritative)
@@ -296,16 +357,28 @@ def chat():
             room_snapshot = get_room_snapshot({}, agent_context)
             room_snapshot_message = _room_snapshot_system_message(room_snapshot, None, runtime_config)
         model = _select_model(platform_config)
-        small_model = str(provider_small_model_config(platform_config, "summarization").get("id") or model)
+        small_model = resolve_task_model(runtime_config, platform_config, "summarization", model)
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
         }
+
+        def notify_ai_retry(retry_number, max_retries):
+            """连接被中断后重试时，在聊天框的思考气泡里提示重试进度。"""
+            _emit_thinking_stage(
+                room_id,
+                ai_request_id,
+                "retrying",
+                f"连接中断，正在重试（第 {retry_number}/{max_retries} 次）",
+            )
+
         requester = _post_ai_request(
             base_url,
             headers,
             runtime_config.ai_request_timeout,
             debug=runtime_config.debug_mode,
+            max_retries=runtime_config.ai_request_max_retries,
+            on_retry=notify_ai_retry,
         )
         agent_requester = _build_agent_requester(
             platform_config,
@@ -314,6 +387,7 @@ def chat():
             model,
             runtime_config.ai_request_timeout,
             requester,
+            max_retries=runtime_config.ai_request_max_retries,
         )
         history_file, history = _load_history(
             user_id,
@@ -371,6 +445,8 @@ def chat():
             system_prompt = (
                 f"{system_prompt}\n"
                 "最终回复必须是有效的 JSON 对象（JSON object），不要输出 JSON 之外的内容。"
+                "所有工具调用必须使用接口原生的 tool_calls 字段，禁止把工具调用写进正文 JSON（例如 "
+                "{\"tool_calls\": [...]}），也不要只描述“将要调用”某个工具而不真正调用。"
                 "房间快照中的 scene_manifest/global_manifest 是唯一索引；摘要不是事实。若 sequential=true，优先按 order 顺序加载模块。"
                 "仅在用户明确需要时按 ID 加载模块原文；转场先调用 room.activate_scenario_scene，再读模块。"
                 "不得创造剧本未写出的地点、设施、NPC、道具或触发器内容；未提供就明确说明。"
@@ -475,7 +551,21 @@ def chat():
             room_snapshot_message=room_snapshot_message,
         )
         _emit_thinking_stage(room_id, ai_request_id, "vector_search_done", "向量库检索完成")
+        # 提示词分段估算：把本次输入 token 拆到静态前缀/知识库/历史/本轮输入等分段，
+        # 随用量一起落库。关了开关就跳过估算，避免不必要的额外开销。
+        prompt_segments = (
+            attribute_prompt_segments(prompt_layers.messages, prompt_layers.segments)
+            if runtime_config.record_prompt_segments
+            else {}
+        )
         prefix_cache_hit = _PREFIX_CACHE.lookup(prompt_layers.cache_key)
+        if prompt_segments:
+            logger.debug(
+                "prompt segments room_id=%s agent=%s segments=%s",
+                room_id,
+                agent_profile.id,
+                prompt_segments,
+            )
         scenario_info_for_cache = (room_snapshot or {}).get("scenario") if isinstance(room_snapshot, dict) else {}
         scenario_info_for_cache = scenario_info_for_cache if isinstance(scenario_info_for_cache, dict) else {}
         state_for_cache = agent_context.room_state() if room_id else {}
@@ -483,7 +573,7 @@ def chat():
             scenario_info_for_cache.get("id") or "unknown",
             scenario_info_for_cache.get("scenario_version") or scenario_info_for_cache.get("version") or "1",
             scenario_info_for_cache.get("active_scene_id") or "unknown",
-            state_for_cache,
+            stable_state_for_cache(state_for_cache),
             content,
         )
         semantic_state = {
@@ -491,9 +581,23 @@ def chat():
             "scenario_id": scenario_info_for_cache.get("id"),
             "scenario_version": scenario_info_for_cache.get("scenario_version") or scenario_info_for_cache.get("version") or "1",
             "active_scene_id": scenario_info_for_cache.get("active_scene_id"),
-            "state": state_for_cache,
+            # 指纹剔除 event_log 的随机 id / 时间戳等每轮都变的字段，否则本地缓存几乎永不命中。
+            "state": stable_state_for_cache(state_for_cache),
         }
-        cached_result = None if scenario_start else (_EXACT_CACHE.get(exact_cache_key) if not room_id else _SEMANTIC_CACHE.get(content, semantic_state))
+        # 只有「无副作用」的输入才允许走本地缓存：检定/手动触发/转场会推进剧情，
+        # 复用旧回复会让 KP 忽略本次裁定与状态变化。这类输入一律直连上游。
+        side_effect_requested = (
+            _request_allows_check(content)
+            or _request_allows_manual_trigger(content)
+            or _request_allows_scene_transition(content)
+        )
+        cache_lookup_allowed = not scenario_start and not side_effect_requested
+        cached_result = None
+        if cache_lookup_allowed:
+            if not room_id:
+                cached_result = _EXACT_CACHE.get(exact_cache_key)
+            elif runtime_config.semantic_cache_enabled:
+                cached_result = _SEMANTIC_CACHE.get(content, semantic_state)
         if isinstance(cached_result, dict) and cached_result.get("content"):
             _emit_thinking_stage(room_id, ai_request_id, "finalizing", "正在整理回复")
             cached_knowledge_usage = cached_result.get("knowledge_usage") or {
@@ -520,12 +624,17 @@ def chat():
                     "completion_tokens": 0,
                     "cached_tokens": 0,
                     "total_tokens": 0,
+                    # 本地缓存命中：没有请求上游，按 100% 命中记账。
+                    "cache_hit_rate": 100.0,
                     "ruleset_ids": cached_knowledge_usage.get("ruleset", {}).get("ruleset_ids", []),
                     "knowledge_versions": cached_knowledge_usage.get("ruleset", {}).get("knowledge_versions", []),
                     "retrieval_topics": cached_knowledge_usage.get("ruleset", {}).get("topics", []),
                     "retrieval_chunk_count": cached_knowledge_usage.get("ruleset", {}).get("chunks", 0),
                     "retrieval_latency_ms": 0,
                     "retrieval_citations": cached_knowledge_usage.get("ruleset", {}).get("citations", []),
+                    # 本地缓存命中的分段只作参考：没有调用上游，token 记为 0，分段占比
+                    # 用于说明「如果没有缓存会花在哪里」。
+                    "prompt_segments": prompt_segments,
                 },
             )
             return success_response(
@@ -555,7 +664,11 @@ def chat():
                 "agent_id": agent_profile.id,
                 "cache_key": prompt_layers.cache_key,
             }
-            request_data["response_format"] = {"type": "json_object"}
+            # 不要在此设置 response_format=json_object：它和原生工具调用（tools +
+            # tool_choice）互斥。强制 JSON 输出会让部分厂商把本该放进 tool_calls 字段
+            # 的调用塞进正文 JSON（{"reply": ..., "tool_calls": [...]}），
+            # trpg_server.agents.runtime._tool_calls 只认原生字段，于是工具被静默丢弃、
+            # 原始 JSON 反而被当成 KP 回复展示。
         if runtime_config.stream_output:
             request_data["stream"] = False
 
@@ -568,20 +681,76 @@ def chat():
             模型=request_data["model"],
             内容长度=len(content),
         )
-        started_at = time.perf_counter()
-        result = run_agent_completion(
-            requester=agent_requester,
-            base_payload=request_data,
-            profile=request_profile,
-            registry=default_tool_registry(),
-            context=agent_context,
-            max_tool_rounds=runtime_config.max_tool_rounds,
-            max_tool_result_chars=runtime_config.max_tool_result_chars,
-            excluded_tools=(
-                {"room.get_scenario_module", "room.activate_scenario_scene"} if direct_import else None
-            ),
-        )
-        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        # 房间内 AI 对话：按管理员拖动排序后的顺序加载启用平台；首个平台无法加载
+        # （报错、余额不足等）时自动切换到下一个启用平台，同一时刻只使用一个平台。
+        # 切换原因推送给在线管理员。非房间场景（模块摘要、剧本导入等）仍只用首选平台。
+        attempt_platforms = [(selected_platform, platform_config)]
+        if room_id:
+            for _candidate_id, _candidate_config in _load_enabled_platforms(agent_profile.provider):
+                if _candidate_id != selected_platform:
+                    attempt_platforms.append((_candidate_id, _candidate_config))
+
+        result = None
+        last_error = None
+        elapsed_ms = 0.0
+        for attempt_index, (attempt_platform, attempt_config) in enumerate(attempt_platforms):
+            next_platform = (
+                attempt_platforms[attempt_index + 1][0]
+                if attempt_index + 1 < len(attempt_platforms)
+                else None
+            )
+            if attempt_index == 0:
+                attempt_state = {"model": model, "agent_requester": agent_requester}
+            else:
+                attempt_state = _build_platform_request_state(
+                    attempt_platform, attempt_config, runtime_config, on_retry=notify_ai_retry
+                )
+            if not attempt_state:
+                last_error = f"AI 平台「{attempt_platform}」配置不完整"
+                if next_platform:
+                    _notify_platform_switch(attempt_platform, next_platform, "配置不完整")
+                continue
+
+            request_data["model"] = attempt_state["model"]
+            started_at = time.perf_counter()
+            attempt_result = run_agent_completion(
+                requester=attempt_state["agent_requester"],
+                base_payload=request_data,
+                profile=request_profile,
+                registry=default_tool_registry(),
+                context=agent_context,
+                max_tool_rounds=runtime_config.max_tool_rounds,
+                max_tool_result_chars=runtime_config.max_tool_result_chars,
+                dedupe_tool_calls=runtime_config.dedupe_tool_calls,
+                excluded_tools=(
+                    {"room.get_scenario_module", "room.activate_scenario_scene"} if direct_import else None
+                ),
+            )
+            elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+
+            if attempt_result.error:
+                last_error = attempt_result.error
+                logger.warning(
+                    "AI agent request failed platform=%s room_id=%s user_id=%s error=%s",
+                    attempt_platform,
+                    room_id,
+                    session.get("user_id"),
+                    attempt_result.error,
+                )
+                if next_platform:
+                    _notify_platform_switch(attempt_platform, next_platform, attempt_result.error)
+                    continue
+                break
+
+            result = attempt_result
+            selected_platform = attempt_platform
+            model = attempt_state["model"]
+            break
+
+        if result is None:
+            _emit_thinking_stage(room_id, ai_request_id, "error", "AI 请求失败")
+            return error_response(last_error or "AI agent request failed", 500, "AI agent request failed")
+
         if result.error:
             logger.warning(
                 "AI agent request failed room_id=%s user_id=%s error=%s",
@@ -645,6 +814,7 @@ def chat():
                 "scenario_retrieval_chunk_count": knowledge_usage["scenario"]["chunks"],
                 "agent_request_rounds": int(agent_context.tool_state.get("agent_request_rounds") or 0),
                 "agent_tool_calls": list(agent_context.tool_state.get("tool_call_trace") or []),
+                "prompt_segments": prompt_segments,
             },
         )
 
@@ -764,10 +934,13 @@ def chat():
             user_history_item["speaker"] = speaker
         history.extend([user_history_item, {"role": "assistant", "content": ai_response}])
         if not result.tool_messages and not direct_messages and not validated_updates and structured is None and not suggestions:
+            # 有副作用的输入（检定/触发/转场）即使本次没有工具产出，也不写缓存：
+            # 下一次相同输入很可能是新的裁定，复用旧叙事会削弱剧本遵守度。
             cache_value = {"content": ai_response, "token_count": token_count, "structured_output": None, "knowledge_usage": knowledge_usage}
             if room_id:
-                _SEMANTIC_CACHE.set(content, semantic_state, cache_value)
-            else:
+                if runtime_config.semantic_cache_enabled and not side_effect_requested:
+                    _SEMANTIC_CACHE.set(content, semantic_state, cache_value)
+            elif not side_effect_requested:
                 _EXACT_CACHE.set(exact_cache_key, cache_value)
         _maybe_remember_important_action(content, agent_context)
         if compact_requested_by_ai:

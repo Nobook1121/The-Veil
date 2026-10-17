@@ -8,11 +8,12 @@ from uuid import uuid4
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.media_defaults import normalize_avatar
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, success_response
 from trpg_server.role_config import load_roles
-from trpg_server.security import get_user_manager, is_socket_user_online, safe_join
+from trpg_server.security import get_user_manager, is_socket_user_online, is_user_in_room, safe_join
 from trpg_server.settings import CONFIG_DIR, ROOMS_DIR, SCENARIOS_DIR, ROOM_ARCHIVES_DIR, CHARACTERS_DIR, HISTORY_DIR
 from trpg_server.agents.config import load_ai_runtime_config
 from trpg_server.agents.room_state import save_room_state
@@ -307,9 +308,9 @@ def _current_member(character_card=None):
 
         user = user_manager.get_user_by_id(user_id)
 
-    avatar = "/assets/avatars/default.jpg"
+    avatar = ""
     if user:
-        avatar = user.get("avatar") or avatar
+        avatar = normalize_avatar(user.get("avatar"))
 
     member = {
         "user_id": user_id,
@@ -635,11 +636,30 @@ def _room_permission_label(member, info):
     return label
 
 
-def _is_member_online(member):
+def _is_member_online(member, room_id=None):
+    """成员在该房间是否显示为「在线」。
+
+    仅当用户既在线、又已经进入这个房间时才算在线：用户在线但停留在别的房间/页面时，
+    不应在本房间的成员列表里显示为在线。
+    """
     if not _is_active_member(member):
         return False
     user_id = member.get("user_id")
-    return user_id is not None and is_socket_user_online(user_id)
+    if user_id is None or not is_socket_user_online(user_id):
+        return False
+    # 未提供 room_id 时退回到旧的「全局在线」判定，兼容不传房间的调用方。
+    if room_id in (None, ""):
+        return True
+    return is_user_in_room(user_id, room_id)
+
+
+def _room_has_online_member(info):
+    """房间内是否存在「已进入该房间且在线」的成员（用于自动存档判定）。"""
+    room_id = (info or {}).get("id")
+    for member in (info or {}).get("members") or []:
+        if isinstance(member, dict) and _is_member_online(member, room_id):
+            return True
+    return False
 
 
 def _live_member_role(member):
@@ -669,7 +689,7 @@ def _room_summary(info):
         role = _live_member_role(member)
         view = {**member, "role": role}
         view["is_active"] = _is_active_member(member)
-        view["is_online"] = _is_member_online(member)
+        view["is_online"] = _is_member_online(member, info.get("id"))
         view["permission_label"] = _room_permission_label(view, info)
         return view
 
@@ -1380,19 +1400,19 @@ def create_room_message(room_id):
         role = _configured_role((message.get("metadata") or {}).get("roleId") or data.get("role_id") or "kp")
         message["sender_id"] = None
         message["sender_name"] = data.get("sender_name") or role.get("name") or "KP"
-        message["avatar"] = data.get("avatar") or role.get("avatar") or "/assets/avatars/default_kp.jpg"
+        message["avatar"] = normalize_avatar(data.get("avatar") or role.get("avatar"))
     elif message["type"] == "dice":
         message["sender_id"] = None
         message["sender_name"] = data.get("sender_name", "骰娘")
-        message["avatar"] = "/assets/avatars/default_dice.jpg"
+        message["avatar"] = ""
     elif message["type"] == "system":
         message["sender_id"] = None
         message["sender_name"] = data.get("sender_name", "系统")
-        message["avatar"] = "/assets/avatars/default_system.jpg"
+        message["avatar"] = ""
     elif message["type"] == "trigger":
         message["sender_id"] = None
         message["sender_name"] = data.get("sender_name") or "触发器"
-        message["avatar"] = data.get("avatar") or "/assets/avatars/default_system.jpg"
+        message["avatar"] = normalize_avatar(data.get("avatar"))
 
     messages = _read_messages(room_dir)
     messages.append(message)
@@ -1462,7 +1482,7 @@ def trigger_room_scenario(room_id):
         "type": "trigger",
         "sender_id": None,
         "sender_name": trigger_message.get("sender_name", "触发器"),
-        "avatar": trigger_message.get("avatar", "/assets/avatars/default_system.jpg"),
+        "avatar": normalize_avatar(trigger_message.get("avatar")),
         "content": trigger_message.get("content", ""),
         "time": data.get("time") or time.strftime("%H:%M"),
         "created_at": _timestamp(),
@@ -1792,6 +1812,10 @@ def run_scheduled_autosaves():
     for room_dir in _iter_room_dirs():
         info = _read_room(room_dir)
         if not info or info.get("archived"):
+            continue
+        # 仅当房间内确实有「已进入该房间且在线」的玩家时才自动存档：
+        # 玩家在线但没进入这个房间，不应对该房间产生自动存档。
+        if not _room_has_online_member(info):
             continue
         autosave_path = room_dir / "autosave.json"
         try:

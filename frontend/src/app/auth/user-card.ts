@@ -118,7 +118,7 @@ namespace AuthModule {
 
         const avatar = document.getElementById("memberProfileAvatar") as HTMLImageElement | null;
         if (avatar) {
-            avatar.src = member.avatar || "/assets/avatars/default.jpg";
+            avatar.src = TrpgAvatar.resolveAvatarSrc(member.username || "", member.avatar);
             avatar.alt = member.username || "";
         }
         const nameText = document.getElementById("memberProfileName");

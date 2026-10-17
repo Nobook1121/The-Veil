@@ -41,6 +41,20 @@ class _TTLCache:
         entry = self._entries.get(str(key))
         return {"hits": entry.hits if entry else 0, "present": bool(self._get(str(key)))}
 
+    def clear(self) -> int:
+        """清空全部条目，返回被清除的条目数（含已过期但尚未回收的）。"""
+
+        count = len(self._entries)
+        self._entries.clear()
+        return count
+
+    def snapshot(self) -> dict[str, Any]:
+        """返回当前存活条目数与累计命中数，用于控制台查看缓存状态。"""
+
+        now = time.time()
+        live = [entry for entry in self._entries.values() if entry.expires_at > now]
+        return {"entries": len(live), "hits": sum(entry.hits for entry in live)}
+
 
 class ProviderPrefixCache(_TTLCache):
     """Tracks stable provider prefixes; provider remains the source of truth for billing hits."""
@@ -69,6 +83,28 @@ class SemanticCache(_TTLCache):
 
     def set(self, intent: str, state: dict[str, Any] | None, value: Any, ttl: int | None = None) -> Any:
         return super().set(self._key(intent, state), value, ttl=ttl)
+
+
+# 缓存指纹里必须剔除的易变字段：事件日志/触发记录的随机 id 与时间戳每轮都会变，
+# 但它们并不改变「相同输入是否应复用同一回复」的判断。保留它们会让指纹几乎永不重复、
+# 本地缓存形同虚设。剔除后只保留真正代表剧情推进的内容字段。
+VOLATILE_STATE_KEYS = frozenset({"id", "created_at", "updated_at", "timestamp"})
+
+
+def stable_state_for_cache(value: Any) -> Any:
+    """递归剔除易变字段，得到跨请求稳定的状态投影，专用于生成缓存指纹。
+
+    只作用于缓存键，不改变实际返回给模型/前端的原始状态，因此不会影响 KP 判断。
+    """
+    if isinstance(value, dict):
+        return {
+            str(key): stable_state_for_cache(item)
+            for key, item in value.items()
+            if str(key) not in VOLATILE_STATE_KEYS
+        }
+    if isinstance(value, (list, tuple)):
+        return [stable_state_for_cache(item) for item in value]
+    return value
 
 
 def build_exact_response_key(
