@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from trpg_server.agents.profiles import AgentProfile
-from trpg_server.agents.tools.base import ToolRegistry
+from trpg_server.agents.tools.base import ToolRegistry, to_api_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,9 @@ FOLDABLE_TOOL_NAMES = frozenset(
         "room.get_memory",
     }
 )
+# 回传给厂商的工具消息用的是 API 安全名（``.`` 已换成 ``_``，见 base.to_api_tool_name），
+# 折叠判断需要与之一致，否则这些结果不会被折叠、白白重复计入后续每一轮的输入 token。
+FOLDABLE_TOOL_API_NAMES = frozenset(to_api_tool_name(name) for name in FOLDABLE_TOOL_NAMES)
 # 最近 N 条工具结果始终保留原文，避免刚拿到的数据马上被折叠掉。
 TOOL_RESULT_KEEP_RECENT = 2
 # 这些工具的结果会随房间/剧本状态变化：同一轮内可去重，但跨轮必须允许重新调用，
@@ -69,7 +72,7 @@ def _fold_stale_tool_results(messages: list[dict[str, Any]]) -> None:
     foldable_indexes = [
         index
         for index, message in enumerate(messages)
-        if message.get("role") == "tool" and str(message.get("name") or "") in FOLDABLE_TOOL_NAMES
+        if message.get("role") == "tool" and str(message.get("name") or "") in FOLDABLE_TOOL_API_NAMES
     ]
     stale_count = len(foldable_indexes) - TOOL_RESULT_KEEP_RECENT
     for index in foldable_indexes[: max(0, stale_count)]:
@@ -253,11 +256,29 @@ def _resolve_tool(tool_name: str, enabled_by_name: dict[str, Any]) -> tuple[str,
     return None, None
 
 
+def _api_safe_tool_call(call: Any) -> Any:
+    """把回传给厂商的工具调用名改成合法形式。
+
+    模型有时会照抄提示词里的 ``room.activate_scenario_scene``，若原样回传到
+    DeepSeek 等严格校验的平台会因为名称含 ``.`` 触发 HTTP 400；这里统一换成
+    下划线形式，与下发的工具声明保持一致。
+    """
+    if not isinstance(call, dict):
+        return call
+    function = call.get("function")
+    if not isinstance(function, dict):
+        return call
+    name = function.get("name")
+    if not isinstance(name, str) or "." not in name:
+        return call
+    return {**call, "function": {**function, "name": to_api_tool_name(name)}}
+
+
 def _assistant_tool_call_message(message: dict[str, Any]) -> dict[str, Any]:
     clean_message = {
         "role": "assistant",
         "content": "",
-        "tool_calls": message.get("tool_calls", []),
+        "tool_calls": [_api_safe_tool_call(call) for call in message.get("tool_calls", [])],
     }
     if "function_call" in message:
         clean_message["function_call"] = message["function_call"]
@@ -493,7 +514,7 @@ def run_agent_completion(
                     {
                         "role": "tool",
                         "tool_call_id": call.get("id") or tool_name,
-                        "name": resolved_name,
+                        "name": to_api_tool_name(resolved_name),
                         "content": _dedupe_reuse_notice(resolved_name),
                     }
                 )
@@ -542,7 +563,7 @@ def run_agent_completion(
                 {
                     "role": "tool",
                     "tool_call_id": call.get("id") or tool_name,
-                    "name": resolved_name,
+                    "name": to_api_tool_name(resolved_name),
                     "content": result_payload,
                 }
             )

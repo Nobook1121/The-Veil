@@ -3,8 +3,8 @@
   "name": "InkStone",
   "description": "",
   "icon": "",
-  "enabled": true,
-  "order": 1,
+  "enabled": false,
+  "order": 2,
   "config": {
     "base_url": "https://discovery-api.intern-ai.org.cn",
     "base_url_full": false,

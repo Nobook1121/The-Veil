@@ -25,7 +25,7 @@ const DEFAULT_REQUEST_CONFIG_PATH = "config/aiplatform/default-request.json";
 
 // 「添加/编辑平台」弹窗的当前状态：config 为尚未保存的草稿，isNew 表示新增模式。
 // iconUploaded 记录用户是否手动上传过头像，避免选择内置供应商时覆盖用户上传的图片。
-let platformModalState: { config: AIPlatformConfig; isNew: boolean; iconUploaded: boolean; apiKey: string } | null = null;
+let platformModalState: { config: AIPlatformConfig; isNew: boolean; iconUploaded: boolean; apiKey: string; savedId: string } | null = null;
 
 // 供应商 API 标准选项：仅作为元数据持久化/展示，不改变后端请求构造。
 const PROVIDER_TYPE_OPTIONS = ["openai", "openai-compatible", "anthropic"];
@@ -396,7 +396,7 @@ async function deletePlatform(platform: AIPlatformConfig): Promise<void> {
 
 // 打开「添加/编辑平台」弹窗：config 是草稿副本，isNew 决定保存时是否新建平台 id。
 async function openPlatformConfigModal(config: AIPlatformConfig, isNew: boolean): Promise<void> {
-    platformModalState = { config, isNew, iconUploaded: Boolean(config.icon && config.icon.startsWith("data:")), apiKey: "" };
+    platformModalState = { config, isNew, iconUploaded: Boolean(config.icon && config.icon.startsWith("data:")), apiKey: "", savedId: "" };
     const modalElement = document.getElementById("platformConfigModal");
     const content = document.getElementById("platformConfigContent");
     const title = document.getElementById("platformConfigModalLabel");
@@ -680,8 +680,25 @@ async function savePlatformModal(config: AIPlatformConfig, isNew: boolean, close
         showNotification(platformT("platform.form.need_base_url", "请填写 Base URL"), "error");
         return false;
     }
-    if (isNew && !config.platform) {
-        config.platform = buildPlatformId(config.name, aiPlatformManager.getAllPlatforms().map((item) => item.platform));
+    if (isNew) {
+        const state = platformModalState;
+        const existingIds = aiPlatformManager.getAllPlatforms().map((item) => item.platform);
+        if (state?.savedId) {
+            // 「测试连接」会先落盘一次草稿；再次保存必须沿用同一个 id，否则每次
+            // 保存都会重新编号、凭空多出一个平台。
+            config.platform = state.savedId;
+        } else if (!config.platform) {
+            config.platform = buildPlatformId(config.name, existingIds);
+        } else if (existingIds.includes(config.platform)) {
+            // 同一个内置供应商允许重复添加：选中的模板 id 已被占用时自动换用带序号的
+            // id 与名称（如 deepseek → deepseek-2 / DeepSeek 2），避免保存到同名文件
+            // 把先前添加的平台直接顶替掉。
+            const platformId = buildPlatformId(config.platform, existingIds);
+            const suffix = platformId.slice(config.platform.length + 1);
+            config.platform = platformId;
+            if (suffix) config.name = `${config.name} ${suffix}`;
+        }
+        if (state) state.savedId = config.platform;
     }
 
     const success = await aiPlatformManager.updatePlatformConfig(config.platform, config);
@@ -694,7 +711,13 @@ async function savePlatformModal(config: AIPlatformConfig, isNew: boolean, close
         isNew ? platformT("platform.form.added", "平台添加成功") : platformT("platform.form.saved", "平台配置已保存"),
         "success",
     );
-    if (closeAfter) bootstrap.Modal.getInstance(document.getElementById("platformConfigModal"))?.hide();
+    if (closeAfter) {
+        bootstrap.Modal.getInstance(document.getElementById("platformConfigModal"))?.hide();
+    } else if (platformModalKey(config) !== id) {
+        // 保存时平台 id 变了（自动编号/改名）：同步重渲染弹窗，让内部元素 id 跟随新平台
+        // id。否则「测试连接」之后再点保存会找不到 API Key 输入框，把已填的密钥清掉。
+        renderPlatformModalBody(config, isNew);
+    }
     return true;
 }
 

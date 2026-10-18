@@ -1,54 +1,53 @@
 {
   "platform": "deepseek",
   "name": "DeepSeek",
-  "description": "深度求索AI模型服务平台",
+  "description": "深度求索 AI 模型服务平台",
   "icon": "/assets/aiplatform/deepseek.png",
-  "enabled": false,
+  "enabled": true,
   "config": {
     "base_url": "https://api.deepseek.com/v1",
     "timeout": 30,
-    "headers": {
-      "Content-Type": "application/json"
-    }
+    "provider_type": "openai-compatible",
+    "base_url_full": false,
+    "default_model": "deepseek-flash",
+    "use_previous_response_id": false
   },
   "models": [
     {
-      "id": "deepseek-chat",
-      "name": "DeepSeek Chat",
-      "description": "深度求索的对话模型",
+      "id": "deepseek-flash",
+      "name": "DeepSeek Flash（默认）",
+      "description": "",
       "enabled": true,
-      "params": {
-        "context_window": 8192,
-        "temperature": 0.7,
-        "top_p": 0.95,
-        "max_tokens": 4096
-      },
-      "doc_url": "https://platform.deepseek.com/docs/api/chat/completions"
+      "params": {}
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "description": "",
+      "enabled": true,
+      "params": {}
     }
   ],
   "small_models": {
     "intent_classification": {
-      "id": "deepseek-chat",
-      "name": "DeepSeek Chat",
+      "id": "deepseek-flash",
+      "name": "DeepSeek Flash（默认）",
       "enabled": true
     },
     "state_update": {
-      "id": "deepseek-chat",
-      "name": "DeepSeek Chat",
+      "id": "deepseek-flash",
+      "name": "DeepSeek Flash（默认）",
       "enabled": true
     },
     "summarization": {
-      "id": "deepseek-chat",
-      "name": "DeepSeek Chat",
+      "id": "deepseek-flash",
+      "name": "DeepSeek Flash（默认）",
       "enabled": true
     },
     "schema_repair": {
-      "id": "deepseek-chat",
-      "name": "DeepSeek Chat",
+      "id": "deepseek-flash",
+      "name": "DeepSeek Flash（默认）",
       "enabled": true
     }
-  },
-  "auth_method": "api_key",
-  "version": "1.0.0",
-  "order": 3
+  }
 }

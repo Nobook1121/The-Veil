@@ -36,7 +36,10 @@ const BUILTIN_PLATFORM_TEMPLATES: AIPlatformTemplate[] = [
         base_url: "https://api.deepseek.com/v1",
         base_url_full: false,
         provider_type: "openai-compatible",
-        models: [{ id: "deepseek-chat", name: "DeepSeek Chat" }],
+        models: [
+            { id: "deepseek-flash", name: "DeepSeek Flash（默认）" },
+            { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+        ],
     },
     {
         id: "openrouter",
@@ -417,6 +420,9 @@ function normalizeAIPlatformConfig(value: unknown): AIPlatformConfig | null {
         : (models.find((model) => model.enabled)?.id || models[0]?.id || "");
 
     return {
+        // 磁盘上可能还有前端不认识的扩展段（如 small_models / embedding）；整对象回写时
+        // 必须原样带上，否则后端会直接用请求体覆盖磁盘文件，等于静默丢配置。
+        ...(value as Record<string, unknown>),
         platform,
         name: typeof value.name === "string" && value.name ? value.name : platform,
         description: typeof value.description === "string" ? value.description : "",
@@ -425,7 +431,7 @@ function normalizeAIPlatformConfig(value: unknown): AIPlatformConfig | null {
         order: typeof value.order === "number" && Number.isFinite(value.order) ? value.order : undefined,
         config,
         models,
-    };
+    } as AIPlatformConfig;
 }
 
 function normalizeAIModelConfig(value: unknown): AIModelConfig | null {

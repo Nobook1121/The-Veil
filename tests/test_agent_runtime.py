@@ -220,8 +220,12 @@ def test_runtime_executes_enabled_tool_and_finishes():
     assert result.content == "final answer"
     assert result.token_count == 9
     assert len(requester.calls) == 2
-    assert requester.calls[0]["tools"][0]["function"]["name"] == "test.echo"
+    # 下发给厂商的工具名必须是 API 合法形式（只含 [a-zA-Z0-9_-]）：内部命名空间
+    # 分隔符 "." 会换成 "_"，否则 DeepSeek 等严格校验的平台会返回 HTTP 400。
+    assert requester.calls[0]["tools"][0]["function"]["name"] == "test_echo"
     assert requester.calls[1]["messages"][-1]["role"] == "tool"
+    assert requester.calls[1]["messages"][-1]["name"] == "test_echo"
+    assert requester.calls[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == "test_echo"
 
 
 def test_runtime_records_request_rounds_and_tool_trace():

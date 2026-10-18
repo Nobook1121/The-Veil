@@ -3,8 +3,8 @@
   "name": "阿里云百炼",
   "description": "阿里云AI大模型服务平台",
   "icon": "/assets/aiplatform/aliyun.png",
-  "enabled": true,
-  "order": 0,
+  "enabled": false,
+  "order": 1,
   "config": {
     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
     "base_url_full": true,

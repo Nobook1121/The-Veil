@@ -134,6 +134,8 @@ export function HomeChat() {
                                 id="chatInput"
                                 placeholder="加入房间后可发送消息，使用 @KP 呼叫 AI"
                                 data-i18n-placeholder="chat.placeholder.room_required"
+                                autoComplete="off"
+                                aria-autocomplete="none"
                             />
                             <button className="btn btn-primary" id="sendButton" type="button">
                                 <i className="fa fa-paper-plane" aria-hidden="true" />{" "}
