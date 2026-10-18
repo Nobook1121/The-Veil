@@ -2,6 +2,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+# 各厂商对 function name 的校验规则统一为 ^[a-zA-Z0-9_-]+$（如 DeepSeek、OpenAI）；
+# 内部工具 id 用点号做命名空间（如 room.get_room_snapshot），对外发送前由
+# to_api_tool_name 规整化，解析模型调用时再映射回内部 id。
+
 
 class ToolExecutionError(ValueError):
     pass
