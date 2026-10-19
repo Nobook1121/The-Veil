@@ -529,6 +529,38 @@
         </div>
     </div>
 
+    <div class="modal fade" id="characterAiModal" tabindex="-1" aria-labelledby="characterAiModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="characterAiModalLabel" data-i18n="character.ai.modal.title">AI 生成角色卡</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="characterAiScenario" data-i18n="character.ai.modal.scenario">用于的剧本（可选）</label>
+                        <select class="form-select" id="characterAiScenario">
+                            <option value="" data-i18n="character.ai.modal.no_scenario">不指定剧本</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="characterAiDescription" data-i18n="character.ai.modal.description">角色描述</label>
+                        <textarea class="form-control" id="characterAiDescription" rows="6" placeholder="例如：一位在旧金山经营古董店的华人女性，胆小却博学，擅长鉴定古籍与古物……"></textarea>
+                    </div>
+                    <p class="text-muted small mb-0" data-i18n="character.ai.modal.hint">AI 会结合所选剧本的角色要求与背景生成角色卡；若填写了角色描述，则以角色描述为主，与剧本背景冲突时适当融合。</p>
+                    <div class="alert alert-info py-2 mt-3 d-none" id="characterAiStatus" role="status" aria-live="polite"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="characterAiGenerate">
+                        <i class="fa fa-magic" aria-hidden="true"></i>
+                        <span data-i18n="character.ai.modal.generate">生成</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="modal fade" id="occupationTemplateModal" tabindex="-1" aria-labelledby="occupationTemplateModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-lg modal-dialog-scrollable">
             <div class="modal-content">

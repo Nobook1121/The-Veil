@@ -536,6 +536,8 @@ interface Window {
     let weaponPickerModal: BootstrapModalInstance | null = null;
     let skillSpecialtyModal: BootstrapModalInstance | null = null;
     let skillBaseSettingsModal: BootstrapModalInstance | null = null;
+    let characterAiModal: BootstrapModalInstance | null = null;
+    let characterAiInFlight = false;
     let pendingSkillSpecialtyRowId = "";
     let pendingSkillSpecialtyKey = "";
     let skillBaseSettingsMode: SkillBaseSettingsMode = "user";
@@ -1722,6 +1724,8 @@ interface Window {
         skillSpecialtyModal = skillSpecialtyModalElement && typeof bootstrap !== "undefined" ? new bootstrap.Modal(skillSpecialtyModalElement) : null;
         const skillBaseSettingsModalElement = byId("skillBaseSettingsModal");
         skillBaseSettingsModal = skillBaseSettingsModalElement && typeof bootstrap !== "undefined" ? new bootstrap.Modal(skillBaseSettingsModalElement) : null;
+        const characterAiModalElement = byId("characterAiModal");
+        characterAiModal = characterAiModalElement && typeof bootstrap !== "undefined" ? new bootstrap.Modal(characterAiModalElement) : null;
         hydrateOccupationSelect();
         bindEvents();
         void Promise.all([loadSkillCatalog(), loadOccupationCatalogs(), loadWeaponCatalog()]).then(() => {
@@ -1735,6 +1739,10 @@ interface Window {
         byId("createCharacter")?.addEventListener("click", () => {
             if (!canCreateCharacterCard()) return;
             openEditor();
+        });
+        byId("createCharacterAI")?.addEventListener("click", openCharacterAiModal);
+        byId("characterAiGenerate")?.addEventListener("click", () => {
+            void generateCharacterWithAI();
         });
         byId("saveCharacter")?.addEventListener("click", () => {
             void saveFromEditor();
@@ -2444,6 +2452,70 @@ interface Window {
         if (skillKey === "fighting") return 1;
         const catalog = SKILL_CATALOG.find((entry) => entry.key === skillKey);
         return catalog ? catalog.base : 0;
+    }
+
+    function openCharacterAiModal(): void {
+        if (!canCreateCharacterCard()) return;
+        const descriptionInput = byId<HTMLTextAreaElement>("characterAiDescription");
+        if (descriptionInput) descriptionInput.value = "";
+        setCharacterAiStatus("", false);
+        characterAiModal?.show();
+        void populateCharacterAiScenarios();
+    }
+
+    async function populateCharacterAiScenarios(): Promise<void> {
+        const select = byId<HTMLSelectElement>("characterAiScenario");
+        if (!select) return;
+        const emptyLabel = window.TrpgI18n?.t("character.ai.modal.no_scenario", "不指定剧本") || "不指定剧本";
+        try {
+            const response = await TrpgApi.get<ApiResponse<Array<{ id?: number | string; title?: string }>>>("/api/scenarios");
+            const scenarios = response.success && Array.isArray(response.data) ? response.data : [];
+            const options = scenarios
+                .filter((item) => item && item.id !== undefined && item.id !== null)
+                .map((item) => `<option value="${escapeHtml(String(item.id))}">${escapeHtml(String(item.title || "未命名剧本"))}</option>`)
+                .join("");
+            select.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>${options}`;
+        } catch (error) {
+            console.warn("加载剧本列表失败:", error);
+            select.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>`;
+        }
+    }
+
+    function setCharacterAiStatus(message: string, show: boolean, isError = false): void {
+        const status = byId("characterAiStatus");
+        if (!status) return;
+        status.textContent = message;
+        status.classList.toggle("d-none", !show);
+        status.classList.toggle("alert-info", show && !isError);
+        status.classList.toggle("alert-danger", show && isError);
+    }
+
+    async function generateCharacterWithAI(): Promise<void> {
+        if (characterAiInFlight) return;
+        const scenarioSelect = byId<HTMLSelectElement>("characterAiScenario");
+        const descriptionInput = byId<HTMLTextAreaElement>("characterAiDescription");
+        const scenarioId = scenarioSelect?.value || "";
+        const description = descriptionInput?.value.trim() || "";
+        characterAiInFlight = true;
+        setButtonBusy("characterAiGenerate", true);
+        setCharacterAiStatus(window.TrpgI18n?.t("character.ai.modal.generating", "AI 正在生成角色卡，请稍候…") || "AI 正在生成角色卡，请稍候…", true);
+        try {
+            const response = await TrpgApi.post<ApiResponse<{ character: COC7CharacterCardInput }>>("/api/characters/generate", {
+                scenario_id: scenarioId,
+                description,
+            });
+            if (!response.success || !response.data?.character) {
+                setCharacterAiStatus(response.message || response.error || "生成角色卡失败", true, true);
+                return;
+            }
+            characterAiModal?.hide();
+            openEditor(createCharacterCard(response.data.character));
+        } catch (error) {
+            setCharacterAiStatus(`生成角色卡失败：${characterErrorMessage(error)}`, true, true);
+        } finally {
+            characterAiInFlight = false;
+            setButtonBusy("characterAiGenerate", false);
+        }
     }
 
     function openEditor(card?: COC7CharacterCard): void {
