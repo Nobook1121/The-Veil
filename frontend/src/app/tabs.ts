@@ -335,7 +335,13 @@ async function loadScenarioKnowledge(): Promise<void> {
         if (!response.success || !response.data) throw new Error(response.message || "剧本知识库加载失败");
         list.innerHTML = response.data.length ? response.data.map((item) => `<div class="list-group-item d-flex justify-content-between align-items-center"><div><strong>${settingsEscapeHtml(item.title)}</strong><div class="small text-muted">向量 ${Number(item.vector_count || 0)} · ${settingsEscapeHtml(item.backend)}<br>${settingsEscapeHtml(item.path)}</div></div><button class="btn btn-sm btn-outline-danger" data-delete-scenario-kb="${String(item.scenario_id)}">删除知识库</button></div>`).join("") : '<div class="list-group-item text-muted">没有匹配的剧本知识库</div>';
         list.querySelectorAll<HTMLButtonElement>("[data-delete-scenario-kb]").forEach((button) => button.addEventListener("click", async () => {
-            if (!confirm("确认删除该剧本的知识库向量和索引吗？")) return;
+            const confirmed = await window.TrpgDialog?.confirm({
+                title: "删除知识库",
+                message: "确认删除该剧本的知识库向量和索引吗？",
+                confirmText: "删除",
+                danger: true,
+            });
+            if (!confirmed) return;
             const result = await TrpgApi.del<ApiResponse<unknown>>(`/api/knowledge-bases/scenarios/${encodeURIComponent(button.dataset.deleteScenarioKb || "")}`);
             if (!result.success) throw new Error(result.message || "删除失败");
             await loadScenarioKnowledge();

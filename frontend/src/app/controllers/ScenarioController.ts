@@ -303,7 +303,13 @@ class ScenarioController {
     }
 
     private async onDeleteScenario(id: number): Promise<void> {
-        if (!confirm("确定要删除这个剧本吗？")) return;
+        const confirmed = await window.TrpgDialog?.confirm({
+            title: "删除剧本",
+            message: "确定要删除这个剧本吗？",
+            confirmText: "删除",
+            danger: true,
+        });
+        if (!confirmed) return;
 
         try {
             await this.model.deleteScenario(id);

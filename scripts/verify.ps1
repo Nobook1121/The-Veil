@@ -82,6 +82,7 @@ try {
     "dist\public\js\auth\index.js",
     "dist\public\js\i18n.js",
     "dist\public\js\network.js",
+    "dist\public\js\dialog.js",
     "dist\public\js\qr.js",
     "dist\public\js\vendor\qrcode.js",
     "dist\public\js\rooms.js",

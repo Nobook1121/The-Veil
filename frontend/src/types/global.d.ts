@@ -51,6 +51,18 @@ interface Window {
     refreshScenarioManagement?: () => void;
     openCreateRoomWithScenario?: (scenarioId: number) => Promise<void>;
     TrpgQr?: { renderSvg: (text: string, options?: { cellSize?: number; margin?: number; alt?: string }) => string };
+    TrpgDialog?: {
+        confirm: (options: TrpgDialogOptions) => Promise<boolean>;
+        prompt: (options: TrpgDialogOptions & { defaultValue?: string }) => Promise<string | null>;
+    };
+}
+
+interface TrpgDialogOptions {
+    title?: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    danger?: boolean;
 }
 
 declare function showNotification(message: string, type?: string): void;

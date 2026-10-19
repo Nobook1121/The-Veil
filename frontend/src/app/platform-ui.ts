@@ -384,7 +384,13 @@ function createPlatformCard(platform: AIPlatformConfig): HTMLElement {
 }
 
 async function deletePlatform(platform: AIPlatformConfig): Promise<void> {
-    if (!confirm(platformT("platform.card.delete_confirm", "确定删除「{name}」吗？该平台的配置与密钥会一并删除。", { name: platform.name }))) return;
+    const confirmed = await window.TrpgDialog?.confirm({
+        title: "删除平台",
+        message: platformT("platform.card.delete_confirm", "确定删除「{name}」吗？该平台的配置与密钥会一并删除。", { name: platform.name }),
+        confirmText: "删除",
+        danger: true,
+    });
+    if (!confirmed) return;
     const success = await aiPlatformManager.deletePlatform(platform.platform);
     if (!success) {
         showNotification(platformT("platform.card.delete_failed", "删除平台失败"), "error");
@@ -849,7 +855,14 @@ function bindModelEvents(config: AIPlatformConfig, isNew: boolean): void {
     document.querySelectorAll<HTMLButtonElement>(".remove-model-btn").forEach((button) => {
         button.addEventListener("click", async () => {
             const modelId = button.dataset.model || "";
-            if (!modelId || !confirm(platformT("platform.model.delete_confirm", "确定要删除这个模型吗？"))) return;
+            if (!modelId) return;
+            const confirmed = await window.TrpgDialog?.confirm({
+                title: "删除模型",
+                message: platformT("platform.model.delete_confirm", "确定要删除这个模型吗？"),
+                confirmText: "删除",
+                danger: true,
+            });
+            if (!confirmed) return;
             if (isNew) {
                 syncPlatformFormToConfig(config);
                 config.models = config.models.filter((model) => model.id !== modelId);

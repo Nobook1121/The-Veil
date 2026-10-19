@@ -1617,7 +1617,14 @@ interface Window {
 
     async function deleteGalleryCharacter(id: string): Promise<void> {
         const card = galleryCards.find((item) => item.id === id);
-        if (!card || !canModifyGalleryCard(card) || !window.confirm("确定要删除这张公开角色卡吗？")) return;
+        if (!card || !canModifyGalleryCard(card)) return;
+        const confirmed = await window.TrpgDialog?.confirm({
+            title: "删除公开角色卡",
+            message: "确定要删除这张公开角色卡吗？",
+            confirmText: "删除",
+            danger: true,
+        });
+        if (!confirmed) return;
         const response = await TrpgApi.del<ApiResponse>(`/api/character-gallery/${encodeURIComponent(id)}`);
         if (!response.success) {
             notify(response.error || response.message || "删除公开角色卡失败", "error");
@@ -3357,7 +3364,13 @@ interface Window {
                 ? `确定要删除选中的 ${ids.length} 张公开角色卡吗？此操作不可恢复。`
                 : `确定要删除选中的 ${ids.length} 张角色卡吗？此操作不可恢复。`
         );
-        if (!window.confirm(confirmMessage)) return;
+        const confirmed = await window.TrpgDialog?.confirm({
+            title: "批量删除",
+            message: confirmMessage,
+            confirmText: "删除",
+            danger: true,
+        });
+        if (!confirmed) return;
 
         const deletedIds = new Set<string>();
         const failures: string[] = [];
@@ -3696,7 +3709,14 @@ interface Window {
 
     async function deleteCard(id: string): Promise<void> {
         const card = cards.find((item) => item.id === id);
-        if (!card || !window.confirm(`确定要删除角色卡“${card.name || "未命名角色卡"}”吗？此操作不可恢复。`)) return;
+        if (!card) return;
+        const confirmed = await window.TrpgDialog?.confirm({
+            title: "删除角色卡",
+            message: `确定要删除角色卡“${card.name || "未命名角色卡"}”吗？此操作不可恢复。`,
+            confirmText: "删除",
+            danger: true,
+        });
+        if (!confirmed) return;
         try {
             const response = await TrpgApi.del<ApiResponse>(`/api/characters/${encodeURIComponent(id)}`);
             if (!response.success) {

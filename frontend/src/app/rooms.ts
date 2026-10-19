@@ -163,17 +163,21 @@ function roomSkillBaseOverrides(room: Room | null | undefined): Record<string, n
  * 校验角色卡技能基础值是否超过房规上限：超上限时提示，用户确认后返回按上限裁剪后的卡片。
  * 返回 null 表示用户放弃使用该角色卡；无上限或无超限时原样返回。
  */
-function enforceSkillBaseLimits(
+async function enforceSkillBaseLimits(
     characterCard: Partial<COC7CharacterCard> | null | undefined,
     overrides: Record<string, number>,
     actionLabel: string
-): Partial<COC7CharacterCard> | null {
+): Promise<Partial<COC7CharacterCard> | null> {
     if (!characterCard) return null;
     if (!Object.keys(overrides).length) return characterCard;
     const card = characterCard as COC7CharacterCard;
     const overflows = window.COC7CharacterSheet?.collectCardSkillBaseOverflows?.(card, overrides) || [];
     if (!overflows.length) return characterCard;
-    const confirmed = window.confirm(`${actionLabel}\n以下技能基础值超过房间规则上限：${overflows.join("、")}\n继续将自动把超出部分降低为房间规则上限。`);
+    const confirmed = await window.TrpgDialog?.confirm({
+        title: actionLabel,
+        message: `以下技能基础值超过房间规则上限：${overflows.join("、")}\n继续将自动把超出部分降低为房间规则上限。`,
+        confirmText: "继续",
+    });
     if (!confirmed) return null;
     return window.COC7CharacterSheet?.clampCardSkillBases?.(card, overrides) || characterCard;
 }
@@ -283,7 +287,7 @@ async function confirmRoomEntryCharacterSelection(): Promise<void> {
         return;
     }
     // 超出房规上限时提示；用户取消则停留在选择弹窗，可改选其他角色卡。
-    const characterCard = enforceSkillBaseLimits(selectedCard, roomEntrySkillBases, "该角色卡的基础值超过本房间规则上限。");
+    const characterCard = await enforceSkillBaseLimits(selectedCard, roomEntrySkillBases, "该角色卡的基础值超过本房间规则上限。");
     if (!characterCard) return;
     settleRoomEntrySelection({ action: roomEntrySelectionAction, characterCard });
     if (roomEntrySelectionRoomId) {
@@ -611,7 +615,7 @@ async function enforceSelfCardSkillBaseLimit(room: Room): Promise<void> {
     if (!userId) return;
     const card = (room.members || []).find((member) => String(member.user_id) === userId)?.character_card;
     if (!card) return;
-    const clamped = enforceSkillBaseLimits(card, overrides, "该角色卡的基础值超过本房间规则上限。");
+    const clamped = await enforceSkillBaseLimits(card, overrides, "该角色卡的基础值超过本房间规则上限。");
     if (!clamped || clamped === card) return;
     const response = await TrpgApi.put<ApiResponse<Room>>(
         `/api/rooms/${encodeURIComponent(room.id)}/members/${encodeURIComponent(userId)}/character`,
@@ -719,7 +723,12 @@ function canManageRoom(room: Room): boolean {
 
 async function archiveCurrentRoom(): Promise<void> {
     if (!currentRoom?.id || currentRoom.archived) return;
-    if (!window.confirm("归档后房间将关闭 AI，但仍保留在房间管理列表中，可继续使用骰娘等工具并查看历史记录。继续吗？")) return;
+    const confirmed = await window.TrpgDialog?.confirm({
+        title: "归档房间",
+        message: "归档后房间将关闭 AI，但仍保留在房间管理列表中，可继续使用骰娘等工具并查看历史记录。",
+        confirmText: "归档",
+    });
+    if (!confirmed) return;
     try {
         const response = await TrpgApi.post<ApiResponse<{ archived_at?: string }>>(`/api/rooms/${encodeURIComponent(currentRoom.id)}/archive`, {});
         if (!response.success) throw new Error(response.message || response.error || "归档失败");
@@ -1133,7 +1142,7 @@ async function confirmRoomCharacterBindingUnlocked(userId: string): Promise<void
         return;
     }
     // 超出房规上限时提示；用户取消则中止本次绑定，可先调整角色卡。
-    const characterCard = enforceSkillBaseLimits(selectedCard, roomSkillBaseOverrides(currentRoom), "该角色卡的基础值超过本房间规则上限。");
+    const characterCard = await enforceSkillBaseLimits(selectedCard, roomSkillBaseOverrides(currentRoom), "该角色卡的基础值超过本房间规则上限。");
     if (!characterCard) {
         showNotification("已取消绑定：角色卡基础值超过房间规则上限", "info");
         return;
@@ -1230,7 +1239,13 @@ function updateHomeRoomMeta(): void {
 
 async function deleteCurrentRoom(): Promise<void> {
     if (!currentRoom) return;
-    if (!confirm("确定要删除这个房间吗？此操作不可恢复。")) return;
+    const confirmed = await window.TrpgDialog?.confirm({
+        title: "删除房间",
+        message: "确定要删除这个房间吗？此操作不可恢复。",
+        confirmText: "删除",
+        danger: true,
+    });
+    if (!confirmed) return;
 
     try {
         const deletingRoomId = currentRoom.id;
@@ -1360,7 +1375,13 @@ async function restoreRoomNode(nodeFilename: string): Promise<void> {
 
 async function deleteRoomNode(nodeFilename: string): Promise<void> {
     if (!currentRoom || !nodeFilename) return;
-    if (!confirm("确定要删除这个回档节点吗？")) return;
+    const confirmed = await window.TrpgDialog?.confirm({
+        title: "删除回档节点",
+        message: "确定要删除这个回档节点吗？",
+        confirmText: "删除",
+        danger: true,
+    });
+    if (!confirmed) return;
 
     try {
         const data = await TrpgApi.del<ApiResponse>(`/api/rooms/${currentRoom.id}/nodes/${nodeFilename}`);
@@ -1611,9 +1632,13 @@ async function copyRoomInviteLink(): Promise<void> {
 /** 刷新邀请令牌：生成新链接并让此前分享出去的旧链接立即失效。 */
 async function rotateRoomInviteToken(): Promise<void> {
     if (!currentRoom) return;
-    if (!window.confirm("刷新后将生成新的邀请链接，之前分享出去的旧链接会立即失效。确定刷新吗？")) {
-        return;
-    }
+    const confirmed = await window.TrpgDialog?.confirm({
+        title: "刷新邀请链接",
+        message: "刷新后将生成新的邀请链接，之前分享出去的旧链接会立即失效。",
+        confirmText: "刷新",
+        danger: true,
+    });
+    if (!confirmed) return;
     try {
         const response = await TrpgApi.post<ApiResponse<RoomInviteTokenResponse>>(
             `/api/rooms/${encodeURIComponent(currentRoom.id)}/invite-token`,

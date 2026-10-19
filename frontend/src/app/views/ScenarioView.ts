@@ -140,7 +140,13 @@ class ScenarioView {
             this.showMessage(scenarioT("common.batch.none_selected", "请先选择要删除的项目"));
             return;
         }
-        if (!window.confirm(scenarioT("common.batch.delete_confirm", "确定要删除选中的 {count} 项吗？此操作不可恢复。", { count: ids.length }))) return;
+        const confirmed = await window.TrpgDialog?.confirm({
+            title: "批量删除剧本",
+            message: scenarioT("common.batch.delete_confirm", "确定要删除选中的 {count} 项吗？此操作不可恢复。", { count: ids.length }),
+            confirmText: "删除",
+            danger: true,
+        });
+        if (!confirmed) return;
         // 先退出批量模式，控制器完成删除后会以普通视图重新渲染列表
         this.selectedScenarioIds.clear();
         this.batchMode = false;
@@ -758,10 +764,20 @@ class ScenarioView {
             return;
         }
         const selected = Array.from(files);
-        const alt = selected.map((file) => window.prompt(`请为 ${file.name} 填写资源描述（必填）`, file.name) || "");
-        if (alt.some((value) => !value.trim())) {
-            this.showMessage("每个资源都必须填写描述", true);
-            return;
+        const alt: string[] = [];
+        for (const file of selected) {
+            const description = await window.TrpgDialog?.prompt({
+                title: "资源描述",
+                message: `请为 ${file.name} 填写资源描述（必填）`,
+                defaultValue: file.name,
+                confirmText: "上传",
+            });
+            if (description == null) return;
+            if (!description.trim()) {
+                this.showMessage("每个资源都必须填写描述", true);
+                return;
+            }
+            alt.push(description);
         }
         try {
             const form = new FormData();

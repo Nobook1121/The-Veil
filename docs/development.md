@@ -54,3 +54,4 @@ python -W error::DeprecationWarning -m pytest tests\test_app_factory.py -q
 - 脚本只在 `index.html` 的 `</body>` 前加载，避免重复初始化。
 - 交互状态需要同步可访问性属性，例如 `aria-expanded`、`aria-selected` 和 `aria-current`。
 - UI 样式优先使用 `style.css` 顶部 token，避免继续散落硬编码颜色、阴影和圆角。
+- **禁止使用浏览器原生弹窗 `alert()` / `confirm()` / `prompt()`**：其外观无法与产品风格统一、会阻塞主线程，且在部分浏览器中会被拦截。轻量反馈统一用 `showNotification()`；需要用户确认或输入时用 `window.TrpgDialog.confirm()` / `window.TrpgDialog.prompt()`（`js/dialog.js`，基于 Bootstrap 模态框，返回 Promise 可直接 `await`）。
