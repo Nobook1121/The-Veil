@@ -116,6 +116,14 @@ Node 包可在 `node_modules/<包名>/LICENSE` 查看）。
 | scheduler | 0.27.0 | MIT |
 | typescript | 5.9.3 | Apache-2.0 |
 
+## 前端内置的第三方代码（vendored）
+
+以下代码直接内置于本仓库源码中（非 npm 依赖），随前端一起构建分发。
+
+| 组件 | 版本 | 许可证 | 来源 |
+| --- | --- | --- | --- |
+| qrcode-generator（裁剪版，仅保留核心编码器与 SVG 渲染器） | 1.4.4 | MIT | https://github.com/kazuhikoarase/qrcode-generator |
+
 ## 合规提示
 
 - **PyMuPDF（AGPL-3.0 或 Artifex 商业许可，双许可）**：AGPL-3.0 属强著佐权许可。若以 AGPL

@@ -20,6 +20,11 @@ interface RoomEntrySelection {
     characterCard?: Partial<COC7CharacterCard>;
 }
 
+interface RoomInviteTokenResponse {
+    invite_token: string;
+    can_rotate?: boolean;
+}
+
 let currentRoom: Room | null = null;
 let previewNodeFilename: string | null = null;
 let roomEntryCharacterModal: BootstrapModalInstance | null = null;
@@ -116,6 +121,17 @@ function initRoomManagement(): void {
             || document.getElementById("roomDetailCode")?.textContent
             || "";
         void copyRoomCodeToClipboard(code);
+    });
+
+    // 房间分享：统一的「邀请玩家」入口（弹窗内展示链接 + 二维码，并可复制/刷新）。
+    document.getElementById("roomInvitePlayersBtn")?.addEventListener("click", () => {
+        void openRoomInviteModal();
+    });
+    document.getElementById("roomInviteCopyBtn")?.addEventListener("click", () => {
+        void copyRoomInviteLink();
+    });
+    document.getElementById("roomInviteRotateBtn")?.addEventListener("click", () => {
+        void rotateRoomInviteToken();
     });
 
     populateCharacterSelectors();
@@ -1361,6 +1377,8 @@ async function deleteRoomNode(nodeFilename: string): Promise<void> {
 
 async function autoLoadLastRoom(): Promise<void> {
     if (!window.currentUser?.user_id) return;
+    // 通过邀请链接（?join=房间码）进入时优先处理邀请，避免被上次房间覆盖。
+    if (await tryJoinRoomFromInvite()) return;
     const lastRoomId = TrpgCookies.get(getLastRoomStorageKey());
     if (!lastRoomId) return;
     await openRoomDetail(lastRoomId);
@@ -1482,6 +1500,22 @@ function roomVisibilityBadge(room: Room): string {
     return `<span class="badge bg-info text-dark ms-1">公开</span>`;
 }
 
+async function writeClipboardText(text: string): Promise<void> {
+    if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+    // 兼容不支持异步剪贴板 API 的环境
+    const helper = document.createElement("textarea");
+    helper.value = text;
+    helper.style.position = "fixed";
+    helper.style.opacity = "0";
+    document.body.appendChild(helper);
+    helper.select();
+    document.execCommand("copy");
+    helper.remove();
+}
+
 async function copyRoomCodeToClipboard(code: string): Promise<void> {
     const value = String(code || "").trim();
     if (!value || value === "-") {
@@ -1489,23 +1523,185 @@ async function copyRoomCodeToClipboard(code: string): Promise<void> {
         return;
     }
     try {
-        if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(value);
-        } else {
-            // 兼容不支持异步剪贴板 API 的环境
-            const helper = document.createElement("textarea");
-            helper.value = value;
-            helper.style.position = "fixed";
-            helper.style.opacity = "0";
-            document.body.appendChild(helper);
-            helper.select();
-            document.execCommand("copy");
-            helper.remove();
-        }
+        await writeClipboardText(value);
         showNotification(`房间码已复制：${value}`, "success");
     } catch {
         showNotification("复制房间码失败，请手动复制", "error");
     }
+}
+
+/** 解析生成邀请链接/二维码时使用的对外基础地址：优先管理员配置，否则回退到访问者当前 origin。 */
+function resolveShareBaseUrl(): string {
+    const configured = typeof getShareBaseUrl === "function" ? getShareBaseUrl().trim() : "";
+    const base = configured || window.location.origin;
+    return base.replace(/\/+$/, "");
+}
+
+/** 用可轮换的邀请令牌拼出邀请链接（?invite=<token>）。 */
+function buildRoomInviteUrl(token: string): string {
+    const normalized = String(token || "").trim();
+    return `${resolveShareBaseUrl()}/?invite=${encodeURIComponent(normalized)}`;
+}
+
+/** 获取当前房间的邀请令牌（无则后端惰性生成），并返回是否允许刷新。 */
+async function fetchRoomInviteToken(): Promise<{ token: string; canRotate: boolean }> {
+    if (!currentRoom) {
+        throw new Error("请先进入一个房间");
+    }
+    const response = await TrpgApi.get<ApiResponse<RoomInviteTokenResponse>>(
+        `/api/rooms/${encodeURIComponent(currentRoom.id)}/invite-token`,
+    );
+    const token = String(response?.data?.invite_token || "").trim();
+    if (!response?.success || !token) {
+        throw new Error(response?.message || response?.error || "未能获取邀请链接");
+    }
+    return { token, canRotate: response.data?.can_rotate !== false };
+}
+
+/** 刷新弹窗内的邀请链接与二维码；不具备刷新权限时隐藏刷新按钮。 */
+function renderRoomInviteModal(link: string, canRotate: boolean): void {
+    const input = document.getElementById("roomInviteLinkInput") as HTMLInputElement | null;
+    if (input) input.value = link;
+    const container = document.getElementById("roomQrCodeContainer");
+    if (container) {
+        try {
+            const svg = window.TrpgQr?.renderSvg(link, { cellSize: 5, margin: 20, alt: "房间邀请二维码" });
+            container.innerHTML = svg || `<div class="text-danger small p-4">${escapeRoomHtml("二维码生成失败")}</div>`;
+        } catch (error) {
+            container.innerHTML = `<div class="text-danger small p-4">${escapeRoomHtml(roomErrorMessage(error))}</div>`;
+        }
+    }
+    setDisplay("roomInviteRotateBtn", canRotate ? "" : "none");
+}
+
+/** 打开「邀请玩家」弹窗：展示邀请链接与二维码（链接即为可轮换的邀请令牌）。 */
+async function openRoomInviteModal(): Promise<void> {
+    const modalElement = document.getElementById("roomQrModal");
+    if (modalElement && typeof bootstrap !== "undefined") {
+        const instance = bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
+        instance.show();
+    }
+    try {
+        const { token, canRotate } = await fetchRoomInviteToken();
+        renderRoomInviteModal(buildRoomInviteUrl(token), canRotate);
+    } catch (error) {
+        showNotification(roomErrorMessage(error), "error");
+    }
+}
+
+function currentRoomInviteLink(): string {
+    const input = document.getElementById("roomInviteLinkInput") as HTMLInputElement | null;
+    return input ? input.value.trim() : "";
+}
+
+async function copyRoomInviteLink(): Promise<void> {
+    const link = currentRoomInviteLink();
+    if (!link) {
+        showNotification("邀请链接尚未就绪", "error");
+        return;
+    }
+    try {
+        await writeClipboardText(link);
+        showNotification("邀请链接已复制，发给队友即可直接进入房间", "success");
+    } catch {
+        showNotification("复制邀请链接失败，请手动复制", "error");
+    }
+}
+
+/** 刷新邀请令牌：生成新链接并让此前分享出去的旧链接立即失效。 */
+async function rotateRoomInviteToken(): Promise<void> {
+    if (!currentRoom) return;
+    if (!window.confirm("刷新后将生成新的邀请链接，之前分享出去的旧链接会立即失效。确定刷新吗？")) {
+        return;
+    }
+    try {
+        const response = await TrpgApi.post<ApiResponse<RoomInviteTokenResponse>>(
+            `/api/rooms/${encodeURIComponent(currentRoom.id)}/invite-token`,
+            {},
+        );
+        const token = String(response?.data?.invite_token || "").trim();
+        if (!response?.success || !token) {
+            throw new Error(response?.message || response?.error || "刷新失败，请稍后重试");
+        }
+        renderRoomInviteModal(buildRoomInviteUrl(token), true);
+        showNotification("邀请链接已刷新，旧链接已失效", "success");
+    } catch (error) {
+        showNotification(`刷新邀请链接失败：${roomErrorMessage(error)}`, "error");
+    }
+}
+
+/** 读取 URL 中的邀请参数：优先可轮换令牌 ?invite=，其次兼容固定房间码 ?join=。 */
+function readRoomInviteFromUrl(): { token: string; code: string } {
+    try {
+        const params = new URLSearchParams(window.location.search);
+        return {
+            token: (params.get("invite") || "").trim(),
+            code: (params.get("join") || "").trim().toUpperCase(),
+        };
+    } catch {
+        return { token: "", code: "" };
+    }
+}
+
+/** 消费邀请链接中的 ?invite= / ?join= 参数，避免刷新或登录后重复触发。 */
+function stripRoomInviteFromUrl(): void {
+    try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("join");
+        url.searchParams.delete("invite");
+        window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+        // 忽略 URL 解析异常
+    }
+}
+
+/** 通过邀请令牌加入房间（链接失效时后端返回 404）。 */
+async function joinRoomByInviteToken(token: string): Promise<void> {
+    const roomEntrySelection = await promptRoomEntryCharacterSelection("join");
+    if (!roomEntrySelection) return;
+    if (roomEntrySelection.createCharacter || roomEntrySelection.action === "create") return;
+    if (roomEntrySelection.action === "invisible") {
+        showNotification("邀请链接不支持隐身进入，请改用房间码", "error");
+        return;
+    }
+    try {
+        const data = await TrpgApi.post<ApiResponse<Room>>("/api/rooms/join", {
+            invite_token: token,
+            character_card: roomEntrySelection.characterCard,
+        });
+        if (!data.success || !data.data) {
+            showNotification(`加入房间失败：${data.message || data.error || "未知错误"}`, "error");
+            return;
+        }
+        await enterRoom(data.data);
+        await loadRoomsList();
+        showNotification("已通过邀请链接加入房间", "success");
+    } catch (error) {
+        showNotification(`加入房间失败：${roomErrorMessage(error)}`, "error");
+    }
+}
+
+/**
+ * 处理通过邀请链接进入的场景（优先 ?invite=令牌，兼容 ?join=房间码）。
+ * 未登录时不消费参数，等登录后由 autoLoadLastRoom 再次处理。返回是否命中邀请。
+ */
+async function tryJoinRoomFromInvite(): Promise<boolean> {
+    const { token, code } = readRoomInviteFromUrl();
+    if (!token && !code) return false;
+    if (!window.currentUser?.user_id) return false;
+    stripRoomInviteFromUrl();
+    window.switchMainTab?.("save");
+    if (token) {
+        await runRoomAction("join-room", "joinRoom", async () => {
+            await joinRoomByInviteToken(token);
+        });
+    } else {
+        setInput("roomCodeInput", code);
+        await runRoomAction("join-room", "joinRoom", async () => {
+            await joinRoomByCodeUnlocked();
+        });
+    }
+    return true;
 }
 
 window.initRoomManagement = initRoomManagement;

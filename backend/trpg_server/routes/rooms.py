@@ -1,5 +1,6 @@
 import json
 import logging
+import secrets
 import tomllib
 import time
 from pathlib import Path
@@ -236,6 +237,34 @@ def _find_room_by_code(room_code):
         if info.get("room_code") == normalized:
             return room_dir, info
     return None, None
+
+
+def _new_invite_token():
+    """生成可轮换的房间邀请令牌（与固定的房间码分离，便于「刷新」后旧链接失效）。"""
+    return secrets.token_urlsafe(16)
+
+
+def _find_room_by_invite_token(invite_token):
+    normalized = str(invite_token or "").strip()
+    if not normalized:
+        return None, None
+    for room_dir in _iter_room_dirs():
+        info = _read_room(room_dir)
+        token = str(info.get("invite_token") or "")
+        if token and secrets.compare_digest(token, normalized):
+            return room_dir, info
+    return None, None
+
+
+def _ensure_invite_token(room_dir, info):
+    """读取房间的邀请令牌；老房间缺失时惰性补发并落盘。"""
+    token = str(info.get("invite_token") or "")
+    if token:
+        return token
+    token = _new_invite_token()
+    info["invite_token"] = token
+    _write_room(room_dir, info)
+    return token
 
 
 def _normalize_room_name(room_name):
@@ -781,6 +810,8 @@ def create_room():
         "id": room_id,
         "name": name,
         "room_code": _new_room_code(),
+        # 可轮换的邀请令牌：邀请链接/二维码用它生成，刷新后旧链接立即失效。
+        "invite_token": _new_invite_token(),
         "scenario_id": scenario_id,
         "scenario_title": scenario_title,
         "visibility": visibility,
@@ -846,9 +877,20 @@ def join_room_by_code():
         return login_error
 
     data = request.get_json(silent=True) or {}
-    room_dir, info = _find_room_by_code(data.get("room_code"))
-    if not room_dir:
-        return error_response("Room not found", 404, "Room not found")
+    invite_token = str(data.get("invite_token") or "").strip()
+    if invite_token:
+        # 通过邀请链接（?invite=<token>）加入：令牌被刷新后旧链接即失效。
+        room_dir, info = _find_room_by_invite_token(invite_token)
+        if not room_dir:
+            return error_response(
+                "Invite link is invalid or has expired",
+                404,
+                "Invite link is invalid or has expired",
+            )
+    else:
+        room_dir, info = _find_room_by_code(data.get("room_code"))
+        if not room_dir:
+            return error_response("Room not found", 404, "Room not found")
 
     user_id = session["user_id"]
     character_card = data.get("character_card")
@@ -886,6 +928,53 @@ def join_room_by_code():
     data = _room_summary(info)
     data["messages"] = _read_messages(room_dir)
     return success_response(data, "Room joined successfully")
+
+
+@bp.route("/api/rooms/<room_id>/invite-token", methods=["GET"])
+def get_room_invite_token(room_id):
+    """获取房间当前的邀请令牌（无则惰性生成），供前端拼出邀请链接与二维码。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+
+    room_dir, info = _find_room(room_id)
+    if not room_dir:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_access(info):
+        return _denied(room_id)
+
+    token = _ensure_invite_token(room_dir, info)
+    return success_response(
+        {"invite_token": token, "can_rotate": _can_manage(info)},
+        "Invite token loaded successfully",
+    )
+
+
+@bp.route("/api/rooms/<room_id>/invite-token", methods=["POST"])
+def rotate_room_invite_token(room_id):
+    """刷新房间邀请令牌：旧邀请链接/二维码随即失效（仅房主或管理员可操作）。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+
+    room_dir, info = _find_room(room_id)
+    if not room_dir:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_manage(info):
+        return _denied(room_id)
+
+    token = _new_invite_token()
+    info["invite_token"] = token
+    _write_room(room_dir, info)
+    log_user_action(
+        logger,
+        user_action_text(session.get("username"), "刷新了房间邀请链接"),
+        用户ID=session.get("user_id"),
+        房间ID=info.get("id"),
+        房间码=info.get("room_code"),
+        房间名=info.get("name"),
+    )
+    return success_response({"invite_token": token}, "Invite link refreshed successfully")
 
 
 @bp.route("/api/rooms/<room_id>/members/<user_id>/character", methods=["PUT"])

@@ -8,6 +8,7 @@ from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.network_discovery import (
     DEFAULT_PORT,
     get_local_ip,
+    get_local_ipv4_addresses,
     get_network_config,
     get_penetration_config,
     save_network_config,
@@ -64,6 +65,31 @@ def update_network_config_api():
     except Exception as exc:
         logger.exception("Failed to update network config")
         return server_error("Failed to update network config")
+
+
+@bp.route("/api/network/addresses", methods=["GET"])
+def get_share_addresses():
+    """返回可用于生成房间邀请链接的候选地址（本机多网卡 IPv4 探测）。
+
+    当主机拥有多块网卡（有线/无线/虚拟网卡）时会有多个可用地址，管理员需要在
+    设置页里挑一个作为对外地址。此接口只暴露本机 IP 与当前配置端口，不含凭据，
+    因此沿用与 ``/api/network/config`` GET 一致的开放读取策略。
+    """
+    try:
+        config = get_network_config(_network_config_file())
+        port = int(config.get("port", DEFAULT_PORT))
+        addresses = [f"http://{ip}:{port}" for ip in get_local_ipv4_addresses()]
+        return success_response(
+            {
+                "addresses": addresses,
+                "share_base_url": config.get("share_base_url", ""),
+                "port": port,
+            },
+            "Share addresses loaded successfully",
+        )
+    except Exception as exc:
+        logger.exception("Failed to get share addresses")
+        return server_error("Failed to get share addresses")
 
 
 @bp.route("/api/network/status", methods=["GET"])
@@ -178,6 +204,17 @@ def _validate_network_config(config_data):
                 return error_response("Port must be between 1 and 65535", 400, "Invalid port")
         except (TypeError, ValueError):
             return error_response("Port must be an integer", 400, "Invalid port")
+
+    # 分享地址（邀请链接/二维码的对外基础地址）：允许留空表示跟随当前访问地址。
+    share_base_url = config_data.get("share_base_url")
+    if share_base_url not in (None, ""):
+        share_text = str(share_base_url).strip()
+        if not share_text.startswith(("http://", "https://")):
+            return error_response(
+                "share_base_url must start with http:// or https://",
+                400,
+                "Invalid share_base_url",
+            )
 
     access_control = config_data.get("access_control", {})
     if access_control and isinstance(access_control, dict):
