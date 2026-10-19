@@ -921,6 +921,12 @@
                                         </div>
                                     </div>
                                     <div class="form-group mt-3">
+                                        <label for="shareBaseUrlSelect">房间邀请地址（生成邀请链接/二维码时使用）</label>
+                                        <select class="form-control" id="shareBaseUrlSelect"></select>
+                                        <input type="text" class="form-control mt-2" id="shareBaseUrlInput" placeholder="留空则使用访问者当前地址，例如 http://192.168.1.10:8086" disabled>
+                                        <div class="form-text">本机有多个网络地址（多网卡/虚拟网卡）时，可在此选定用于生成邀请链接与二维码的对外地址。</div>
+                                    </div>
+                                    <div class="form-group mt-3">
                                         <button class="btn btn-primary" id="saveNetworkConfig">保存网络配置</button>
                                         <button class="btn btn-secondary ml-2" id="testNetworkConnection">测试网络连接</button>
                                     </div>

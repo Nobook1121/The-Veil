@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_NETWORK_CONFIG = {
     "port": DEFAULT_PORT,
     "discovery_enabled": True,
+    # 生成房间邀请链接/二维码时使用的对外基础地址（如 http://192.168.1.10:8086）。
+    # 留空表示使用访问者当前地址栏的 origin，由前端自动推断。
+    "share_base_url": "",
     "access_control": {
         "enabled": False,
         "allowed_ips": [],

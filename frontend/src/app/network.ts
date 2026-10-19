@@ -1,6 +1,21 @@
 interface NetworkConfig {
     port?: number;
     discovery_enabled?: boolean;
+    /** 生成房间邀请链接/二维码时使用的对外基础地址，留空表示跟随访问者当前地址。 */
+    share_base_url?: string;
+}
+
+interface ShareAddressResponse {
+    addresses?: string[];
+    share_base_url?: string;
+    port?: number;
+}
+
+let networkShareBaseUrl = "";
+
+/** 供其它模块（房间分享）读取管理员配置的邀请地址；未配置时返回空串，由调用方回退到当前 origin。 */
+function getShareBaseUrl(): string {
+    return networkShareBaseUrl;
 }
 
 interface PenetrationConfig {
@@ -24,6 +39,21 @@ interface NetworkTestResult {
 
 async function initNetworkConfig(): Promise<void> {
     await loadNetworkConfig();
+    await loadShareAddressOptions();
+
+    const shareBaseUrlSelect = document.getElementById("shareBaseUrlSelect") as HTMLSelectElement | null;
+    const shareBaseUrlInput = document.getElementById("shareBaseUrlInput") as HTMLInputElement | null;
+    if (shareBaseUrlSelect && shareBaseUrlInput) {
+        shareBaseUrlSelect.addEventListener("change", () => {
+            if (shareBaseUrlSelect.value === "__custom__") {
+                shareBaseUrlInput.disabled = false;
+                shareBaseUrlInput.focus();
+                return;
+            }
+            shareBaseUrlInput.disabled = true;
+            shareBaseUrlInput.value = shareBaseUrlSelect.value;
+        });
+    }
 
     const saveNetworkConfigBtn = document.getElementById("saveNetworkConfig");
     if (saveNetworkConfigBtn) {
@@ -62,11 +92,66 @@ async function loadNetworkConfig(): Promise<void> {
                 enableDiscovery.checked = config.discovery_enabled !== false;
             }
 
+            networkShareBaseUrl = (config.share_base_url || "").trim();
+
             await loadPenetrationConfig();
         }
     } catch (error) {
         console.error("加载网络配置失败:", error);
     }
+}
+
+/** 拉取本机多网卡候选地址并填充设置页的「邀请地址」下拉框。 */
+async function loadShareAddressOptions(): Promise<void> {
+    const select = document.getElementById("shareBaseUrlSelect") as HTMLSelectElement | null;
+    const input = document.getElementById("shareBaseUrlInput") as HTMLInputElement | null;
+    if (!select || !input) return;
+    try {
+        const data = await TrpgApi.get<ApiResponse<ShareAddressResponse>>("/api/network/addresses");
+        const payload = data.success ? data.data : undefined;
+        const addresses = payload?.addresses || [];
+        const configured = (payload?.share_base_url || "").trim();
+
+        select.innerHTML = "";
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "使用访问者当前地址（默认）";
+        select.appendChild(defaultOption);
+        addresses.forEach((address) => {
+            const option = document.createElement("option");
+            option.value = address;
+            option.textContent = address;
+            select.appendChild(option);
+        });
+        const customOption = document.createElement("option");
+        customOption.value = "__custom__";
+        customOption.textContent = "自定义地址…";
+        select.appendChild(customOption);
+
+        if (!configured) {
+            select.value = "";
+            input.value = "";
+        } else if (addresses.includes(configured)) {
+            select.value = configured;
+            input.value = configured;
+        } else {
+            select.value = "__custom__";
+            input.value = configured;
+        }
+        input.disabled = select.value !== "__custom__";
+    } catch (error) {
+        console.error("加载邀请地址列表失败:", error);
+    }
+}
+
+/** 读取当前设置页里用户选择的邀请地址（下拉选中项优先，自定义模式取输入框）。 */
+function currentShareBaseUrlInput(): string {
+    const select = document.getElementById("shareBaseUrlSelect") as HTMLSelectElement | null;
+    const input = document.getElementById("shareBaseUrlInput") as HTMLInputElement | null;
+    if (select && select.value && select.value !== "__custom__") {
+        return select.value;
+    }
+    return (input?.value || "").trim();
 }
 
 async function loadPenetrationConfig(): Promise<void> {
@@ -93,12 +178,20 @@ async function saveNetworkConfig(): Promise<void> {
             return;
         }
 
+        const shareBaseUrl = currentShareBaseUrlInput();
+        if (shareBaseUrl && !/^https?:\/\//i.test(shareBaseUrl)) {
+            showNotification("邀请地址需以 http:// 或 https:// 开头", "error");
+            return;
+        }
+
         const data = await TrpgApi.post<ApiResponse>("/api/network/config", {
             port: Number.parseInt(networkPort.value, 10),
             discovery_enabled: enableDiscovery.checked,
+            share_base_url: shareBaseUrl,
         });
 
         if (data.success) {
+            networkShareBaseUrl = shareBaseUrl;
             showNotification("网络配置保存成功", "success");
             await updateNetworkStatus();
         } else {

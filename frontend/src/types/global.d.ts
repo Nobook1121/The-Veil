@@ -50,6 +50,7 @@ interface Window {
     refreshGeneralSettingsBaseline?: () => void;
     refreshScenarioManagement?: () => void;
     openCreateRoomWithScenario?: (scenarioId: number) => Promise<void>;
+    TrpgQr?: { renderSvg: (text: string, options?: { cellSize?: number; margin?: number; alt?: string }) => string };
 }
 
 declare function showNotification(message: string, type?: string): void;
