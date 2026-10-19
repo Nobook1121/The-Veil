@@ -114,3 +114,6 @@ docs/样本
 
 #ignore wiki
 /docs/the-veil.wiki
+
+#ignore project backups
+/projectbackups/
