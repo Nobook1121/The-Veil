@@ -27,7 +27,8 @@ from trpg_server.scenario_store import (
     scenario_public_asset_url,
     trigger_size_limit,
 )
-from trpg_server.agents.config import ai_debug_enabled
+from trpg_server.agents.config import ai_debug_enabled, load_ai_runtime_config
+from trpg_server.agents.http_retry import post_with_retry
 from trpg_server.agents.versioning import next_scenario_version, normalize_semver, scenario_content_changed
 from trpg_server.ai_capabilities import chat_completions_endpoint
 from trpg_server.scenario_importer import convert_script_to_scenario, convert_with_ai, extract_script_text
@@ -421,6 +422,7 @@ def import_script():
                 # short chat completion; never reuse the 20s chat timeout.
                 configured_timeout = int(platform_config.get("config", {}).get("timeout", 60) or 60)
                 timeout = max(120, configured_timeout)
+                runtime_config = load_ai_runtime_config(current_app.config.get("CONFIG_DIR"))
                 def request_ai(ai_payload):
                     # 完整的请求/响应体会包含整段提示词与模型输出，只有开启调试模式
                     # 才写日志；正常导入时保持安静，避免日志被大剧本刷满。
@@ -438,8 +440,16 @@ def import_script():
                         )
                     started_at = time.monotonic()
                     try:
-                        response = requests.post(base_url, headers=headers, json=ai_payload, timeout=timeout)
-                    except requests.exceptions.RequestException:
+                        response = post_with_retry(
+                            base_url,
+                            headers=headers,
+                            payload=ai_payload,
+                            timeout=timeout,
+                            max_retries=runtime_config.ai_request_max_retries,
+                            post=requests.post,
+                            label="scenario_import",
+                        )
+                    except (requests.exceptions.RequestException, RuntimeError):
                         logger.exception(
                             "scenario_import.ai_http_transport_error elapsed_seconds=%.3f",
                             time.monotonic() - started_at,
@@ -473,7 +483,7 @@ def import_script():
                     return response_data
                 try:
                     result = convert_with_ai(request_ai, text, model=model, metadata=metadata)
-                except (requests.exceptions.RequestException, ValueError) as exc:
+                except (requests.exceptions.RequestException, RuntimeError, ValueError) as exc:
                     # AI enrichment is optional; a transient provider timeout
                     # must not discard the user's document. Return the local
                     # section-preserving conversion and keep the exact cause

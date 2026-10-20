@@ -13,7 +13,10 @@ from typing import Any
 
 import requests
 
+from trpg_server.agents.ai_request import PROBE_MAX_TOKENS
 from trpg_server.agents.cache_probe import select_platform_model
+from trpg_server.agents.config import load_ai_runtime_config
+from trpg_server.agents.http_retry import post_with_retry
 from trpg_server.ai_capabilities import chat_completions_endpoint, probe_responses_api
 from trpg_server.ai_platform_config import (
     load_platform_config,
@@ -88,11 +91,26 @@ def test_platform(platform: str, platform_dir: Any = None, secret_dir: Any = Non
     model = select_platform_model(config)
 
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key or ''}"}
-    payload = {"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 16, "temperature": 0}
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": PROBE_MAX_TOKENS,
+        "temperature": 0,
+    }
     sender = post or requests.post
+    runtime_config = load_ai_runtime_config(CONFIG_DIR)
     try:
-        response = sender(endpoint, headers=headers, json=payload, timeout=30)
+        response = post_with_retry(
+            endpoint,
+            headers=headers,
+            payload=payload,
+            timeout=30,
+            max_retries=runtime_config.ai_request_max_retries,
+            post=sender,
+            label="platform_test",
+        )
     except Exception as exc:  # noqa: BLE001 - 网络异常转为可读结果
+        logger.warning("AI 平台连通性测试失败 platform=%s: %s", platform, exc)
         return {"ok": False, "status": None, "detail": str(exc), "endpoint": endpoint, "model": model}
     status = getattr(response, "status_code", None)
     try:

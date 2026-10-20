@@ -231,6 +231,47 @@ ai cache clear [--yes]          清空本地缓存（破坏性，需确认）
 ai usage reset <all|agent-id> [--yes]   删除当天的用量记录（all 为全部）
 ```
 
+### 角色卡 AI 生成自测
+
+```text
+ai character generate <描述> [--scenario <id>] [--json]
+```
+
+在服务器控制台直接触发一次角色卡 AI 生成，用于自测与排障。它复用 Web 端
+`/api/characters/generate` 完全相同的生成流水线（平台解析、提示词拼装、请求、
+解析、日志与 AI 用量记录），因此控制台观察到的行为与线上一致。
+
+- `<描述>`：角色描述文本，可省略（省略时依据剧本或自由发挥）；
+- `--scenario <id>`：可选，绑定某个剧本，让 AI 参考该剧本的角色要求；
+- `--json`：以 JSON 打印完整生成结果（含 `finish_reason`、正文字数、思考字数），
+  便于排查「模型返回内容为空」这类问题。
+
+示例：
+
+```text
+ai character generate 一位在旧金山经营古董店的华人女性，胆小却博学
+ai character generate --scenario 1 一位退役军医
+ai character generate 自由发挥一位调查员 --json
+```
+
+> 生成失败会返回带分类的错误（如 `platform` / `timeout` / `connection` /
+> `empty_content`），其中 `empty_content` 通常意味着推理模型的思考 token 占满了
+> `max_tokens` 输出预算，导致正文为空，可重试，或在管理员设置页把「最大输出 Token（全局）」
+> 调大（默认已开启、默认 16384）。
+
+### 自动重试控制
+
+所有发起 AI 请求的功能（KP 对话、角色卡生成、模块摘要、剧本导入、平台连通性测试等）
+共用同一套「日志 + 报错 + 在总预算内自动重试」的封装。当上游持续抖动、希望立即停止
+等待时，可在控制台终止自动重试：
+
+```text
+ai abort     立即终止进行中的 AI 自动重试（下一次重试前生效）
+ai resume    解除终止状态，恢复自动重试（别名 ai retry）
+```
+
+被终止的请求会以「已被手动终止自动重试」的错误返回，并在日志中记录。
+
 ## 向量库与知识库
 
 ```text

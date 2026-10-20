@@ -48,6 +48,54 @@ def test_console_command_rejects_unknown_command():
     assert "Unknown command" in result.message
 
 
+def test_console_ai_character_requires_generate_subcommand():
+    from trpg_server.console_commands import execute_console_command
+
+    result = execute_console_command("ai character")
+
+    assert not result.ok
+    assert "Usage" in result.message
+
+
+def test_console_ai_character_generate_reports_card(monkeypatch):
+    from trpg_server import console_commands
+    from trpg_server.app_factory import create_app
+
+    monkeypatch.setattr(
+        console_commands,
+        "run_character_generation",
+        lambda description, scenario_context=None, **kwargs: {
+            "character": {"name": "林清", "occupationName": "医生"},
+            "token_count": 321,
+            "model": "deepseek-flash",
+            "platform": "deepseek",
+            "finish_reason": "stop",
+            "content_length": 3800,
+            "reasoning_length": 900,
+        },
+    )
+    app = create_app({"TESTING": True})
+
+    result = console_commands.execute_console_command("ai character generate 一位医生", app=app)
+
+    assert result.ok
+    assert "林清" in result.message
+    assert "deepseek-flash" in result.message
+
+
+def test_console_ai_abort_then_resume_controls_retry_flag():
+    from trpg_server import console_commands
+    from trpg_server.agents.http_retry import is_abort_requested
+
+    assert not is_abort_requested()
+    abort = console_commands.execute_console_command("ai abort")
+    assert abort.ok
+    assert is_abort_requested()
+    resume = console_commands.execute_console_command("ai resume")
+    assert resume.ok
+    assert not is_abort_requested()
+
+
 def test_console_command_demotes_user_to_user_by_default():
     from trpg_server.console_commands import execute_console_command
 

@@ -27,8 +27,16 @@ dice_fumble_threshold = 96
 max_tool_rounds = 8
 ai_request_timeout = 1800
 ai_request_max_retries = 5
+# 所有平台共用的「最大输出 token」默认值：开启后，未在请求模板里自行声明的请求统一按
+# max_tokens 下发；请求模板里显式写了 max_tokens 的以模板为准。默认取宽裕值，避免靠压缩
+# 输出预算省 token 而截断回复。
+constrain_max_tokens = true
+max_tokens = 16384
 record_prompt_segments = true
 cloud_embedding_enabled = false
+# 首次部署引导「程序自动下载」使用的本地向量模型仓库（HuggingFace owner/name）。
+# 引导页会显示这个值，改这里即可换用其它模型或镜像仓库。
+local_embedding_repo = "BAAI/bge-small-zh-v1.5"
 
 [ai.small_models]
 intent_classification = ""

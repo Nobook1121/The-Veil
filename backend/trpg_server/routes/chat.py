@@ -12,6 +12,7 @@ from pathlib import Path
 import requests
 from flask import Blueprint, current_app, request, session
 from trpg_server.ai_capabilities import chat_completions_endpoint
+from trpg_server.agents.ai_request import merge_request_template
 from trpg_server.agents.config import load_ai_runtime_config
 from trpg_server.agents.context import build_agent_context
 from trpg_server.agents.profiles import resolve_agent_profile
@@ -121,6 +122,7 @@ def _post_ai_request(base_url, headers, timeout=300, debug=False, max_retries=5,
             timeout=timeout,
             max_retries=max_retries,
             on_retry=on_retry,
+            label="kp_chat",
         )
 
     def requester(payload):
@@ -712,10 +714,20 @@ def chat():
                 continue
 
             request_data["model"] = attempt_state["model"]
+            # 请求模板（default-request.json + aimodel/<平台>/<模型>.json）作为默认参数并入；
+            # 本层的 messages/model/temperature/top_p 等运行时字段优先。输出长度只由全局
+            # 「是否约束最大 token」开关决定，未开启时不下发 max_tokens（把上限交给平台）。
+            attempt_payload = merge_request_template(
+                request_data,
+                attempt_platform,
+                attempt_state["model"],
+                runtime_config=runtime_config,
+                config_dir=_get_config_dir(),
+            )
             started_at = time.perf_counter()
             attempt_result = run_agent_completion(
                 requester=attempt_state["agent_requester"],
-                base_payload=request_data,
+                base_payload=attempt_payload,
                 profile=request_profile,
                 registry=default_tool_registry(),
                 context=agent_context,

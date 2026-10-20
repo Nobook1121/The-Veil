@@ -20,8 +20,14 @@ from trpg_server import (
     vector_admin,
 )
 from trpg_server.agents.cache_probe import probe_enabled_platform
+from trpg_server.agents.http_retry import clear_abort, is_abort_requested, request_abort
 from trpg_server.agents.telemetry import load_daily_ai_usage
 from trpg_server.agents.token_accounting import format_segment_summary, merge_segment_totals
+from trpg_server.character_ai import (
+    CharacterGenerationError,
+    run_character_generation,
+    scenario_context_from_record,
+)
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.scenario_admin import (
     delete_scenario,
@@ -30,6 +36,7 @@ from trpg_server.scenario_admin import (
     set_owner,
     validate_scenario,
 )
+from trpg_server.scenario_store import load_scenario_by_id
 from trpg_server.settings import (
     KNOWLEDGE_BASES_DIR,
     LOGS_DIR,
@@ -190,6 +197,12 @@ def execute_console_command(
             )
         if subcommand == "cache":
             return _log_result(_ai_cache_command(args[1:], confirm=confirm))
+        if subcommand == "character":
+            return _log_result(_ai_character_command(args[1:], app))
+        if subcommand == "abort":
+            return _log_result(_ai_retry_abort_command())
+        if subcommand in {"resume", "retry"}:
+            return _log_result(_ai_retry_resume_command())
 
     if domain == "scenario" and subcommand:
         if subcommand == "list":
@@ -269,6 +282,9 @@ def command_help_text() -> str:
             "  ai platform detect-responses [id]                （探测是否支持 Responses API）",
             "  ai cache stats                                   （本地前缀/精确/语义缓存统计）",
             "  ai cache clear [--yes]                           （清空本地缓存）",
+            "  ai character generate <描述> [--scenario <id>] [--json]  （触发一次角色卡 AI 生成，用于自测）",
+            "  ai abort                                         （立即终止进行中的 AI 自动重试）",
+            "  ai resume                                        （解除终止状态，恢复自动重试）",
             "  scenario list [search]                           （列出剧本）",
             "  scenario owner <id> <user>                       （更改剧本所有者）",
             "  scenario delete <id> [--vectors-only|--force]    （删剧本；--yes 跳过确认）",
@@ -979,6 +995,100 @@ def _ai_cache_command(args: list[str], *, confirm: Callable[[str], bool] | None 
             prompt="确认清空本地缓存?",
         )
     return ConsoleCommandResult(False, f"Unknown ai cache action: {action}")
+
+
+def _ai_character_command(args: list[str], app: Any) -> ConsoleCommandResult:
+    """控制台触发一次角色卡 AI 生成，用于自测与排障。
+
+    复用 Web 端点同一条生成流水线（``run_character_generation``），因此控制台输出、
+    日志与 AI 用量台账跟线上完全一致。生成不是破坏性操作，无需预演确认。
+    """
+    if not args:
+        return ConsoleCommandResult(False, "Usage: ai character generate <描述> [--scenario <id>] [--json]")
+
+    action = args[0].lower()
+    tokens = list(args[1:])
+    if action != "generate":
+        return ConsoleCommandResult(False, f"未知子命令: ai character {args[0]}（可用：generate）")
+
+    scenario_id: Any = None
+    json_output = False
+    description_parts: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in {"--scenario", "-s"}:
+            if index + 1 >= len(tokens):
+                return ConsoleCommandResult(False, "参数 --scenario 缺少取值")
+            scenario_id = tokens[index + 1]
+            index += 2
+            continue
+        if token == "--json":
+            json_output = True
+            index += 1
+            continue
+        if token.startswith("-"):
+            return ConsoleCommandResult(False, f"未知参数: {token}")
+        description_parts.append(token)
+        index += 1
+
+    description = " ".join(description_parts).strip()
+    if app is None:
+        return ConsoleCommandResult(False, "未注入应用上下文，无法执行角色卡生成")
+
+    with app.app_context():
+        scenario_context: dict[str, Any] = {}
+        if scenario_id not in (None, "", 0, "0"):
+            _, scenario = load_scenario_by_id(
+                _resolve_scenarios_dir(app.config.get("SCENARIOS_DIR")), scenario_id
+            )
+            if isinstance(scenario, dict):
+                scenario_context = scenario_context_from_record(scenario)
+        try:
+            result = run_character_generation(
+                description, scenario_context, user_id="console", scenario_id=scenario_id
+            )
+        except CharacterGenerationError as exc:
+            return ConsoleCommandResult(False, f"角色卡生成失败（{exc.kind}）：{exc}")
+
+    if json_output:
+        return ConsoleCommandResult(True, _json_block(result))
+    card = result.get("character") or {}
+    lines = [
+        "角色卡 AI 生成成功:",
+        f"  平台: {result.get('platform') or '-'} · 模型: {result.get('model') or '-'}",
+        "  结束原因: {finish} · 正文字数: {content} · 思考字数: {reasoning} · token: {tokens}".format(
+            finish=result.get("finish_reason") or "-",
+            content=result.get("content_length"),
+            reasoning=result.get("reasoning_length"),
+            tokens=result.get("token_count"),
+        ),
+        f"  姓名: {card.get('name') or '-'} · 职业: {card.get('occupationName') or '-'}",
+    ]
+    return ConsoleCommandResult(True, "\n".join(lines))
+
+
+def _ai_retry_abort_command() -> ConsoleCommandResult:
+    """立即终止所有进行中的 AI 自动重试（下一次重试前生效）。"""
+    if is_abort_requested():
+        return ConsoleCommandResult(True, "AI 自动重试此前已被终止；如已恢复请重新执行 ai resume。")
+    request_abort()
+    logger.warning("AI auto-retry abort requested via console")
+    return ConsoleCommandResult(
+        True,
+        "已请求终止 AI 自动重试：进行中的请求会在下一次重试前停止，并返回「已被手动终止」错误。\n"
+        "恢复自动重试请执行：ai resume",
+    )
+
+
+def _ai_retry_resume_command() -> ConsoleCommandResult:
+    """解除终止状态，恢复自动重试。"""
+    was_aborted = is_abort_requested()
+    clear_abort()
+    logger.info("AI auto-retry abort cleared via console")
+    if was_aborted:
+        return ConsoleCommandResult(True, "已解除终止状态，AI 请求恢复正常自动重试。")
+    return ConsoleCommandResult(True, "AI 自动重试本就处于正常状态，无需恢复。")
 
 
 # ---------------------------------------------------------------------------

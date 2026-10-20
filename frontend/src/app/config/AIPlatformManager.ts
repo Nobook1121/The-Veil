@@ -82,11 +82,12 @@ function getBuiltinPlatformTemplate(platform: string): AIPlatformTemplate | null
 }
 
 // 新模型写入的默认参数，与后端默认请求配置保持一致；用户可在请求模板里覆盖。
+// 注意：不含 max_tokens —— 输出长度统一由管理员设置页的「最大输出 Token（全局）」
+// 控制，不再按平台/模型分散配置。
 const DEFAULT_MODEL_PARAMS = {
     context_window: 8192,
     temperature: 0.7,
     top_p: 0.95,
-    max_tokens: 4096,
 };
 
 class AIPlatformManager implements AIPlatformManager {

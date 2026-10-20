@@ -171,6 +171,19 @@ class ResponsesRequester:
         if isinstance(tools, list) and tools:
             body["tools"] = tools_to_responses(tools)
             body["tool_choice"] = payload.get("tool_choice") or "auto"
+        # 把采样/输出参数透传给 Responses 路径，使其与 chat/completions 共享同一套
+        # 请求模板与全局 max_tokens 策略（此前这些键会被静默丢弃）。
+        for key in (
+            "max_tokens",
+            "max_output_tokens",
+            "temperature",
+            "top_p",
+            "stop",
+            "frequency_penalty",
+            "presence_penalty",
+        ):
+            if key in payload:
+                body[key if key != "max_tokens" else "max_output_tokens"] = payload[key]
         extra_body = payload.get("extra_body")
         if isinstance(extra_body, dict):
             body.update(extra_body)
@@ -183,6 +196,7 @@ class ResponsesRequester:
             timeout=self.timeout,
             max_retries=self._max_retries,
             post=self._post,
+            label="responses_api",
         )
         if not response.ok:
             raise RuntimeError(f"Responses API returned HTTP {response.status_code}")

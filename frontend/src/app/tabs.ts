@@ -276,6 +276,8 @@ function initSettingsTabs(): void {
     bindGeneralNumberSetting("maxToolRounds", "ai", "max_tool_rounds", 1, 30);
     bindGeneralNumberSetting("aiRequestTimeout", "ai", "ai_request_timeout", 30, 1800);
     bindGeneralNumberSetting("aiRequestMaxRetries", "ai", "ai_request_max_retries", 0, 20);
+    bindGeneralCheckboxSetting("constrainMaxTokens", "ai", "constrain_max_tokens");
+    bindGeneralNumberSetting("maxTokens", "ai", "max_tokens", 1, 200000);
     bindGeneralCheckboxSetting("dedupeToolCalls", "ai.prompt", "dedupe_tool_calls");
     bindGeneralCheckboxSetting("semanticCacheEnabled", "ai.cache", "semantic_enabled");
     bindGeneralNumberSetting("semanticCacheTtl", "ai.cache", "semantic_ttl_seconds", 30, 86400);

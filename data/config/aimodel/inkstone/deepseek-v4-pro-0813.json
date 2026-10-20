@@ -2,7 +2,6 @@
   "model": "deepseek-v4-pro-0813",
   "messages": [],
   "stream": true,
-  "max_tokens": 4096,
   "temperature": 0.7,
   "top_p": 0.9
 }

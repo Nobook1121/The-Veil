@@ -17,8 +17,12 @@ from typing import Any, Callable
 
 import requests
 
+from trpg_server.agents.ai_request import PROBE_MAX_TOKENS
+from trpg_server.agents.config import load_ai_runtime_config
+from trpg_server.agents.http_retry import post_with_retry
 from trpg_server.ai_capabilities import chat_completions_endpoint
 from trpg_server.ai_platform_config import load_platform_config, ordered_platform_paths
+from trpg_server.settings import CONFIG_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +75,7 @@ def _build_probe_payload(model: str, filler_chars: int) -> dict[str, Any]:
             {"role": "system", "content": filler},
             {"role": "user", "content": "只回复：pong"},
         ],
-        "max_tokens": 16,
+        "max_tokens": PROBE_MAX_TOKENS,
         "temperature": 0,
     }
 
@@ -126,7 +130,21 @@ def probe_prefix_cache(
     if not model:
         return {"ok": False, "supported": None, "detail": "an enabled model is required", "endpoint": endpoint, "model": model}
 
-    sender = post or requests.post
+    raw_sender = post or requests.post
+    runtime_config = load_ai_runtime_config(CONFIG_DIR)
+
+    def sender(url: str, *, headers: dict[str, str], json: dict[str, Any], timeout: int) -> Any:
+        # 探针同样是「发起 AI 请求」，复用统一重试与日志，避免个别抖动直接误判不支持。
+        return post_with_retry(
+            url,
+            headers=headers,
+            payload=json,
+            timeout=timeout,
+            max_retries=runtime_config.ai_request_max_retries,
+            post=raw_sender,
+            label="cache_probe",
+        )
+
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key or ''}"}
     payload = _build_probe_payload(model, filler_chars)
 

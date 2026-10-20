@@ -138,6 +138,9 @@ class ConfigManager {
         configSetInputValue("maxToolRounds", this.get("general", "ai", "max_tool_rounds", 8));
         configSetInputValue("aiRequestTimeout", this.get("general", "ai", "ai_request_timeout", 300));
         configSetInputValue("aiRequestMaxRetries", this.get("general", "ai", "ai_request_max_retries", 5));
+        // 最大输出 token 全局默认值（模板未自行声明时统一下发；关闭则不下发）
+        configSetCheckboxValue("constrainMaxTokens", this.get("general", "ai", "constrain_max_tokens", true));
+        configSetInputValue("maxTokens", this.get("general", "ai", "max_tokens", 16384));
         configSetCheckboxValue("dedupeToolCalls", this.get("general", "ai.prompt", "dedupe_tool_calls", true));
         // 本地响应缓存（命中即跳过上游请求，直接省 token）
         configSetCheckboxValue("semanticCacheEnabled", this.get("general", "ai.cache", "semantic_enabled", true));

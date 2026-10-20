@@ -113,11 +113,12 @@ _CHARACTER_JSON = {
 
 
 def _patch_ai(monkeypatch, content: str, captured: dict):
-    from trpg_server.routes import character_ai
+    from trpg_server import character_ai as generator
+    from trpg_server.routes import character_ai as route
 
-    monkeypatch.setattr(character_ai, "_can_use_permission", lambda node_id: True)
+    monkeypatch.setattr(route, "_can_use_permission", lambda node_id: True)
     monkeypatch.setattr(
-        character_ai,
+        generator,
         "character_generator_role",
         lambda: {"id": "character_generator", "provider": "deepseek", "prompt": "角色卡生成提示词"},
     )
@@ -134,7 +135,7 @@ def _patch_ai(monkeypatch, content: str, captured: dict):
         captured["timeout"] = timeout
         return DummyResponse()
 
-    monkeypatch.setattr(character_ai.requests, "post", fake_post)
+    monkeypatch.setattr(generator.requests, "post", fake_post)
 
 
 def test_character_generator_role_is_registered_by_default(tmp_path: Path):
@@ -230,6 +231,82 @@ def test_generate_character_rejects_invalid_ai_payload(tmp_path: Path, monkeypat
 
     assert response.status_code == 502
     assert response.get_json()["success"] is False
+
+
+def test_generate_character_reports_empty_content_as_budget_issue(tmp_path: Path, monkeypatch):
+    """推理模型思考 token 挤占输出预算导致 content 为空时，应给出可诊断的提示。"""
+
+    app = _build_app(tmp_path)
+    client = app.test_client()
+    _login(client)
+
+    captured: dict = {}
+    _patch_ai(monkeypatch, "", captured)
+
+    response = client.post(
+        "/api/characters/generate",
+        json={"description": "随便一位调查员"},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+
+    assert response.status_code == 502
+    assert "max_tokens" in (response.get_json().get("error") or "")
+
+
+def test_build_request_payload_applies_template_and_token_policy(tmp_path):
+    from trpg_server.agents.ai_request import build_request_payload
+    from trpg_server.agents.config import AIRuntimeConfig
+
+    # 请求模板：默认模板 + 模型模板（均未声明 max_tokens）。
+    (tmp_path / "aiplatform").mkdir()
+    (tmp_path / "aiplatform" / "default-request.json").write_text(
+        json.dumps({"temperature": 0.7, "stop": ["</s>"]}), encoding="utf-8"
+    )
+    (tmp_path / "aimodel" / "deepseek").mkdir(parents=True)
+    (tmp_path / "aimodel" / "deepseek" / "m1.json").write_text(
+        json.dumps({"top_p": 0.3, "temperature": 0.9}), encoding="utf-8"
+    )
+
+    messages = [{"role": "user", "content": "hi"}]
+    # 关闭全局约束：不下发 max_tokens，输出上限交还平台自身。
+    unconstrained = AIRuntimeConfig(constrain_max_tokens=False)
+    payload = build_request_payload(
+        "deepseek",
+        "m1",
+        messages,
+        runtime_config=unconstrained,
+        config_dir=tmp_path,
+        params={"temperature": 0.6},
+    )
+    assert "max_tokens" not in payload
+    assert payload["messages"] == messages
+    # 调用方声明的 temperature 优先于模板；模板独有的 stop 仍然并入。
+    assert payload["temperature"] == 0.6
+    assert payload["stop"] == ["</s>"]
+    assert payload["top_p"] == 0.3
+    # 调用方未声明的采样参数则由模板提供（模型模板覆盖默认模板）。
+    assert (
+        build_request_payload(
+            "deepseek", "m1", messages, runtime_config=unconstrained, config_dir=tmp_path
+        )["temperature"]
+        == 0.9
+    )
+
+    # 开启全局约束：模板未声明 max_tokens 时，按管理员设置统一下发。
+    constrained = AIRuntimeConfig(constrain_max_tokens=True, max_tokens=3000)
+    payload2 = build_request_payload(
+        "deepseek", "m1", messages, runtime_config=constrained, config_dir=tmp_path
+    )
+    assert payload2["max_tokens"] == 3000
+
+    # 请求模板显式声明 max_tokens 时以模板为准（模板即真实请求体，用户改动真正生效）。
+    (tmp_path / "aiplatform" / "default-request.json").write_text(
+        json.dumps({"temperature": 0.7, "max_tokens": 4096}), encoding="utf-8"
+    )
+    payload3 = build_request_payload(
+        "deepseek", "m1", messages, runtime_config=constrained, config_dir=tmp_path
+    )
+    assert payload3["max_tokens"] == 4096
 
 
 def test_parse_character_generation_handles_fences_and_wrappers():

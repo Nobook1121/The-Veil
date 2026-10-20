@@ -98,12 +98,12 @@
 
 | 命令 | 作用 | 复用实现 | 风险 | 优先级 | 采纳 |
 |---|---|---|---|---|---|
-| `network status` | 端口、内网穿透状态 | `routes/network.py` status / penetration status | 只读 | ★★ | |
-| `network test` | 网络连通性测试 | `routes/network.py` .../test | 只读 | ★★ | |
-| `autosave run` | 立即触发一次自动存档 | `app_factory.py` → `run_scheduled_autosaves` | 低 | ★★ | |
+| `network status` | 端口、内网穿透状态 | `routes/network.py` status / penetration status | 只读 | ★★ |✅|
+| `network test` | 网络连通性测试 | `routes/network.py` .../test | 只读 | ★★ |✅|
+| `autosave` | 立即触发一次自动存档检查 | `room_admin.trigger_autosave` | 只读 | ★★ |✅|
 | `import jobs` | 查看剧本导入任务进度与状态 | `scenario_import_jobs.py` | 只读 | ★ | |
-| `backup create [--out <dir>]` | 打包 config / scenarios / rooms / 用户库 / 日志 | 新增 | 中 | ★★ | |
-| `owner transfer <user> --yes` | 转移系统 OWNER 身份 | `routes/setup.py` owner | 高 | ★ | |
+| `backup create [--out <dir>]` | 打包 config / scenarios / rooms / 用户库 / 日志 | 新增 | 中 | ★★ |✅|
+| `owner transfer <user> [--yes]` | 转移系统 OWNER 身份 | `routes/setup.py` owner | 高 | ★ |✅|
 
 ---
 

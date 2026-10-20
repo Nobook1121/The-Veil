@@ -34,6 +34,12 @@ class AIRuntimeConfig:
     ai_request_timeout: int = 300
     # 连接被网络层中断（防火墙/NAT 空闲超时等）时，单次 AI 请求最多重试几次。
     ai_request_max_retries: int = 5
+    # 所有平台的「最大输出 token」默认值。开启约束时，未在请求模板里自行声明的请求
+    # 一律按此值下发 max_tokens；模板里显式写了 max_tokens 的则以模板为准。
+    # 默认取一个足够宽裕的值，避免用压缩输出预算的方式省 token（那样容易截断回复或挤空
+    # 推理正文）；探针/连通性测试始终使用极小值，不受此影响。
+    constrain_max_tokens: bool = True
+    max_tokens: int = 16384
     # 是否把每次请求的提示词按分段估算 token 并记入用量日志，供成本归因与仪表盘展示。
     record_prompt_segments: bool = True
     # 骰娘大成功 / 大失败的全局默认阈值（管理员设置页可改，房规可覆盖）。
@@ -61,6 +67,10 @@ class AIRuntimeConfig:
     # 才会在本地模型不可用时改用 AI 平台配置里的 embedding 接口；关闭时一律回落到
     # 本地模型（可用的话）或确定性的哈希向量，避免静默产生云端调用费用。
     cloud_embedding_enabled: bool = False
+    # 首次部署引导「程序自动下载」使用的模型仓库（HuggingFace ``owner/name``）。
+    # 默认值只是兜底，实际取值以 general.toml 的 [ai] 段为准；引导页会把该值显示给
+    # 用户，因此前端文案里不要重复写死仓库名。
+    local_embedding_repo: str = "BAAI/bge-small-zh-v1.5"
 
 
 def _toml_int(value: str, fallback: int) -> int:
@@ -121,6 +131,8 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
     max_tool_rounds = AIRuntimeConfig.max_tool_rounds
     ai_request_timeout = AIRuntimeConfig.ai_request_timeout
     ai_request_max_retries = AIRuntimeConfig.ai_request_max_retries
+    constrain_max_tokens = AIRuntimeConfig.constrain_max_tokens
+    max_tokens = AIRuntimeConfig.max_tokens
     record_prompt_segments = AIRuntimeConfig.record_prompt_segments
     dice_critical_threshold = AIRuntimeConfig.dice_critical_threshold
     dice_fumble_threshold = AIRuntimeConfig.dice_fumble_threshold
@@ -135,6 +147,7 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
     max_recursion_depth = AIRuntimeConfig.max_recursion_depth
     lorebook_token_budget = AIRuntimeConfig.lorebook_token_budget
     cloud_embedding_enabled = AIRuntimeConfig.cloud_embedding_enabled
+    local_embedding_repo = AIRuntimeConfig.local_embedding_repo
     for raw_line in general_file.read_text(encoding="utf-8").splitlines():
         line = raw_line.split("#", 1)[0].strip()
         if not line:
@@ -201,10 +214,16 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
                 ai_request_timeout = max(30, min(1800, _toml_int(value, AIRuntimeConfig.ai_request_timeout)))
             elif key == "ai_request_max_retries":
                 ai_request_max_retries = max(0, min(20, _toml_int(value, AIRuntimeConfig.ai_request_max_retries)))
+            elif key == "constrain_max_tokens":
+                constrain_max_tokens = value.lower() == "true"
+            elif key == "max_tokens":
+                max_tokens = max(1, min(200000, _toml_int(value, AIRuntimeConfig.max_tokens)))
             elif key == "record_prompt_segments":
                 record_prompt_segments = value.lower() == "true"
             elif key == "cloud_embedding_enabled":
                 cloud_embedding_enabled = value.lower() == "true"
+            elif key == "local_embedding_repo":
+                local_embedding_repo = value.strip()
             elif key == "dice_critical_threshold":
                 dice_critical_threshold = max(0, min(100, _toml_int(value, AIRuntimeConfig.dice_critical_threshold)))
             elif key == "dice_fumble_threshold":
@@ -225,6 +244,8 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
         max_tool_rounds=max_tool_rounds,
         ai_request_timeout=ai_request_timeout,
         ai_request_max_retries=ai_request_max_retries,
+        constrain_max_tokens=constrain_max_tokens,
+        max_tokens=max_tokens,
         record_prompt_segments=record_prompt_segments,
         dice_critical_threshold=dice_critical_threshold,
         dice_fumble_threshold=dice_fumble_threshold,
@@ -239,4 +260,5 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
         max_recursion_depth=max_recursion_depth,
         lorebook_token_budget=lorebook_token_budget,
         cloud_embedding_enabled=cloud_embedding_enabled,
+        local_embedding_repo=local_embedding_repo,
     )

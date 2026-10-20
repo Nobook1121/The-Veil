@@ -1,7 +1,12 @@
 import pytest
 import requests
 
-from trpg_server.agents.http_retry import post_with_retry
+from trpg_server.agents.http_retry import (
+    clear_abort,
+    is_abort_requested,
+    post_with_retry,
+    request_abort,
+)
 
 
 class _OkResponse:
@@ -60,3 +65,23 @@ def test_post_with_retry_wraps_connection_errors_without_retrying():
 
     assert len(calls) == 1
     assert "AI 平台连接失败" in str(excinfo.value)
+
+
+def test_post_with_retry_stops_when_abort_requested():
+    calls = []
+
+    def post(url, headers=None, json=None, timeout=None):
+        calls.append(True)
+        raise requests.exceptions.Timeout("boom")
+
+    request_abort()
+    try:
+        with pytest.raises(RuntimeError) as excinfo:
+            post_with_retry("u", headers={}, payload={}, timeout=30, max_retries=5, post=post)
+    finally:
+        clear_abort()
+
+    # 第一次请求超时后即因中止请求而停止，不再继续重试。
+    assert len(calls) == 1
+    assert "手动终止" in str(excinfo.value)
+    assert not is_abort_requested()

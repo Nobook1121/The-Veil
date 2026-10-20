@@ -1,8 +1,11 @@
 import logging
 
 import requests
-from flask import Blueprint, request, session
+from flask import Blueprint, current_app, request, session
 
+from trpg_server.agents.ai_request import build_request_payload
+from trpg_server.agents.config import load_ai_runtime_config
+from trpg_server.agents.http_retry import post_with_retry
 from trpg_server.ai_capabilities import chat_completions_endpoint
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.responses import error_response, server_error, success_response
@@ -15,6 +18,7 @@ from trpg_server.scenario_ai import (
     summary_role,
 )
 from trpg_server.routes.scenarios import _can_use_permission, _require_login
+from trpg_server.settings import CONFIG_DIR
 
 bp = Blueprint("scenario_summary", __name__)
 logger = logging.getLogger(__name__)
@@ -56,21 +60,40 @@ def summarize_scenario_module():
             "Authorization": f"Bearer {api_key}",
         }
         model = select_model(platform_config)
-        payload = {
-            "model": model,
-            "messages": [
+        config_dir = current_app.config.get("CONFIG_DIR", CONFIG_DIR)
+        runtime_config = load_ai_runtime_config(config_dir)
+        payload = build_request_payload(
+            selected_platform,
+            model,
+            [
                 {"role": "system", "content": str(role.get("prompt") or "")},
                 {"role": "user", "content": module_summary_user_prompt(request_data.get("scenario_title"), module)},
             ],
-            "max_tokens": 180,
-            "temperature": 0.2,
-            "top_p": 0.8,
-        }
+            runtime_config=runtime_config,
+            config_dir=config_dir,
+            params={"temperature": 0.2, "top_p": 0.8},
+        )
+        logger.info(
+            "module_summary_request platform=%s model=%s max_tokens=%s constrain=%s token_count_target=%s",
+            selected_platform,
+            model,
+            payload.get("max_tokens"),
+            runtime_config.constrain_max_tokens,
+            module.get("token_count"),
+        )
         try:
             timeout = int(platform_config.get("config", {}).get("timeout", 30))
         except (TypeError, ValueError):
             timeout = 30
-        response = requests.post(base_url, headers=headers, json=payload, timeout=max(15, min(timeout, 60)))
+        response = post_with_retry(
+            base_url,
+            headers=headers,
+            payload=payload,
+            timeout=max(15, min(timeout, 60)),
+            max_retries=runtime_config.ai_request_max_retries,
+            post=requests.post,
+            label="module_summary",
+        )
         response_data = response.json()
         if not isinstance(response_data, dict):
             return error_response("AI 平台返回的数据格式无效", 502, "Response must be a JSON object")
@@ -95,6 +118,13 @@ def summarize_scenario_module():
             data={"summary": summary, "token_count": token_count, "role_id": role.get("id"), "model": model},
             message="Module summary generated successfully",
         )
+    except RuntimeError as exc:
+        # post_with_retry 统一把「超时/连接失败/手动终止」抛为 RuntimeError，按文案分类。
+        message = str(exc)
+        logger.warning("Scenario module summary request failed after retries: %s", message)
+        if "超时" in message:
+            return error_response(message, 504, "Request timeout")
+        return error_response(message, 503, "Connection error")
     except requests.exceptions.Timeout:
         logger.warning("Scenario module summary request timed out")
         return error_response("AI 平台请求超时，请稍后重试", 504, "Request timeout")

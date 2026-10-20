@@ -151,6 +151,7 @@ def test_module_summary_endpoint_returns_clean_summary_and_token_count(tmp_path:
     assert payload["data"]["token_count"] == 19
     # 只填主机名/前缀时，后端会在发请求前补齐 chat/completions 端点（问题 10）。
     assert captured["url"] == "https://example.test/chat/v1/chat/completions"
-    assert captured["json"]["max_tokens"] == 180
+    # 默认开启全局约束且模板未声明：按管理员设置的默认值统一下发 max_tokens。
+    assert captured["json"]["max_tokens"] == 16384
     assert captured["json"]["messages"][1]["content"].startswith("请为下面的剧本模块生成摘要")
 

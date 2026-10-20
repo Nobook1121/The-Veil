@@ -12,12 +12,33 @@ Responses 路径若只做单次请求，一次瞬时抖动就会永久降级回 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any, Callable
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+# 管理员可通过控制台 ``ai abort`` 立即终止正在进行的自动重试；``ai resume`` 恢复。
+# 用进程内事件做「软中止」：置位后，下一次重试前直接放弃并抛出可读错误，避免用户在
+# 平台持续抖动时只能干等到预算耗尽。
+_abort_event = threading.Event()
+
+
+def request_abort() -> None:
+    """请求终止当前所有进行中的自动重试。"""
+    _abort_event.set()
+
+
+def clear_abort() -> None:
+    """解除终止状态，恢复自动重试。"""
+    _abort_event.clear()
+
+
+def is_abort_requested() -> bool:
+    """当前是否已请求终止自动重试。"""
+    return _abort_event.is_set()
 
 
 def post_with_retry(
@@ -29,13 +50,18 @@ def post_with_retry(
     max_retries: int,
     post: Callable[..., Any] | None = None,
     on_retry: Callable[[int, int], None] | None = None,
+    label: str = "",
 ) -> Any:
     """在总预算内重试一次 POST；超时/连接失败最终以 :class:`RuntimeError` 抛出。
 
     ``on_retry`` 会在每次重试前被调用（用于在聊天框里提示重试进度），它自身抛错
     不影响重试。错误信息里的等待秒数取真实耗时，而非配置值。
+
+    ``label`` 用于日志里标记本次请求的用途（如 ``character_generation``），便于把
+    重试/超时事件归因到具体功能。重试前会检查全局中止开关，置位则立即停止重试。
     """
     sender = post or requests.post
+    tag = f"[{label}] " if label else ""
     budget = max(1, timeout)
     deadline = time.monotonic() + budget
     total_attempts = max(1, max_retries + 1)
@@ -54,8 +80,14 @@ def post_with_retry(
             attempt_elapsed = time.monotonic() - attempt_started
             remaining = deadline - time.monotonic()
             if attempt < total_attempts and remaining >= 1:
+                if is_abort_requested():
+                    logger.warning("%sAI 自动重试已被手动终止（第 %s 次请求超时）", tag, attempt)
+                    raise RuntimeError(
+                        f"AI 请求已被手动终止自动重试（等待第 {attempt} 次响应超时）"
+                    ) from exc
                 logger.warning(
-                    "AI API request interrupted after %.1fs; retrying (%s/%s)",
+                    "%sAI API request interrupted after %.1fs; retrying (%s/%s)",
+                    tag,
                     attempt_elapsed,
                     attempt,
                     max_retries,
@@ -70,7 +102,8 @@ def post_with_retry(
             retried = attempt - 1
             total_elapsed = budget - max(0.0, remaining)
             logger.warning(
-                "AI API request timed out after %.1fs (budget %.0fs, attempts %s)",
+                "%sAI API request timed out after %.1fs (budget %.0fs, attempts %s)",
+                tag,
                 total_elapsed,
                 budget,
                 attempt,

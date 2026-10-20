@@ -90,3 +90,18 @@ def test_ai_runtime_config_reads_debug_mode(tmp_path):
     config = load_ai_runtime_config(config_dir)
 
     assert config.debug_mode is True
+
+
+def test_ai_runtime_config_reads_max_tokens_constraint(tmp_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "general.toml").write_text(
+        "[ai]\nconstrain_max_tokens = true\nmax_tokens = 2048\n", encoding="utf-8"
+    )
+
+    config = load_ai_runtime_config(config_dir)
+
+    # 默认开启约束（模板未声明时按全局值下发），显式配置后按配置生效。
+    assert config.constrain_max_tokens is True
+    assert config.max_tokens == 2048
+    assert load_ai_runtime_config(tmp_path / "missing").constrain_max_tokens is True

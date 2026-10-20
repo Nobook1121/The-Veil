@@ -14,12 +14,18 @@ import re
 from pathlib import Path
 from typing import Any
 
+import requests
 from flask import current_app
 
+from trpg_server.agents.ai_request import build_request_payload
+from trpg_server.agents.config import load_ai_runtime_config
+from trpg_server.agents.http_retry import post_with_retry
+from trpg_server.ai_capabilities import chat_completions_endpoint
 from trpg_server.json_store import read_json
 from trpg_server.role_config import CHARACTER_GENERATOR_ROLE_ID, load_roles
 from trpg_server.scenario_ai import (
     ai_platform_dir,
+    extract_ai_response,
     kp_prompt_file,
     load_enabled_platform,
     role_config_file,
@@ -31,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 MAX_DESCRIPTION_LENGTH = 2000
 MAX_SCENARIO_TEXT_LENGTH = 800
+
+DEFAULT_TIMEOUT = 60
+MAX_TIMEOUT = 180
 
 
 def character_generator_role() -> dict[str, Any]:
@@ -192,3 +201,252 @@ def parse_character_generation(content: str) -> dict[str, Any] | None:
     if not isinstance(parsed.get("attributes"), dict):
         return None
     return parsed
+
+
+class CharacterGenerationError(Exception):
+    """角色卡生成过程中的可预期失败，携带分类与建议的 HTTP 状态码。
+
+    ``kind`` 用于日志与前端区分失败原因（platform / timeout / connection /
+    request / invalid_json / http / empty_content / parse）；``status`` 是路由层
+    映射到 HTTP 响应的建议状态码。
+    """
+
+    def __init__(self, message: str, kind: str = "error", status: int = 502):
+        super().__init__(message)
+        self.kind = kind
+        self.status = status
+
+
+def resolve_connection(role: dict[str, Any]) -> dict[str, Any]:
+    """从角色绑定的平台配置里解析出本次请求所需的连接参数。"""
+    provider = role.get("provider") if isinstance(role, dict) else None
+    platform, platform_config = load_enabled_platform(provider)
+    if not platform_config:
+        raise CharacterGenerationError("No enabled AI platform", "platform", 400)
+
+    config = platform_config.get("config") if isinstance(platform_config.get("config"), dict) else {}
+    api_key = config.get("api_key")
+    base_url = chat_completions_endpoint(config.get("base_url"))
+    if not base_url:
+        raise CharacterGenerationError("AI platform config is incomplete", "platform", 400)
+    if not api_key and platform == "lmstudio":
+        api_key = "lm-studio"
+    elif not api_key:
+        raise CharacterGenerationError("AI platform config is incomplete", "platform", 400)
+
+    try:
+        timeout = int(config.get("timeout", DEFAULT_TIMEOUT))
+    except (TypeError, ValueError):
+        timeout = DEFAULT_TIMEOUT
+
+    return {
+        "platform": platform,
+        "config": platform_config,
+        "model": select_model(platform_config),
+        "base_url": base_url,
+        "api_key": api_key,
+        "timeout": max(30, min(timeout, MAX_TIMEOUT)),
+    }
+
+
+def _response_diagnostics(response_data: dict[str, Any]) -> dict[str, Any]:
+    """提取响应中用于排障的关键字段（思考长度、结束原因、用量）。"""
+    choices = response_data.get("choices") if isinstance(response_data.get("choices"), list) else []
+    choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+    message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
+    usage = response_data.get("usage") if isinstance(response_data.get("usage"), dict) else {}
+    return {
+        "finish_reason": choice.get("finish_reason"),
+        "content_length": len(str(message.get("content") or "")),
+        "reasoning_length": len(str(message.get("reasoning_content") or "")),
+        "usage": usage,
+    }
+
+
+def _record_usage(usage: dict[str, Any], *, model: str, scenario_id: Any, success: bool, kind: str) -> None:
+    """把一次角色卡生成的用量写入 AI 用量台账，便于 ``ai usage`` 复盘。"""
+    try:
+        from trpg_server.agents.telemetry import record_ai_usage
+
+        log_dir = current_app.config.get("LOGS_DIR")
+        if not log_dir:
+            return
+        record_ai_usage(
+            Path(log_dir),
+            {
+                "agent_id": "character_generator",
+                "model": model,
+                "scenario_id": str(scenario_id or ""),
+                "success": bool(success),
+                "error_kind": kind,
+                "prompt_tokens": usage.get("prompt_tokens", 0),
+                "completion_tokens": usage.get("completion_tokens", 0),
+                "total_tokens": usage.get("total_tokens")
+                or (int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)),
+                "cached_tokens": (usage.get("prompt_tokens_details") or {}).get(
+                    "cached_tokens", usage.get("prompt_cache_hit_tokens", 0)
+                ),
+            },
+        )
+    except Exception:  # noqa: BLE001 - 台账失败绝不能影响角色卡生成主流程
+        logger.debug("character_generation usage recording failed", exc_info=True)
+
+
+def run_character_generation(
+    description: str,
+    scenario_context: dict[str, Any] | None = None,
+    *,
+    user_id: Any = None,
+    scenario_id: Any = None,
+) -> dict[str, Any]:
+    """执行一次完整的角色卡 AI 生成。
+
+    返回结果字典；可预期的失败以 :class:`CharacterGenerationError` 抛出，路由层与
+    控制台命令据此映射为 HTTP 响应或命令行输出。所有关键步骤都会写入日志，便于在
+    出现「识别错误」时定位是平台、网络、还是模型输出被截断。
+    """
+    role = character_generator_role()
+    connection = resolve_connection(role)
+    platform = connection["platform"]
+    model = connection["model"]
+    config_dir = current_app.config.get("CONFIG_DIR", CONFIG_DIR)
+    runtime_config = load_ai_runtime_config(config_dir)
+    reference = build_character_reference_payload()
+    messages = [
+        {"role": "system", "content": str(role.get("prompt") or "")},
+        {
+            "role": "user",
+            "content": build_character_generation_user_prompt(description, scenario_context, reference),
+        },
+    ]
+    # 请求模板（default-request.json + aimodel/<平台>/<模型>.json）在此真正并入请求，
+    # 输出长度只由全局「是否约束最大 token」开关决定，不再硬编码。
+    payload = build_request_payload(
+        platform,
+        model,
+        messages,
+        runtime_config=runtime_config,
+        config_dir=config_dir,
+        params={"temperature": 0.6, "top_p": 0.9},
+    )
+    logger.info(
+        "character_generation_request platform=%s model=%s max_tokens=%s constrain=%s user_id=%s scenario_id=%s "
+        "description_length=%s occupation_samples=%s weapon_samples=%s skill_samples=%s",
+        platform,
+        model,
+        payload.get("max_tokens"),
+        runtime_config.constrain_max_tokens,
+        user_id,
+        scenario_id,
+        len(description or ""),
+        len(reference.get("occupations") or []),
+        len(reference.get("weapons") or []),
+        len(reference.get("skills") or []),
+    )
+
+    try:
+        response = post_with_retry(
+            connection["base_url"],
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {connection['api_key']}"},
+            payload=payload,
+            timeout=connection["timeout"],
+            max_retries=runtime_config.ai_request_max_retries,
+            post=requests.post,
+            label="character_generation",
+        )
+    except RuntimeError as exc:
+        # post_with_retry 把「超时/连接失败/手动终止」统一抛 RuntimeError，这里按文案分类。
+        message = str(exc)
+        kind = "timeout" if "超时" in message else "connection"
+        status = 504 if kind == "timeout" else 503
+        logger.warning("character_generation_request_failed user_id=%s model=%s kind=%s: %s", user_id, model, kind, exc)
+        raise CharacterGenerationError(message, kind, status) from exc
+    except requests.exceptions.RequestException as exc:
+        logger.warning("character_generation_request_error user_id=%s model=%s: %s", user_id, model, exc)
+        raise CharacterGenerationError("AI 平台请求失败", "request", 502) from exc
+
+    try:
+        response_data = response.json()
+    except ValueError as exc:
+        logger.warning("character_generation_invalid_json user_id=%s status=%s: %s", user_id, response.status_code, exc)
+        raise CharacterGenerationError("AI 平台返回的数据格式无效", "invalid_json", 502) from exc
+
+    if not isinstance(response_data, dict):
+        logger.warning("character_generation_non_object_response user_id=%s status=%s", user_id, response.status_code)
+        raise CharacterGenerationError("AI 平台返回的数据格式无效", "invalid_json", 502)
+
+    diagnostics = _response_diagnostics(response_data)
+    usage = diagnostics["usage"]
+
+    if response.status_code != 200:
+        message = ""
+        error = response_data.get("error")
+        if isinstance(error, dict):
+            message = str(error.get("message") or "")
+        elif isinstance(error, str):
+            message = error
+        message = message or f"API request failed: {response.status_code}"
+        logger.warning(
+            "character_generation_http_error user_id=%s status=%s model=%s message=%s",
+            user_id,
+            response.status_code,
+            model,
+            message,
+        )
+        _record_usage(usage, model=model, scenario_id=scenario_id, success=False, kind="http")
+        raise CharacterGenerationError(message, "http", response.status_code)
+
+    logger.info(
+        "character_generation_response user_id=%s model=%s status=%s finish_reason=%s content_length=%s "
+        "reasoning_length=%s prompt_tokens=%s completion_tokens=%s",
+        user_id,
+        model,
+        response.status_code,
+        diagnostics["finish_reason"],
+        diagnostics["content_length"],
+        diagnostics["reasoning_length"],
+        usage.get("prompt_tokens"),
+        usage.get("completion_tokens"),
+    )
+
+    content, token_count = extract_ai_response(response_data)
+    character = parse_character_generation(content)
+    if not character:
+        logger.warning(
+            "character_generation_parse_failed user_id=%s content_length=%s reasoning_length=%s "
+            "finish_reason=%s completion_tokens=%s content_preview=%r",
+            user_id,
+            diagnostics["content_length"],
+            diagnostics["reasoning_length"],
+            diagnostics["finish_reason"],
+            usage.get("completion_tokens"),
+            str(content or "")[:200],
+        )
+        if not content:
+            _record_usage(usage, model=model, scenario_id=scenario_id, success=False, kind="empty_content")
+            raise CharacterGenerationError(
+                "AI 平台未返回有效内容（可能是推理模型思考 token 超出输出预算），请重试或提高 max_tokens",
+                "empty_content",
+                502,
+            )
+        _record_usage(usage, model=model, scenario_id=scenario_id, success=False, kind="parse")
+        raise CharacterGenerationError("AI 平台未返回有效的角色卡数据", "parse", 502)
+
+    _record_usage(usage, model=model, scenario_id=scenario_id, success=True, kind="")
+    logger.info(
+        "character_generation_succeeded user_id=%s model=%s scene_count=%s token_count=%s",
+        user_id,
+        model,
+        len((scenario_context or {}).get("scenes") or []),
+        token_count,
+    )
+    return {
+        "character": character,
+        "token_count": token_count,
+        "model": model,
+        "platform": platform,
+        "role_id": role.get("id"),
+        "finish_reason": diagnostics["finish_reason"],
+        "content_length": diagnostics["content_length"],
+        "reasoning_length": diagnostics["reasoning_length"],
+    }

@@ -7,6 +7,8 @@ import time
 import requests
 from flask import Blueprint, current_app, request, session
 
+from trpg_server.agents.config import load_ai_runtime_config
+from trpg_server.agents.http_retry import post_with_retry
 from trpg_server.ai_capabilities import chat_completions_endpoint, probe_responses_api
 from trpg_server.ai_platform_config import (
     load_platform_config,
@@ -366,7 +368,16 @@ def test_ai_platform_api(platform):
             平台=platform,
             BaseURL=base_url,
         )
-        response = requests.post(base_url, headers=headers, json=test_payload, timeout=30)
+        runtime_config = load_ai_runtime_config(_get_config_dir())
+        response = post_with_retry(
+            base_url,
+            headers=headers,
+            payload=test_payload,
+            timeout=30,
+            max_retries=runtime_config.ai_request_max_retries,
+            post=requests.post,
+            label="platform_api_test",
+        )
         response_data = response.json()
         if response.status_code != 200:
             error_message = response_data.get("error", {}).get(
