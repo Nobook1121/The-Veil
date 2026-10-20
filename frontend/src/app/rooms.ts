@@ -685,6 +685,12 @@ function updateRoomDetail(room: Room): void {
     if (deleteButton) deleteButton.hidden = Boolean(room.archived);
     const archivedBadge = document.getElementById("roomDetailArchivedBadge") as HTMLElement | null;
     if (archivedBadge) archivedBadge.style.display = room.archived ? "inline-block" : "none";
+    // 房间内嵌控制台：仅显示本房间日志，房主/管理员可执行房间域命令。
+    window.openRoomConsole?.(room.id, {
+        canExecute: canManageRoom(room),
+        archived: Boolean(room.archived),
+        invisibleView: room.invisible_view === true,
+    });
 }
 
 window.refreshRoomArchiveUi = (): void => {
@@ -1411,6 +1417,7 @@ function clearCurrentRoom(): void {
     window.currentRoom = null;
     window.setChatReadOnly?.(false);
     applyInvisibleRoomView(false);
+    window.closeRoomConsole?.();
     setText("homeRoomTitle", "未加入房间");
     setText("homeRoomOnlineCount", "在线玩家 0/0");
     renderRoomMemberList(null);

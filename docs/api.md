@@ -201,6 +201,10 @@
 - `POST /api/rooms/<room_id>/scenario-switch`：切换剧本。
 - `POST /api/rooms/<room_id>/scenario-migration`：在换剧本时迁移剧情进度。
 - `GET|PUT /api/rooms/<room_id>/house-rules`：读取 / 保存房间规则（含技能基础值覆盖）。
+- `GET /api/rooms/<room_id>/console/log`：读取本房间控制台日志（可按 `level` / `search` / `limit` 过滤）。
+- `GET /api/rooms/<room_id>/console/commands`：读取房间控制台命令白名单与帮助文本。
+- `POST /api/rooms/<room_id>/console/command`：执行一条房间范围内命令（body: `{command}`）。
+- `DELETE /api/rooms/<room_id>/console/log`：清空本房间控制台日志（破坏性，已归档房间拒绝）。
 - `POST /api/rooms/<room_id>/archive`：归档房间。
 - `GET /api/rooms/<room_id>/archive`：读取归档房间内容（别名 `GET /api/room-archives/<room_id>`）。
 - `GET /api/room-archives`：列出归档房间（别名 `GET /api/rooms/archives`）。

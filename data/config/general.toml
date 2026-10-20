@@ -13,6 +13,13 @@ enabled = true
 interval = 300
 max_nodes = 3
 
+[room_console]
+enabled = true
+mirror_to_server_console = false
+max_entries = 500
+view_role = "admin"
+execute_role = "admin"
+
 [chat]
 show_timestamp = true
 message_font_size = 14

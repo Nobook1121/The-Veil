@@ -284,6 +284,22 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- 房间内嵌控制台：仅显示本房间日志，日志随房间一起归档 -->
+                            <div class="card" id="roomConsolePanel" data-room-sensitive>
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <span data-i18n="room.console.title">房间控制台</span>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" id="roomConsoleClear" data-i18n="room.console.clear">清空</button>
+                                </div>
+                                <div class="card-body">
+                                    <div id="roomConsoleOutput" class="room-console-output" style="max-height: 240px; overflow-y: auto; font-family: monospace; font-size: 12px; background: #1e1e1e; color: #d4d4d4; padding: 8px; border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;"></div>
+                                    <div id="roomConsoleEmpty" class="text-muted small mt-2" data-i18n="room.console.empty">本房间暂无日志。</div>
+                                    <div class="input-group mt-2">
+                                        <input type="text" class="form-control" id="roomConsoleInput" data-i18n-placeholder="room.console.placeholder" placeholder="输入房间命令，如 help / members / state">
+                                        <button class="btn btn-primary" type="button" id="roomConsoleSend" data-i18n="room.console.send">执行</button>
+                                    </div>
+                                    <small class="text-muted" id="roomConsoleReadOnlyHint" data-i18n="room.console.readonly" hidden>仅房间所有者/管理员可执行命令。</small>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

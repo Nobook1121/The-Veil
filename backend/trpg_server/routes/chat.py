@@ -30,6 +30,7 @@ from trpg_server.agents.tools.room import get_room_snapshot
 from trpg_server.agents.room_state import append_room_event, project_room_state
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
+from trpg_server.room_log import log_room_event
 from trpg_server.responses import error_response, server_error, success_response
 from trpg_server.role_config import load_roles, resolve_task_model
 from trpg_server.settings import (
@@ -674,9 +675,12 @@ def chat():
         if runtime_config.stream_output:
             request_data["stream"] = False
 
-        log_user_action(
-            logger,
-            user_action_text(session.get("username") or user_id, "开始 AI 对话"),
+        log_room_event(
+            message=user_action_text(session.get("username") or user_id, "开始 AI 对话"),
+            actor=session.get("username") or user_id,
+            room_id=room_id,
+            rooms_dir=current_app.config.get("ROOMS_DIR"),
+            logger_=logger,
             用户ID=session.get("user_id") or user_id,
             角色=role_config.get("id"),
             平台=selected_platform,
@@ -926,9 +930,12 @@ def chat():
                 400,
                 "No response",
             )
-        log_user_action(
-            logger,
-            user_action_text(session.get("username") or user_id, "收到 AI 回复"),
+        log_room_event(
+            message=user_action_text(session.get("username") or user_id, "收到 AI 回复"),
+            actor=session.get("username") or user_id,
+            room_id=room_id,
+            rooms_dir=current_app.config.get("ROOMS_DIR"),
+            logger_=logger,
             用户ID=session.get("user_id") or user_id,
             平台=selected_platform,
             模型=request_data["model"],

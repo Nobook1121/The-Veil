@@ -1241,6 +1241,7 @@ function initWebSocket(): void {
         socket.on("user_typing", (data) => handleUserTyping(data));
         socket.on("room_members_changed", () => { void window.refreshCurrentRoomMembers?.(); });
         socket.on("room_autosave_created", () => { void window.refreshRoomNodes?.(); });
+        socket.on("room_console_log", (data) => { window.appendRoomConsoleEntry?.(data as RoomConsoleSocketPayload); });
         socket.on("role_changed", (data) => handleRoleChanged(data));
         // 平台自动切换等仅面向管理员的提示：服务端只推给在线管理员，前端以通知条展示（不用 alert）。
         socket.on("admin_notification", (payload: unknown) => {

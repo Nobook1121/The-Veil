@@ -4,6 +4,7 @@ from flask import current_app, request, session
 from flask_socketio import disconnect, emit, join_room, leave_room
 
 from trpg_server.logging_config import log_user_action, user_action_text
+from trpg_server.room_log import log_room_event, set_room_log_broadcaster
 from trpg_server.security import (
     ACTIVE_SESSION_REGISTRY_KEY,
     SESSION_TOKEN_KEY,
@@ -19,6 +20,15 @@ logger = logging.getLogger(__name__)
 def register_socket_events(socketio):
     if getattr(socketio, "_trpg_events_registered", False):
         return
+
+    # 房间日志实时广播：新增条目推送给房间内在线用户，驱动内嵌 Web 控制台。
+    set_room_log_broadcaster(
+        lambda room_id, entry: socketio.emit(
+            "room_console_log",
+            {"room_id": room_id, "type": "append", "entry": entry},
+            room=room_id,
+        )
+    )
 
     def _room_membership():
         return current_app.config.setdefault(USER_ROOM_MEMBERSHIP_KEY, {})
@@ -79,11 +89,13 @@ def register_socket_events(socketio):
             if "user_id" in session:
                 membership = _room_membership()
                 membership.setdefault(str(session["user_id"]), set()).add(room_id)
-            log_user_action(
-                logger,
-                user_action_text(session.get("username"), "加入了房间"),
+            log_room_event(
+                message=user_action_text(session.get("username"), "加入了房间"),
+                actor=session.get("username"),
+                room_id=room_id,
+                rooms_dir=current_app.config.get("ROOMS_DIR"),
+                logger_=logger,
                 用户ID=session.get("user_id"),
-                房间ID=room_id,
             )
             # 用户刚上线/进入房间，通知房间内其他人刷新成员列表。
             _notify_room_members_changed(room_id)
@@ -96,11 +108,13 @@ def register_socket_events(socketio):
             if "user_id" in session:
                 membership = _room_membership()
                 membership.get(str(session["user_id"]), set()).discard(room_id)
-            log_user_action(
-                logger,
-                user_action_text(session.get("username"), "离开了房间"),
+            log_room_event(
+                message=user_action_text(session.get("username"), "离开了房间"),
+                actor=session.get("username"),
+                room_id=room_id,
+                rooms_dir=current_app.config.get("ROOMS_DIR"),
+                logger_=logger,
                 用户ID=session.get("user_id"),
-                房间ID=room_id,
             )
             _notify_room_members_changed(room_id)
 

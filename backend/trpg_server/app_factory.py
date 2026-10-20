@@ -302,6 +302,7 @@ def register_blueprints(app):
     from trpg_server.routes.knowledge_bases import bp as knowledge_bases_bp
     from trpg_server.routes.pages import bp as pages_bp
     from trpg_server.routes.rooms import bp as rooms_bp
+    from trpg_server.routes.room_console import bp as room_console_bp
     from trpg_server.routes.scenarios import bp as scenarios_bp
     from trpg_server.routes.scenario_summary import bp as scenario_summary_bp
     from trpg_server.routes.setup import bp as setup_bp
@@ -325,6 +326,7 @@ def register_blueprints(app):
     app.register_blueprint(config_bp)
     app.register_blueprint(setup_bp)
     app.register_blueprint(rooms_bp)
+    app.register_blueprint(room_console_bp)
     app.register_blueprint(network_bp)
     app.register_blueprint(knowledge_bases_bp)
     app.register_blueprint(pages_bp)

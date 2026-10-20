@@ -86,6 +86,7 @@ try {
     "dist\public\js\qr.js",
     "dist\public\js\vendor\qrcode.js",
     "dist\public\js\rooms.js",
+    "dist\public\js\room-console.js",
     "dist\public\js\scenario.js",
     "dist\public\js\character-sheet.js",
     "dist\public\js\main.js",

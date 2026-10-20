@@ -296,6 +296,9 @@ function initSettingsTabs(): void {
     bindGeneralNumberSetting("maxRecursionDepth", "ai.knowledge", "max_recursion_depth", 0, 10);
     bindGeneralNumberSetting("lorebookTokenBudget", "ai.knowledge", "lorebook_token_budget", 0, 200000);
     bindGeneralCheckboxSetting("cloudEmbeddingEnabled", "ai", "cloud_embedding_enabled");
+    bindGeneralCheckboxSetting("enableRoomConsole", "room_console", "enabled");
+    bindGeneralCheckboxSetting("mirrorRoomConsole", "room_console", "mirror_to_server_console");
+    bindGeneralNumberSetting("roomConsoleMaxEntries", "room_console", "max_entries", 50, 5000);
     document.getElementById("savePermissionConfig")?.addEventListener("click", () => {
         void savePermissionConfig();
     });

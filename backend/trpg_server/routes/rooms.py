@@ -11,6 +11,7 @@ from flask import Blueprint, current_app, request, session
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.media_defaults import normalize_avatar
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
+from trpg_server.room_log import ARCHIVE_LOG_LIMIT, load_room_log, log_room_event
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, success_response
 from trpg_server.role_config import load_roles
@@ -621,6 +622,7 @@ def _build_room_archive(room_dir, info):
         "creator_id": info.get("creator_id"),
         "members": info.get("members", []),
         "messages": _read_messages(room_dir),
+        "console_log": load_room_log(room_dir, limit=ARCHIVE_LOG_LIMIT),
     }
     history_dir = current_app.config.get("HISTORY_DIR", HISTORY_DIR)
     if history_dir:
@@ -841,11 +843,13 @@ def create_room():
     _write_messages(room_dir, [])
     write_json_atomic(room_dir / "autosave.json", {"updated_at": now, "messages": []})
 
-    log_user_action(
-        logger,
+    log_room_event(
+        room_dir,
         user_action_text(session.get("username"), "创建了房间"),
+        actor=session.get("username"),
+        room_id=room_id,
+        logger_=logger,
         用户ID=session.get("user_id"),
-        房间ID=room_id,
         房间码=info["room_code"],
         房间名=name,
         剧本=scenario_title,
@@ -917,11 +921,13 @@ def join_room_by_code():
         _bind_character(member, character_card)
         _write_room(room_dir, info)
 
-    log_user_action(
-        logger,
+    log_room_event(
+        room_dir,
         user_action_text(session.get("username"), "加入了房间"),
+        actor=session.get("username"),
+        room_id=info["id"],
+        logger_=logger,
         用户ID=user_id,
-        房间ID=info["id"],
         房间码=info.get("room_code"),
         房间名=info.get("name"),
     )
@@ -966,11 +972,13 @@ def rotate_room_invite_token(room_id):
     token = _new_invite_token()
     info["invite_token"] = token
     _write_room(room_dir, info)
-    log_user_action(
-        logger,
+    log_room_event(
+        room_dir,
         user_action_text(session.get("username"), "刷新了房间邀请链接"),
+        actor=session.get("username"),
+        room_id=info.get("id"),
+        logger_=logger,
         用户ID=session.get("user_id"),
-        房间ID=info.get("id"),
         房间码=info.get("room_code"),
         房间名=info.get("name"),
     )
@@ -1002,11 +1010,13 @@ def bind_room_member_character(room_id, user_id):
     if not _bind_character(target, character_card):
         return error_response("Character card is required", 400, "Character card is required")
     _write_room(room_dir, info)
-    log_user_action(
-        logger,
+    log_room_event(
+        room_dir,
         user_action_text(session.get("username"), "绑定了房间角色卡"),
+        actor=session.get("username"),
+        room_id=room_id,
+        logger_=logger,
         用户ID=session.get("user_id"),
-        房间ID=room_id,
         目标用户=user_id,
         角色卡ID=target.get("character_card", {}).get("id"),
         角色名=target.get("character_card", {}).get("name"),
@@ -1039,11 +1049,13 @@ def delete_room_member(room_id, user_id):
     if target.get("room_role") == ROOM_ROLE_ADMIN:
         target["room_role"] = ROOM_ROLE_MEMBER
     _write_room(room_dir, info)
-    log_user_action(
-        logger,
+    log_room_event(
+        room_dir,
         user_action_text(session.get("username"), "移除了房间成员"),
+        actor=session.get("username"),
+        room_id=room_id,
+        logger_=logger,
         用户ID=session.get("user_id"),
-        房间ID=room_id,
         目标用户=user_id,
         房间名=info.get("name"),
     )
@@ -1073,11 +1085,13 @@ def update_room_member_role(room_id, user_id):
         return error_response("Invalid room role", 400, "Invalid room role")
     target["room_role"] = role
     _write_room(room_dir, info)
-    log_user_action(
-        logger,
+    log_room_event(
+        room_dir,
         user_action_text(session.get("username"), "更改了房间成员权限"),
+        actor=session.get("username"),
+        room_id=room_id,
+        logger_=logger,
         用户ID=session.get("user_id"),
-        房间ID=room_id,
         目标用户=user_id,
         权限=role,
     )
@@ -1226,11 +1240,13 @@ def switch_room_scenario(room_id):
         except OSError:
             logger.debug("Failed to remove knowledge cursor on scenario switch", exc_info=True)
 
-    log_user_action(
-        logger,
+    log_room_event(
+        room_dir,
         user_action_text(session.get("username"), "强制切换了房间剧本"),
+        actor=session.get("username"),
+        room_id=room_id,
+        logger_=logger,
         用户ID=session.get("user_id"),
-        房间ID=room_id,
         房间码=updated.get("room_code"),
         原剧本=previous_title,
         新剧本=updated["scenario_title"],
@@ -1303,7 +1319,15 @@ def archive_room(room_id):
     info.pop("house_rules", None)
     _write_room(room_dir, info)
     archive = _build_room_archive(room_dir, info)
-    log_user_action(logger, user_action_text(session.get("username"), "归档了房间"), 用户ID=session.get("user_id"), 房间ID=room_id, 房间名=info.get("name"))
+    log_room_event(
+        room_dir,
+        user_action_text(session.get("username"), "归档了房间"),
+        actor=session.get("username"),
+        room_id=room_id,
+        logger_=logger,
+        用户ID=session.get("user_id"),
+        房间名=info.get("name"),
+    )
     return success_response({"id": archive["id"], "name": archive["name"], "archived_at": archive["archived_at"]}, "Room archived successfully")
 
 
@@ -1389,11 +1413,13 @@ def update_room_house_rules(room_id):
             return error_response("Invalid room visibility", 400, "Invalid visibility")
         info["visibility"] = candidate
     _write_room(room_dir, info)
-    log_user_action(
-        logger,
+    log_room_event(
+        room_dir,
         user_action_text(session.get("username"), "更新了房间房规"),
+        actor=session.get("username"),
+        room_id=room_id,
+        logger_=logger,
         用户ID=session.get("user_id"),
-        房间ID=room_id,
         房间名=info.get("name"),
     )
     return success_response(
@@ -1508,11 +1534,13 @@ def create_room_message(room_id):
     _write_messages(room_dir, messages)
     _write_room(room_dir, info)
 
-    log_user_action(
-        logger,
+    log_room_event(
+        room_dir,
         user_action_text(session.get("username"), "发送了房间消息"),
+        actor=session.get("username"),
+        room_id=room_id,
+        logger_=logger,
         用户ID=session.get("user_id"),
-        房间ID=room_id,
         类型=message["type"],
         内容长度=len(content),
     )
@@ -1583,11 +1611,13 @@ def trigger_room_scenario(room_id):
     _write_room(room_dir, info)
     if new_trigger:
         record_trigger(room_dir, str(trigger_id), reason=str(data.get("reason") or "manual trigger"))
-    log_user_action(
-        logger,
+    log_room_event(
+        room_dir,
         user_action_text(session.get("username"), "触发了场景触发器"),
+        actor=session.get("username"),
+        room_id=room_id,
+        logger_=logger,
         用户ID=session.get("user_id"),
-        房间ID=room_id,
         触发器ID=trigger_id,
     )
     return success_response(message, "Trigger executed successfully", 201)
@@ -1654,11 +1684,13 @@ def _create_character_record_for_room(room_dir, info):
         state.setdefault(collection, []).insert(0, record)
 
     _write_room(room_dir, info)
-    log_user_action(
-        logger,
+    log_room_event(
+        room_dir,
         user_action_text(session.get("username"), "记录了角色状态变化"),
+        actor=session.get("username"),
+        room_id=info.get("id"),
+        logger_=logger,
         用户ID=session.get("user_id"),
-        房间ID=info.get("id"),
         类型=record_type,
         目标玩家=target.get("username"),
         数值=value,
@@ -1702,11 +1734,13 @@ def delete_character_record(room_id, record_id):
                 state[collection_name] = next_records
                 _recalculate_character_state(state)
                 _write_room(room_dir, info)
-                log_user_action(
-                    logger,
+                log_room_event(
+                    room_dir,
                     user_action_text(session.get("username"), "删除了角色状态记录"),
+                    actor=session.get("username"),
+                    room_id=room_id,
+                    logger_=logger,
                     用户ID=session.get("user_id"),
-                    房间ID=room_id,
                     记录ID=record_id,
                 )
                 return success_response({"member": member}, "Character record deleted")
@@ -1764,11 +1798,13 @@ def create_room_node(room_id):
         "messages": _read_messages(room_dir),
     }
     write_json_atomic(room_dir / "nodes" / node["filename"], node)
-    log_user_action(
-        logger,
+    log_room_event(
+        room_dir,
         user_action_text(session.get("username"), "创建了房间回档节点"),
+        actor=session.get("username"),
+        room_id=room_id,
+        logger_=logger,
         用户ID=session.get("user_id"),
-        房间ID=room_id,
         文件=node["filename"],
     )
     return success_response(node, "Room node created successfully", 201)
@@ -1811,11 +1847,13 @@ def restore_room_node(room_id, node_filename):
     node = read_json(node_file, default={"messages": []})
     _write_messages(room_dir, node.get("messages", []))
     _write_room(room_dir, info)
-    log_user_action(
-        logger,
+    log_room_event(
+        room_dir,
         user_action_text(session.get("username"), "恢复了房间回档节点"),
+        actor=session.get("username"),
+        room_id=room_id,
+        logger_=logger,
         用户ID=session.get("user_id"),
-        房间ID=room_id,
         文件=node_filename,
     )
     return success_response(node, "Room node restored successfully")
@@ -1836,11 +1874,13 @@ def delete_room_node(room_id, node_filename):
     node_file = safe_join(room_dir / "nodes", node_filename)
     if node_file.exists():
         node_file.unlink()
-    log_user_action(
-        logger,
+    log_room_event(
+        room_dir,
         user_action_text(session.get("username"), "删除了房间回档节点"),
+        actor=session.get("username"),
+        room_id=room_id,
+        logger_=logger,
         用户ID=session.get("user_id"),
-        房间ID=room_id,
         文件=node_filename,
     )
     return success_response(message="Room node deleted successfully")
@@ -1873,15 +1913,25 @@ def _write_room_autosave(room_dir, room_id, messages, *, username=None, user_id=
     for _, old_file in automatic_nodes[_autosave_node_limit():]:
         old_file.unlink(missing_ok=True)
     if username:
-        log_user_action(
-            logger,
+        log_room_event(
+            room_dir,
             user_action_text(username, "保存了房间自动存档"),
+            actor=username,
+            room_id=room_id,
+            logger_=logger,
+            level="debug",
             用户ID=user_id,
-            房间ID=room_id,
             消息数=len(messages),
         )
     else:
-        log_user_action(logger, "系统保存了房间自动存档", 房间ID=room_id, 消息数=len(messages))
+        log_room_event(
+            room_dir,
+            "系统保存了房间自动存档",
+            room_id=room_id,
+            logger_=logger,
+            level="debug",
+            消息数=len(messages),
+        )
     socketio = current_app.extensions.get("socketio")
     if socketio is not None:
         socketio.emit("room_autosave_created", {"room_id": room_id, "filename": autosave["filename"]}, room=room_id)

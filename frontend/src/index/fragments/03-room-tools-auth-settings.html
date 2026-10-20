@@ -665,6 +665,27 @@
                                 </div>
                             </div>
                             <div class="mb-4">
+                                <h4 data-i18n="settings.section.room_console">房间控制台</h4>
+                                <div class="form-group">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="enableRoomConsole">
+                                        <label class="form-check-label" for="enableRoomConsole" data-i18n="settings.room_console.enable">启用房间内嵌控制台</label>
+                                    </div>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="mirrorRoomConsole">
+                                        <label class="form-check-label" for="mirrorRoomConsole" data-i18n="settings.room_console.mirror">同时输出到服务器控制台</label>
+                                    </div>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label data-i18n="settings.room_console.max_entries">房间日志条数上限</label>
+                                    <input type="number" class="form-control" id="roomConsoleMaxEntries" value="500" min="50" max="5000">
+                                    <small class="form-text text-muted" data-i18n="settings.room_console.max_entries_hint">每个房间保留的日志条数，超出后裁剪最早的记录。</small>
+                                </div>
+                                <small class="form-text text-muted" data-i18n="settings.room_console.hint">房间日志记录在房间目录内，随房间一起归档；关闭后房间事件将像以前一样输出到服务器控制台。</small>
+                            </div>
+                            <div class="mb-4">
                                 <h4>聊天设置</h4>
                                 <div class="form-group">
                                     <div class="form-check">

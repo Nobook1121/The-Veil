@@ -388,17 +388,23 @@ def test_room_message_logs_display_name_without_content(monkeypatch, caplog, tmp
         ]
     }
     messages = []
+    room_dir = tmp_path / "room-1"
+    room_dir.mkdir(parents=True, exist_ok=True)
 
     import trpg_server.routes.rooms as rooms_routes
-    from trpg_server import logging_config
+    from trpg_server import logging_config, room_log
 
     def write_messages(room_dir, saved):
         messages[:] = saved
 
-    monkeypatch.setattr(rooms_routes, "_find_room", lambda room_id: ("room-dir", room_info))
+    monkeypatch.setattr(rooms_routes, "_find_room", lambda room_id: (room_dir, room_info))
     monkeypatch.setattr(rooms_routes, "_read_messages", lambda room_dir: messages.copy())
     monkeypatch.setattr(rooms_routes, "_write_messages", write_messages)
     monkeypatch.setattr(rooms_routes, "_write_room", lambda room_dir, info: None)
+    # 房间事件现在写入房间内嵌控制台日志（房间目录内），不再刷服务器控制台。
+    monkeypatch.setattr(
+        room_log, "room_console_settings", lambda *args, **kwargs: dict(room_log.DEFAULT_ROOM_CONSOLE_SETTINGS)
+    )
     caplog.set_level("INFO", logger="trpg_server.routes.rooms")
     # 锁定日志语言：指向空的配置目录即回落到默认语言（英文），
     # 否则会受其他测试残留的配置目录影响。
@@ -418,14 +424,18 @@ def test_room_message_logs_display_name_without_content(monkeypatch, caplog, tmp
 
     assert status == 201
     assert response.get_json()["data"]["content"] == "hello from player"
-    log_text = "\n".join(record.getMessage() for record in caplog.records)
-    # 房间消息日志与其他房间接口一致：只记录操作者与结构化元数据，不记录聊天正文
-    assert "alice" in log_text
-    assert "sent a room message" in log_text
-    assert "user ID" in log_text
-    assert "room ID" in log_text
-    assert "content length" in log_text
-    assert "hello from player" not in log_text
+
+    entries = room_log.read_room_log(room_dir)["entries"]
+    assert len(entries) == 1
+    entry = entries[0]
+    # 房间消息日志与其他房间接口一致：只记录操作者与结构化元数据，不记录聊天正文。
+    assert "alice" in entry["message"]
+    assert "sent a room message" in entry["message"]
+    assert entry["details"]["内容长度"] == len("hello from player")
+    assert "hello from player" not in str(entry)
+    # 房间事件不再进入服务器控制台日志。
+    server_log = "\n".join(record.getMessage() for record in caplog.records)
+    assert "sent a room message" not in server_log
 
 
 def test_socket_broadcast_does_not_log_persisted_room_message(monkeypatch, caplog):

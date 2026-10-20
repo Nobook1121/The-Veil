@@ -66,6 +66,28 @@ interface RoomHouseRules {
     skill_bases?: Record<string, number>;
 }
 
+interface RoomConsoleEntry {
+    ts?: string;
+    level?: string;
+    source?: string;
+    actor?: string | null;
+    room_id?: string;
+    message?: string;
+    details?: Record<string, unknown>;
+}
+
+interface RoomConsoleSocketPayload {
+    room_id?: string;
+    type?: string;
+    entry?: RoomConsoleEntry;
+}
+
+interface RoomConsoleOpenOptions {
+    canExecute?: boolean;
+    archived?: boolean;
+    invisibleView?: boolean;
+}
+
 interface ChatMessage {
     id?: string;
     role?: string;
