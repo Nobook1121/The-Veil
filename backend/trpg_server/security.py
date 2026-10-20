@@ -20,11 +20,16 @@ CSRF_EXEMPT_PATHS = {
     "/api/auth/register",
     # 首次部署引导发生在登录之前，此时会话中还没有 CSRF token；
     # 这些接口以“系统中不存在 OWNER”作为安全门闸，因此豁免 CSRF 与会话校验。
+    # （embedding/status 是只读接口，仅回传本机模型与下载进度状态。）
     "/api/setup/status",
     "/api/setup/dismiss",
     "/api/setup/site",
     "/api/setup/ai",
     "/api/setup/ai/test",
+    "/api/setup/embedding/status",
+    "/api/setup/embedding/download",
+    "/api/setup/embedding/upload",
+    "/api/setup/embedding/cloud",
     "/api/setup/owner",
 }
 WINDOWS_RESERVED_FILENAMES = {

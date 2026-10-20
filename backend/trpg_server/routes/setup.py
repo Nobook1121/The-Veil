@@ -17,12 +17,26 @@ from flask import Blueprint, current_app, request, session
 
 from trpg_server.ai_capabilities import chat_completions_endpoint
 from trpg_server.ai_platform_config import load_platform_config, save_platform_config
+from trpg_server.agents.ai_request import PROBE_MAX_TOKENS
+from trpg_server.agents.config import load_ai_runtime_config
+from trpg_server.agents.http_retry import post_with_retry
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.responses import error_response, server_error, success_response
 from trpg_server.role_config import load_roles
 from trpg_server.security import CSRF_SESSION_KEY, SESSION_TOKEN_KEY, safe_join
-from trpg_server.settings import AI_PLATFORM_SECRET_DIR, CONFIG_DIR, SITE_CONFIG_FILE
+from trpg_server.setup_embedding import (
+    EMBEDDING_REPO_PATTERN,
+    EmbeddingSetupError,
+    build_embedding_platform_options,
+    count_model_files,
+    derive_embedding_base_url,
+    embedding_job,
+    local_model_present,
+    set_cloud_embedding_enabled,
+    store_uploaded_files,
+)
+from trpg_server.settings import AI_PLATFORM_SECRET_DIR, CONFIG_DIR, LOCAL_EMBEDDING_MODEL_PATH, SITE_CONFIG_FILE
 
 bp = Blueprint("setup", __name__)
 logger = logging.getLogger(__name__)
@@ -52,6 +66,19 @@ def _get_user_manager():
 
 def _get_site_config_file():
     return current_app.config.get("SITE_CONFIG_FILE", SITE_CONFIG_FILE)
+
+
+def _embedding_model_path():
+    return current_app.config.get("LOCAL_EMBEDDING_MODEL_PATH", LOCAL_EMBEDDING_MODEL_PATH)
+
+
+def _embedding_repo() -> str:
+    """引导页自动下载使用的模型仓库取自 general.toml 的 [ai] 段，不在代码里写死。"""
+    return load_ai_runtime_config(_get_config_dir()).local_embedding_repo.strip()
+
+
+def _general_config_file():
+    return _get_config_dir() / "general.toml"
 
 
 def _read_site_config() -> dict:
@@ -220,14 +247,23 @@ def test_ai_platform():
         payload = {
             "model": model_id,
             "messages": [{"role": "user", "content": "ping"}],
-            "max_tokens": 16,
+            "max_tokens": PROBE_MAX_TOKENS,
             "temperature": 0,
         }
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
         }
-        response = requests.post(chat_completions_endpoint(base_url), headers=headers, json=payload, timeout=30)
+        runtime_config = load_ai_runtime_config(_get_config_dir())
+        response = post_with_retry(
+            chat_completions_endpoint(base_url),
+            headers=headers,
+            payload=payload,
+            timeout=30,
+            max_retries=runtime_config.ai_request_max_retries,
+            post=requests.post,
+            label="setup_test",
+        )
         if response.status_code != 200:
             try:
                 detail = response.json().get("error", {}).get("message", "")
@@ -239,6 +275,140 @@ def test_ai_platform():
     except Exception as exc:
         logger.exception("Failed to test AI platform during setup")
         return server_error()
+
+
+@bp.route("/api/setup/embedding/status", methods=["GET"])
+def setup_embedding_status():
+    """Embedding 步骤的只读状态。
+
+    这是只读接口，因此不随 OWNER 存在与否锁定：下载在后台线程里进行，用户可能在
+    下载途中就完成了 owner 创建，此时仍需要能查询进度。回传内容不含敏感信息。
+    """
+    try:
+        model_path = _embedding_model_path()
+        return success_response(
+            {
+                "local_model_present": local_model_present(model_path),
+                "local_model_files": count_model_files(model_path),
+                "cloud_embedding_enabled": load_ai_runtime_config(_get_config_dir()).cloud_embedding_enabled,
+                "local_embedding_repo": _embedding_repo(),
+                "job": embedding_job.snapshot(),
+                "platforms": build_embedding_platform_options(
+                    _get_ai_platform_dir(), _get_ai_platform_secret_dir()
+                ),
+            }
+        )
+    except Exception:
+        logger.exception("Failed to read embedding setup status")
+        return server_error("Failed to read embedding status")
+
+
+@bp.route("/api/setup/embedding/download", methods=["POST"])
+def setup_embedding_download():
+    """启动后台下载本地 embedding 模型（仅系统尚无 OWNER 时可用）。"""
+    try:
+        if _owner_exists(_get_user_manager()):
+            return _setup_locked_response()
+
+        payload = request.get_json(silent=True) or {}
+        repo = str(payload.get("repo") or _embedding_repo()).strip()
+        if not EMBEDDING_REPO_PATTERN.fullmatch(repo):
+            return error_response("Invalid model repo", 400, "Invalid model repo")
+
+        started = embedding_job.start(_embedding_model_path(), repo)
+        log_user_action(
+            logger,
+            "完成引导：启动本地 Embedding 模型下载",
+            仓库=repo,
+            已启动=started,
+        )
+        return success_response({"started": started, "job": embedding_job.snapshot()})
+    except Exception:
+        logger.exception("Failed to start embedding download during setup")
+        return server_error("Failed to start download")
+
+
+@bp.route("/api/setup/embedding/upload", methods=["POST"])
+def setup_embedding_upload():
+    """接收用户拖入的本地模型（zip 或散文件）并写入模型目录。"""
+    try:
+        if _owner_exists(_get_user_manager()):
+            return _setup_locked_response()
+
+        files = [item for item in request.files.getlist("files") if item and item.filename]
+        if not files and request.files.get("file"):
+            files = [request.files["file"]]
+
+        result = store_uploaded_files(files, _embedding_model_path())
+        log_user_action(
+            logger,
+            "完成引导：上传本地 Embedding 模型",
+            文件数=result.get("written"),
+            模型可用=result.get("local_model_present"),
+        )
+        return success_response(result)
+    except EmbeddingSetupError as exc:
+        logger.warning("Rejected embedding upload during setup: %s", exc)
+        return error_response(str(exc), 400, str(exc))
+    except Exception:
+        logger.exception("Failed to store uploaded embedding model during setup")
+        return server_error("Failed to store model files")
+
+
+@bp.route("/api/setup/embedding/cloud", methods=["POST"])
+def setup_embedding_cloud():
+    """启用云端 AI 平台的 embedding 接口，并写好平台配置。"""
+    try:
+        if _owner_exists(_get_user_manager()):
+            return _setup_locked_response()
+
+        payload = request.get_json(silent=True) or {}
+        platform = str(payload.get("platform") or "").strip()
+        model_id = str(payload.get("model") or "").strip()
+        base_url = str(payload.get("base_url") or "").strip()
+        if not _PLATFORM_ID_RE.fullmatch(platform):
+            return error_response("Invalid platform id", 400, "Invalid platform id")
+
+        platform_dir = _get_ai_platform_dir()
+        config_path = safe_join(platform_dir, f"{platform}.json")
+        if not config_path.exists():
+            return error_response("Platform not configured", 400, "Platform not configured")
+        secret_path = safe_join(_get_ai_platform_secret_dir(), f"{platform}.json")
+        config = load_platform_config(config_path, secret_path)
+
+        platform_config = config.get("config") if isinstance(config.get("config"), dict) else {}
+        if not platform_config.get("api_key"):
+            return error_response("Platform has no API key", 400, "Platform has no API key")
+
+        if not base_url:
+            base_url = derive_embedding_base_url(str(platform_config.get("base_url") or ""))
+        try:
+            dimensions = int(payload.get("dimensions"))
+        except (TypeError, ValueError):
+            dimensions = 0
+        if not base_url or not model_id or dimensions < 1:
+            return error_response("Incomplete embedding config", 400, "Incomplete embedding config")
+
+        config["embedding"] = {"base_url": base_url, "model": model_id, "dimensions": dimensions}
+        save_platform_config(config_path, secret_path, config)
+        set_cloud_embedding_enabled(_general_config_file(), True)
+
+        log_user_action(
+            logger,
+            "完成引导：启用云端 Embedding",
+            平台=platform,
+            BaseURL=base_url,
+            模型=model_id,
+            维度=dimensions,
+        )
+        return success_response(
+            {"platform": platform, "base_url": base_url, "model": model_id, "dimensions": dimensions}
+        )
+    except EmbeddingSetupError as exc:
+        return error_response(str(exc), 400, str(exc))
+    except Exception:
+        logger.exception("Failed to enable cloud embedding during setup")
+        return server_error("Failed to save embedding config")
 
 
 @bp.route("/api/setup/owner", methods=["POST"])
@@ -313,7 +483,6 @@ def _upsert_model(models, model_id: str, model_name: str) -> list:
                 "context_window": 8192,
                 "temperature": 0.7,
                 "top_p": 0.95,
-                "max_tokens": 4096,
             },
         },
     )

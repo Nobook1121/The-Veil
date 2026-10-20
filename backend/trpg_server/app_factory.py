@@ -15,7 +15,7 @@ from trpg_server.logging_config import configure_logging
 from trpg_server.security import register_session_guard
 from trpg_server.socket_events import register_socket_events
 from trpg_server.settings import LOGS_DIR, SECRET_KEY, SESSION_COOKIE_SECURE, USERS_DIR, WEAPONS_DIR, ROOM_ARCHIVES_DIR
-from trpg_server.settings import SCENARIO_IMPORTS_DIR, SCENARIO_IMPORT_MAX_BYTES, SCENARIO_IMPORT_WORKERS
+from trpg_server.settings import SCENARIO_IMPORTS_DIR, SCENARIO_IMPORT_MAX_BYTES, SCENARIO_IMPORT_WORKERS, SETUP_EMBEDDING_UPLOAD_MAX_BYTES
 from trpg_server.settings import VECTOR_DB_URL, VECTOR_DB_PATH, VECTOR_DB_API_KEY, VECTOR_BACKEND, VECTOR_BACKEND_EXPLICIT, EMBEDDED_VECTOR_DB_PATH, SCENARIOS_DIR, EMBEDDING_BASE_URL, EMBEDDING_API_KEY, EMBEDDING_MODEL, EMBEDDING_DIMENSIONS, OCR_ENABLED, OCR_LANG, LOCAL_EMBEDDING_MODEL_PATH, PADDLEOCR_HOME, AI_PLATFORM_SECRET_DIR, CONFIG_DIR
 from trpg_server.agents.vector_store import create_vector_store
 from trpg_server.agents.embedding_provider import select_embedding_provider
@@ -59,7 +59,8 @@ def create_app(config=None):
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=SESSION_COOKIE_SECURE,
         PERMANENT_SESSION_LIFETIME=timedelta(days=7),
-        MAX_CONTENT_LENGTH=SCENARIO_IMPORT_MAX_BYTES,
+        MAX_CONTENT_LENGTH=max(SCENARIO_IMPORT_MAX_BYTES, SETUP_EMBEDDING_UPLOAD_MAX_BYTES),
+        SETUP_EMBEDDING_UPLOAD_MAX_BYTES=SETUP_EMBEDDING_UPLOAD_MAX_BYTES,
         USER_DATABASE_FILE=USERS_DIR / "users.sqlite3",
         USERS_FILE=USERS_DIR / "users.json",
         USER_IP_CONFIG_DIR=USERS_DIR / "ip_configs",
@@ -77,9 +78,10 @@ def create_app(config=None):
     )
     if config:
         app.config.update(config)
-    # Scenario imports support the larger limit declared by the import
-    # validator.  Ruleset uploads still enforce their own smaller limit inside
-    # the route, but Flask must not reject them first with an HTML 413 page.
+    # The global body limit is the largest of the per-feature allowances (scenario
+    # imports, setup embedding model uploads).  Each route still enforces its own
+    # smaller limit internally (or via its own validator), so Flask must not reject
+    # a legitimate request first with an HTML 413 page.
     configure_logging(app.config.get("LOGS_DIR", LOGS_DIR), app.config.get("CONFIG_DIR", CONFIG_DIR))
     if "USER_MANAGER" not in app.config:
         _configure_user_service(app)

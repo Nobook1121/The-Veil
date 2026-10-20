@@ -107,6 +107,72 @@
                 padding: 10px 0;
                 border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
             }
+            .setup-option-list {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                margin-bottom: 14px;
+            }
+            .setup-option {
+                display: flex;
+                gap: 10px;
+                align-items: flex-start;
+                padding: 10px 12px;
+                border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+                border-radius: 10px;
+                cursor: pointer;
+            }
+            .setup-option:has(input:checked) {
+                border-color: var(--accent-color, #4f8cff);
+                background: rgba(79, 140, 255, 0.1);
+            }
+            .setup-option input {
+                margin-top: 3px;
+            }
+            .setup-option span {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            .setup-option small {
+                color: var(--muted-text-color, #97a1b5);
+                font-size: 0.8rem;
+            }
+            .setup-embed-repo {
+                color: var(--muted-text-color, #97a1b5);
+                font-size: 0.78rem;
+                word-break: break-all;
+            }
+            .setup-embed-pane {
+                display: none;
+            }
+            .setup-embed-pane.is-active {
+                display: block;
+            }
+            .setup-dropzone {
+                border: 1px dashed var(--border-color, rgba(255, 255, 255, 0.25));
+                border-radius: 10px;
+                padding: 22px 16px;
+                text-align: center;
+                color: var(--muted-text-color, #97a1b5);
+                font-size: 0.85rem;
+                cursor: pointer;
+            }
+            .setup-dropzone.is-dragover {
+                border-color: var(--accent-color, #4f8cff);
+                background: rgba(79, 140, 255, 0.1);
+                color: var(--text-color, #e8ecf4);
+            }
+            .setup-embed-progress {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-top: 12px;
+                font-size: 0.8rem;
+            }
+            .setup-embed-progress progress {
+                flex: 1;
+            }
         </style>
         <div class="setup-wizard-card" role="dialog" aria-modal="true" aria-labelledby="setupWizardTitle">
             <h2 class="setup-wizard-title" id="setupWizardTitle" data-i18n="setup.title">欢迎，先完成初始化</h2>
@@ -118,6 +184,7 @@
                 <span class="setup-progress-step" data-step="3"></span>
                 <span class="setup-progress-step" data-step="4"></span>
                 <span class="setup-progress-step" data-step="5"></span>
+                <span class="setup-progress-step" data-step="6"></span>
             </div>
 
             <section class="setup-panel is-active" data-setup-step="1">
@@ -151,7 +218,69 @@
             </section>
 
             <section class="setup-panel" data-setup-step="2">
-                <h3 data-i18n="setup.site.heading">2. 为网站取名</h3>
+                <h3 data-i18n="setup.embed.heading">2. 准备 Embedding 模型（可跳过）</h3>
+                <p class="setup-hint" data-i18n="setup.embed.hint">知识库检索需要向量化模型。可以自动下载、拖入本地模型文件，或改用云端 AI 平台的 embedding 接口；不准备也能继续，稍后可在「设置 - 模型设置」中配置。</p>
+                <div class="setup-option-list">
+                    <label class="setup-option">
+                        <input type="radio" name="setupEmbeddingMode" value="download" checked>
+                        <span>
+                            <strong data-i18n="setup.embed.opt_download">程序自动下载</strong>
+                            <small data-i18n="setup.embed.opt_download_hint">从模型仓库自动下载本地向量模型（约 100 MB）。</small>
+                            <code class="setup-embed-repo" id="setupEmbeddingRepo" hidden></code>
+                        </span>
+                    </label>
+                    <label class="setup-option">
+                        <input type="radio" name="setupEmbeddingMode" value="upload">
+                        <span>
+                            <strong data-i18n="setup.embed.opt_upload">拖入本地模型</strong>
+                            <small data-i18n="setup.embed.opt_upload_hint">自行下载模型后，把模型文件夹或 .zip 压缩包拖到下方区域上传。</small>
+                        </span>
+                    </label>
+                    <label class="setup-option">
+                        <input type="radio" name="setupEmbeddingMode" value="cloud">
+                        <span>
+                            <strong data-i18n="setup.embed.opt_cloud">使用云端 Embedding</strong>
+                            <small data-i18n="setup.embed.opt_cloud_hint">复用第 1 步配置的 AI 平台，改用它的 embedding 接口。</small>
+                        </span>
+                    </label>
+                </div>
+
+                <div class="setup-embed-pane is-active" data-embed-pane="download">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="setupEmbeddingDownloadBtn" data-i18n="setup.embed.start_download">开始下载</button>
+                    <div class="setup-embed-progress" id="setupEmbeddingProgress" hidden>
+                        <progress id="setupEmbeddingProgressBar" max="100" value="0"></progress>
+                        <span id="setupEmbeddingProgressText"></span>
+                    </div>
+                </div>
+
+                <div class="setup-embed-pane" data-embed-pane="upload">
+                    <div class="setup-dropzone" id="setupEmbeddingDropzone" role="button" tabindex="0" data-i18n="setup.embed.dropzone">把模型文件夹或 .zip 压缩包拖到这里，或点击选择文件。</div>
+                    <input type="file" id="setupEmbeddingFileInput" multiple hidden>
+                </div>
+
+                <div class="setup-embed-pane" data-embed-pane="cloud">
+                    <div class="mb-3">
+                        <label class="form-label" for="setupEmbeddingPlatform" data-i18n="setup.embed.platform">平台</label>
+                        <select class="form-select" id="setupEmbeddingPlatform"></select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="setupEmbeddingBaseUrl" data-i18n="setup.embed.base_url">Embedding 接口地址</label>
+                        <input type="text" class="form-control" id="setupEmbeddingBaseUrl" placeholder="https://api.example.com/v1/embeddings">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="setupEmbeddingModel" data-i18n="setup.embed.model">Embedding 模型 ID</label>
+                        <input type="text" class="form-control" id="setupEmbeddingModel" placeholder="text-embedding-3-small">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="setupEmbeddingDimensions" data-i18n="setup.embed.dimensions">向量维度</label>
+                        <input type="number" class="form-control" id="setupEmbeddingDimensions" min="1" placeholder="1536">
+                    </div>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="setupEmbeddingCloudBtn" data-i18n="setup.embed.enable_cloud">启用云端 Embedding</button>
+                </div>
+            </section>
+
+            <section class="setup-panel" data-setup-step="3">
+                <h3 data-i18n="setup.site.heading">3. 为网站取名</h3>
                 <p class="setup-hint" data-i18n="setup.site.hint">这个名字会显示在浏览器标题栏和侧边栏。</p>
                 <div class="mb-3">
                     <label class="form-label" for="setupSiteName" data-i18n="setup.site.name">网站名称</label>
@@ -159,8 +288,8 @@
                 </div>
             </section>
 
-            <section class="setup-panel" data-setup-step="3">
-                <h3 data-i18n="setup.domain.heading">3. 绑定域名（可跳过）</h3>
+            <section class="setup-panel" data-setup-step="4">
+                <h3 data-i18n="setup.domain.heading">4. 绑定域名（可跳过）</h3>
                 <p class="setup-hint" data-i18n="setup.domain.hint">仅记录域名用于展示。实际的 DNS 解析与 HTTPS 需要由 Nginx/Caddy 等反向代理完成，可稍后再配置。</p>
                 <div class="mb-3">
                     <label class="form-label" for="setupSiteDomain" data-i18n="setup.domain.label">域名</label>
@@ -168,8 +297,8 @@
                 </div>
             </section>
 
-            <section class="setup-panel" data-setup-step="4">
-                <h3 data-i18n="setup.owner.heading">4. 创建 Owner 账号</h3>
+            <section class="setup-panel" data-setup-step="5">
+                <h3 data-i18n="setup.owner.heading">5. 创建 Owner 账号</h3>
                 <p class="setup-hint" data-i18n="setup.owner.hint">这是最高权限账号，用于管理网站。用户名 3-32 位，密码至少 8 位。</p>
                 <div class="mb-3">
                     <label class="form-label" for="setupOwnerUsername" data-i18n="setup.owner.username">用户名</label>
@@ -189,8 +318,8 @@
                 </div>
             </section>
 
-            <section class="setup-panel" data-setup-step="5">
-                <h3 data-i18n="setup.done.heading">5. 完成</h3>
+            <section class="setup-panel" data-setup-step="6">
+                <h3 data-i18n="setup.done.heading">6. 完成</h3>
                 <p class="setup-hint" data-i18n="setup.done.hint">初始化已完成，点击下方按钮进入系统。</p>
                 <ul class="setup-summary" id="setupSummary"></ul>
             </section>

@@ -35,14 +35,20 @@
 
 来源：`routes/setup.py`
 
-系统内还没有任何 `OWNER` 时，`/api/setup/status` 的 `setup_required` 为 `true`，前端会弹出五步向导。
+系统内还没有任何 `OWNER` 时，`/api/setup/status` 的 `setup_required` 为 `true`，前端会弹出六步向导。
 
 - `GET /api/setup/status`：读取引导状态（是否需要引导、站点信息、AI 配置状态）。
 - `POST /api/setup/dismiss`：关闭引导。
 - `POST /api/setup/site`：保存站点名称等基础信息。
 - `POST /api/setup/ai`：保存向导中的 AI 平台配置。
 - `POST /api/setup/ai/test`：测试 AI 连接是否可用。
+- `GET /api/setup/embedding/status`：读取 Embedding 步骤状态（本地模型是否就绪、下载进度、可选的云端平台）。只读接口，不随 OWNER 存在与否锁定。
+- `POST /api/setup/embedding/download`：在后台线程下载本地 Embedding 模型（默认 `BAAI/bge-small-zh-v1.5`，可从官方仓库回落到镜像站）。
+- `POST /api/setup/embedding/upload`：接收用户拖入的模型（`.zip` 压缩包或散文件），自动展开顶层目录后写入模型目录。
+- `POST /api/setup/embedding/cloud`：复用已配置的 AI 平台，写入其 embedding 接口配置，并开启 `cloud_embedding_enabled`。
 - `POST /api/setup/owner`：创建首个最高权限（OWNER）账号，完成后自动登录。
+
+> 本地模型与云端 Embedding 均在程序下次启动时生效；未准备模型时系统会退回内置哈希向量。
 
 ---
 

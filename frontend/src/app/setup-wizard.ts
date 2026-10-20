@@ -6,10 +6,44 @@ namespace SetupWizard {
         site_domain?: string;
     }
 
-    const TOTAL_STEPS = 5;
-    const SKIPPABLE_STEPS = [1, 3];
+    interface SetupEmbeddingJob {
+        state?: string;
+        message?: string;
+        error?: string;
+        host?: string;
+        total_files?: number;
+        completed_files?: number;
+        running?: boolean;
+    }
+
+    interface SetupEmbeddingPlatform {
+        platform?: string;
+        name?: string;
+        has_api_key?: boolean;
+        embedding_base_url?: string;
+        embedding_model?: string;
+        embedding_dimensions?: number;
+    }
+
+    interface SetupEmbeddingStatus {
+        local_model_present?: boolean;
+        local_model_files?: number;
+        cloud_embedding_enabled?: boolean;
+        local_embedding_repo?: string;
+        job?: SetupEmbeddingJob;
+        platforms?: SetupEmbeddingPlatform[];
+    }
+
+    interface SetupUploadItem {
+        file: File;
+        path: string;
+    }
+
+    const TOTAL_STEPS = 6;
+    const SKIPPABLE_STEPS = [1, 2, 4];
     const DEFAULT_SITE_NAME = "帷幕";
     const DISMISS_STORAGE_KEY = "trpg_setup_dismissed";
+    const EMBEDDING_POLL_INTERVAL = 2000;
     let currentStep = 1;
     let brandingName = "";
     let brandingBound = false;
@@ -18,6 +52,9 @@ namespace SetupWizard {
     let siteDomain = "";
     let aiPlatform = "";
     let aiModel = "";
+    let embeddingSummary = "";
+    let embeddingPlatformsLoaded = false;
+    let embeddingPollTimer: number | null = null;
     let skipPromise: Promise<void> | null = null;
     let skipResolver: (() => void) | null = null;
 
@@ -141,6 +178,7 @@ namespace SetupWizard {
             void testAiConnection();
         });
         byId("setupPlatform")?.addEventListener("change", prefillAiDefaults);
+        bindEmbeddingEvents();
     }
 
     function prefillAiDefaults(): void {
@@ -167,7 +205,12 @@ namespace SetupWizard {
         setHidden("setupFinishBtn", step < TOTAL_STEPS);
         setHidden("setupSkipBtn", !SKIPPABLE_STEPS.includes(step));
         setMessage("");
-        if (step === TOTAL_STEPS) renderSummary();
+        if (step === 2) {
+            void refreshEmbeddingStatus();
+        }
+        if (step === TOTAL_STEPS) {
+            void refreshEmbeddingStatus().then(renderSummary);
+        }
     }
 
     async function handleNext(): Promise<void> {
@@ -176,14 +219,16 @@ namespace SetupWizard {
                 if (!(await saveAiStep())) return;
                 renderStep(2);
             } else if (currentStep === 2) {
-                if (!(await saveSiteStep())) return;
                 renderStep(3);
             } else if (currentStep === 3) {
                 if (!(await saveSiteStep())) return;
                 renderStep(4);
             } else if (currentStep === 4) {
-                if (!(await createOwnerStep())) return;
+                if (!(await saveSiteStep())) return;
                 renderStep(5);
+            } else if (currentStep === 5) {
+                if (!(await createOwnerStep())) return;
+                renderStep(6);
             }
         } catch (error) {
             setMessage(errorMessage(error), "error");
@@ -196,8 +241,14 @@ namespace SetupWizard {
             setMessage(msg("setup.msg.ai_skipped", "已跳过 AI 配置，可稍后在“设置 - 模型设置”中补充。"), "success");
             return;
         }
-        if (currentStep === 3) {
-            renderStep(4);
+        if (currentStep === 2) {
+            stopEmbeddingPoll();
+            renderStep(3);
+            setMessage(msg("setup.msg.embedding_skipped", "已跳过 Embedding 模型配置，可稍后在“设置 - 模型设置”中补充。"), "success");
+            return;
+        }
+        if (currentStep === 4) {
+            renderStep(5);
         }
     }
 
@@ -306,12 +357,335 @@ namespace SetupWizard {
         }
     }
 
+    function bindEmbeddingEvents(): void {
+        document.querySelectorAll<HTMLInputElement>('input[name="setupEmbeddingMode"]').forEach((radio) => {
+            radio.addEventListener("change", () => {
+                if (radio.checked) selectEmbeddingMode(radio.value);
+            });
+        });
+        byId("setupEmbeddingDownloadBtn")?.addEventListener("click", () => {
+            void startEmbeddingDownload();
+        });
+        const dropzone = byId("setupEmbeddingDropzone");
+        const fileInput = byId<HTMLInputElement>("setupEmbeddingFileInput");
+        dropzone?.addEventListener("click", () => fileInput?.click());
+        dropzone?.addEventListener("keydown", (event) => {
+            if ((event as KeyboardEvent).key === "Enter" || (event as KeyboardEvent).key === " ") {
+                event.preventDefault();
+                fileInput?.click();
+            }
+        });
+        dropzone?.addEventListener("dragover", (event) => {
+            event.preventDefault();
+            dropzone.classList.add("is-dragover");
+        });
+        dropzone?.addEventListener("dragleave", () => dropzone.classList.remove("is-dragover"));
+        dropzone?.addEventListener("drop", (event) => {
+            event.preventDefault();
+            dropzone.classList.remove("is-dragover");
+            void collectDataTransferFiles((event as DragEvent).dataTransfer).then(uploadEmbeddingFiles);
+        });
+        fileInput?.addEventListener("change", () => {
+            if (fileInput.files?.length) void uploadEmbeddingFiles(collectInputFiles(fileInput));
+        });
+        byId("setupEmbeddingPlatform")?.addEventListener("change", prefillEmbeddingCloudDefaults);
+        byId("setupEmbeddingCloudBtn")?.addEventListener("click", () => {
+            void enableCloudEmbedding();
+        });
+    }
+
+    function selectEmbeddingMode(mode: string): void {
+        document.querySelectorAll<HTMLElement>(".setup-embed-pane").forEach((pane) => {
+            pane.classList.toggle("is-active", pane.dataset.embedPane === mode);
+        });
+        setMessage("");
+    }
+
+    /** 拉取 embedding 步骤状态：本地模型、下载进度、已配置的平台。 */
+    async function refreshEmbeddingStatus(): Promise<void> {
+        try {
+            const response = await TrpgApi.get<ApiResponse<SetupEmbeddingStatus>>("/api/setup/embedding/status");
+            const data = response.data;
+            if (!response.success || !data) return;
+            if (data.local_model_present) {
+                embeddingSummary = msg("setup.embed.summary_local", "本地模型");
+            } else if (data.cloud_embedding_enabled) {
+                embeddingSummary = msg("setup.embed.summary_cloud", "云端 Embedding");
+            }
+            renderEmbeddingRepo(data.local_embedding_repo);
+            renderEmbeddingPlatforms(data.platforms || []);
+            updateEmbeddingJob(data.job);
+        } catch (error) {
+            console.error("[setup] 无法获取 Embedding 状态", error);
+        }
+    }
+
+    /** 下载选项显示的仓库名取自服务端配置，避免在前端文案里写死。 */
+    function renderEmbeddingRepo(repo?: string): void {
+        const target = byId<HTMLElement>("setupEmbeddingRepo");
+        if (!target) return;
+        target.textContent = repo || "";
+        target.hidden = !repo;
+    }
+
+    function renderEmbeddingPlatforms(platforms: SetupEmbeddingPlatform[]): void {
+        const select = byId<HTMLSelectElement>("setupEmbeddingPlatform");
+        if (!select) return;
+        const previous = select.value;
+        select.innerHTML = "";
+        if (!platforms.length) {
+            const option = document.createElement("option");
+            option.value = "";
+            option.textContent = msg("setup.embed.no_platform", "尚未配置 AI 平台，请先完成第 1 步");
+            select.appendChild(option);
+            select.disabled = true;
+            setHidden("setupEmbeddingCloudBtn", true);
+            return;
+        }
+        select.disabled = false;
+        setHidden("setupEmbeddingCloudBtn", false);
+        platforms.forEach((item) => {
+            const option = document.createElement("option");
+            option.value = item.platform || "";
+            option.textContent = item.name || item.platform || "";
+            option.dataset.embeddingUrl = item.embedding_base_url || "";
+            option.dataset.embeddingModel = item.embedding_model || "";
+            option.dataset.embeddingDimensions = item.embedding_dimensions ? String(item.embedding_dimensions) : "";
+            select.appendChild(option);
+        });
+        if (previous && platforms.some((item) => item.platform === previous)) {
+            select.value = previous;
+        } else if (!embeddingPlatformsLoaded && aiPlatform && platforms.some((item) => item.platform === aiPlatform)) {
+            select.value = aiPlatform;
+        }
+        embeddingPlatformsLoaded = true;
+        prefillEmbeddingCloudDefaults();
+    }
+
+    function prefillEmbeddingCloudDefaults(): void {
+        const select = byId<HTMLSelectElement>("setupEmbeddingPlatform");
+        const option = select?.selectedOptions[0];
+        if (!option) return;
+        setValue("setupEmbeddingBaseUrl", option.dataset.embeddingUrl || "");
+        setValue("setupEmbeddingModel", option.dataset.embeddingModel || "");
+        setValue("setupEmbeddingDimensions", option.dataset.embeddingDimensions || "");
+    }
+
+    async function startEmbeddingDownload(): Promise<void> {
+        setMessage(msg("setup.embed.download_starting", "正在启动下载…"));
+        try {
+            const response = await TrpgApi.post<ApiResponse<{ started?: boolean; job?: SetupEmbeddingJob }>>(
+                "/api/setup/embedding/download",
+                {},
+            );
+            const data = response.data;
+            if (!response.success || !data) {
+                setMessage(backendMessage(response.message || response.error || "", msg("setup.embed.download_failed", "启动下载失败")), "error");
+                return;
+            }
+            updateEmbeddingJob(data.job);
+            if (data.started === false) {
+                setMessage(msg("setup.embed.download_running", "下载已在进行中…"));
+            }
+            startEmbeddingPoll();
+        } catch (error) {
+            setMessage(errorMessage(error), "error");
+        }
+    }
+
+    function startEmbeddingPoll(): void {
+        if (embeddingPollTimer !== null) return;
+        embeddingPollTimer = window.setInterval(() => {
+            void pollEmbeddingJob();
+        }, EMBEDDING_POLL_INTERVAL);
+        void pollEmbeddingJob();
+    }
+
+    async function pollEmbeddingJob(): Promise<void> {
+        try {
+            const response = await TrpgApi.get<ApiResponse<SetupEmbeddingStatus>>("/api/setup/embedding/status");
+            const job = response.data?.job;
+            if (!response.success || !job) {
+                stopEmbeddingPoll();
+                return;
+            }
+            updateEmbeddingJob(job);
+            if (job.state !== "running") stopEmbeddingPoll();
+        } catch {
+            stopEmbeddingPoll();
+        }
+    }
+
+    function stopEmbeddingPoll(): void {
+        if (embeddingPollTimer !== null) {
+            window.clearInterval(embeddingPollTimer);
+            embeddingPollTimer = null;
+        }
+    }
+
+    function updateEmbeddingJob(job?: SetupEmbeddingJob): void {
+        if (!job) return;
+        const progress = byId("setupEmbeddingProgress");
+        const bar = byId<HTMLProgressElement>("setupEmbeddingProgressBar");
+        const text = byId("setupEmbeddingProgressText");
+        const total = job.total_files || 0;
+        const completed = job.completed_files || 0;
+        if (progress) progress.hidden = job.state === "idle";
+        if (bar) {
+            if (total > 0) {
+                bar.max = total;
+                bar.value = Math.min(completed, total);
+            } else {
+                bar.removeAttribute("value");
+                bar.max = 100;
+            }
+        }
+        if (text) text.textContent = total > 0 ? `${completed}/${total}` : "";
+
+        // 下载在后台进行，用户可能已经翻到后续步骤；此时不要把进度文案写到共享提示区。
+        if (currentStep !== 2) return;
+
+        if (job.state === "done") {
+            embeddingSummary = msg("setup.embed.summary_local", "本地模型");
+            setMessage(msg("setup.embed.download_done", "模型下载完成。重启程序后即可启用本地模型。"), "success");
+        } else if (job.state === "error") {
+            console.error("[setup] Embedding 下载失败", job.error);
+            setMessage(msg("setup.embed.download_failed", "模型下载失败，请改用上传或云端方案。"), "error");
+        } else if (job.state === "running") {
+            setMessage(job.message || msg("setup.embed.downloading", "正在下载模型…"));
+        }
+    }
+
+    function collectInputFiles(input: HTMLInputElement): SetupUploadItem[] {
+        return Array.from(input.files || []).map((file) => ({
+            file,
+            path: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
+        }));
+    }
+
+    async function collectDataTransferFiles(dataTransfer: DataTransfer | null): Promise<SetupUploadItem[]> {
+        if (!dataTransfer) return [];
+        const entries: FileSystemEntry[] = [];
+        Array.from(dataTransfer.items || []).forEach((item) => {
+            if (item.kind !== "file") return;
+            const entry = (item as DataTransferItem & { webkitGetAsEntry?: () => FileSystemEntry | null }).webkitGetAsEntry?.();
+            if (entry) entries.push(entry);
+        });
+        if (!entries.length) {
+            return Array.from(dataTransfer.files || []).map((file) => ({ file, path: file.name }));
+        }
+        const collected: SetupUploadItem[] = [];
+        for (const entry of entries) {
+            await walkEntry(entry, "", collected);
+        }
+        return collected;
+    }
+
+    function walkEntry(entry: FileSystemEntry, prefix: string, output: SetupUploadItem[]): Promise<void> {
+        if (entry.isFile) {
+            return new Promise<void>((resolve) => {
+                (entry as FileSystemFileEntry).file((file) => {
+                    output.push({ file, path: prefix ? `${prefix}/${file.name}` : file.name });
+                    resolve();
+                }, () => resolve());
+            });
+        }
+        if (entry.isDirectory) {
+            const reader = (entry as FileSystemDirectoryEntry).createReader();
+            const dirPrefix = prefix ? `${prefix}/${entry.name}` : entry.name;
+            return readAllDirectoryEntries(reader).then((children) =>
+                Promise.all(children.map((child) => walkEntry(child, dirPrefix, output))).then(() => undefined),
+            );
+        }
+        return Promise.resolve();
+    }
+
+    function readAllDirectoryEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+        const entries: FileSystemEntry[] = [];
+        const readBatch = (): Promise<void> =>
+            new Promise<void>((resolve) => {
+                reader.readEntries((batch) => {
+                    if (!batch.length) {
+                        resolve();
+                        return;
+                    }
+                    entries.push(...batch);
+                    resolve(readBatch());
+                }, () => resolve());
+            });
+        return readBatch().then(() => entries);
+    }
+
+    async function uploadEmbeddingFiles(items: SetupUploadItem[]): Promise<void> {
+        if (!items.length) return;
+        const form = new FormData();
+        const single = items.length === 1 ? items[0] : undefined;
+        if (single && single.file.name.toLowerCase().endsWith(".zip")) {
+            form.append("file", single.file, single.file.name);
+        } else {
+            items.forEach((item) => form.append("files", item.file, item.path));
+        }
+
+        setMessage(msg("setup.embed.uploading", "正在上传模型文件…"));
+        try {
+            const response = await TrpgApi.post<ApiResponse<{ local_model_present?: boolean }>>(
+                "/api/setup/embedding/upload",
+                form,
+            );
+            if (!response.success) {
+                setMessage(backendMessage(response.message || response.error || "", msg("setup.embed.upload_failed", "上传失败")), "error");
+                return;
+            }
+            embeddingSummary = msg("setup.embed.summary_local", "本地模型");
+            setMessage(msg("setup.embed.upload_done", "模型文件上传完成。重启程序后即可启用本地模型。"), "success");
+        } catch (error) {
+            setMessage(errorMessage(error), "error");
+        }
+    }
+
+    async function enableCloudEmbedding(): Promise<void> {
+        const platform = value("setupEmbeddingPlatform");
+        const baseUrl = value("setupEmbeddingBaseUrl").trim();
+        const modelId = value("setupEmbeddingModel").trim();
+        const dimensions = Number(value("setupEmbeddingDimensions"));
+        if (!platform) {
+            setMessage(msg("setup.embed.cloud_no_platform", "请先在第 1 步配置 AI 平台。"), "error");
+            return;
+        }
+        if (!baseUrl || !modelId) {
+            setMessage(msg("setup.embed.cloud_required", "请填写 Embedding 接口地址与模型 ID。"), "error");
+            return;
+        }
+        if (!dimensions || dimensions < 1) {
+            setMessage(msg("setup.embed.cloud_dimensions_required", "请填写向量维度。"), "error");
+            return;
+        }
+
+        try {
+            const response = await TrpgApi.post<ApiResponse>("/api/setup/embedding/cloud", {
+                platform,
+                base_url: baseUrl,
+                model: modelId,
+                dimensions,
+            });
+            if (!response.success) {
+                setMessage(backendMessage(response.message || response.error || "", msg("setup.embed.cloud_failed", "启用云端 Embedding 失败")), "error");
+                return;
+            }
+            embeddingSummary = msg("setup.embed.summary_cloud", "云端 Embedding");
+            setMessage(msg("setup.embed.cloud_done", "已启用云端 Embedding。重启程序后生效。"), "success");
+        } catch (error) {
+            setMessage(errorMessage(error), "error");
+        }
+    }
+
     function renderSummary(): void {
         const summary = byId("setupSummary");
         if (!summary) return;
         const rows: Array<[string, string]> = [
             [msg("setup.summary.platform", "AI 平台"), aiPlatform || msg("setup.summary.unset", "未配置")],
             [msg("setup.summary.model", "模型"), aiModel || msg("setup.summary.unset", "未配置")],
+            [msg("setup.summary.embedding", "Embedding 模型"), embeddingSummary || msg("setup.summary.unset", "未配置")],
             [msg("setup.summary.site_name", "网站名称"), siteName || "-"],
             [msg("setup.summary.domain", "域名"), siteDomain || msg("setup.summary.domain_unbound", "未绑定")],
         ];
@@ -365,6 +739,14 @@ namespace SetupWizard {
         "Base URL and model are required": "setup.backend.ai_incomplete",
         "Invalid platform id": "setup.backend.platform_invalid",
         "Failed to create owner account": "setup.backend.owner_create_failed",
+        "Invalid model repo": "setup.backend.embedding_repo_invalid",
+        "Failed to start download": "setup.backend.embedding_download_failed",
+        "Failed to store model files": "setup.backend.embedding_upload_failed",
+        "Platform not configured": "setup.backend.embedding_platform_missing",
+        "Platform has no API key": "setup.backend.embedding_platform_no_key",
+        "Incomplete embedding config": "setup.backend.embedding_incomplete",
+        "Failed to save embedding config": "setup.backend.embedding_cloud_failed",
+        "Uploaded file is too large": "setup.backend.upload_too_large",
     };
 
     /** 把后端返回的提示转换为当前语言；未知提示复用认证模块的映射，仍无法匹配则原样返回。 */

@@ -31,6 +31,9 @@ KNOWLEDGE_BASES_DIR = RUNTIME_DIR / "knowledge-bases"
 SCENARIO_IMPORTS_DIR = RUNTIME_DIR / "scenario_imports"
 SCENARIO_IMPORT_MAX_BYTES = 32 * 1024 * 1024
 SCENARIO_IMPORT_WORKERS = 2
+# 首次部署引导允许用户拖入本地 embedding 模型（bge-small-zh-v1.5 约 100MB），
+# 需要一个比剧本导入更大的请求体上限；各接口仍会自行校验自己的体积限制。
+SETUP_EMBEDDING_UPLOAD_MAX_BYTES = 256 * 1024 * 1024
 VECTOR_DB_URL = os.environ.get("AI_TRPG_VECTOR_DB_URL", "")
 VECTOR_DB_PATH = RUNTIME_DIR / "vector-db" / "qdrant"
 VECTOR_DB_API_KEY = os.environ.get("AI_TRPG_VECTOR_DB_API_KEY", "")
