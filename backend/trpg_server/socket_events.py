@@ -1,4 +1,5 @@
 import logging
+from typing import Any, cast
 
 from flask import current_app, request, session
 from flask_socketio import disconnect, emit, join_room, leave_room
@@ -56,9 +57,10 @@ def register_socket_events(socketio):
         active_sockets = current_app.config.setdefault("ACTIVE_SOCKET_SESSIONS", {})
         user_key = str(session["user_id"])
         previous_sid = active_sockets.get(user_key)
-        if previous_sid and previous_sid != request.sid:
+        # flask_socketio 握手时把 sid 注入 flask.request，但 Flask 的类型声明里没有该属性。
+        if previous_sid and previous_sid != cast(Any, request).sid:
             socketio.emit("session_expired", room=f"user:{user_key}", namespace="/")
-        active_sockets[user_key] = request.sid
+        active_sockets[user_key] = cast(Any, request).sid
 
     @socketio.on("connect")
     def handle_connect():
@@ -75,7 +77,7 @@ def register_socket_events(socketio):
         if "user_id" in session:
             user_key = str(session["user_id"])
             active_sockets = current_app.config.setdefault("ACTIVE_SOCKET_SESSIONS", {})
-            if active_sockets.get(user_key) == request.sid:
+            if active_sockets.get(user_key) == cast(Any, request).sid:
                 active_sockets.pop(user_key, None)
             # 断开后该用户变为离线，通知其所在房间刷新成员在线状态。
             membership = _room_membership()
@@ -133,12 +135,11 @@ def register_socket_events(socketio):
             return
 
         payload = data or {}
-        message = payload.get("message") or payload
         room_id = payload.get("room_id")
         if room_id:
-            emit("new_message", payload, room=room_id, include_self=False)
+            socketio.emit("new_message", payload, room=room_id, include_self=False)
         else:
-            emit("new_message", payload, broadcast=True, include_self=False)
+            socketio.emit("new_message", payload, broadcast=True, include_self=False)
 
     @socketio.on("typing")
     def handle_typing(data):
@@ -149,8 +150,8 @@ def register_socket_events(socketio):
 
         room_id = (data or {}).get("room_id")
         if room_id:
-            emit("user_typing", data, room=room_id, include_self=False)
+            socketio.emit("user_typing", data, room=room_id, include_self=False)
         else:
-            emit("user_typing", data, broadcast=True, include_self=False)
+            socketio.emit("user_typing", data, broadcast=True, include_self=False)
 
     socketio._trpg_events_registered = True

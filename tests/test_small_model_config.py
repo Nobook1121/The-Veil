@@ -120,6 +120,31 @@ def test_runtime_config_reads_quoted_dotted_sections(tmp_path):
     assert config.max_tool_result_chars == 2500
 
 
+def test_config_field_specs_cover_every_runtime_field():
+    """规格表是配置项的唯一接线点，漏登记会让字段永远读不到 general.toml。"""
+    from dataclasses import fields
+
+    from trpg_server.agents.config import _FIELD_SPECS, AIRuntimeConfig
+
+    spec_names = [spec.name for spec in _FIELD_SPECS]
+
+    assert len(spec_names) == len(set(spec_names))
+    # small_model_tasks 是字典字段，由解析循环单独累积，不参与单值规格表。
+    assert set(spec_names) == {item.name for item in fields(AIRuntimeConfig)} - {"small_model_tasks"}
+
+
+def test_runtime_config_rejects_unknown_dice_animation_level(tmp_path, caplog):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "general.toml").write_text('[ai]\ndice_animation_level = "ultra"\n', encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        config = load_ai_runtime_config(config_dir)
+
+    assert config.dice_animation_level == "3d"
+    assert "dice_animation_level" in caplog.text
+
+
 def test_convert_to_toml_emits_dotted_sections_without_quotes():
     content = convert_to_toml(
         {

@@ -1,7 +1,9 @@
 import json
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +92,121 @@ def _toml_int(value: str, fallback: int) -> int:
         return fallback
 
 
+def _as_bool(raw: str, default: bool) -> bool:
+    """与历史行为保持一致：只有字面量 ``true``（忽略大小写）才算真。"""
+    return raw.lower() == "true"
+
+
+def _as_text(raw: str, default: str) -> str:
+    return raw.strip()
+
+
+def _clamped_int(*, minimum: int, maximum: int | None = None) -> Callable[[str, int], int]:
+    """生成整数转换器：非法值回退默认值，再收敛到 ``[minimum, maximum]``。"""
+
+    def convert(raw: str, default: int) -> int:
+        value = _toml_int(raw, default)
+        if value < minimum:
+            return minimum
+        if maximum is not None and value > maximum:
+            return maximum
+        return value
+
+    return convert
+
+
+def _enum(field_name: str, allowed: frozenset[str]) -> Callable[[str, str], str]:
+    """生成枚举转换器：非法值告警并回退默认值。"""
+
+    def convert(raw: str, default: str) -> str:
+        candidate = raw.strip().lower()
+        if candidate in allowed:
+            return candidate
+        logger.warning("Invalid %s %r in general.toml; falling back to %s", field_name, raw, default)
+        return default
+
+    return convert
+
+
+@dataclass(frozen=True)
+class _FieldSpec:
+    """一条配置项接线：``general.toml`` 的分节/键 → ``AIRuntimeConfig`` 字段 + 转换方式。"""
+
+    name: str
+    section: str
+    keys: tuple[str, ...]
+    convert: Callable[[str, Any], Any]
+
+
+# 权威字段清单。新增配置项只需在这里加一行，解析循环与对象装配都不再需要改动。
+_FIELD_SPECS: tuple[_FieldSpec, ...] = (
+    # [ai]
+    _FieldSpec("stream_output", "ai", ("stream_output",), _as_bool),
+    _FieldSpec("debug_mode", "ai", ("debug_mode",), _as_bool),
+    _FieldSpec("show_ai_hints", "ai", ("show_ai_hints", "show_kp_hints", "reply_hints"), _as_bool),
+    _FieldSpec("max_tool_rounds", "ai", ("max_tool_rounds",), _clamped_int(minimum=1, maximum=30)),
+    _FieldSpec("ai_request_timeout", "ai", ("ai_request_timeout",), _clamped_int(minimum=30, maximum=1800)),
+    _FieldSpec("ai_request_max_retries", "ai", ("ai_request_max_retries",), _clamped_int(minimum=0, maximum=20)),
+    _FieldSpec("constrain_max_tokens", "ai", ("constrain_max_tokens",), _as_bool),
+    _FieldSpec("max_tokens", "ai", ("max_tokens",), _clamped_int(minimum=1, maximum=200000)),
+    _FieldSpec("record_prompt_segments", "ai", ("record_prompt_segments",), _as_bool),
+    _FieldSpec("cloud_embedding_enabled", "ai", ("cloud_embedding_enabled",), _as_bool),
+    _FieldSpec("local_embedding_repo", "ai", ("local_embedding_repo",), _as_text),
+    _FieldSpec("dice_critical_threshold", "ai", ("dice_critical_threshold",), _clamped_int(minimum=0, maximum=100)),
+    _FieldSpec("dice_fumble_threshold", "ai", ("dice_fumble_threshold",), _clamped_int(minimum=0, maximum=100)),
+    _FieldSpec(
+        "dice_animation_level",
+        "ai",
+        ("dice_animation_level",),
+        _enum("dice_animation_level", frozenset({"text", "simple", "3d"})),
+    ),
+    _FieldSpec("dice_player_roll", "ai", ("dice_player_roll",), _as_bool),
+    _FieldSpec(
+        "dice_player_roll_timeout", "ai", ("dice_player_roll_timeout",), _clamped_int(minimum=30, maximum=300)
+    ),
+    # [ai.prompt]
+    _FieldSpec(
+        "snapshot_manifest_summary_cap", "ai.prompt", ("snapshot_manifest_summary_cap",), _clamped_int(minimum=0)
+    ),
+    _FieldSpec(
+        "max_snapshot_scene_manifest", "ai.prompt", ("max_snapshot_scene_manifest",), _clamped_int(minimum=0)
+    ),
+    _FieldSpec("snapshot_include_entity_manifest", "ai.prompt", ("snapshot_include_entity_manifest",), _as_bool),
+    _FieldSpec("max_tool_result_chars", "ai.prompt", ("max_tool_result_chars",), _clamped_int(minimum=500)),
+    _FieldSpec("dedupe_tool_calls", "ai.prompt", ("dedupe_tool_calls",), _as_bool),
+    # [ai.cache]
+    _FieldSpec("semantic_cache_enabled", "ai.cache", ("semantic_enabled",), _as_bool),
+    _FieldSpec("semantic_cache_ttl", "ai.cache", ("semantic_ttl_seconds",), _clamped_int(minimum=30, maximum=86400)),
+    _FieldSpec("exact_cache_ttl", "ai.cache", ("exact_ttl_seconds",), _clamped_int(minimum=30, maximum=86400)),
+    # [ai.knowledge]
+    _FieldSpec("retrieval_top_k_default", "ai.knowledge", ("top_k_default",), _clamped_int(minimum=1, maximum=32)),
+    _FieldSpec("retrieval_top_k_direct", "ai.knowledge", ("top_k_direct",), _clamped_int(minimum=1, maximum=32)),
+    _FieldSpec(
+        "chunk_child_max_chars", "ai.knowledge", ("chunk_child_max_chars",), _clamped_int(minimum=200, maximum=8000)
+    ),
+    _FieldSpec(
+        "chunk_parent_max_chars",
+        "ai.knowledge",
+        ("chunk_parent_max_chars",),
+        _clamped_int(minimum=200, maximum=16000),
+    ),
+    _FieldSpec("sticky_rounds", "ai.knowledge", ("sticky_rounds",), _clamped_int(minimum=0, maximum=10)),
+    _FieldSpec("cooldown_rounds", "ai.knowledge", ("cooldown_rounds",), _clamped_int(minimum=0, maximum=20)),
+    _FieldSpec("keyword_channel_enabled", "ai.knowledge", ("keyword_channel_enabled",), _as_bool),
+    _FieldSpec("recursive_scanning", "ai.knowledge", ("recursive_scanning",), _as_bool),
+    _FieldSpec("max_recursion_depth", "ai.knowledge", ("max_recursion_depth",), _clamped_int(minimum=0, maximum=10)),
+    _FieldSpec(
+        "lorebook_token_budget", "ai.knowledge", ("lorebook_token_budget",), _clamped_int(minimum=0, maximum=200000)
+    ),
+)
+
+_SPECS_BY_SECTION_KEY: dict[tuple[str, str], _FieldSpec] = {
+    (spec.section, key): spec for spec in _FIELD_SPECS for key in spec.keys
+}
+
+_AI_SECTIONS = frozenset({"ai", "ai.small_models", "ai.prompt", "ai.knowledge", "ai.cache"})
+
+
 def _unquote_toml_name(raw: str) -> str:
     """去掉段名 / 键名外层引号（如 `["ai.small_models"]` 中的引号）。
 
@@ -125,42 +242,11 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
     if not general_file.exists():
         return AIRuntimeConfig()
 
+    defaults = AIRuntimeConfig()
+    overrides: dict[str, Any] = {}
+    small_model_tasks = dict(defaults.small_model_tasks)
     current_section = ""
-    stream_output = False
-    debug_mode = False
-    show_ai_hints = True
-    small_model_tasks = AIRuntimeConfig().small_model_tasks.copy()
-    snapshot_manifest_summary_cap = AIRuntimeConfig.snapshot_manifest_summary_cap
-    max_snapshot_scene_manifest = AIRuntimeConfig.max_snapshot_scene_manifest
-    snapshot_include_entity_manifest = AIRuntimeConfig.snapshot_include_entity_manifest
-    max_tool_result_chars = AIRuntimeConfig.max_tool_result_chars
-    dedupe_tool_calls = AIRuntimeConfig.dedupe_tool_calls
-    semantic_cache_enabled = AIRuntimeConfig.semantic_cache_enabled
-    semantic_cache_ttl = AIRuntimeConfig.semantic_cache_ttl
-    exact_cache_ttl = AIRuntimeConfig.exact_cache_ttl
-    max_tool_rounds = AIRuntimeConfig.max_tool_rounds
-    ai_request_timeout = AIRuntimeConfig.ai_request_timeout
-    ai_request_max_retries = AIRuntimeConfig.ai_request_max_retries
-    constrain_max_tokens = AIRuntimeConfig.constrain_max_tokens
-    max_tokens = AIRuntimeConfig.max_tokens
-    record_prompt_segments = AIRuntimeConfig.record_prompt_segments
-    dice_critical_threshold = AIRuntimeConfig.dice_critical_threshold
-    dice_fumble_threshold = AIRuntimeConfig.dice_fumble_threshold
-    dice_animation_level = AIRuntimeConfig.dice_animation_level
-    dice_player_roll = AIRuntimeConfig.dice_player_roll
-    dice_player_roll_timeout = AIRuntimeConfig.dice_player_roll_timeout
-    retrieval_top_k_default = AIRuntimeConfig.retrieval_top_k_default
-    retrieval_top_k_direct = AIRuntimeConfig.retrieval_top_k_direct
-    chunk_child_max_chars = AIRuntimeConfig.chunk_child_max_chars
-    chunk_parent_max_chars = AIRuntimeConfig.chunk_parent_max_chars
-    sticky_rounds = AIRuntimeConfig.sticky_rounds
-    cooldown_rounds = AIRuntimeConfig.cooldown_rounds
-    keyword_channel_enabled = AIRuntimeConfig.keyword_channel_enabled
-    recursive_scanning = AIRuntimeConfig.recursive_scanning
-    max_recursion_depth = AIRuntimeConfig.max_recursion_depth
-    lorebook_token_budget = AIRuntimeConfig.lorebook_token_budget
-    cloud_embedding_enabled = AIRuntimeConfig.cloud_embedding_enabled
-    local_embedding_repo = AIRuntimeConfig.local_embedding_repo
+
     for raw_line in general_file.read_text(encoding="utf-8").splitlines():
         line = raw_line.split("#", 1)[0].strip()
         if not line:
@@ -168,124 +254,18 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
         if line.startswith("[") and line.endswith("]"):
             current_section = _unquote_toml_name(line[1:-1])
             continue
-        if current_section in {"ai", "ai.small_models", "ai.prompt", "ai.knowledge", "ai.cache"} and "=" in line:
-            key, value = [part.strip() for part in line.split("=", 1)]
-            key = _unquote_toml_name(key)
-            quoted_value = bool(value.startswith(('"', "'")))
-            if quoted_value and value.endswith(('"', "'")):
-                value = value[1:-1]
-            if current_section == "ai.small_models":
-                small_model_tasks[key] = value
-            elif current_section == "ai.prompt":
-                if key == "snapshot_manifest_summary_cap":
-                    snapshot_manifest_summary_cap = max(0, _toml_int(value, AIRuntimeConfig.snapshot_manifest_summary_cap))
-                elif key == "max_snapshot_scene_manifest":
-                    max_snapshot_scene_manifest = max(0, _toml_int(value, AIRuntimeConfig.max_snapshot_scene_manifest))
-                elif key == "snapshot_include_entity_manifest":
-                    snapshot_include_entity_manifest = value.lower() == "true"
-                elif key == "max_tool_result_chars":
-                    max_tool_result_chars = max(500, _toml_int(value, AIRuntimeConfig.max_tool_result_chars))
-                elif key == "dedupe_tool_calls":
-                    dedupe_tool_calls = value.lower() == "true"
-            elif current_section == "ai.cache":
-                if key == "semantic_enabled":
-                    semantic_cache_enabled = value.lower() == "true"
-                elif key == "semantic_ttl_seconds":
-                    semantic_cache_ttl = max(30, min(86400, _toml_int(value, AIRuntimeConfig.semantic_cache_ttl)))
-                elif key == "exact_ttl_seconds":
-                    exact_cache_ttl = max(30, min(86400, _toml_int(value, AIRuntimeConfig.exact_cache_ttl)))
-            elif current_section == "ai.knowledge":
-                if key == "top_k_default":
-                    retrieval_top_k_default = max(1, min(32, _toml_int(value, AIRuntimeConfig.retrieval_top_k_default)))
-                elif key == "top_k_direct":
-                    retrieval_top_k_direct = max(1, min(32, _toml_int(value, AIRuntimeConfig.retrieval_top_k_direct)))
-                elif key == "chunk_child_max_chars":
-                    chunk_child_max_chars = max(200, min(8000, _toml_int(value, AIRuntimeConfig.chunk_child_max_chars)))
-                elif key == "chunk_parent_max_chars":
-                    chunk_parent_max_chars = max(200, min(16000, _toml_int(value, AIRuntimeConfig.chunk_parent_max_chars)))
-                elif key == "sticky_rounds":
-                    sticky_rounds = max(0, min(10, _toml_int(value, AIRuntimeConfig.sticky_rounds)))
-                elif key == "cooldown_rounds":
-                    cooldown_rounds = max(0, min(20, _toml_int(value, AIRuntimeConfig.cooldown_rounds)))
-                elif key == "keyword_channel_enabled":
-                    keyword_channel_enabled = value.lower() == "true"
-                elif key == "recursive_scanning":
-                    recursive_scanning = value.lower() == "true"
-                elif key == "max_recursion_depth":
-                    max_recursion_depth = max(0, min(10, _toml_int(value, AIRuntimeConfig.max_recursion_depth)))
-                elif key == "lorebook_token_budget":
-                    lorebook_token_budget = max(0, min(200000, _toml_int(value, AIRuntimeConfig.lorebook_token_budget)))
-            elif key == "stream_output":
-                stream_output = value.lower() == "true"
-            elif key == "debug_mode":
-                debug_mode = value.lower() == "true"
-            elif key in {"show_ai_hints", "show_kp_hints", "reply_hints"}:
-                show_ai_hints = value.lower() == "true"
-            elif key == "max_tool_rounds":
-                max_tool_rounds = max(1, min(30, _toml_int(value, AIRuntimeConfig.max_tool_rounds)))
-            elif key == "ai_request_timeout":
-                ai_request_timeout = max(30, min(1800, _toml_int(value, AIRuntimeConfig.ai_request_timeout)))
-            elif key == "ai_request_max_retries":
-                ai_request_max_retries = max(0, min(20, _toml_int(value, AIRuntimeConfig.ai_request_max_retries)))
-            elif key == "constrain_max_tokens":
-                constrain_max_tokens = value.lower() == "true"
-            elif key == "max_tokens":
-                max_tokens = max(1, min(200000, _toml_int(value, AIRuntimeConfig.max_tokens)))
-            elif key == "record_prompt_segments":
-                record_prompt_segments = value.lower() == "true"
-            elif key == "cloud_embedding_enabled":
-                cloud_embedding_enabled = value.lower() == "true"
-            elif key == "local_embedding_repo":
-                local_embedding_repo = value.strip()
-            elif key == "dice_critical_threshold":
-                dice_critical_threshold = max(0, min(100, _toml_int(value, AIRuntimeConfig.dice_critical_threshold)))
-            elif key == "dice_fumble_threshold":
-                dice_fumble_threshold = max(0, min(100, _toml_int(value, AIRuntimeConfig.dice_fumble_threshold)))
-            elif key == "dice_animation_level":
-                candidate = value.strip().lower()
-                if candidate in {"text", "simple", "3d"}:
-                    dice_animation_level = candidate
-                else:
-                    logger.warning("Invalid dice_animation_level %r in general.toml; falling back to 3d", value)
-                    dice_animation_level = "3d"
-            elif key == "dice_player_roll":
-                dice_player_roll = value.lower() == "true"
-            elif key == "dice_player_roll_timeout":
-                dice_player_roll_timeout = max(30, min(300, _toml_int(value, AIRuntimeConfig.dice_player_roll_timeout)))
-    return AIRuntimeConfig(
-        stream_output=stream_output,
-        debug_mode=debug_mode,
-        show_ai_hints=show_ai_hints,
-        small_model_tasks=small_model_tasks,
-        snapshot_manifest_summary_cap=snapshot_manifest_summary_cap,
-        max_snapshot_scene_manifest=max_snapshot_scene_manifest,
-        snapshot_include_entity_manifest=snapshot_include_entity_manifest,
-        max_tool_result_chars=max_tool_result_chars,
-        dedupe_tool_calls=dedupe_tool_calls,
-        semantic_cache_enabled=semantic_cache_enabled,
-        semantic_cache_ttl=semantic_cache_ttl,
-        exact_cache_ttl=exact_cache_ttl,
-        max_tool_rounds=max_tool_rounds,
-        ai_request_timeout=ai_request_timeout,
-        ai_request_max_retries=ai_request_max_retries,
-        constrain_max_tokens=constrain_max_tokens,
-        max_tokens=max_tokens,
-        record_prompt_segments=record_prompt_segments,
-        dice_critical_threshold=dice_critical_threshold,
-        dice_fumble_threshold=dice_fumble_threshold,
-        dice_animation_level=dice_animation_level,
-        dice_player_roll=dice_player_roll,
-        dice_player_roll_timeout=dice_player_roll_timeout,
-        retrieval_top_k_default=retrieval_top_k_default,
-        retrieval_top_k_direct=retrieval_top_k_direct,
-        chunk_child_max_chars=chunk_child_max_chars,
-        chunk_parent_max_chars=chunk_parent_max_chars,
-        sticky_rounds=sticky_rounds,
-        cooldown_rounds=cooldown_rounds,
-        keyword_channel_enabled=keyword_channel_enabled,
-        recursive_scanning=recursive_scanning,
-        max_recursion_depth=max_recursion_depth,
-        lorebook_token_budget=lorebook_token_budget,
-        cloud_embedding_enabled=cloud_embedding_enabled,
-        local_embedding_repo=local_embedding_repo,
-    )
+        if current_section not in _AI_SECTIONS or "=" not in line:
+            continue
+        key, value = [part.strip() for part in line.split("=", 1)]
+        key = _unquote_toml_name(key)
+        if value.startswith(('"', "'")) and value.endswith(('"', "'")):
+            value = value[1:-1]
+        if current_section == "ai.small_models":
+            small_model_tasks[key] = value
+            continue
+        spec = _SPECS_BY_SECTION_KEY.get((current_section, key))
+        if spec is not None:
+            overrides[spec.name] = spec.convert(value, getattr(defaults, spec.name))
+
+    overrides["small_model_tasks"] = small_model_tasks
+    return replace(defaults, **overrides)

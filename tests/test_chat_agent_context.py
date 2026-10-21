@@ -451,6 +451,9 @@ def test_socket_broadcast_does_not_log_persisted_room_message(monkeypatch, caplo
 
             return decorator
 
+        def emit(self, *args, **kwargs):
+            pass
+
     fake_socket = FakeSocketIO()
     register_socket_events(fake_socket)
     import trpg_server.socket_events as socket_events
