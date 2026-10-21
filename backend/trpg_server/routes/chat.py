@@ -315,6 +315,30 @@ def chat():
                 "allow_scene_transition": _request_allows_scene_transition(content),
             }
         )
+        # 骰子动画档位与玩家投掷：房间规则优先，管理员默认兜底（工具自身也会兜底）。
+        from trpg_server.agents.dice_settings import resolve_dice_settings
+
+        dice_settings = resolve_dice_settings(
+            current_app.config.get("CONFIG_DIR", CONFIG_DIR),
+            (agent_context.room_info() or {}).get("house_rules"),
+        )
+        agent_context.tool_state.update(
+            {
+                "dice_animation_level": dice_settings["level"],
+                "player_dice_roll": dice_settings["player_roll"],
+                "player_dice_roll_timeout": dice_settings["timeout"],
+                "user_name": session.get("username") or str(session_user_id),
+                # 玩家投掷模式下这几个工具允许同参数重复调用（每次都要重新等待玩家）。
+                "no_dedupe_tools": [
+                    "check.roll_room_check",
+                    "dice.roll_coc_check",
+                    "san.roll_sanity_check",
+                    "sanity.roll_sanity_check",
+                    "dice.roll",
+                    "dice.roll_dice",
+                ],
+            }
+        )
         ruleset_metrics = {"latency_ms": 0.0}
         if room_id:
             ruleset_store = RulesetKnowledgeStore(

@@ -54,6 +54,14 @@ interface Room {
     house_rules?: RoomHouseRules;
     // 全房间统一的骰娘大成功/大失败阈值（房规优先，其次管理员默认值）。
     dice_thresholds?: { critical: number; fumble: number };
+    // 房间生效的骰子动画档位与玩家投掷开关（房规优先，管理员默认兜底）。
+    dice_animation?: {
+        level: "text" | "simple" | "3d";
+        player_roll: boolean;
+        timeout: number;
+        level_source: "room" | "admin";
+        player_roll_source: "room" | "admin";
+    };
     saves?: Array<{ filename: string; title?: string; created_at?: string }>;
 }
 
@@ -62,6 +70,9 @@ interface RoomHouseRules {
     // 留空（null）表示沿用管理员设置页配置的默认阈值。
     dice_critical_threshold?: number | null;
     dice_fumble_threshold?: number | null;
+    // 骰子动画档位与玩家投掷：null 表示跟随管理员默认；两者相互独立。
+    dice_animation_level?: "text" | "simple" | "3d" | null;
+    player_dice_roll?: boolean | null;
     // 房间级技能基础值覆盖（键为 skillKey 或 skillKey.specialtyKey）。
     skill_bases?: Record<string, number>;
 }

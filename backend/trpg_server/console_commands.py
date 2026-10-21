@@ -243,6 +243,18 @@ def execute_console_command(
         if subcommand == "prune":
             return _log_result(_room_prune_command(args[1:], rooms_dir, confirm=confirm))
 
+    if domain == "dice":
+        if not subcommand:
+            return _log_result(ConsoleCommandResult(True, "Usage: dice <settings|pending|textures|skin delete>"))
+        if subcommand == "settings":
+            return _log_result(_dice_settings_command(args[1:], rooms_dir))
+        if subcommand == "pending":
+            return _log_result(_dice_pending_command(args[1:], rooms_dir))
+        if subcommand == "textures":
+            return _log_result(_dice_textures_command(args[1:]))
+        if subcommand == "skin" and len(args) > 1 and args[1].lower() == "delete":
+            return _log_result(_dice_skin_delete_command(args[2:], confirm=confirm))
+
     if domain == "network":
         if subcommand == "status":
             return _log_result(_network_status_command())
@@ -298,6 +310,10 @@ def command_help_text() -> str:
             "  room members <room_id>                           （查看房间成员）",
             "  room archive <room_id> [--yes]                   （归档房间）",
             "  room prune [--days N] [--yes]                    （清理僵尸房间，默认 30 天）",
+            "  dice settings [room_id]                          （动画档位/玩家投掷的管理员默认与房间生效值）",
+            "  dice pending [room_id]                           （列出等待玩家投掷的请求）",
+            "  dice textures                                    （贴图资产、桌面皮肤与骰子皮肤概览）",
+            "  dice skin delete <skin_id> [--yes]               （删除骰子皮肤；--yes 跳过确认）",
             "  network status / network test                    （网络状态 / 连通性测试）",
             "  server health [--json] / server info             （子系统健康 / 进程与目录信息）",
             "  log tail [n]                                     （打印最近 n 行日志，默认 50）",
@@ -1543,6 +1559,127 @@ def _room_prune_command(
         assume_yes=assume_yes,
         confirm=confirm,
         prompt=f"确认删除这 {len(stale)} 个房间（含消息）?",
+    )
+
+
+# ---------------------------------------------------------------------------
+# dice
+# ---------------------------------------------------------------------------
+
+
+def _dice_settings_command(args: list[str], rooms_dir: Any) -> ConsoleCommandResult:
+    from trpg_server.agents.dice_settings import admin_dice_settings, resolve_dice_settings
+    from trpg_server.json_store import read_json
+
+    positionals, flags = _split_args(args)
+    unknown = _reject_unknown_flags(flags, set())
+    if unknown:
+        return ConsoleCommandResult(False, unknown)
+    if len(positionals) > 1:
+        return ConsoleCommandResult(False, "Usage: dice settings [room-id]")
+
+    admin = admin_dice_settings()
+    lines = [
+        "管理员默认: "
+        f"动画={admin.dice_animation_level} · "
+        f"玩家投掷={'开' if admin.dice_player_roll else '关'} · "
+        f"等待超时={admin.dice_player_roll_timeout}s"
+    ]
+    if positionals:
+        room_id = positionals[0]
+        info_path = _resolve_rooms_dir(rooms_dir) / room_id / "info.json"
+        info = read_json(info_path, default=None)
+        if not isinstance(info, dict):
+            return ConsoleCommandResult(False, f"未找到房间 {room_id}")
+        settings = resolve_dice_settings(None, info.get("house_rules"))
+        source = "房间规则" if settings["level_source"] == "room" else "管理员默认"
+        player_source = "房间规则" if settings["player_roll_source"] == "room" else "管理员默认"
+        lines.append(
+            f"房间 {room_id}: 动画={settings['level']}（{source}） · "
+            f"玩家投掷={'开' if settings['player_roll'] else '关'}（{player_source}） · "
+            f"等待超时={settings['timeout']}s"
+        )
+    return ConsoleCommandResult(True, "\n".join(lines))
+
+
+def _dice_pending_command(args: list[str], rooms_dir: Any) -> ConsoleCommandResult:
+    from trpg_server.agents import player_roll
+
+    positionals, flags = _split_args(args)
+    unknown = _reject_unknown_flags(flags, set())
+    if unknown:
+        return ConsoleCommandResult(False, unknown)
+    if len(positionals) > 1:
+        return ConsoleCommandResult(False, "Usage: dice pending [room-id]")
+    room_id = positionals[0] if positionals else None
+    items = player_roll.list_pending(room_id)
+    if not items:
+        return ConsoleCommandResult(True, "当前没有等待玩家投掷的请求")
+    lines = [f"待投掷请求 {len(items)} 个:"]
+    for item in items:
+        roller = item.get("roller") or {}
+        plan = item.get("plan") or {}
+        lines.append(
+            f"  {item.get('request_id')} · 房间={item.get('room_id')} · "
+            f"玩家={roller.get('username') or roller.get('user_id') or '-'} · "
+            f"工具={item.get('tool_name') or '-'} · 表达式={plan.get('expression') or '-'}"
+        )
+    return ConsoleCommandResult(True, "\n".join(lines))
+
+
+def _dice_textures_command(args: list[str]) -> ConsoleCommandResult:
+    from trpg_server import dice_textures
+
+    positionals, flags = _split_args(args)
+    unknown = _reject_unknown_flags(flags, set())
+    if unknown:
+        return ConsoleCommandResult(False, unknown)
+    if positionals:
+        return ConsoleCommandResult(False, "Usage: dice textures")
+    data = dice_textures.library(include_disabled=True)
+    lines = [
+        f"贴图资产 {len(data['assets'])} · 桌面皮肤 {len(data['table_skins'])} · 骰子皮肤 {len(data['dice_skins'])}"
+    ]
+    for asset in data["assets"]:
+        state = "" if asset.get("enabled", True) else "（停用）"
+        lines.append(
+            f"  资产 {asset.get('id')} · {asset.get('name')} · {asset.get('kind')} · "
+            f"{asset.get('width')}×{asset.get('height')}{state}"
+        )
+    for skin in data["table_skins"]:
+        lines.append(f"  桌面皮肤 {skin.get('id')} · {skin.get('name')} · 资产={skin.get('asset_id')}")
+    for skin in data["dice_skins"]:
+        lines.append(f"  骰子皮肤 {skin.get('id')} · {skin.get('name')} · {skin.get('die_type')}")
+    return ConsoleCommandResult(True, "\n".join(lines))
+
+
+def _dice_skin_delete_command(
+    args: list[str], *, confirm: Callable[[str], bool] | None = None
+) -> ConsoleCommandResult:
+    from trpg_server import dice_textures
+
+    positionals, flags = _split_args(args)
+    unknown = _reject_unknown_flags(flags - YES_FLAGS, set())
+    if unknown:
+        return ConsoleCommandResult(False, unknown)
+    if len(positionals) != 1:
+        return ConsoleCommandResult(False, "Usage: dice skin delete <skin-id> [--yes]")
+    skin_id = positionals[0]
+
+    def _apply() -> ConsoleCommandResult:
+        try:
+            dice_textures.delete_skin(skin_id)
+        except dice_textures.TextureError as exc:
+            return ConsoleCommandResult(False, exc.reason)
+        log_user_action(logger, user_action_text(CONSOLE_ACTOR, "删除了骰子皮肤"), 皮肤ID=skin_id)
+        return ConsoleCommandResult(True, f"已删除皮肤 {skin_id}")
+
+    return _confirm_action(
+        preview=f"将删除骰子皮肤 {skin_id}（已选择该皮肤的玩家会回退到纯色）。",
+        apply=_apply,
+        assume_yes=_assume_yes(flags),
+        confirm=confirm,
+        prompt=f"确认删除皮肤 {skin_id}?",
     )
 
 

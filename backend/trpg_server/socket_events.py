@@ -30,6 +30,13 @@ def register_socket_events(socketio):
         )
     )
 
+    # 玩家投掷：广播待投掷请求、结果、取消与强制结算。
+    from trpg_server.agents import player_roll
+
+    player_roll.register_broadcaster(
+        lambda event, payload: socketio.emit(event, payload, room=payload.get("room_id"))
+    )
+
     def _room_membership():
         return current_app.config.setdefault(USER_ROOM_MEMBERSHIP_KEY, {})
 

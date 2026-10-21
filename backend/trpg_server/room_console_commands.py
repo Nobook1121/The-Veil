@@ -37,10 +37,11 @@ ROOM_COMMAND_WHITELIST: dict[str, set[str]] = {
     "log": {"tail", "clear"},
     "autosave": set(),
     "archive": set(),
+    "dice": {"status", "level", "player", "pending", "cancel"},
 }
 
 # 不带子命令时默认执行的子命令（例如 `members` 等价于 `members list`）。
-DEFAULT_SUBS: dict[str, str] = {"members": "list"}
+DEFAULT_SUBS: dict[str, str] = {"members": "list", "dice": "status"}
 
 
 @dataclass
@@ -92,6 +93,11 @@ def room_command_help_text() -> str:
             "  log clear [--yes]           （清空本房间日志，破坏性）",
             "  autosave                    （立即为本房间保存一次自动存档）",
             "  archive [--yes]             （归档本房间，需已到达结局）",
+            "  dice                        （本房间骰子动画档位、玩家投掷开关与待投掷请求）",
+            "  dice level <text|simple|3d|inherit> [--yes]（设置本房间动画档位，inherit 表示跟随管理员默认）",
+            "  dice player <on|off|inherit> [--yes]（设置本房间玩家投掷开关）",
+            "  dice pending                （列出本房间等待玩家投掷的请求）",
+            "  dice cancel [request_id] [--yes]（取消本房间待投掷请求，缺省取消最早的一条）",
             "  说明：破坏性命令缺省为「预演」，加 --yes 或在交互确认时输入 y 才会真正执行。",
             "  说明：成员命令只调整房间内角色（房主/管理员/成员），不会授予网站级权限。",
         ]
@@ -174,6 +180,16 @@ def execute_room_command(
         return _autosave_command(room_dir, room_id, app, actor, actor_id)
     if domain == "archive":
         return _archive_command(room_id, resolved_rooms_dir, app, flags, confirm)
+    if domain == "dice":
+        if sub == "level":
+            return _dice_level_command(room_dir, room_id, rest, flags, confirm)
+        if sub == "player":
+            return _dice_player_command(room_dir, room_id, rest, flags, confirm)
+        if sub == "pending":
+            return _dice_pending_command(room_id)
+        if sub == "cancel":
+            return _dice_cancel_command(room_id, rest, flags, confirm)
+        return _dice_status_command(room_dir, room_id)
     return RoomCommandResult(False, f"未知命令: {parts[0]}")
 
 
@@ -384,6 +400,132 @@ def _log_tail_command(room_dir: Path, rest: list[str]) -> RoomCommandResult:
     lines = [f"本房间最近 {len(entries)} 条日志:"]
     lines.extend(f"  {_format_log_line(entry)}" for entry in entries)
     return RoomCommandResult(True, "\n".join(lines))
+
+
+def _dice_status_command(room_dir: Path, room_id: Any) -> RoomCommandResult:
+    from trpg_server.agents import player_roll
+    from trpg_server.agents.dice_settings import resolve_dice_settings
+
+    info = _load_room_info(room_dir)
+    settings = resolve_dice_settings(None, info.get("house_rules"))
+    level_source = "房间规则" if settings["level_source"] == "room" else "管理员默认"
+    player_source = "房间规则" if settings["player_roll_source"] == "room" else "管理员默认"
+    pending = player_roll.list_pending(str(room_id))
+    lines = [
+        f"骰子动画: {settings['level']}（{level_source}）",
+        f"玩家投掷: {'开' if settings['player_roll'] else '关'}（{player_source}）",
+        f"等待超时: {settings['timeout']}s",
+        f"待投掷请求: {len(pending)} 个",
+    ]
+    for item in pending:
+        roller = item.get("roller") or {}
+        lines.append(f"  {item.get('request_id')} · 玩家={roller.get('username') or roller.get('user_id') or '-'}")
+    return RoomCommandResult(True, "\n".join(lines))
+
+
+def _set_house_rule(room_dir: Path, key: str, value: Any, room_id: Any, summary: str) -> RoomCommandResult:
+    from trpg_server.routes.rooms import _write_room
+
+    info = _load_room_info(room_dir)
+    rules = info.get("house_rules")
+    if not isinstance(rules, dict):
+        rules = {}
+    rules[key] = value
+    info["house_rules"] = rules
+    _write_room(room_dir, info)
+    log_room_event(room_dir, summary, source="room_console", actor=ROOM_CONSOLE_ACTOR)
+    return RoomCommandResult(True, summary)
+
+
+def _dice_level_command(
+    room_dir: Path, room_id: Any, rest: list[str], flags: set[str], confirm: Callable[[str], bool] | None
+) -> RoomCommandResult:
+    if not rest:
+        return RoomCommandResult(False, "Usage: dice level <text|simple|3d|inherit> [--yes]")
+    value = rest[0].lower()
+    if value not in {"text", "simple", "3d", "inherit"}:
+        return RoomCommandResult(False, "动画档位只能是 text / simple / 3d / inherit")
+    target = None if value == "inherit" else value
+    label = "跟随管理员默认" if target is None else target
+
+    def _apply() -> RoomCommandResult:
+        return _set_house_rule(room_dir, "dice_animation_level", target, room_id, f"房间骰子动画档位已设为 {label}")
+
+    return _confirm_action(
+        preview=f"将把本房间骰子动画设为 {label}。",
+        apply=_apply,
+        assume_yes=_assume_yes(flags),
+        confirm=confirm,
+        prompt=f"确认把本房间骰子动画设为 {label}?",
+    )
+
+
+def _dice_player_command(
+    room_dir: Path, room_id: Any, rest: list[str], flags: set[str], confirm: Callable[[str], bool] | None
+) -> RoomCommandResult:
+    if not rest:
+        return RoomCommandResult(False, "Usage: dice player <on|off|inherit> [--yes]")
+    value = rest[0].lower()
+    if value not in {"on", "off", "inherit"}:
+        return RoomCommandResult(False, "玩家投掷只能是 on / off / inherit")
+    target = None if value == "inherit" else value == "on"
+    label = "跟随管理员默认" if target is None else ("开" if target else "关")
+
+    def _apply() -> RoomCommandResult:
+        return _set_house_rule(room_dir, "player_dice_roll", target, room_id, f"房间玩家投掷已设为 {label}")
+
+    return _confirm_action(
+        preview=f"将把本房间玩家投掷设为 {label}。",
+        apply=_apply,
+        assume_yes=_assume_yes(flags),
+        confirm=confirm,
+        prompt=f"确认把本房间玩家投掷设为 {label}?",
+    )
+
+
+def _dice_pending_command(room_id: Any) -> RoomCommandResult:
+    from trpg_server.agents import player_roll
+
+    items = player_roll.list_pending(str(room_id))
+    if not items:
+        return RoomCommandResult(True, "本房间没有等待玩家投掷的请求")
+    lines = [f"本房间待投掷请求 {len(items)} 个:"]
+    for item in items:
+        roller = item.get("roller") or {}
+        plan = item.get("plan") or {}
+        lines.append(
+            f"  {item.get('request_id')} · 玩家={roller.get('username') or roller.get('user_id') or '-'} · "
+            f"表达式={plan.get('expression') or '-'}"
+        )
+    return RoomCommandResult(True, "\n".join(lines))
+
+
+def _dice_cancel_command(
+    room_id: Any, rest: list[str], flags: set[str], confirm: Callable[[str], bool] | None
+) -> RoomCommandResult:
+    from trpg_server.agents import player_roll
+
+    pending = player_roll.list_pending(str(room_id))
+    if not pending:
+        return RoomCommandResult(True, "本房间没有等待玩家投掷的请求")
+    request_id = rest[0] if rest else str(pending[0].get("request_id") or "")
+    if not request_id:
+        return RoomCommandResult(False, "无法确定要取消的请求")
+
+    def _apply() -> RoomCommandResult:
+        _, error = player_roll.cancel_roll(str(room_id), request_id, operator=ROOM_CONSOLE_ACTOR)
+        if error:
+            message = "请求已投掷或不存在" if error in {"not_found", "already_rolled"} else error
+            return RoomCommandResult(False, message)
+        return RoomCommandResult(True, f"已取消待投掷请求 {request_id}")
+
+    return _confirm_action(
+        preview=f"将取消待投掷请求 {request_id}，AI 会收到「已被管理员取消」。",
+        apply=_apply,
+        assume_yes=_assume_yes(flags),
+        confirm=confirm,
+        prompt=f"确认取消投掷请求 {request_id}?",
+    )
 
 
 def _log_clear_command(

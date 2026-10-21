@@ -128,6 +128,7 @@ namespace AuthModule {
         if (smooth) {
             document.querySelector<HTMLElement>(".profile-settings-content")?.scrollTo({ top: 0, behavior: "smooth" });
         }
+        if (targetId === "profile-dice-appearance") void window.TrpgDiceAppearanceSettings?.init();
     }
 
     function clearPasswordFields(): void {

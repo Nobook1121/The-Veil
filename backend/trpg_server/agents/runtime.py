@@ -508,7 +508,9 @@ def run_agent_completion(
             already_called = signature in round_signatures or (
                 not refetchable and signature in executed_calls
             )
-            if dedupe_tool_calls and already_called:
+            related = tool_state.get("no_dedupe_tools") if isinstance(tool_state, dict) else None
+            no_dedupe = {str(name) for name in related} if isinstance(related, (list, tuple, set)) else set()
+            if dedupe_tool_calls and already_called and resolved_name not in no_dedupe:
                 logger.info("Agent tool %s called again with identical arguments; reused", resolved_name)
                 messages.append(
                     {

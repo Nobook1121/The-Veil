@@ -31,6 +31,10 @@ debug_mode = false
 show_ai_hints = true
 dice_critical_threshold = 1
 dice_fumble_threshold = 96
+# 骰子动画默认档位（text / simple / 3d）与玩家投掷默认开关、等待超时（30-300 秒）。
+dice_animation_level = "3d"
+dice_player_roll = false
+dice_player_roll_timeout = 120
 max_tool_rounds = 8
 ai_request_timeout = 1800
 ai_request_max_retries = 5

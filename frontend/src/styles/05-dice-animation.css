@@ -1,0 +1,345 @@
+/* 骰子虚拟投掷桌：3D 舞台 / 简易骰子 / 文本兜底共用的外观层。 */
+.dice-table-message {
+    display: flex;
+    justify-content: center;
+}
+
+.dice-table-card {
+    --dice-body-color: var(--color-surface, #f6f1e7);
+    --dice-text-color: var(--color-text, #2b2a33);
+    --dice-table-color: var(--color-surface-alt, #1d3a34);
+    --dice-edge-color: var(--color-primary, #d8b56d);
+    width: min(100%, 420px);
+    margin: 6px 0 10px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--dice-edge-color) 45%, transparent);
+    background: color-mix(in srgb, var(--dice-table-color) 88%, #000 12%);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+    color: var(--dice-text-color);
+}
+
+.dice-table-surface {
+    position: relative;
+    min-height: 190px;
+    padding: 14px 14px 10px;
+    background:
+        var(--dice-table-image, none),
+        radial-gradient(circle at 50% 18%, color-mix(in srgb, var(--dice-edge-color) 22%, transparent), transparent 62%),
+        linear-gradient(160deg, color-mix(in srgb, var(--dice-table-color) 88%, #fff 12%), var(--dice-table-color));
+    background-size: cover, cover, cover;
+    background-position: center;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.dice-table-label {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.78;
+}
+
+.dice-table-stage {
+    min-height: 132px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dice-table-result {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    min-height: 24px;
+    font-variant-numeric: tabular-nums;
+}
+
+.dice-total {
+    font-size: 30px;
+    font-weight: 700;
+    color: var(--dice-edge-color);
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+
+.dice-verdict {
+    font-size: 13px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.dice-verdict.success { color: #5ad48a; }
+.dice-verdict.failure { color: #ff8a7a; }
+.dice-verdict.critical { color: #ffd166; }
+
+.dice-target,
+.dice-roller,
+.dice-auto {
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+.dice-auto { color: #ffcf70; }
+
+.dice-table-status {
+    padding: 6px 14px;
+    font-size: 12px;
+    min-height: 0;
+}
+
+.dice-table-status:empty {
+    display: none;
+}
+
+.dice-table-status.waiting { color: #ffd166; }
+.dice-table-status.cancelled,
+.dice-table-status.forced { color: #ff9f8a; }
+
+.dice-table-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 0 14px;
+}
+
+.dice-table-actions:empty {
+    display: none;
+}
+
+.dice-table-actions .btn {
+    margin-bottom: 10px;
+}
+
+/* 简易骰子 */
+.dice-simple-stage {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    perspective: 600px;
+}
+
+.dice-simple-die {
+    width: 64px;
+    height: 64px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    background:
+        var(--dice-face-image, none),
+        linear-gradient(145deg, color-mix(in srgb, var(--dice-body-color) 92%, #fff 8%), var(--dice-body-color));
+    background-size: cover;
+    background-position: center;
+    color: var(--dice-text-color);
+    font-size: 24px;
+    font-weight: 700;
+    border: 2px solid color-mix(in srgb, var(--dice-edge-color) 60%, transparent);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.32), inset 0 -4px 8px rgba(0, 0, 0, 0.18);
+    font-variant-numeric: tabular-nums;
+}
+
+.dice-simple-die.has-face-texture span {
+    opacity: 0.9;
+    text-shadow: 0 1px 4px #000;
+}
+
+.dice-simple-die.dice-simple-tens {
+    border-color: var(--dice-edge-color);
+    box-shadow: 0 8px 18px color-mix(in srgb, var(--dice-edge-color) 45%, transparent);
+}
+
+.dice-simple-die.rolling {
+    animation: dice-simple-shake 0.24s linear infinite;
+}
+
+.dice-simple-die.settled {
+    animation: dice-simple-settle 0.28s ease-out;
+}
+
+@keyframes dice-simple-shake {
+    0% { transform: rotate(-9deg) translateY(-3px) scale(1.02); }
+    25% { transform: rotate(8deg) translateY(2px) scale(0.98); }
+    50% { transform: rotate(-6deg) translateY(-5px) scale(1.03); }
+    75% { transform: rotate(7deg) translateY(1px) scale(0.99); }
+    100% { transform: rotate(-9deg) translateY(-3px) scale(1.02); }
+}
+
+@keyframes dice-simple-settle {
+    from { transform: translateY(-6px) rotate(4deg) scale(1.06); }
+    to { transform: translateY(0) rotate(0) scale(1); }
+}
+
+.dice-text-fallback {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--dice-text-color);
+}
+
+.dice3d-canvas {
+    display: block;
+    width: 100%;
+    height: 132px;
+    border-radius: 10px;
+}
+
+.dice-table-card .dice3d-fallback-overlay {
+    font-size: 12px;
+    opacity: 0.7;
+}
+
+@media (max-width: 520px) {
+    .dice-table-card { width: 100%; }
+    .dice-table-surface { min-height: 160px; }
+    .dice-table-stage { min-height: 112px; }
+    .dice-simple-die { width: 54px; height: 54px; font-size: 20px; }
+}
+
+/* 玩家骰子外观设置 */
+.dice-appearance-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 560px;
+}
+
+.dice-appearance-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.dice-appearance-label {
+    min-width: 88px;
+    font-size: 13px;
+    opacity: 0.82;
+}
+
+.dice-appearance-row .form-select {
+    max-width: 240px;
+}
+
+.dice-appearance-row .form-control-color {
+    width: 56px;
+    padding: 2px;
+}
+
+.dice-appearance-follow {
+    margin: 0;
+    white-space: nowrap;
+}
+
+.dice-appearance-skins {
+    border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+    border-radius: 10px;
+    padding: 8px 12px;
+}
+
+.dice-appearance-skins summary {
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.dice-appearance-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* 管理员骰子贴图库 */
+.admin-dice-upload {
+    border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+    border-radius: 10px;
+    padding: 10px;
+}
+
+.admin-dice-assets {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.admin-dice-asset {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-surface-alt, #222) 70%, transparent);
+}
+
+.admin-dice-asset img {
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: 6px;
+    flex: 0 0 auto;
+}
+
+.admin-dice-asset-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.admin-dice-asset-meta strong,
+.admin-dice-asset-meta span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.admin-dice-skins {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.admin-dice-skin-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.admin-dice-skin-row > span:first-child {
+    flex: 1 1 auto;
+}
+
+.admin-dice-face-editor {
+    margin-top: 10px;
+    border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+    border-radius: 10px;
+    padding: 10px;
+}
+
+.admin-dice-faces[open] {
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.admin-dice-face-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.admin-dice-face-row > span {
+    width: 40px;
+    text-align: right;
+    font-size: 13px;
+    opacity: 0.8;
+}
+

@@ -65,6 +65,26 @@
                                 </div>
                                 <p class="form-text mt-2" id="houseRuleDiceDefaultHint" data-i18n="room.house_rules.dice_default_hint">留空表示使用管理员设置的默认阈值。</p>
                                 <hr class="my-3">
+                                <h6 data-i18n="room.house_rules.dice_animation">骰子动画与玩家投掷</h6>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleDiceAnimationLevel" data-i18n="room.house_rules.dice_animation_level">骰子动画档位</label>
+                                    <select class="form-select" id="houseRuleDiceAnimationLevel">
+                                        <option value="" data-i18n="room.house_rules.follow_admin">跟随管理员默认</option>
+                                        <option value="text" data-i18n="settings.dice.level_text">纯文本</option>
+                                        <option value="simple" data-i18n="settings.dice.level_simple">简易动画</option>
+                                        <option value="3d" data-i18n="settings.dice.level_3d">3D 骰子</option>
+                                    </select>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="houseRulePlayerDiceRoll" data-i18n="room.house_rules.player_dice_roll">玩家投掷骰子</label>
+                                    <select class="form-select" id="houseRulePlayerDiceRoll">
+                                        <option value="" data-i18n="room.house_rules.follow_admin">跟随管理员默认</option>
+                                        <option value="on" data-i18n="common.enabled">开启</option>
+                                        <option value="off" data-i18n="common.disabled">关闭</option>
+                                    </select>
+                                </div>
+                                <p class="form-text mt-2" id="houseRuleDiceAnimationHint"></p>
+                                <hr class="my-3">
                                 <h6 data-i18n="room.house_rules.skill_bases">技能基础值</h6>
                                 <p class="form-text" data-i18n="room.house_rules.skill_bases_hint">房间规则优先级最高，进入房间后覆盖用户个性化与管理员默认值。</p>
                                 <button type="button" class="btn btn-outline-secondary btn-sm" id="openRoomSkillBaseSettings" data-i18n="room.house_rules.skill_bases_button">设置技能基础值</button>
@@ -465,6 +485,7 @@
                                     <summary><span><i class="fa fa-cog" aria-hidden="true"></i><span data-i18n="profile.section.website_settings">网站设置</span></span><i class="fa fa-chevron-down" aria-hidden="true"></i></summary>
                                     <div class="profile-subnav">
                                         <button type="button" class="profile-section-tab" data-profile-target="profile-website-theme" data-i18n="profile.section.website_theme">外观偏好</button>
+                                        <button type="button" class="profile-section-tab" data-profile-target="profile-dice-appearance" data-i18n="profile.section.dice_appearance">骰子外观</button>
                                         <button type="button" class="profile-section-tab" data-profile-target="profile-skill-bases" data-i18n="profile.section.skill_bases">技能基础值</button>
                                     </div>
                                 </details>
@@ -570,6 +591,11 @@
                                     <h4 data-i18n="profile.section.skill_bases">技能基础值</h4>
                                     <p class="profile-section-hint" data-i18n="profile.note.skill_bases">个性化基础值保存在当前浏览器，用于新建角色卡；进入房间后以房规为准。</p>
                                     <button class="btn btn-outline-secondary btn-sm" id="openUserSkillBaseSettings" type="button" data-i18n="profile.action.edit_skill_bases">设置技能基础值</button>
+                                </section>
+                                <section class="profile-panel-section" id="profile-dice-appearance">
+                                    <h4 data-i18n="profile.section.dice_appearance">骰子外观</h4>
+                                    <p class="profile-section-hint" data-i18n="profile.note.dice_appearance">颜色、桌面贴图与骰子皮肤只保存在当前浏览器，不影响其他玩家。</p>
+                                    <div id="diceAppearanceSettings"></div>
                                 </section>
                             </div>
                         </div>
@@ -869,6 +895,30 @@
                                 <div class="form-group mt-2">
                                     <label for="diceFumbleThresholdDefault" data-i18n="settings.dice.fumble">默认大失败阈值（点数 ≥）</label>
                                     <input type="number" class="form-control" id="diceFumbleThresholdDefault" value="96" min="0" max="100">
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="diceAnimationLevel" data-i18n="settings.dice.animation_level">骰子动画档位</label>
+                                    <select class="form-select" id="diceAnimationLevel">
+                                        <option value="text" data-i18n="settings.dice.level_text">纯文本</option>
+                                        <option value="simple" data-i18n="settings.dice.level_simple">简易动画</option>
+                                        <option value="3d" data-i18n="settings.dice.level_3d">3D 骰子</option>
+                                    </select>
+                                    <small class="text-muted" data-i18n="settings.dice.animation_level_hint">全局默认档位，房间可在房规内覆盖。3D 不可用时自动降级并写入房间日志。</small>
+                                </div>
+                                <div class="form-check mt-3">
+                                    <input class="form-check-input" type="checkbox" id="dicePlayerRollDefault">
+                                    <label class="form-check-label" for="dicePlayerRollDefault" data-i18n="settings.dice.player_roll">允许玩家投掷骰子</label>
+                                    <small class="d-block text-muted" data-i18n="settings.dice.player_roll_hint">AI 检定时等待目标玩家点击投掷；不依赖动画档位，纯文本模式下同样可用。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="dicePlayerRollTimeout" data-i18n="settings.dice.player_roll_timeout">玩家投掷等待超时（秒）</label>
+                                    <input type="number" class="form-control" id="dicePlayerRollTimeout" value="120" min="30" max="300">
+                                    <small class="text-muted" data-i18n="settings.dice.player_roll_timeout_hint">超时后由服务端自动投掷，避免 AI 永久等待。</small>
+                                </div>
+                                <div class="mt-3">
+                                    <h5 data-i18n="settings.dice.textures_title">骰子贴图库</h5>
+                                    <p class="text-muted small" data-i18n="settings.dice.textures_hint">上传桌面贴图与骰面贴图，组合成皮肤供玩家在本机选择。</p>
+                                    <div id="adminDiceTextures"></div>
                                 </div>
                             </div>
                         </div>

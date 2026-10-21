@@ -194,6 +194,8 @@ function switchSettingsTab(tabName: string): void {
         void loadScenarioKnowledge();
         void loadEmbeddingHealth();
     }
+    // 骰子贴图库按需初始化，避免非管理员页面加载时发出多余请求。
+    window.TrpgAdminDiceTextures?.init();
 }
 
 function switchToolTab(toolName: string): void {
@@ -285,6 +287,10 @@ function initSettingsTabs(): void {
     bindGeneralCheckboxSetting("recordPromptSegments", "ai", "record_prompt_segments");
     bindGeneralNumberSetting("diceCriticalThresholdDefault", "ai", "dice_critical_threshold", 0, 100);
     bindGeneralNumberSetting("diceFumbleThresholdDefault", "ai", "dice_fumble_threshold", 0, 100);
+    bindGeneralSelectSetting("diceAnimationLevel", "ai", "dice_animation_level");
+    bindGeneralCheckboxSetting("dicePlayerRollDefault", "ai", "dice_player_roll");
+    bindGeneralNumberSetting("dicePlayerRollTimeout", "ai", "dice_player_roll_timeout", 30, 300);
+    bindDicePlayerRollTimeoutState();
     bindGeneralNumberSetting("retrievalTopKDefault", "ai.knowledge", "top_k_default", 1, 32);
     bindGeneralNumberSetting("retrievalTopKDirect", "ai.knowledge", "top_k_direct", 1, 32);
     bindGeneralNumberSetting("chunkChildMaxChars", "ai.knowledge", "chunk_child_max_chars", 200, 8000);
@@ -482,8 +488,22 @@ function bindGeneralSelectSetting(elementId: string, sectionName: string, key: s
     registerGeneralSetting({ element: select, kind: "select", section: sectionName, key, savedValue: select.value });
 }
 
+/** 玩家投掷关闭时，等待超时输入仅置灰，仍保留已保存值。 */
+function bindDicePlayerRollTimeoutState(): void {
+    const toggle = document.getElementById("dicePlayerRollDefault") as HTMLInputElement | null;
+    const timeout = document.getElementById("dicePlayerRollTimeout") as HTMLInputElement | null;
+    if (!toggle || !timeout) return;
+    const sync = (): void => {
+        timeout.disabled = !toggle.checked;
+        timeout.closest<HTMLElement>(".form-group")?.classList.toggle("setting-disabled", !toggle.checked);
+    };
+    toggle.addEventListener("change", sync);
+    sync();
+}
+
 /** 配置加载并回填 UI 之后调用：把当前界面值记为「已保存基线」。 */
 function refreshGeneralSettingsBaseline(): void {
+    bindDicePlayerRollTimeoutState();
     generalSettingControls.forEach((control) => {
         control.savedValue = readGeneralSettingValue(control);
     });

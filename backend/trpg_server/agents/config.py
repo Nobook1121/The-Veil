@@ -1,6 +1,9 @@
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -45,6 +48,13 @@ class AIRuntimeConfig:
     # 骰娘大成功 / 大失败的全局默认阈值（管理员设置页可改，房规可覆盖）。
     dice_critical_threshold: int = 1
     dice_fumble_threshold: int = 96
+    # 骰子动画全局默认档位：text（纯文本）/ simple（简易动画）/ 3d（3D 物理骰子）。
+    # 房间可在房规内覆盖；两者相互独立，玩家投掷不依赖动画档位。
+    dice_animation_level: str = "3d"
+    # 是否允许 AI 检定等待玩家点击投掷（全局默认，房规可覆盖）。
+    dice_player_roll: bool = False
+    # 等待玩家投掷的最长秒数，超时后由服务端自动投掷。
+    dice_player_roll_timeout: int = 120
     # 知识库检索与切块。``top_k_*`` 现在表示「返回的章节数」：命中后会把同章节的
     # 相邻小块回填成完整章节，因此数值比按块召回时可以更小。
     # 直接导入的剧本只有知识块这一条剧情来源，因此召回数可单独放大。
@@ -136,6 +146,9 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
     record_prompt_segments = AIRuntimeConfig.record_prompt_segments
     dice_critical_threshold = AIRuntimeConfig.dice_critical_threshold
     dice_fumble_threshold = AIRuntimeConfig.dice_fumble_threshold
+    dice_animation_level = AIRuntimeConfig.dice_animation_level
+    dice_player_roll = AIRuntimeConfig.dice_player_roll
+    dice_player_roll_timeout = AIRuntimeConfig.dice_player_roll_timeout
     retrieval_top_k_default = AIRuntimeConfig.retrieval_top_k_default
     retrieval_top_k_direct = AIRuntimeConfig.retrieval_top_k_direct
     chunk_child_max_chars = AIRuntimeConfig.chunk_child_max_chars
@@ -228,6 +241,17 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
                 dice_critical_threshold = max(0, min(100, _toml_int(value, AIRuntimeConfig.dice_critical_threshold)))
             elif key == "dice_fumble_threshold":
                 dice_fumble_threshold = max(0, min(100, _toml_int(value, AIRuntimeConfig.dice_fumble_threshold)))
+            elif key == "dice_animation_level":
+                candidate = value.strip().lower()
+                if candidate in {"text", "simple", "3d"}:
+                    dice_animation_level = candidate
+                else:
+                    logger.warning("Invalid dice_animation_level %r in general.toml; falling back to 3d", value)
+                    dice_animation_level = "3d"
+            elif key == "dice_player_roll":
+                dice_player_roll = value.lower() == "true"
+            elif key == "dice_player_roll_timeout":
+                dice_player_roll_timeout = max(30, min(300, _toml_int(value, AIRuntimeConfig.dice_player_roll_timeout)))
     return AIRuntimeConfig(
         stream_output=stream_output,
         debug_mode=debug_mode,
@@ -249,6 +273,9 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
         record_prompt_segments=record_prompt_segments,
         dice_critical_threshold=dice_critical_threshold,
         dice_fumble_threshold=dice_fumble_threshold,
+        dice_animation_level=dice_animation_level,
+        dice_player_roll=dice_player_roll,
+        dice_player_roll_timeout=dice_player_roll_timeout,
         retrieval_top_k_default=retrieval_top_k_default,
         retrieval_top_k_direct=retrieval_top_k_direct,
         chunk_child_max_chars=chunk_child_max_chars,

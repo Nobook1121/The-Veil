@@ -109,11 +109,14 @@ Node 包可在 `node_modules/<包名>/LICENSE` 查看）。
 | @esbuild/win32-x64 | 0.28.1 | MIT |
 | @types/react | 19.2.17 | MIT |
 | @types/react-dom | 19.2.3 | MIT |
+| @types/three | 0.180.0 | MIT |
+| cannon-es | 0.20.0 | MIT |
 | csstype | 3.2.3 | MIT |
 | esbuild | 0.28.1 | MIT |
 | react | 19.2.7 | MIT |
 | react-dom | 19.2.7 | MIT |
 | scheduler | 0.27.0 | MIT |
+| three | 0.180.0 | MIT |
 | typescript | 5.9.3 | Apache-2.0 |
 
 ## 前端内置的第三方代码（vendored）

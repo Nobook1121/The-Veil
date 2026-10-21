@@ -137,6 +137,18 @@ export function HomeChat() {
                                 autoComplete="off"
                                 aria-autocomplete="none"
                             />
+                            <button
+                                className="btn btn-outline-primary"
+                                id="diceRollButton"
+                                type="button"
+                                title="投掷骰子"
+                                aria-label="投掷骰子"
+                                data-i18n-title="chat.action.roll"
+                                hidden
+                            >
+                                <i className="fa fa-hand-pointer-o" aria-hidden="true" />{" "}
+                                <span data-i18n="chat.action.roll">投掷</span>
+                            </button>
                             <button className="btn btn-primary" id="sendButton" type="button">
                                 <i className="fa fa-paper-plane" aria-hidden="true" />{" "}
                                 <span data-i18n="chat.action.send">发送</span>

@@ -296,6 +296,15 @@ room prune [--days N] [--yes]   清理僵尸房间：未归档、无有效成员
 `room archive` 会生成与网页一致的不可变归档快照（需要运行体注入的 Flask app 上下文；
 若未注入则只落盘归档标记）。
 
+### 骰子动画与贴图
+
+```text
+dice settings [room-id]          查看动画档位/玩家投掷的管理员默认；带房间 ID 时显示房间生效值与来源
+dice pending [room-id]          列出等待玩家投掷的请求（可按房间过滤）
+dice textures                   贴图资产、桌面皮肤与骰子皮肤概览
+dice skin delete <skin-id> [--yes]  删除骰子皮肤（破坏性，缺省预演）
+```
+
 ## 房间内嵌控制台（网页内，非服务器终端）
 
 除服务器启动窗口的站点控制台外，每个房间在**网页内**还有一个只显示本房间日志的控制台
@@ -324,7 +333,15 @@ log tail [n]                （查看本房间最近 n 条日志，默认 50）
 log clear [--yes]           （清空本房间日志，破坏性）
 autosave                    （立即为本房间保存一次自动存档）
 archive [--yes]             （归档本房间，需已到达结局）
+dice                        （本房间的动画档位、玩家投掷开关与待投掷请求）
+dice level <text|simple|3d|inherit> [--yes]（设置本房间动画档位；inherit 跟随管理员默认）
+dice player <on|off|inherit> [--yes]（设置本房间玩家投掷开关）
+dice pending                （列出本房间等待玩家投掷的请求）
+dice cancel [request-id] [--yes]（取消待投掷请求，缺省取消最早一条）
 ```
+
+`dice level` / `dice player` 只写入本房间的房规字段（`null` 表示继承管理员默认），不会修改
+站点级配置；`dice cancel` 会让 AI 收到「投掷被管理员取消」，并将其作为工具结果继续对话。
 
 破坏性命令（`log clear`、`archive`）同样遵循「缺省预演、确认后执行」的约定：网页控制台先
 返回预演文本，再由交互确认框决定是否真正执行（服务器控制台则用 `--yes` / `-y` 跳过确认）。

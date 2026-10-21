@@ -224,6 +224,32 @@
 - `POST /api/rooms/<room_id>/autosave`：保存当前消息为自动存档。
 - `GET /api/rooms/<room_id>/autosave`：读取自动存档。
 
+### 骰子动画与玩家投掷
+
+来源：`routes/dice_rolls.py`
+
+房间生效档位由房规优先、管理员默认兜底：`dice_animation_level`（`text` / `simple` / `3d`，`null` 表示继承）与 `player_dice_roll`（`true` / `false` / `null`）。房间详情与房规接口的 `dice_animation` 字段给出当前生效值及来源（`room` / `admin`）。
+
+- `GET /api/rooms/<room_id>/dice-requests`：列出本房间等待玩家投掷的请求。
+- `GET /api/rooms/<room_id>/dice-requests/<request_id>`：读取单个待投掷请求（重连恢复用）。
+- `POST /api/rooms/<room_id>/dice-requests/<request_id>/roll`：目标玩家点击投掷；非目标玩家返回 403。
+- `POST .../complete`：幂等确认结果已播放（服务端仅允许目标玩家）。
+- `POST .../cancel`：取消等待。
+- `POST .../force`：房主 / 房间管理员 / 站点管理员强制立即投掷。
+- `POST /api/rooms/<room_id>/dice-animation/degraded`：前端降级上报（`from_level`、`to_level`、`reason`、`error`、`scope`、`dice`、`request_id`、`tool_name`）；会话内去重并限流 30 条 / 60 秒，写入房间日志（`source=dice_animation`）。
+
+### 骰子贴图库
+
+来源：`routes/dice_textures.py`（写入接口仅 `ADMIN` / `OWNER`）
+
+- `GET /api/dice-textures`：贴图资产、桌面皮肤与骰子皮肤；`include_disabled=1` 仅管理员可用。
+- `GET /api/dice-textures/assets/<asset_id>`：读取图片（长缓存，文件名不可猜测）。
+- `POST /api/dice-textures/assets`：multipart 上传（`file`、`kind`=`table|dice|face`、`name`）；服务端按文件头与尺寸（128–2048px，≤3MB）校验。
+- `DELETE /api/dice-textures/assets/<asset_id>`：删除资产；被皮肤引用时返回 409。
+- `POST /api/dice-textures/table-skins`：新建 / 更新桌面皮肤（`name`、`asset_id`）。
+- `POST /api/dice-textures/dice-skins`：新建 / 更新骰子皮肤（`id` 可选、`name`、`die_type`、`faces` 逐面资产映射）。
+- `DELETE /api/dice-textures/skins/<skin_id>`：删除皮肤。
+
 ---
 
 ## 十一、聊天（Chat）
@@ -313,6 +339,10 @@
 
 - `room_members_changed`：房间成员上下线或角色变化后广播，前端据此重拉成员信息。
 - `role_changed`：成员房间角色变更时广播。
+- `player_dice_request`：AI 摆好骰子、等待目标玩家投掷；payload 含 `room_id`、`request_id`、`roller`、`plan`、`expires_at`。
+- `player_dice_rolled`：玩家完成投掷（或超时自动投掷，`auto=true`）；payload 含结果快照。
+- `player_dice_cancelled`：等待被取消或房间关闭；payload 含 `reason`。
+- `player_dice_forced`：房主 / 管理员强制投掷。
 - 实时消息、输入提示等由服务端向房间广播。
 
 ---

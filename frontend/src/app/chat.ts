@@ -100,6 +100,8 @@ const COMMAND_DEFINITIONS: CommandDefinition[] = [
     { name: "/sc", usage: "/sc {玩家名} {成功变化/失败变化}", description: "理智检定并结算 SAN" },
     { name: "/record", usage: "/record {damage/san} {username} {int} {reason?}", description: "管理员记录房间角色伤害或 San 损失" },
     { name: "/trigger", usage: "/trigger {触发器编号}", description: "触发场景触发器" },
+    { name: "/roll", usage: "/roll", description: "完成当前等待中的玩家投掷" },
+    { name: "/roll force", usage: "/roll force", description: "管理员强制结算当前等待中的投掷" },
 ];
 
 function getCurrentUsername(): string {
@@ -146,6 +148,7 @@ function initChat(): void {
     initWebSocket();
     initCommandPalette(activeChatInput);
     initTypingIndicator(activeChatInput);
+    window.TrpgDiceTable?.init();
     restoreThinkingState();
     bindChatAvatarCards();
 
@@ -203,6 +206,14 @@ function initChat(): void {
                 renderRoomMessage(triggerResult);
                 broadcastMessage(triggerResult);
             }
+            return;
+        }
+
+        // /roll 与 /roll force：直接完成玩家投掷，不额外发送聊天消息。
+        const lowerCommand = message.trim().toLowerCase();
+        if (lowerCommand === "/roll" || lowerCommand === "/roll force") {
+            activeChatInput.value = "";
+            await window.TrpgDiceTable?.handleRollCommand(lowerCommand === "/roll force");
             return;
         }
 
@@ -1201,9 +1212,13 @@ function renderRoomMessage(message: ChatMessage | null, animate = false): void {
         numericMetadata(metadata, "cacheHitRate") ?? numericMetadata(metadata, "cache_hit_rate"),
         displayMessage,
     );
+    const messageElement = document.querySelector<HTMLElement>(`#chatHistory .message[data-id="${String(renderedId)}"]`);
+    // 骰子结果按房间生效档位渲染虚拟投掷桌；历史消息静态展示，避免回看时重播动画。
+    if (messageElement) window.TrpgDiceTable?.renderForMessage(messageElement, displayMessage, animate);
     // 仅对实时到达的 KP 消息做渐进显现；历史记录一次性铺满，避免回看时跳动。
     if (animate && type === "kp") {
-        const contentElement = document.querySelector<HTMLElement>(`#chatHistory .message[data-id="${String(renderedId)}"] .message-content`);
+        const contentElement = messageElement?.querySelector<HTMLElement>(".message-content")
+            || document.querySelector<HTMLElement>(`#chatHistory .message[data-id="${String(renderedId)}"] .message-content`);
         if (contentElement) revealKpContent(contentElement);
     }
 }
@@ -1243,6 +1258,11 @@ function initWebSocket(): void {
         socket.on("room_autosave_created", () => { void window.refreshRoomNodes?.(); });
         socket.on("room_console_log", (data) => { window.appendRoomConsoleEntry?.(data as RoomConsoleSocketPayload); });
         socket.on("role_changed", (data) => handleRoleChanged(data));
+        // 玩家投掷：待投掷请求、结果、取消与强制结算。
+        socket.on("player_dice_request", (data) => { window.TrpgDiceTable?.handleRequest(data as DiceRequestPayload); });
+        socket.on("player_dice_rolled", (data) => { window.TrpgDiceTable?.handleRolled(data as DiceRolledPayload); });
+        socket.on("player_dice_cancelled", (data) => { window.TrpgDiceTable?.handleCancelled(data as DiceRolledPayload); });
+        socket.on("player_dice_forced", (data) => { window.TrpgDiceTable?.handleForced(data as DiceRolledPayload); });
         // 平台自动切换等仅面向管理员的提示：服务端只推给在线管理员，前端以通知条展示（不用 alert）。
         socket.on("admin_notification", (payload: unknown) => {
             const data = (payload || {}) as { message?: unknown; level?: unknown };
@@ -1267,6 +1287,8 @@ function disconnectSocket(): void {
 }
 
 function joinSocketRoom(roomId: string): void {
+    // 换房时清空上一房间的投掷桌与降级记忆，并恢复当前房间的待投掷请求。
+    window.TrpgDiceTable?.onRoomChanged();
     if (socket?.connected && roomId && !getCurrentRoom()?.invisible_view) socket.emit("join_room", { room_id: roomId });
 }
 

@@ -18,6 +18,7 @@ from trpg_server.role_config import load_roles
 from trpg_server.security import get_user_manager, is_socket_user_online, is_user_in_room, safe_join
 from trpg_server.settings import CONFIG_DIR, ROOMS_DIR, SCENARIOS_DIR, ROOM_ARCHIVES_DIR, CHARACTERS_DIR, HISTORY_DIR
 from trpg_server.agents.config import load_ai_runtime_config
+from trpg_server.agents.dice_settings import DICE_ANIMATION_LEVELS, resolve_dice_settings
 from trpg_server.agents.room_state import save_room_state
 from trpg_server.agents.versioning import migrate_room_binding
 from trpg_server.agents.trigger_system import find_trigger_definition, record_trigger, validate_trigger
@@ -45,6 +46,10 @@ HOUSE_RULE_DEFINITIONS = {
     # 骰娘大成功/大失败阈值（全房间统一）。留空表示沿用管理员设置页配置的全局默认值。
     "dice_critical_threshold": {"type": "nullable_integer", "default": None, "min": 0, "max": 100, "ai_prompt": False},
     "dice_fumble_threshold": {"type": "nullable_integer", "default": None, "min": 0, "max": 100, "ai_prompt": False},
+    # 骰子动画档位与玩家投掷（留空表示继承管理员默认值）。两者相互独立：
+    # 纯文本档位同样可以开启玩家投掷。
+    "dice_animation_level": {"type": "nullable_enum", "default": None, "values": list(DICE_ANIMATION_LEVELS), "ai_prompt": False},
+    "player_dice_roll": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
     # 技能基础值覆盖表：键为技能键（带专精时为 `skillKey.specialtyKey`），值为 0-99 整数。
     # 留空表示沿用下一优先级（用户个性化 > 管理员设置 > 技能目录默认值）。
     "skill_bases": {"type": "skill_bases", "default": {}, "ai_prompt": False},
@@ -162,6 +167,11 @@ def _room_house_rules(info):
         value = stored.get(key, spec["default"])
         if spec["type"] == "boolean":
             value = bool(value)
+        elif spec["type"] == "nullable_boolean":
+            value = value if isinstance(value, bool) else None
+        elif spec["type"] == "nullable_enum":
+            candidate = str(value).strip().lower() if value is not None else ""
+            value = candidate if candidate in spec.get("values", []) else None
         elif spec["type"] == "nullable_integer":
             value = _normalize_nullable_int(value, spec.get("min", 0), spec.get("max", 100))
         elif spec["type"] == "skill_bases":
@@ -217,6 +227,11 @@ def _room_dice_thresholds(info):
         "critical": defaults["critical"] if critical is None else critical,
         "fumble": defaults["fumble"] if fumble is None else fumble,
     }
+
+
+def _room_dice_animation(info):
+    """房间生效的骰子动画档位与玩家投掷开关（房规优先，管理员默认兜底）。"""
+    return resolve_dice_settings(_get_config_dir(), _room_house_rules(info))
 
 
 def _room_dir(room_id):
@@ -743,6 +758,7 @@ def _room_summary(info):
         "house_rules": _room_house_rules(info),
         # 全房间统一的骰娘大成功/大失败阈值（房规优先，其次管理员默认值）。
         "dice_thresholds": _room_dice_thresholds(info),
+        "dice_animation": _room_dice_animation(info),
         "created_at": info.get("created_at"),
         "updated_at": info.get("updated_at"),
     }
@@ -1349,6 +1365,11 @@ def get_room_house_rules(room_id):
             "visibility": _room_visibility(info),
             "dice_thresholds": _room_dice_thresholds(info),
             "dice_threshold_defaults": _admin_dice_thresholds(),
+            "dice_animation": _room_dice_animation(info),
+            "dice_animation_defaults": {
+                "level": load_ai_runtime_config(_get_config_dir()).dice_animation_level,
+                "player_roll": load_ai_runtime_config(_get_config_dir()).dice_player_roll,
+            },
         },
         "House rules loaded successfully",
     )
@@ -1379,6 +1400,18 @@ def update_room_house_rules(room_id):
             if not isinstance(value, bool):
                 return error_response(f"House rule {key} must be a boolean", 400, "Invalid house rule type")
             current[key] = value
+        elif spec["type"] == "nullable_boolean":
+            if value is not None and not isinstance(value, bool):
+                return error_response(f"House rule {key} must be a boolean or null", 400, "Invalid house rule type")
+            current[key] = value
+        elif spec["type"] == "nullable_enum":
+            if value is not None:
+                candidate = str(value).strip().lower()
+                if candidate not in spec.get("values", []):
+                    return error_response(f"House rule {key} must be one of {spec.get('values')} or null", 400, "Invalid house rule type")
+                current[key] = candidate
+            else:
+                current[key] = None
         elif spec["type"] == "nullable_integer":
             if value is not None and value != "":
                 try:
@@ -1430,6 +1463,11 @@ def update_room_house_rules(room_id):
             "visibility": _room_visibility(info),
             "dice_thresholds": _room_dice_thresholds(info),
             "dice_threshold_defaults": _admin_dice_thresholds(),
+            "dice_animation": _room_dice_animation(info),
+            "dice_animation_defaults": {
+                "level": load_ai_runtime_config(_get_config_dir()).dice_animation_level,
+                "player_roll": load_ai_runtime_config(_get_config_dir()).dice_player_roll,
+            },
         },
         "House rules updated successfully",
     )

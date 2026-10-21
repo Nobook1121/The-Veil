@@ -249,8 +249,244 @@ def _resolve_check_display_name(card: dict[str, Any], check_name: str) -> str:
         if candidates & expected:
             return str(skill.get("name") or "").strip() or localized
     return localized
-def _result_message(summary: str, tool_name: str, **metadata: Any) -> dict[str, Any]:
-    return {"type": "dice", "sender_name": "骰娘", "avatar": "", "content": summary, "metadata": {"tool_name": tool_name, **metadata}}
+def _result_message(summary: str, tool_name: str, extra_metadata: dict[str, Any] | None = None, **metadata: Any) -> dict[str, Any]:
+    merged: dict[str, Any] = {"tool_name": tool_name, **metadata}
+    if isinstance(extra_metadata, dict):
+        merged.update(extra_metadata)
+    return {"type": "dice", "sender_name": "骰娘", "avatar": "", "content": summary, "metadata": merged}
+
+
+def _percentile_faces(value: int) -> tuple[list[int], list[str]]:
+    """把 1-100 的百分骰结果拆成两枚 d10 的骰面（十位 / 个位）。"""
+    roll = max(1, min(100, int(value)))
+    tens = 0 if roll == 100 else roll // 10
+    units = roll % 10
+    return [tens, units], [f"{tens * 10:02d}", str(units)]
+
+
+def _dice_roll_metadata(
+    result: dict[str, Any],
+    *,
+    mode: str,
+    check_name: str | None = None,
+    difficulty: str | None = None,
+    target: int | None = None,
+    roller: str | None = None,
+    roller_user_id: Any = None,
+    show_table: bool = True,
+    player_roll: bool = False,
+    request_id: str | None = None,
+    auto: bool = False,
+    player_roll_ignored: bool = False,
+) -> dict[str, Any]:
+    """生成供前端虚拟投掷桌使用的展示元数据（只追加，不改变原有返回字段）。"""
+    if mode == "percentile":
+        value = int(result.get("roll") or 0)
+        faces, labels = _percentile_faces(value)
+        bonus_dice = int(result.get("bonus_dice") or 0)
+        penalty_dice = int(result.get("penalty_dice") or 0)
+        rolls = [value]
+        candidates = list(result.get("rolls") or []) if (bonus_dice or penalty_dice) else []
+        expression, count, sides, total = "1d100", 2, 10, value
+        success = bool(result.get("success"))
+        success_level = result.get("success_level")
+    else:
+        expression = str(result.get("expression") or "")
+        match = re.fullmatch(r"(\d+)d(\d+)", expression)
+        count = int(match.group(1)) if match else len(result.get("rolls") or [])
+        sides = int(match.group(2)) if match else 0
+        rolls = [int(item) for item in (result.get("rolls") or [])]
+        faces = rolls
+        labels = [str(item) for item in rolls]
+        total = int(result.get("total") or sum(rolls))
+        candidates = []
+        success = result.get("success")
+        success_level = result.get("success_level")
+    return {
+        "mode": mode,
+        "expression": expression,
+        "count": count,
+        "sides": sides,
+        "faces": faces,
+        "labels": labels,
+        "roll": int(result.get("roll") if result.get("roll") is not None else total),
+        "rolls": rolls,
+        "candidates": candidates,
+        "bonus_dice": int(result.get("bonus_dice") or 0),
+        "penalty_dice": int(result.get("penalty_dice") or 0),
+        "total": total,
+        "success": success,
+        "success_level": success_level,
+        "check_name": check_name,
+        "difficulty": difficulty if difficulty != "regular" else None,
+        "target": target,
+        "roller": roller,
+        "roller_user_id": roller_user_id,
+        "request_id": request_id,
+        "auto": auto,
+        "show_table": bool(show_table),
+        "player_roll": bool(player_roll),
+        "player_roll_ignored": bool(player_roll_ignored),
+    }
+
+
+def _effective_dice_settings(context: Any) -> dict[str, Any]:
+    """读取生效的骰子档位与玩家投掷开关（聊天路径用 tool_state，其他路径自行解析）。"""
+    state = getattr(context, "tool_state", None)
+    if isinstance(state, dict) and "dice_animation_level" in state:
+        return {
+            "level": str(state.get("dice_animation_level") or "3d"),
+            "player_roll": bool(state.get("player_dice_roll")),
+            "timeout": int(state.get("player_dice_roll_timeout") or 120),
+        }
+    from trpg_server.agents.dice_settings import resolve_dice_settings
+
+    room_info = context.room_info() if hasattr(context, "room_info") else {}
+    rules = room_info.get("house_rules") if isinstance(room_info, dict) else None
+    return resolve_dice_settings(getattr(context, "config_dir", None), rules)
+
+
+def _context_username(context: Any) -> str:
+    state = getattr(context, "tool_state", None)
+    if isinstance(state, dict):
+        name = str(state.get("user_name") or "").strip()
+        if name:
+            return name
+    return str(getattr(context, "user_id", "") or "")
+
+
+def _player_online(user_id: Any) -> bool:
+    """目标玩家是否在线；无 Socket 基础设施（测试/控制台）时视为在线。"""
+    if user_id in (None, ""):
+        return False
+    try:
+        from flask import current_app, has_app_context
+
+        if not has_app_context():
+            return True
+        registry = current_app.config.get("ACTIVE_SOCKET_SESSIONS") or {}
+        if not registry:
+            return True
+        from trpg_server.security import is_socket_user_online
+
+        return is_socket_user_online(user_id)
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _should_wait_for_player(context: Any, arguments: dict[str, Any], roller_user_id: Any) -> bool:
+    """是否需要阻塞等待玩家投掷（与动画档位无关，只有暗投/模式关闭/离线才跳过）。"""
+    if arguments.get("dark") or arguments.get("secret"):
+        return False
+    settings = _effective_dice_settings(context)
+    if not settings.get("player_roll"):
+        return False
+    if not getattr(context, "room_id", None):
+        return False
+    if roller_user_id in (None, ""):
+        return False
+    try:
+        from trpg_server.agents import player_roll
+
+        if not player_roll.has_broadcaster():
+            return False
+    except Exception:  # noqa: BLE001
+        return False
+    return _player_online(roller_user_id)
+
+
+def _plan_percentile(*, check_name: str | None, difficulty: str | None, target: int | None, bonus: int, penalty: int) -> dict[str, Any]:
+    return {
+        "mode": "percentile",
+        "expression": "1d100",
+        "count": 2,
+        "sides": 10,
+        "bonus_dice": int(bonus),
+        "penalty_dice": int(penalty),
+        "candidates": [],
+        "check": {"name": check_name, "difficulty": difficulty, "target": target},
+    }
+
+
+def _room_check_plan(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip()
+    check_name = str(arguments.get("name") or arguments.get("skill") or "").strip()
+    difficulty = _normalize_difficulty(arguments.get("difficulty")) or "regular"
+    bonus = _dice_count(arguments, "bonus_dice", "bonus")
+    penalty = _dice_count(arguments, "penalty_dice", "penalty")
+    target: int | None = None
+    display_name = check_name
+    try:
+        member = _find_member(player_name, context)
+        card = member.get("character_card") if member else None
+        if isinstance(card, dict):
+            base = _lookup_check_value(card, check_name)
+            display_name = _resolve_check_display_name(card, check_name)
+            if base is not None and base >= 0:
+                target = _adjust_threshold(_threshold(base, difficulty), arguments.get("adjustment", arguments.get("correction")))
+    except (TypeError, ValueError):
+        target = None
+    return _plan_percentile(check_name=display_name, difficulty=difficulty, target=target, bonus=bonus, penalty=penalty)
+
+
+def _coc_check_plan(arguments: dict[str, Any]) -> dict[str, Any]:
+    difficulty = _normalize_difficulty(arguments.get("difficulty")) or "regular"
+    target = _as_int(arguments.get("target"))
+    return _plan_percentile(
+        check_name=str(arguments.get("skill") or "检定"),
+        difficulty=difficulty,
+        target=target if 1 <= target <= 100 else None,
+        bonus=_dice_count(arguments, "bonus_dice", "bonus"),
+        penalty=_dice_count(arguments, "penalty_dice", "penalty"),
+    )
+
+
+def _sanity_check_plan(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip()
+    current: int | None = None
+    try:
+        member = _find_member(player_name, context)
+        card = member.get("character_card") if member else None
+        if isinstance(card, dict):
+            sanity = card.get("sanity") if isinstance(card.get("sanity"), dict) else {}
+            state = member.get("character_state") if isinstance(member, dict) else {}
+            state = state if isinstance(state, dict) else {}
+            current = _as_int(state.get("current_san", card.get("currentSan", sanity.get("current", card.get("maxSan", 0)))), 0)
+    except Exception:  # noqa: BLE001
+        current = None
+    return _plan_percentile(check_name="理智", difficulty=None, target=current, bonus=0, penalty=0)
+
+
+def _generic_plan(arguments: dict[str, Any]) -> dict[str, Any]:
+    expression = str(arguments.get("expression") or arguments.get("dice") or "1d100").strip().lower()
+    match = re.fullmatch(r"(\d+)d(\d+)", expression)
+    count = int(match.group(1)) if match else 1
+    sides = int(match.group(2)) if match else 100
+    return {"mode": "standard", "expression": expression, "count": count, "sides": sides, "bonus_dice": 0, "penalty_dice": 0, "candidates": [], "check": None}
+
+
+def _finalize_dice_metadata(
+    result: dict[str, Any],
+    context: Any,
+    *,
+    show_table: bool = True,
+    player_roll_requested: bool = False,
+) -> dict[str, Any]:
+    """统一修正展示元数据：纯文本档位忽略桌面；模式关闭时标记 player_roll_ignored。"""
+    if not isinstance(result, dict):
+        return result
+    settings = _effective_dice_settings(context)
+    message = result.get("visible_message")
+    if isinstance(message, dict):
+        metadata = message.get("metadata")
+        dice = metadata.get("dice_roll") if isinstance(metadata, dict) else None
+        if isinstance(dice, dict):
+            dice["show_table"] = bool(show_table) and settings.get("level") != "text"
+            dice["player_roll"] = bool(player_roll_requested) and bool(settings.get("player_roll"))
+            dice["player_roll_ignored"] = bool(player_roll_requested) and not settings.get("player_roll")
+    if player_roll_requested and not settings.get("player_roll"):
+        logger.info("dice.roll player_roll requested but player-roll mode is disabled; rolled immediately")
+    return result
 
 
 def _attach_trigger_reveal(result: dict[str, Any], arguments: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -261,7 +497,7 @@ def _attach_trigger_reveal(result: dict[str, Any], arguments: dict[str, Any], co
     未传 ``trigger_id`` 时原样返回，既有行为完全不变。
     """
     trigger_id = arguments.get("trigger_id")
-    if trigger_id in (None, ""):
+    if trigger_id in (None, "") or result.get("cancelled"):
         return result
     revealed = reveal_trigger_after_check(trigger_id, bool(result.get("success")), context)
     if isinstance(revealed.get("direct_message"), dict):
@@ -291,9 +527,41 @@ def roll_coc_check(arguments: dict[str, Any], rng: Callable[[int], int] | None =
     # in the structured result while bonus/penalty candidates are expanded.
     if candidates: summary += f" {'奖励骰' if bonus_dice else '惩罚骰'}（{', '.join(map(str, candidates))}），取{roll}。"
     if reason: summary += f" 原因：{reason}。"
-    return {"skill": skill, "reason": reason, "roll": roll, "rolls": candidates or [roll], "target": target, "difficulty": difficulty, "threshold": threshold, "adjustment": modifier, "bonus_dice": bonus_dice, "penalty_dice": penalty_dice, "success": success, "success_level": level if success else "failure", "raw_success_level": level, "critical": level == "critical", "fumble": level == "fumble", "critical_threshold": critical_threshold, "fumble_threshold": fumble_threshold, "summary": summary, "visible_message": _result_message(summary, "dice.roll_coc_check", check_type="coc")}
+    result = {"skill": skill, "reason": reason, "roll": roll, "rolls": candidates or [roll], "target": target, "difficulty": difficulty, "threshold": threshold, "adjustment": modifier, "bonus_dice": bonus_dice, "penalty_dice": penalty_dice, "success": success, "success_level": level if success else "failure", "raw_success_level": level, "critical": level == "critical", "fumble": level == "fumble", "critical_threshold": critical_threshold, "fumble_threshold": fumble_threshold, "summary": summary}
+    result["visible_message"] = _result_message(
+        summary,
+        "dice.roll_coc_check",
+        check_type="coc",
+        extra_metadata={
+            "dice_roll": _dice_roll_metadata(
+                result,
+                mode="percentile",
+                check_name=skill,
+                difficulty=difficulty,
+                target=target,
+                roller=str(arguments.get("character_name") or "") or None,
+            )
+        },
+    )
+    return result
 def execute_roll_coc_check(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
-    return _attach_trigger_reveal(roll_coc_check(_merge_context_thresholds(arguments, context)), arguments, context)
+    roller_id = getattr(context, "user_id", None)
+    if _should_wait_for_player(context, arguments, roller_id):
+        from trpg_server.agents import player_roll
+
+        result = player_roll.wait_for_player_roll(
+            context,
+            _coc_check_plan(arguments),
+            lambda: roll_coc_check(_merge_context_thresholds(arguments, context)),
+            roller_user_id=roller_id,
+            roller_name=_context_username(context),
+            tool_name="dice.roll_coc_check",
+        )
+        result = _finalize_dice_metadata(result, context, player_roll_requested=True)
+    else:
+        result = roll_coc_check(_merge_context_thresholds(arguments, context))
+        result = _finalize_dice_metadata(result, context)
+    return _attach_trigger_reveal(result, arguments, context)
 
 def roll_room_check(arguments: dict[str, Any], context: Any, rng: Callable[[int], int] | None = None) -> dict[str, Any]:
     player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip(); check_name = str(arguments.get("name") or arguments.get("skill") or "").strip()
@@ -325,9 +593,45 @@ def roll_room_check(arguments: dict[str, Any], context: Any, rng: Callable[[int]
     summary = _format_room_check_summary(display_name, difficulty, roll, threshold, success) + _level_suffix(level)
     modifier = str(arguments.get("adjustment", arguments.get("correction")) or "").strip()
     if candidates: summary += f" {'奖励骰' if bonus_dice else '惩罚骰'}（{', '.join(map(str, candidates))}），取{roll}。"
-    return {"player_name": player_name, "character_name": card.get("name"), "name": display_name, "roll": roll, "rolls": candidates or [roll], "base_target": base_target, "target": threshold, "difficulty": difficulty, "difficulty_label": DIFFICULTY_LABELS[difficulty], "adjustment": modifier, "bonus_dice": bonus_dice, "penalty_dice": penalty_dice, "success": success, "success_level": level if success else "failure", "raw_success_level": level, "critical": level == "critical", "fumble": level == "fumble", "critical_threshold": critical_threshold, "fumble_threshold": fumble_threshold, "summary": summary, "visible_message": _result_message(summary, "check.roll_room_check", check_type="room", player_name=player_name, name=display_name)}
+    result = {"player_name": player_name, "character_name": card.get("name"), "name": display_name, "roll": roll, "rolls": candidates or [roll], "base_target": base_target, "target": threshold, "difficulty": difficulty, "difficulty_label": DIFFICULTY_LABELS[difficulty], "adjustment": modifier, "bonus_dice": bonus_dice, "penalty_dice": penalty_dice, "success": success, "success_level": level if success else "failure", "raw_success_level": level, "critical": level == "critical", "fumble": level == "fumble", "critical_threshold": critical_threshold, "fumble_threshold": fumble_threshold, "summary": summary}
+    result["visible_message"] = _result_message(
+        summary,
+        "check.roll_room_check",
+        check_type="room",
+        player_name=player_name,
+        name=display_name,
+        extra_metadata={
+            "dice_roll": _dice_roll_metadata(
+                result,
+                mode="percentile",
+                check_name=display_name,
+                difficulty=difficulty,
+                target=threshold,
+                roller=player_name,
+            )
+        },
+    )
+    return result
 def execute_roll_room_check(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
-    return _attach_trigger_reveal(roll_room_check(arguments, context), arguments, context)
+    player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip()
+    member = _find_member(player_name, context)
+    roller_id = member.get("user_id") if isinstance(member, dict) else None
+    if _should_wait_for_player(context, arguments, roller_id):
+        from trpg_server.agents import player_roll
+
+        result = player_roll.wait_for_player_roll(
+            context,
+            _room_check_plan(arguments, context),
+            lambda: roll_room_check(arguments, context),
+            roller_user_id=roller_id,
+            roller_name=player_name,
+            tool_name="check.roll_room_check",
+        )
+        result = _finalize_dice_metadata(result, context, player_roll_requested=True)
+    else:
+        result = roll_room_check(arguments, context)
+        result = _finalize_dice_metadata(result, context)
+    return _attach_trigger_reveal(result, arguments, context)
 
 def _roll_sanity_value(expression: Any, roller: Callable[[int], int]) -> tuple[int, list[int]]:
     text = str(expression or "0").strip()
@@ -380,9 +684,47 @@ def roll_sanity_check(arguments: dict[str, Any], context: Any, rng: Callable[[in
         write_json_atomic(context.room_dir / "info.json", room_info)
     result_text = "成功" if success else "失败"
     summary = f"{player_name} 理智检定：1d100=[{roll}] / 当前 SAN {current}，{result_text}；理智变化 {selected_expr} = {delta:+d}，SAN {current}→{new_san}。"
-    return {"player_name": player_name, "roll": roll, "san": current, "current_san": new_san, "max_san": maximum, "success": success, "change": delta, "change_expression": selected_expr, "change_rolls": detail_rolls, "san_change": change, "temporary_insanity": bool(flags.get("temporaryInsanity")), "indefinite_insanity": bool(flags.get("indefiniteInsanity")), "permanent_insanity": bool(flags.get("permanentInsanity")), "summary": summary, "visible_message": {**_result_message(summary, "san.roll_sanity_check", check_type="sanity", player_name=player_name), "metadata": {"tool_name": "san.roll_sanity_check", "check_type": "sanity", "player_name": player_name, "current_san": new_san, "max_san": maximum, "temporary_insanity": bool(flags.get("temporaryInsanity")), "indefinite_insanity": bool(flags.get("indefiniteInsanity")), "permanent_insanity": bool(flags.get("permanentInsanity"))}}}
+    result = {"player_name": player_name, "roll": roll, "san": current, "current_san": new_san, "max_san": maximum, "success": success, "change": delta, "change_expression": selected_expr, "change_rolls": detail_rolls, "san_change": change, "temporary_insanity": bool(flags.get("temporaryInsanity")), "indefinite_insanity": bool(flags.get("indefiniteInsanity")), "permanent_insanity": bool(flags.get("permanentInsanity")), "summary": summary}
+    result["visible_message"] = _result_message(
+        summary,
+        "san.roll_sanity_check",
+        check_type="sanity",
+        player_name=player_name,
+        current_san=new_san,
+        max_san=maximum,
+        temporary_insanity=bool(flags.get("temporaryInsanity")),
+        indefinite_insanity=bool(flags.get("indefiniteInsanity")),
+        permanent_insanity=bool(flags.get("permanentInsanity")),
+        extra_metadata={
+            "dice_roll": _dice_roll_metadata(
+                result,
+                mode="percentile",
+                check_name="理智",
+                target=current,
+                roller=player_name,
+            )
+        },
+    )
+    return result
 
-def execute_roll_sanity_check(arguments: dict[str, Any], context: Any) -> dict[str, Any]: return roll_sanity_check(arguments, context)
+def execute_roll_sanity_check(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip()
+    member = _find_member(player_name, context)
+    roller_id = member.get("user_id") if isinstance(member, dict) else None
+    if _should_wait_for_player(context, arguments, roller_id):
+        from trpg_server.agents import player_roll
+
+        # 理智变化必须延迟到玩家投掷完成后由 resolver 写入房间状态。
+        result = player_roll.wait_for_player_roll(
+            context,
+            _sanity_check_plan(arguments, context),
+            lambda: roll_sanity_check(arguments, context),
+            roller_user_id=roller_id,
+            roller_name=player_name,
+            tool_name="san.roll_sanity_check",
+        )
+        return _finalize_dice_metadata(result, context, player_roll_requested=True)
+    return _finalize_dice_metadata(roll_sanity_check(arguments, context), context)
 
 def roll_dice(arguments: dict[str, Any], rng: Callable[[int], int] | None = None) -> dict[str, Any]:
     expression = str(arguments.get("expression") or arguments.get("dice") or "1d100").strip().lower(); match = re.fullmatch(r"(\d+)d(\d+)", expression)
@@ -391,13 +733,52 @@ def roll_dice(arguments: dict[str, Any], rng: Callable[[int], int] | None = None
     if count < 1 or count > 100 or sides < 2 or sides > 1000: return {"error": "dice count must be 1-100 and sides 2-1000"}
     rolls = [int((rng or (lambda n: random.randint(1, n)))(sides)) for _ in range(count)]; total = sum(rolls); summary = f"投掷 {expression}：{' + '.join(map(str, rolls))}" + (f" = {total}" if count > 1 else "")
     result = {"expression": expression, "rolls": rolls, "total": total, "summary": summary}
-    if not arguments.get("dark", arguments.get("secret", False)): result["visible_message"] = _result_message(summary, "dice.roll", check_type="dice")
+    roll_table = bool(arguments.get("show_table")) or bool(arguments.get("player_roll"))
+    want_player_roll = bool(arguments.get("player_roll"))
+    if not arguments.get("dark", arguments.get("secret", False)):
+        result["visible_message"] = _result_message(
+            summary,
+            "dice.roll",
+            check_type="dice",
+            extra_metadata={
+                "dice_roll": _dice_roll_metadata(
+                    result,
+                    mode="standard",
+                    show_table=roll_table,
+                    player_roll=want_player_roll,
+                )
+            },
+        )
     return result
-def execute_roll_dice(arguments: dict[str, Any], context: Any) -> dict[str, Any]: return roll_dice(arguments)
+def execute_roll_dice(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    dark = bool(arguments.get("dark") or arguments.get("secret"))
+    request_player = bool(arguments.get("player_roll")) and not dark
+    roller_id = getattr(context, "user_id", None)
+    if request_player and _should_wait_for_player(context, arguments, roller_id):
+        from trpg_server.agents import player_roll
+
+        result = player_roll.wait_for_player_roll(
+            context,
+            _generic_plan(arguments),
+            lambda: roll_dice(arguments),
+            roller_user_id=roller_id,
+            roller_name=_context_username(context),
+            tool_name="dice.roll",
+        )
+        return _finalize_dice_metadata(result, context, player_roll_requested=True)
+    result = roll_dice(arguments)
+    if dark:
+        return result
+    return _finalize_dice_metadata(
+        result,
+        context,
+        show_table=bool(arguments.get("show_table")) or request_player,
+        player_roll_requested=request_player,
+    )
 
 ROLL_COC_CHECK_TOOL = AgentTool(name="dice.roll_coc_check", description="Roll a real backend COC7 percentile check. The result reports whether it is a critical success or fumble. Uses the room's configured critical/fumble thresholds unless overridden by arguments.", parameters={"type": "object", "properties": {"character_name": {"type": "string"}, "skill": {"type": "string"}, "target": {"type": "integer", "minimum": 1, "maximum": 100}, "difficulty": {"type": "string"}, "adjustment": {"type": "string"}, "correction": {"type": "string"}, "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "critical_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "fumble_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "reason": {"type": "string"}, "trigger_id": {"type": ["integer", "string"], "description": "Optional. When this check gates a scenario trigger, pass the trigger id so the trigger content is revealed in the same round if the check succeeds. Do not pass it when the trigger condition is not tied to this check."}}, "required": ["skill", "target"]}, handler=execute_roll_coc_check)
 ROLL_ROOM_CHECK_TOOL = AgentTool(name="check.roll_room_check", description="Resolve a current-room player's character card and roll a COC check. The result reports whether it is a critical success or fumble. Uses the room's configured critical/fumble thresholds unless overridden by arguments.", parameters={"type": "object", "properties": {"player_name": {"type": "string"}, "name": {"type": "string"}, "difficulty": {"type": "string"}, "adjustment": {"type": "string"}, "correction": {"type": "string"}, "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "critical_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "fumble_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "trigger_id": {"type": ["integer", "string"], "description": "Optional. When this check gates a scenario trigger, pass the trigger id so the trigger content is revealed in the same round if the check succeeds. Do not pass it when the trigger condition is not tied to this check."}}, "required": ["player_name", "name"]}, handler=execute_roll_room_check)
 ROLL_SANITY_CHECK_TOOL = AgentTool(name="san.roll_sanity_check", description="Roll a player's SAN check and apply success/failure sanity change directly to the room character state.", parameters={"type": "object", "properties": {"player_name": {"type": "string"}, "san_change": {"type": "string", "description": "Success/failure change, e.g. 1d4/1d6 or +1d4/-1d6"}}, "required": ["player_name", "san_change"]}, handler=execute_roll_sanity_check)
 ROLL_SANITY_CHECK_ALIAS_TOOL = AgentTool(name="sanity.roll_sanity_check", description=ROLL_SANITY_CHECK_TOOL.description, parameters=ROLL_SANITY_CHECK_TOOL.parameters, handler=execute_roll_sanity_check)
-ROLL_DICE_TOOL = AgentTool(name="dice.roll", description="Roll generic dice such as 1d100. Set dark=true for a secret roll.", parameters={"type": "object", "properties": {"expression": {"type": "string"}, "dark": {"type": "boolean"}}, "required": ["expression"]}, handler=execute_roll_dice)
+ROLL_DICE_TOOL = AgentTool(name="dice.roll", description="Roll generic dice such as 1d100. Set dark=true for a secret roll. Optional show_table summons the virtual dice table for this roll; player_roll lets the current player throw it (only when player-roll mode is enabled).", parameters={"type": "object", "properties": {"expression": {"type": "string"}, "dark": {"type": "boolean"}, "show_table": {"type": "boolean", "description": "Set true to summon the virtual dice table for this roll. Ignored in text-only animation mode."}, "player_roll": {"type": "boolean", "description": "Set true to let the current player throw the dice. Only honored when player-roll mode is enabled; otherwise the roll resolves immediately. Works in text, simple, and 3D animation modes."}}, "required": ["expression"]}, handler=execute_roll_dice)
 ROLL_DICE_FUNCTION_TOOL = AgentTool(name="dice.roll_dice", description="Roll generic dice such as 1d100. Set dark=true for a secret roll.", parameters=ROLL_DICE_TOOL.parameters, handler=execute_roll_dice)

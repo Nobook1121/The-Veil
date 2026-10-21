@@ -7,16 +7,20 @@
     "prepare:frontend": "node scripts/build-frontend.mjs --assets-only",
     "typecheck": "npm run prepare:frontend && tsc --noEmit && tsc --project tsconfig.react.json --noEmit",
     "build:react": "esbuild frontend/src/react/main.tsx --bundle --format=iife --target=es2022 --jsx=automatic --minify \"--external:/assets/*\" --outfile=dist/public/js/react/main.js",
-    "build:frontend": "node scripts/build-frontend.mjs && tsc --project tsconfig.frontend.json && node scripts/relocate-tools.mjs && npm run build:react"
+    "build:dice3d": "esbuild frontend/src/dice3d/main.ts --bundle --format=iife --target=es2022 --minify --outfile=dist/public/js/dice/dice3d.js",
+    "build:frontend": "node scripts/build-frontend.mjs && tsc --project tsconfig.frontend.json && node scripts/relocate-tools.mjs && npm run build:react && npm run build:dice3d"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.180.0",
     "esbuild": "^0.28.1",
     "typescript": "^5.8.3"
   },
   "dependencies": {
+    "cannon-es": "^0.20.0",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "three": "^0.180.0"
   }
 }

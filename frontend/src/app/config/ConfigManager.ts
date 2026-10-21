@@ -150,6 +150,9 @@ class ConfigManager {
         // 骰娘默认阈值（房间规则未单独设置时生效）
         configSetInputValue("diceCriticalThresholdDefault", this.get("general", "ai", "dice_critical_threshold", 1));
         configSetInputValue("diceFumbleThresholdDefault", this.get("general", "ai", "dice_fumble_threshold", 96));
+        configSetSelectValue("diceAnimationLevel", this.get("general", "ai", "dice_animation_level", "3d"));
+        configSetCheckboxValue("dicePlayerRollDefault", this.get("general", "ai", "dice_player_roll", false));
+        configSetInputValue("dicePlayerRollTimeout", this.get("general", "ai", "dice_player_roll_timeout", 120));
         // 知识库检索与切块
         configSetInputValue("retrievalTopKDefault", this.get("general", "ai.knowledge", "top_k_default", 5));
         configSetInputValue("retrievalTopKDirect", this.get("general", "ai.knowledge", "top_k_direct", 6));

@@ -896,6 +896,14 @@ interface RoomHouseRulesPayload {
     visibility?: "public" | "private";
     dice_thresholds?: { critical: number; fumble: number };
     dice_threshold_defaults?: { critical: number; fumble: number };
+    dice_animation_defaults?: { level: "text" | "simple" | "3d"; player_roll: boolean };
+    dice_animation?: {
+        level: "text" | "simple" | "3d";
+        player_roll: boolean;
+        timeout: number;
+        level_source: "room" | "admin";
+        player_roll_source: "room" | "admin";
+    };
 }
 
 /** 读取房规弹窗中的大成功/大失败阈值输入；留空返回 null 表示沿用管理员默认值。 */
@@ -946,6 +954,21 @@ async function openHouseRulesModal(): Promise<void> {
         if (diceHint && defaults) {
             diceHint.textContent = `留空表示使用管理员设置的默认阈值（大成功 ≤ ${defaults.critical}，大失败 ≥ ${defaults.fumble}）。`;
         }
+        const animationSelect = document.getElementById("houseRuleDiceAnimationLevel") as HTMLSelectElement | null;
+        const playerRollSelect = document.getElementById("houseRulePlayerDiceRoll") as HTMLSelectElement | null;
+        const animationHint = document.getElementById("houseRuleDiceAnimationHint") as HTMLElement | null;
+        if (animationSelect) animationSelect.value = response.data.house_rules?.dice_animation_level || "";
+        const playerRule = response.data.house_rules?.player_dice_roll;
+        if (playerRollSelect) playerRollSelect.value = playerRule === null || playerRule === undefined ? "" : playerRule ? "on" : "off";
+        if (animationHint) {
+            const defaultsAnim = response.data.dice_animation_defaults;
+            const effective = response.data.dice_animation;
+            const levelLabel = { text: "纯文本", simple: "简易动画", "3d": "3D 骰子" } as const;
+            const parts: string[] = [];
+            if (defaultsAnim) parts.push(`管理员默认：${levelLabel[defaultsAnim.level]} / 玩家投掷${defaultsAnim.player_roll ? "开启" : "关闭"}`);
+            if (effective) parts.push(`当前生效：${levelLabel[effective.level]} / 玩家投掷${effective.player_roll ? "开启" : "关闭"}（等待超时 ${effective.timeout} 秒）`);
+            animationHint.textContent = parts.join("；");
+        }
         new bootstrap.Modal(modalElement).show();
     } catch (error) {
         showNotification(`加载房规失败：${roomErrorMessage(error)}`, "error");
@@ -957,12 +980,17 @@ async function saveHouseRules(): Promise<void> {
     const checkbox = document.getElementById("houseRuleActionSuggestions") as HTMLInputElement | null;
     const visibilitySelect = document.getElementById("houseRuleVisibility") as HTMLSelectElement | null;
     if (!checkbox) return;
+    const animationSelect = document.getElementById("houseRuleDiceAnimationLevel") as HTMLSelectElement | null;
+    const playerRollSelect = document.getElementById("houseRulePlayerDiceRoll") as HTMLSelectElement | null;
+    const playerRuleValue = playerRollSelect?.value || "";
     try {
         const response = await TrpgApi.put<ApiResponse<RoomHouseRulesPayload>>(`/api/rooms/${encodeURIComponent(currentRoom.id)}/house-rules`, {
             house_rules: {
                 action_suggestions_enabled: checkbox.checked,
                 dice_critical_threshold: readHouseRuleDiceThreshold("houseRuleDiceCritical"),
                 dice_fumble_threshold: readHouseRuleDiceThreshold("houseRuleDiceFumble"),
+                dice_animation_level: animationSelect?.value || null,
+                player_dice_roll: playerRuleValue === "" ? null : playerRuleValue === "on",
             },
             visibility: visibilitySelect?.value || "private",
         });
@@ -973,6 +1001,7 @@ async function saveHouseRules(): Promise<void> {
         currentRoom.house_rules = response.data.house_rules;
         if (response.data.visibility) currentRoom.visibility = response.data.visibility;
         if (response.data.dice_thresholds) currentRoom.dice_thresholds = response.data.dice_thresholds;
+        if (response.data.dice_animation) currentRoom.dice_animation = response.data.dice_animation;
         updateRoomDetail(currentRoom);
         void window.COC7CharacterSheet?.reloadSkillBases?.();
         bootstrap.Modal.getInstance(document.getElementById("roomHouseRulesModal"))?.hide();
@@ -1415,6 +1444,7 @@ function clearCurrentRoom(): void {
     if (currentRoom?.id) window.leaveSocketRoom?.(currentRoom.id);
     currentRoom = null;
     window.currentRoom = null;
+    window.TrpgDiceTable?.onRoomChanged();
     window.setChatReadOnly?.(false);
     applyInvisibleRoomView(false);
     window.closeRoomConsole?.();
