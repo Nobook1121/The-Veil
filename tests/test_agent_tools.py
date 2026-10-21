@@ -2,6 +2,7 @@ from trpg_server.agents.profiles import DEFAULT_KP_TOOLS
 from trpg_server.agents.tools import default_tool_registry
 from trpg_server.agents.tools.dice import (
     execute_roll_coc_check,
+    execute_roll_dice,
     execute_roll_room_check,
     roll_coc_check,
     roll_room_check,
@@ -365,6 +366,81 @@ def test_room_check_without_trigger_id_keeps_original_behaviour(tmp_path, monkey
 
     assert "direct_message" not in result
     assert "trigger_note" not in result
+
+
+def _enable_room_log(monkeypatch):
+    """用例不受本机 general.toml 的运行时开关影响。"""
+    from trpg_server.room_log import DEFAULT_ROOM_CONSOLE_SETTINGS
+
+    monkeypatch.setattr(
+        "trpg_server.room_log.room_console_settings",
+        lambda config_dir=None: dict(DEFAULT_ROOM_CONSOLE_SETTINGS),
+    )
+
+
+def test_room_check_result_is_written_to_room_log(tmp_path, monkeypatch):
+    """房间检定结果必须进入房间日志，供房间控制台查看。"""
+    _enable_room_log(monkeypatch)
+    context = _context_with_check_trigger(tmp_path)
+    monkeypatch.setattr("trpg_server.agents.tools.dice.random.randint", lambda low, high: 30)
+
+    execute_roll_room_check({"player_name": "testplayer", "name": "侦查"}, context)
+
+    from trpg_server.room_log import read_room_log
+
+    entries = read_room_log(context.room_dir)["entries"]
+    dice_entries = [entry for entry in entries if entry["source"] == "dice"]
+    assert len(dice_entries) == 1
+    assert "侦查" in dice_entries[0]["message"]
+    assert dice_entries[0]["actor"] == "testplayer"
+    assert dice_entries[0]["details"]["工具"] == "check.roll_room_check"
+
+
+def test_generic_dice_roll_result_is_written_to_room_log(tmp_path, monkeypatch):
+    _enable_room_log(monkeypatch)
+    room_dir = tmp_path / "rooms" / "room-1"
+    room_dir.mkdir(parents=True)
+    (room_dir / "info.json").write_text(json.dumps({"id": "room-1"}), encoding="utf-8")
+    context = AgentRequestContext(room_id="room-1", room_dir=room_dir, agent_id="kp")
+    monkeypatch.setattr("trpg_server.agents.tools.dice.random.randint", lambda low, high: 4)
+
+    execute_roll_dice({"expression": "1d6"}, context)
+
+    from trpg_server.room_log import read_room_log
+
+    entries = read_room_log(room_dir)["entries"]
+    assert entries[-1]["source"] == "dice"
+    assert "投掷 1d6" in entries[-1]["message"]
+    assert entries[-1]["details"]["工具"] == "dice.roll"
+
+
+def test_dark_dice_roll_is_logged_with_secret_flag(tmp_path, monkeypatch):
+    _enable_room_log(monkeypatch)
+    room_dir = tmp_path / "rooms" / "room-1"
+    room_dir.mkdir(parents=True)
+    (room_dir / "info.json").write_text(json.dumps({"id": "room-1"}), encoding="utf-8")
+    context = AgentRequestContext(room_id="room-1", room_dir=room_dir, agent_id="kp")
+    monkeypatch.setattr("trpg_server.agents.tools.dice.random.randint", lambda low, high: 7)
+
+    execute_roll_dice({"expression": "1d100", "dark": True}, context)
+
+    from trpg_server.room_log import read_room_log
+
+    entries = read_room_log(room_dir)["entries"]
+    assert entries[-1]["details"]["暗投"] == "是"
+
+
+def test_dice_roll_error_is_not_written_to_room_log(tmp_path):
+    room_dir = tmp_path / "rooms" / "room-1"
+    room_dir.mkdir(parents=True)
+    (room_dir / "info.json").write_text(json.dumps({"id": "room-1"}), encoding="utf-8")
+    context = AgentRequestContext(room_id="room-1", room_dir=room_dir, agent_id="kp")
+
+    execute_roll_dice({"expression": "bad"}, context)
+
+    from trpg_server.room_log import read_room_log
+
+    assert read_room_log(room_dir)["entries"] == []
 
 
 def test_room_check_returns_error_for_missing_bound_character(tmp_path):
