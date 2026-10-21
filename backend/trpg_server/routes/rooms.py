@@ -18,7 +18,7 @@ from trpg_server.role_config import load_roles
 from trpg_server.security import get_user_manager, is_socket_user_online, is_user_in_room, safe_join
 from trpg_server.settings import CONFIG_DIR, ROOMS_DIR, SCENARIOS_DIR, ROOM_ARCHIVES_DIR, CHARACTERS_DIR, HISTORY_DIR
 from trpg_server.agents.config import load_ai_runtime_config
-from trpg_server.agents.dice_settings import DICE_ANIMATION_LEVELS, resolve_dice_settings
+from trpg_server.agents.dice_settings import DICE_ANIMATION_LEVELS, DICE_REROLL_MODES, resolve_dice_settings
 from trpg_server.agents.room_state import save_room_state
 from trpg_server.agents.versioning import migrate_room_binding
 from trpg_server.agents.trigger_system import find_trigger_definition, record_trigger, validate_trigger
@@ -50,6 +50,9 @@ HOUSE_RULE_DEFINITIONS = {
     # 纯文本档位同样可以开启玩家投掷。
     "dice_animation_level": {"type": "nullable_enum", "default": None, "values": list(DICE_ANIMATION_LEVELS), "ai_prompt": False},
     "player_dice_roll": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
+    # 玩家投掷的重投配置（留空表示继承管理员默认值）。
+    "dice_reroll_mode": {"type": "nullable_enum", "default": None, "values": list(DICE_REROLL_MODES), "ai_prompt": False},
+    "dice_reroll_limit": {"type": "nullable_integer", "default": None, "min": 1, "max": 20, "ai_prompt": False},
     # 技能基础值覆盖表：键为技能键（带专精时为 `skillKey.specialtyKey`），值为 0-99 整数。
     # 留空表示沿用下一优先级（用户个性化 > 管理员设置 > 技能目录默认值）。
     "skill_bases": {"type": "skill_bases", "default": {}, "ai_prompt": False},
@@ -1369,6 +1372,8 @@ def get_room_house_rules(room_id):
             "dice_animation_defaults": {
                 "level": load_ai_runtime_config(_get_config_dir()).dice_animation_level,
                 "player_roll": load_ai_runtime_config(_get_config_dir()).dice_player_roll,
+                "reroll_mode": load_ai_runtime_config(_get_config_dir()).dice_reroll_mode,
+                "reroll_limit": load_ai_runtime_config(_get_config_dir()).dice_reroll_limit,
             },
         },
         "House rules loaded successfully",
@@ -1467,6 +1472,8 @@ def update_room_house_rules(room_id):
             "dice_animation_defaults": {
                 "level": load_ai_runtime_config(_get_config_dir()).dice_animation_level,
                 "player_roll": load_ai_runtime_config(_get_config_dir()).dice_player_roll,
+                "reroll_mode": load_ai_runtime_config(_get_config_dir()).dice_reroll_mode,
+                "reroll_limit": load_ai_runtime_config(_get_config_dir()).dice_reroll_limit,
             },
         },
         "House rules updated successfully",

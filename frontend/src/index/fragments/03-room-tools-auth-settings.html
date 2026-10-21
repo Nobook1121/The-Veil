@@ -83,6 +83,19 @@
                                         <option value="off" data-i18n="common.disabled">关闭</option>
                                     </select>
                                 </div>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleDiceRerollMode" data-i18n="room.house_rules.dice_reroll_mode">骰子重投模式</label>
+                                    <select class="form-select" id="houseRuleDiceRerollMode">
+                                        <option value="" data-i18n="room.house_rules.follow_admin">跟随管理员默认</option>
+                                        <option value="off" data-i18n="settings.dice.reroll_mode_off">关闭重投</option>
+                                        <option value="limited" data-i18n="settings.dice.reroll_mode_limited">指定次数</option>
+                                        <option value="unlimited" data-i18n="settings.dice.reroll_mode_unlimited">无限重投</option>
+                                    </select>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleDiceRerollLimit" data-i18n="room.house_rules.dice_reroll_limit">重投次数（1-20）</label>
+                                    <input type="number" class="form-control" id="houseRuleDiceRerollLimit" min="1" max="20" placeholder="留空继承默认值">
+                                </div>
                                 <p class="form-text mt-2" id="houseRuleDiceAnimationHint"></p>
                                 <hr class="my-3">
                                 <h6 data-i18n="room.house_rules.skill_bases">技能基础值</h6>
@@ -906,6 +919,11 @@
                                     <small class="text-muted" data-i18n="settings.dice.animation_level_hint">全局默认档位，房间可在房规内覆盖。3D 不可用时自动降级并写入房间日志。</small>
                                 </div>
                                 <div class="form-check mt-3">
+                                    <input class="form-check-input" type="checkbox" id="dicePhysicsResults">
+                                    <label class="form-check-label" for="dicePhysicsResults" data-i18n="settings.dice.physics_results">启用现代化骰子点数生成器</label>
+                                    <small class="d-block text-muted" data-i18n="settings.dice.physics_results_hint">开启后由客户端读取骰子落定后朝上的面，服务端据此结算；关闭则沿用服务端随机数生成器。纯文本档位与兜底场景始终使用旧生成器。</small>
+                                </div>
+                                <div class="form-check mt-3">
                                     <input class="form-check-input" type="checkbox" id="dicePlayerRollDefault">
                                     <label class="form-check-label" for="dicePlayerRollDefault" data-i18n="settings.dice.player_roll">允许玩家投掷骰子</label>
                                     <small class="d-block text-muted" data-i18n="settings.dice.player_roll_hint">AI 检定时等待目标玩家点击投掷；不依赖动画档位，纯文本模式下同样可用。</small>
@@ -914,6 +932,20 @@
                                     <label for="dicePlayerRollTimeout" data-i18n="settings.dice.player_roll_timeout">玩家投掷等待超时（秒）</label>
                                     <input type="number" class="form-control" id="dicePlayerRollTimeout" value="120" min="30" max="300">
                                     <small class="text-muted" data-i18n="settings.dice.player_roll_timeout_hint">超时后由服务端自动投掷，避免 AI 永久等待。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="diceRerollMode" data-i18n="settings.dice.reroll_mode">骰子重投模式</label>
+                                    <select class="form-select" id="diceRerollMode">
+                                        <option value="off" data-i18n="settings.dice.reroll_mode_off">关闭重投</option>
+                                        <option value="limited" data-i18n="settings.dice.reroll_mode_limited">指定次数</option>
+                                        <option value="unlimited" data-i18n="settings.dice.reroll_mode_unlimited">无限重投</option>
+                                    </select>
+                                    <small class="text-muted" data-i18n="settings.dice.reroll_mode_hint">开启后玩家可在骰桌浮层重投并确认结果；关闭时投掷后自动返回。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="diceRerollLimit" data-i18n="settings.dice.reroll_limit">重投次数（1-20）</label>
+                                    <input type="number" class="form-control" id="diceRerollLimit" value="3" min="1" max="20">
+                                    <small class="text-muted" data-i18n="settings.dice.reroll_limit_hint">仅在重投模式为「指定次数」时可编辑。</small>
                                 </div>
                                 <div class="mt-3">
                                     <h5 data-i18n="settings.dice.textures_title">骰子贴图库</h5>

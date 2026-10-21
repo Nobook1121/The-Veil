@@ -6,13 +6,14 @@
 ## 1. 项目定位
 
 **帷幕 The Veil**：自托管的 AI 跑团（TRPG）平台。AI 担任 KP/守秘人，真人玩家在同一房间聊天中掷骰、交流、推进剧情。
-仓库名 `the-veil`，当前版本 `0.5.0-b`，Apache-2.0。
+仓库名 `the-veil`，当前开发版本 `v0.5.1b`（`package.json` 版本号尚未 bump，仍为 `0.5.0-b`），Apache-2.0。
 
 技术栈：
 
 - 后端：Python 3.11+ / Flask 2.3 / Flask-SocketIO（线程模式）/ SQLite / JSON 文件存储
 - 前端：TypeScript + 原生 DOM（历史页面）+ React 19（侧边栏与首页聊天）/ Bootstrap 5（CDN）
-- 构建：`tsc`（legacy TS → `dist/public/js`）+ `esbuild`（React bundle → `dist/public/js/react/main.js`）
+- 构建：`tsc`（legacy TS → `dist/public/js`）+ `esbuild`（React bundle、3D 骰子 bundle）
+- 3D 骰子：`three` + `cannon-es`（独立 bundle `dist/public/js/dice/dice3d.js`，按需加载）
 - AI：OpenAI 兼容接口（DeepSeek / OpenAI / 阿里百炼 / SiliconFlow / OpenRouter / LM Studio / 任意兼容端点）
 - 向量检索：内置 SQLite 向量库（默认）/ 可选 Qdrant；Embedding 支持本地 `sentence-transformers`、云端接口、哈希降级
 - 文档解析：PyMuPDF（PDF/DOC，AGPL-3.0 双许可）、olefile；可选 PaddleOCR（扫描件）
@@ -25,7 +26,8 @@
 | 源码启动（macOS/Linux） | `python server.py` |
 | 指定端口 | `python server.py 8087`（默认 8086，被占用时自动向后找） |
 | 开发时自动重建前端 | 设 `AI_TRPG_DEV_BUILD=1` 后启动 |
-| 前端构建 | `npm run build:frontend` |
+| 前端构建 | `npm run build:frontend`（含 `build:react` 与 `build:dice3d`） |
+| 仅 3D 骰子 bundle | `npm run build:dice3d` |
 | 类型检查 | `npm run typecheck` |
 | 全量验证 | `.\scripts\verify.ps1`（py_compile → typecheck → build → node --check → pytest） |
 | 单元测试 | `python -m pytest -q`（测试目录 `tests/`，`conftest.py` 把 `backend/` 加入 `sys.path`） |
@@ -42,11 +44,12 @@
 | `frontend/src/` | 前端源码（TS、HTML 片段、样式、i18n、模板） |
 | `dist/public/` | 前端构建产物（发布包内置，禁止手改） |
 | `data/` | 持久化数据（剧本、资源、配置、运行时数据） |
-| `tests/` | pytest 测试（约 56 个 `test_*.py`） |
+| `tests/` | pytest 测试（54 个 `test_*.py`；全量约 458 passed / 1 skipped） |
 | `scripts/` | 构建、迁移、验证、导入辅助脚本 |
 | `config/` | 示例环境配置（`vector-embedding-ocr.example.env`） |
 | `docs/` | 开发文档、API 文档、格式说明、本地 wiki |
 | `release/` | 变更日志与发布清单 |
+| `pyrightconfig.json` | Pyright 静态检查配置（`extraPaths: ["backend"]`，让测试能解析 `trpg_server.*`） |
 | `node_modules/`、`.venv/`、`__pycache__/`、`.pytest_cache/` | 依赖与缓存，不手改 |
 
 ## 4. 后端结构
@@ -72,6 +75,7 @@
 | `scenario_documents.py` / `scenario_importer.py` / `scenario_import_pipeline.py` / `scenario_import_jobs.py` | 剧本导入：文档解析、分块、AI 结构化、任务队列 |
 | `scenario_admin.py` / `scenario_ai.py` | 剧本管理命令与 AI 生成/摘要 |
 | `character_ai.py` | AI 生成角色卡 |
+| `dice_textures.py` (222) | 骰子贴图库：UUID 文件名、索引原子写、魔数与尺寸校验（不依赖 Pillow） |
 | `media_defaults.py` | 媒体与默认封面处理 |
 | `network_discovery.py` / `network_admin.py` | 局域网 IP/端口发现、网络配置 |
 | `setup_embedding.py` / `vector_admin.py` / `knowledge_admin.py` | Embedding 模型下载/上传、向量库与知识库管理 |
@@ -91,6 +95,8 @@
 | `setup.py` (426) | 首次部署六步向导（站点、AI、Embedding、Owner） |
 | `room_console.py` (180) | 房间控制台 REST 接口与日志读取 |
 | `triggers.py` (282) | 触发器资源与附件 |
+| `dice_rolls.py` (202) | 待投掷请求查询/投掷/幂等完成/取消/强制投掷，前端降级上报 |
+| `dice_textures.py` (111) | 骰子贴图上传、桌面皮肤、逐面皮肤、删除引用保护 |
 | `knowledge_bases.py` (153) | 规则书知识库 |
 | `network.py` (212) | 局域网/内网穿透配置 |
 | `themes.py` (174) | 主题资源 |
@@ -108,7 +114,7 @@
 | `runtime.py` (554) | Agent 主循环：消息组装、工具调用、工具结果折叠、usage 记录 |
 | `prompt_builder.py` (158) | KP/NPC 提示词拼装 |
 | `profiles.py` (62) | AgentProfile 与默认 KP 工具集 |
-| `config.py` (250) / `ai_request.py` (113) | AI 运行配置、请求封装 |
+| `config.py` (235) / `ai_request.py` (113) | AI 运行配置（字段规格表 `_FIELD_SPECS` 驱动，新增配置项只需加一行）、统一请求封装 |
 | `responses_transport.py` (187) / `http_retry.py` (102) | Responses/Chat Completions 传输、超时重试 |
 | `cache.py` (92) / `cache_probe.py` (225) | 精确/语义缓存、缓存探测 |
 | `token_accounting.py` (87) / `telemetry.py` (117) | token 计量、用量看板数据 |
@@ -118,6 +124,8 @@
 | `trigger_system.py` (290) | 触发器匹配、剧透等级、可见性 |
 | `room_state.py` (80) / `memory.py` (43) / `context.py` (47) | 房间状态、长期记忆、上下文提供器 |
 | `versioning.py` (65) | 剧本/数据版本 |
+| `dice_settings.py` (44) | 骰子动画/玩家投掷生效值解析：房规优先、管理员默认兜底 |
+| `player_roll.py` (309) | 玩家投掷等待：内存态 `PendingRoll` + `threading.Event`，超时自动投掷、断线恢复、房间关闭清理 |
 | `ocr_provider.py` | PaddleOCR 封装 |
 
 Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送给 API 前 `.` 会转成 `_`）：
@@ -151,10 +159,13 @@ Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送�
 | `app/models/` | `ScenarioModel.ts` |
 | `app/config/` | `ConfigManager.ts`、`AIPlatformManager.ts`、`TestRequestConfig.ts` |
 | `app/auth/` | 登录/注册/资料/用户卡片/认证状态 |
+| `app/dice/` | 简易动画、3D 适配器、降级记忆、骰子外观、管理员贴图库 |
+| `app/diceTable.ts` (571) | 虚拟投掷桌：3D → 简易 → 纯文本逐层降级并上报 |
+| `dice3d/main.ts` (289) | Three.js + cannon-es 3D 骰子舞台，独立打包为 `js/dice/dice3d.js` |
 | `app/generated/templates.ts` | 构建时由 `templates/*.html` 生成（勿手改） |
 | `templates/*.html` | `<template id="...">` 模板源 |
 | `react/` | React 19 局部挂载：`main.tsx`、`shell/Sidebar.tsx`、`home/HomeChat.tsx`，esbuild 打包 |
-| `styles/` | 分层 CSS：`00-theme-tokens` → `01-foundation-chat` → `02-scenario-character` → `03-tools-settings-platform` → `04-auth-profile-overrides` |
+| `styles/` | 分层 CSS：`00-theme-tokens` → `01-foundation-chat` → `02-scenario-character` → `03-tools-settings-platform` → `04-auth-profile-overrides` → `05-dice-animation` |
 | `locales/zh_cn.json` / `en_us.json` | 中英文案（运行时 `i18n.ts`） |
 | `tools/` | 骰子/检定/工具管理（编译到 `dist/public/data/tools/`） |
 | `types/*.d.ts` | 手写全局类型声明 |
@@ -164,6 +175,7 @@ Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送�
 - `index.html`：片段拼接结果
 - `js/`：tsc 输出的 legacy JS（`app/`、`config/`、`views/`、`generated/`、`auth/`、`vendor/`……）
 - `js/react/main.js` + `main.css`：esbuild 打包的 React 部分
+- `js/dice/dice3d.js`：esbuild 打包的 3D 骰子 bundle（按需加载）
 - `data/tools/`：骰子/检定工具脚本
 - `locales/`：i18n JSON
 
@@ -177,6 +189,7 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 | `data/scenarios/<id>/` | 已发布剧本：`scenario.json`、`versions/`、`trigger-content/` |
 | `data/scenarios/knowledge-index/` | 剧本知识索引 |
 | `data/assets/` | 头像、剧本封面、AI 平台图标、主题、上传资源、vendor 资源 |
+| `data/dice-textures/` | 骰子贴图库（桌面贴图 / 骰面贴图 + 索引） |
 | `data/config/` | `site.json`、`network.json`、`penetration.json`、`general.toml`、`roles/`、`aiplatform/`、`aimodel/`、角色技能表 |
 | `data/occupations/` / `data/weapons/` | 职业与武器目录 |
 | `data/runtime/users/` | `users.sqlite3`、IP 配置 |
@@ -203,8 +216,9 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 
 ### Node / 前端（`package.json`）
 
-- dependencies：`react`、`react-dom`（19.x）
-- devDependencies：`typescript` 5.x、`esbuild` 0.28、`@types/react`、`@types/react-dom`
+- dependencies：`react`、`react-dom`（19.x）、`three` 0.180、`cannon-es` 0.20
+- devDependencies：`typescript` 5.x、`esbuild` 0.28、`@types/react`、`@types/react-dom`、`@types/three` 0.180
+- `three` / `cannon-es` 仅用于 3D 骰子 bundle，均为 MIT
 - 运行时前端库走 CDN：Bootstrap、Socket.IO client、marked、DOMPurify
 - 仓库内置：裁剪版 qrcode-generator
 
@@ -235,6 +249,7 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 | 房间/邀请/成员/自动存档 | `routes/rooms.py`、`room_admin.py`、`data/runtime/rooms/` |
 | 聊天与 Socket 事件 | `routes/chat.py`、`routes/chat_helpers.py`、`socket_events.py`、`frontend/src/app/chat.ts` |
 | 角色卡/COC7 检定 | `routes/characters.py`、`character_ai.py`、`frontend/src/app/character-sheet.ts`、`agents/tools/dice.py` |
+| 骰子动画/玩家投掷/贴图 | `agents/dice_settings.py`、`agents/player_roll.py`、`routes/dice_rolls.py`、`routes/dice_textures.py`、`dice_textures.py`、`frontend/src/app/diceTable.ts`、`frontend/src/app/dice/*`、`frontend/src/dice3d/main.ts`、`styles/05-dice-animation.css` |
 | 权限/角色 | `permission_config.py`、`role_config.py`、`routes/users.py`、`routes/auth.py` |
 | 向量检索/Embedding | `agents/vector_store.py`、`agents/embedding_provider.py`、`setup_embedding.py`、`routes/vector_health.py` |
 | 房间控制台 | `room_console_commands.py`、`room_log.py`、`routes/room_console.py`、`frontend/src/app/room-console.ts` |
@@ -248,6 +263,8 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 - 同一请求里同时使用 `response_format: json_object` 和原生 `tools`，模型可能把工具调用塞进 JSON 正文而永不执行。
 - 缓存命中率不能简单用 `cached_tokens / prompt_tokens`（本地缓存命中时 token 为 0，会显示 0%），应逐请求记录命中。
 - DeepSeek 要求工具函数名匹配 `^[a-zA-Z0-9_-]+$`，内部 `命名空间.工具` 必须转成 `_`，assistant/tool 消息里的 name 也要同步规范化。
+- 3D 骰子不可用时前端按 `3D → simple → text` 逐层降级并写入房间日志；改动动画逻辑必须覆盖整条降级链。
+- 玩家投掷等待超时取 `min(玩家投掷超时, AI 请求超时 - 5)`；AI 端不能无限等待玩家点击。
 - 修改前端后必须重新 `npm run build:frontend`；发布包用 `dist/`，不依赖 Node。
 - 浏览器会缓存未带版本的静态资源，样式改动需强制 revalidate。
 - 测试 `test_backend_project_structure.py` / `test_frontend_project_structure.py` 会校验目录边界，移动文件前先看它们。

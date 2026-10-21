@@ -60,7 +60,7 @@
 .dice-total {
     font-size: 30px;
     font-weight: 700;
-    color: var(--dice-edge-color);
+    color: var(--dice-result-color, var(--dice-edge-color));
     text-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
 }
 
@@ -72,9 +72,9 @@
     background: rgba(255, 255, 255, 0.12);
 }
 
-.dice-verdict.success { color: #5ad48a; }
-.dice-verdict.failure { color: #ff8a7a; }
-.dice-verdict.critical { color: #ffd166; }
+.dice-verdict.success { color: var(--dice-success-color, var(--theme-success, #5ad48a)); }
+.dice-verdict.failure { color: var(--dice-danger-color, var(--theme-danger, #ff8a7a)); }
+.dice-verdict.critical { color: var(--dice-warning-color, var(--theme-warning, #ffd166)); }
 
 .dice-target,
 .dice-roller,
@@ -83,7 +83,7 @@
     opacity: 0.8;
 }
 
-.dice-auto { color: #ffcf70; }
+.dice-auto { color: var(--dice-warning-color, var(--theme-warning, #ffcf70)); }
 
 .dice-table-status {
     padding: 6px 14px;
@@ -95,9 +95,9 @@
     display: none;
 }
 
-.dice-table-status.waiting { color: #ffd166; }
+.dice-table-status.waiting { color: var(--dice-warning-color, #ffd166); }
 .dice-table-status.cancelled,
-.dice-table-status.forced { color: #ff9f8a; }
+.dice-table-status.forced { color: var(--dice-danger-color, #ff9f8a); }
 
 .dice-table-actions {
     display: flex;
@@ -114,6 +114,115 @@
     margin-bottom: 10px;
 }
 
+/* 聊天内嵌骰桌：所有玩家可见，只有目标玩家有投掷按钮；桌面铺满聊天宽度 */
+.dice-inline {
+    width: 100%;
+    max-width: none;
+    margin: 8px 0 12px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--dice-table-color, #1d3a34) 92%, #000 8%);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
+    color: var(--dice-ui-text-color, var(--theme-text-primary, #f6f1e7));
+    overflow: hidden;
+}
+
+.dice-inline-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px 0;
+}
+
+.dice-inline-label {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.9;
+}
+
+/* 骰桌区域贴边铺满，避免桌面四周出现一圈非桌面的留白/描边 */
+.dice-inline-surface {
+    position: relative;
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+    background:
+        var(--dice-table-image, none),
+        radial-gradient(circle at 50% 18%, color-mix(in srgb, var(--dice-edge-color, #d8b56d) 22%, transparent), transparent 62%),
+        linear-gradient(160deg, color-mix(in srgb, var(--dice-table-color, #1d3a34) 86%, #fff 14%), var(--dice-table-color, #1d3a34));
+    background-size: cover, cover, cover;
+    background-position: center;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.dice-inline-stage {
+    flex: 1 1 auto;
+    height: clamp(200px, 30vh, 360px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dice-inline-stage > .dice-simple-stage {
+    width: 100%;
+}
+
+.dice-inline-result {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    padding: 10px 14px 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.dice-inline-result:empty {
+    display: none;
+}
+
+.dice-inline-status {
+    padding: 6px 14px;
+    font-size: 12px;
+    min-height: 0;
+}
+
+.dice-inline-status:empty {
+    display: none;
+}
+
+.dice-inline-status.waiting { color: var(--dice-warning-color, #ffd166); }
+.dice-inline-status.auto { color: var(--dice-warning-color, #ffcf70); }
+.dice-inline-status.cancelled,
+.dice-inline-status.forced { color: var(--dice-danger-color, #ff9f8a); }
+
+.dice-inline-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 6px 14px 12px;
+}
+
+.dice-inline-actions:empty {
+    display: none;
+}
+
+.dice-inline-throw {
+    min-width: 96px;
+}
+
+/* 已由内嵌骰桌承载结果的持久化骰子消息不再重复展示 */
+.dice-message-consumed {
+    display: none !important;
+}
+
+@media (max-width: 576px) {
+    .dice-inline-stage {
+        height: clamp(180px, 34vh, 280px);
+    }
+}
+
 /* 简易骰子 */
 .dice-simple-stage {
     display: flex;
@@ -122,6 +231,68 @@
     gap: 14px;
     flex-wrap: wrap;
     perspective: 600px;
+}
+
+.dice-simple-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.dice-simple-group-label {
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    opacity: 0.7;
+}
+
+.dice-simple-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.dice-simple-group-candidate .dice-simple-die {
+    border-style: dashed;
+}
+
+.dice-pips {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+    width: 68%;
+    height: 68%;
+}
+
+.dice-pip {
+    border-radius: 50%;
+}
+
+.dice-pip.on {
+    background: var(--dice-text-color, #2b2a33);
+}
+
+.dice-simple-die .dice-face-value {
+    line-height: 1;
+}
+
+.dice-simple-die.dice-selected {
+    opacity: 1;
+    /* 只做发光高亮，不位移/缩放：落定后骰子必须留在桌面上原来的位置。 */
+    box-shadow: 0 0 0 2px var(--dice-edge-color), 0 0 20px color-mix(in srgb, var(--dice-edge-color) 80%, transparent);
+    animation: dice-selected-glow 1.2s ease-in-out infinite alternate;
+}
+
+.dice-simple-die.dice-dimmed {
+    opacity: 0.45;
+    filter: grayscale(0.65);
+}
+
+@keyframes dice-selected-glow {
+    from { box-shadow: 0 0 0 2px var(--dice-edge-color), 0 0 12px color-mix(in srgb, var(--dice-edge-color) 55%, transparent); }
+    to { box-shadow: 0 0 0 2px var(--dice-edge-color), 0 0 26px color-mix(in srgb, var(--dice-edge-color) 90%, transparent); }
 }
 
 .dice-simple-die {
@@ -148,17 +319,8 @@
     text-shadow: 0 1px 4px #000;
 }
 
-.dice-simple-die.dice-simple-tens {
-    border-color: var(--dice-edge-color);
-    box-shadow: 0 8px 18px color-mix(in srgb, var(--dice-edge-color) 45%, transparent);
-}
-
 .dice-simple-die.rolling {
     animation: dice-simple-shake 0.24s linear infinite;
-}
-
-.dice-simple-die.settled {
-    animation: dice-simple-settle 0.28s ease-out;
 }
 
 @keyframes dice-simple-shake {
@@ -169,11 +331,6 @@
     100% { transform: rotate(-9deg) translateY(-3px) scale(1.02); }
 }
 
-@keyframes dice-simple-settle {
-    from { transform: translateY(-6px) rotate(4deg) scale(1.06); }
-    to { transform: translateY(0) rotate(0) scale(1); }
-}
-
 .dice-text-fallback {
     font-size: 22px;
     font-weight: 700;
@@ -181,11 +338,30 @@
     color: var(--dice-text-color);
 }
 
+/* 骰桌区域提示：骰型不支持 / 骰子数量过多时替代骰子画面，结果仍在下方展示。 */
+.dice-stage-notice {
+    max-width: min(92%, 520px);
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px dashed color-mix(in srgb, var(--dice-edge-color, #d8b56d) 55%, transparent);
+    background: color-mix(in srgb, var(--dice-table-color, #1d3a34) 70%, transparent);
+    color: var(--dice-ui-text-color, var(--theme-text-primary, #f6f1e7));
+    font-size: 13px;
+    line-height: 1.6;
+    text-align: center;
+}
+
 .dice3d-canvas {
     display: block;
     width: 100%;
-    height: 132px;
-    border-radius: 10px;
+    height: 100%;
+    min-height: 100%;
+    border-radius: 0;
+}
+
+/* 超出 3D 实例上限后的静态图：与 canvas 保持同样的尺寸占位。 */
+.dice3d-static {
+    object-fit: cover;
 }
 
 .dice-table-card .dice3d-fallback-overlay {

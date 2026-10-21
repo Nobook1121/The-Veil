@@ -29,6 +29,11 @@
     --theme-warning: #f0c36a;
     --theme-warning-soft: #fff6d8;
 
+    /* 骰桌跟随主题：桌面底色、点缀色与桌面文字色都可按主题调整 */
+    --theme-dice-table: #1d3a34;
+    --theme-dice-accent: #d8b56d;
+    --theme-dice-table-text: #f6f1e7;
+
     --theme-chat-other-bg: #ffffff;
     --theme-chat-other-text: var(--theme-text-primary);
     --theme-chat-player-bg: #007bff;
@@ -129,6 +134,10 @@ body.dark-theme {
     --theme-warning: #f0c36a;
     --theme-warning-soft: rgba(240, 195, 106, 0.16);
 
+    --theme-dice-table: #1b2226;
+    --theme-dice-accent: #58a6ff;
+    --theme-dice-table-text: #e4e9ee;
+
     --theme-chat-other-bg: #24292e;
     --theme-chat-other-text: var(--theme-text-primary);
     --theme-chat-player-bg: #1f6feb;
@@ -203,6 +212,10 @@ body.theme-cyber-2 {
     --theme-success-soft: rgba(102, 226, 173, 0.14);
     --theme-warning: #f0c36a;
     --theme-warning-soft: rgba(240, 195, 106, 0.16);
+
+    --theme-dice-table: #0a2024;
+    --theme-dice-accent: #66e2ad;
+    --theme-dice-table-text: #d7e8e1;
 
     --theme-chat-other-bg: rgba(7, 18, 24, 0.82);
     --theme-chat-other-text: var(--theme-text-primary);
@@ -348,6 +361,10 @@ body.theme-tome {
     --theme-success-soft: #e9efe1;
     --theme-warning: #d9a441;
     --theme-warning-soft: #f9efd2;
+
+    --theme-dice-table: #3a2a1d;
+    --theme-dice-accent: #d9a441;
+    --theme-dice-table-text: #fdf9ee;
 
     --theme-chat-other-bg: #fffaf0;
     --theme-chat-other-text: var(--theme-text-primary);

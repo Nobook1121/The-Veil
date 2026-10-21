@@ -325,8 +325,12 @@ def chat():
         agent_context.tool_state.update(
             {
                 "dice_animation_level": dice_settings["level"],
+                "dice_physics_results": dice_settings["physics_results"],
                 "player_dice_roll": dice_settings["player_roll"],
                 "player_dice_roll_timeout": dice_settings["timeout"],
+                "dice_reroll_mode": dice_settings["reroll_mode"],
+                "dice_reroll_limit": dice_settings["reroll_limit"],
+                "dice_rerolls": dice_settings["rerolls"],
                 "user_name": session.get("username") or str(session_user_id),
                 # 玩家投掷模式下这几个工具允许同参数重复调用（每次都要重新等待玩家）。
                 "no_dedupe_tools": [

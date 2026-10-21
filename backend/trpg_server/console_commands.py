@@ -245,7 +245,22 @@ def execute_console_command(
 
     if domain == "dice":
         if not subcommand:
-            return _log_result(ConsoleCommandResult(True, "Usage: dice <settings|pending|textures|skin delete>"))
+            return _log_result(
+                ConsoleCommandResult(
+                    True,
+                    "Usage: dice <animation|player-roll|reroll|reroll-limit|timeout|settings|pending|textures|skin>",
+                )
+            )
+        if subcommand == "animation":
+            return _log_result(_dice_animation_command(args[1:], confirm=confirm))
+        if subcommand == "player-roll":
+            return _log_result(_dice_player_roll_command(args[1:], confirm=confirm))
+        if subcommand == "reroll":
+            return _log_result(_dice_reroll_command(args[1:], confirm=confirm))
+        if subcommand == "reroll-limit":
+            return _log_result(_dice_reroll_limit_command(args[1:], confirm=confirm))
+        if subcommand == "timeout":
+            return _log_result(_dice_timeout_command(args[1:], confirm=confirm))
         if subcommand == "settings":
             return _log_result(_dice_settings_command(args[1:], rooms_dir))
         if subcommand == "pending":
@@ -310,7 +325,15 @@ def command_help_text() -> str:
             "  room members <room_id>                           （查看房间成员）",
             "  room archive <room_id> [--yes]                   （归档房间）",
             "  room prune [--days N] [--yes]                    （清理僵尸房间，默认 30 天）",
-            "  dice settings [room_id]                          （动画档位/玩家投掷的管理员默认与房间生效值）",
+            "  dice animation show                             （查看管理员默认骰子动画档位）",
+            "  dice animation set <text|simple|3d> [--yes]      （设置默认动画档位）",
+            "  dice player-roll show                           （查看默认玩家投掷开关）",
+            "  dice player-roll <on|off> [--yes]                （设置默认玩家投掷开关）",
+            "  dice reroll show                                （查看默认重投模式与上限）",
+            "  dice reroll <off|limited|unlimited> [--yes]      （设置默认重投模式）",
+            "  dice reroll-limit <1-20> [--yes]                 （设置指定次数模式的上限）",
+            "  dice timeout <30-300> [--yes]                    （设置等待玩家投掷的超时秒数）",
+            "  dice settings [room_id]                          （管理员默认与房间生效值概览）",
             "  dice pending [room_id]                           （列出等待玩家投掷的请求）",
             "  dice textures                                    （贴图资产、桌面皮肤与骰子皮肤概览）",
             "  dice skin delete <skin_id> [--yes]               （删除骰子皮肤；--yes 跳过确认）",
@@ -1583,7 +1606,8 @@ def _dice_settings_command(args: list[str], rooms_dir: Any) -> ConsoleCommandRes
         "管理员默认: "
         f"动画={admin.dice_animation_level} · "
         f"玩家投掷={'开' if admin.dice_player_roll else '关'} · "
-        f"等待超时={admin.dice_player_roll_timeout}s"
+        f"等待超时={admin.dice_player_roll_timeout}s · "
+        f"重投={admin.dice_reroll_mode}/{admin.dice_reroll_limit}"
     ]
     if positionals:
         room_id = positionals[0]
@@ -1594,10 +1618,12 @@ def _dice_settings_command(args: list[str], rooms_dir: Any) -> ConsoleCommandRes
         settings = resolve_dice_settings(None, info.get("house_rules"))
         source = "房间规则" if settings["level_source"] == "room" else "管理员默认"
         player_source = "房间规则" if settings["player_roll_source"] == "room" else "管理员默认"
+        reroll_source = "房间规则" if settings["reroll_source"] == "room" else "管理员默认"
         lines.append(
             f"房间 {room_id}: 动画={settings['level']}（{source}） · "
             f"玩家投掷={'开' if settings['player_roll'] else '关'}（{player_source}） · "
-            f"等待超时={settings['timeout']}s"
+            f"等待超时={settings['timeout']}s · "
+            f"重投={settings['reroll_mode']}/{settings['reroll_limit']}（{reroll_source}）"
         )
     return ConsoleCommandResult(True, "\n".join(lines))
 
@@ -1651,6 +1677,157 @@ def _dice_textures_command(args: list[str]) -> ConsoleCommandResult:
     for skin in data["dice_skins"]:
         lines.append(f"  骰子皮肤 {skin.get('id')} · {skin.get('name')} · {skin.get('die_type')}")
     return ConsoleCommandResult(True, "\n".join(lines))
+
+
+def _dice_apply_setting(
+    *,
+    key: str,
+    value: Any,
+    success: str,
+    preview: str,
+    flags: set[str],
+    confirm: Callable[[str], bool] | None,
+) -> ConsoleCommandResult:
+    """写入管理员默认骰子设置（破坏性写操作，默认预演）。"""
+    from trpg_server.agents.config import write_ai_setting
+
+    def _apply() -> ConsoleCommandResult:
+        write_ai_setting(key, value)
+        log_user_action(logger, user_action_text(CONSOLE_ACTOR, "修改了骰子默认设置"), 配置项=key, 值=str(value))
+        return ConsoleCommandResult(True, success)
+
+    return _confirm_action(
+        preview=preview,
+        apply=_apply,
+        assume_yes=_assume_yes(flags),
+        confirm=confirm,
+        prompt=f"确认{preview}",
+    )
+
+
+def _dice_admin_config_lines() -> list[str]:
+    from trpg_server.agents.dice_settings import admin_dice_settings
+
+    admin = admin_dice_settings()
+    return [
+        f"动画档位: {admin.dice_animation_level}",
+        f"玩家投掷: {'开' if admin.dice_player_roll else '关'}",
+        f"等待超时: {admin.dice_player_roll_timeout}s",
+        f"重投模式: {admin.dice_reroll_mode}",
+        f"重投上限: {admin.dice_reroll_limit}",
+    ]
+
+
+def _dice_animation_command(args: list[str], *, confirm: Callable[[str], bool] | None = None) -> ConsoleCommandResult:
+    from trpg_server.agents.dice_settings import DICE_ANIMATION_LEVELS
+
+    positionals, flags = _split_args(args)
+    unknown = _reject_unknown_flags(flags - YES_FLAGS, set())
+    if unknown:
+        return ConsoleCommandResult(False, unknown)
+    if positionals == ["show"]:
+        return ConsoleCommandResult(True, "\n".join(_dice_admin_config_lines()[:1]))
+    if len(positionals) == 2 and positionals[0] == "set":
+        value = positionals[1].lower()
+        if value not in DICE_ANIMATION_LEVELS:
+            return ConsoleCommandResult(False, "动画档位只能是 text / simple / 3d")
+        return _dice_apply_setting(
+            key="dice_animation_level",
+            value=value,
+            success=f"管理员默认动画档位已设为 {value}",
+            preview=f"把管理员默认骰子动画档位设为 {value}",
+            flags=flags,
+            confirm=confirm,
+        )
+    return ConsoleCommandResult(False, "Usage: dice animation show | dice animation set <text|simple|3d> [--yes]")
+
+
+def _dice_player_roll_command(args: list[str], *, confirm: Callable[[str], bool] | None = None) -> ConsoleCommandResult:
+    positionals, flags = _split_args(args)
+    unknown = _reject_unknown_flags(flags - YES_FLAGS, set())
+    if unknown:
+        return ConsoleCommandResult(False, unknown)
+    if positionals == ["show"]:
+        return ConsoleCommandResult(True, "\n".join(_dice_admin_config_lines()[1:2]))
+    if len(positionals) == 1 and positionals[0] in {"on", "off"}:
+        enabled = positionals[0] == "on"
+        return _dice_apply_setting(
+            key="dice_player_roll",
+            value=enabled,
+            success=f"管理员默认玩家投掷已设为 {'开' if enabled else '关'}",
+            preview=f"把管理员默认玩家投掷设为 {'开' if enabled else '关'}",
+            flags=flags,
+            confirm=confirm,
+        )
+    return ConsoleCommandResult(False, "Usage: dice player-roll show | dice player-roll <on|off> [--yes]")
+
+
+def _dice_reroll_command(args: list[str], *, confirm: Callable[[str], bool] | None = None) -> ConsoleCommandResult:
+    from trpg_server.agents.dice_settings import DICE_REROLL_MODES
+
+    positionals, flags = _split_args(args)
+    unknown = _reject_unknown_flags(flags - YES_FLAGS, set())
+    if unknown:
+        return ConsoleCommandResult(False, unknown)
+    if positionals == ["show"]:
+        return ConsoleCommandResult(True, "\n".join(_dice_admin_config_lines()[3:]))
+    if len(positionals) == 1 and positionals[0] in DICE_REROLL_MODES:
+        value = positionals[0]
+        return _dice_apply_setting(
+            key="dice_reroll_mode",
+            value=value,
+            success=f"管理员默认重投模式已设为 {value}",
+            preview=f"把管理员默认重投模式设为 {value}",
+            flags=flags,
+            confirm=confirm,
+        )
+    return ConsoleCommandResult(False, "Usage: dice reroll show | dice reroll <off|limited|unlimited> [--yes]")
+
+
+def _dice_reroll_limit_command(args: list[str], *, confirm: Callable[[str], bool] | None = None) -> ConsoleCommandResult:
+    positionals, flags = _split_args(args)
+    unknown = _reject_unknown_flags(flags - YES_FLAGS, set())
+    if unknown:
+        return ConsoleCommandResult(False, unknown)
+    if len(positionals) != 1:
+        return ConsoleCommandResult(False, "Usage: dice reroll-limit <1-20> [--yes]")
+    try:
+        value = int(positionals[0])
+    except ValueError:
+        return ConsoleCommandResult(False, "重投上限必须是 1-20 的整数")
+    if not 1 <= value <= 20:
+        return ConsoleCommandResult(False, "重投上限必须是 1-20 的整数")
+    return _dice_apply_setting(
+        key="dice_reroll_limit",
+        value=value,
+        success=f"管理员默认重投上限已设为 {value}",
+        preview=f"把管理员默认重投上限设为 {value}",
+        flags=flags,
+        confirm=confirm,
+    )
+
+
+def _dice_timeout_command(args: list[str], *, confirm: Callable[[str], bool] | None = None) -> ConsoleCommandResult:
+    positionals, flags = _split_args(args)
+    unknown = _reject_unknown_flags(flags - YES_FLAGS, set())
+    if unknown:
+        return ConsoleCommandResult(False, unknown)
+    if len(positionals) != 1:
+        return ConsoleCommandResult(False, "Usage: dice timeout <30-300> [--yes]")
+    try:
+        value = int(positionals[0])
+    except ValueError:
+        return ConsoleCommandResult(False, "等待超时必须是 30-300 的整数（秒）")
+    if not 30 <= value <= 300:
+        return ConsoleCommandResult(False, "等待超时必须是 30-300 的整数（秒）")
+    return _dice_apply_setting(
+        key="dice_player_roll_timeout",
+        value=value,
+        success=f"管理员默认等待超时已设为 {value}s",
+        preview=f"把管理员默认等待超时设为 {value}s",
+        flags=flags,
+        confirm=confirm,
+    )
 
 
 def _dice_skin_delete_command(

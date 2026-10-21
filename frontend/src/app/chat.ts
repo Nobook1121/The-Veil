@@ -95,12 +95,13 @@ const TYPING_IDLE_TIMEOUT_MS = 4000;
 let lastTypingEmitAt = 0;
 
 const COMMAND_DEFINITIONS: CommandDefinition[] = [
-    { name: "/dice", usage: "/dice {dice}", description: "掷骰" },
+    { name: "/dice", usage: "/dice {dice} [--table]", description: "掷骰；加 --table 本地召唤骰桌" },
     { name: "/check", usage: "/check {*玩家名} {*技能/属性名} {困难/极难} {调整值}", description: "属性或技能鉴定" },
     { name: "/sc", usage: "/sc {玩家名} {成功变化/失败变化}", description: "理智检定并结算 SAN" },
     { name: "/record", usage: "/record {damage/san} {username} {int} {reason?}", description: "管理员记录房间角色伤害或 San 损失" },
     { name: "/trigger", usage: "/trigger {触发器编号}", description: "触发场景触发器" },
     { name: "/roll", usage: "/roll", description: "完成当前等待中的玩家投掷" },
+    { name: "/roll confirm", usage: "/roll confirm", description: "确认重投后的最终结果" },
     { name: "/roll force", usage: "/roll force", description: "管理员强制结算当前等待中的投掷" },
 ];
 
@@ -209,11 +210,22 @@ function initChat(): void {
             return;
         }
 
-        // /roll 与 /roll force：直接完成玩家投掷，不额外发送聊天消息。
-        const lowerCommand = message.trim().toLowerCase();
-        if (lowerCommand === "/roll" || lowerCommand === "/roll force") {
+        // /dice --table：前端本地投掷并在屏幕中央召唤骰桌，不经过 AI。
+        const diceTableCommand = message.trim().match(/^\/dice\s+([\s\S]*?)(?:\s+(--table|-t))?\s*$/i);
+        if (diceTableCommand && diceTableCommand[2]) {
+            const expression = (diceTableCommand[1] || "").trim() || "1d100";
             activeChatInput.value = "";
-            await window.TrpgDiceTable?.handleRollCommand(lowerCommand === "/roll force");
+            await sendVisibleMessage("player", message);
+            await window.TrpgDiceTable?.handleDiceTableCommand(expression);
+            return;
+        }
+
+        // /roll、/roll force 与 /roll confirm：直接推进玩家投掷，不额外发送聊天消息。
+        const lowerCommand = message.trim().toLowerCase();
+        if (lowerCommand === "/roll" || lowerCommand === "/roll force" || lowerCommand === "/roll confirm") {
+            activeChatInput.value = "";
+            const mode = lowerCommand === "/roll force" ? "force" : lowerCommand === "/roll confirm" ? "confirm" : "roll";
+            await window.TrpgDiceTable?.handleRollCommand(mode);
             return;
         }
 
@@ -620,6 +632,23 @@ async function sendVisibleMessage(
         avatar: "",
     });
     return null;
+}
+
+/** /dice --table 本地投掷后写入房间历史，刷新或重连时按 metadata 静态还原骰桌。 */
+async function persistLocalDiceMessage(content: string, metadata: Record<string, unknown>): Promise<ChatMessage | null> {
+    const room = getCurrentRoom();
+    if (!room || room.invisible_view) return null;
+    try {
+        const message = await persistRoomMessage("dice", content, metadata);
+        if (message) {
+            renderRoomMessage(message, false);
+            broadcastMessage(message);
+        }
+        return message;
+    } catch (error) {
+        console.warn("保存本地骰子记录失败", error);
+        return null;
+    }
 }
 
 async function persistDirectRoomMessage(message: ChatMessage): Promise<ChatMessage | null> {
@@ -1260,9 +1289,13 @@ function initWebSocket(): void {
         socket.on("role_changed", (data) => handleRoleChanged(data));
         // 玩家投掷：待投掷请求、结果、取消与强制结算。
         socket.on("player_dice_request", (data) => { window.TrpgDiceTable?.handleRequest(data as DiceRequestPayload); });
-        socket.on("player_dice_rolled", (data) => { window.TrpgDiceTable?.handleRolled(data as DiceRolledPayload); });
+        // 物理结果：所有客户端按同一 seed 同步播放投掷动画。
+        socket.on("player_dice_rolling", (data) => { window.TrpgDiceTable?.handleRolling(data as DiceRequestPayload); });
+        socket.on("player_dice_rolled", (data) => { void window.TrpgDiceTable?.handleRolled(data as DiceRolledPayload); });
+        socket.on("player_dice_rerolled", (data) => { void window.TrpgDiceTable?.handleRerolled(data as DiceRolledPayload); });
+        socket.on("player_dice_confirmed", (data) => { window.TrpgDiceTable?.handleConfirmed(data as DiceRolledPayload); });
         socket.on("player_dice_cancelled", (data) => { window.TrpgDiceTable?.handleCancelled(data as DiceRolledPayload); });
-        socket.on("player_dice_forced", (data) => { window.TrpgDiceTable?.handleForced(data as DiceRolledPayload); });
+        socket.on("player_dice_forced", (data) => { void window.TrpgDiceTable?.handleForced(data as DiceRolledPayload); });
         // 平台自动切换等仅面向管理员的提示：服务端只推给在线管理员，前端以通知条展示（不用 alert）。
         socket.on("admin_notification", (payload: unknown) => {
             const data = (payload || {}) as { message?: unknown; level?: unknown };
@@ -1548,6 +1581,7 @@ function chatT(key: string, fallback: string, values: Record<string, string | nu
 
 window.renderChatMessages = renderChatMessages;
 window.getCurrentChatMessages = getCurrentChatMessages;
+window.persistLocalDiceMessage = persistLocalDiceMessage;
 window.clearChatMessages = clearChatMessages;
 window.setChatReadOnly = setChatReadOnly;
 window.joinSocketRoom = joinSocketRoom;

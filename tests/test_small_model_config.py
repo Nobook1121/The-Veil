@@ -145,6 +145,63 @@ def test_runtime_config_rejects_unknown_dice_animation_level(tmp_path, caplog):
     assert "dice_animation_level" in caplog.text
 
 
+def test_runtime_config_reads_and_clamps_dice_reroll_settings(tmp_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+
+    defaults = load_ai_runtime_config(config_dir)
+    assert defaults.dice_reroll_mode == "off"
+    assert defaults.dice_reroll_limit == 3
+
+    (config_dir / "general.toml").write_text(
+        '[ai]\ndice_reroll_mode = "limited"\ndice_reroll_limit = 30\n',
+        encoding="utf-8",
+    )
+    config = load_ai_runtime_config(config_dir)
+
+    assert config.dice_reroll_mode == "limited"
+    assert config.dice_reroll_limit == 20
+
+    (config_dir / "general.toml").write_text(
+        '[ai]\ndice_reroll_mode = "sometimes"\ndice_reroll_limit = 0\n',
+        encoding="utf-8",
+    )
+    clamped = load_ai_runtime_config(config_dir)
+
+    assert clamped.dice_reroll_mode == "off"
+    assert clamped.dice_reroll_limit == 1
+
+
+def test_write_ai_setting_preserves_other_sections_and_comments(tmp_path):
+    from trpg_server.agents.config import write_ai_setting
+
+    path = tmp_path / "general.toml"
+    path.write_text(
+        '# 文件头注释\n[ai]\ndice_animation_level = "3d"\n# 保留注释\n'
+        "dice_player_roll = false\n\n"
+        "[ai.knowledge]\ntop_k_default = 5\n",
+        encoding="utf-8",
+    )
+
+    write_ai_setting("dice_reroll_mode", "limited", tmp_path)
+    write_ai_setting("dice_reroll_limit", 7, tmp_path)
+    write_ai_setting("dice_player_roll", True, tmp_path)
+
+    content = path.read_text(encoding="utf-8")
+    assert "# 文件头注释" in content
+    assert "# 保留注释" in content
+    assert '[ai.knowledge]\ntop_k_default = 5' in content
+    assert 'dice_reroll_mode = "limited"' in content
+    assert "dice_reroll_limit = 7" in content
+    assert "dice_player_roll = true" in content
+    assert not (tmp_path / "general.toml.tmp").exists()
+
+    config = load_ai_runtime_config(tmp_path)
+    assert config.dice_reroll_mode == "limited"
+    assert config.dice_reroll_limit == 7
+    assert config.dice_player_roll is True
+
+
 def test_convert_to_toml_emits_dotted_sections_without_quotes():
     content = convert_to_toml(
         {

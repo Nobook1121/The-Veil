@@ -288,9 +288,13 @@ function initSettingsTabs(): void {
     bindGeneralNumberSetting("diceCriticalThresholdDefault", "ai", "dice_critical_threshold", 0, 100);
     bindGeneralNumberSetting("diceFumbleThresholdDefault", "ai", "dice_fumble_threshold", 0, 100);
     bindGeneralSelectSetting("diceAnimationLevel", "ai", "dice_animation_level");
+    bindGeneralCheckboxSetting("dicePhysicsResults", "ai", "dice_physics_results");
     bindGeneralCheckboxSetting("dicePlayerRollDefault", "ai", "dice_player_roll");
     bindGeneralNumberSetting("dicePlayerRollTimeout", "ai", "dice_player_roll_timeout", 30, 300);
+    bindGeneralSelectSetting("diceRerollMode", "ai", "dice_reroll_mode");
+    bindGeneralNumberSetting("diceRerollLimit", "ai", "dice_reroll_limit", 1, 20);
     bindDicePlayerRollTimeoutState();
+    bindDiceRerollLimitState();
     bindGeneralNumberSetting("retrievalTopKDefault", "ai.knowledge", "top_k_default", 1, 32);
     bindGeneralNumberSetting("retrievalTopKDirect", "ai.knowledge", "top_k_direct", 1, 32);
     bindGeneralNumberSetting("chunkChildMaxChars", "ai.knowledge", "chunk_child_max_chars", 200, 8000);
@@ -501,9 +505,24 @@ function bindDicePlayerRollTimeoutState(): void {
     sync();
 }
 
+/** 重投模式不是「指定次数」时，次数输入仅置灰，仍保留已保存值。 */
+function bindDiceRerollLimitState(): void {
+    const mode = document.getElementById("diceRerollMode") as HTMLSelectElement | null;
+    const limit = document.getElementById("diceRerollLimit") as HTMLInputElement | null;
+    if (!mode || !limit) return;
+    const sync = (): void => {
+        const editable = mode.value === "limited";
+        limit.disabled = !editable;
+        limit.closest<HTMLElement>(".form-group")?.classList.toggle("setting-disabled", !editable);
+    };
+    mode.addEventListener("change", sync);
+    sync();
+}
+
 /** 配置加载并回填 UI 之后调用：把当前界面值记为「已保存基线」。 */
 function refreshGeneralSettingsBaseline(): void {
     bindDicePlayerRollTimeoutState();
+    bindDiceRerollLimitState();
     generalSettingControls.forEach((control) => {
         control.savedValue = readGeneralSettingValue(control);
     });

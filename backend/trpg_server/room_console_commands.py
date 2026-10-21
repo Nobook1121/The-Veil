@@ -37,7 +37,7 @@ ROOM_COMMAND_WHITELIST: dict[str, set[str]] = {
     "log": {"tail", "clear"},
     "autosave": set(),
     "archive": set(),
-    "dice": {"status", "level", "player", "pending", "cancel"},
+    "dice": {"status", "animation", "player-roll", "reroll", "reroll-limit", "pending", "cancel", "level", "player"},
 }
 
 # 不带子命令时默认执行的子命令（例如 `members` 等价于 `members list`）。
@@ -93,9 +93,14 @@ def room_command_help_text() -> str:
             "  log clear [--yes]           （清空本房间日志，破坏性）",
             "  autosave                    （立即为本房间保存一次自动存档）",
             "  archive [--yes]             （归档本房间，需已到达结局）",
-            "  dice                        （本房间骰子动画档位、玩家投掷开关与待投掷请求）",
-            "  dice level <text|simple|3d|inherit> [--yes]（设置本房间动画档位，inherit 表示跟随管理员默认）",
-            "  dice player <on|off|inherit> [--yes]（设置本房间玩家投掷开关）",
+            "  dice                        （本房间骰子动画档位、玩家投掷、重投配置与待投掷请求）",
+            "  dice animation show         （查看本房间生效的动画档位）",
+            "  dice animation set <text|simple|3d|inherit> [--yes]（设置动画档位，inherit 跟随管理员默认）",
+            "  dice player-roll show       （查看本房间生效的玩家投掷开关）",
+            "  dice player-roll <on|off|inherit> [--yes]（设置玩家投掷开关）",
+            "  dice reroll show            （查看本房间生效的重投模式与上限）",
+            "  dice reroll <off|limited|unlimited|inherit> [--yes]（设置重投模式）",
+            "  dice reroll-limit <1-20|inherit> [--yes]（设置指定次数模式的上限）",
             "  dice pending                （列出本房间等待玩家投掷的请求）",
             "  dice cancel [request_id] [--yes]（取消本房间待投掷请求，缺省取消最早的一条）",
             "  说明：破坏性命令缺省为「预演」，加 --yes 或在交互确认时输入 y 才会真正执行。",
@@ -181,10 +186,14 @@ def execute_room_command(
     if domain == "archive":
         return _archive_command(room_id, resolved_rooms_dir, app, flags, confirm)
     if domain == "dice":
-        if sub == "level":
-            return _dice_level_command(room_dir, room_id, rest, flags, confirm)
-        if sub == "player":
-            return _dice_player_command(room_dir, room_id, rest, flags, confirm)
+        if sub in {"animation", "level"}:
+            return _dice_animation_command(room_dir, room_id, rest, flags, confirm, legacy=sub == "level")
+        if sub in {"player-roll", "player"}:
+            return _dice_player_roll_command(room_dir, room_id, rest, flags, confirm, legacy=sub == "player")
+        if sub == "reroll":
+            return _dice_reroll_command(room_dir, room_id, rest, flags, confirm)
+        if sub == "reroll-limit":
+            return _dice_reroll_limit_command(room_dir, room_id, rest, flags, confirm)
         if sub == "pending":
             return _dice_pending_command(room_id)
         if sub == "cancel":
@@ -410,16 +419,18 @@ def _dice_status_command(room_dir: Path, room_id: Any) -> RoomCommandResult:
     settings = resolve_dice_settings(None, info.get("house_rules"))
     level_source = "房间规则" if settings["level_source"] == "room" else "管理员默认"
     player_source = "房间规则" if settings["player_roll_source"] == "room" else "管理员默认"
+    reroll_source = "房间规则" if settings["reroll_source"] == "room" else "管理员默认"
     pending = player_roll.list_pending(str(room_id))
     lines = [
         f"骰子动画: {settings['level']}（{level_source}）",
         f"玩家投掷: {'开' if settings['player_roll'] else '关'}（{player_source}）",
         f"等待超时: {settings['timeout']}s",
+        f"重投模式: {settings['reroll_mode']}（{reroll_source}） · 上限: {settings['reroll_limit']}",
         f"待投掷请求: {len(pending)} 个",
     ]
     for item in pending:
         roller = item.get("roller") or {}
-        lines.append(f"  {item.get('request_id')} · 玩家={roller.get('username') or roller.get('user_id') or '-'}")
+        lines.append(f"  {item.get('request_id')} · 玩家={roller.get('username') or roller.get('user_id') or '-'} · 状态={item.get('state')}")
     return RoomCommandResult(True, "\n".join(lines))
 
 
@@ -437,12 +448,38 @@ def _set_house_rule(room_dir: Path, key: str, value: Any, room_id: Any, summary:
     return RoomCommandResult(True, summary)
 
 
-def _dice_level_command(
-    room_dir: Path, room_id: Any, rest: list[str], flags: set[str], confirm: Callable[[str], bool] | None
+def _dice_show(room_dir: Path, key: str) -> str:
+    from trpg_server.agents.dice_settings import resolve_dice_settings
+
+    info = _load_room_info(room_dir)
+    settings = resolve_dice_settings(None, info.get("house_rules"))
+    if key == "animation":
+        source = "房间规则" if settings["level_source"] == "room" else "管理员默认"
+        return f"本房间动画档位: {settings['level']}（{source}）"
+    if key == "player-roll":
+        source = "房间规则" if settings["player_roll_source"] == "room" else "管理员默认"
+        return f"本房间玩家投掷: {'开' if settings['player_roll'] else '关'}（{source}）"
+    source = "房间规则" if settings["reroll_source"] == "room" else "管理员默认"
+    return f"本房间重投: {settings['reroll_mode']} · 上限 {settings['reroll_limit']}（{source}）"
+
+
+def _dice_animation_command(
+    room_dir: Path,
+    room_id: Any,
+    rest: list[str],
+    flags: set[str],
+    confirm: Callable[[str], bool] | None,
+    *,
+    legacy: bool = False,
 ) -> RoomCommandResult:
-    if not rest:
-        return RoomCommandResult(False, "Usage: dice level <text|simple|3d|inherit> [--yes]")
-    value = rest[0].lower()
+    if legacy:
+        value = rest[0].lower() if rest else ""
+    elif rest == ["show"]:
+        return RoomCommandResult(True, _dice_show(room_dir, "animation"))
+    elif len(rest) == 2 and rest[0] == "set":
+        value = rest[1].lower()
+    else:
+        return RoomCommandResult(False, "Usage: dice animation show | dice animation set <text|simple|3d|inherit> [--yes]")
     if value not in {"text", "simple", "3d", "inherit"}:
         return RoomCommandResult(False, "动画档位只能是 text / simple / 3d / inherit")
     target = None if value == "inherit" else value
@@ -460,12 +497,23 @@ def _dice_level_command(
     )
 
 
-def _dice_player_command(
-    room_dir: Path, room_id: Any, rest: list[str], flags: set[str], confirm: Callable[[str], bool] | None
+def _dice_player_roll_command(
+    room_dir: Path,
+    room_id: Any,
+    rest: list[str],
+    flags: set[str],
+    confirm: Callable[[str], bool] | None,
+    *,
+    legacy: bool = False,
 ) -> RoomCommandResult:
-    if not rest:
-        return RoomCommandResult(False, "Usage: dice player <on|off|inherit> [--yes]")
-    value = rest[0].lower()
+    if legacy:
+        value = rest[0].lower() if rest else ""
+    elif rest == ["show"]:
+        return RoomCommandResult(True, _dice_show(room_dir, "player-roll"))
+    elif len(rest) == 1:
+        value = rest[0].lower()
+    else:
+        return RoomCommandResult(False, "Usage: dice player-roll show | dice player-roll <on|off|inherit> [--yes]")
     if value not in {"on", "off", "inherit"}:
         return RoomCommandResult(False, "玩家投掷只能是 on / off / inherit")
     target = None if value == "inherit" else value == "on"
@@ -480,6 +528,69 @@ def _dice_player_command(
         assume_yes=_assume_yes(flags),
         confirm=confirm,
         prompt=f"确认把本房间玩家投掷设为 {label}?",
+    )
+
+
+def _dice_reroll_command(
+    room_dir: Path,
+    room_id: Any,
+    rest: list[str],
+    flags: set[str],
+    confirm: Callable[[str], bool] | None,
+) -> RoomCommandResult:
+    from trpg_server.agents.dice_settings import DICE_REROLL_MODES
+
+    if rest == ["show"]:
+        return RoomCommandResult(True, _dice_show(room_dir, "reroll"))
+    if len(rest) != 1 or rest[0].lower() not in {*DICE_REROLL_MODES, "inherit"}:
+        return RoomCommandResult(False, "Usage: dice reroll show | dice reroll <off|limited|unlimited|inherit> [--yes]")
+    value = rest[0].lower()
+    target = None if value == "inherit" else value
+    label = "跟随管理员默认" if target is None else value
+
+    def _apply() -> RoomCommandResult:
+        return _set_house_rule(room_dir, "dice_reroll_mode", target, room_id, f"房间重投模式已设为 {label}")
+
+    return _confirm_action(
+        preview=f"将把本房间重投模式设为 {label}。",
+        apply=_apply,
+        assume_yes=_assume_yes(flags),
+        confirm=confirm,
+        prompt=f"确认把本房间重投模式设为 {label}?",
+    )
+
+
+def _dice_reroll_limit_command(
+    room_dir: Path,
+    room_id: Any,
+    rest: list[str],
+    flags: set[str],
+    confirm: Callable[[str], bool] | None,
+) -> RoomCommandResult:
+    if len(rest) != 1:
+        return RoomCommandResult(False, "Usage: dice reroll-limit <1-20|inherit> [--yes]")
+    raw = rest[0].lower()
+    if raw == "inherit":
+        target: int | None = None
+        label = "跟随管理员默认"
+    else:
+        try:
+            target = int(raw)
+        except ValueError:
+            return RoomCommandResult(False, "重投上限必须是 1-20 的整数或 inherit")
+        if not 1 <= target <= 20:
+            return RoomCommandResult(False, "重投上限必须是 1-20 的整数或 inherit")
+        label = str(target)
+
+    def _apply() -> RoomCommandResult:
+        return _set_house_rule(room_dir, "dice_reroll_limit", target, room_id, f"房间重投上限已设为 {label}")
+
+    return _confirm_action(
+        preview=f"将把本房间重投上限设为 {label}。",
+        apply=_apply,
+        assume_yes=_assume_yes(flags),
+        confirm=confirm,
+        prompt=f"确认把本房间重投上限设为 {label}?",
     )
 
 

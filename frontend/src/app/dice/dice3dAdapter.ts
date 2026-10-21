@@ -4,8 +4,10 @@ class Dice3DAdapter {
     private plan: DicePlan;
     private faceUrls: Record<string, string>;
     private instance: {
-        roll: (snapshot: DiceResultSnapshot) => Promise<void>;
+        roll: (snapshot: DiceResultSnapshot, seed?: number | null) => Promise<number[]>;
         setStatic: (snapshot: DiceResultSnapshot) => void;
+        showTable: () => void;
+        freeze: () => string | null;
         dispose: () => void;
     } | null = null;
     private static bundlePromise: Promise<boolean> | null = null;
@@ -37,26 +39,54 @@ class Dice3DAdapter {
                 create: (
                     container: HTMLElement,
                     options: Record<string, unknown>,
-                ) => { roll: (snapshot: DiceResultSnapshot) => Promise<void>; setStatic: (snapshot: DiceResultSnapshot) => void; dispose: () => void };
+                ) => { roll: (snapshot: DiceResultSnapshot, seed?: number | null) => Promise<number[]>; setStatic: (snapshot: DiceResultSnapshot) => void; showTable: () => void; freeze: () => string | null; dispose: () => void };
             };
         }).TrpgDice3D;
         if (!factory) throw new Error("dice3d_bundle_missing");
-        const colors = diceResolvedColors(diceLoadAppearance());
+        const appearance = diceLoadAppearance();
+        const colors = diceResolvedColors(appearance);
         this.instance = factory.create(this.container, {
             plan: this.plan,
             faceUrls: this.faceUrls,
+            tableSkinUrl: diceTableSkinUrl(appearance.tableSkinId),
             colors,
         });
     }
 
-    async play(snapshot: DiceResultSnapshot): Promise<void> {
+    /** 播放物理投掷；提供 seed 时所有客户端轨迹一致，并返回落定后的骰面。 */
+    async play(snapshot: DiceResultSnapshot, seed?: number | null): Promise<number[] | null> {
         this.ensureInstance();
-        await this.instance!.roll(snapshot);
+        return this.instance!.roll(snapshot, seed);
     }
 
     static(snapshot: DiceResultSnapshot): void {
         this.ensureInstance();
         this.instance!.setStatic(snapshot);
+    }
+
+    /** 空骰桌预览：等待玩家投掷时就显示完整桌面。 */
+    showTable(): void {
+        this.ensureInstance();
+        this.instance!.showTable();
+    }
+
+    /** 冻结为静态图：截图后销毁 3D 实例并释放 WebGL context。 */
+    freeze(): void {
+        const instance = this.instance;
+        if (!instance) return;
+        let snapshot: string | null = null;
+        try {
+            snapshot = instance.freeze();
+        } catch (error) {
+            console.warn("3D 骰桌截图失败", error);
+        }
+        this.dispose();
+        if (!snapshot) return;
+        const image = document.createElement("img");
+        image.className = "dice3d-canvas dice3d-static";
+        image.alt = "骰子结果";
+        image.src = snapshot;
+        this.container.appendChild(image);
     }
 
     dispose(): void {

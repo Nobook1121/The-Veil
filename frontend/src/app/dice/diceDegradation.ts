@@ -6,12 +6,17 @@
 const DiceDegradation = (() => {
     const sessionLevels = new Map<string, DiceAnimationLevel>();
     const reportedSession = new Set<string>();
+    let webglSupport = false;
 
     function webglAvailable(): boolean {
+        if (webglSupport) return true;
         try {
             const canvas = document.createElement("canvas");
-            const context = canvas.getContext("webgl2") || canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
-            return Boolean(context);
+            const context = (canvas.getContext("webgl2") || canvas.getContext("webgl")) as WebGLRenderingContext | null;
+            webglSupport = Boolean(context);
+            // 探测用的 context 立即释放，避免占用浏览器的 WebGL context 配额。
+            context?.getExtension("WEBGL_lose_context")?.loseContext();
+            return webglSupport;
         } catch {
             return false;
         }

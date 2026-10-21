@@ -17,7 +17,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Callable
 
-from trpg_server.json_store import read_json
+from trpg_server.json_store import read_json, replace_with_retry
 from trpg_server.logging_config import log_user_action, redact_sensitive
 from trpg_server.settings import CONFIG_DIR, ROOMS_DIR
 
@@ -122,14 +122,15 @@ def _write_entries(path: Path, entries: list[dict[str, Any]]) -> None:
             os.fsync(temp.fileno())
         finally:
             temp.close()
-        os.replace(temp_path, path)
+        replace_with_retry(temp_path, path)
         temp_path = None
     finally:
         if temp_path is not None:
             try:
                 temp_path.unlink()
-            except FileNotFoundError:
-                pass
+            except OSError:
+                # 清理失败不能覆盖原始异常（例如文件正被杀毒软件扫描）。
+                logger.debug("room_log_temp_cleanup_failed path=%s", temp_path)
 
 
 def append_room_log(

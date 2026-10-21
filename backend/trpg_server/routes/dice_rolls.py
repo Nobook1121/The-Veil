@@ -101,8 +101,165 @@ def roll_dice_request(room_id, request_id):
         return error_response("Only the requested player may roll", 403, "Forbidden")
     if error == "already_rolled":
         return error_response("Dice request already rolled", 409, "Already rolled")
-    data = {"request_id": request_id, **result_snapshot(result or {})}
+    data = {"request_id": request_id, **_roll_state(room_id, request_id), **result_snapshot(result or {})}
     return success_response(data, "Dice rolled successfully")
+
+
+@bp.route("/api/rooms/<room_id>/dice-requests/<request_id>/begin", methods=["POST"])
+def begin_dice_request(room_id, request_id):
+    """物理结果模式：开始动画投掷，生成所有客户端共享的确定性种子。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    _path, info = _find_room(room_id)
+    if not info:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_access(info):
+        return _denied(room_id)
+    payload = request.get_json(silent=True) or {}
+    is_reroll = bool(payload.get("reroll"))
+    forced = _can_manage(info)
+    data, error = player_roll.begin_roll(
+        room_id,
+        request_id,
+        session.get("user_id"),
+        reroll=is_reroll,
+        force=forced,
+    )
+    if error == "not_found":
+        return error_response("Dice request not found", 404, "Dice request not found")
+    if error == "forbidden":
+        return error_response("Only the requested player may roll", 403, "Forbidden")
+    if error == "already_rolled":
+        return error_response("Dice request already rolled", 409, "Already rolled")
+    if error == "not_rolled":
+        return error_response("Roll the dice before rerolling", 409, "Not rolled")
+    if error == "already_finished":
+        return error_response("Dice request already finished", 409, "Already finished")
+    if error == "reroll_disabled":
+        return error_response("Reroll is disabled in this room", 409, "Reroll disabled")
+    if error == "reroll_exhausted":
+        return error_response("No rerolls remaining", 409, "Reroll exhausted")
+    return success_response(data or {}, "Dice rolling started")
+
+
+@bp.route("/api/rooms/<room_id>/dice-requests/<request_id>/faces", methods=["POST"])
+def submit_dice_faces(room_id, request_id):
+    """物理结果模式：客户端上报骰子落定后朝上的面，由服务端完成结算。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    path, info = _find_room(room_id)
+    if not info:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_access(info):
+        return _denied(room_id)
+    payload = request.get_json(silent=True) or {}
+    raw_faces = payload.get("faces")
+    if raw_faces is None:
+        raw_faces = []
+    if not isinstance(raw_faces, list):
+        return error_response("faces must be a list of integers", 400, "Invalid faces")
+    try:
+        faces = [int(value) for value in raw_faces]
+    except (TypeError, ValueError):
+        return error_response("faces must be a list of integers", 400, "Invalid faces")
+    if len(faces) > 200:
+        return error_response("too many faces", 400, "Invalid faces")
+    fallback = bool(payload.get("fallback"))
+    forced = _can_manage(info)
+    result, error = player_roll.submit_faces(
+        room_id,
+        request_id,
+        session.get("user_id"),
+        faces,
+        fallback=fallback,
+        force=forced,
+    )
+    if error == "not_found":
+        return error_response("Dice request not found", 404, "Dice request not found")
+    if error == "forbidden":
+        log_room_event(
+            path,
+            "非目标玩家尝试上报骰面",
+            actor=session.get("username"),
+            room_id=room_id,
+            logger_=logger,
+            请求ID=request_id,
+        )
+        return error_response("Only the requested player may roll", 403, "Forbidden")
+    if error == "invalid_faces":
+        return error_response("dice faces do not match the roll plan", 400, "Invalid faces")
+    if error == "already_rolled" and result is None:
+        return error_response("Dice request already rolled", 409, "Already rolled")
+    data = {"request_id": request_id, **_roll_state(room_id, request_id), **result_snapshot(result or {})}
+    return success_response(data, "Dice result resolved")
+
+
+def _roll_state(room_id: str, request_id: str) -> dict[str, Any]:
+    """附加当前状态与剩余重投次数，供前端更新按钮。"""
+    state = player_roll.get_pending(room_id, request_id)
+    if not state:
+        return {"state": "finished", "remaining": 0}
+    reroll = state.get("reroll") if isinstance(state.get("reroll"), dict) else {}
+    return {
+        "state": state.get("state"),
+        "remaining": reroll.get("remaining", 0),
+        "reroll": reroll,
+    }
+
+
+@bp.route("/api/rooms/<room_id>/dice-requests/<request_id>/reroll", methods=["POST"])
+def reroll_dice_request(room_id, request_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    _path, info = _find_room(room_id)
+    if not info:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_access(info):
+        return _denied(room_id)
+    result, error = player_roll.reroll(room_id, request_id, session.get("user_id"))
+    state = _roll_state(room_id, request_id)
+    if error == "not_found":
+        return error_response("Dice request not found", 404, "Dice request not found")
+    if error == "forbidden":
+        return error_response("Only the requested player may reroll", 403, "Forbidden")
+    if error == "not_rolled":
+        return error_response("Roll the dice before rerolling", 409, "Not rolled")
+    if error == "already_finished":
+        return error_response("Dice request already finished", 409, "Already finished")
+    if error == "reroll_disabled":
+        return error_response("Reroll is disabled in this room", 409, "Reroll disabled")
+    if error == "reroll_exhausted":
+        return error_response("No rerolls remaining", 409, "Reroll exhausted")
+    return success_response({"request_id": request_id, **state, **result_snapshot(result or {})}, "Dice rerolled successfully")
+
+
+@bp.route("/api/rooms/<room_id>/dice-requests/<request_id>/confirm", methods=["POST"])
+def confirm_dice_request(room_id, request_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    _path, info = _find_room(room_id)
+    if not info:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_access(info):
+        return _denied(room_id)
+    result, error = player_roll.confirm_roll(
+        room_id,
+        request_id,
+        session.get("user_id"),
+        operator=str(session.get("username") or ""),
+    )
+    if error == "not_found":
+        return error_response("Dice request not found", 404, "Dice request not found")
+    if error == "forbidden":
+        return error_response("Only the requested player may confirm", 403, "Forbidden")
+    if error == "not_rolled":
+        return error_response("Roll the dice before confirming", 409, "Not rolled")
+    data = {"request_id": request_id, "state": "finished", "remaining": 0, "confirmed": True, **result_snapshot(result or {})}
+    return success_response(data, "Dice result confirmed")
 
 
 @bp.route("/api/rooms/<room_id>/dice-requests/<request_id>/complete", methods=["POST"])
@@ -119,7 +276,10 @@ def complete_dice_request(room_id, request_id):
     if error == "forbidden":
         return error_response("Only the requested player may complete", 403, "Forbidden")
     # 请求可能已被超时/自动完成清理；对客户端保持幂等。
-    return success_response({"request_id": request_id, "completed": ok}, "Dice request completed")
+    return success_response(
+        {"request_id": request_id, "completed": ok, **_roll_state(room_id, request_id)},
+        "Dice request completed",
+    )
 
 
 @bp.route("/api/rooms/<room_id>/dice-requests/<request_id>/cancel", methods=["POST"])
@@ -164,7 +324,14 @@ def force_dice_request(room_id, request_id):
         return error_response("Dice request not found", 404, "Dice request not found")
     if error == "already_rolled":
         return error_response("Dice request already rolled", 409, "Already rolled")
-    data = {"request_id": request_id, "forced": True, "operator": operator, **result_snapshot(result or {})}
+    data = {
+        "request_id": request_id,
+        "forced": True,
+        "operator": operator,
+        "state": "forced",
+        "remaining": 0,
+        **result_snapshot(result or {}),
+    }
     return success_response(data, "Dice request forced")
 
 

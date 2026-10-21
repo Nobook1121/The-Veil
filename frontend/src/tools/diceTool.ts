@@ -191,6 +191,131 @@ class DiceTool {
         }
         return message;
     }
+
+    /** 解析本地骰桌表达式（NdM 与加法混合），返回每一项的数量与面数。 */
+    private parseLocalTerms(expression: string): Array<{ count: number; sides: number }> {
+        const compact = String(expression || "").replace(/\s+/g, "").toLowerCase();
+        const terms = compact.split("+").map((term) => /^(\d+)d(\d+)$/.exec(term));
+        if (!compact || terms.some((match) => !match)) {
+            throw new Error('无效的骰子表达式，请使用类似 "2d6" 或 "1d100+1d6" 的格式');
+        }
+        const parsed = terms.map((match) => ({
+            count: Number.parseInt(match![1] || "1", 10),
+            sides: Number.parseInt(match![2] || "6", 10),
+        }));
+        const totalCount = parsed.reduce((sum, term) => sum + term.count, 0);
+        if (totalCount < 1 || totalCount > 100 || parsed.some((term) => term.sides < 2 || term.sides > 1000)) {
+            throw new Error("骰子数量必须为 1-100，面数必须为 2-1000");
+        }
+        return parsed;
+    }
+
+    /** 只生成骰桌计划，不产生随机点数；真正点数由落定后的物理骰面决定。 */
+    localPlan(expression: string): DicePlan {
+        const parsed = this.parseLocalTerms(expression);
+        const compact = String(expression || "").replace(/\s+/g, "").toLowerCase();
+        const groups: DiceGroupSpec[] = [];
+        parsed.forEach((term) => {
+            if (term.sides === 100) {
+                for (let index = 0; index < term.count; index += 1) {
+                    groups.push({ role: "tens", type: "d10", count: 1, faces: [], labels: [] });
+                    groups.push({ role: "ones", type: "d10", count: 1, faces: [], labels: [] });
+                }
+                return;
+            }
+            groups.push({ role: "normal", type: `d${term.sides}`, count: term.count, faces: [], labels: [] });
+        });
+        return {
+            mode: "standard",
+            expression: compact,
+            count: parsed.reduce((sum, term) => sum + term.count, 0),
+            sides: parsed.length === 1 ? parsed[0]!.sides : 0,
+            bonus_dice: 0,
+            penalty_dice: 0,
+            candidates: [],
+            groups,
+            selected: null,
+            check: null,
+        };
+    }
+
+    /**
+     * 本地投掷（/dice --table）：支持 NdM 与加法混合表达式。
+     * 传入 faces 时按物理落定的骰面结算；不传时退回随机数生成器（纯文本/兜底）。
+     */
+    rollLocal(expression: string, faces?: number[] | null): { plan: DicePlan; snapshot: DiceResultSnapshot } {
+        const plan = this.localPlan(expression);
+        const groups: DiceGroupSpec[] = [];
+        const flatFaces: number[] = [];
+        const flatLabels: string[] = [];
+        const expected = (plan.groups || []).reduce((sum, group) => sum + group.count, 0);
+        const provided = Array.isArray(faces) && faces.length === expected ? faces : null;
+        let cursor = 0;
+        let total = 0;
+        const parsed = this.parseLocalTerms(expression);
+        parsed.forEach((term) => {
+            if (term.sides === 100) {
+                for (let index = 0; index < term.count; index += 1) {
+                    let tens: number;
+                    let units: number;
+                    if (provided) {
+                        tens = Number(provided[cursor++] ?? 0);
+                        units = Number(provided[cursor++] ?? 0);
+                        // 百分骰的 00 + 0 记为 100。
+                        if (tens === 0 && units === 0) total += 100;
+                        else total += tens * 10 + units;
+                    } else {
+                        const value = 1 + Math.floor(Math.random() * 100);
+                        tens = value === 100 ? 0 : Math.floor(value / 10);
+                        units = value % 10;
+                        total += value;
+                    }
+                    groups.push({ role: "tens", type: "d10", count: 1, faces: [tens], labels: [String(tens * 10).padStart(2, "0")] });
+                    groups.push({ role: "ones", type: "d10", count: 1, faces: [units], labels: [String(units)] });
+                    flatFaces.push(tens, units);
+                    flatLabels.push(String(tens * 10).padStart(2, "0"), String(units));
+                }
+                return;
+            }
+            const rolls: number[] = [];
+            for (let index = 0; index < term.count; index += 1) {
+                const value = provided ? Number(provided[cursor++] ?? 1) : 1 + Math.floor(Math.random() * term.sides);
+                rolls.push(value);
+                total += value;
+            }
+            groups.push({
+                role: "normal",
+                type: `d${term.sides}`,
+                count: term.count,
+                faces: rolls,
+                labels: rolls.map((value) => String(value)),
+            });
+            flatFaces.push(...rolls);
+            flatLabels.push(...rolls.map((value) => String(value)));
+        });
+        const snapshot: DiceResultSnapshot = {
+            faces: flatFaces,
+            labels: flatLabels,
+            groups,
+            selected: null,
+            roll: total,
+            rolls: flatFaces,
+            total,
+            success: null,
+            success_level: null,
+            summary: `投掷 ${plan.expression}：${flatLabels.join(" + ")} = ${total}`,
+            check_name: null,
+            difficulty: null,
+            target: null,
+            roller: null,
+            mode: "standard",
+            expression: plan.expression,
+            count: plan.count,
+            sides: plan.sides,
+            candidates: [],
+        };
+        return { plan, snapshot };
+    }
 }
 
 window.DiceTool = DiceTool;

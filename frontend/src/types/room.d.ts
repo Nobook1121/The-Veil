@@ -59,8 +59,15 @@ interface Room {
         level: "text" | "simple" | "3d";
         player_roll: boolean;
         timeout: number;
+        reroll_mode: "off" | "limited" | "unlimited";
+        reroll_limit: number;
+        rerolls: number;
         level_source: "room" | "admin";
         player_roll_source: "room" | "admin";
+        reroll_source: "room" | "admin";
+        // 结果来源：物理骰面（默认）或服务端随机数生成器。
+        physics_results: boolean;
+        result_source: "physics" | "server";
     };
     saves?: Array<{ filename: string; title?: string; created_at?: string }>;
 }
@@ -73,6 +80,9 @@ interface RoomHouseRules {
     // 骰子动画档位与玩家投掷：null 表示跟随管理员默认；两者相互独立。
     dice_animation_level?: "text" | "simple" | "3d" | null;
     player_dice_roll?: boolean | null;
+    // 重投模式与次数：null 表示跟随管理员默认；次数仅在 limited 时生效。
+    dice_reroll_mode?: "off" | "limited" | "unlimited" | null;
+    dice_reroll_limit?: number | null;
     // 房间级技能基础值覆盖（键为 skillKey 或 skillKey.specialtyKey）。
     skill_bases?: Record<string, number>;
 }

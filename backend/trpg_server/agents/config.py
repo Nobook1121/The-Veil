@@ -53,10 +53,18 @@ class AIRuntimeConfig:
     # 骰子动画全局默认档位：text（纯文本）/ simple（简易动画）/ 3d（3D 物理骰子）。
     # 房间可在房规内覆盖；两者相互独立，玩家投掷不依赖动画档位。
     dice_animation_level: str = "3d"
+    # 骰子结果来源：开=读取骰子落定后朝上的面；关=沿用服务端随机数生成器。
+    # 关闭后旧生成器同时负责纯文本档位与所有兜底场景。
+    dice_physics_results: bool = True
     # 是否允许 AI 检定等待玩家点击投掷（全局默认，房规可覆盖）。
     dice_player_roll: bool = False
     # 等待玩家投掷的最长秒数，超时后由服务端自动投掷。
     dice_player_roll_timeout: int = 120
+    # 玩家投掷的重投模式：off（关闭）/ limited（指定次数）/ unlimited（无限）。
+    # 仅影响玩家投掷流程；自动投掷恒为关闭。
+    dice_reroll_mode: str = "off"
+    # ``limited`` 模式下的重投次数上限（1-20）。
+    dice_reroll_limit: int = 3
     # 知识库检索与切块。``top_k_*`` 现在表示「返回的章节数」：命中后会把同章节的
     # 相邻小块回填成完整章节，因此数值比按块召回时可以更小。
     # 直接导入的剧本只有知识块这一条剧情来源，因此召回数可单独放大。
@@ -160,10 +168,18 @@ _FIELD_SPECS: tuple[_FieldSpec, ...] = (
         ("dice_animation_level",),
         _enum("dice_animation_level", frozenset({"text", "simple", "3d"})),
     ),
+    _FieldSpec("dice_physics_results", "ai", ("dice_physics_results",), _as_bool),
     _FieldSpec("dice_player_roll", "ai", ("dice_player_roll",), _as_bool),
     _FieldSpec(
         "dice_player_roll_timeout", "ai", ("dice_player_roll_timeout",), _clamped_int(minimum=30, maximum=300)
     ),
+    _FieldSpec(
+        "dice_reroll_mode",
+        "ai",
+        ("dice_reroll_mode",),
+        _enum("dice_reroll_mode", frozenset({"off", "limited", "unlimited"})),
+    ),
+    _FieldSpec("dice_reroll_limit", "ai", ("dice_reroll_limit",), _clamped_int(minimum=1, maximum=20)),
     # [ai.prompt]
     _FieldSpec(
         "snapshot_manifest_summary_cap", "ai.prompt", ("snapshot_manifest_summary_cap",), _clamped_int(minimum=0)
@@ -269,3 +285,58 @@ def load_ai_runtime_config(config_dir: Path) -> AIRuntimeConfig:
 
     overrides["small_model_tasks"] = small_model_tasks
     return replace(defaults, **overrides)
+
+
+def _format_toml_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    text = str(value)
+    if text.startswith(('"', "'")) and text.endswith(('"', "'")):
+        return text
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def write_ai_setting(key: str, value: Any, config_dir: Path | None = None) -> Path:
+    """把单个 ``[ai]`` 键写回 ``general.toml``，保留其余注释与顺序（原子写入）。"""
+    if config_dir is None:
+        from trpg_server.settings import CONFIG_DIR
+
+        config_dir = CONFIG_DIR
+    path = Path(config_dir) / "general.toml"
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    entry = f"{key} = {_format_toml_value(value)}"
+    start: int | None = None
+    end = len(lines)
+    for index, raw in enumerate(lines):
+        stripped = raw.split("#", 1)[0].strip()
+        if not (stripped.startswith("[") and stripped.endswith("]")):
+            continue
+        name = _unquote_toml_name(stripped[1:-1])
+        if start is None:
+            if name == "ai":
+                start = index
+        else:
+            end = index
+            break
+    if start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append("[ai]")
+        lines.append(entry)
+    else:
+        replaced = False
+        for index in range(start + 1, end):
+            stripped = lines[index].split("#", 1)[0].strip()
+            if "=" in stripped and _unquote_toml_name(stripped.split("=", 1)[0].strip()) == key:
+                lines[index] = entry
+                replaced = True
+                break
+        if not replaced:
+            lines.insert(end, entry)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(path.name + ".tmp")
+    temp_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    temp_path.replace(path)
+    return path

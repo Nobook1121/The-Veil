@@ -228,15 +228,25 @@
 
 来源：`routes/dice_rolls.py`
 
-房间生效档位由房规优先、管理员默认兜底：`dice_animation_level`（`text` / `simple` / `3d`，`null` 表示继承）与 `player_dice_roll`（`true` / `false` / `null`）。房间详情与房规接口的 `dice_animation` 字段给出当前生效值及来源（`room` / `admin`）。
+房间生效档位由房规优先、管理员默认兜底：`dice_animation_level`（`text` / `simple` / `3d`，`null` 表示继承）、`player_dice_roll`（`true` / `false` / `null`）、`dice_reroll_mode`（`off` / `limited` / `unlimited`，`null` 表示继承）与 `dice_reroll_limit`（1–20，`null` 表示继承）。房间详情与房规接口的 `dice_animation` 字段给出当前生效值、来源（`room` / `admin`）与可重投次数 `rerolls`（`0` 关闭，`-1` 无限）。
+
+结果来源由管理员设置 `ai.dice_physics_results`（默认 `true`）统一控制：`dice_animation.physics_results` 与 `dice_animation.result_source`（`physics` / `server`）给出当前值。`physics` 模式下服务端只生成 `seed` 并广播，点数由客户端读取落定后朝上的骰面并经 `/faces` 上报；服务端负责百分骰十位 / 个位、奖励 / 惩罚取小取大、总和与成功等级等全部结算。
 
 - `GET /api/rooms/<room_id>/dice-requests`：列出本房间等待玩家投掷的请求。
-- `GET /api/rooms/<room_id>/dice-requests/<request_id>`：读取单个待投掷请求（重连恢复用）。
-- `POST /api/rooms/<room_id>/dice-requests/<request_id>/roll`：目标玩家点击投掷；非目标玩家返回 403。
-- `POST .../complete`：幂等确认结果已播放（服务端仅允许目标玩家）。
+- `GET /api/rooms/<room_id>/dice-requests/<request_id>`：读取单个待投掷请求（重连恢复用）；响应含 `state`、`reroll.remaining`、`physics`、`auto` 与当前 `seed`。
+- `POST /api/rooms/<room_id>/dice-requests/<request_id>/roll`：目标玩家点击投掷；非目标玩家返回 403。`physics` 模式请改用 `/begin` + `/faces`。
+- `POST .../begin`：开始一次动画投掷，生成并广播共享的 32 位 `seed`（事件 `player_dice_rolling`）；请求体可带 `{"reroll": true}` 表示重投。已投掷返回 409 `already_rolled`。
+- `POST .../faces`：投掷者上报落定后的骰面，请求体 `{"faces": [int, ...]}`（按骰组顺序；百分骰为 `[十位, 个位, 候选十位...]`，d100 为两枚 d10）。`{"fallback": true}` 表示改用服务端旧生成器。骰面数量或范围不符返回 400 `Invalid faces`。
+- `POST .../reroll`：目标玩家重投（未开启返回 409 `reroll_disabled`，次数用尽返回 409 `reroll_exhausted`）。`physics` 模式请改用 `/begin` 的 `reroll` 参数。
+- `POST .../confirm`：目标玩家确认最终结果并放行 AI；重投开启时只有确认或超时才会结束等待。
+- `POST .../complete`：幂等确认动画已播放（重投开启时不结束等待）；尚未投掷时返回 `completed=false` 并保持等待，避免 AI 拿到空结果后重复检定。
 - `POST .../cancel`：取消等待。
-- `POST .../force`：房主 / 房间管理员 / 站点管理员强制立即投掷。
-- `POST /api/rooms/<room_id>/dice-animation/degraded`：前端降级上报（`from_level`、`to_level`、`reason`、`error`、`scope`、`dice`、`request_id`、`tool_name`）；会话内去重并限流 30 条 / 60 秒，写入房间日志（`source=dice_animation`）。
+- `POST .../force`：站点管理员 / 房主 / 房间管理员强制立即投掷。
+- `POST /api/rooms/<room_id>/dice-animation/degraded`：前端降级上报（`from_level`、`to_level`、`reason`、`error`、`scope`、`dice`、`request_id`、`tool_name`）；会话内去重并限流 30 条 / 60 秒，写入房间日志（`source=dice_animation`）。常见 `reason`：`unsupported_dice:<type>`（不支持的面数，回落简易）、`webgl_unavailable` / `bundle_load_failed`（会话级降级）、`dice_count_exceeded`（单次骰子数超过渲染上限 60 枚，骰桌只给提示、结果照常显示）、`render_error` / `geometry_error`。
+
+投掷元数据（`metadata.dice_roll`）同时返回 `groups`（`{role, type, count, faces, labels}`，如 `tens` / `ones` / `candidate` / `normal`，d100 展开为两枚 d10）、`selected`（`{group, index}`，奖励/惩罚骰选中的骰子；普通检定与无候选时为 `null`，前端不高亮任何骰子）、`reroll`（`{enabled, mode, limit, used, remaining}`）与 `confirmed`，供前端按真实骰型渲染并高亮选中骰。
+
+前端本地召桌命令 `/dice <表达式> --table` 不经过 AI，但会把结果以 `type=dice` 的消息写入房间历史，`metadata.dice_roll` 同样包含 `show_table`、`request_id`、`mode`、`expression`、`count`、`sides`、`groups`、`faces`、`labels`、`selected`、`roll` / `rolls`、`total`、`candidates` 与 `roller`，使刷新或重连后可以静态还原同一张骰桌；没有 `groups` 的旧消息保持纯文本展示。
 
 ### 骰子贴图库
 
@@ -341,9 +351,13 @@
 - `role_changed`：成员房间角色变更时广播。
 - `player_dice_request`：AI 摆好骰子、等待目标玩家投掷；payload 含 `room_id`、`request_id`、`roller`、`plan`、`expires_at`。
 - `player_dice_rolled`：玩家完成投掷（或超时自动投掷，`auto=true`）；payload 含结果快照。
+- `player_dice_rerolled`：目标玩家重投；payload 含新的结果快照与 `reroll_index`。
+- `player_dice_confirmed`：目标玩家确认或等待超时自动确认；payload 含最终结果快照。
 - `player_dice_cancelled`：等待被取消或房间关闭；payload 含 `reason`。
 - `player_dice_forced`：房主 / 管理员强制投掷。
 - 实时消息、输入提示等由服务端向房间广播。
+
+同一房间同时只允许一个待投掷请求：AI 重复发起检定会收到 `error=dice_request_pending` 的工具结果，而不会即时投掷，避免同一次检定出现两次结果。
 
 ---
 

@@ -30,6 +30,7 @@ interface Window {
     DOMPurify?: DomPurifySanitizer;
     renderChatMessages?: (messages: ChatMessage[]) => void;
     getCurrentChatMessages?: () => ChatMessage[];
+    persistLocalDiceMessage?: (content: string, metadata: Record<string, unknown>) => Promise<ChatMessage | null>;
     clearChatMessages?: () => void;
     setChatReadOnly?: (readOnly: boolean) => void;
     refreshRoomArchiveUi?: () => void;

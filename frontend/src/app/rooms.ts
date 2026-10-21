@@ -896,14 +896,44 @@ interface RoomHouseRulesPayload {
     visibility?: "public" | "private";
     dice_thresholds?: { critical: number; fumble: number };
     dice_threshold_defaults?: { critical: number; fumble: number };
-    dice_animation_defaults?: { level: "text" | "simple" | "3d"; player_roll: boolean };
+    dice_animation_defaults?: { level: "text" | "simple" | "3d"; player_roll: boolean; reroll_mode: "off" | "limited" | "unlimited"; reroll_limit: number };
     dice_animation?: {
         level: "text" | "simple" | "3d";
         player_roll: boolean;
         timeout: number;
+        reroll_mode: "off" | "limited" | "unlimited";
+        reroll_limit: number;
+        rerolls: number;
         level_source: "room" | "admin";
         player_roll_source: "room" | "admin";
+        reroll_source: "room" | "admin";
+        physics_results: boolean;
+        result_source: "physics" | "server";
     };
+}
+
+/** 读取房规弹窗中的重投次数输入；留空返回 null 表示继承管理员默认值。 */
+function readHouseRuleDiceRerollLimit(): number | null {
+    const input = document.getElementById("houseRuleDiceRerollLimit") as HTMLInputElement | null;
+    const raw = input?.value.trim() || "";
+    if (!raw) return null;
+    const value = Number.parseInt(raw, 10);
+    if (!Number.isFinite(value)) return null;
+    return Math.max(1, Math.min(20, value));
+}
+
+/** 房规里只有「指定次数」时才允许编辑重投次数，跟随默认/关闭/无限均置灰。 */
+function syncHouseRuleDiceRerollLimit(): void {
+    const mode = document.getElementById("houseRuleDiceRerollMode") as HTMLSelectElement | null;
+    const limit = document.getElementById("houseRuleDiceRerollLimit") as HTMLInputElement | null;
+    if (!mode || !limit) return;
+    if (mode.dataset.rerollBound !== "1") {
+        mode.dataset.rerollBound = "1";
+        mode.addEventListener("change", syncHouseRuleDiceRerollLimit);
+    }
+    const editable = mode.value === "limited";
+    limit.disabled = !editable;
+    limit.closest<HTMLElement>(".form-group")?.classList.toggle("setting-disabled", !editable);
 }
 
 /** 读取房规弹窗中的大成功/大失败阈值输入；留空返回 null 表示沿用管理员默认值。 */
@@ -956,17 +986,31 @@ async function openHouseRulesModal(): Promise<void> {
         }
         const animationSelect = document.getElementById("houseRuleDiceAnimationLevel") as HTMLSelectElement | null;
         const playerRollSelect = document.getElementById("houseRulePlayerDiceRoll") as HTMLSelectElement | null;
+        const rerollModeSelect = document.getElementById("houseRuleDiceRerollMode") as HTMLSelectElement | null;
+        const rerollLimitInput = document.getElementById("houseRuleDiceRerollLimit") as HTMLInputElement | null;
         const animationHint = document.getElementById("houseRuleDiceAnimationHint") as HTMLElement | null;
         if (animationSelect) animationSelect.value = response.data.house_rules?.dice_animation_level || "";
         const playerRule = response.data.house_rules?.player_dice_roll;
         if (playerRollSelect) playerRollSelect.value = playerRule === null || playerRule === undefined ? "" : playerRule ? "on" : "off";
+        const rerollMode = response.data.house_rules?.dice_reroll_mode;
+        const rerollLimit = response.data.house_rules?.dice_reroll_limit;
+        if (rerollModeSelect) rerollModeSelect.value = rerollMode || "";
+        if (rerollLimitInput) {
+            rerollLimitInput.value = rerollLimit === null || rerollLimit === undefined ? "" : String(rerollLimit);
+            const defaultsReroll = response.data.dice_animation_defaults;
+            rerollLimitInput.placeholder = defaultsReroll ? `留空继承默认值（${defaultsReroll.reroll_limit}）` : "留空继承默认值";
+        }
+        syncHouseRuleDiceRerollLimit();
         if (animationHint) {
             const defaultsAnim = response.data.dice_animation_defaults;
             const effective = response.data.dice_animation;
             const levelLabel = { text: "纯文本", simple: "简易动画", "3d": "3D 骰子" } as const;
+            const rerollLabel = { off: "关闭", limited: "指定次数", unlimited: "无限" } as const;
+            const rerollText = (mode: "off" | "limited" | "unlimited", limit: number): string =>
+                mode === "limited" ? `${rerollLabel[mode]}（${limit} 次）` : rerollLabel[mode];
             const parts: string[] = [];
-            if (defaultsAnim) parts.push(`管理员默认：${levelLabel[defaultsAnim.level]} / 玩家投掷${defaultsAnim.player_roll ? "开启" : "关闭"}`);
-            if (effective) parts.push(`当前生效：${levelLabel[effective.level]} / 玩家投掷${effective.player_roll ? "开启" : "关闭"}（等待超时 ${effective.timeout} 秒）`);
+            if (defaultsAnim) parts.push(`管理员默认：${levelLabel[defaultsAnim.level]} / 玩家投掷${defaultsAnim.player_roll ? "开启" : "关闭"} / 重投${rerollText(defaultsAnim.reroll_mode, defaultsAnim.reroll_limit)}`);
+            if (effective) parts.push(`当前生效：${levelLabel[effective.level]} / 玩家投掷${effective.player_roll ? "开启" : "关闭"} / 重投${rerollText(effective.reroll_mode, effective.reroll_limit)}（等待超时 ${effective.timeout} 秒）`);
             animationHint.textContent = parts.join("；");
         }
         new bootstrap.Modal(modalElement).show();
@@ -982,7 +1026,9 @@ async function saveHouseRules(): Promise<void> {
     if (!checkbox) return;
     const animationSelect = document.getElementById("houseRuleDiceAnimationLevel") as HTMLSelectElement | null;
     const playerRollSelect = document.getElementById("houseRulePlayerDiceRoll") as HTMLSelectElement | null;
+    const rerollModeSelect = document.getElementById("houseRuleDiceRerollMode") as HTMLSelectElement | null;
     const playerRuleValue = playerRollSelect?.value || "";
+    const rerollModeValue = rerollModeSelect?.value || "";
     try {
         const response = await TrpgApi.put<ApiResponse<RoomHouseRulesPayload>>(`/api/rooms/${encodeURIComponent(currentRoom.id)}/house-rules`, {
             house_rules: {
@@ -991,6 +1037,9 @@ async function saveHouseRules(): Promise<void> {
                 dice_fumble_threshold: readHouseRuleDiceThreshold("houseRuleDiceFumble"),
                 dice_animation_level: animationSelect?.value || null,
                 player_dice_roll: playerRuleValue === "" ? null : playerRuleValue === "on",
+                dice_reroll_mode: rerollModeValue || null,
+                // 非「指定次数」时不写入次数，避免留下与模式无关的覆盖值。
+                dice_reroll_limit: rerollModeValue === "limited" ? readHouseRuleDiceRerollLimit() : null,
             },
             visibility: visibilitySelect?.value || "private",
         });
