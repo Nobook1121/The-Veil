@@ -292,6 +292,8 @@ function initSettingsTabs(): void {
     void loadAITokenDashboard();
     // 设置说明按需展开 + 设置搜索索引。
     window.TrpgSettingsAssistant?.init();
+    // 管理员骰子贴图库：默认停在常规设置页时也要渲染上传入口与皮肤编辑。
+    window.TrpgAdminDiceTextures?.init();
 }
 
 async function loadRulesetKnowledge(): Promise<void> {

@@ -142,7 +142,12 @@ const SettingsAssistant = (() => {
 
             hints.forEach((hint) => hint.classList.add("setting-section-hint"));
             const toggle = createHintToggle(t("settings.hint.section", "说明"));
-            heading.insertAdjacentElement("afterend", toggle);
+            // 标题与「说明」按钮放在同一行，避免按钮独占一行挤到标题下方。
+            const headingRow = document.createElement("div");
+            headingRow.className = "setting-section-heading";
+            heading.insertAdjacentElement("beforebegin", headingRow);
+            headingRow.appendChild(heading);
+            headingRow.appendChild(toggle);
 
             const setOpen = (open: boolean): void => {
                 hints.forEach((hint) => hint.classList.toggle("setting-hint-open", open));
@@ -182,7 +187,7 @@ const SettingsAssistant = (() => {
 
             content.querySelectorAll<HTMLElement>(".mb-4").forEach((section) => {
                 if (isExcluded(section)) return;
-                const heading = section.querySelector<HTMLElement>(":scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6");
+                const heading = section.querySelector<HTMLElement>("h1, h2, h3, h4, h5, h6");
                 const title = headingText(heading);
                 if (!title) return;
                 const hint = Array.from(section.children)

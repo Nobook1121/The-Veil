@@ -539,7 +539,7 @@
                                 <h4 data-i18n="settings.section.autosave">自动保存设置</h4>
                                 <div class="form-group">
                                     <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="enableAutosave">
+                                        <input type="checkbox" class="form-check-input" id="enableAutosave" checked>
                                         <label class="form-check-label" for="enableAutosave" data-i18n="settings.autosave.enable">启用自动保存</label>
                                     </div>
                                 </div>
@@ -560,7 +560,7 @@
                                 <h4 data-i18n="settings.section.room_console">房间控制台</h4>
                                 <div class="form-group">
                                     <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="enableRoomConsole">
+                                        <input type="checkbox" class="form-check-input" id="enableRoomConsole" checked>
                                         <label class="form-check-label" for="enableRoomConsole" data-i18n="settings.room_console.enable">启用房间内嵌控制台</label>
                                     </div>
                                 </div>
@@ -581,7 +581,7 @@
                                 <h4>网站 Agent</h4>
                                 <div class="form-group">
                                     <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="siteAgentEnabled">
+                                        <input type="checkbox" class="form-check-input" id="siteAgentEnabled" checked>
                                         <label class="form-check-label" for="siteAgentEnabled">启用网站 Agent</label>
                                     </div>
                                     <small class="form-text text-muted">关闭后所有用户的悬浮球与 Agent 页立即不可用；已保存的会话仍会保留。</small>
@@ -807,17 +807,17 @@
                                     <select class="form-select" id="diceAnimationLevel">
                                         <option value="text" data-i18n="settings.dice.level_text">纯文本</option>
                                         <option value="simple" data-i18n="settings.dice.level_simple">简易动画</option>
-                                        <option value="3d" data-i18n="settings.dice.level_3d">3D 骰子</option>
+                                        <option value="3d" selected data-i18n="settings.dice.level_3d">3D 骰子</option>
                                     </select>
                                     <small class="text-muted" data-i18n="settings.dice.animation_level_hint">全局默认档位，房间可在房规内覆盖。3D 不可用时自动降级并写入房间日志。</small>
                                 </div>
                                 <div class="form-check mt-3">
-                                    <input class="form-check-input" type="checkbox" id="dicePhysicsResults">
+                                    <input class="form-check-input" type="checkbox" id="dicePhysicsResults" checked>
                                     <label class="form-check-label" for="dicePhysicsResults" data-i18n="settings.dice.physics_results">启用现代化骰子点数生成器</label>
                                     <small class="d-block text-muted" data-i18n="settings.dice.physics_results_hint">开启后由客户端读取骰子落定后朝上的面，服务端据此结算；关闭则沿用服务端随机数生成器。纯文本档位与兜底场景始终使用旧生成器。</small>
                                 </div>
                                 <div class="form-check mt-3">
-                                    <input class="form-check-input" type="checkbox" id="dicePlayerRollDefault">
+                                    <input class="form-check-input" type="checkbox" id="dicePlayerRollDefault" checked>
                                     <label class="form-check-label" for="dicePlayerRollDefault" data-i18n="settings.dice.player_roll">允许玩家投掷骰子</label>
                                     <small class="d-block text-muted" data-i18n="settings.dice.player_roll_hint">AI 检定时等待目标玩家点击投掷；不依赖动画档位，纯文本模式下同样可用。</small>
                                 </div>
@@ -840,7 +840,7 @@
                                     <input type="number" class="form-control" id="diceRerollLimit" value="3" min="1" max="20">
                                     <small class="text-muted" data-i18n="settings.dice.reroll_limit_hint">仅在重投模式为「指定次数」时可编辑。</small>
                                 </div>
-                                <div class="mt-3">
+                                <div class="mt-3" data-admin-only="true" id="adminDiceTexturesSection">
                                     <h5 data-i18n="settings.dice.textures_title">骰子贴图库</h5>
                                     <p class="text-muted small" data-i18n="settings.dice.textures_hint">上传桌面贴图与骰面贴图，组合成皮肤供玩家在本机选择。</p>
                                     <div id="adminDiceTextures"></div>

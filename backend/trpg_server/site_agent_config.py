@@ -2,7 +2,7 @@
 
 配置集中在 ``data/config/general.toml`` 的 ``[site_agent]`` 段，统一走分层加载
 （模板/env/CLI 生效，schema 保证键齐全且收敛到合法范围）。该模块只做取值，
-不读写会话数据；缺省配置为「关闭」，避免升级后自动放开入口。
+不读写会话数据；缺省配置为「开启」。
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from trpg_server.settings import CONFIG_DIR
 
 @dataclass(frozen=True)
 class SiteAgentConfig:
-    enabled: bool = False
+    enabled: bool = True
     max_tool_rounds: int = 6
     request_timeout: int = 120
     max_history_messages: int = 40

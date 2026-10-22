@@ -97,6 +97,10 @@ namespace AuthModule {
         window.refreshScenarioManagement?.();
         // 未登录时标记 body，供剧本/角色卡页的「登录后可创建」提示条显隐（CSS 控制）。
         document.body.classList.toggle("is-guest", !user);
+        // 骰子贴图库依赖管理员角色；启动时用户信息尚未恢复，登录/会话恢复后再初始化。
+        if (user && (user.role === "ADMIN" || user.role === "OWNER")) {
+            window.TrpgAdminDiceTextures?.init();
+        }
     }
 
     function presenceLabel(presence: CurrentUser["presence"]): string {

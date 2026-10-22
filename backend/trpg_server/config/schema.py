@@ -73,7 +73,7 @@ class AIRuntimeConfig:
     # 关闭后旧生成器同时负责纯文本档位与所有兜底场景。
     dice_physics_results: bool = True
     # 是否允许 AI 检定等待玩家点击投掷（全局默认，房规可覆盖）。
-    dice_player_roll: bool = False
+    dice_player_roll: bool = True
     # 等待玩家投掷的最长秒数，超时后由服务端自动投掷。
     dice_player_roll_timeout: int = 120
     # 玩家投掷的重投模式：off（关闭）/ limited（指定次数）/ unlimited（无限）。
@@ -217,7 +217,7 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec("check_update_on_startup", "update", ("check_update_on_startup",), as_bool, True),
     FieldSpec("auto_update", "update", ("auto_update",), as_bool, False),
     # [site_agent]（与 site_agent_config.SiteAgentConfig 默认值/边界保持一致）
-    FieldSpec("enabled", "site_agent", ("enabled",), as_bool, False),
+    FieldSpec("enabled", "site_agent", ("enabled",), as_bool, True),
     FieldSpec("max_tool_rounds", "site_agent", ("max_tool_rounds",), clamped_int(minimum=1, maximum=20), 6),
     FieldSpec("request_timeout", "site_agent", ("request_timeout",), clamped_int(minimum=30, maximum=1800), 120),
     FieldSpec("max_history_messages", "site_agent", ("max_history_messages",), clamped_int(minimum=4, maximum=200), 40),

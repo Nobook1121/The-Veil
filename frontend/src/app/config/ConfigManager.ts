@@ -91,7 +91,7 @@ class ConfigManager {
         configSetInputValue("diceFumbleThresholdDefault", this.get("general", "ai", "dice_fumble_threshold", 96));
         configSetSelectValue("diceAnimationLevel", this.get("general", "ai", "dice_animation_level", "3d"));
         configSetCheckboxValue("dicePhysicsResults", this.get("general", "ai", "dice_physics_results", true));
-        configSetCheckboxValue("dicePlayerRollDefault", this.get("general", "ai", "dice_player_roll", false));
+        configSetCheckboxValue("dicePlayerRollDefault", this.get("general", "ai", "dice_player_roll", true));
         configSetInputValue("dicePlayerRollTimeout", this.get("general", "ai", "dice_player_roll_timeout", 120));
         // 重投模式与次数（关闭时次数控件置灰，但仍保留已保存值）
         configSetSelectValue("diceRerollMode", this.get("general", "ai", "dice_reroll_mode", "off"));
@@ -109,11 +109,11 @@ class ConfigManager {
         configSetInputValue("lorebookTokenBudget", this.get("general", "ai.knowledge", "lorebook_token_budget", 0));
         configSetCheckboxValue("cloudEmbeddingEnabled", this.get("general", "ai", "cloud_embedding_enabled", false));
         // 房间内嵌控制台：开关与保留条数必须回填，否则刷新后 UI 会退回 HTML 默认值。
-        configSetCheckboxValue("enableRoomConsole", this.get("general", "room_console", "enabled", false));
+        configSetCheckboxValue("enableRoomConsole", this.get("general", "room_console", "enabled", true));
         configSetCheckboxValue("mirrorRoomConsole", this.get("general", "room_console", "mirror_to_server_console", false));
         configSetInputValue("roomConsoleMaxEntries", this.get("general", "room_console", "max_entries", 500));
         // 网站 Agent 的启用开关与限额
-        configSetCheckboxValue("siteAgentEnabled", this.get("general", "site_agent", "enabled", false));
+        configSetCheckboxValue("siteAgentEnabled", this.get("general", "site_agent", "enabled", true));
         configSetInputValue("siteAgentDailyTokenBudget", this.get("general", "site_agent", "daily_token_budget", 200000));
         configSetInputValue("siteAgentMaxTurnsPerHour", this.get("general", "site_agent", "max_turns_per_hour", 60));
         configSetInputValue("siteAgentMaxToolRounds", this.get("general", "site_agent", "max_tool_rounds", 6));

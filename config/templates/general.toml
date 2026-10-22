@@ -40,7 +40,7 @@ dice_critical_threshold = 1
 dice_fumble_threshold = 96
 # 骰子动画默认档位（text / simple / 3d）与玩家投掷默认开关、等待超时（30-300 秒）。
 dice_animation_level = "3d"
-dice_player_roll = false
+dice_player_roll = true
 dice_player_roll_timeout = 120
 # 骰子结果来源：开=读取骰子落定后朝上的面；关=沿用服务端随机数生成器。
 dice_physics_results = true
@@ -120,7 +120,7 @@ check_update_on_startup = true
 auto_update = false
 
 [site_agent]
-enabled = false
+enabled = true
 max_tool_rounds = 6
 request_timeout = 120
 max_history_messages = 40

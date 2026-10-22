@@ -63,6 +63,10 @@ interface Window {
         init: () => void;
         runSearch: () => void;
     };
+    TrpgAdminDiceTextures?: {
+        init: () => void;
+        refresh: () => Promise<void>;
+    };
 }
 
 interface TrpgDialogOptions {
