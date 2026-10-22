@@ -17,24 +17,20 @@ from trpg_server.network_discovery import (
 )
 from trpg_server.security import require_permission_node
 from trpg_server.responses import error_response, server_error, success_response
-from trpg_server.settings import NETWORK_CONFIG_FILE, PENETRATION_CONFIG_FILE
+from trpg_server.settings import CONFIG_DIR
 
 bp = Blueprint("network", __name__)
 logger = logging.getLogger(__name__)
 
 
-def _network_config_file():
-    return current_app.config.get("NETWORK_CONFIG_FILE", NETWORK_CONFIG_FILE)
-
-
-def _penetration_config_file():
-    return current_app.config.get("PENETRATION_CONFIG_FILE", PENETRATION_CONFIG_FILE)
+def _get_config_dir():
+    return current_app.config.get("CONFIG_DIR", CONFIG_DIR)
 
 
 @bp.route("/api/network/config", methods=["GET"])
 def get_network_config_api():
     try:
-        config = get_network_config(_network_config_file())
+        config = get_network_config(_get_config_dir())
         return success_response(config, "Network config loaded successfully")
     except Exception as exc:
         logger.exception("Failed to get network config")
@@ -53,7 +49,7 @@ def update_network_config_api():
         if validation_error:
             return validation_error
 
-        saved_config = save_network_config(config_data, _network_config_file())
+        saved_config = save_network_config(config_data, _get_config_dir())
         log_user_action(
             logger,
             user_action_text(session.get("username"), "更改了网络设置"),
@@ -76,7 +72,7 @@ def get_share_addresses():
     因此沿用与 ``/api/network/config`` GET 一致的开放读取策略。
     """
     try:
-        config = get_network_config(_network_config_file())
+        config = get_network_config(_get_config_dir())
         port = int(config.get("port", DEFAULT_PORT))
         addresses = [f"http://{ip}:{port}" for ip in get_local_ipv4_addresses()]
         return success_response(
@@ -100,7 +96,7 @@ def get_network_status():
         except socket.gaierror:
             local_ip = "127.0.0.1"
 
-        config = get_network_config(_network_config_file())
+        config = get_network_config(_get_config_dir())
         port = config.get("port", DEFAULT_PORT)
         port_available = _can_bind(local_ip, port)
         status = {
@@ -123,7 +119,7 @@ def get_network_status():
 @bp.route("/api/network/test", methods=["POST"])
 def test_network_connection():
     try:
-        config = get_network_config(_network_config_file())
+        config = get_network_config(_get_config_dir())
         local_ip = get_local_ip()
         target_port = config.get("port", DEFAULT_PORT)
         connection_success, error_message = _test_local_bind(local_ip)
@@ -149,7 +145,7 @@ def test_network_connection():
 @require_permission_node("settings.network")
 def get_penetration_config_api():
     try:
-        config = get_penetration_config(_penetration_config_file())
+        config = get_penetration_config(_get_config_dir())
         return success_response(config, "Penetration config loaded successfully")
     except Exception as exc:
         logger.exception("Failed to get penetration config")
@@ -164,7 +160,7 @@ def update_penetration_config_api():
         if not config_data:
             return error_response("Please provide penetration config data", 400, "No data")
 
-        save_penetration_config(config_data, _penetration_config_file())
+        save_penetration_config(config_data, _get_config_dir())
         log_user_action(
             logger,
             user_action_text(session.get("username"), "更改了穿透设置"),
@@ -181,7 +177,7 @@ def update_penetration_config_api():
 @bp.route("/api/network/penetration/status", methods=["GET"])
 def get_penetration_status():
     try:
-        config = get_penetration_config(_penetration_config_file())
+        config = get_penetration_config(_get_config_dir())
         status = {
             "enabled": config.get("enabled", False),
             "type": config.get("type", "ngrok"),

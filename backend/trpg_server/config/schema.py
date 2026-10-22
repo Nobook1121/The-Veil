@@ -10,7 +10,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from trpg_server.config.fields import FieldSpec, as_bool, as_enum, as_text, clamped_int
+from trpg_server.config.fields import (
+    FieldSpec,
+    as_bool,
+    as_enum,
+    as_list,
+    as_str_list,
+    as_text,
+    clamped_int,
+)
+
+# network.port 的代码默认值（L1）。``settings.DEFAULT_PORT`` 由此派生，避免两处漂移。
+DEFAULT_NETWORK_PORT = 8086
 
 
 @dataclass(frozen=True)
@@ -218,6 +229,25 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec("action_ttl_seconds", "site_agent", ("action_ttl_seconds",), clamped_int(minimum=30, maximum=3600), 300),
     FieldSpec("max_conversations_per_user", "site_agent", ("max_conversations_per_user",), clamped_int(minimum=1, maximum=200), 30),
     FieldSpec("max_messages_per_conversation", "site_agent", ("max_messages_per_conversation",), clamped_int(minimum=10, maximum=2000), 200),
+    # [site]（整合自原 site.json；setup.py 读写）
+    FieldSpec("name", "site", ("name",), as_text, ""),
+    FieldSpec("domain", "site", ("domain",), as_text, ""),
+    FieldSpec("setup_dismissed", "site", ("setup_dismissed",), as_bool, False),
+    # [network]（整合自原 network.json；server.py/routes/network.py 读写，port 需重启）
+    FieldSpec("port", "network", ("port",), clamped_int(minimum=1, maximum=65535), DEFAULT_NETWORK_PORT),
+    FieldSpec("discovery_enabled", "network", ("discovery_enabled",), as_bool, True),
+    FieldSpec("share_base_url", "network", ("share_base_url",), as_text, ""),
+    # [network.access_control]（原 network.json 的嵌套 access_control 表）
+    FieldSpec("enabled", "network.access_control", ("enabled",), as_bool, False),
+    FieldSpec("allowed_ips", "network.access_control", ("allowed_ips",), as_str_list, []),
+    # [network.penetration]（整合自原 penetration.json；启停需重启穿透进程）
+    FieldSpec("enabled", "network.penetration", ("enabled",), as_bool, False),
+    FieldSpec("type", "network.penetration", ("type",), as_text, "ngrok"),
+    FieldSpec("port_mappings", "network.penetration", ("port_mappings",), as_list, []),
+    # [network.penetration.settings]（穿透令牌等；模板中一律留空，不落密钥）
+    FieldSpec("auth_token", "network.penetration.settings", ("auth_token",), as_text, ""),
+    FieldSpec("region", "network.penetration.settings", ("region",), as_text, "us"),
+    FieldSpec("subdomain", "network.penetration.settings", ("subdomain",), as_text, ""),
 )
 
 SPECS: tuple[FieldSpec, ...] = AI_SPECS + GENERAL_SPECS

@@ -20,7 +20,7 @@ from trpg_server.ai_platform_config import load_platform_config, save_platform_c
 from trpg_server.agents.ai_request import PROBE_MAX_TOKENS
 from trpg_server.agents.config import load_ai_runtime_config
 from trpg_server.agents.http_retry import post_with_retry
-from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.json_store import write_json_atomic
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.responses import error_response, server_error, success_response
 from trpg_server.role_config import load_roles
@@ -36,7 +36,9 @@ from trpg_server.setup_embedding import (
     set_cloud_embedding_enabled,
     store_uploaded_files,
 )
-from trpg_server.settings import AI_PLATFORM_SECRET_DIR, CONFIG_DIR, LOCAL_EMBEDDING_MODEL_PATH, SITE_CONFIG_FILE
+from trpg_server.config import load_settings, update_sections
+from trpg_server.config.paths import general_config_path
+from trpg_server.settings import AI_PLATFORM_SECRET_DIR, CONFIG_DIR, LOCAL_EMBEDDING_MODEL_PATH
 
 bp = Blueprint("setup", __name__)
 logger = logging.getLogger(__name__)
@@ -64,10 +66,6 @@ def _get_user_manager():
     return current_app.config.get("USER_MANAGER", user_manager)
 
 
-def _get_site_config_file():
-    return current_app.config.get("SITE_CONFIG_FILE", SITE_CONFIG_FILE)
-
-
 def _embedding_model_path():
     return current_app.config.get("LOCAL_EMBEDDING_MODEL_PATH", LOCAL_EMBEDDING_MODEL_PATH)
 
@@ -82,8 +80,12 @@ def _general_config_file():
 
 
 def _read_site_config() -> dict:
-    config = read_json(_get_site_config_file(), default={})
-    return config if isinstance(config, dict) else {}
+    """生效站点配置（``[site]`` 段，含代码默认值兜底与 env 覆盖）。"""
+    return load_settings(_get_config_dir()).section("site")
+
+
+def _write_site_config(values: dict) -> None:
+    update_sections(general_config_path(_get_config_dir()), {"site": values})
 
 
 def _owner_exists(manager) -> bool:
@@ -126,9 +128,7 @@ def dismiss_setup():
         if _owner_exists(_get_user_manager()):
             return _setup_locked_response()
 
-        site_config = _read_site_config()
-        site_config["setup_dismissed"] = True
-        write_json_atomic(_get_site_config_file(), site_config)
+        _write_site_config({"setup_dismissed": True})
 
         logger.info("Setup wizard dismissed")
         return success_response({"setup_dismissed": True})
@@ -153,10 +153,7 @@ def save_site_config():
         if len(domain) > _MAX_DOMAIN_LENGTH:
             return error_response("Domain is too long", 400, "Domain is too long")
 
-        site_config = _read_site_config()
-        site_config["name"] = name
-        site_config["domain"] = domain
-        write_json_atomic(_get_site_config_file(), site_config)
+        _write_site_config({"name": name, "domain": domain})
 
         logger.info("Setup site config saved name=%s domain=%s", name, domain)
         return success_response({"name": name, "domain": domain})

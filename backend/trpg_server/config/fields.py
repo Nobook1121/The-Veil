@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -66,6 +67,40 @@ def as_enum(field_name: str, allowed: frozenset[str]) -> Callable[[Any, str], st
         return default
 
     return convert
+
+
+def as_str_list(raw: Any, default: list) -> list:
+    """字符串数组（如 IP 白名单）：TOML 数组直取；字符串按 JSON 数组或逗号分隔解析。"""
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return list(default)
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except ValueError:
+                return list(default)
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item).strip()]
+            return list(default)
+        return [part.strip() for part in text.split(",") if part.strip()]
+    return list(default)
+
+
+def as_list(raw: Any, default: list) -> list:
+    """任意数组整体替换（如端口映射）：只接受 TOML 数组或 JSON 数组字符串。"""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw.strip())
+        except ValueError:
+            return list(default)
+        if isinstance(parsed, list):
+            return parsed
+    return list(default)
 
 
 @dataclass(frozen=True)

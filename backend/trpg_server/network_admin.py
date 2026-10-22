@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import logging
 import socket
-from pathlib import Path
 from typing import Any
 
 from trpg_server.network_discovery import (
@@ -16,7 +15,6 @@ from trpg_server.network_discovery import (
     get_penetration_config,
     test_udp_discovery,
 )
-from trpg_server.settings import NETWORK_CONFIG_FILE, PENETRATION_CONFIG_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +30,11 @@ def _can_bind(ip: str, port: int) -> bool:
         probe.close()
 
 
-def network_status(
-    network_config_file: Any = None,
-    penetration_config_file: Any = None,
-) -> dict[str, Any]:
+def network_status(config_dir: Any = None) -> dict[str, Any]:
     """返回本地 IP、端口占用、局域网发现与穿透开关。"""
 
-    config = get_network_config(Path(network_config_file) if network_config_file else Path(NETWORK_CONFIG_FILE))
-    penetration = get_penetration_config(Path(penetration_config_file) if penetration_config_file else Path(PENETRATION_CONFIG_FILE))
+    config = get_network_config(config_dir)
+    penetration = get_penetration_config(config_dir)
     try:
         local_ip = socket.gethostbyname(socket.gethostname())
     except socket.gaierror:
@@ -55,10 +50,10 @@ def network_status(
     }
 
 
-def network_test(network_config_file: Any = None) -> dict[str, Any]:
+def network_test(config_dir: Any = None) -> dict[str, Any]:
     """本地端口绑定测试 + UDP 发现测试，用于判断网络是否可用。"""
 
-    config = get_network_config(Path(network_config_file) if network_config_file else Path(NETWORK_CONFIG_FILE))
+    config = get_network_config(config_dir)
     local_ip = get_local_ip()
     bind_ok = _can_bind(local_ip, 0)
     try:

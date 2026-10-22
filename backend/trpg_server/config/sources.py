@@ -7,6 +7,7 @@ TOML 读取统一走 ``tomlkit``（往返保留注释，写入侧复用同一解
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,15 @@ logger = logging.getLogger(__name__)
 
 # 环境变量命名空间：AI_TRPG_CFG_<SECTION>_<KEY>（section 点号转下划线，全大写）。
 ENV_PREFIX = "AI_TRPG_CFG_"
+
+# 兼容期遗留文件：(文件名, 映射到的 base section)。嵌套 dict 按 TOML 相同语义压平
+# （network.json 的 access_control → network.access_control；penetration.json 的
+# settings → network.penetration.settings）。迁移完成后本表随兼容代码一起删除。
+LEGACY_JSON_FILES: tuple[tuple[str, str], ...] = (
+    ("site.json", "site"),
+    ("network.json", "network"),
+    ("penetration.json", "network.penetration"),
+)
 
 
 def flatten_sections(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -53,6 +63,41 @@ def read_toml_file(path: Path) -> dict[str, dict[str, Any]]:
         logger.error("Failed to parse %s: %s; ignoring this layer", path, exc)
         return {}
     return flatten_sections(doc.unwrap())
+
+
+def legacy_json_stamps(config_dir: Path) -> tuple:
+    """遗留 JSON 文件的 (文件名, mtime_ns, size) 指纹，用于加载缓存键。"""
+    stamps: list[tuple[str, int, int]] = []
+    for filename, _base_section in LEGACY_JSON_FILES:
+        try:
+            stat = (config_dir / filename).stat()
+            stamps.append((filename, stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            stamps.append((filename, 0, 0))
+    return tuple(stamps)
+
+
+def read_legacy_json_layer(config_dir: Path) -> dict[str, dict[str, Any]]:
+    """兼容期：把遗留 site/network/penetration JSON 读成扁平 section 层。
+
+    该层合并优先级低于用户 ``general.toml``，因此 TOML 里已有的键天然胜出，
+    只有 TOML 缺失的键才回落到遗留 JSON 的值。文件损坏只跳过该文件并告警。
+    """
+    layer: dict[str, dict[str, Any]] = {}
+    for filename, base_section in LEGACY_JSON_FILES:
+        path = config_dir / filename
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            logger.error("Failed to parse legacy %s: %s; ignoring this file", path, exc)
+            continue
+        if not isinstance(data, dict):
+            continue
+        for section, values in flatten_sections({base_section: data}).items():
+            layer.setdefault(section, {}).update(values)
+    return layer
 
 
 def env_key_name(section: str, key: str) -> str:

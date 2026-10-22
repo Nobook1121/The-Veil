@@ -40,8 +40,6 @@ from trpg_server.scenario_store import load_scenario_by_id
 from trpg_server.settings import (
     KNOWLEDGE_BASES_DIR,
     LOGS_DIR,
-    NETWORK_CONFIG_FILE,
-    PENETRATION_CONFIG_FILE,
     ROOMS_DIR,
     SCENARIOS_DIR,
 )
@@ -1866,7 +1864,7 @@ def _dice_skin_delete_command(
 
 
 def _network_status_command() -> ConsoleCommandResult:
-    data = network_admin.network_status(Path(NETWORK_CONFIG_FILE), Path(PENETRATION_CONFIG_FILE))
+    data = network_admin.network_status()
     lines = [
         "网络状态:",
         f"  本地 IP: {data['local_ip']} · 端口 {data['port']} · 端口可用={data['port_available']}",
@@ -1877,7 +1875,7 @@ def _network_status_command() -> ConsoleCommandResult:
 
 
 def _network_test_command() -> ConsoleCommandResult:
-    data = network_admin.network_test(Path(NETWORK_CONFIG_FILE))
+    data = network_admin.network_test()
     lines = [
         "网络连通性测试:",
         f"  本地 IP: {data['local_ip']} · 端口 {data['port']}",

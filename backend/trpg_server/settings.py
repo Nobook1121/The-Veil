@@ -5,6 +5,7 @@ from pathlib import Path
 # 路径常量的权威定义在 trpg_server.config.paths（纯 stdlib，可在 Flask 启动前使用），
 # 这里导入后再导出，保持既有 ``settings.CONFIG_DIR`` 等引用不变。
 from trpg_server.config.paths import BASE_DIR, CONFIG_DIR, DATA_DIR, TEMPLATE_DIR  # noqa: F401
+from trpg_server.config.schema import DEFAULT_NETWORK_PORT
 
 RUNTIME_DIR = DATA_DIR / "runtime"
 FRONTEND_DIST_DIR = BASE_DIR / "dist" / "public"
@@ -59,11 +60,10 @@ OCR_LANG = os.environ.get("AI_TRPG_OCR_LANG", "ch")
 LOCAL_EMBEDDING_MODEL_PATH = Path(os.environ.get("AI_TRPG_LOCAL_EMBEDDING_MODEL_PATH", str(RUNTIME_DIR / "models" / "embedding" / "bge-small-zh-v1.5")))
 PADDLEOCR_HOME = Path(os.environ.get("PADDLE_PDX_CACHE_HOME", str(RUNTIME_DIR / "models" / "paddleocr")))
 
-NETWORK_CONFIG_FILE = CONFIG_DIR / "network.json"
-PENETRATION_CONFIG_FILE = CONFIG_DIR / "penetration.json"
-SITE_CONFIG_FILE = CONFIG_DIR / "site.json"
+# 遗留 JSON（site/network/penetration）已由 general.toml 的对应段取代，文件路径
+# 常量随之删除；兼容读取见 trpg_server.config.sources.LEGACY_JSON_FILES。
 
-DEFAULT_PORT = 8086
+DEFAULT_PORT = DEFAULT_NETWORK_PORT
 PORT_RETRY_COUNT = 5
 PORT_RETRY_INTERVAL = 2
 DISCOVERY_PORT = 50000

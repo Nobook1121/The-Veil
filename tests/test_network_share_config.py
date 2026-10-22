@@ -22,7 +22,6 @@ def _app(tmp_path, role="ADMIN"):
             "TESTING": True,
             "USER_MANAGER": FakeManager(role),
             "CONFIG_DIR": config_dir,
-            "NETWORK_CONFIG_FILE": config_dir / "network.json",
             "ROOMS_DIR": tmp_path / "rooms",
             "SCENARIOS_DIR": tmp_path / "scenarios",
         }

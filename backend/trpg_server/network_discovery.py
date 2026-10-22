@@ -2,42 +2,17 @@ import json
 import logging
 import socket
 import time
-from copy import deepcopy
 
-from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.config import load_settings, update_sections
+from trpg_server.config.paths import general_config_path
 from trpg_server.settings import (
     DEFAULT_PORT,
     DISCOVERY_PORT,
-    NETWORK_CONFIG_FILE,
-    PENETRATION_CONFIG_FILE,
     PORT_RETRY_COUNT,
     PORT_RETRY_INTERVAL,
 )
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_NETWORK_CONFIG = {
-    "port": DEFAULT_PORT,
-    "discovery_enabled": True,
-    # 生成房间邀请链接/二维码时使用的对外基础地址（如 http://192.168.1.10:8086）。
-    # 留空表示使用访问者当前地址栏的 origin，由前端自动推断。
-    "share_base_url": "",
-    "access_control": {
-        "enabled": False,
-        "allowed_ips": [],
-    },
-}
-
-DEFAULT_PENETRATION_CONFIG = {
-    "enabled": False,
-    "type": "ngrok",
-    "settings": {
-        "auth_token": "",
-        "region": "us",
-        "subdomain": "",
-    },
-    "port_mappings": [],
-}
 
 
 def is_port_available(port):
@@ -96,32 +71,45 @@ def get_local_ipv4_addresses():
     return addresses
 
 
-def get_network_config(path=NETWORK_CONFIG_FILE):
-    data = read_json(path, default=None)
-    if not data:
-        return deepcopy(DEFAULT_NETWORK_CONFIG)
-    return data
+def get_network_config(config_dir=None):
+    """生效网络配置（嵌套形状，与既有 API 契约一致）。
+
+    数据来自统一分层配置（``general.toml`` 的 ``[network]``/``[network.access_control]``，
+    兼容期回落到遗留 ``network.json``），代码默认值兜底，因此键始终齐全。
+    """
+    settings = load_settings(config_dir)
+    section = settings.section("network")
+    section["access_control"] = settings.section("network.access_control")
+    return section
 
 
-def save_network_config(config_data, path=NETWORK_CONFIG_FILE):
-    current_config = get_network_config(path)
-    current_config.update(config_data)
-    write_json_atomic(path, current_config)
-    return current_config
+def save_network_config(config_data, config_dir=None):
+    """把提交的网络设置写入用户 ``general.toml``（只写提交的键，注释保留）。"""
+    data = dict(config_data)
+    access_control = data.pop("access_control", None)
+    changes: dict[str, dict] = {"network": data}
+    if isinstance(access_control, dict):
+        changes["network.access_control"] = access_control
+    update_sections(general_config_path(config_dir), changes)
+    return get_network_config(config_dir)
 
 
-def get_penetration_config(path=PENETRATION_CONFIG_FILE):
-    data = read_json(path, default=None)
-    if not data:
-        return deepcopy(DEFAULT_PENETRATION_CONFIG)
-    return data
+def get_penetration_config(config_dir=None):
+    """生效穿透配置（嵌套形状）；``settings`` 子表来自 ``[network.penetration.settings]``。"""
+    settings = load_settings(config_dir)
+    section = settings.section("network.penetration")
+    section["settings"] = settings.section("network.penetration.settings")
+    return section
 
 
-def save_penetration_config(config_data, path=PENETRATION_CONFIG_FILE):
-    current_config = get_penetration_config(path)
-    current_config.update(config_data)
-    write_json_atomic(path, current_config)
-    return current_config
+def save_penetration_config(config_data, config_dir=None):
+    data = dict(config_data)
+    nested = data.pop("settings", None)
+    changes: dict[str, dict] = {"network.penetration": data}
+    if isinstance(nested, dict):
+        changes["network.penetration.settings"] = nested
+    update_sections(general_config_path(config_dir), changes)
+    return get_penetration_config(config_dir)
 
 
 def test_udp_discovery():

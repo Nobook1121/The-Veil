@@ -1,3 +1,10 @@
+# 「帷幕 The Veil」全局配置模板（L2 层）。
+#
+# 加载优先级（低 → 高）：代码内默认值 < 本模板 < data/config/general.toml（首次启动
+# 由本模板复制生成）< 环境变量 AI_TRPG_CFG_<段>_<键> < CLI 参数。
+# 用户配置里缺失的键会回落到本模板的值；本模板也缺失的键回落到代码默认值。
+# 修改本文件只影响「之后首次部署」生成的用户配置；已存在的用户配置不会被覆盖。
+
 [appearance]
 theme = "pattern_cyber_2"
 
@@ -35,6 +42,12 @@ dice_fumble_threshold = 96
 dice_animation_level = "3d"
 dice_player_roll = false
 dice_player_roll_timeout = 120
+# 骰子结果来源：开=读取骰子落定后朝上的面；关=沿用服务端随机数生成器。
+dice_physics_results = true
+# 玩家投掷的重投模式：off（关闭）/ limited（指定次数）/ unlimited（无限）。
+dice_reroll_mode = "off"
+# limited 模式下的重投次数上限（1-20）。
+dice_reroll_limit = 3
 max_tool_rounds = 8
 ai_request_timeout = 1800
 ai_request_max_retries = 5
@@ -116,3 +129,42 @@ max_message_chars = 4000
 max_turns_per_hour = 60
 daily_token_budget = 200000
 conversation_retention_days = 30
+action_ttl_seconds = 300
+max_conversations_per_user = 30
+max_messages_per_conversation = 200
+
+[site]
+# 站点名称：显示在浏览器标题与页面品牌处（留空使用默认品牌）。
+name = ""
+# 站点域名（可选）：仅作展示与外链用途。
+domain = ""
+# 首次部署引导是否已跳过/完成；false 时新部署首次访问会进入引导页。
+setup_dismissed = false
+
+[network]
+# HTTP 服务监听端口（修改后需重启服务生效）。
+port = 8086
+# 局域网 UDP 发现：允许同网段设备搜索到本实例。
+discovery_enabled = true
+# 生成房间邀请链接/二维码时使用的对外基础地址（如 http://192.168.1.10:8086）。
+# 留空表示跟随访问者当前地址栏，由前端自动推断。
+share_base_url = ""
+
+[network.access_control]
+# 访问控制白名单（预留能力）。
+enabled = false
+allowed_ips = []
+
+[network.penetration]
+# 内网穿透开关（启停需重启穿透进程生效）。
+enabled = false
+# 穿透服务类型（当前支持 ngrok）。
+type = "ngrok"
+# 端口映射列表（JSON 数组，元素为映射对象）。
+port_mappings = []
+
+[network.penetration.settings]
+# 穿透服务鉴权令牌（密钥，默认留空，由部署方自行填写）。
+auth_token = ""
+region = "us"
+subdomain = ""

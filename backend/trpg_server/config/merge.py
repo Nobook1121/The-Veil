@@ -159,7 +159,9 @@ def load_settings(
         template_stamp: tuple = (tstat.st_mtime_ns, tstat.st_size)
     except OSError:
         template_stamp = (0, 0)
-    cache_key = (str(resolved_dir), user_stamp, template_stamp, _env_signature(environ),
+    legacy_stamps = sources.legacy_json_stamps(resolved_dir)
+    cache_key = (str(resolved_dir), user_stamp, template_stamp, legacy_stamps,
+                 _env_signature(environ),
                  repr(sorted(cli_layer.items())) if cli_layer else "")
 
     with _cache_lock:
@@ -168,13 +170,14 @@ def load_settings(
         return cached
 
     template_layer = sources.read_toml_file(template_path)
+    legacy_layer = sources.read_legacy_json_layer(resolved_dir)
     user_layer = sources.read_toml_file(user_path)
     env_layer, locked, unknown_env = sources.collect_env_layer(environ, _KNOWN_ENV_NAMES)
     for name in unknown_env:
         logger.warning("Unknown config env var %s ignored", name)
     cli_locked = {f"{section}.{key}": "cli" for section, values in cli_layer.items() for key in values}
 
-    layers = [template_layer, user_layer, env_layer, cli_layer]
+    layers = [template_layer, legacy_layer, user_layer, env_layer, cli_layer]
     merged = _merge_layers([_type_layer(layer) for layer in layers])
     typed = _fill_defaults(merged)
     settings = Settings(
