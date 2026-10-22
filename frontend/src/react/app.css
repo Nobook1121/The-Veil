@@ -5,3 +5,4 @@
 @import "../styles/03-tools-settings-platform.css";
 @import "../styles/04-auth-profile-overrides.css";
 @import "../styles/05-dice-animation.css";
+@import "./agent/agent.css";

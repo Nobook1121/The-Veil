@@ -308,6 +308,7 @@ def register_blueprints(app):
     from trpg_server.routes.scenarios import bp as scenarios_bp
     from trpg_server.routes.scenario_summary import bp as scenario_summary_bp
     from trpg_server.routes.setup import bp as setup_bp
+    from trpg_server.routes.site_agent import bp as site_agent_bp
     from trpg_server.routes.scenario_imports import bp as scenario_imports_bp
     from trpg_server.routes.vector_health import bp as vector_health_bp
     from trpg_server.routes.telemetry import bp as telemetry_bp
@@ -324,6 +325,7 @@ def register_blueprints(app):
     app.register_blueprint(character_ai_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
+    app.register_blueprint(site_agent_bp)
     app.register_blueprint(chat_bp)
     app.register_blueprint(config_bp)
     app.register_blueprint(setup_bp)

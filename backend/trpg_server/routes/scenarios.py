@@ -8,6 +8,7 @@ import requests
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.json_store import read_json
+from trpg_server import scenario_service
 from trpg_server.media_defaults import normalize_cover
 from trpg_server.logging_config import log_user_action, redact_sensitive, user_action_text
 from trpg_server.permission_config import is_role_allowed, permission_config_path
@@ -173,6 +174,23 @@ def _can_modify_scenario(scenario):
     if _can_use_permission("scenarios.manage_all"):
         return True
     return scenario.get("owner_id") == session.get("user_id")
+
+
+def scenario_service_actor():
+    """把当前会话转换成剧本领域服务需要的 Actor。"""
+    from trpg_server.site_agent_auth import Actor, AgentAuthError, build_actor, permission_set_for_role
+
+    try:
+        return build_actor()
+    except AgentAuthError:
+        role = str(session.get("role") or "USER").upper()
+        return Actor(
+            user_id=int(session.get("user_id") or 0),
+            username=str(session.get("username") or ""),
+            role=role,
+            permissions=permission_set_for_role(role),
+            room_ids=frozenset(),
+        )
 
 
 def _trigger_size_limit():
@@ -520,50 +538,16 @@ def create_scenario():
         scenario_data = request.get_json(silent=True)
         if not scenario_data:
             return error_response("Please provide scenario data", 400, "No data")
+        try:
+            saved_scenario = scenario_service.apply_create(scenario_service_actor(), scenario_data)
+        except scenario_service.ScenarioServiceError as exc:
+            return error_response(exc.message, exc.status, exc.message)
 
-        title = scenario_data.get("title", "unnamed")
-        requested_version = str(scenario_data.get("scenario_version") or "").strip()
-        if requested_version and normalize_semver(requested_version, default="") == "":
-            return error_response("Scenario version must use n.n.n format", 400, "Invalid scenario version")
-        for path in _iter_scenario_files():
-            try:
-                existing_data = load_scenario_record(path, _scenarios_dir())
-            except (json.JSONDecodeError, OSError, ValueError):
-                logger.exception("Failed to check scenario title: %s", path.name)
-                continue
-
-            if existing_data.get("title") == title:
-                return error_response(
-                    f'Scenario title "{title}" already exists',
-                    400,
-                    "Scenario title already exists",
-                )
-
-        scenario_id = int(time.time() * 1000)
-        scenario_data["id"] = scenario_id
-        scenario_data["scenario_version"] = normalize_semver(scenario_data.get("scenario_version"))
-        scenario_data["owner_id"] = session["user_id"]
-        scenario_data["creator_username"] = session.get("username", "")
-        scenario_data["public_id"] = generate_public_id(
-            {
-                str(item.get("public_id"))
-                for item in load_scenarios()
-                if item.get("public_id")
-            }
-        )
-        scenario_data["createdAt"] = _current_timestamp()
-        scenario_data["updatedAt"] = scenario_data["createdAt"]
-        scenario_data["cover"] = normalize_cover(scenario_data.get("cover"))
-
-        file_path = save_scenario_record(_scenarios_dir(), scenario_data, trigger_max_file_size=_trigger_size_limit())
         draft_path = _draft_path()
         if draft_path.exists():
             draft_path.unlink()
-        saved_scenario = load_scenario_record(file_path, _scenarios_dir())
-        knowledge = _index_scenario_knowledge(file_path, saved_scenario)
-        saved_scenario["knowledge"] = knowledge
-        clear_scenarios_cache()
-
+        title = scenario_data.get("title", "unnamed")
+        scenario_id = saved_scenario.get("id")
         log_user_action(
             logger,
             user_action_text(session.get("username"), "创建了剧本"),
@@ -605,57 +589,21 @@ def update_scenario(scenario_id):
         if not _can_use_permission("scenarios.edit"):
             return error_response("Permission denied", 403, "Permission denied")
 
-        scenario_data["id"] = scenario_id
-        current_version = str(existing_scenario.get("scenario_version") or existing_scenario.get("version") or "1")
-        requested_version = str(scenario_data.get("scenario_version") or "").strip()
-        if requested_version and normalize_semver(requested_version, default="") == "":
-            return error_response("Scenario version must use n.n.n format", 400, "Invalid scenario version")
-        # 客户端可能只提交部分字段（例如直接导入的剧本只修改基础信息）：先与已存
-        # 记录合并，避免 import_mode/conversion 等服务端字段被静默丢弃。
-        scenario_data = {**existing_scenario, **scenario_data}
-        scenario_data["id"] = scenario_id
-        changed = scenario_content_changed(existing_scenario, scenario_data)
-        if not changed:
-            scenario_data["scenario_version"] = current_version
-        elif requested_version and normalize_semver(requested_version) != normalize_semver(current_version) and "." in requested_version:
-            scenario_data["scenario_version"] = normalize_semver(requested_version)
-        else:
-            scenario_data["scenario_version"] = normalize_semver(next_scenario_version(normalize_semver(current_version)))
-        scenario_data["owner_id"] = existing_scenario.get("owner_id")
-        scenario_data["creator_username"] = existing_scenario.get("creator_username") or session.get("username", "")
-        scenario_data["public_id"] = existing_scenario.get("public_id") or generate_public_id(
-            {
-                str(item.get("public_id"))
-                for item in load_scenarios()
-                if item.get("public_id") and item.get("id") != scenario_id
-            }
-        )
-        scenario_data["updatedAt"] = _current_timestamp()
-        if "createdAt" not in scenario_data:
-            scenario_data["createdAt"] = existing_scenario.get(
-                "createdAt",
-                _current_timestamp(),
+        try:
+            saved_scenario = scenario_service.apply_update(
+                scenario_service_actor(),
+                scenario_id,
+                scenario_data,
             )
-
-        file_path = save_scenario_record(
-            _scenarios_dir(),
-            scenario_data,
-            existing_descriptor=target_file,
-            trigger_max_file_size=_trigger_size_limit(),
-        )
-        saved_scenario = load_scenario_record(file_path, _scenarios_dir())
-        # 仅修改基础信息（标题/作者/推荐人数/简介/封面）时版本号不变，也不重做
-        # 向量嵌入，直接复用已有知识库。
-        knowledge = _index_scenario_knowledge(file_path, saved_scenario) if changed else _scenario_knowledge_stats(file_path, saved_scenario)
-        saved_scenario["knowledge"] = knowledge
-        clear_scenarios_cache()
+        except scenario_service.ScenarioServiceError as exc:
+            return error_response(exc.message, exc.status, exc.message)
 
         log_user_action(
             logger,
             user_action_text(session.get("username"), "更新了剧本"),
             用户ID=session.get("user_id"),
             剧本ID=scenario_id,
-            标题=scenario_data.get("title", "unknown"),
+            标题=saved_scenario.get("title", "unknown"),
         )
         return success_response(saved_scenario, "Scenario updated successfully")
     except Exception as exc:

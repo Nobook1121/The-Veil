@@ -34,7 +34,7 @@ def test_room_write_actions_are_guarded_against_duplicate_clicks():
     assert 'return runRoomAction("create-room", "confirmCreateSave", async () => {' in source
     assert 'return runRoomAction("join-room", "joinRoom", async () => {' in source
     assert 'return runRoomAction(`bind-character:${currentRoom.id}:${userId}`, "confirmRoomCharacterBind", async () => {' in source
-    assert 'return runRoomAction("submit-character-record", "submitCharacterRecord", async () => {' in source
+    assert "window.recordCharacterChange = recordCharacterChange;" in source
 
 
 def test_chat_input_supports_enter_to_send_message():

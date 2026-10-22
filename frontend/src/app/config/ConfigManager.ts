@@ -168,6 +168,15 @@ class ConfigManager {
         configSetCheckboxValue("recursiveScanning", this.get("general", "ai.knowledge", "recursive_scanning", true));
         configSetInputValue("maxRecursionDepth", this.get("general", "ai.knowledge", "max_recursion_depth", 3));
         configSetInputValue("lorebookTokenBudget", this.get("general", "ai.knowledge", "lorebook_token_budget", 0));
+        // 网站 Agent 的启用开关与限额
+        configSetCheckboxValue("siteAgentEnabled", this.get("general", "site_agent", "enabled", false));
+        configSetInputValue("siteAgentDailyTokenBudget", this.get("general", "site_agent", "daily_token_budget", 200000));
+        configSetInputValue("siteAgentMaxTurnsPerHour", this.get("general", "site_agent", "max_turns_per_hour", 60));
+        configSetInputValue("siteAgentMaxToolRounds", this.get("general", "site_agent", "max_tool_rounds", 6));
+        configSetInputValue("siteAgentRequestTimeout", this.get("general", "site_agent", "request_timeout", 120));
+        configSetInputValue("siteAgentMaxHistoryMessages", this.get("general", "site_agent", "max_history_messages", 40));
+        configSetInputValue("siteAgentMaxToolResultChars", this.get("general", "site_agent", "max_tool_result_chars", 4000));
+        configSetInputValue("siteAgentActionTtlSeconds", this.get("general", "site_agent", "action_ttl_seconds", 300));
 
         // UI 回填完成后记录「已保存基线」，让设置页的保存条据此判断未保存改动。
         window.refreshGeneralSettingsBaseline?.();

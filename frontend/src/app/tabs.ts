@@ -75,16 +75,10 @@ function handleMainNavigationClick(
     targetTab.classList.add("active");
     console.log(`切换到标签页: ${tabId}`);
 
-    // 小工具与设置页各自在页面顶部提供完整的横向子标签，侧边栏只保留一级入口，
-    // 因此这里仅在 hash 明确指向某个子标签（tools-* / settings-*）时才切换。
+    // 设置页在页面顶部提供横向子标签，因此仅在 hash 明确指向 settings-* 时切换。
     if (tabId === "settings") {
         const hash = link.hash.replace("#", "");
         if (hash.startsWith("settings-")) switchSettingsTab(hash.slice("settings-".length));
-    }
-
-    if (tabId === "tools") {
-        const hash = link.hash.replace("#", "");
-        if (hash.startsWith("tools-")) switchToolTab(hash.slice("tools-".length));
     }
 }
 
@@ -198,38 +192,6 @@ function switchSettingsTab(tabName: string): void {
     window.TrpgAdminDiceTextures?.init();
 }
 
-function switchToolTab(toolName: string): void {
-    const toolTabs = document.querySelectorAll<HTMLElement>(".tool-tab");
-    const toolContents = document.querySelectorAll<HTMLElement>(".tool-content");
-
-    toolTabs.forEach((tab) => {
-        tab.classList.remove("active");
-        tab.setAttribute("aria-selected", "false");
-    });
-    toolContents.forEach((content) => content.classList.remove("active"));
-
-    const targetTab = document.querySelector<HTMLElement>(`.tool-tab[data-tool="${CSS.escape(toolName)}"]`);
-    const targetContent = document.getElementById(`${toolName}-tool-content`);
-    targetTab?.classList.add("active");
-    targetTab?.setAttribute("aria-selected", "true");
-    targetContent?.classList.add("active");
-}
-
-function initToolTabs(): void {
-    const toolTabs = document.querySelectorAll<HTMLElement>(".tool-tab");
-    const toolContents = document.querySelectorAll<HTMLElement>(".tool-content");
-    if (toolTabs.length === 0 || toolContents.length === 0) {
-        console.error("无法找到工具标签或工具内容");
-        return;
-    }
-
-    toolTabs.forEach((tab) => {
-        tab.setAttribute("role", "tab");
-        tab.setAttribute("aria-selected", tab.classList.contains("active") ? "true" : "false");
-        tab.addEventListener("click", () => switchToolTab(tab.dataset.tool || ""));
-    });
-}
-
 function initSettingsTabs(): void {
     const settingsTabs = document.querySelectorAll<HTMLElement>(".settings-tab");
     const settingsContents = document.querySelectorAll<HTMLElement>(".settings-content");
@@ -309,6 +271,14 @@ function initSettingsTabs(): void {
     bindGeneralCheckboxSetting("enableRoomConsole", "room_console", "enabled");
     bindGeneralCheckboxSetting("mirrorRoomConsole", "room_console", "mirror_to_server_console");
     bindGeneralNumberSetting("roomConsoleMaxEntries", "room_console", "max_entries", 50, 5000);
+    bindGeneralCheckboxSetting("siteAgentEnabled", "site_agent", "enabled");
+    bindGeneralNumberSetting("siteAgentDailyTokenBudget", "site_agent", "daily_token_budget", 0, 100000000);
+    bindGeneralNumberSetting("siteAgentMaxTurnsPerHour", "site_agent", "max_turns_per_hour", 1, 1000);
+    bindGeneralNumberSetting("siteAgentMaxToolRounds", "site_agent", "max_tool_rounds", 1, 20);
+    bindGeneralNumberSetting("siteAgentRequestTimeout", "site_agent", "request_timeout", 30, 1800);
+    bindGeneralNumberSetting("siteAgentMaxHistoryMessages", "site_agent", "max_history_messages", 4, 200);
+    bindGeneralNumberSetting("siteAgentMaxToolResultChars", "site_agent", "max_tool_result_chars", 200, 20000);
+    bindGeneralNumberSetting("siteAgentActionTtlSeconds", "site_agent", "action_ttl_seconds", 30, 3600);
     document.getElementById("savePermissionConfig")?.addEventListener("click", () => {
         void savePermissionConfig();
     });
