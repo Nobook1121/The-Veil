@@ -12,6 +12,7 @@ from typing import Any, Callable, TextIO
 from trpg_server import (
     ai_admin,
     backup_admin,
+    config_admin,
     knowledge_admin,
     network_admin,
     room_admin,
@@ -274,6 +275,14 @@ def execute_console_command(
         if subcommand == "test":
             return _log_result(_network_test_command())
 
+    if domain == "config" and subcommand:
+        if subcommand == "show":
+            return _log_result(_config_show_command(args[1:]))
+        if subcommand == "migrate":
+            return _log_result(_config_migrate_command(args[1:], confirm=confirm))
+        if subcommand == "path":
+            return _log_result(_config_path_command(args[1:]))
+
     if domain == "autosave":
         return _log_result(_autosave_command(app))
 
@@ -336,6 +345,9 @@ def command_help_text() -> str:
             "  dice textures                                    （贴图资产、桌面皮肤与骰子皮肤概览）",
             "  dice skin delete <skin_id> [--yes]               （删除骰子皮肤；--yes 跳过确认）",
             "  network status / network test                    （网络状态 / 连通性测试）",
+            "  config show [--section <name>]                   （查看生效配置与部署锁定来源）",
+            "  config migrate [--yes]                           （遗留 JSON 并入 general.toml，原文件改名 .legacy）",
+            "  config path                                      （打印配置目录与模板目录）",
             "  server health [--json] / server info             （子系统健康 / 进程与目录信息）",
             "  log tail [n]                                     （打印最近 n 行日志，默认 50）",
             "  autosave                                         （立即触发一次自动存档检查）",
@@ -1882,6 +1894,61 @@ def _network_test_command() -> ConsoleCommandResult:
         f"  端口绑定: {'成功' if data['connection_success'] else '失败'}",
         f"  UDP 发现: {'成功' if data['discovery_success'] else '失败'}"
         + (f" · {data['discovery_error']}" if data["discovery_error"] else ""),
+    ]
+    return ConsoleCommandResult(True, "\n".join(lines))
+
+
+def _config_show_command(args: list[str]) -> ConsoleCommandResult:
+    section: str | None = None
+    index = 0
+    while index < len(args):
+        item = args[index]
+        if item.lower() == "--section":
+            if index + 1 >= len(args):
+                return ConsoleCommandResult(False, "Usage: config show [--section <name>]")
+            section = args[index + 1]
+            index += 2
+            continue
+        return ConsoleCommandResult(False, f"未知参数: {item}（用法: config show [--section <name>]）")
+    return ConsoleCommandResult(True, config_admin.format_settings(section))
+
+
+def _config_migrate_command(args: list[str], *, confirm: Callable[[str], bool] | None = None) -> ConsoleCommandResult:
+    positionals, flags = _split_args(args)
+    unknown = _reject_unknown_flags(flags - YES_FLAGS, set())
+    if unknown:
+        return ConsoleCommandResult(False, unknown)
+    if positionals:
+        return ConsoleCommandResult(False, f"未知参数: {', '.join(positionals)}")
+    if not config_admin.legacy_files_present():
+        return ConsoleCommandResult(True, config_admin.format_migration_preview())
+
+    def _apply() -> ConsoleCommandResult:
+        actions = config_admin.migrate_legacy_config()
+        log_user_action(logger, user_action_text(CONSOLE_ACTOR, "迁移了遗留JSON配置到 general.toml"))
+        return ConsoleCommandResult(True, "\n".join(actions) if actions else "没有需要迁移的内容。")
+
+    return _confirm_action(
+        preview=config_admin.format_migration_preview(),
+        apply=_apply,
+        assume_yes=_assume_yes(flags),
+        confirm=confirm,
+        prompt="确认执行配置迁移?",
+    )
+
+
+def _config_path_command(args: list[str]) -> ConsoleCommandResult:
+    positionals, flags = _split_args(args)
+    unknown = _reject_unknown_flags(flags - YES_FLAGS, set())
+    if unknown:
+        return ConsoleCommandResult(False, unknown)
+    if positionals:
+        return ConsoleCommandResult(False, f"未知参数: {', '.join(positionals)}")
+    info = config_admin.config_path_info()
+    lines = [
+        f"配置目录: {info['config_dir']}",
+        f"模板目录: {info['template_dir']}",
+        f"用户配置: {info['general_config']}",
     ]
     return ConsoleCommandResult(True, "\n".join(lines))
 

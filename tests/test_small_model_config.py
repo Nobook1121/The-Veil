@@ -261,11 +261,13 @@ def test_shipped_general_config_exposes_knowledge_settings(tmp_path):
     assert config.lorebook_token_budget == 0
 
 
-def test_frontend_parser_unquotes_toml_section_names():
+def test_frontend_config_manager_uses_json_api_not_toml_parser():
+    # Phase 2 起前端不再解析 TOML：生效配置统一由 GET /api/config/<name> 返回 JSON。
     source = Path("frontend/src/app/config/ConfigManager.ts").read_text(encoding="utf-8")
 
-    assert "normalizeTomlKey" in source
-    assert "normalizeTomlKey(sectionMatch[1]" in source
+    assert "parseTOML" not in source
+    assert "normalizeTomlKey" not in source
+    assert "/api/config/" in source
 
 
 def test_provider_small_model_config_prefers_task_model_and_falls_back():

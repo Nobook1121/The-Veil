@@ -12,6 +12,7 @@ import requests
 from pathlib import Path
 
 from trpg_server.config import ensure_user_config
+from trpg_server.config.paths import resolve_config_dir
 from trpg_server.logging_config import configure_logging
 from trpg_server.security import register_session_guard
 from trpg_server.socket_events import register_socket_events
@@ -79,6 +80,8 @@ def create_app(config=None):
     )
     if config:
         app.config.update(config)
+    # --config-dir CLI 覆盖经 paths.resolve_config_dir() 生效；测试注入的 CONFIG_DIR 优先。
+    app.config.setdefault("CONFIG_DIR", resolve_config_dir())
     # 首次启动（含测试注入的临时 CONFIG_DIR）：从模板生成缺失的用户配置，幂等不覆盖。
     ensure_user_config(app.config.get("CONFIG_DIR", CONFIG_DIR))
     # The global body limit is the largest of the per-feature allowances (scenario
@@ -99,10 +102,10 @@ def create_app(config=None):
     app.extensions["scenario_import_executor"] = ThreadPoolExecutor(max_workers=app.config["SCENARIO_IMPORT_WORKERS"])
     # 云端 embedding 接口默认关闭：环境变量没显式配置时，只有管理员在设置页开启后才会读取
     # AI 平台配置里的 embedding 段；关闭时一律回落到本地模型（可用时）或哈希向量。
-    cloud_embedding_enabled = load_ai_runtime_config(CONFIG_DIR).cloud_embedding_enabled
+    cloud_embedding_enabled = load_ai_runtime_config(app.config["CONFIG_DIR"]).cloud_embedding_enabled
     embedding_url, embedding_key, embedding_model, embedding_dimensions = app.config["EMBEDDING_BASE_URL"], app.config["EMBEDDING_API_KEY"], app.config["EMBEDDING_MODEL"], app.config["EMBEDDING_DIMENSIONS"]
     if cloud_embedding_enabled and not (embedding_url and embedding_key and embedding_model):
-        platform_dir = Path(app.config.get("AI_PLATFORM_DIR", CONFIG_DIR / "aiplatform"))
+        platform_dir = Path(app.config.get("AI_PLATFORM_DIR", app.config["CONFIG_DIR"] / "aiplatform"))
         secret_dir = Path(app.config.get("AI_PLATFORM_SECRET_DIR", AI_PLATFORM_SECRET_DIR))
         for public_path in sorted(platform_dir.glob("*.json")):
             candidate = load_platform_config(public_path, secret_dir / public_path.name)
@@ -228,7 +231,7 @@ def _configure_scenario_chunk_analyzer(app):
     """
     if callable(app.config.get("SCENARIO_CHUNK_ANALYZER")):
         return
-    platform_dir = Path(app.config.get("AI_PLATFORM_DIR", CONFIG_DIR / "aiplatform"))
+    platform_dir = Path(app.config.get("AI_PLATFORM_DIR", app.config["CONFIG_DIR"] / "aiplatform"))
     secret_dir = Path(app.config.get("AI_PLATFORM_SECRET_DIR", AI_PLATFORM_SECRET_DIR))
     for public_path in sorted(platform_dir.glob("*.json")):
         try:

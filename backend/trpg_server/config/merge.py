@@ -142,12 +142,13 @@ def load_settings(
     env: Mapping[str, str] | None = None,
     cli_overrides: dict[str, dict[str, Any]] | None = None,
 ) -> Settings:
-    """加载生效配置（带缓存）。``env``/``cli_overrides`` 主要供测试注入。"""
+    """加载生效配置（带缓存）。``env``/``cli_overrides`` 主要供测试注入；
+    未显式传入 ``cli_overrides`` 时读取 paths 中的全局 CLI 覆盖（``--set``）。"""
     resolved_dir = paths.resolve_config_dir(config_dir)
     user_path = resolved_dir / paths.GENERAL_CONFIG_FILENAME
     template_path = paths.template_general_path()
     environ = dict(os.environ if env is None else env)
-    cli_layer = cli_overrides or {}
+    cli_layer = dict(cli_overrides) if cli_overrides is not None else paths.get_cli_overrides()
 
     try:
         stat = user_path.stat()

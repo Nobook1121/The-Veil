@@ -377,6 +377,20 @@ backup create [--out <dir>] [--yes]     打包 config/剧本/房间/知识库/�
 
 `backup create` 默认输出到 `data/backups`，可用 `--out` 指定目录。
 
+## 配置查看与迁移
+
+```text
+config show [--section <name>]    查看生效配置（五层合并结果），被 env/CLI 锁定的键标注来源
+config migrate [--yes]            把遗留 site.json/network.json/penetration.json 并入 general.toml，
+                                  原文件改名为 *.legacy（缺省预演，--yes 直接执行）
+config path                       打印配置目录、模板目录与用户配置文件路径
+```
+
+`config show` 输出的是部署生效值（代码默认 < 模板 < 用户配置 < 环境变量 `AI_TRPG_CFG_*` < CLI
+`--set`）；标注 `(locked: env)` / `(locked: cli)` 的键在设置页不可修改。`config migrate` 只写入
+`general.toml` 中尚不存在的键，保证迁移前后生效配置完全一致；迁移完成后遗留文件保留为
+`*.legacy` 备份，可人工确认后删除。
+
 ## 系统 OWNER 转移
 
 ```text

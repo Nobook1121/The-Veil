@@ -26,12 +26,24 @@ if str(BACKEND_DIR) not in sys.path:
 # create_app() loads the embedding model, which takes seconds, so emitting a
 # line first lets the user see output immediately instead of waiting in silence.
 from trpg_server.config import ensure_user_config
+from trpg_server.config import paths as config_paths
 from trpg_server.logging_config import configure_logging
 from trpg_server.settings import CONFIG_DIR, DEFAULT_PORT, LOGS_DIR
 
+# CLI 解析必须在 ensure_user_config() 与端口选择之前完成：--config-dir 决定
+# 首次启动生成配置的位置，--set/--port 覆盖经 config 包注入全部分层加载。
+try:
+    _CLI_ARGS = config_paths.parse_cli_args(sys.argv)
+except ValueError as exc:
+    print(f"Invalid command line: {exc}", file=sys.stderr)
+    sys.exit(2)
+if _CLI_ARGS.config_dir is not None:
+    config_paths.set_config_dir_override(_CLI_ARGS.config_dir)
+config_paths.set_cli_overrides(_CLI_ARGS.overrides)
+
 # 首次启动：从 config/templates 生成 data/config 下的用户配置（幂等，不覆盖已有文件）。
-ensure_user_config(CONFIG_DIR)
-configure_logging(LOGS_DIR, CONFIG_DIR)
+ensure_user_config()
+configure_logging(LOGS_DIR, config_paths.resolve_config_dir())
 logger = logging.getLogger(__name__)
 logger.info("Server starting")
 
@@ -177,16 +189,15 @@ def _log_listening_addresses(local_ip, port):
         logger.info("listening on http://%s:%s", address, port)
 
 
-def _select_port(argv):
+def _select_port():
+    # 端口优先级：CLI（位置参数 / --port）> 环境变量 > 用户配置 > 模板/代码默认。
+    # get_network_config 内部已走统一分层加载（含 env 与 --set 覆盖）。
     config = get_network_config()
     port = config.get("port", DEFAULT_PORT)
 
-    if len(argv) > 1:
-        try:
-            port = int(argv[1])
-            logger.debug("Using command line port: %s", port)
-        except ValueError:
-            logger.warning("Invalid command line port; using configured port")
+    if _CLI_ARGS.port is not None:
+        port = _CLI_ARGS.port
+        logger.debug("Using command line port: %s", port)
 
     if is_port_available(port):
         return port
@@ -201,10 +212,9 @@ def _select_port(argv):
     return DEFAULT_PORT
 
 
-def run_server(argv=None):
-    argv = argv or sys.argv
+def run_server():
     _shutdown_requested.clear()
-    port = _select_port(argv)
+    port = _select_port()
     local_ip = get_local_ip()
     ensure_frontend_build()
     logger.debug("Starting server on port %s", port)
