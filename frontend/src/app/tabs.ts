@@ -468,8 +468,9 @@ function bindDicePlayerRollTimeoutState(): void {
     const timeout = document.getElementById("dicePlayerRollTimeout") as HTMLInputElement | null;
     if (!toggle || !timeout) return;
     const sync = (): void => {
-        timeout.disabled = !toggle.checked;
-        timeout.closest<HTMLElement>(".form-group")?.classList.toggle("setting-disabled", !toggle.checked);
+        const locked = timeout.dataset.deploymentLocked === "true";
+        timeout.disabled = locked || !toggle.checked;
+        timeout.closest<HTMLElement>(".form-group")?.classList.toggle("setting-disabled", locked || !toggle.checked);
     };
     toggle.addEventListener("change", sync);
     sync();
@@ -481,7 +482,8 @@ function bindDiceRerollLimitState(): void {
     const limit = document.getElementById("diceRerollLimit") as HTMLInputElement | null;
     if (!mode || !limit) return;
     const sync = (): void => {
-        const editable = mode.value === "limited";
+        const locked = limit.dataset.deploymentLocked === "true";
+        const editable = !locked && mode.value === "limited";
         limit.disabled = !editable;
         limit.closest<HTMLElement>(".form-group")?.classList.toggle("setting-disabled", !editable);
     };
@@ -489,8 +491,37 @@ function bindDiceRerollLimitState(): void {
     sync();
 }
 
+/** 部署层（环境变量/命令行参数）锁定的设置项：禁用控件并提示「已被部署配置覆盖」。 */
+function applyGeneralDeploymentOverrides(): void {
+    generalSettingControls.forEach((control) => {
+        const source = configManager.getOverrideSource("general", control.section, control.key);
+        const group = control.element.closest<HTMLElement>(".form-group");
+        let hint = group?.querySelector<HTMLElement>(".setting-override-hint") || null;
+        if (source !== null) {
+            control.element.dataset.deploymentLocked = "true";
+            control.element.disabled = true;
+            group?.classList.add("setting-disabled");
+            if (group && !hint) {
+                hint = document.createElement("div");
+                hint.className = "form-text text-warning setting-override-hint";
+                group.appendChild(hint);
+            }
+            if (hint) {
+                const sourceLabel = source === "cli" ? "命令行参数" : "环境变量";
+                hint.textContent = `已被部署配置覆盖（${sourceLabel}），此处修改不会生效`;
+            }
+        } else if (control.element.dataset.deploymentLocked === "true") {
+            delete control.element.dataset.deploymentLocked;
+            control.element.disabled = false;
+            group?.classList.remove("setting-disabled");
+            hint?.remove();
+        }
+    });
+}
+
 /** 配置加载并回填 UI 之后调用：把当前界面值记为「已保存基线」。 */
 function refreshGeneralSettingsBaseline(): void {
+    applyGeneralDeploymentOverrides();
     bindDicePlayerRollTimeoutState();
     bindDiceRerollLimitState();
     generalSettingControls.forEach((control) => {

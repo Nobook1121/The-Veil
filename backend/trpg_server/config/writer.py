@@ -22,6 +22,32 @@ logger = logging.getLogger(__name__)
 _write_lock = threading.Lock()
 
 
+def _normalize_quoted_dotted_tables(doc: Any) -> None:
+    """把根级带引号的点分表名（``["ai.small_models"]``）折叠为嵌套表。
+
+    历史脏数据里段名以引号整体出现；若不做归一，写入 ``ai.small_models`` 会在
+    文档里同时存在 ``["ai.small_models"]`` 与 ``[ai.small_models]`` 两种形态，
+    序列化后即非法 TOML。合法文件不可能两种形态并存（解析期就会冲突报错），
+    因此折叠后不会与既有嵌套表冲突。
+    """
+    for key in list(doc.keys()):
+        if "." not in key:
+            continue
+        value = doc[key]
+        if not isinstance(value, tomlkit.items.Table):
+            continue
+        del doc[key]
+        target: Any = doc
+        parts = key.split(".")
+        for part in parts[:-1]:
+            existing = target.get(part)
+            if not isinstance(existing, tomlkit.items.Table):
+                existing = tomlkit.table()
+                target[part] = existing
+            target = existing
+        target[parts[-1]] = value
+
+
 def update_sections(path: Path, changes: Mapping[str, Mapping[str, Any]]) -> Path:
     """把 ``changes``（section → {key: value}）定点写入 ``path`` 并原子替换。
 
@@ -32,6 +58,7 @@ def update_sections(path: Path, changes: Mapping[str, Mapping[str, Any]]) -> Pat
         if path.exists():
             text = path.read_text(encoding="utf-8")
         doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
+        _normalize_quoted_dotted_tables(doc)
 
         for section, values in changes.items():
             if not values:

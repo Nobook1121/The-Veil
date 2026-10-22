@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 import shutil
 import time
 
@@ -16,6 +15,9 @@ from trpg_server.ai_platform_config import (
     ordered_platform_paths,
     save_platform_config,
 )
+from trpg_server.config import load_settings, update_sections
+from trpg_server.config.paths import general_config_path
+from trpg_server.config.sources import read_toml_file
 from trpg_server.json_store import write_json_atomic
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.permission_config import load_permission_config, permission_config_path, save_permission_config
@@ -26,10 +28,12 @@ from trpg_server.settings import AI_PLATFORM_SECRET_DIR, CONFIG_DIR
 
 bp = Blueprint("config", __name__)
 logger = logging.getLogger(__name__)
-_BARE_TOML_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 CONFIG_LABELS = {
     "general": "通用设置",
 }
+
+# 密钥类字段：GET 一律掩码、POST 一律拒写（穿透令牌经 /api/network/penetration/config 管理）。
+_REDACTED_GENERAL_KEYS = frozenset({("network.penetration.settings", "auth_token")})
 
 
 def _get_config_dir():
@@ -74,68 +78,23 @@ def _current_role_can(node_id):
     return load_permission_config(_get_permission_config_file())["matrix"].get(node_id, []).count(session.get("role", "USER")) > 0
 
 
-def _format_toml_value(value):
-    if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, bool):
-        return str(value).lower()
-    if isinstance(value, (int, float)):
-        return str(value)
-    return json.dumps(str(value), ensure_ascii=False)
+@bp.route("/api/config/general", methods=["GET"])
+def get_general_config():
+    """返回生效配置（五层合并后）与被部署层锁定的键。
 
-
-def _format_toml_key(key):
-    key_text = str(key)
-    if _BARE_TOML_KEY_RE.fullmatch(key_text):
-        return key_text
-    return json.dumps(key_text, ensure_ascii=False)
-
-
-def _normalize_toml_name(name):
-    """剥离历史脏数据中反复叠加的引号转义，使段名收敛到基名。
-
-    早期版本把 ``ai.small_models`` 写成 ``["ai.small_models"]``，读取时又未去引号，
-    前端整对象回写后引号被再次转义，导致每次保存转义翻倍。这里做有界收敛。
+    前端启动早期（登录前）就要按此渲染主题等，因此不要求登录；
+    密钥类字段在响应中一律掩码为空串。
     """
-    text = str(name).strip()
-    for _ in range(8):
-        if len(text) < 2 or text[0] != text[-1] or text[0] not in {'"', "'"}:
-            break
-        if text[0] == '"':
-            try:
-                unquoted = json.loads(text)
-            except ValueError:
-                break
-            if not isinstance(unquoted, str) or unquoted == text:
-                break
-            text = unquoted
-        else:
-            text = text[1:-1]
-    return text
-
-
-def _format_toml_section(section):
-    # 点号分隔的段名（如 ai.small_models）按 TOML 点分键原样输出；
-    # 否则 json.dumps 会写成 ["ai.small_models"] 并触发读取侧的引号叠加问题。
-    section_text = _normalize_toml_name(section)
-    parts = section_text.split(".")
-    if section_text and all(_BARE_TOML_KEY_RE.fullmatch(part) for part in parts):
-        return ".".join(parts)
-    return _format_toml_key(section_text)
-
-
-def convert_to_toml(config_data):
-    lines = []
-    for section, values in config_data.items():
-        if not isinstance(values, dict):
-            continue
-
-        lines.append(f"[{_format_toml_section(section)}]")
-        for key, value in values.items():
-            lines.append(f"{_format_toml_key(key)} = {_format_toml_value(value)}")
-        lines.append("")
-
-    return "\n".join(lines)
+    try:
+        settings = load_settings(_get_config_dir())
+        data = {section: dict(values) for section, values in settings.data.items()}
+        for section, key in _REDACTED_GENERAL_KEYS:
+            if key in data.get(section, {}):
+                data[section][key] = ""
+        return success_response(data={"config": data, "overrides": settings.locked})
+    except Exception:
+        logger.exception("Failed to load general config")
+        return server_error("Load failed")
 
 
 @bp.route("/api/config/<config_name>", methods=["POST"])
@@ -148,18 +107,43 @@ def save_config(config_name):
         if not config_data:
             return error_response("Invalid config data", 400)
 
-        config_path = safe_join(_get_config_dir(), f"{config_name}.toml")
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(convert_to_toml(config_data), encoding="utf-8")
+        config_dir = _get_config_dir()
+        locked = load_settings(config_dir).locked
+        user_path = general_config_path(config_dir) if config_name == "general" else safe_join(config_dir, f"{config_name}.toml")
+        user_layer = read_toml_file(user_path)
+
+        # 逐键 diff：只写相对磁盘用户文件发生变化的键；部署层（env/CLI）锁定键
+        # 与密钥类字段不允许经此接口写入。
+        changes = {}
+        skipped_locked = []
+        for section, values in config_data.items():
+            if not isinstance(values, dict):
+                continue
+            user_section = user_layer.get(section, {})
+            for key, value in values.items():
+                if (section, key) in _REDACTED_GENERAL_KEYS:
+                    continue
+                if f"{section}.{key}" in locked:
+                    skipped_locked.append(f"{section}.{key}")
+                    continue
+                if key in user_section and user_section[key] == value:
+                    continue
+                changes.setdefault(section, {})[key] = value
+
+        if skipped_locked:
+            logger.info("Config save skipped deployment-locked keys: %s", ",".join(sorted(skipped_locked)))
+        if changes:
+            update_sections(user_path, changes)
 
         log_user_action(
             logger,
             user_action_text(session.get("username"), f"更改了{CONFIG_LABELS.get(config_name, config_name + '设置')}"),
             用户ID=session.get("user_id"),
-            文件=config_path.name,
+            文件=user_path.name,
+            变更键数=sum(len(values) for values in changes.values()),
         )
         return success_response(message="Config saved successfully")
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to save config: %s", config_name)
         return server_error("Save failed")
 

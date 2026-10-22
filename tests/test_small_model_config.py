@@ -1,9 +1,7 @@
-import json
 from pathlib import Path
 
 from trpg_server.agents.config import load_ai_runtime_config
 from trpg_server.role_config import provider_small_model_config, resolve_task_model
-from trpg_server.routes.config import convert_to_toml
 
 
 def test_runtime_config_reads_small_model_task_mapping(tmp_path):
@@ -203,29 +201,21 @@ def test_write_ai_setting_preserves_other_sections_and_comments(tmp_path):
     assert config.dice_player_roll is True
 
 
-def test_convert_to_toml_emits_dotted_sections_without_quotes():
-    content = convert_to_toml(
-        {
-            "ai": {"stream_output": True},
-            "ai.small_models": {"summarization": "qwen-turbo"},
-        }
-    )
+def test_update_sections_collapses_legacy_quoted_dotted_sections(tmp_path):
+    """历史脏数据里的引号段名（``["ai.small_models"]``）在写入时折叠为嵌套表，
+    避免与新建的点分表并存导致文件非法。"""
+    from trpg_server.config import update_sections
 
-    assert "[ai]" in content
-    assert "[ai.small_models]" in content
+    path = tmp_path / "general.toml"
+    path.write_text('["ai.small_models"]\nsummarization = "qwen-turbo"\n', encoding="utf-8")
+
+    update_sections(path, {"ai.small_models": {"intent_classification": "qwen-plus"}})
+
+    content = path.read_text(encoding="utf-8")
     assert '["ai.small_models"]' not in content
-
-
-def test_convert_to_toml_collapses_legacy_escaped_section_names():
-    # 模拟历史脏数据：段名被反复加引号 / 转义
-    dirty = "ai.small_models"
-    for _ in range(4):
-        dirty = json.dumps(dirty, ensure_ascii=False)
-
-    content = convert_to_toml({dirty: {"summarization": "qwen-turbo"}})
-
-    assert "[ai.small_models]" in content
-    assert "\\\\" not in content
+    config = load_ai_runtime_config(tmp_path)
+    assert config.small_model_tasks["summarization"] == "qwen-turbo"
+    assert config.small_model_tasks["intent_classification"] == "qwen-plus"
 
 
 def test_general_config_has_no_escaped_section_names():

@@ -4,6 +4,7 @@ interface ConfigManager {
     getConfig(configName: string): TomlConfig;
     get<T = unknown>(configName: string, section: string | null, key: string, defaultValue?: T): T;
     getSection(configName: string, section: string): TomlConfig | null;
+    getOverrideSource(configName: string, section: string, key: string): string | null;
     applyGeneralSettings(): void;
     initThemeSystem(): void;
     getEffectiveTheme(): string;

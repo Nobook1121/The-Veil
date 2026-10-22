@@ -1,92 +1,31 @@
 class ConfigManager {
     private readonly configs: Record<string, TomlConfig> = {};
-    private readonly configPath = "config";
+    // 部署层（环境变量/命令行）锁定的键："section.key" -> 来源（env/cli）。
+    private readonly overrides: Record<string, Record<string, string>> = {};
     private themeInitialized = false;
     private themeTransitionTimer: number | null = null;
 
     async loadConfig(configName: string): Promise<TomlConfig | null> {
         try {
-            const response = await fetch(`${this.configPath}/${configName}.toml`);
-            if (!response.ok) {
-                throw new Error(`无法加载配置文件: ${configName}.toml`);
+            const { response, data } = await TrpgApi.requestWithResponse<
+                ApiResponse<{ config: TomlConfig; overrides?: Record<string, string> }>
+            >(`/api/config/${configName}`);
+            if (!response.ok || !data.success || !data.data) {
+                throw new Error(`无法加载配置: ${configName}`);
             }
-            const config = this.parseTOML(await response.text());
-            this.configs[configName] = config;
-            console.log(`配置文件 ${configName}.toml 加载成功`);
-            return config;
+            this.configs[configName] = data.data.config;
+            this.overrides[configName] = data.data.overrides || {};
+            console.log(`配置 ${configName} 加载成功`);
+            return data.data.config;
         } catch (error) {
-            console.error(`加载配置文件失败: ${configErrorMessage(error)}`);
+            console.error(`加载配置失败: ${configErrorMessage(error)}`);
             return null;
         }
     }
 
-    parseTOML(tomlContent: string): TomlConfig {
-        const config: TomlConfig = {};
-        let currentSection: string | null = null;
-
-        for (let line of tomlContent.split("\n")) {
-            const commentIndex = line.indexOf("#");
-            if (commentIndex !== -1) {
-                line = line.substring(0, commentIndex);
-            }
-            line = line.trim();
-            if (!line) continue;
-
-            const sectionMatch = line.match(/^\[(.+)\]$/);
-            if (sectionMatch) {
-                currentSection = normalizeTomlKey(sectionMatch[1] || "");
-                config[currentSection] = {};
-                continue;
-            }
-
-            const keyValueMatch = line.match(/^([^=]+)=(.+)$/);
-            if (!keyValueMatch) continue;
-
-            const key = normalizeTomlKey(keyValueMatch[1] || "");
-            const value = this.parseValue((keyValueMatch[2] || "").trim());
-            if (currentSection) {
-                const section = config[currentSection];
-                if (isTomlConfig(section)) section[key] = value;
-            } else {
-                config[key] = value;
-            }
-        }
-
-        return config;
-    }
-
-    parseValue(value: string): TomlConfigValue {
-        if (value.startsWith('"') && value.endsWith('"')) {
-            // TOML 基本字符串需要还原 \" \\ 等转义，否则嵌套结构（以 JSON 字符串保存）
-            // 读出来会残留反斜杠，再次保存时转义会反复叠加。
-            try {
-                const parsed = JSON.parse(value) as unknown;
-                if (typeof parsed === "string") return parsed;
-            } catch {
-                // 非法 JSON 字符串（如未转义的引号）按字面量处理
-            }
-            return value.slice(1, -1);
-        }
-        if (value.startsWith("'") && value.endsWith("'")) {
-            return value.slice(1, -1);
-        }
-        if (value === "true") return true;
-        if (value === "false") return false;
-        if (/^-?\d+$/.test(value)) return Number.parseInt(value, 10);
-        if (/^-?\d+\.\d+$/.test(value)) return Number.parseFloat(value);
-
-        if (value.startsWith("[") && value.endsWith("]")) {
-            try {
-                const parsed = JSON.parse(value.replace(/'/g, '"')) as unknown;
-                if (Array.isArray(parsed)) {
-                    return parsed.filter(isTomlScalar);
-                }
-            } catch {
-                return value.slice(1, -1).split(",").map((item) => String(this.parseValue(item.trim())));
-            }
-        }
-
-        return value;
+    /** 返回键的部署锁定来源（"env"/"cli"），未锁定返回 null。 */
+    getOverrideSource(configName: string, section: string, key: string): string | null {
+        return this.overrides[configName]?.[`${section}.${key}`] || null;
     }
 
     get<T = unknown>(configName: string, section: string | null, key: string, defaultValue?: T): T {
@@ -245,9 +184,25 @@ class ConfigManager {
 
     async saveConfig(configName: string, settings: TomlConfig): Promise<boolean> {
         try {
+            // 部署层锁定键不参与写回（后端会再过滤一次，这里避免把生效值误当用户意图提交）。
+            const locked = this.overrides[configName] || {};
+            const payload: TomlConfig = {};
+            for (const [section, values] of Object.entries(settings)) {
+                if (!isTomlConfig(values)) {
+                    payload[section] = values;
+                    continue;
+                }
+                const kept: TomlConfig = {};
+                for (const [key, value] of Object.entries(values)) {
+                    if (locked[`${section}.${key}`]) continue;
+                    kept[key] = value;
+                }
+                payload[section] = kept;
+            }
+
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse>(`/api/config/${configName}`, {
                 method: "POST",
-                body: settings,
+                body: payload,
             });
 
             if (!response.ok || !data.success) {
@@ -264,33 +219,8 @@ class ConfigManager {
     }
 }
 
-function isTomlScalar(value: unknown): value is string | number | boolean {
-    return ["string", "number", "boolean"].includes(typeof value);
-}
-
 function isTomlConfig(value: unknown): value is TomlConfig {
     return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * 还原 TOML 段名 / 键名的外层引号，例如 ["ai.small_models"] 应解析为 ai.small_models。
- * 若不去引号，保存回写时引号会被再次转义，反复保存会不断叠加转义。
- */
-function normalizeTomlKey(raw: string): string {
-    const text = raw.trim();
-    if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
-        try {
-            const parsed = JSON.parse(text) as unknown;
-            if (typeof parsed === "string") return parsed;
-        } catch {
-            // 非合法 JSON 字符串时按字面量处理
-        }
-        return text.slice(1, -1);
-    }
-    if (text.length >= 2 && text.startsWith("'") && text.endsWith("'")) {
-        return text.slice(1, -1);
-    }
-    return text;
 }
 
 function configSetSelectValue(id: string, value: unknown): void {

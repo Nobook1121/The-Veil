@@ -24,6 +24,9 @@ from trpg_server.settings import (
 
 bp = Blueprint("assets", __name__)
 
+# 不再允许静态直出的设置文件（含站点/网络/穿透设置，避免密钥与内网信息外泄）。
+_BLOCKED_CONFIG_FILES = frozenset({"general.toml", "site.json", "network.json", "penetration.json"})
+
 # 主页聊天附件上传目录与限制（图片/视频/常用文档）。
 CHAT_UPLOAD_DIR = RUNTIME_DIR / "uploads" / "chat"
 CHAT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024
@@ -86,6 +89,11 @@ def serve_theme_asset(filename):
 
 @bp.route("/config/<path:filename>")
 def serve_config(filename):
+    # 人类设置文件改经 /api/config/general（JSON，密钥掩码）读取；直接静态暴露
+    # general.toml 会把穿透令牌等密钥回传给未登录访客。aiplatform JSON 仍走此处
+    # （load_public_platform_config 会剔除 api_key）。
+    if filename in _BLOCKED_CONFIG_FILES:
+        return error_response("Not found", 404, "Not found")
     if filename.startswith("aiplatform/") and filename.endswith(".json"):
         config_path = safe_join(_get_config_dir(), filename)
         if config_path.exists():
