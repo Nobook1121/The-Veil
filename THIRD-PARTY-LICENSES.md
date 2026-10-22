@@ -66,6 +66,7 @@ Node 包可在 `node_modules/<包名>/LICENSE` 查看）。
 | sympy | 1.14.0 | BSD License |  |
 | threadpoolctl | 3.7.0 | BSD-3-Clause |  |
 | tokenizers | 0.23.3 | Apache Software License |  |
+| tomlkit | 0.15.2 | MIT | 是 |
 | torch | 2.14.1+cpu | Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT |  |
 | tqdm | 4.70.1 | MPL-2.0 AND MIT |  |
 | transformers | 5.19.0 | Apache 2.0 License |  |

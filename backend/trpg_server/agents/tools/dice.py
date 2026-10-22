@@ -8,7 +8,7 @@ from typing import Any
 from trpg_server.agents.tools.base import AgentTool
 from trpg_server.agents.tools.trigger import reveal_trigger_after_check
 from trpg_server.json_store import read_json, write_json_atomic
-from trpg_server.settings import CONFIG_DIR
+from trpg_server.settings import CHARACTER_SKILLS_FILE
 
 logger = logging.getLogger(__name__)
 DIFFICULTY_ALIASES = {"regular": "regular", "普通": "regular", "hard": "hard", "困难": "hard", "extreme": "extreme", "极难": "extreme"}
@@ -84,14 +84,14 @@ CHECK_NAME_ALIASES = {
 _CHECK_NAME_CACHE: tuple[str, float, set[str]] | None = None
 
 
-def _skill_catalog_names(config_dir: Any = None) -> set[str]:
+def _skill_catalog_names() -> set[str]:
     """加载 COC7 技能目录，返回可接受的技能名集合（英文键 + 本地化中文名 + 专精）。
 
-    结果按文件 mtime 缓存，避免每次检定都读盘。
+    技能目录是随包发布的参考数据（``data/character_skills.json``），结果按文件
+    mtime 缓存，避免每次检定都读盘。
     """
     global _CHECK_NAME_CACHE
-    base = Path(config_dir) if config_dir else CONFIG_DIR
-    path = base / "character_skills.json"
+    path = CHARACTER_SKILLS_FILE
     try:
         mtime = path.stat().st_mtime
     except OSError:
@@ -130,7 +130,7 @@ def _skill_catalog_names(config_dir: Any = None) -> set[str]:
     return names
 
 
-def _is_known_check_name(check_name: str, config_dir: Any = None) -> bool:
+def _is_known_check_name(check_name: str) -> bool:
     """判断检定名是否为 COC7 认可的属性、技能或专精（接受常见中文变体）。"""
     text = str(check_name or "").strip()
     if not text:
@@ -140,7 +140,7 @@ def _is_known_check_name(check_name: str, config_dir: Any = None) -> bool:
     if ATTRIBUTE_ALIASES.get(text) or ATTRIBUTE_ALIASES.get(text.upper()):
         return True
     text = CHECK_NAME_ALIASES.get(text, text)
-    return text.casefold() in _skill_catalog_names(config_dir)
+    return text.casefold() in _skill_catalog_names()
 
 
 def _lookup_check_value(card: dict[str, Any], check_name: str) -> int | None:
@@ -864,7 +864,7 @@ def roll_room_check(
         if not isinstance(card, dict): return {"error": f"player {player_name} has no bound character card"}
         base_target = _lookup_check_value(card, check_name)
         if base_target is None or base_target < 0:
-            if not _is_known_check_name(check_name, getattr(context, "config_dir", None)):
+            if not _is_known_check_name(check_name):
                 return {"error": f"“{check_name}”不是 COC7 标准属性或技能目录中的技能，已拒绝该检定；请改用标准检定名（如 侦察/聆听/心理学/力量/敏捷）或角色卡上已有的技能。"}
             return {"error": f"{check_name} was not found on player {player_name}'s character card"}
         if base_target > 100: return {"error": f"{check_name} value must be between 0 and 100"}

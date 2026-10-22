@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def test_kp_prompt_is_valid_chinese_and_requires_tools_for_dice():
-    prompt = Path("data/config/roles/kp.md").read_text(encoding="utf-8")
+    prompt = Path("config/templates/roles/kp.md").read_text(encoding="utf-8")
 
     assert "浣犳槸" not in prompt
     assert "你是KP" in prompt
@@ -19,7 +19,7 @@ def test_kp_prompt_is_valid_chinese_and_requires_tools_for_dice():
 
 
 def test_kp_prompt_contains_defensive_user_input_rules():
-    prompt = Path("data/config/roles/kp.md").read_text(encoding="utf-8")
+    prompt = Path("config/templates/roles/kp.md").read_text(encoding="utf-8")
 
     assert "系统规则（优先级最高" in prompt
     assert "---->USER_INPUT<----" in prompt
@@ -29,7 +29,7 @@ def test_kp_prompt_contains_defensive_user_input_rules():
 
 
 def test_general_config_contains_ai_stream_output_flag():
-    general_config = Path("data/config/general.toml").read_text(encoding="utf-8")
+    general_config = Path("config/templates/general.toml").read_text(encoding="utf-8")
 
     assert "[ai]" in general_config
     # 默认开启：KP 回复以渐进方式显现，避免整段一次性蹦出。
@@ -59,7 +59,7 @@ def test_debug_mode_exposes_independent_prompt_settings():
     settings_html = Path("frontend/src/index/fragments/03-room-tools-auth-settings.html").read_text(encoding="utf-8")
     platform_source = Path("frontend/src/app/platform-ui.ts").read_text(encoding="utf-8")
     chat_source = Path("backend/trpg_server/routes/chat.py").read_text(encoding="utf-8")
-    debug_prompt = Path("data/config/roles/debug-kp.md").read_text(encoding="utf-8")
+    debug_prompt = Path("config/templates/roles/debug-kp.md").read_text(encoding="utf-8")
 
     assert 'id="debugMode"' in settings_html
     assert 'id="debugKpPrompt"' in settings_html

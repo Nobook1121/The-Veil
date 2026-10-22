@@ -31,7 +31,7 @@ from trpg_server.scenario_ai import (
     role_config_file,
     select_model,
 )
-from trpg_server.settings import CONFIG_DIR, OCCUPATIONS_DIR, SCENARIOS_DIR, WEAPONS_DIR
+from trpg_server.settings import CHARACTER_SKILLS_FILE, CONFIG_DIR, OCCUPATIONS_DIR, SCENARIOS_DIR, WEAPONS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +80,8 @@ def load_weapon_catalog() -> list[dict[str, Any]]:
 
 
 def load_skill_catalog() -> list[dict[str, str]]:
-    config_dir = Path(current_app.config.get("CONFIG_DIR", CONFIG_DIR))
-    catalog = read_json(config_dir / "character_skills.json", default={})
+    skills_file = Path(current_app.config.get("CHARACTER_SKILLS_FILE", CHARACTER_SKILLS_FILE))
+    catalog = read_json(skills_file, default={})
     if not isinstance(catalog, dict):
         return []
     skills = catalog.get("skills") if isinstance(catalog.get("skills"), list) else []

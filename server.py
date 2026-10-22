@@ -25,9 +25,12 @@ if str(BACKEND_DIR) not in sys.path:
 # Configure logging and print the startup marker before importing app_factory:
 # create_app() loads the embedding model, which takes seconds, so emitting a
 # line first lets the user see output immediately instead of waiting in silence.
+from trpg_server.config import ensure_user_config
 from trpg_server.logging_config import configure_logging
 from trpg_server.settings import CONFIG_DIR, DEFAULT_PORT, LOGS_DIR
 
+# 首次启动：从 config/templates 生成 data/config 下的用户配置（幂等，不覆盖已有文件）。
+ensure_user_config(CONFIG_DIR)
 configure_logging(LOGS_DIR, CONFIG_DIR)
 logger = logging.getLogger(__name__)
 logger.info("Server starting")

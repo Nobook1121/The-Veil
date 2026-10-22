@@ -33,6 +33,9 @@ htmlcov/
 # Runtime data
 /data/runtime/
 /backend/data/runtime/
+
+# User config: generated from config/templates on first start; local test state must not be committed
+/data/config/
 /data/characters/*
 /data/history/
 /data/history/*

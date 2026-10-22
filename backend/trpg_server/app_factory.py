@@ -11,6 +11,7 @@ import time
 import requests
 from pathlib import Path
 
+from trpg_server.config import ensure_user_config
 from trpg_server.logging_config import configure_logging
 from trpg_server.security import register_session_guard
 from trpg_server.socket_events import register_socket_events
@@ -78,6 +79,8 @@ def create_app(config=None):
     )
     if config:
         app.config.update(config)
+    # 首次启动（含测试注入的临时 CONFIG_DIR）：从模板生成缺失的用户配置，幂等不覆盖。
+    ensure_user_config(app.config.get("CONFIG_DIR", CONFIG_DIR))
     # The global body limit is the largest of the per-feature allowances (scenario
     # imports, setup embedding model uploads).  Each route still enforces its own
     # smaller limit internally (or via its own validator), so Flask must not reject

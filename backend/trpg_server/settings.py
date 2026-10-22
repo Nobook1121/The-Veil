@@ -2,8 +2,10 @@ import os
 import secrets
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-DATA_DIR = BASE_DIR / "data"
+# 路径常量的权威定义在 trpg_server.config.paths（纯 stdlib，可在 Flask 启动前使用），
+# 这里导入后再导出，保持既有 ``settings.CONFIG_DIR`` 等引用不变。
+from trpg_server.config.paths import BASE_DIR, CONFIG_DIR, DATA_DIR, TEMPLATE_DIR  # noqa: F401
+
 RUNTIME_DIR = DATA_DIR / "runtime"
 FRONTEND_DIST_DIR = BASE_DIR / "dist" / "public"
 
@@ -19,11 +21,12 @@ THEME_ASSETS_DIR = DATA_DIR / "assets" / "theme"
 TOOLS_DIR = FRONTEND_DIST_DIR / "data" / "tools"
 ROOMS_DIR = RUNTIME_DIR / "rooms"
 ROOM_ARCHIVES_DIR = RUNTIME_DIR / "room_archives"
-CONFIG_DIR = DATA_DIR / "config"
 DEBUG_KP_PROMPT_FILE = CONFIG_DIR / "roles" / "debug-kp.md"
 AI_PLATFORM_SECRET_DIR = RUNTIME_DIR / "config" / "aiplatform"
 OCCUPATIONS_DIR = DATA_DIR / "occupations"
 WEAPONS_DIR = DATA_DIR / "weapons"
+# COC7 技能目录是随包发布的规则参考数据（不是用户配置），与职业/武器目录同级。
+CHARACTER_SKILLS_FILE = DATA_DIR / "character_skills.json"
 USERS_DIR = RUNTIME_DIR / "users"
 HISTORY_DIR = RUNTIME_DIR / "history"
 LOGS_DIR = RUNTIME_DIR / "logs"

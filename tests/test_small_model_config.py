@@ -38,8 +38,9 @@ def test_runtime_config_clamps_and_defaults_request_limits(tmp_path):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
 
+    # 无用户配置时模板层（L2）生效：随包模板即「默认配置」。
     assert load_ai_runtime_config(config_dir).max_tool_rounds == 8
-    assert load_ai_runtime_config(config_dir).ai_request_timeout == 300
+    assert load_ai_runtime_config(config_dir).ai_request_timeout == 1800
 
     (config_dir / "general.toml").write_text(
         "[ai]\nmax_tool_rounds = 999\nai_request_timeout = 5\n",
@@ -124,9 +125,9 @@ def test_config_field_specs_cover_every_runtime_field():
     """规格表是配置项的唯一接线点，漏登记会让字段永远读不到 general.toml。"""
     from dataclasses import fields
 
-    from trpg_server.agents.config import _FIELD_SPECS, AIRuntimeConfig
+    from trpg_server.config.schema import AI_SPECS, AIRuntimeConfig
 
-    spec_names = [spec.name for spec in _FIELD_SPECS]
+    spec_names = [spec.name for spec in AI_SPECS]
 
     assert len(spec_names) == len(set(spec_names))
     # small_model_tasks 是字典字段，由解析循环单独累积，不参与单值规格表。
@@ -228,7 +229,7 @@ def test_convert_to_toml_collapses_legacy_escaped_section_names():
 
 
 def test_general_config_has_no_escaped_section_names():
-    content = Path("data/config/general.toml").read_text(encoding="utf-8")
+    content = Path("config/templates/general.toml").read_text(encoding="utf-8")
 
     assert "[ai.small_models]" in content
     assert "[ai.prompt]" in content
@@ -248,14 +249,15 @@ def test_runtime_config_reads_cloud_embedding_flag(tmp_path):
     assert config.cloud_embedding_enabled is True
 
 
-def test_shipped_general_config_disables_cloud_embedding_by_default():
-    config = load_ai_runtime_config(Path("data/config/general.toml").parent)
+def test_shipped_general_config_disables_cloud_embedding_by_default(tmp_path):
+    # 空目录 → 模板层生效，等价于首次部署用户拿到的随包配置。
+    config = load_ai_runtime_config(tmp_path)
 
     assert config.cloud_embedding_enabled is False
 
 
-def test_shipped_general_config_exposes_knowledge_settings():
-    config = load_ai_runtime_config(Path("data/config/general.toml").parent)
+def test_shipped_general_config_exposes_knowledge_settings(tmp_path):
+    config = load_ai_runtime_config(tmp_path)
 
     assert config.retrieval_top_k_default == 5
     assert config.retrieval_top_k_direct == 6
@@ -305,17 +307,3 @@ def test_resolve_task_model_prefers_override_then_small_then_primary():
     overridden = AIRuntimeConfig(small_model_tasks={"summarization": "pinned-model", "state_update": ""})
     assert resolve_task_model(overridden, provider, "summarization", "primary") == "pinned-model"
     assert resolve_task_model(overridden, provider, "state_update", "primary") == "primary"
-
-
-def test_openai_provider_template_is_openai_compatible():
-    config = json.loads(open("data/config/aiplatform/openai.json", encoding="utf-8").read())
-    assert config["enabled"] is False
-    assert config["config"]["base_url"].endswith("/chat/completions")
-    assert config["small_models"]["summarization"]["id"] == "gpt-4o-mini"
-
-
-def test_aliyun_provider_includes_enabled_economy_model_and_embedding_endpoint():
-    config = json.loads(open("data/config/aiplatform/aliyun.json", encoding="utf-8").read())
-    assert any(model["id"] == "qwen-turbo" and model["enabled"] for model in config["models"])
-    assert config["small_models"]["summarization"]["id"] == "qwen-turbo"
-    assert config["embedding"]["base_url"].endswith("/embeddings")

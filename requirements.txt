@@ -8,3 +8,4 @@ pytest==8.4.0
 olefile==0.47
 requests>=2.31,<3
 PyMuPDF>=1.24,<2
+tomlkit>=0.12,<1

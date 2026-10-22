@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OCCUPATION_DIR = ROOT / "data" / "occupations" / "builtin"
-SKILL_CATALOG_PATH = ROOT / "data" / "config" / "character_skills.json"
+SKILL_CATALOG_PATH = ROOT / "data" / "character_skills.json"
 
 ATTRIBUTE_KEYS = {"STR", "CON", "SIZ", "DEX", "APP", "INT", "POW", "EDU", "LUC"}
 CATEGORY_SLUGS = {

@@ -15,7 +15,7 @@ from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, success_response
 from trpg_server.security import normalize_filename, safe_join
-from trpg_server.settings import CHARACTER_GALLERY_DIR, CHARACTERS_DIR, CONFIG_DIR, OCCUPATIONS_DIR, ROOMS_DIR, WEAPONS_DIR
+from trpg_server.settings import CHARACTER_GALLERY_DIR, CHARACTER_SKILLS_FILE, CHARACTERS_DIR, CONFIG_DIR, OCCUPATIONS_DIR, ROOMS_DIR, WEAPONS_DIR
 
 bp = Blueprint("characters", __name__)
 logger = logging.getLogger(__name__)
@@ -589,11 +589,11 @@ def _iter_builtin_weapon_files():
 
 
 def _skill_catalog_path():
+    # 技能目录是随包发布的参考数据（data/character_skills.json），允许 app.config 覆盖便于测试注入。
     try:
-        config_dir = _get_config_dir()
+        return Path(current_app.config.get("CHARACTER_SKILLS_FILE", CHARACTER_SKILLS_FILE))
     except RuntimeError:
-        config_dir = CONFIG_DIR
-    return config_dir / "character_skills.json"
+        return CHARACTER_SKILLS_FILE
 
 
 def _skill_key_from_name(name, fallback=""):

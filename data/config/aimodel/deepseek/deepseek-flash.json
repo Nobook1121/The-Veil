@@ -1,7 +1,0 @@
-{
-  "model": "deepseek-flash",
-  "messages": [],
-  "stream": true,
-  "temperature": 0.7,
-  "top_p": 0.9
-}

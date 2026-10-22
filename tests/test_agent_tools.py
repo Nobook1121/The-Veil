@@ -569,7 +569,7 @@ def test_frontend_registers_check_command():
 
 
 def test_kp_prompt_requires_room_check_function():
-    prompt = open("data/config/roles/kp.md", encoding="utf-8").read()
+    prompt = open("config/templates/roles/kp.md", encoding="utf-8").read()
 
     assert "check.roll_room_check" in prompt
     assert "/check {*\u73a9\u5bb6\u540d} {*\u6280\u80fd/\u5c5e\u6027\u540d}" in prompt

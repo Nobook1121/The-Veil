@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CATALOG_PATH = ROOT / "data" / "config" / "character_skills.json"
+CATALOG_PATH = ROOT / "data" / "character_skills.json"
 
 
 def _skills_by_key():
