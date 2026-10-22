@@ -317,7 +317,32 @@
 
 ---
 
-## 十六、Socket.IO 事件
+## 十六、网站 Agent（Site Agent）
+
+来源：`routes/site_agent.py`
+
+所有接口都需要已登录会话；写请求（POST/DELETE）还必须携带 `X-CSRF-Token`。权限与房间范围完全由服务端按当前会话判定，请求体中的 `user_id`、`role`、`permissions` 等身份字段一律忽略。
+
+- `GET /api/agent/status`：返回开关、可用性与当前用户能力清单。
+  - `enabled`、`can_use`、`role`、`permissions`、`tools`、`room_tools`、`limits`、`usage_today`、`turns_last_hour`。
+- `GET /api/agent/conversations`：当前用户的会话摘要列表（按更新时间倒序）。
+- `POST /api/agent/conversations`：创建空会话。
+- `GET /api/agent/conversations/<conversation_id>`：读取会话与全部消息（含待确认操作附件）。
+- `DELETE /api/agent/conversations/<conversation_id>`：删除会话。
+- `POST /api/agent/turn`：执行一轮对话。
+  - 请求：`{"content": "...", "conversation_id": "c_xxx | null", "room_id": "room-id | null"}`。
+  - `conversation_id` 为空时自动创建会话；`room_id` 仅对房间范围工具有效，且必须是当前 socket 会话已加入的房间。
+  - 返回 `conversation`（最新完整会话）与 `message`（本轮助手消息，含 `usage`、`attachments`）。
+  - 每轮会在助手消息的 `usage` 中记录 prompt/completion/cached/total tokens；管理员可通过审计日志查看明细。
+- `POST /api/agent/actions/<action_id>/confirm`：确认并执行待确认的写操作（服务端会重新鉴权与校验有效期）。
+- `POST /api/agent/actions/<action_id>/reject`：取消待确认操作。
+- `GET /api/agent/usage?window_hours=24`：按时间窗口统计全站 Agent token 消耗与请求数；需要 `settings.general` 权限。
+
+写工具（`characters.save`、`scenarios.save`、权限与用户管理）不会在对话中直接落库：Agent 只生成 `pending_action` 附件，必须由用户在界面中确认后才会执行，且操作默认在 5 分钟后过期。
+
+---
+
+## 十七、Socket.IO 事件
 
 来源：`socket_events.py`
 

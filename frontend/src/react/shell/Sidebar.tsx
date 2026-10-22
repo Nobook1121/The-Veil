@@ -18,7 +18,7 @@ const primaryLinks: NavLinkItem[] = [
     { href: "#home", tab: "home", label: "主页", labelKey: "nav.home", active: true },
     { href: "#character", tab: "character", label: "角色卡", labelKey: "nav.character" },
     { href: "#save", tab: "save", label: "房间", labelKey: "nav.rooms" },
-    { href: "#tools", tab: "tools", label: "小工具", labelKey: "nav.tools" },
+    { href: "#agent", tab: "agent", label: "网站 Agent", labelKey: "nav.agent" },
 ];
 
 const groupedLinks: NavGroup[] = [

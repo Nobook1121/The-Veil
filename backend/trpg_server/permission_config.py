@@ -22,6 +22,7 @@ _GROUPS = {
         "characters.gallery.publish", "characters.gallery.apply",
         "characters.gallery.edit", "characters.gallery.delete",
     ],
+    "agent": ["agent.use"],
     "settings": [
         "settings.general", "settings.ai_models", "settings.network",
         "settings.character_rules", "settings.permissions", "settings.ai_debug",
@@ -60,6 +61,7 @@ DEFAULT_PERMISSION_MATRIX: dict[str, list[str]] = {
     "characters.gallery.apply": ["USER", "ADMIN", "OWNER"],
     "characters.gallery.edit": ["USER", "ADMIN", "OWNER"],
     "characters.gallery.delete": ["USER", "ADMIN", "OWNER"],
+    "agent.use": ["USER", "ADMIN", "OWNER"],
     "settings.general": ["ADMIN", "OWNER"],
     "settings.ai_models": ["ADMIN", "OWNER"],
     "settings.ai_debug": ["ADMIN", "OWNER"],

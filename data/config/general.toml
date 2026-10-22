@@ -105,3 +105,14 @@ window_height = 800
 [update]
 check_update_on_startup = true
 auto_update = false
+
+[site_agent]
+enabled = false
+max_tool_rounds = 6
+request_timeout = 120
+max_history_messages = 40
+max_tool_result_chars = 4000
+max_message_chars = 4000
+max_turns_per_hour = 60
+daily_token_budget = 200000
+conversation_retention_days = 30

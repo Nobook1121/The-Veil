@@ -10,6 +10,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server import character_service
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, success_response
@@ -89,6 +90,23 @@ def _can_use_permission(node_id):
 
 def _current_player_ids():
     return {str(session.get("user_id", "")), str(session.get("username", ""))}
+
+
+def character_service_actor():
+    """把当前会话转换成领域服务需要的 Actor（身份只来自服务端）。"""
+    from trpg_server.site_agent_auth import Actor, AgentAuthError, build_actor, permission_set_for_role
+
+    try:
+        return build_actor()
+    except AgentAuthError:
+        role = str(session.get("role") or "USER").upper()
+        return Actor(
+            user_id=int(session.get("user_id") or 0),
+            username=str(session.get("username") or ""),
+            role=role,
+            permissions=permission_set_for_role(role),
+            room_ids=frozenset(),
+        )
 
 
 def _iter_character_files():
@@ -984,23 +1002,16 @@ def save_character(character_id):
 
     path = _character_path(character_id)
     is_new_character = not path.exists()
-    existing = _character_from_storage(read_json(path, default={}), character_id) if path.exists() else {}
-    if existing and not _can_access_character(existing):
-        return error_response("Permission denied", 403, "Permission denied")
-
-    if not _is_elevated() and not existing and _owned_character_count() >= _max_cards_per_user():
-        return error_response("Character card limit reached", 403, "Character card limit reached")
-
     payload = request.get_json(silent=True) or {}
-    if _is_test_character_shape(payload):
-        payload = _test_character_to_runtime(payload, character_id)
-    payload["id"] = character_id
-    character = _normalize_character_payload(payload, existing)
-    if character is None:
-        return error_response("Invalid character card", 400, "Invalid character card")
+    try:
+        character = character_service.apply_save(
+            character_service_actor(),
+            character_id,
+            payload,
+        )
+    except character_service.CharacterServiceError as exc:
+        return error_response(exc.message, exc.status, exc.message)
 
-    write_json_atomic(path, _runtime_to_test_character(character))
-    _sync_room_character_snapshots(character)
     log_user_action(
         logger,
         user_action_text(session.get("username"), "保存了角色卡"),

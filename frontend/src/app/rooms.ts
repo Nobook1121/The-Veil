@@ -53,9 +53,6 @@ function initRoomManagement(): void {
     document.getElementById("joinRoom")?.addEventListener("click", () => {
         void joinRoomByCode();
     });
-    document.getElementById("submitCharacterRecord")?.addEventListener("click", () => {
-        void submitCharacterRecord();
-    });
     document.getElementById("backToSaveList")?.addEventListener("click", showRoomListView);
     document.getElementById("deleteSave")?.addEventListener("click", () => {
         void deleteCurrentRoom();
@@ -666,7 +663,6 @@ function updateRoomDetail(room: Room): void {
         visibilityBadge.className = `badge ms-1 ${isPublic ? "bg-info text-dark" : "bg-secondary"}`;
         visibilityBadge.style.display = "inline-block";
     }
-    setInput("recordRoomName", room.name);
     setText("homeRoomOnlineCount", formatRoomOnlineCount(room));
     renderRoomCharacterBindings(room);
     renderRoomMemberList(room);
@@ -1216,23 +1212,6 @@ async function promoteRoomMember(userId: string): Promise<void> {
     await enterRoom(response.data);
 }
 
-async function submitCharacterRecord(): Promise<void> {
-    return runRoomAction("submit-character-record", "submitCharacterRecord", async () => {
-        await submitCharacterRecordUnlocked();
-    });
-}
-
-async function submitCharacterRecordUnlocked(): Promise<void> {
-    const payload: CharacterRecordPayload = {
-        roomName: roomInputValue("recordRoomName") || currentRoom?.name || "",
-        username: roomInputValue("recordUsername"),
-        type: recordTypeValue("recordType"),
-        value: Number.parseInt(roomInputValue("recordValue") || "1", 10) || 1,
-        reason: roomInputValue("recordReason") || "未知",
-    };
-    await recordCharacterChange(payload);
-}
-
 async function recordCharacterChange(payload: CharacterRecordPayload): Promise<unknown> {
     const roomName = String(payload.roomName || payload.roomId || "");
     const username = String(payload.username || "");
@@ -1490,10 +1469,6 @@ function escapeRoomHtml(value: unknown): string {
 
 function roomInputValue(id: string): string {
     return (document.getElementById(id) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null)?.value.trim() || "";
-}
-
-function recordTypeValue(id: string): "damage" | "san" {
-    return roomInputValue(id) === "san" ? "san" : "damage";
 }
 
 function setInput(id: string, value: string): void {

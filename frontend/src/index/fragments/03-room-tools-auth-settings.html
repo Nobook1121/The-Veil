@@ -97,176 +97,17 @@
                     </div>
                 </div>
 
-                <!-- 小工具内容 -->
-                <div id="tools" class="tab-content">
+                <!-- 网站 Agent：内容由 React 渲染，与悬浮球共享同一份会话状态 -->
+                <div id="agent" class="tab-content">
                     <div class="p-4">
-                        <header class="page-command-header" data-page-header="tools">
+                        <header class="page-command-header" data-page-header="agent">
                             <div>
-                                <p class="page-kicker"><i class="fa fa-wrench" aria-hidden="true"></i> TABLE UTILITY BAY</p>
-                                <h2>小工具</h2>
-                                <p class="page-subtitle">集中执行骰点、COC 检定、房间资料读取、剧本检索、角色列表与状态记录。</p>
+                                <p class="page-kicker"><i class="fa fa-magic" aria-hidden="true"></i> SITE AGENT</p>
+                                <h2>网站 Agent</h2>
+                                <p class="page-subtitle">用自然语言查询角色卡、剧本、权限与房间资料；所有写操作都必须由你确认后才会执行。</p>
                             </div>
                         </header>
-                        <!-- 工具子标签页 -->
-                        <div class="tool-tabs mb-4">
-                            <button class="tool-tab active" data-tool="dice">骰子工具</button>
-                            <button class="tool-tab" data-tool="coc-check">COC 检定</button>
-                            <button class="tool-tab" data-tool="room-snapshot">房间概览</button>
-                            <button class="tool-tab" data-tool="scenario-context">剧本检索</button>
-                            <button class="tool-tab" data-tool="character-cards">角色列表</button>
-                            <button class="tool-tab" data-tool="memory">房间记忆</button>
-                            <button class="tool-tab" data-tool="character-record">房间角色记录</button>
-                        </div>
-                        
-                        <!-- 骰子工具内容 -->
-                        <div id="dice-tool-content" class="tool-content active">
-                            <div class="dice-tool">
-                                <select class="form-select" id="diceType">
-                                    <option value="d4">D4</option>
-                                    <option value="d6">D6</option>
-                                    <option value="d8">D8</option>
-                                    <option value="d10">D10</option>
-                                    <option value="d12">D12</option>
-                                    <option value="d20">D20</option>
-                                    <option value="d100">D100</option>
-                                </select>
-                                <button class="btn btn-primary" id="rollDice">投掷</button>
-                                <div class="dice-result mt-2" id="diceResult" aria-live="polite"></div>
-                            </div>
-                        </div>
-                        <div id="coc-check-tool-content" class="tool-content">
-                            <div class="tool-panel">
-                                <div class="tool-panel-header">
-                                    <h5><i class="fa fa-percent" aria-hidden="true"></i> COC7 百分骰检定</h5>
-                                    <span>/check 可视化</span>
-                                </div>
-                                <div class="tool-grid">
-                                    <label class="tool-field">玩家用户名
-                                        <input type="text" class="form-control" id="cocCheckPlayer" placeholder="当前房间成员用户名">
-                                    </label>
-                                    <label class="tool-field">技能或属性
-                                        <input type="text" class="form-control" id="cocCheckName" placeholder="侦查 / DEX / 幸运">
-                                    </label>
-                                    <label class="tool-field">难度
-                                        <select class="form-select" id="cocCheckDifficulty">
-                                            <option value="">普通</option>
-                                            <option value="困难">困难</option>
-                                            <option value="极难">极难</option>
-                                        </select>
-                                    </label>
-                                    <label class="tool-field">调整值
-                                        <input type="text" class="form-control" id="cocCheckAdjustment" placeholder="+10 或 -20">
-                                    </label>
-                                </div>
-                                <button class="btn btn-primary mt-3" id="submitCocCheck" type="button">
-                                    <i class="fa fa-random" aria-hidden="true"></i> 执行检定
-                                </button>
-                                <pre class="tool-output mt-3" id="cocCheckResult" aria-live="polite"></pre>
-                            </div>
-                        </div>
-                        <div id="room-snapshot-tool-content" class="tool-content">
-                            <div class="tool-panel">
-                                <div class="tool-panel-header">
-                                    <h5><i class="fa fa-server" aria-hidden="true"></i> 当前房间概览</h5>
-                                    <span>房间 / 剧本 / 成员</span>
-                                </div>
-                                <button class="btn btn-primary" id="refreshRoomSnapshot" type="button">
-                                    <i class="fa fa-refresh" aria-hidden="true"></i> 刷新概览
-                                </button>
-                                <pre class="tool-output mt-3" id="roomSnapshotResult" aria-live="polite"></pre>
-                            </div>
-                        </div>
-                        <div id="scenario-context-tool-content" class="tool-content">
-                            <div class="tool-panel">
-                                <div class="tool-panel-header">
-                                    <h5><i class="fa fa-search" aria-hidden="true"></i> 剧本资料检索</h5>
-                                    <span>当前房间绑定剧本</span>
-                                </div>
-                                <div class="tool-grid">
-                                    <label class="tool-field">关键词
-                                        <input type="text" class="form-control" id="scenarioContextQuery" placeholder="NPC、地点、线索或场景内容">
-                                    </label>
-                                    <label class="tool-field">最多结果
-                                        <input type="number" class="form-control" id="scenarioContextLimit" min="1" max="20" value="5">
-                                    </label>
-                                </div>
-                                <button class="btn btn-primary mt-3" id="submitScenarioContext" type="button">
-                                    <i class="fa fa-filter" aria-hidden="true"></i> 检索
-                                </button>
-                                <pre class="tool-output mt-3" id="scenarioContextResult" aria-live="polite"></pre>
-                            </div>
-                        </div>
-                        <div id="character-cards-tool-content" class="tool-content">
-                            <div class="tool-panel">
-                                <div class="tool-panel-header">
-                                    <h5><i class="fa fa-address-card-o" aria-hidden="true"></i> 房间角色列表</h5>
-                                    <span>成员绑定与 HP/SAN</span>
-                                </div>
-                                <button class="btn btn-primary" id="refreshCharacterCards" type="button">
-                                    <i class="fa fa-refresh" aria-hidden="true"></i> 刷新角色
-                                </button>
-                                <pre class="tool-output mt-3" id="characterCardsResult" aria-live="polite"></pre>
-                            </div>
-                        </div>
-                        <div id="memory-tool-content" class="tool-content">
-                            <div class="tool-panel">
-                                <div class="tool-panel-header">
-                                    <h5><i class="fa fa-database" aria-hidden="true"></i> 房间记忆记录</h5>
-                                    <span>本地可见的重要事实</span>
-                                </div>
-                                <div class="tool-grid">
-                                    <label class="tool-field">类型
-                                        <input type="text" class="form-control" id="memoryKind" placeholder="clue / npc / event">
-                                    </label>
-                                    <label class="tool-field">重要度
-                                        <input type="number" class="form-control" id="memoryImportance" min="1" max="5" value="3">
-                                    </label>
-                                </div>
-                                <label class="tool-field mt-3">内容
-                                    <textarea class="form-control" id="memoryContent" rows="3" placeholder="需要给 KP 保留的重要事实"></textarea>
-                                </label>
-                                <button class="btn btn-primary mt-3" id="submitRememberFact" type="button">
-                                    <i class="fa fa-save" aria-hidden="true"></i> 记录到当前会话
-                                </button>
-                                <pre class="tool-output mt-3" id="memoryToolResult" aria-live="polite"></pre>
-                            </div>
-                        </div>
-                        <div id="character-record-tool-content" class="tool-content">
-                            <div class="card mt-4">
-                                <div class="card-body">
-                                    <h5 class="card-title">房间角色记录</h5>
-                                    <div class="row g-3">
-                                        <div class="col-md-3">
-                                            <label class="form-label" for="recordRoomName">房间名</label>
-                                            <input type="text" class="form-control" id="recordRoomName" placeholder="当前房间名">
-                                        </div>
-                                        <div class="col-md-3">
-                                            <label class="form-label" for="recordUsername">用户名</label>
-                                            <input type="text" class="form-control" id="recordUsername" placeholder="玩家用户名">
-                                        </div>
-                                        <div class="col-md-2">
-                                            <label class="form-label" for="recordType">类型</label>
-                                            <select class="form-select" id="recordType">
-                                                <option value="damage">damage</option>
-                                                <option value="san">san</option>
-                                            </select>
-                                        </div>
-                                        <div class="col-md-2">
-                                            <label class="form-label" for="recordValue">数值</label>
-                                            <input type="number" class="form-control" id="recordValue" min="1" value="1">
-                                        </div>
-                                        <div class="col-md-2">
-                                            <label class="form-label" for="recordReason">原因</label>
-                                            <input type="text" class="form-control" id="recordReason" placeholder="未知">
-                                        </div>
-                                    </div>
-                                    <button class="btn btn-primary mt-3" id="submitCharacterRecord" type="button">
-                                        <i class="fa fa-plus-circle" aria-hidden="true"></i> 记录
-                                    </button>
-                                    <div class="text-muted mt-2" id="recordToolResult" aria-live="polite"></div>
-                                </div>
-                            </div>
-                        </div>
+                        <div id="react-agent-page-root"></div>
                     </div>
                 </div>
 
@@ -710,6 +551,46 @@
                                     <small class="form-text text-muted" data-i18n="settings.room_console.max_entries_hint">每个房间保留的日志条数，超出后裁剪最早的记录。</small>
                                 </div>
                                 <small class="form-text text-muted" data-i18n="settings.room_console.hint">房间日志记录在房间目录内，随房间一起归档；关闭后房间事件将像以前一样输出到服务器控制台。</small>
+                            </div>
+                            <div class="mb-4">
+                                <h4>网站 Agent</h4>
+                                <div class="form-group">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="siteAgentEnabled">
+                                        <label class="form-check-label" for="siteAgentEnabled">启用网站 Agent</label>
+                                    </div>
+                                    <small class="form-text text-muted">关闭后所有用户的悬浮球与 Agent 页立即不可用；已保存的会话仍会保留。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="siteAgentDailyTokenBudget">每日 Token 预算（0 表示不限制）</label>
+                                    <input type="number" class="form-control" id="siteAgentDailyTokenBudget" value="200000" min="0" max="100000000">
+                                    <small class="form-text text-muted">按用户统计当日 Agent 消耗，超出后拒绝新的对话请求。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="siteAgentMaxTurnsPerHour">每用户每小时最大轮数</label>
+                                    <input type="number" class="form-control" id="siteAgentMaxTurnsPerHour" value="60" min="1" max="1000">
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="siteAgentMaxToolRounds">单轮工具调用上限</label>
+                                    <input type="number" class="form-control" id="siteAgentMaxToolRounds" value="6" min="1" max="20">
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="siteAgentRequestTimeout">单次模型请求超时（秒）</label>
+                                    <input type="number" class="form-control" id="siteAgentRequestTimeout" value="120" min="30" max="1800">
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="siteAgentMaxHistoryMessages">携带的历史消息条数</label>
+                                    <input type="number" class="form-control" id="siteAgentMaxHistoryMessages" value="40" min="4" max="200">
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="siteAgentMaxToolResultChars">单个工具结果最大字符数</label>
+                                    <input type="number" class="form-control" id="siteAgentMaxToolResultChars" value="4000" min="200" max="20000">
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="siteAgentActionTtlSeconds">待确认操作有效期（秒）</label>
+                                    <input type="number" class="form-control" id="siteAgentActionTtlSeconds" value="300" min="30" max="3600">
+                                    <small class="form-text text-muted">超过有效期后写操作卡片自动失效，需要 Agent 重新生成。</small>
+                                </div>
                             </div>
                             <div class="mb-4">
                                 <h4>聊天设置</h4>

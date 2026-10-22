@@ -85,26 +85,24 @@ def test_scenario_preview_long_text_wraps_in_preview_sections():
     assert 'class="scenario-preview-segment"' in scenario_template
 
 
-def test_tools_tab_exposes_available_command_tools():
+def test_agent_page_replaces_tools_tab():
     settings_fragment = (ROOT / "frontend/src/index/fragments/03-room-tools-auth-settings.html").read_text(encoding="utf-8")
     main_ts = (ROOT / "frontend/src/app/main.ts").read_text(encoding="utf-8")
+    sidebar = (ROOT / "frontend/src/react/shell/Sidebar.tsx").read_text(encoding="utf-8")
 
-    for tool_name in [
-        "dice",
-        "coc-check",
-        "room-snapshot",
-        "scenario-context",
-        "character-cards",
-        "memory",
-        "character-record",
-    ]:
-        assert f'data-tool="{tool_name}"' in settings_fragment
-        assert f'id="{tool_name}-tool-content"' in settings_fragment
+    assert 'id="agent" class="tab-content"' in settings_fragment
+    assert 'id="react-agent-page-root"' in settings_fragment
+    assert 'data-tool=' not in settings_fragment
+    assert 'id="dice-tool-content"' not in settings_fragment
 
-    assert "initCommandToolPanels" in main_ts
-    assert "submitCocCheck" in main_ts
-    assert "submitScenarioContext" in main_ts
-    assert "submitRememberFact" in main_ts
+    assert "initToolTabs" not in main_ts
+    assert "initCommandToolPanels" not in main_ts
+    assert "submitCocCheck" not in main_ts
+    assert "submitScenarioContext" not in main_ts
+    assert "submitRememberFact" not in main_ts
+
+    assert 'tab: "agent"' in sidebar
+    assert 'tab: "tools"' not in sidebar
 
 
 def test_scenario_editor_exposes_module_summary_action_and_role_description():
@@ -195,7 +193,7 @@ def test_main_tabs_have_decorated_page_headers():
     ]
     combined = "\n".join(fragments)
 
-    for tab_id in ["chat", "save", "scenario", "characters", "tools", "settings"]:
+    for tab_id in ["chat", "save", "scenario", "characters", "agent", "settings"]:
         assert f'data-page-header="{tab_id}"' in combined
     assert "page-command-header" in combined
 

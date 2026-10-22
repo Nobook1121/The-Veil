@@ -71,43 +71,6 @@ class DiceTool {
         return level === "critical" ? "（大成功）" : level === "fumble" ? "（大失败）" : "";
     }
 
-    // 在“骰子工具”栏位内注入阈值设置面板（HTML 片段为只读文件，这里动态挂载）。
-    mountSettingsPanel(): void {
-        const container = document.getElementById("dice-tool-content");
-        if (!container || container.querySelector("#diceSuccessSettings")) return;
-        const settings = this.getSuccessSettings();
-        const panel = document.createElement("div");
-        panel.id = "diceSuccessSettings";
-        panel.className = "dice-success-settings mt-3";
-        panel.innerHTML = `
-            <div class="dice-success-settings-title"><strong>骰娘大成功 / 大失败阈值</strong></div>
-            <div class="dice-success-settings-row" style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-                <label for="diceCriticalThreshold">大成功（点数 ≤）</label>
-                <input type="number" class="form-control" id="diceCriticalThreshold" min="0" max="100" value="${settings.criticalThreshold}" style="max-width:120px;">
-            </div>
-            <div class="dice-success-settings-row" style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-                <label for="diceFumbleThreshold">大失败（点数 ≥）</label>
-                <input type="number" class="form-control" id="diceFumbleThreshold" min="0" max="100" value="${settings.fumbleThreshold}" style="max-width:120px;">
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-                <button type="button" class="btn btn-outline-primary btn-sm" id="saveDiceSuccessSettings">保存阈值</button>
-                <span class="dice-success-settings-hint text-muted">默认 1 为大成功，96-100 为大失败。</span>
-            </div>
-        `;
-        container.appendChild(panel);
-        panel.querySelector<HTMLButtonElement>("#saveDiceSuccessSettings")?.addEventListener("click", () => {
-            const criticalInput = document.getElementById("diceCriticalThreshold") as HTMLInputElement | null;
-            const fumbleInput = document.getElementById("diceFumbleThreshold") as HTMLInputElement | null;
-            const saved = this.saveSuccessSettings({
-                criticalThreshold: criticalInput?.value,
-                fumbleThreshold: fumbleInput?.value,
-            });
-            if (criticalInput) criticalInput.value = String(saved.criticalThreshold);
-            if (fumbleInput) fumbleInput.value = String(saved.fumbleThreshold);
-            window.showNotification?.(`骰娘阈值已保存：大成功 ≤ ${saved.criticalThreshold}，大失败 ≥ ${saved.fumbleThreshold}`, "success");
-        });
-    }
-
     rollSingleDice(diceType: string): number {
         const sides = this.diceTypes[diceType] || 6;
         return Math.floor(Math.random() * sides) + 1;
@@ -194,12 +157,3 @@ class DiceTool {
 }
 
 window.DiceTool = DiceTool;
-
-// 页面就绪后在“骰子工具”栏位挂载阈值设置面板（HTML 片段为只读文件）。
-if (typeof document !== "undefined") {
-    const bootstrapDiceSettings = (): void => {
-        try { new DiceTool().mountSettingsPanel(); } catch { /* 面板挂载失败不影响骰子功能 */ }
-    };
-    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bootstrapDiceSettings);
-    else bootstrapDiceSettings();
-}
