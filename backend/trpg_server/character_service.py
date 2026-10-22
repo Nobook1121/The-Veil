@@ -7,16 +7,15 @@
 from __future__ import annotations
 
 import time
-import tomllib
 from pathlib import Path
 from typing import Any
 
 from flask import current_app
 
+from trpg_server.config import load_settings
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.settings import CHARACTERS_DIR, CONFIG_DIR, ROOMS_DIR
 
-DEFAULT_MAX_CARDS_PER_USER = 3
 CHARACTER_WRITE_FIELDS = (
     "name",
     "occupationId",
@@ -73,16 +72,9 @@ def _player_ids(actor: Any) -> set[str]:
 
 
 def _max_cards_per_user() -> int:
-    path = Path(current_app.config.get("CONFIG_DIR", CONFIG_DIR)) / "general.toml"
-    try:
-        data = tomllib.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except (OSError, tomllib.TOMLDecodeError):
-        return DEFAULT_MAX_CARDS_PER_USER
-    value = (data.get("character_rules") or {}).get("max_cards_per_user", DEFAULT_MAX_CARDS_PER_USER)
-    try:
-        return max(1, min(int(value), 999))
-    except (TypeError, ValueError):
-        return DEFAULT_MAX_CARDS_PER_USER
+    # 统一走分层加载（含模板/env/CLI），schema 已保证返回 [1, 50] 的 int。
+    config_dir = Path(current_app.config.get("CONFIG_DIR", CONFIG_DIR))
+    return int(load_settings(config_dir).data["character_rules"]["max_cards_per_user"])
 
 
 def _load_stored(character_id: str) -> dict[str, Any] | None:

@@ -13,10 +13,10 @@ import os
 import tempfile
 import threading
 import time
-import tomllib
 from pathlib import Path
 from typing import Any, Callable
 
+from trpg_server.config import load_settings
 from trpg_server.json_store import read_json, replace_with_retry
 from trpg_server.logging_config import log_user_action, redact_sensitive
 from trpg_server.settings import CONFIG_DIR, ROOMS_DIR
@@ -28,16 +28,6 @@ MAX_ROOM_LOG_ENTRIES = 500
 ARCHIVE_LOG_LIMIT = 1000
 ROOM_LOG_LEVELS = ("debug", "info", "warning", "error")
 
-DEFAULT_ROOM_CONSOLE_SETTINGS = {
-    "enabled": True,
-    "mirror_to_server_console": False,
-    "max_entries": MAX_ROOM_LOG_ENTRIES,
-    "view_role": "admin",
-    "execute_role": "admin",
-}
-
-# 读取 general.toml 的 (路径, mtime) 缓存，避免每条日志都重新解析配置文件。
-_settings_cache: tuple[str, float, dict[str, Any]] | None = None
 # 并发追加保护：后台自动存档线程与请求线程都可能写同一房间的日志。
 _log_lock = threading.Lock()
 # 房间日志广播回调：(room_id, entry) -> None。由 socket 层注入，保持本模块与 Flask 解耦。
@@ -55,35 +45,18 @@ def room_log_path(room_dir: Any) -> Path:
 
 
 def room_console_settings(config_dir: Any = None) -> dict[str, Any]:
-    """读取 ``general.toml`` 的 ``[room_console]`` 段（带 mtime 缓存）。"""
-    global _settings_cache
-    path = Path(config_dir or CONFIG_DIR) / "general.toml"
-    cache_key = str(path)
-    try:
-        mtime = path.stat().st_mtime
-    except OSError:
-        return dict(DEFAULT_ROOM_CONSOLE_SETTINGS)
-    if _settings_cache is not None and _settings_cache[0] == cache_key and _settings_cache[1] == mtime:
-        return dict(_settings_cache[2])
-    try:
-        config = tomllib.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except (OSError, tomllib.TOMLDecodeError):
-        config = {}
-    section = config.get("room_console") or {}
-    defaults = DEFAULT_ROOM_CONSOLE_SETTINGS
-    try:
-        max_entries = int(section.get("max_entries", defaults["max_entries"]))
-    except (TypeError, ValueError):
-        max_entries = defaults["max_entries"]
-    result = {
-        "enabled": bool(section.get("enabled", defaults["enabled"])),
-        "mirror_to_server_console": bool(section.get("mirror_to_server_console", defaults["mirror_to_server_console"])),
-        "max_entries": max(50, min(max_entries, 5000)),
-        "view_role": str(section.get("view_role") or defaults["view_role"]),
-        "execute_role": str(section.get("execute_role") or defaults["execute_role"]),
+    """读取生效配置的 ``[room_console]`` 段（统一分层加载，含模板/env/CLI）。
+
+    schema 已保证五个键齐全且类型/范围合法（max_entries 收敛到 [50, 5000]）。
+    """
+    section = load_settings(Path(config_dir or CONFIG_DIR)).data.get("room_console", {})
+    return {
+        "enabled": bool(section.get("enabled", True)),
+        "mirror_to_server_console": bool(section.get("mirror_to_server_console", False)),
+        "max_entries": int(section.get("max_entries", MAX_ROOM_LOG_ENTRIES)),
+        "view_role": str(section.get("view_role") or "admin"),
+        "execute_role": str(section.get("execute_role") or "admin"),
     }
-    _settings_cache = (cache_key, mtime, result)
-    return dict(result)
 
 
 def _read_entries(path: Path) -> list[dict[str, Any]]:

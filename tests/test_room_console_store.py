@@ -4,6 +4,15 @@ import logging
 
 from trpg_server import room_log
 
+# 与 config schema [room_console] 段默认值一致（唯一权威在 schema，这里只是测试镜像）。
+_DEFAULT_SETTINGS = {
+    "enabled": True,
+    "mirror_to_server_console": False,
+    "max_entries": 500,
+    "view_role": "admin",
+    "execute_role": "admin",
+}
+
 
 def _room_dir(tmp_path, room_id="r-1"):
     room_dir = tmp_path / "rooms" / room_id
@@ -15,7 +24,7 @@ def _room_dir(tmp_path, room_id="r-1"):
 
 
 def _settings(**overrides):
-    base = dict(room_log.DEFAULT_ROOM_CONSOLE_SETTINGS)
+    base = dict(_DEFAULT_SETTINGS)
     base.update(overrides)
     return base
 
@@ -167,7 +176,7 @@ def test_room_console_settings_reads_section_and_clamps(tmp_path):
 def test_room_console_settings_falls_back_to_defaults(tmp_path):
     settings = room_log.room_console_settings(tmp_path / "absent")
 
-    assert settings == room_log.DEFAULT_ROOM_CONSOLE_SETTINGS
+    assert settings == _DEFAULT_SETTINGS
 
 
 def test_log_room_event_writes_room_log_without_server_log(tmp_path, caplog, monkeypatch):

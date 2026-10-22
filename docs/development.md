@@ -8,6 +8,13 @@
 - `backend/trpg_server/socket_events.py` 维护 Socket.IO 事件注册。
 - 前端仍使用静态 HTML、Bootstrap、原生 JavaScript 和全局初始化函数；迁移时必须保持现有 DOM id、接口路径和可见功能不变。
 
+## 配置规范
+
+- 全部配置经 `trpg_server.config` 分层加载：代码默认值 < `config/templates/general.toml` < `data/config/general.toml` < 环境变量 `AI_TRPG_CFG_*` < CLI `--set`；新增配置项必须先在 `config/schema.py` 注册 FieldSpec（默认值、类型转换器），再补 `config/templates/general.toml` 对应键与注释（`tests/test_config_template_sync.py` 强制双向同步）。
+- 业务代码只读 `load_settings()` / `load_ai_runtime_config()` 的生效值，禁止再用 `tomllib` 直读 `general.toml` 或自带默认值兜底；写入一律走 `config.writer.update_sections()`（注释保留、原子替换、写后缓存失效）。
+- 启动参数：`python server.py [port] [--port N] [--config-dir PATH] [--set section.key=value ...]`；被 env/CLI 覆盖的键在设置页自动锁定。
+- 遗留 `site.json`/`network.json`/`penetration.json` 仅兼容读取，控制台 `config migrate` 可并入 `general.toml`。
+
 ## 验证流程
 
 提交前运行：

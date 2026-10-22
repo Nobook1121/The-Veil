@@ -4,7 +4,6 @@ import re
 import secrets
 import string
 import time
-import tomllib
 from pathlib import Path
 
 from flask import Blueprint, current_app, request, session
@@ -15,12 +14,11 @@ from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, success_response
 from trpg_server.security import normalize_filename, safe_join
-from trpg_server.settings import CHARACTER_GALLERY_DIR, CHARACTER_SKILLS_FILE, CHARACTERS_DIR, CONFIG_DIR, OCCUPATIONS_DIR, ROOMS_DIR, WEAPONS_DIR
+from trpg_server.settings import CHARACTER_GALLERY_DIR, CHARACTER_SKILLS_FILE, CHARACTERS_DIR, OCCUPATIONS_DIR, ROOMS_DIR, WEAPONS_DIR
 
 bp = Blueprint("characters", __name__)
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_CARDS_PER_USER = 3
 SKILL_GROUP_CATEGORIES = {
     "special": "特殊",
     "explore": "探索",
@@ -52,10 +50,6 @@ def _get_characters_dir():
 
 def _get_character_gallery_dir():
     return current_app.config.get("CHARACTER_GALLERY_DIR", CHARACTER_GALLERY_DIR)
-
-
-def _get_config_dir():
-    return current_app.config.get("CONFIG_DIR", CONFIG_DIR)
 
 
 def _get_occupations_dir():
@@ -610,20 +604,6 @@ def _skill_key_from_name(name, fallback=""):
         labels = {}
     lookup = {str(value): str(item.get("key") or "") for item in skills if isinstance(item, dict) for value in [labels.get(_as_text(item.get("labelKey"))), item.get("key")]}
     return _as_text(lookup.get(str(name)), fallback)
-
-
-def _max_cards_per_user():
-    config_path = _get_config_dir() / "general.toml"
-    try:
-        config = tomllib.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
-    except (OSError, tomllib.TOMLDecodeError):
-        return DEFAULT_MAX_CARDS_PER_USER
-    value = (config.get("character_rules") or {}).get("max_cards_per_user", DEFAULT_MAX_CARDS_PER_USER)
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return DEFAULT_MAX_CARDS_PER_USER
-    return max(1, min(parsed, 999))
 
 
 def _owned_character_count(excluded_character_id=None):

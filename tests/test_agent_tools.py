@@ -370,11 +370,15 @@ def test_room_check_without_trigger_id_keeps_original_behaviour(tmp_path, monkey
 
 def _enable_room_log(monkeypatch):
     """用例不受本机 general.toml 的运行时开关影响。"""
-    from trpg_server.room_log import DEFAULT_ROOM_CONSOLE_SETTINGS
-
     monkeypatch.setattr(
         "trpg_server.room_log.room_console_settings",
-        lambda config_dir=None: dict(DEFAULT_ROOM_CONSOLE_SETTINGS),
+        lambda config_dir=None: {
+            "enabled": True,
+            "mirror_to_server_console": False,
+            "max_entries": 500,
+            "view_role": "admin",
+            "execute_role": "admin",
+        },
     )
 
 

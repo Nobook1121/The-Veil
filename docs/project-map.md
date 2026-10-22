@@ -39,14 +39,14 @@
 
 | 路径 | 作用 |
 | --- | --- |
-| `server.py` | 兼容启动入口，只做启动/端口/控制台/停机 |
+| `server.py` | 兼容启动入口，只做启动/端口/控制台/停机；解析 `--config-dir` / `--set section.key=value` / `--port` |
 | `backend/trpg_server/` | 全部后端源码（Python 包） |
 | `frontend/src/` | 前端源码（TS、HTML 片段、样式、i18n、模板） |
 | `dist/public/` | 前端构建产物（发布包内置，禁止手改） |
 | `data/` | 持久化数据（剧本、资源、配置、运行时数据） |
 | `tests/` | pytest 测试（55 个 `test_*.py`；全量 511 passed / 1 skipped） |
 | `scripts/` | 构建、迁移、验证、导入辅助脚本 |
-| `config/` | 示例环境配置（`vector-embedding-ocr.example.env`） |
+| `config/` | 配置模板（`templates/general.toml`、`templates/roles/`、`templates/aiplatform/`）与示例环境配置（`vector-embedding-ocr.example.env`） |
 | `docs/` | 开发文档、API 文档、格式说明、本地 wiki |
 | `release/` | 变更日志与发布清单 |
 | `pyrightconfig.json` | Pyright 静态检查配置（`extraPaths: ["backend"]`，让测试能解析 `trpg_server.*`） |
@@ -60,6 +60,7 @@
 | --- | --- |
 | `app_factory.py` | 创建 Flask app、CORS、Socket.IO、日志、蓝图、CSP/安全头、Embedding/向量库初始化、自动存档线程 |
 | `settings.py` | 全部路径常量与环境变量（端口 8086、数据目录、向量库、OCR、Secret Key） |
+| `config/` 包 | 五层分层配置（代码默认 < `config/templates` < `data/config` < env `AI_TRPG_CFG_*` < CLI `--set`）：`paths`（目录解析与 CLI 解析/注入）、`fields`（类型转换器）、`schema`（全部配置项权威规格）、`sources`（TOML/遗留 JSON/env 读取）、`merge`（分层合并与缓存）、`writer`（注释保留写入）、`bootstrap`（首启种子）；`agents/config.py` 为兼容门面 |
 | `socket_events.py` | Socket.IO 事件注册（房间聊天、成员/输入状态、房间控制台日志推送等） |
 | `security.py` | `safe_join`、上传扩展名校验、会话守卫 |
 | `json_store.py` | `read_json` / `write_json_atomic`（原子写，防半写文件） |
@@ -196,8 +197,8 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 | `data/scenarios/knowledge-index/` | 剧本知识索引 |
 | `data/assets/` | 头像、剧本封面、AI 平台图标、主题、上传资源、vendor 资源 |
 | `data/dice-textures/` | 骰子贴图库（桌面贴图 / 骰面贴图 + 索引） |
-| `data/config/` | `site.json`、`network.json`、`penetration.json`、`general.toml`、`roles/`、`aiplatform/`、`aimodel/`、角色技能表 |
-| `data/occupations/` / `data/weapons/` | 职业与武器目录 |
+| `data/config/` | `general.toml`（首次启动从 `config/templates/` 幂等生成，本地不入库）、`roles/`、`aiplatform/`、`aimodel/`；遗留 `site.json`/`network.json`/`penetration.json` 仅兼容读取，可用控制台 `config migrate` 并入 TOML |
+| `data/occupations/` / `data/weapons/` / `data/character_skills.json` | 职业、武器目录与角色技能表 |
 | `data/runtime/users/` | `users.sqlite3`、IP 配置 |
 | `data/runtime/rooms/<room_id>/` | `info.json`、`messages.json`、`autosave.json`、`nodes/`、`console.jsonl` |
 | `data/runtime/agent/` | 网站 Agent：`conversations/<user_id>/`、`actions/`（待确认操作，TTL 默认 5 分钟）、`audit/`（JSONL 滚动审计）、`usage/<user_id>/`（逐日 token） |

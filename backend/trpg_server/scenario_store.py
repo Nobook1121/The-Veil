@@ -8,10 +8,10 @@ import re
 import secrets
 import string
 import time
-import tomllib
 from pathlib import Path
 from typing import Any
 
+from trpg_server.config import load_settings
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.media_defaults import LEGACY_DEFAULT_COVERS, normalize_cover
 from trpg_server.security import normalize_filename, safe_join
@@ -253,17 +253,8 @@ def decode_data_url(data_url: str) -> tuple[bytes, str]:
 
 
 def trigger_size_limit(config_dir: Path | None = None) -> int:
-    if not config_dir:
-        return DEFAULT_TRIGGER_SIZE_LIMIT
-    config_path = Path(config_dir) / "general.toml"
-    try:
-        config = tomllib.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
-    except (OSError, tomllib.TOMLDecodeError):
-        return DEFAULT_TRIGGER_SIZE_LIMIT
-    try:
-        return int((config.get("scenario") or {}).get("trigger_max_file_size", DEFAULT_TRIGGER_SIZE_LIMIT))
-    except (TypeError, ValueError):
-        return DEFAULT_TRIGGER_SIZE_LIMIT
+    # 统一分层加载（含模板/env/CLI）；schema 收敛到 [1024, 512MB]，默认 5MB。
+    return int(load_settings(config_dir).data["scenario"]["trigger_max_file_size"])
 
 
 def _trigger_asset_filename(scene_id: int | str, trigger_id: int | str, asset_name: str) -> str:

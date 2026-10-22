@@ -403,7 +403,15 @@ def test_room_message_logs_display_name_without_content(monkeypatch, caplog, tmp
     monkeypatch.setattr(rooms_routes, "_write_room", lambda room_dir, info: None)
     # 房间事件现在写入房间内嵌控制台日志（房间目录内），不再刷服务器控制台。
     monkeypatch.setattr(
-        room_log, "room_console_settings", lambda *args, **kwargs: dict(room_log.DEFAULT_ROOM_CONSOLE_SETTINGS)
+        room_log,
+        "room_console_settings",
+        lambda *args, **kwargs: {
+            "enabled": True,
+            "mirror_to_server_console": False,
+            "max_entries": 500,
+            "view_role": "admin",
+            "execute_role": "admin",
+        },
     )
     caplog.set_level("INFO", logger="trpg_server.routes.rooms")
     # 锁定日志语言：指向空的配置目录即回落到默认语言（英文），

@@ -1,13 +1,13 @@
 import json
 import logging
 import secrets
-import tomllib
 import time
 from pathlib import Path
 from uuid import uuid4
 
 from flask import Blueprint, current_app, request, session
 
+from trpg_server.config import load_settings
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.media_defaults import normalize_avatar
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
@@ -33,7 +33,6 @@ ROOM_ROLE_ADMIN = "admin"
 ROOM_ROLE_MEMBER = "member"
 ROOM_MEMBER_ACTIVE = "active"
 ROOM_MEMBER_REMOVED = "removed"
-DEFAULT_AUTOSAVE_NODE_LIMIT = 3
 ROOM_VISIBILITY_PRIVATE = "private"
 ROOM_VISIBILITY_PUBLIC = "public"
 ROOM_VISIBILITIES = {ROOM_VISIBILITY_PRIVATE, ROOM_VISIBILITY_PUBLIC}
@@ -85,29 +84,14 @@ def _get_role_config_file():
 
 
 def _autosave_node_limit():
-    config_path = _get_config_dir() / "general.toml"
-    try:
-        config = tomllib.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
-        value = int((config.get("autosave") or {}).get("max_nodes", DEFAULT_AUTOSAVE_NODE_LIMIT))
-    except (OSError, ValueError, tomllib.TOMLDecodeError):
-        value = DEFAULT_AUTOSAVE_NODE_LIMIT
-    return max(1, min(value, 50))
+    # schema 已收敛到 [1, 50]，默认 3。
+    return int(load_settings(_get_config_dir()).data["autosave"]["max_nodes"])
 
 
 def _autosave_settings():
-    """读取 general.toml 的 [autosave] 段，供服务端后台调度使用。"""
-    defaults = {"enabled": True, "interval": 300}
-    config_path = _get_config_dir() / "general.toml"
-    try:
-        config = tomllib.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
-    except (OSError, tomllib.TOMLDecodeError):
-        config = {}
-    section = config.get("autosave") or {}
-    try:
-        interval = int(section.get("interval", defaults["interval"]))
-    except (TypeError, ValueError):
-        interval = defaults["interval"]
-    return {"enabled": bool(section.get("enabled", defaults["enabled"])), "interval": max(30, min(interval, 3600))}
+    """读取生效配置的 [autosave] 段，供服务端后台调度使用（schema 保证键齐全）。"""
+    section = load_settings(_get_config_dir()).data["autosave"]
+    return {"enabled": bool(section["enabled"]), "interval": int(section["interval"])}
 
 
 def _timestamp():

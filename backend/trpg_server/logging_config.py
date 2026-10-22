@@ -1,6 +1,5 @@
 import logging
 import json
-import tomllib
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -252,7 +251,11 @@ def set_log_config_dir(config_dir: str | Path | None = None) -> None:
 
 
 def log_language() -> str:
-    """读取当前界面语言；文件缺失或解析失败时回落到默认语言。"""
+    """读取当前界面语言；统一走分层加载（模板/env/CLI），异常时回落默认语言。
+
+    用户配置文件缺失时保持历史行为：直接回落 ``DEFAULT_LOG_LANGUAGE``（英文），
+    不读模板——日志语言只跟随用户显式配置，避免首次启动前的日志突然换语言。
+    """
     global _language_cache
     path = _log_config_dir / "general.toml"
     try:
@@ -262,10 +265,10 @@ def log_language() -> str:
     if _language_cache is not None and _language_cache[0] == mtime:
         return _language_cache[1]
     try:
-        with path.open("rb") as handle:
-            data = tomllib.load(handle)
-        language = str(data.get("language", {}).get("language") or DEFAULT_LOG_LANGUAGE)
-    except (OSError, tomllib.TOMLDecodeError):
+        from trpg_server.config import load_settings
+
+        language = str(load_settings(_log_config_dir).data.get("language", {}).get("language") or DEFAULT_LOG_LANGUAGE)
+    except Exception:  # noqa: BLE001 - 日志路径绝不能因配置异常而崩溃
         language = DEFAULT_LOG_LANGUAGE
     _language_cache = (mtime, language)
     return language
