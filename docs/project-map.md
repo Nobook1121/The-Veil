@@ -6,7 +6,7 @@
 ## 1. 项目定位
 
 **帷幕 The Veil**：自托管的 AI 跑团（TRPG）平台。AI 担任 KP/守秘人，真人玩家在同一房间聊天中掷骰、交流、推进剧情。
-仓库名 `the-veil`，当前开发版本 `v0.5.1b`（`package.json` 版本号尚未 bump，仍为 `0.5.0-b`），Apache-2.0。
+仓库名 `the-veil`，当前开发版本 `v0.5.2b`（`package.json` 版本号尚未 bump，仍为 `0.5.0-b`），Apache-2.0。
 
 技术栈：
 
@@ -44,7 +44,7 @@
 | `frontend/src/` | 前端源码（TS、HTML 片段、样式、i18n、模板） |
 | `dist/public/` | 前端构建产物（发布包内置，禁止手改） |
 | `data/` | 持久化数据（剧本、资源、配置、运行时数据） |
-| `tests/` | pytest 测试（54 个 `test_*.py`；全量约 458 passed / 1 skipped） |
+| `tests/` | pytest 测试（55 个 `test_*.py`；全量 511 passed / 1 skipped） |
 | `scripts/` | 构建、迁移、验证、导入辅助脚本 |
 | `config/` | 示例环境配置（`vector-embedding-ocr.example.env`） |
 | `docs/` | 开发文档、API 文档、格式说明、本地 wiki |
@@ -79,6 +79,10 @@
 | `media_defaults.py` | 媒体与默认封面处理 |
 | `network_discovery.py` / `network_admin.py` | 局域网 IP/端口发现、网络配置 |
 | `setup_embedding.py` / `vector_admin.py` / `knowledge_admin.py` | Embedding 模型下载/上传、向量库与知识库管理 |
+| `site_agent.py` (439) | 网站 Agent 编排层：轮次循环、token 记账、平台故障转移 |
+| `site_agent_config.py` / `site_agent_auth.py` / `site_agent_prompt.py` / `site_agent_store.py` | Agent 配置（`general.toml [site_agent]`）、统一鉴权（会话→开关→`agent.use`→工具权限→房间范围→业务校验）、系统提示词（不可信数据块包裹）、按用户隔离的会话/待确认操作/审计/用量存储 |
+| `site_agent_tools/` | Agent 工具注册表：`base.py`（JSON Schema 白名单清洗，丢弃身份/路径/命令字段）+ `characters` / `scenarios` / `rooms` / `permissions` / `users` / `utilities`；只读工具直接执行，写工具只生成 `pending_action` 待确认卡片 |
+| `character_service.py` (244) / `scenario_service.py` (312) | 角色卡/剧本的领域服务：校验、版本、知识库索引；路由与 Agent 写工具共用，避免两条写路径分叉 |
 
 ### 4.2 HTTP 路由（`backend/trpg_server/routes/`，每个文件一个业务组）
 
@@ -94,6 +98,7 @@
 | `config.py` (545) | 站点、AI 平台、运行配置 |
 | `setup.py` (426) | 首次部署六步向导（站点、AI、Embedding、Owner） |
 | `room_console.py` (180) | 房间控制台 REST 接口与日志读取 |
+| `site_agent.py` (193) | 网站 Agent HTTP 接口（会话、消息、待确认操作、用量） |
 | `triggers.py` (282) | 触发器资源与附件 |
 | `dice_rolls.py` (202) | 待投掷请求查询/投掷/幂等完成/取消/强制投掷，前端降级上报 |
 | `dice_textures.py` (111) | 骰子贴图上传、桌面皮肤、逐面皮肤、删除引用保护 |
@@ -125,7 +130,7 @@
 | `room_state.py` (80) / `memory.py` (43) / `context.py` (47) | 房间状态、长期记忆、上下文提供器 |
 | `versioning.py` (65) | 剧本/数据版本 |
 | `dice_settings.py` (44) | 骰子动画/玩家投掷生效值解析：房规优先、管理员默认兜底 |
-| `player_roll.py` (309) | 玩家投掷等待：内存态 `PendingRoll` + `threading.Event`，超时自动投掷、断线恢复、房间关闭清理 |
+| `player_roll.py` (~620) | 玩家投掷等待：内存态 `PendingRoll` + `threading.Event`，超时自动投掷、断线恢复、房间关闭清理；投掷/检定结果写入房间日志 |
 | `ocr_provider.py` | PaddleOCR 封装 |
 
 Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送给 API 前 `.` 会转成 `_`）：
@@ -159,12 +164,13 @@ Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送�
 | `app/models/` | `ScenarioModel.ts` |
 | `app/config/` | `ConfigManager.ts`、`AIPlatformManager.ts`、`TestRequestConfig.ts` |
 | `app/auth/` | 登录/注册/资料/用户卡片/认证状态 |
-| `app/dice/` | 简易动画、3D 适配器、降级记忆、骰子外观、管理员贴图库 |
-| `app/diceTable.ts` (571) | 虚拟投掷桌：3D → 简易 → 纯文本逐层降级并上报 |
-| `dice3d/main.ts` (289) | Three.js + cannon-es 3D 骰子舞台，独立打包为 `js/dice/dice3d.js` |
+| `app/dice/` | 简易动画、3D 适配器、降级记忆、骰子外观、管理员贴图库、`diceOverlay.ts`（覆盖层）、`diceTypes.ts`（共享类型） |
+| `app/diceTable.ts` (~1400) | 虚拟投掷桌：物理骰面结果生成、本地骰桌结算、3D → 简易 → 纯文本逐层降级并上报 |
+| `dice3d/main.ts` (~1100) | Three.js + cannon-es 3D 骰子舞台（物理骰面结算），独立打包为 `js/dice/dice3d.js` |
 | `app/generated/templates.ts` | 构建时由 `templates/*.html` 生成（勿手改） |
 | `templates/*.html` | `<template id="...">` 模板源 |
 | `react/` | React 19 局部挂载：`main.tsx`、`shell/Sidebar.tsx`、`home/HomeChat.tsx`，esbuild 打包 |
+| `react/agent/` | 网站 Agent：`AgentProvider`（共享状态）、`AgentBall`（悬浮球）、`AgentWindow`（可拖拽悬浮窗）、`AgentPage`（全屏页）、`AgentChat` / `AgentActionCard`（Markdown 消息与待确认卡片）、`agent-api.ts` / `agent-types.ts` / `agent.css` |
 | `styles/` | 分层 CSS：`00-theme-tokens` → `01-foundation-chat` → `02-scenario-character` → `03-tools-settings-platform` → `04-auth-profile-overrides` → `05-dice-animation` |
 | `locales/zh_cn.json` / `en_us.json` | 中英文案（运行时 `i18n.ts`） |
 | `tools/` | 骰子/检定/工具管理（编译到 `dist/public/data/tools/`） |
@@ -194,6 +200,7 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 | `data/occupations/` / `data/weapons/` | 职业与武器目录 |
 | `data/runtime/users/` | `users.sqlite3`、IP 配置 |
 | `data/runtime/rooms/<room_id>/` | `info.json`、`messages.json`、`autosave.json`、`nodes/`、`console.jsonl` |
+| `data/runtime/agent/` | 网站 Agent：`conversations/<user_id>/`、`actions/`（待确认操作，TTL 默认 5 分钟）、`audit/`（JSONL 滚动审计）、`usage/<user_id>/`（逐日 token） |
 | `data/runtime/room_archives/` | 房间归档快照（含控制台日志） |
 | `data/runtime/characters/` / `character_gallery/` | 角色卡与广场 |
 | `data/runtime/knowledge-bases/` / `scenario_imports/` / `scenario_drafts/` | 知识库、导入任务、草稿 |
@@ -234,6 +241,8 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 - 禁止 `alert()` / `confirm()` / `prompt()`；用 `showNotification()` 或 `TrpgDialog.confirm()/prompt()`。
 - 新增控制台命令：独立非 Flask 模块 + 依赖注入；破坏性命令默认 dry-run + 交互确认，支持 `--yes`；同时更新 `command_help_text()` 与 `docs/console-commands.md`。
 - 房间控制台命令严格限定当前房间；日志写房间目录 `console.jsonl` 并纳入归档。
+- 网站 Agent：权限节点 `agent.use` + 内置角色 `site_agent`；所有写操作只生成 `pending_action` 待确认卡片，确认时服务端重新鉴权并校验操作有效期（默认 5 分钟）；工具入参按 JSON Schema 白名单清洗，身份与路径/命令字段一律丢弃；角色卡/剧本写入必须走 `character_service.py` / `scenario_service.py`，不在路由或工具里另起写路径。
+- 角色卡编辑器的「AI 生成」按钮已移除，AI 生成角色卡能力由网站 Agent 承接；原「小工具」页已删除，侧边栏入口改为 Agent（`/check`、`/roll` 等聊天命令保留）。
 - 每次提交后更新 `release/changelog/`（写明时间）；新增依赖必须登记 `THIRD-PARTY-LICENSES.md`；新功能同步更新 `docs/the-veil.wiki/`。
 - 日志：`logging.getLogger(__name__)`；INFO 只记关键操作；不记录密码/密钥/令牌/上传内容；输出字典前用 `redact_sensitive`。
 - 前端静态资源需带缓存控制头，避免浏览器长期缓存旧样式。
@@ -253,6 +262,7 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 | 权限/角色 | `permission_config.py`、`role_config.py`、`routes/users.py`、`routes/auth.py` |
 | 向量检索/Embedding | `agents/vector_store.py`、`agents/embedding_provider.py`、`setup_embedding.py`、`routes/vector_health.py` |
 | 房间控制台 | `room_console_commands.py`、`room_log.py`、`routes/room_console.py`、`frontend/src/app/room-console.ts` |
+| 网站 Agent | `site_agent.py`、`site_agent_auth.py`、`site_agent_config.py`、`site_agent_prompt.py`、`site_agent_store.py`、`site_agent_tools/*`、`routes/site_agent.py`、`frontend/src/react/agent/*`；写操作走 `character_service.py` / `scenario_service.py` |
 | 服务器控制台 | `console_commands.py`、`docs/console-commands.md` |
 | 前端页面/样式 | `frontend/src/index/fragments/*`、`frontend/src/app/*`、`frontend/src/styles/*` |
 | 国际化 | `frontend/src/locales/zh_cn.json`、`en_us.json`、`frontend/src/app/i18n.ts` |
