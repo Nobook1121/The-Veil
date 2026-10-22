@@ -1,6 +1,9 @@
 <!-- 首次部署引导向导：仅在系统中还没有 OWNER 账号时显示 -->
     <div id="setupWizard" class="setup-wizard" hidden>
         <style>
+            .setup-wizard[hidden] {
+                display: none !important;
+            }
             .setup-wizard {
                 position: fixed;
                 inset: 0;

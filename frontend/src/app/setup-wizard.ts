@@ -64,7 +64,8 @@ namespace SetupWizard {
             const data = status.data;
             applySiteBranding(data?.site_name || "");
             // 已在本浏览器跳过引导时不再弹出（服务端状态未及时更新也能生效）。
-            if (status.success && data && data.setup_required && !isDismissedLocally()) {
+            // 只要服务端已有 OWNER，就说明本机已完成初始化，任何入口都不再弹出引导。
+            if (status.success && data && data.setup_required && data.owner_exists !== true && !isDismissedLocally()) {
                 startWizard();
                 return true;
             }
@@ -126,11 +127,12 @@ namespace SetupWizard {
         // 引导期间隐藏登录弹窗，避免登录流程与首次初始化冲突。
         const authModal = document.getElementById("auth-modal");
         if (authModal) authModal.style.display = "none";
-        wizard.hidden = false;
+        // 先绑定事件再显示遮罩：即使绑定过程异常，也不会留下无法点击的引导层。
         if (!wizardBound) {
             wizardBound = true;
             bindEvents();
         }
+        wizard.hidden = false;
         prefillAiDefaults();
         prefillSiteName();
         renderStep(1);

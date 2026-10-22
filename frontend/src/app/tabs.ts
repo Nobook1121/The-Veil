@@ -546,7 +546,16 @@ function updateGeneralPendingState(): void {
 }
 
 async function saveGeneralSettingsChanges(): Promise<void> {
-    const generalConfig = configManager.getConfig("general");
+    let generalConfig = configManager.getConfig("general");
+    // 配置未成功加载时不能保存：否则会用界面上的默认值覆盖磁盘里的真实配置。
+    if (!isConfigObject(generalConfig) || Object.keys(generalConfig).length === 0) {
+        await configManager.loadConfig("general");
+        generalConfig = configManager.getConfig("general");
+    }
+    if (!isConfigObject(generalConfig) || Object.keys(generalConfig).length === 0) {
+        showNotification("通用设置尚未加载完成，请刷新页面后重试", "error");
+        return;
+    }
     generalSettingControls.forEach((control) => {
         const existing = generalConfig[control.section];
         const section: TomlConfig = isConfigObject(existing) ? existing : {};

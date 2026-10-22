@@ -1670,6 +1670,9 @@ interface Window {
     }
 
     async function reloadCharacterSheet(): Promise<void> {
+        // 登录后重新拉取目录：页面初始化时若尚未登录，目录请求会 401，
+        // 只在登录后刷新角色卡列表而不重载目录会导致职业/技能一直为空。
+        await Promise.all([loadSkillCatalog(), loadOccupationCatalogs(), loadWeaponCatalog()]);
         await loadCards();
         await loadAssignableUsers();
         render();
