@@ -95,6 +95,8 @@ namespace AuthModule {
         });
         window.refreshAdminNavigation?.();
         window.refreshScenarioManagement?.();
+        // 未登录时标记 body，供剧本/角色卡页的「登录后可创建」提示条显隐（CSS 控制）。
+        document.body.classList.toggle("is-guest", !user);
     }
 
     function presenceLabel(presence: CurrentUser["presence"]): string {

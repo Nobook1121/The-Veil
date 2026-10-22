@@ -23,6 +23,11 @@
                             <input type="file" id="importScenarioFile" accept=".json" style="display: none;" multiple>
                             <input type="file" id="importScenarioDocumentFile" accept=".doc,.docx,.pdf,.txt,.md,.markdown,.text" style="display: none;">
                         </header>
+                        <div class="guest-login-hint" role="status">
+                            <i class="fa fa-lock" aria-hidden="true"></i>
+                            <span data-i18n="guest.hint.scenario">当前未登录，登录后即可创建、导入和管理剧本。</span>
+                            <button type="button" class="btn btn-sm btn-primary" data-guest-login data-i18n="guest.action.login">立即登录</button>
+                        </div>
                         <div class="batch-toolbar" id="scenarioBatchToolbar" hidden>
                             <label class="batch-toolbar-select"><input type="checkbox" id="scenarioBatchSelectAll"> <span data-i18n="common.batch.select_all">全选</span></label>
                             <span class="batch-toolbar-count" id="scenarioBatchCount" aria-live="polite"></span>
@@ -71,6 +76,12 @@
                                 </button>
                             </div>
                         </header>
+
+                        <div class="guest-login-hint" role="status">
+                            <i class="fa fa-lock" aria-hidden="true"></i>
+                            <span data-i18n="guest.hint.character">当前未登录，登录后即可创建、导入和管理角色卡。</span>
+                            <button type="button" class="btn btn-sm btn-primary" data-guest-login data-i18n="guest.action.login">立即登录</button>
+                        </div>
 
                         <div class="character-list-view" id="character-list-view">
                             <div class="batch-toolbar" id="characterBatchToolbar" hidden>

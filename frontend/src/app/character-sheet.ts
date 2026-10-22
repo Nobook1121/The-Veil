@@ -1265,6 +1265,14 @@ interface Window {
         return isCurrentUserElevated() ? cards : currentUserCharacterCards();
     }
 
+    /** 未登录时目录接口返回 401（职业为空、技能只剩内置兜底），创建/导入必须先登录。 */
+    function requireLoginForCharacterAction(action: string): boolean {
+        if (global.currentUser) return true;
+        showNotification(`请先登录后再${action}`, "warning");
+        AuthModule.showAuthModal();
+        return false;
+    }
+
     function canCreateCharacterCard(): boolean {
         if (isCurrentUserElevated()) return true;
         const limit = loadRuleSettings().maxCardsPerUser;
@@ -1743,13 +1751,17 @@ interface Window {
 
     function bindEvents(): void {
         byId("createCharacter")?.addEventListener("click", () => {
+            if (!requireLoginForCharacterAction("创建角色卡")) return;
             if (!canCreateCharacterCard()) return;
             openEditor();
         });
         byId("saveCharacter")?.addEventListener("click", () => {
             void saveFromEditor();
         });
-        byId("importCharacter")?.addEventListener("click", () => byId<HTMLInputElement>("importCharacterFile")?.click());
+        byId("importCharacter")?.addEventListener("click", () => {
+            if (!requireLoginForCharacterAction("导入角色卡")) return;
+            byId<HTMLInputElement>("importCharacterFile")?.click();
+        });
         byId<HTMLInputElement>("importCharacterFile")?.addEventListener("change", importCharacterFiles);
         byId("exportCharacter")?.addEventListener("click", exportActiveCard);
         // 「角色卡广场」按钮此前没有绑定任何事件，点击无反应；这里切到广场标签页。
@@ -1765,6 +1777,7 @@ interface Window {
         byId("nameGenderSelect")?.addEventListener("change", regenerateNamePreview);
         byId("openOccupationTemplatePicker")?.addEventListener("click", openOccupationTemplatePicker);
         byId("createGalleryCharacter")?.addEventListener("click", () => {
+            if (!requireLoginForCharacterAction("创建角色卡")) return;
             if (canCreateCharacterCard()) openEditor();
         });
         byId("characterGallerySearch")?.addEventListener("input", handleGallerySearchInput);

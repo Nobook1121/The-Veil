@@ -34,6 +34,14 @@ class ScenarioView {
         this.handlers = handlers;
     }
 
+    /** 未登录时后端会拒绝创建/导入剧本，这里提前拦截并引导登录。 */
+    private requireLogin(action: string): boolean {
+        if (window.currentUser) return true;
+        showNotification(`请先登录后再${action}`, "warning");
+        AuthModule.showAuthModal();
+        return false;
+    }
+
     renderScenarioList(scenarios: Scenario[]): void {
         this.currentScenarios = scenarios;
         this.scenarioList.innerHTML = "";
@@ -506,10 +514,12 @@ class ScenarioView {
 
     private initEventListeners(): void {
         document.getElementById("createScenario")?.addEventListener("click", () => {
+            if (!this.requireLogin("创建剧本")) return;
             this.handlers?.onCreateScenarioClick();
         });
 
         document.getElementById("importScenarioDocument")?.addEventListener("click", () => {
+            if (!this.requireLogin("导入剧本文档")) return;
             void this.handlers?.onImportScenarioDocumentClick();
         });
 
@@ -521,6 +531,7 @@ class ScenarioView {
         });
 
         document.getElementById("importScenario")?.addEventListener("click", () => {
+            if (!this.requireLogin("导入剧本")) return;
             input("importScenarioFile").click();
         });
 

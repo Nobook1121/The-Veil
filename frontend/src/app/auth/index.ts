@@ -29,6 +29,9 @@ namespace AuthModule {
                 window.switchMainTab?.(button.dataset.targetTab || "", { clearNav: false });
             });
         });
+        document.querySelectorAll<HTMLButtonElement>("[data-guest-login]").forEach((button) => {
+            button.addEventListener("click", () => showAuthModal());
+        });
         document.getElementById("userInfo")?.addEventListener("click", toggleUserCard);
         closeUserCardOnOutsideClick();
         bindProfileNavigation();
