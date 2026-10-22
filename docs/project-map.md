@@ -6,7 +6,7 @@
 ## 1. 项目定位
 
 **帷幕 The Veil**：自托管的 AI 跑团（TRPG）平台。AI 担任 KP/守秘人，真人玩家在同一房间聊天中掷骰、交流、推进剧情。
-仓库名 `the-veil`，当前开发版本 `v0.5.2b`（`package.json` 版本号尚未 bump，仍为 `0.5.0-b`），Apache-2.0。
+仓库名 `the-veil`，当前开发版本 `v0.5.3b`（`package.json` 版本号尚未 bump，仍为 `0.5.0-b`），Apache-2.0。
 
 技术栈：
 
@@ -24,7 +24,9 @@
 | --- | --- |
 | 源码启动（Windows） | 双击 `start.cmd`，或 `python server.py` |
 | 源码启动（macOS/Linux） | `python server.py` |
-| 指定端口 | `python server.py 8087`（默认 8086，被占用时自动向后找） |
+| 指定端口 | `python server.py 8087` 或 `--port 8087`（默认 8086，被占用时自动向后找） |
+| 指定配置目录 | `python server.py --config-dir <PATH>`（首次启动的种子文件也生成到该目录） |
+| 临时覆盖配置 | `python server.py --set section.key=value`（可重复；优先级最高，高于环境变量） |
 | 开发时自动重建前端 | 设 `AI_TRPG_DEV_BUILD=1` 后启动 |
 | 前端构建 | `npm run build:frontend`（含 `build:react` 与 `build:dice3d`） |
 | 仅 3D 骰子 bundle | `npm run build:dice3d` |
@@ -32,8 +34,8 @@
 | 全量验证 | `.\scripts\verify.ps1`（py_compile → typecheck → build → node --check → pytest） |
 | 单元测试 | `python -m pytest -q`（测试目录 `tests/`，`conftest.py` 把 `backend/` 加入 `sys.path`） |
 
-入口链路：`server.py` → `create_app()`（`backend/trpg_server/app_factory.py`）→ 注册蓝图/Socket.IO/Embedding/向量库 → `werkzeug.make_server` 监听 `0.0.0.0`。
-`server.py` 另含：端口选择、控制台命令循环、仅回环可用的优雅停机端点 `POST /__internal/shutdown`。
+入口链路：`server.py` 先解析 CLI 并 `ensure_user_config()`（首次从模板生成 `data/config/`），再 `create_app()`（`backend/trpg_server/app_factory.py`）→ 注册蓝图/Socket.IO/Embedding/向量库 → `werkzeug.make_server` 监听 `0.0.0.0`。
+`server.py` 另含：端口选择（优先级 CLI > 环境变量 > 用户配置 > 模板/代码默认）、控制台命令循环、仅回环可用的优雅停机端点 `POST /__internal/shutdown`。
 
 ## 3. 顶层目录
 
@@ -43,8 +45,8 @@
 | `backend/trpg_server/` | 全部后端源码（Python 包） |
 | `frontend/src/` | 前端源码（TS、HTML 片段、样式、i18n、模板） |
 | `dist/public/` | 前端构建产物（发布包内置，禁止手改） |
-| `data/` | 持久化数据（剧本、资源、配置、运行时数据） |
-| `tests/` | pytest 测试（55 个 `test_*.py`；全量 511 passed / 1 skipped） |
+| `data/` | 持久化数据（剧本、资源、配置、运行时数据；`data/config/` 不入库，首次启动生成） |
+| `tests/` | pytest 测试（62 个 `test_*.py`；v0.5.3b 变更日志记录全量 583 passed） |
 | `scripts/` | 构建、迁移、验证、导入辅助脚本 |
 | `config/` | 配置模板（`templates/general.toml`、`templates/roles/`、`templates/aiplatform/`）与示例环境配置（`vector-embedding-ocr.example.env`） |
 | `docs/` | 开发文档、API 文档、格式说明、本地 wiki |
@@ -59,8 +61,9 @@
 | 文件 | 职责 |
 | --- | --- |
 | `app_factory.py` | 创建 Flask app、CORS、Socket.IO、日志、蓝图、CSP/安全头、Embedding/向量库初始化、自动存档线程 |
-| `settings.py` | 全部路径常量与环境变量（端口 8086、数据目录、向量库、OCR、Secret Key） |
-| `config/` 包 | 五层分层配置（代码默认 < `config/templates` < `data/config` < env `AI_TRPG_CFG_*` < CLI `--set`）：`paths`（目录解析与 CLI 解析/注入）、`fields`（类型转换器）、`schema`（全部配置项权威规格）、`sources`（TOML/遗留 JSON/env 读取）、`merge`（分层合并与缓存）、`writer`（注释保留写入）、`bootstrap`（首启种子）；`agents/config.py` 为兼容门面 |
+| `settings.py` | 路径常量（从 `config.paths` 再导出）、模型/向量库/OCR 环境变量、Secret Key 持久化；`DEFAULT_PORT` 派生自 `config.schema.DEFAULT_NETWORK_PORT` |
+| `config/` 包 | 分层配置权威实现：优先级 代码默认(`schema`) < `config/templates` < 遗留 JSON 兼容层 < `data/config/general.toml` < env `AI_TRPG_CFG_*` < CLI `--set`；`paths`（目录/CLI 解析与注入）、`fields`（FieldSpec 与转换器）、`schema`（全部配置项规格 + `AIRuntimeConfig`）、`sources`（tomlkit/遗留 JSON/env 读取）、`merge`（逐层类型化合并 + 缓存）、`writer`（注释保留定点写入）、`bootstrap`（首启种子） |
+| `config_admin.py` (89) | 控制台配置工具：`config show` / `config migrate` / `config path`；迁移只写 TOML 缺失键，并把遗留文件改名 `*.legacy` |
 | `socket_events.py` | Socket.IO 事件注册（房间聊天、成员/输入状态、房间控制台日志推送等） |
 | `security.py` | `safe_join`、上传扩展名校验、会话守卫 |
 | `json_store.py` | `read_json` / `write_json_atomic`（原子写，防半写文件） |
@@ -96,7 +99,7 @@
 | `scenario_imports.py` (216) | 剧本导入任务与审核发布 |
 | `auth.py` (553) | 注册/登录/登出/改密/找回密码/邮箱验证/身份模拟 |
 | `users.py` (335) | 用户列表、角色与状态、IP 配置、全局认证设置 |
-| `config.py` (545) | 站点、AI 平台、运行配置 |
+| `config.py` (536) | `GET /api/config/general` 返回分层合并后的生效配置 + `overrides` 锁定来源（免登录、密钥掩码）；`POST` 逐键 diff 写入并拒绝锁定/密钥键；AI 平台、提示词、权限配置 |
 | `setup.py` (426) | 首次部署六步向导（站点、AI、Embedding、Owner） |
 | `room_console.py` (180) | 房间控制台 REST 接口与日志读取 |
 | `site_agent.py` (193) | 网站 Agent HTTP 接口（会话、消息、待确认操作、用量） |
@@ -109,7 +112,7 @@
 | `telemetry.py` | AI 用量与缓存统计 |
 | `vector_health.py` | 向量库健康检查 |
 | `character_ai.py` (73) | 角色卡 AI 生成接口 |
-| `pages.py` / `assets.py` | 主页/SPA 回退、静态资源与上传 |
+| `pages.py` / `assets.py` | 主页/SPA 回退、静态资源与上传；`/config/<path>` 在 `assets.py` 中封禁 `general.toml`、`site.json`、`network.json`、`penetration.json` |
 
 完整接口清单见 [api.md](./api.md)；文件访问、日志、前端规范见 [development.md](./development.md)。
 
@@ -120,7 +123,7 @@
 | `runtime.py` (554) | Agent 主循环：消息组装、工具调用、工具结果折叠、usage 记录 |
 | `prompt_builder.py` (158) | KP/NPC 提示词拼装 |
 | `profiles.py` (62) | AgentProfile 与默认 KP 工具集 |
-| `config.py` (235) / `ai_request.py` (113) | AI 运行配置（字段规格表 `_FIELD_SPECS` 驱动，新增配置项只需加一行）、统一请求封装 |
+| `config.py` (~57) / `ai_request.py` (113) | `config.py` 仅保留兼容门面（`load_ai_runtime_config` / `write_ai_setting` / `AIRuntimeConfig`），实现已迁入 `trpg_server.config`；`ai_request.py` 为统一请求封装 |
 | `responses_transport.py` (187) / `http_retry.py` (102) | Responses/Chat Completions 传输、超时重试 |
 | `cache.py` (92) / `cache_probe.py` (225) | 精确/语义缓存、缓存探测 |
 | `token_accounting.py` (87) / `telemetry.py` (117) | token 计量、用量看板数据 |
@@ -197,7 +200,7 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 | `data/scenarios/knowledge-index/` | 剧本知识索引 |
 | `data/assets/` | 头像、剧本封面、AI 平台图标、主题、上传资源、vendor 资源 |
 | `data/dice-textures/` | 骰子贴图库（桌面贴图 / 骰面贴图 + 索引） |
-| `data/config/` | `general.toml`（首次启动从 `config/templates/` 幂等生成，本地不入库）、`roles/`、`aiplatform/`、`aimodel/`；遗留 `site.json`/`network.json`/`penetration.json` 仅兼容读取，可用控制台 `config migrate` 并入 TOML |
+| `data/config/` | 用户配置（`.gitignore` 已忽略，首次启动从模板幂等生成）：`general.toml` 是唯一「人类设置」入口，段包括 `appearance/language/notification/autosave/room_console/chat/ai*/character_rules/scenario/window/update/site_agent/site/network*`；另有 `roles/`、`aiplatform/`（首次保存时创建）、`aimodel/`；遗留 `site.json`/`network.json`/`penetration.json` 仅兼容读取，用 `config migrate` 并入 TOML |
 | `data/occupations/` / `data/weapons/` / `data/character_skills.json` | 职业、武器目录与角色技能表 |
 | `data/runtime/users/` | `users.sqlite3`、IP 配置 |
 | `data/runtime/rooms/<room_id>/` | `info.json`、`messages.json`、`autosave.json`、`nodes/`、`console.jsonl` |
@@ -214,7 +217,7 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 
 ### Python（`requirements.txt`）
 
-`Flask==2.3.3`、`Flask-Cors==4.0.1`、`Werkzeug==2.3.8`、`Flask-SocketIO==5.3.6`、`python-socketio==5.11.2`、`bcrypt==4.0.1`、`pytest==8.4.0`、`olefile==0.47`、`requests>=2.31,<3`、`PyMuPDF>=1.24,<2`
+`Flask==2.3.3`、`Flask-Cors==4.0.1`、`Werkzeug==2.3.8`、`Flask-SocketIO==5.3.6`、`python-socketio==5.11.2`、`bcrypt==4.0.1`、`pytest==8.4.0`、`olefile==0.47`、`requests>=2.31,<3`、`PyMuPDF>=1.24,<2`、`tomlkit>=0.12,<1`
 
 可选：
 
@@ -235,6 +238,8 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 ## 8. 关键工程约定（改代码前必看）
 
 - 后端包必须位于 `backend/trpg_server/`；根目录 `server.py` 只作兼容入口（有结构测试约束）。
+- 配置：新增项先在 `config/schema.py` 注册 `FieldSpec`（默认值 + 转换器），再补 `config/templates/general.toml` 对应键与注释；`tests/test_config_template_sync.py` 强制模板与规格表双向同步。业务代码只读 `load_settings()` / `load_ai_runtime_config()` 的生效值，**禁止用 `tomllib` 直读 `general.toml` 或自带默认值兜底**；写入统一走 `config.writer.update_sections()`（注释保留、原子替换、写后失效缓存）。
+- 被 env / CLI 覆盖的键自动进入 `overrides` 锁定集合：设置页禁用对应字段，`POST /api/config/general` 会跳过并记录日志；密钥字段（如穿透令牌）GET 掩码、POST 拒写。
 - 前端浏览器源码必须在 `frontend/src/app/`，手写类型放 `frontend/src/types/`；不得出现 `frontend/src/js`、根 `js/`、`frontend/dist/`。
 - 新增路由：`routes/` 下新文件一个业务组，并在 `app_factory.register_blueprints()` 注册。
 - 路径拼接用 `security.safe_join`；上传校验用 `is_allowed_upload`；JSON 读写用 `json_store`。
@@ -254,6 +259,7 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 | --- | --- |
 | AI 对话/工具调用/上下文/token | `agents/runtime.py`、`agents/prompt_builder.py`、`routes/chat.py`、`agents/tools/*` |
 | AI 平台配置/超时/重试 | `ai_platform_config.py`、`agents/ai_request.py`、`agents/responses_transport.py`、`agents/http_retry.py` |
+| 全局配置/分层加载/设置页 | `config/`（`schema`/`merge`/`writer`/`bootstrap`）、`config/templates/general.toml`、`routes/config.py`、`config_admin.py`、`frontend/src/app/config/ConfigManager.ts` |
 | 剧本导入/解析 | `scenario_import_pipeline.py`、`scenario_documents.py`、`scenario_import_jobs.py`、`routes/scenario_imports.py` |
 | 剧本 CRUD/版本/模块 | `scenario_store.py`、`routes/scenarios.py`、`frontend/src/app/views/*` |
 | 房间/邀请/成员/自动存档 | `routes/rooms.py`、`room_admin.py`、`data/runtime/rooms/` |
@@ -278,12 +284,16 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 - 玩家投掷等待超时取 `min(玩家投掷超时, AI 请求超时 - 5)`；AI 端不能无限等待玩家点击。
 - 修改前端后必须重新 `npm run build:frontend`；发布包用 `dist/`，不依赖 Node。
 - 浏览器会缓存未带版本的静态资源，样式改动需强制 revalidate。
+- 禁止再用 `tomllib` 直读 `general.toml` 或自带默认值兜底：模板、env、CLI 的覆盖会因此失效，schema 才是唯一权威。
+- 历史脏数据里根级带引号的点分表（`["ai.small_models"]`）写入前必须归一为嵌套表，否则会与新建点分表并存并生成非法 TOML。
+- 静态 `/config/<path>` 必须继续封禁 `general.toml`、`site.json`、`network.json`、`penetration.json`：`general.toml` 含穿透令牌，明文外泄即安全事件。
+- 遗留 JSON 兼容层优先级低于用户 TOML、高于模板，只在 TOML 缺键时生效；`config migrate` 也只写缺失键，保证迁移前后生效值一致。
 - 测试 `test_backend_project_structure.py` / `test_frontend_project_structure.py` 会校验目录边界，移动文件前先看它们。
 
 ## 11. 相关文档
 
 - [API 概览](./api.md)：按蓝图分组的全部 HTTP API 与 Socket.IO 事件
-- [开发说明](./development.md)：架构边界、验证流程、日志/文件/前端规范
+- [开发说明](./development.md)：架构边界、配置规范、验证流程、日志/文件/前端规范
 - [控制台命令](./console-commands.md)
 - [剧本格式](./scenario-format.md)、[剧本导入](./scenario-import.md)
 - [向量库](./vector-store.md)
