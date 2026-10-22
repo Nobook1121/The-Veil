@@ -33,9 +33,11 @@ const DiceTable = (() => {
     let rolling = false;
     let lastRoomId = "";
 
-    /** 同时存活的 3D 实例上限：超出后把最早的骰桌冻结成静态图，及时释放 WebGL context。 */
+    /** 同时存活的 3D 实例上限：超出后把最早的骰桌改为平铺 2D 结果，及时释放 WebGL context。 */
     const MAX_LIVE_3D = 4;
-    const live3D = new Set<Dice3DAdapter>();
+    const live3D = new Map<Dice3DAdapter, ActiveRoll>();
+    /** 各客户端的 rolling 广播携带同一 seed；实时消息补播动画时复用它，保证画面与投掷者一致。 */
+    const rollingSeeds = new Map<string, number>();
 
     function roomId(): string {
         return String(window.currentRoom?.id || "");
@@ -215,7 +217,7 @@ const DiceTable = (() => {
             previous.dispose();
         }
         target.renderer = renderer;
-        if (renderer instanceof Dice3DAdapter) track3D(renderer);
+        if (renderer instanceof Dice3DAdapter) track3D(renderer, target);
     }
 
     /** 先释放旧渲染器再创建简易渲染器：3D 实例销毁时会清理自己的 canvas，顺序反了会把新舞台一起清掉。 */
@@ -235,8 +237,8 @@ const DiceTable = (() => {
         return adapter;
     }
 
-    function track3D(adapter: Dice3DAdapter): void {
-        live3D.add(adapter);
+    function track3D(adapter: Dice3DAdapter, target: ActiveRoll): void {
+        live3D.set(adapter, target);
         trim3D();
     }
 
@@ -244,14 +246,31 @@ const DiceTable = (() => {
         if (renderer instanceof Dice3DAdapter) live3D.delete(renderer);
     }
 
-    /** 超出上限时把最早的 3D 骰桌冻结为静态图；正在投掷的骰桌不冻结。 */
+    /**
+     * 超出上限时把最早的 3D 骰桌替换为平铺的 2D 结果，释放 WebGL context。
+     * 正在投掷的骰桌不处理；刷新后所有历史骰桌本来就按 2D 静态还原。
+     */
     function trim3D(): void {
         if (live3D.size <= MAX_LIVE_3D) return;
-        Array.from(live3D).forEach((adapter) => {
+        Array.from(live3D.entries()).forEach(([adapter, target]) => {
             if (live3D.size <= MAX_LIVE_3D) return;
             if (active && adapter === active.renderer) return;
             live3D.delete(adapter);
-            adapter.freeze();
+            adapter.dispose();
+            if (target.renderer === adapter) target.renderer = null;
+            const snapshot = target.snapshot;
+            if (!snapshot) return;
+            const groups = diceSnapshotGroups(target.plan, snapshot);
+            if (diceTotalCount(groups) > DICE_SIMPLE_RENDER_LIMIT) return;
+            try {
+                target.overlay.stage.innerHTML = "";
+                const simple = new DiceSimpleRenderer(target.overlay.stage, target.plan, faceUrlsFor(target.plan, groups));
+                simple.static(snapshot);
+                target.renderer = simple;
+                target.overlay.setResult(snapshot);
+            } catch (error) {
+                console.warn("3D 骰桌降级为平铺结果失败", error);
+            }
         });
     }
 
@@ -331,6 +350,11 @@ const DiceTable = (() => {
         if (target.playedKey === key && !target.playback) return;
         target.playKey = key;
         target.snapshot = snapshot;
+        // 补播（没赶上 rolling 广播）时复用共享种子，轨迹才能与投掷者一致。
+        if (animate && target.seed === null) {
+            const shared = rollingSeeds.get(target.requestId);
+            if (shared !== undefined) target.seed = shared;
+        }
         const run = renderSnapshot(target, snapshot, animate);
         target.playback = run;
         try {
@@ -392,7 +416,8 @@ const DiceTable = (() => {
                     const loaded = await Dice3DAdapter.loadBundle();
                     if (!loaded) throw new Error("dice3d_bundle_missing");
                     const adapter = ensure3DRenderer(target, faceUrls);
-                    if (animate) await adapter.play(snapshot);
+                    // 有共享 seed 时复用同一段物理轨迹，实时补播才能与投掷者看到的一致。
+                    if (animate) await adapter.play(snapshot, target.seed);
                     else adapter.static(snapshot);
                     // 结果必须在动画结束后才出现，且与最终朝上的骰面一致。
                     target.overlay.setResult(snapshot);
@@ -732,9 +757,11 @@ const DiceTable = (() => {
             // 所有客户端已在 rolling 广播里同步播放过动画：这里只显示结算结果，
             // 绝不再旋转/抬起/重投骰子，避免落定后的点数发生变化。
             if (target.animation) await target.animation;
-            if (target.animatedSeed === null || (payload.fallback && target.settledFaces === null)) {
-                // 没赶上动画（重连、纯文本或超时兜底）：静态还原最终骰面。
-                await playSnapshot(target, snapshot, false);
+            const sharedSeed = rollingSeeds.get(target.requestId);
+            if (target.animatedSeed === null || (sharedSeed !== undefined && target.animatedSeed !== sharedSeed)) {
+                // 没赶上 rolling 广播（或重投的 rolling 丢失）：补播结果动画，
+                // 有共享 seed 时轨迹与投掷者一致，而不是直接摆出静态画面。
+                await playSnapshot(target, snapshot, true);
             } else {
                 target.snapshot = snapshot;
                 target.overlay.setResult(snapshot);
@@ -814,8 +841,10 @@ const DiceTable = (() => {
         if (active.physics) {
             // 物理模式的重投在 rolling 广播里已经播放过，直接展示新结果。
             if (active.animation) await active.animation;
-            if (active.animatedSeed === null) await playSnapshot(active, snapshot, false);
-            else {
+            const sharedSeed = rollingSeeds.get(active.requestId);
+            if (active.animatedSeed === null || (sharedSeed !== undefined && active.animatedSeed !== sharedSeed)) {
+                await playSnapshot(active, snapshot, true);
+            } else {
                 active.snapshot = snapshot;
                 active.overlay.setResult(snapshot);
             }
@@ -831,6 +860,8 @@ const DiceTable = (() => {
         const requestId = String(payload.request_id || "");
         const seed = Number(payload.seed);
         if (!requestId || !Number.isFinite(seed)) return;
+        // 记住共享种子：若实时结果消息比动画更晚渲染，补播动画仍能复现同一段轨迹。
+        rollingSeeds.set(requestId, seed);
         let target = active && active.requestId === requestId ? active : null;
         if (!target) {
             const index = queue.findIndex((item) => item.request_id === requestId);
@@ -924,6 +955,38 @@ const DiceTable = (() => {
         if (requestId && active?.requestId === requestId) {
             void playSnapshot(active, snapshotFromMeta(meta), animate);
             messageElement.classList.add("dice-message-consumed");
+            return;
+        }
+        if (animate && !active) {
+            // 实时消息：本机可能没赶上 rolling 广播（中途加入、网络抖动、事件丢失）。
+            // 这里补建骰桌并播放动画，保证房间内所有玩家看到与投掷者一致的过程；历史消息仍走静态还原。
+            const tableId = requestId || `message-${message.id}`;
+            const target = createActive(tableId, planFromMeta(meta));
+            active = target;
+            target.state = "rolled";
+            target.physics = true;
+            target.auto = Boolean(meta.auto);
+            target.rollerUserId = String(
+                meta.roller_user_id
+                    ?? (typeof meta.roller === "object" && meta.roller ? meta.roller.user_id : "")
+                    ?? "",
+            );
+            const seed = requestId ? rollingSeeds.get(requestId) : undefined;
+            if (seed !== undefined) target.seed = seed;
+            // 结果事件可能比这条消息更晚到达：标记已处理，避免再创建第二张骰桌。
+            if (requestId) {
+                handledRequests.add(requestId);
+                rollBacklog.delete(requestId);
+            }
+            void playSnapshot(target, snapshotFromMeta(meta), true).then(() => {
+                if (active !== target) return;
+                finishActive(true, target.snapshot || undefined);
+            });
+            messageElement.classList.add("dice-message-consumed");
+            if (requestId === pending?.request_id) {
+                pending = null;
+                updateInputButton();
+            }
             return;
         }
         // 历史/重连消息：在消息位置插入静态骰桌，数字结果位于骰桌下方，不重播动画。
@@ -1269,8 +1332,9 @@ const DiceTable = (() => {
             active = null;
         }
         // 离开房间时释放所有存活的 3D 实例，避免 WebGL context 跨房间累积。
-        live3D.forEach((adapter) => adapter.dispose());
+        live3D.forEach((_target, adapter) => adapter.dispose());
         live3D.clear();
+        rollingSeeds.clear();
         queue.length = 0;
         rollBacklog.clear();
         handledRequests.clear();

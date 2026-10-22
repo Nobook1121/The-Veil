@@ -59,6 +59,10 @@ interface Window {
         confirm: (options: TrpgDialogOptions) => Promise<boolean>;
         prompt: (options: TrpgDialogOptions & { defaultValue?: string }) => Promise<string | null>;
     };
+    TrpgSettingsAssistant?: {
+        init: () => void;
+        runSearch: () => void;
+    };
 }
 
 interface TrpgDialogOptions {

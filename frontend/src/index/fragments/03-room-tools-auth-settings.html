@@ -477,6 +477,18 @@
                             <button class="settings-tab" data-settings="knowledge" data-admin-only="true">知识库管理</button>
                             <button class="settings-tab" data-settings="about" data-i18n="settings.tab.about">关于应用</button>
                         </div>
+                        <!-- 设置搜索：匹配设置名称与说明文字，支持模糊匹配并跳转定位 -->
+                        <div class="settings-search" role="search">
+                            <i class="fa fa-search" aria-hidden="true"></i>
+                            <input type="search" class="form-control" id="settingsSearchInput" autocomplete="off"
+                                   placeholder="搜索设置名称或说明（支持模糊匹配）" data-i18n-placeholder="settings.search.placeholder">
+                            <button type="button" class="settings-search-clear" id="settingsSearchClear" hidden
+                                    title="清空搜索" aria-label="清空搜索"
+                                    data-i18n-title="settings.search.clear" data-i18n-aria-label="settings.search.clear">
+                                <i class="fa fa-times" aria-hidden="true"></i>
+                            </button>
+                            <div class="settings-search-results" id="settingsSearchResults" hidden data-i18n-dynamic="true"></div>
+                        </div>
                         <!-- 常规设置统一保存条：本页任何设置改动都不会立即生效，需点「保存」后才会应用 -->
                         <div class="settings-pending-save-bar" id="generalSettingsPendingSaveBar" hidden>
                             <span><strong id="generalSettingsPendingChangeCount">0</strong> <span data-i18n="settings.pending.general">项设置更改未保存</span></span>
@@ -1123,7 +1135,7 @@
                             </div>
                             <div class="mb-4">
                                 <h4>许可证</h4>
-                                <p class="text-muted">本软件遵循 MIT 许可证开源发布。</p>
+                                <p class="text-muted" data-no-settings-hint>本软件遵循 MIT 许可证开源发布。</p>
                             </div>
                         </div>
                     </div>

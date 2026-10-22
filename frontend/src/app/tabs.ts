@@ -290,6 +290,8 @@ function initSettingsTabs(): void {
         void loadAITokenDashboard();
     });
     void loadAITokenDashboard();
+    // 设置说明按需展开 + 设置搜索索引。
+    window.TrpgSettingsAssistant?.init();
 }
 
 async function loadRulesetKnowledge(): Promise<void> {
