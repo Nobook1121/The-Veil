@@ -70,7 +70,7 @@
       "applicationCategory": "GameApplication",
       "applicationSubCategory": "Tabletop role-playing game platform",
       "operatingSystem": "Windows, macOS, Linux",
-      "softwareVersion": "0.4.3b",
+      "softwareVersion": "0.5.3b",
       "softwareRequirements": "Python 3.11+；Node.js 18+ 仅在自行构建前端时需要",
       "license": "https://www.apache.org/licenses/LICENSE-2.0",
       "isAccessibleForFree": true,
@@ -87,7 +87,10 @@
         "内置剧本编辑器：场景卡、结局、时间线、NPC、怪物与道具在同一界面编排，可配封面与简介，只有改动内容才生成新版本",
         "COC7 角色卡与检定：属性、技能、武器、专精与本地化技能名，检定名对照 character_skills.json 校验，1D100 结果直接写回卡上",
         "内置角色卡编辑器：在页面里建卡改卡、分配技能点，技能基础值支持「房规 > 管理员默认 > 规则书默认」三级覆盖",
-        "规则书知识库：上传 COC7 规则文本即刻可检索，AI 回答规则问题时以你的规则书为依据"
+        "规则书知识库：上传 COC7 规则文本即刻可检索，AI 回答规则问题时以你的规则书为依据",
+        "网站 Agent：自然语言查看与修改站点设置、个人资料与房间消息，写入前待确认，设置仅管理员/OWNER，密钥打码拒写",
+        "房间用量与花费：按模型输入/输出单价与币种累计每个房间的 token 与金额，仅房主与房间管理员可见",
+        "3D 骰子与房间控制台：玩家投掷动画全桌同步并在超限时降级为 2D，房间内嵌控制台日志随房间归档"
       ],
       "offers": {
         "@type": "Offer",
@@ -332,6 +335,14 @@ section:first-of-type::before{display:none}
 .hero-sub{color:var(--muted);font-size:1.03rem;margin:22px 0 0;max-width:44em}
 .hero-cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:32px}
 .hero-meta{margin:20px 0 0;font-family:var(--mono);font-size:.74rem;color:var(--muted-2);letter-spacing:.02em}
+
+/* ---------- 下载 ---------- */
+.dl-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:24px}
+.dl-card{display:flex;flex-direction:column;gap:8px;padding:20px 18px;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg-2);transition:border-color .2s ease,transform .2s ease}
+.dl-card:hover{border-color:var(--line-gold);transform:translateY(-2px)}
+.dl-k{font-family:var(--mono);font-size:.82rem;letter-spacing:.04em;color:var(--ink-strong)}
+.dl-d{color:var(--muted);font-size:.82rem;line-height:1.55}
+.dl-tag{display:inline-block;margin-top:auto;padding-top:10px;font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--gold)}
 
 /* ---------- 编号清单 ---------- */
 .list{display:grid;grid-template-columns:1fr 1fr;gap:0 54px;border-top:1px solid var(--line)}
@@ -640,6 +651,7 @@ footer{padding:40px 0 52px}
 /* ---------- 响应式 ---------- */
 @media (max-width:940px){
   .list,.split,.docs,.code-wrap,.who-grid{grid-template-columns:1fr;gap:0}
+  .dl-grid{grid-template-columns:1fr 1fr}
   .shots{gap:46px}
   .shot{grid-template-columns:1fr;gap:24px}
   .shot:nth-child(even) .shot-canvas{order:0}
@@ -658,6 +670,7 @@ footer{padding:40px 0 52px}
   .brand-text{display:none}
   .steps{grid-template-columns:1fr}
   .step:nth-child(odd),.step:nth-child(even){padding:22px 0;border-left:none}
+  .dl-grid{grid-template-columns:1fr}
 }
 @media (prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
@@ -681,6 +694,7 @@ footer{padding:40px 0 52px}
     </a>
     <nav class="nav">
       <a href="#engine" data-zh="能力" data-en="Capabilities">能力</a>
+      <a href="#download" data-zh="下载" data-en="Download">下载</a>
       <a href="#shots" data-zh="界面预览" data-en="Screens">界面预览</a>
       <a href="#start" data-zh="快速开始" data-en="Quick start">快速开始</a>
       <a href="#deploy" data-zh="部署" data-en="Deploy">部署</a>
@@ -689,7 +703,7 @@ footer{padding:40px 0 52px}
     <div class="header-actions">
       <button id="langToggle" class="btn" type="button" aria-label="Switch language">EN</button>
       <a class="btn btn-outline btn-sm" href="https://github.com/Nobook1121/the-veil" target="_blank" rel="noopener">GitHub <span class="ar">↗</span></a>
-      <a class="btn btn-primary btn-sm" href="https://github.com/Nobook1121/the-veil/releases" target="_blank" rel="noopener" data-zh="下载 Release" data-en="Download">下载 Release <span class="ar">→</span></a>
+      <a class="btn btn-primary btn-sm" href="#download" data-zh="下载 Release" data-en="Download">下载 Release <span class="ar">→</span></a>
     </div>
   </div>
 </header>
@@ -703,15 +717,49 @@ footer{padding:40px 0 52px}
         <h1 data-zh="AI 跑团工具：让 AI 坐上 KP 的位置，<span class=&quot;hl&quot;>把故事跑下去</span>。" data-en="An AI TRPG tool — put AI in the Keeper's seat and <span class=&quot;hl&quot;>keep the story going</span>.">AI 跑团工具：让 AI 坐上 KP 的位置，<span class="hl">把故事跑下去</span>。</h1>
         <p class="hero-sub" data-zh="面向 COC7 的开源、自托管 AI 跑团平台：AI 守秘人推进剧情，规则书知识库回答规则问题，剧本编辑器把 Word / PDF 模组变成可玩模组，角色卡与内置编辑器管住每一点技能——剧本、账号与聊天记录全部落在你自己的机器上。" data-en="An open-source, self-hosted AI tabletop platform for COC7: an AI Keeper drives the story, a rulebook knowledge base answers rules questions, a scenario editor turns Word / PDF modules into playable ones, and character sheets plus a built-in editor keep every skill point in order — with scenarios, accounts and chat logs all on your own machine.">面向 COC7 的开源、自托管 AI 跑团平台：AI 守秘人推进剧情，规则书知识库回答规则问题，剧本编辑器把 Word / PDF 模组变成可玩模组，角色卡与内置编辑器管住每一点技能——剧本、账号与聊天记录全部落在你自己的机器上。</p>
         <div class="hero-cta">
-          <a class="btn btn-primary btn-lg" href="https://github.com/Nobook1121/the-veil/releases" target="_blank" rel="noopener">
+          <a class="btn btn-primary btn-lg" href="#download">
             <svg class="ico-dl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v11"/><path d="m7.5 10 4.5 4 4.5-4"/><path d="M5 20h14"/></svg>
             <span data-zh="下载" data-en="Download">下载</span>
-            <span class="ver">v0.4.3b</span>
+            <span class="ver">v0.5.3b</span>
           </a>
           <a class="btn btn-outline btn-lg" href="#start" data-zh="快速开始" data-en="Quick start">快速开始 <span class="ar">→</span></a>
         </div>
         <p class="hero-meta">Apache-2.0 · Python 3.11+ · <span data-zh="默认端口" data-en="Default port">默认端口</span> 8086 · <span data-zh="单进程运行" data-en="Single process">单进程运行</span></p>
       </div>
+    </div>
+  </section>
+
+  <!-- DOWNLOAD -->
+  <section id="download" class="tint-gold">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="kicker" data-zh="下载 · v0.5.3b" data-en="Download · v0.5.3b">下载 · v0.5.3b</span>
+        <h2 data-zh="四种下载方式，<span class=&quot;hl&quot;>挑一个顺手的</span>。" data-en="Four ways to download — <span class=&quot;hl&quot;>pick whichever works</span>.">四种下载方式，<span class="hl">挑一个顺手的</span>。</h2>
+        <p data-zh="四个入口都是同一个版本。GitHub 为官方发布页；国内访问不便时可用夸克网盘、百度网盘或 gofile 镜像。下载后解压，双击 start.cmd 即可启动。" data-en="All four entries point to the same version. GitHub is the official release page; if it is slow to reach, use the Quark, Baidu or gofile mirrors. Unzip, then double-click start.cmd.">四个入口都是同一个版本。GitHub 为官方发布页；国内访问不便时可用夸克网盘、百度网盘或 gofile 镜像。下载后解压，双击 start.cmd 即可启动。</p>
+      </div>
+      <div class="dl-grid">
+        <a class="dl-card" data-download="github" href="https://github.com/Nobook1121/the-veil/releases/latest" target="_blank" rel="noopener">
+          <span class="dl-k">GitHub Releases</span>
+          <span class="dl-d" data-zh="官方发布页，含更新说明、校验值与历史版本。" data-en="Official releases with notes, checksums and version history.">官方发布页，含更新说明、校验值与历史版本。</span>
+          <span class="dl-tag" data-zh="官方 ↗" data-en="Official ↗">官方 ↗</span>
+        </a>
+        <a class="dl-card" data-download="quark" rel="noopener">
+          <span class="dl-k" data-zh="夸克网盘" data-en="Quark Drive">夸克网盘</span>
+          <span class="dl-d" data-zh="国内下载较快，适合直接转存后下载。" data-en="Fast inside mainland China; save to your drive and download.">国内下载较快，适合直接转存后下载。</span>
+          <span class="dl-tag" data-zh="国内加速 ↗" data-en="Mirror ↗">国内加速 ↗</span>
+        </a>
+        <a class="dl-card" data-download="baidu" rel="noopener">
+          <span class="dl-k" data-zh="百度网盘" data-en="Baidu Drive">百度网盘</span>
+          <span class="dl-d" data-zh="适合已有百度网盘会员的用户。" data-en="A good fit if you already have a Baidu Drive membership.">适合已有百度网盘会员的用户。</span>
+          <span class="dl-tag" data-zh="国内加速 ↗" data-en="Mirror ↗">国内加速 ↗</span>
+        </a>
+        <a class="dl-card" data-download="gofile" rel="noopener">
+          <span class="dl-k">gofile</span>
+          <span class="dl-d" data-zh="无需登录的海外直链，适合海外用户。" data-en="No-login direct download hosted overseas.">无需登录的海外直链，适合海外用户。</span>
+          <span class="dl-tag" data-zh="海外直链 ↗" data-en="Direct ↗">海外直链 ↗</span>
+        </a>
+      </div>
+      <p class="note" data-zh="自托管遇到问题？发布包内附有 <code>SELF-HOSTING-GUIDE.txt</code>，用普通用户能看懂的话写了安装、启动、联机、备份与排错。" data-en="Stuck self-hosting? Every release ships <code>SELF-HOSTING-GUIDE.txt</code>, a plain-language guide to install, launch, connect, back up and troubleshoot.">自托管遇到问题？发布包内附有 <code>SELF-HOSTING-GUIDE.txt</code>，用普通用户能看懂的话写了安装、启动、联机、备份与排错。</p>
     </div>
   </section>
 
@@ -789,6 +837,61 @@ footer{padding:40px 0 52px}
         <span class="theme-chip" style="border-style:dashed" data-zh="界面主题可随时切换，并记住你的选择" data-en="Themes switch anytime and remember your choice">界面主题可随时切换，并记住你的选择</span>
       </div>
       <p class="note" data-zh="单进程运行，不需要 Docker 也能跑。预置 DeepSeek / OpenAI / 阿里云百炼 / SiliconFlow / OpenRouter / LM Studio 六家平台，也支持任意 OpenAI 兼容接口。" data-en="Runs as a single process — no Docker required. Six providers are built in: DeepSeek, OpenAI, Alibaba Bailian, SiliconFlow, OpenRouter and LM Studio, plus any OpenAI-compatible endpoint.">单进程运行，不需要 Docker 也能跑。预置 DeepSeek / OpenAI / 阿里云百炼 / SiliconFlow / OpenRouter / LM Studio 六家平台，也支持任意 OpenAI 兼容接口。</p>
+    </div>
+  </section>
+
+  <!-- WHAT'S NEW -->
+  <section class="tint-warm">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="kicker" data-zh="本次更新 · v0.5.3b" data-en="New in v0.5.3b">本次更新 · v0.5.3b</span>
+        <h2 data-zh="这一版，把<span class=&quot;hl&quot;>管理和成本</span>也补上了。" data-en="This release adds <span class=&quot;hl&quot;>management and cost control</span>.">这一版，把<span class="hl">管理和成本</span>也补上了。</h2>
+        <p data-zh="除了跑团本身，这次更新重点在「谁可以改什么」和「这局花了多少」，以及让桌面上的骰子更好看。" data-en="Beyond the game itself, this release focuses on who may change what, how much a session costs, and making the dice table look better.">除了跑团本身，这次更新重点在「谁可以改什么」和「这局花了多少」，以及让桌面上的骰子更好看。</p>
+      </div>
+      <div class="list">
+        <div class="item">
+          <span class="item-num">01</span>
+          <div>
+            <h3 data-zh="网站 Agent 能动手了" data-en="A site Agent that can actually act">网站 Agent 能动手了</h3>
+            <p data-zh="用自然语言查看和修改网站设置、改自己的昵称与邮箱、搜索或清理房间消息。所有写操作先弹确认卡片；设置仅管理员可改，网络与 Agent 自身配置仅 Owner 可改，密钥字段读取打码、写入拒绝。" data-en="Use plain language to inspect or change site settings, edit your own nickname and email, and search or clear room messages. Every write asks for confirmation first; settings are admin-only, network and Agent config are Owner-only, and secret fields are masked on read and rejected on write.">用自然语言查看和修改网站设置、改自己的昵称与邮箱、搜索或清理房间消息。所有写操作先弹确认卡片；设置仅管理员可改，网络与 Agent 自身配置仅 Owner 可改，密钥字段读取打码、写入拒绝。</p>
+          </div>
+        </div>
+        <div class="item">
+          <span class="item-num">02</span>
+          <div>
+            <h3 data-zh="房间花了多少，一眼看到" data-en="See what a room costs at a glance">房间花了多少，一眼看到</h3>
+            <p data-zh="每个房间单独累计 token 与花费，小字显示在房间右上角和房间管理页。金额按你在 AI 平台设置里填写的模型输入/输出单价与币种计算，只有房主与房间管理员可见。" data-en="Each room tracks its own token use and cost, shown in small type at the top-right of the room and in room management. Costs follow the per-model input/output prices and currency you set in AI platform settings, visible only to the owner and room admins.">每个房间单独累计 token 与花费，小字显示在房间右上角和房间管理页。金额按你在 AI 平台设置里填写的模型输入/输出单价与币种计算，只有房主与房间管理员可见。</p>
+          </div>
+        </div>
+        <div class="item">
+          <span class="item-num">03</span>
+          <div>
+            <h3 data-zh="3D 骰子，全桌同步" data-en="3D dice, synced across the table">3D 骰子，全桌同步</h3>
+            <p data-zh="玩家投掷的 3D 动画会同步给房间里所有人，轨迹一致；结果默认保留 3D 骰桌，实例过多或刷新页面后自动降级为 2D 平铺结果，兼顾观感与性能。" data-en="A player's 3D roll plays for everyone in the room with the same trajectory. Results keep the 3D table by default; when too many contexts pile up or the page is refreshed, it degrades to a flat 2D result to protect performance.">玩家投掷的 3D 动画会同步给房间里所有人，轨迹一致；结果默认保留 3D 骰桌，实例过多或刷新页面后自动降级为 2D 平铺结果，兼顾观感与性能。</p>
+          </div>
+        </div>
+        <div class="item">
+          <span class="item-num">04</span>
+          <div>
+            <h3 data-zh="房间内嵌控制台" data-en="An in-room console">房间内嵌控制台</h3>
+            <p data-zh="房间页内置只显示本房间日志的控制台，房主、房间管理员与网站管理员可用；日志随房间目录持久保存，并在归档时一并归档，不会把站点级命令暴露给房内。" data-en="The room page includes a console showing only that room's log, available to the owner, room admins and site admins. Logs persist in the room directory and travel with archives; site-level commands never leak into a room.">房间页内置只显示本房间日志的控制台，房主、房间管理员与网站管理员可用；日志随房间目录持久保存，并在归档时一并归档，不会把站点级命令暴露给房内。</p>
+          </div>
+        </div>
+        <div class="item">
+          <span class="item-num">05</span>
+          <div>
+            <h3 data-zh="配置分层，注释不再丢" data-en="Layered config that keeps your comments">配置分层，注释不再丢</h3>
+            <p data-zh="配置统一收进 general.toml，支持「代码默认 &lt; 模板 &lt; 用户配置 &lt; 环境变量 &lt; 命令行」五层优先级；写入时保留注释与键序，部署用环境变量或 <code>--set</code> 锁定的键不会被界面或 Agent 覆盖。" data-en="Configuration now lives in general.toml with five layers: code defaults, template, user config, environment variables and CLI. Writes preserve comments and key order, and keys locked by env vars or <code>--set</code> cannot be overwritten by the UI or the Agent.">配置统一收进 general.toml，支持「代码默认 &lt; 模板 &lt; 用户配置 &lt; 环境变量 &lt; 命令行」五层优先级；写入时保留注释与键序，部署用环境变量或 <code>--set</code> 锁定的键不会被界面或 Agent 覆盖。</p>
+          </div>
+        </div>
+        <div class="item">
+          <span class="item-num">06</span>
+          <div>
+            <h3 data-zh="解压即用，一键启动" data-en="Unzip and go">解压即用，一键启动</h3>
+            <p data-zh="发布包内置构建好的前端与自托管指南，Windows 双击 start.cmd 会自动准备 Python、依赖与运行环境；首次打开弹出部署向导，选平台、填 Key、创建 Owner 即可开团。" data-en="Releases ship the built frontend and a self-hosting guide. On Windows, double-click start.cmd and it prepares Python, dependencies and the runtime automatically; the first launch opens a setup wizard for provider, key and Owner account.">发布包内置构建好的前端与自托管指南，Windows 双击 start.cmd 会自动准备 Python、依赖与运行环境；首次打开弹出部署向导，选平台、填 Key、创建 Owner 即可开团。</p>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -1251,12 +1354,12 @@ footer{padding:40px 0 52px}
         <div class="step">
           <span class="step-num" data-zh="01 · 部署" data-en="01 · Deploy">01 · 部署</span>
           <h3 data-zh="部署" data-en="Deploy">部署</h3>
-          <p data-zh="克隆仓库或解压 release 包，装好依赖，<code>python server.py</code> 即起。" data-en="Clone the repo or unzip a release, install dependencies, run <code>python server.py</code>.">克隆仓库或解压 release 包，装好依赖，<code>python server.py</code> 即起。</p>
+          <p data-zh="解压 release 包，双击 <code>start.cmd</code> 即起；Windows 会自动准备 Python 与依赖。macOS / Linux 用 <code>python3 server.py</code>。" data-en="Unzip a release and double-click <code>start.cmd</code>; on Windows it prepares Python and dependencies for you. On macOS / Linux, run <code>python3 server.py</code>.">解压 release 包，双击 <code>start.cmd</code> 即起；Windows 会自动准备 Python 与依赖。macOS / Linux 用 <code>python3 server.py</code>。</p>
         </div>
         <div class="step">
           <span class="step-num" data-zh="02 · 配置" data-en="02 · Configure">02 · 配置</span>
           <h3 data-zh="配置" data-en="Configure">配置</h3>
-          <p data-zh="打开首页会弹出 5 步向导：选平台、填 Key、测试连接、创建 Owner，全程不用手改配置文件。" data-en="The home page walks you through five steps: pick a provider, paste a key, test the connection, create the Owner. No config files by hand.">打开首页会弹出 5 步向导：选平台、填 Key、测试连接、创建 Owner，全程不用手改配置文件。</p>
+          <p data-zh="打开首页会弹出部署向导：选平台、填 Key、测试连接、创建 Owner、进入系统，全程不用手改配置文件。" data-en="The home page opens a setup wizard: pick a provider, paste a key, test the connection, create the Owner and enter. No config files by hand.">打开首页会弹出部署向导：选平台、填 Key、测试连接、创建 Owner、进入系统，全程不用手改配置文件。</p>
         </div>
         <div class="step">
           <span class="step-num" data-zh="03 · 准备" data-en="03 · Prepare">03 · 准备</span>
@@ -1276,9 +1379,9 @@ footer{padding:40px 0 52px}
   <section id="start" class="tint-azure">
     <div class="wrap">
       <div class="sec-head">
-        <span class="kicker" data-zh="Python · 三条命令" data-en="Python · Three commands">Python · 三条命令</span>
-        <h2 data-zh="跑起来只需要一个终端。" data-en="All you need is one terminal.">跑起来只需要一个终端。</h2>
-        <p data-zh="需要 Python 3.11+；Node.js 18+ 只在你自己构建前端时才会用到。" data-en="Requires Python 3.11+; Node.js 18+ is only needed if you build the frontend yourself.">需要 Python 3.11+；Node.js 18+ 只在你自己构建前端时才会用到。</p>
+        <span class="kicker" data-zh="解压 · 双击 · 开团" data-en="Unzip · Double-click · Play">解压 · 双击 · 开团</span>
+        <h2 data-zh="Windows 上不用碰命令行。" data-en="No terminal needed on Windows.">Windows 上不用碰命令行。</h2>
+        <p data-zh="发布包已带构建好的前端与自托管指南。Windows 双击 <code>start.cmd</code> 即可；macOS / Linux 装好 Python 3.11+ 后运行 <code>python3 server.py</code>。" data-en="Releases include the built frontend and a self-hosting guide. On Windows, just double-click <code>start.cmd</code>; on macOS / Linux install Python 3.11+ and run <code>python3 server.py</code>.">发布包已带构建好的前端与自托管指南。Windows 双击 <code>start.cmd</code> 即可；macOS / Linux 装好 Python 3.11+ 后运行 <code>python3 server.py</code>。</p>
       </div>
       <div class="code-wrap">
         <div class="code-card">
@@ -1286,17 +1389,23 @@ footer{padding:40px 0 52px}
             <span>Command Prompt</span>
             <button id="copyCmd" class="btn btn-outline btn-sm" type="button" data-zh="复制" data-en="Copy">复制</button>
           </div>
-<pre id="cmdBlock">git clone https://github.com/Nobook1121/the-veil
-cd the-veil
+<pre id="cmdBlock">:: Windows「发布包」：解压后双击
+start.cmd
 
+:: 指定其它端口
+start.cmd 8090
+
+:: macOS / Linux「发布包」
+python3 server.py
+
+:: 从源码运行（可选）
+git clone https://github.com/Nobook1121/the-veil
+cd the-veil
 python -m venv .venv
 .venv\Scripts\activate.bat
 pip install -r requirements.txt
-
-npm install
-npm run build:frontend
-
-start.cmd</pre>
+npm install && npm run build:frontend
+python server.py</pre>
         </div>
         <div>
           <p class="log-cap" data-zh="启动日志（示例）" data-en="Startup log (example)">启动日志（示例）</p>
@@ -1307,7 +1416,7 @@ start.cmd</pre>
             <div><span class="t">[INFO]</span> listening on <span class="i">http://127.0.0.1:8086</span></div>
             <div><span class="t">[INFO]</span> listening on <span class="i">http://192.168.1.24:8086</span></div>
           </div>
-          <p class="note" data-zh="如果用的是 release 压缩包，里面已经带构建好的前端：解压后 <code>pip install -r requirements.txt</code> 再 <code>python server.py</code> 就行。" data-en="A release archive already ships the built frontend: unzip, run <code>pip install -r requirements.txt</code>, then <code>python server.py</code>.">如果用的是 release 压缩包，里面已经带构建好的前端：解压后 <code>pip install -r requirements.txt</code> 再 <code>python server.py</code> 就行。</p>
+          <p class="note" data-zh="第一次启动会自动创建运行环境并下载依赖，可能需要几分钟；之后启动只需几秒。遇到问题先看发布包里的 <code>SELF-HOSTING-GUIDE.txt</code>。" data-en="The first launch creates the runtime and downloads dependencies, which can take a few minutes; later launches take seconds. If something goes wrong, read <code>SELF-HOSTING-GUIDE.txt</code> in the release package.">第一次启动会自动创建运行环境并下载依赖，可能需要几分钟；之后启动只需几秒。遇到问题先看发布包里的 <code>SELF-HOSTING-GUIDE.txt</code>。</p>
         </div>
       </div>
     </div>
@@ -1397,6 +1506,14 @@ start.cmd</pre>
         <details>
           <summary data-zh="线上跑团怎么和朋友一起玩？" data-en="How do I play online with friends?">线上跑团怎么和朋友一起玩？</summary>
           <p data-zh="房主在自己电脑上运行程序，新建房间后把房间码发给朋友；朋友用浏览器打开同一个地址、输入房间码就能加入。页面和实时聊天共用同一个端口，再配合内网穿透，异地朋友也能连上，不需要云服务器。" data-en="The host runs the app locally, creates a room and shares the room code. Friends open the same address in a browser and enter the code to join. Page and live chat share one port, so a tunnelling tool is enough for remote friends — no cloud server required.">房主在自己电脑上运行程序，新建房间后把房间码发给朋友；朋友用浏览器打开同一个地址、输入房间码就能加入。页面和实时聊天共用同一个端口，再配合内网穿透，异地朋友也能连上，不需要云服务器。</p>
+        </details>
+        <details>
+          <summary data-zh="怎么看一局跑了多少 token、花了多少钱？" data-en="How do I see a room's token use and cost?">怎么看一局跑了多少 token、花了多少钱？</summary>
+          <p data-zh="房主与房间管理员会在房间右上角、房间管理页看到本房间累计的 token 与花费。金额按「AI 平台设置」里每个模型的输入/输出单价和平台币种计算；没填单价的模型只统计 token，金额显示「未配置单价」。数据只对本房间可管理的人可见。" data-en="The owner and room admins see the room's cumulative tokens and cost at the top-right of the room and in room management. Costs follow the per-model input/output prices and currency set in AI platform settings; models without prices still count tokens but show “price not configured”. Only room managers can see it.">房主与房间管理员会在房间右上角、房间管理页看到本房间累计的 token 与花费。金额按「AI 平台设置」里每个模型的输入/输出单价和平台币种计算；没填单价的模型只统计 token，金额显示「未配置单价」。数据只对本房间可管理的人可见。</p>
+        </details>
+        <details>
+          <summary data-zh="网站 Agent 会不会被普通用户用来改站点设置？" data-en="Could a regular user use the site Agent to change settings?">网站 Agent 会不会被普通用户用来改站点设置？</summary>
+          <p data-zh="不会。Agent 的每次写操作都会先弹出确认卡片，后端在生成和执行两步分别鉴权：网站设置只有管理员与 Owner 能用，网络与 Agent 自身配置只有 Owner 能改，密钥字段读取时打码、写入时拒绝；房间消息的删除与清空还要求房主或房间管理员身份。权限不足时会直接拒绝并写入日志。" data-en="No. Every Agent write asks for confirmation, and the backend authorises both when the card is created and when it is applied: site settings are admin/Owner only, network and Agent config are Owner only, secret fields are masked on read and rejected on write, and deleting or clearing room messages requires room owner/admin. Denials are logged.">不会。Agent 的每次写操作都会先弹出确认卡片，后端在生成和执行两步分别鉴权：网站设置只有管理员与 Owner 能用，网络与 Agent 自身配置只有 Owner 能改，密钥字段读取时打码、写入时拒绝；房间消息的删除与清空还要求房主或房间管理员身份。权限不足时会直接拒绝并写入日志。</p>
         </details>
         <details>
           <summary data-zh="有没有免费的跑团工具？" data-en="Is there a free TRPG tool?">有没有免费的跑团工具？</summary>
@@ -1512,6 +1629,38 @@ start.cmd</pre>
     langToggle.addEventListener("click", function () {
       applyLang(html.lang.indexOf("zh") === 0 ? "en" : "zh");
     });
+  }
+
+  /* ============================================================
+     下载链接：只需修改下面四个地址（这是唯一需要填写的地方）。
+     - github：已填官方 Release 页，一般不用改
+     - quark ：夸克网盘分享链接（形如 https://pan.quark.cn/s/xxxx）
+     - baidu ：百度网盘分享链接（形如 https://pan.baidu.com/s/xxxx）
+     - gofile：gofile 分享链接（形如 https://gofile.io/d/xxxx）
+     留空则该卡片自动置灰、不可点击；填入后自动变可点击并在新标签打开。
+     ============================================================ */
+  var DOWNLOAD_LINKS = {
+    github: "https://github.com/Nobook1121/the-veil/releases/latest",
+    quark: "",
+    baidu: "",
+    gofile: ""
+  };
+
+  var downloadCards = document.querySelectorAll("[data-download]");
+  for (var d = 0; d < downloadCards.length; d++) {
+    (function (card) {
+      var url = DOWNLOAD_LINKS[card.getAttribute("data-download")] || "";
+      if (url) {
+        card.href = url;
+        card.setAttribute("target", "_blank");
+        card.setAttribute("rel", "noopener");
+        return;
+      }
+      card.removeAttribute("href");
+      card.style.opacity = ".55";
+      card.style.cursor = "not-allowed";
+      card.addEventListener("click", function (event) { event.preventDefault(); });
+    })(downloadCards[d]);
   }
 
   var copyBtn = document.getElementById("copyCmd");
