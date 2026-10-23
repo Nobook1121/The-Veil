@@ -20,6 +20,7 @@ from trpg_server.site_agent_auth import (
 from trpg_server.site_agent_prompt import detect_injection, untrusted_block
 from trpg_server.site_agent_tools import _make_wrapper
 from trpg_server.site_agent_tools.base import ToolArgumentError, ToolContext, ToolResult, ToolSpec, sanitize_arguments
+from trpg_server.site_agent_tools.profile import _validate as validate_profile_change
 from trpg_server.site_agent_tools.rooms import _is_room_manager
 from trpg_server.site_agent_tools.settings import (
     get_general_settings,
@@ -229,6 +230,26 @@ class TestWriteToolConfirmation:
         assert action["args"] == {"value": "curated"}
         # 预览参数只用于执行，不进入展示给用户的 diff。
         assert "apply_args" not in action["diff"]
+
+
+class TestProfileValidation:
+    _USER = {"nickname": "Alice", "email": "alice@example.com", "presence": "online"}
+
+    def test_presence_whitelist(self):
+        changes, error = validate_profile_change({"presence": "invisible"}, self._USER)
+        assert error is None
+        assert changes == {"presence": "invisible"}
+
+        _, error = validate_profile_change({"presence": "busy"}, self._USER)
+        assert error and "在线状态" in error
+
+    def test_requires_at_least_one_field(self):
+        _, error = validate_profile_change({}, self._USER)
+        assert error and "至少" in error
+
+    def test_unchanged_values_are_ignored(self):
+        _, error = validate_profile_change({"presence": "online", "nickname": "Alice"}, self._USER)
+        assert error and "没有需要修改" in error
 
 
 class TestRoomMessageAuthorization:
