@@ -468,8 +468,11 @@ footer{padding:40px 0 52px}
 .rv-ready .shot.in figcaption>*:nth-child(2){transition-delay:.10s}
 .rv-ready .shot.in figcaption>*:nth-child(3){transition-delay:.20s}
 .rv-ready .shot.in figcaption>*:nth-child(4){transition-delay:.30s}
+.rv-ready .list .item{opacity:0;transform:translateY(18px);transition:opacity .6s cubic-bezier(.2,.7,.3,1),transform .6s cubic-bezier(.2,.7,.3,1)}
+.rv-ready .list .item.in{opacity:1;transform:none}
+.rv-ready .list .item:nth-child(even).in{transition-delay:.08s}
 @media (prefers-reduced-motion:reduce){
-  .rv-ready .sec-head,.rv-ready .shot-canvas,.rv-ready .shot figcaption>*{opacity:1;transform:none;transition:none}
+  .rv-ready .sec-head,.rv-ready .shot-canvas,.rv-ready .shot figcaption>*,.rv-ready .list .item{opacity:1;transform:none;transition:none}
 }
 
 /* 示意图：还原程序真实外观（程序默认主题「赛博档案」：深青底 + 薄荷绿强调 + 网格） */
@@ -1722,7 +1725,7 @@ python server.py</pre>
   // 主通道用 IntersectionObserver（依据元素与视口的相交状态触发，不依赖 scroll 事件派发）；
   // 兜底通道在 scroll/resize/load 上做几何判定。两条通道共用 rvReveal，重复触发无副作用。
   // 全部点亮后解绑兜底监听；脚本失效则不加 rv-ready，内容保持可见。
-  var rvTargets = document.querySelectorAll(".sec-head, #shots .shot");
+  var rvTargets = document.querySelectorAll(".sec-head, #shots .shot, .list .item");
   if (rvTargets.length) {
     document.documentElement.classList.add("rv-ready");
     var rvPending = [];
