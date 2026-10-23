@@ -287,10 +287,53 @@ function New-PipArguments([string[]]$Extra) {
 }
 
 # ------------------------------------------------------------------ 各步骤
+# 虚拟环境是否真的能跑。只看 python.exe 是否存在不够：从别的电脑整个目录搬过来的
+# .venv 里，pyvenv.cfg 仍指向原机器的 Python 安装路径，python.exe 会直接以非 0 退出。
+function Test-VenvUsable {
+    if (-not (Test-Path $VenvPython)) { return $false }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $prefix = & $VenvPython -c "import sys; print(sys.prefix)" 2>$null
+        if ($LASTEXITCODE -ne 0) { return $false }
+        $line = ($prefix | Select-Object -First 1)
+        if (-not $line) { return $false }
+        return ($line.Trim() -eq $VenvDir.TrimEnd('\'))
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
+function Remove-BrokenVenv {
+    # 先改名保留现场（体积可能很大，脚本会打印位置，确认无用后可手动删除）；
+    # 改名失败（文件被占用）时退回直接删除。
+    $backup = "$VenvDir.broken-$((Get-Date).ToString('yyyyMMddHHmmss'))"
+    try {
+        Move-Item -LiteralPath $VenvDir -Destination $backup -ErrorAction Stop
+        Write-Warn "旧环境已改名为 $backup，确认无需保留后可手动删除。"
+    } catch {
+        try {
+            Remove-Item -LiteralPath $VenvDir -Recurse -Force -ErrorAction Stop
+        } catch {
+            Fail "无法重建虚拟环境：$VenvDir 被占用。请关闭正在使用它的程序后重试。"
+        }
+    }
+}
+
 function Ensure-Venv($python) {
-    if (Test-Path $VenvPython) {
+    if (Test-VenvUsable) {
         Write-Ok '已有独立虚拟环境 .venv'
         return
+    }
+    if (Test-Path $VenvDir) {
+        if ($DryRun) {
+            Write-Warn '（DryRun）检测到 .venv 不可用，正式运行时会重建它'
+            return
+        }
+        Write-Warn '检测到 .venv 不可用（常见原因：项目从另一台电脑搬来，原机器的 Python 已不存在；或本机 Python 被升级/卸载），正在重建 ...'
+        Remove-BrokenVenv
     }
     if (-not $python) {
         Write-Warn 'Python 不可用，跳过虚拟环境创建'
@@ -304,6 +347,9 @@ function Ensure-Venv($python) {
     & $python.Exe @($python.Args) -m venv $VenvDir
     if (-not (Test-Path $VenvPython)) {
         Fail '虚拟环境创建失败，请确认 Python 安装完整后重试。'
+    }
+    if (-not (Test-VenvUsable)) {
+        Fail "虚拟环境已创建但无法运行（$VenvPython）。请手动删除 .venv 后重试，或重新安装 Python 3.11+。"
     }
     Write-Ok '虚拟环境创建完成'
 }

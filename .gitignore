@@ -117,6 +117,7 @@ docs/样本
 
 # Self-hosting guide: shipped inside release packages, not tracked by git
 /SELF-HOSTING-GUIDE.txt
+/使用指南.txt
 
 #ignore wiki
 /docs/the-veil.wiki
