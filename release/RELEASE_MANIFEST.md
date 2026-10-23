@@ -6,7 +6,7 @@
 
 - 前端 TypeScript 类型检查：通过
 - 前端生产构建：通过
-- 后端测试：`pytest` 602 passed
+- 后端测试：`pytest` 603 passed
 - 发布包敏感信息扫描：不应包含本地 `.env`、运行时密钥、日志、缓存、本地数据库或依赖目录
 - 发布包内容核对：不应包含 `.gitignore`、`.gitattributes`、`docs/`、`tests/`、`data/scenarios/`、`data/runtime/`
 

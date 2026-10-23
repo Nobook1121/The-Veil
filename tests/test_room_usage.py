@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from flask import Flask
+
+from trpg_server.agents.telemetry import record_ai_usage
 from trpg_server.json_store import write_json_atomic
 from trpg_server.room_usage import load_room_usage, record_room_usage
 
@@ -95,6 +98,29 @@ class TestRoomUsage:
         assert data["requests"] == 0
         assert data["total_tokens"] == 0
         assert data["costs"] == {}
+
+    def test_telemetry_hooks_room_usage_when_app_context_exists(self, tmp_path: Path):
+        app = Flask(__name__)
+        app.config["ROOMS_DIR"] = tmp_path / "rooms"
+        app.config["CONFIG_DIR"] = tmp_path / "config"
+        _write_platform(app.config["CONFIG_DIR"], currency="USD", input_price=1, output_price=0)
+
+        with app.app_context():
+            record_ai_usage(
+                tmp_path / "logs",
+                {
+                    "room_id": "r6",
+                    "provider": "deepseek",
+                    "model": "deepseek-chat",
+                    "prompt_tokens": 2_000_000,
+                    "completion_tokens": 0,
+                },
+            )
+
+        data = load_room_usage(app.config["ROOMS_DIR"] / "r6", "r6")
+        assert data["requests"] == 1
+        assert data["total_tokens"] == 2_000_000
+        assert data["costs"] == {"USD": 2.0}
 
     def test_total_tokens_falls_back_to_prompt_plus_completion(self, tmp_path: Path):
         room_dir = tmp_path / "rooms" / "r5"
