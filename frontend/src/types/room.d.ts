@@ -31,6 +31,17 @@ interface CharacterRuntimeState {
     records?: CharacterRuntimeRecord[];
 }
 
+interface RoomUsage {
+    room_id?: string;
+    requests: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    cached_tokens?: number;
+    costs: Record<string, number>;
+    updated_at?: string;
+}
+
 interface Room {
     id: string;
     code?: string;
@@ -70,6 +81,8 @@ interface Room {
         result_source: "physics" | "server";
     };
     saves?: Array<{ filename: string; title?: string; created_at?: string }>;
+    // 房主/房间管理员可见的累计 AI 用量与花费；其他成员看不到该字段。
+    usage?: RoomUsage;
 }
 
 interface RoomHouseRules {

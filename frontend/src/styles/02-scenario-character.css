@@ -595,6 +595,32 @@ body.is-guest .guest-login-hint {
     margin: 18px 24px 10px;
 }
 
+.room-usage-meter {
+    margin-left: auto;
+    align-self: flex-end;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--color-panel-muted);
+    color: var(--color-muted);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    white-space: nowrap;
+    cursor: help;
+}
+
+.room-usage-meter .room-usage-sep {
+    opacity: 0.6;
+}
+
+@media (max-width: 640px) {
+    .room-usage-meter {
+        display: none;
+    }
+}
+
 .home-room-meta {
     display: flex;
     flex-wrap: wrap;

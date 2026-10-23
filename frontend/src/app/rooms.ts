@@ -484,6 +484,9 @@ function renderRoomCard(room: Room): string {
         roomCode: room.room_code || room.code || "-",
         scenarioTitle: room.scenario_title || "未知",
         members,
+        usageHtml: room.usage
+            ? `<br><small class="text-muted room-card-usage">AI 用量：${roomUsageText(room.usage)}</small>`
+            : "",
         actionLabel: isActive ? "管理房间" : "进入房间",
     });
 }
@@ -687,6 +690,7 @@ function updateRoomDetail(room: Room): void {
         archived: Boolean(room.archived),
         invisibleView: room.invisible_view === true,
     });
+    renderRoomUsage(room.usage);
 }
 
 window.refreshRoomArchiveUi = (): void => {
@@ -722,6 +726,99 @@ function canManageRoom(room: Room): boolean {
     const self = activeRoomMembers(room).find((member) => String(member.user_id) === String(window.currentUser?.user_id));
     return Boolean(self && (self.room_role === "owner" || self.room_role === "admin"));
 }
+
+const ROOM_CURRENCY_SYMBOLS: Record<string, string> = { CNY: "¥", USD: "$", EUR: "€", JPY: "¥" };
+
+function formatRoomTokenCount(value: number): string {
+    const count = Math.max(0, Number(value) || 0);
+    if (count >= 100000000) return `${(count / 100000000).toFixed(2)} 亿`;
+    if (count >= 10000) return `${(count / 10000).toFixed(2)} 万`;
+    return count.toLocaleString("zh-CN");
+}
+
+function formatRoomCosts(costs: Record<string, number> | undefined): string {
+    const entries = Object.entries(costs || {}).filter(([, amount]) => Number(amount) > 0);
+    if (!entries.length) return "未配置单价";
+    return entries
+        .map(([currency, amount]) => `${ROOM_CURRENCY_SYMBOLS[currency] || `${currency} `}${Number(amount).toFixed(4)}`)
+        .join(" + ");
+}
+
+function roomUsageText(usage: RoomUsage | undefined): string {
+    if (!usage) return "";
+    return `本房间累计 ${formatRoomTokenCount(usage.total_tokens)} tokens · ${formatRoomCosts(usage.costs)}`;
+}
+
+function roomUsageTooltip(usage: RoomUsage | undefined): string {
+    if (!usage) return "";
+    const lines = [
+        `请求次数：${usage.requests || 0}`,
+        `输入 tokens：${formatRoomTokenCount(usage.prompt_tokens)}`,
+        `输出 tokens：${formatRoomTokenCount(usage.completion_tokens)}`,
+        `总 tokens：${formatRoomTokenCount(usage.total_tokens)}`,
+        `累计花费：${formatRoomCosts(usage.costs)}`,
+    ];
+    if (usage.updated_at) lines.push(`最后更新：${usage.updated_at}`);
+    return lines.join("\n");
+}
+
+/**
+ * 房间用量只对房主/房间管理员返回；role 不满足时后端不会下发 usage 字段。
+ */
+function renderRoomUsage(usage: RoomUsage | undefined): void {
+    const text = roomUsageText(usage);
+    const meter = document.getElementById("roomUsageMeter") as HTMLElement | null;
+    if (meter) {
+        meter.hidden = !text;
+        meter.title = roomUsageTooltip(usage);
+        setText("roomUsageTokens", usage ? `${formatRoomTokenCount(usage.total_tokens)} tokens` : "");
+        setText("roomUsageCost", usage ? formatRoomCosts(usage.costs) : "");
+    }
+    const detail = document.getElementById("roomDetailUsage") as HTMLElement | null;
+    if (detail) {
+        detail.hidden = !text;
+        detail.textContent = text ? `AI 用量：${text}` : "";
+        detail.title = roomUsageTooltip(usage);
+    }
+}
+
+async function refreshRoomUsage(): Promise<void> {
+    const room = currentRoom;
+    if (!room?.id || room.invisible_view || !canManageRoom(room)) {
+        renderRoomUsage(room?.usage);
+        return;
+    }
+    try {
+        const response = await TrpgApi.get<ApiResponse<RoomUsage>>(`/api/rooms/${encodeURIComponent(room.id)}/usage`);
+        if (response.success && response.data) {
+            renderRoomUsage(response.data);
+            if (currentRoom) currentRoom.usage = response.data;
+            return;
+        }
+    } catch {
+        /* 网络异常时保留上一次展示 */
+    }
+    renderRoomUsage(room.usage);
+}
+
+async function reloadRoomMessages(): Promise<void> {
+    const room = currentRoom;
+    if (!room?.id || room.invisible_view) return;
+    try {
+        const response = await TrpgApi.get<ApiResponse<Room>>(`/api/rooms/${encodeURIComponent(room.id)}`);
+        if (!response.success || !response.data) return;
+        const nextRoom: Room = { ...response.data, messages: response.data.messages ?? [] };
+        currentRoom = nextRoom;
+        window.currentRoom = nextRoom;
+        window.renderChatMessages?.(nextRoom.messages ?? []);
+        updateRoomDetail(nextRoom);
+    } catch {
+        /* 网络异常时等待下一次房间事件 */
+    }
+}
+
+window.refreshRoomUsage = refreshRoomUsage;
+window.reloadRoomMessages = reloadRoomMessages;
 
 async function archiveCurrentRoom(): Promise<void> {
     if (!currentRoom?.id || currentRoom.archived) return;

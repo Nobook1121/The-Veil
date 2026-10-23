@@ -14,6 +14,7 @@ from trpg_server.logging_config import log_access_denied, log_user_action, user_
 from trpg_server.room_log import ARCHIVE_LOG_LIMIT, load_room_log, log_room_event
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, success_response
+from trpg_server.room_usage import load_room_usage
 from trpg_server.role_config import load_roles
 from trpg_server.security import get_user_manager, is_socket_user_online, is_user_in_room, safe_join
 from trpg_server.settings import CONFIG_DIR, ROOMS_DIR, SCENARIOS_DIR, ROOM_ARCHIVES_DIR, CHARACTERS_DIR, HISTORY_DIR
@@ -302,6 +303,13 @@ def _can_manage(info):
         return True
     member = _find_member(info, user_id=session.get("user_id"), active_only=True)
     return _room_permission(member, info) in {ROOM_ROLE_OWNER, ROOM_ROLE_ADMIN}
+
+
+def _room_usage_for(info, room_dir):
+    """只有房主/房间管理员（或站点管理员）能看到房间 token 与花费。"""
+    if not _can_manage(info):
+        return None
+    return load_room_usage(room_dir, str(info.get("id") or ""))
 
 
 def _archive_visible(archive):
@@ -775,7 +783,11 @@ def list_rooms():
         info = _read_room(room_dir)
         # 公开房间展示给所有玩家；私人房间仅成员可访问。
         if _can_access(info) or (_room_visibility(info) == ROOM_VISIBILITY_PUBLIC and not info.get("archived")):
-            rooms.append(_room_summary(info))
+            summary = _room_summary(info)
+            usage = _room_usage_for(info, room_dir)
+            if usage is not None:
+                summary["usage"] = usage
+            rooms.append(summary)
     rooms.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
     return success_response(rooms, "Rooms loaded successfully")
 
@@ -859,6 +871,7 @@ def create_room():
     )
     data = _room_summary(info)
     data["messages"] = []
+    data["usage"] = load_room_usage(room_dir, str(room_id))
     return success_response(data, "Room created successfully", 201)
 
 
@@ -936,6 +949,9 @@ def join_room_by_code():
     )
     data = _room_summary(info)
     data["messages"] = _read_messages(room_dir)
+    usage = _room_usage_for(info, room_dir)
+    if usage is not None:
+        data["usage"] = usage
     return success_response(data, "Room joined successfully")
 
 
@@ -1115,7 +1131,24 @@ def get_room(room_id):
 
     data = _room_summary(info)
     data["messages"] = _read_messages(room_dir)
+    usage = _room_usage_for(info, room_dir)
+    if usage is not None:
+        data["usage"] = usage
     return success_response(data, "Room loaded successfully")
+
+
+@bp.route("/api/rooms/<room_id>/usage", methods=["GET"])
+def get_room_usage(room_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+
+    room_dir, info = _find_room(room_id)
+    if not room_dir:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_manage(info):
+        return _denied(room_id)
+    return success_response(load_room_usage(room_dir, str(room_id)), "Room usage loaded successfully")
 
 
 @bp.route("/api/rooms/<room_id>/scenario-migration", methods=["POST"])

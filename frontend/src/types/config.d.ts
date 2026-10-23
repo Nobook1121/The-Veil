@@ -23,6 +23,9 @@ interface AIModelConfig {
     description: string;
     enabled: boolean;
     params?: Record<string, unknown>;
+    // 计费用单价（每百万 token），由管理员填写；未填写时只统计 token。
+    input_price?: number;
+    output_price?: number;
 }
 
 interface AIPlatformConfig {
@@ -39,6 +42,8 @@ interface AIPlatformConfig {
         timeout: number;
         // 提供商 API 标准（openai / openai-compatible / anthropic），仅作元数据存储与展示。
         provider_type?: string;
+        // 计费货币代码（CNY/USD/EUR/JPY），默认 CNY。
+        currency?: string;
         // true 表示 base_url 已经是完整端点；false 表示由后端自动补齐 chat/completions 后缀。
         base_url_full?: boolean;
         // 平台默认模型 id，用于测试连接等默认选型。

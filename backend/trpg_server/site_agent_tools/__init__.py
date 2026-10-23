@@ -21,13 +21,22 @@ from trpg_server.site_agent_tools.base import (
 )
 from trpg_server.site_agent_tools.characters import CHARACTER_TOOLS
 from trpg_server.site_agent_tools.permissions import PERMISSION_TOOLS
+from trpg_server.site_agent_tools.profile import PROFILE_TOOLS
 from trpg_server.site_agent_tools.rooms import ROOM_TOOLS
 from trpg_server.site_agent_tools.scenarios import SCENARIO_TOOLS
+from trpg_server.site_agent_tools.settings import SITE_SETTING_TOOLS
 from trpg_server.site_agent_tools.users import USER_TOOLS
 from trpg_server.site_agent_tools.utilities import UTILITY_TOOLS
 
 ALL_TOOL_SPECS: tuple[ToolSpec, ...] = tuple(
-    CHARACTER_TOOLS + SCENARIO_TOOLS + PERMISSION_TOOLS + USER_TOOLS + UTILITY_TOOLS + ROOM_TOOLS
+    CHARACTER_TOOLS
+    + SCENARIO_TOOLS
+    + PERMISSION_TOOLS
+    + USER_TOOLS
+    + UTILITY_TOOLS
+    + ROOM_TOOLS
+    + SITE_SETTING_TOOLS
+    + PROFILE_TOOLS
 )
 SPECS_BY_NAME = {spec.name: spec for spec in ALL_TOOL_SPECS}
 
@@ -161,6 +170,7 @@ def _make_wrapper(spec: ToolSpec, actor: Any, context: ToolContext, config: Any)
             diff=data,
             risk=spec.risk,
             ttl_seconds=getattr(config, "action_ttl_seconds", 300),
+            room_id=context.room_id,
         )
         context.pending_actions.append(
             {
@@ -216,7 +226,8 @@ def apply_pending_action(actor: Any, action: dict[str, Any], *, config: Any) -> 
     if spec.risk not in {"write", "danger"} or spec.apply is None:
         return ToolResult.failure("该操作不是可执行的写操作")
     args = action.get("args") if isinstance(action.get("args"), dict) else {}
-    decision = authorize_tool(actor, spec, args, config=config, room_id=None)
+    room_id = str(action.get("room_id") or "") or None
+    decision = authorize_tool(actor, spec, args, config=config, room_id=room_id)
     if not decision.allowed:
         return ToolResult.failure(DENIAL_MESSAGES.get(decision.reason, decision.reason))
     context = ToolContext(
@@ -225,5 +236,6 @@ def apply_pending_action(actor: Any, action: dict[str, Any], *, config: Any) -> 
         conversation_id=str(action.get("conversation_id") or ""),
         turn_id=f"apply-{action.get('id')}",
         ip="",
+        room_id=room_id,
     )
     return spec.apply(actor, args, context)

@@ -1281,7 +1281,11 @@ function initWebSocket(): void {
             window.currentUser = null;
             showAuthModal();
         });
-        socket.on("new_message", (data) => handleIncomingMessage(data));
+        socket.on("new_message", (data) => {
+            handleIncomingMessage(data);
+            void window.refreshRoomUsage?.();
+        });
+        socket.on("room_messages_changed", () => { void window.reloadRoomMessages?.(); });
         socket.on("user_typing", (data) => handleUserTyping(data));
         socket.on("room_members_changed", () => { void window.refreshCurrentRoomMembers?.(); });
         socket.on("room_autosave_created", () => { void window.refreshRoomNodes?.(); });

@@ -39,6 +39,8 @@ interface Window {
     closeRoomConsole?: () => void;
     refreshCurrentRoomMembers?: () => Promise<void>;
     refreshRoomNodes?: () => Promise<void>;
+    refreshRoomUsage?: () => Promise<void>;
+    reloadRoomMessages?: () => Promise<void>;
     joinSocketRoom?: (roomId: string) => void;
     leaveSocketRoom?: (roomId: string) => void;
     reconnectSocket?: () => void;

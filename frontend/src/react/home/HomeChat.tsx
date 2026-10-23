@@ -107,6 +107,11 @@ export function HomeChat() {
                                 </span>
                             </p>
                         </div>
+                        <div className="room-usage-meter" id="roomUsageMeter" hidden aria-live="polite">
+                            <span id="roomUsageTokens">0 tokens</span>
+                            <span className="room-usage-sep" aria-hidden="true">·</span>
+                            <span id="roomUsageCost">未配置单价</span>
+                        </div>
                     </header>
 
                     <div className="chat-history" id="chatHistory">

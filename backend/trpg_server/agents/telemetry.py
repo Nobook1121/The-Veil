@@ -53,7 +53,28 @@ def record_ai_usage(log_dir: Path, usage: dict[str, Any]) -> dict[str, Any]:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(item, ensure_ascii=False, separators=(",", ":")) + "\n")
+    _record_room_usage(item)
     return item
+
+
+def _record_room_usage(item: dict[str, Any]) -> None:
+    """把带 room_id 的 AI 用量累计到房间用量文件；统计失败不影响主流程。"""
+    room_id = item.get("room_id")
+    if room_id in (None, ""):
+        return
+    try:
+        from flask import current_app, has_app_context
+
+        if not has_app_context():
+            return
+        from trpg_server.room_usage import record_room_usage
+        from trpg_server.settings import CONFIG_DIR, ROOMS_DIR
+
+        rooms_dir = Path(current_app.config.get("ROOMS_DIR", ROOMS_DIR))
+        config_dir = Path(current_app.config.get("CONFIG_DIR", CONFIG_DIR))
+        record_room_usage(rooms_dir / str(room_id), item, config_dir=config_dir)
+    except Exception:
+        pass
 
 
 def load_daily_ai_usage(log_dir: Path, day: str | None = None) -> dict[str, Any]:

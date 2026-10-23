@@ -488,6 +488,13 @@ function buildPlatformConfigHTML(config: AIPlatformConfig, isNew: boolean): stri
                         <label for="modal-provider-type-${id}">${platformEscapeHtml(platformT("platform.form.provider_type", "提供商类型"))}</label>
                         <select class="form-select" id="modal-provider-type-${id}">${providerOptions}</select>
                     </div>
+                    <div class="form-group mt-2">
+                        <label for="modal-currency-${id}">${platformEscapeHtml(platformT("platform.form.currency", "计费货币"))}</label>
+                        <select class="form-select" id="modal-currency-${id}">
+                            ${["CNY", "USD", "EUR", "JPY"].map((code) => `<option value="${code}" ${(config.config.currency || "CNY") === code ? "selected" : ""}>${code}</option>`).join("")}
+                        </select>
+                        <small class="text-muted">${platformEscapeHtml(platformT("platform.form.currency_hint", "模型单价按该货币填写，房间用量会按此货币累计花费。"))}</small>
+                    </div>
                     ${buildModelList(config, isNew)}
                     <div class="form-group mt-3">
                         <label for="modal-timeout-${id}">${platformEscapeHtml(platformT("platform.config.timeout_label", "超时设置 ({value} 秒)", { value: config.config.timeout }))}</label>
@@ -558,6 +565,19 @@ function buildModelList(config: AIPlatformConfig, isNew: boolean): string {
                         <div class="model-info">
                             <h7>${platformEscapeHtml(model.name)}</h7>
                             <p>${platformEscapeHtml(model.description || model.id)}</p>
+                            <div class="model-pricing">
+                                <label>${platformEscapeHtml(platformT("platform.model.input_price", "输入单价"))}
+                                    <input class="form-control form-control-sm model-price-input" type="number" min="0" step="0.0001"
+                                        data-model="${platformEscapeHtml(model.id)}" data-price-field="input_price"
+                                        value="${numberOrEmpty(model.input_price)}" placeholder="0">
+                                </label>
+                                <label>${platformEscapeHtml(platformT("platform.model.output_price", "输出单价"))}
+                                    <input class="form-control form-control-sm model-price-input" type="number" min="0" step="0.0001"
+                                        data-model="${platformEscapeHtml(model.id)}" data-price-field="output_price"
+                                        value="${numberOrEmpty(model.output_price)}" placeholder="0">
+                                </label>
+                                <span>${platformEscapeHtml(config.config.currency || "CNY")} / 百万 token</span>
+                            </div>
                         </div>
                         <div class="model-actions">
                             <label class="model-default-option" title="${platformEscapeHtml(platformT("platform.model.default_hint", "设为平台默认模型"))}">
@@ -600,6 +620,20 @@ function syncPlatformFormToConfig(config: AIPlatformConfig): void {
     if (fullUrl) config.config.base_url_full = fullUrl.checked;
     const providerType = document.getElementById(`modal-provider-type-${id}`) as HTMLSelectElement | null;
     if (providerType) config.config.provider_type = providerType.value;
+    const currency = document.getElementById(`modal-currency-${id}`) as HTMLSelectElement | null;
+    if (currency) config.config.currency = currency.value;
+    document.querySelectorAll<HTMLInputElement>(".model-price-input").forEach((input) => {
+        const model = config.models.find((item) => item.id === (input.dataset.model || ""));
+        if (!model) return;
+        const field = input.dataset.priceField === "output_price" ? "output_price" : "input_price";
+        const raw = input.value.trim();
+        if (!raw) {
+            delete model[field];
+            return;
+        }
+        const parsed = Number.parseFloat(raw);
+        model[field] = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    });
     const timeout = document.getElementById(`modal-timeout-${id}`) as HTMLInputElement | null;
     if (timeout) config.config.timeout = Number.parseInt(timeout.value, 10) || 30;
     const usePrev = document.getElementById(`modal-use-previous-response-${id}`) as HTMLInputElement | null;
@@ -1166,6 +1200,11 @@ function platformEscapeHtml(value: unknown): string {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
+}
+
+function numberOrEmpty(value: number | undefined): string {
+    if (value === undefined || value === null || !Number.isFinite(Number(value))) return "";
+    return String(value);
 }
 
 function platformErrorMessage(error: unknown): string {

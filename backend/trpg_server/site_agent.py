@@ -379,13 +379,17 @@ def confirm_action(actor: Actor, action_id: str, *, apply: bool) -> dict[str, An
         return {"status": "rejected", "action_id": action_id}
 
     action_args = action.get("args") if isinstance(action.get("args"), dict) else {}
-    spec = next((item for item in exposed_specs(actor, config, room_id=None) if item.name == action.get("tool")), None)
+    room_id = str(action.get("room_id") or "") or None
+    spec = next(
+        (item for item in exposed_specs(actor, config, room_id=room_id) if item.name == action.get("tool")),
+        None,
+    )
     if spec is None:
         from trpg_server.site_agent_tools import SPECS_BY_NAME
 
         spec = SPECS_BY_NAME.get(str(action.get("tool")))
     if spec is not None:
-        decision = authorize_tool(actor, spec, action_args, config=config, room_id=None)
+        decision = authorize_tool(actor, spec, action_args, config=config, room_id=room_id)
         if not decision.allowed:
             raise SiteAgentError("permission_denied", "权限已变化，无法执行该操作", 403)
     result = apply_pending_action(actor, action, config=config)

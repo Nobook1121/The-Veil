@@ -223,6 +223,7 @@ def create_action(
     diff: dict[str, Any] | None = None,
     risk: str = "write",
     ttl_seconds: int = AGENT_ACTION_TTL_SECONDS,
+    room_id: str | None = None,
 ) -> dict[str, Any]:
     now = time.time()
     action = {
@@ -238,6 +239,8 @@ def create_action(
         "expires_at": datetime.fromtimestamp(now + max(30, ttl_seconds)).astimezone().isoformat(timespec="seconds"),
         "status": "pending",
     }
+    if room_id:
+        action["room_id"] = str(room_id)
     path = _actions_dir() / f"{action['id']}.json"
     with _STORE_LOCK:
         write_json_atomic(path, action)

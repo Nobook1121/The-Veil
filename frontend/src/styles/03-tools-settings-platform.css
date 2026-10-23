@@ -867,6 +867,29 @@
     color: var(--theme-text-muted);
 }
 
+.model-pricing {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+    font-size: var(--theme-font-size-xs);
+    color: var(--theme-text-muted);
+}
+
+.model-pricing label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    font-weight: normal;
+}
+
+.model-pricing .model-price-input {
+    width: 84px;
+    padding: 2px 6px;
+}
+
 .model-actions {
     display: flex;
     align-items: center;
