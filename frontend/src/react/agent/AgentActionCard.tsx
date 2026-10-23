@@ -7,6 +7,10 @@ const TOOL_LABELS: Record<string, string> = {
     "users.set_role": "修改用户组",
     "users.set_status": "修改账号状态",
     "users.force_password_reset": "强制重置密码",
+    "site.update_general_settings": "修改网站设置",
+    "profile.update_my_profile": "修改个人资料",
+    "room.delete_message": "删除房间消息",
+    "room.clear_messages": "清空房间消息",
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -24,6 +28,11 @@ const FIELD_LABELS: Record<string, string> = {
     status: "状态",
     playerId: "归属玩家",
     preview: "预览",
+    section: "配置段",
+    key: "配置项",
+    value: "新值",
+    changes: "变更内容",
+    field: "字段",
 };
 
 const HIDDEN_DIFF_KEYS = new Set(["summary"]);
