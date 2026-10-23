@@ -85,14 +85,15 @@
 | `setup_embedding.py` / `vector_admin.py` / `knowledge_admin.py` | Embedding 模型下载/上传、向量库与知识库管理 |
 | `site_agent.py` (439) | 网站 Agent 编排层：轮次循环、token 记账、平台故障转移 |
 | `site_agent_config.py` / `site_agent_auth.py` / `site_agent_prompt.py` / `site_agent_store.py` | Agent 配置（`general.toml [site_agent]`）、统一鉴权（会话→开关→`agent.use`→工具权限→房间范围→业务校验）、系统提示词（不可信数据块包裹）、按用户隔离的会话/待确认操作/审计/用量存储 |
-| `site_agent_tools/` | Agent 工具注册表：`base.py`（JSON Schema 白名单清洗，丢弃身份/路径/命令字段）+ `characters` / `scenarios` / `rooms` / `permissions` / `users` / `utilities`；只读工具直接执行，写工具只生成 `pending_action` 待确认卡片 |
+| `site_agent_tools/` | Agent 工具注册表：`base.py`（JSON Schema 白名单清洗，丢弃身份/路径/命令字段）+ `characters` / `scenarios` / `rooms`（含消息读取/删除/清空）/ `settings`（网站设置读写，ADMIN/OWNER 硬门控）/ `profile`（本人昵称/邮箱/在线状态）/ `permissions` / `users` / `utilities`；只读工具直接执行，写工具只生成 `pending_action` 待确认卡片 |
+| `room_usage.py` | 房间 AI 用量账本：按平台模型单价与币种累加 `data/runtime/rooms/<room_id>/usage.json`（总/输入/输出/缓存 token、调用次数、分模型明细、多币种花费） |
 | `character_service.py` (244) / `scenario_service.py` (312) | 角色卡/剧本的领域服务：校验、版本、知识库索引；路由与 Agent 写工具共用，避免两条写路径分叉 |
 
 ### 4.2 HTTP 路由（`backend/trpg_server/routes/`，每个文件一个业务组）
 
 | 文件（约行数） | 职责 |
 | --- | --- |
-| `rooms.py` (1717) | 房间 CRUD、成员、邀请码、角色、自动存档、归档、切换剧本 |
+| `rooms.py` (1741) | 房间 CRUD、成员、邀请码、角色、自动存档、归档、切换剧本；`GET /api/rooms/<room_id>/usage` 用量（仅房主/房间管理员） |
 | `chat.py` (1028) + `chat_helpers.py` (676) | 聊天消息、AI KP 对话/流式输出、上下文组装 |
 | `characters.py` (883) | COC7 角色卡、职业/技能/武器目录、角色卡广场 |
 | `scenarios.py` (790) + `scenario_summary.py` (130) | 剧本 CRUD、模块、版本、摘要 |
@@ -109,7 +110,7 @@
 | `knowledge_bases.py` (153) | 规则书知识库 |
 | `network.py` (212) | 局域网/内网穿透配置 |
 | `themes.py` (174) | 主题资源 |
-| `telemetry.py` | AI 用量与缓存统计 |
+| `telemetry.py` | AI 用量与缓存统计；按 `room_id` 联动 `room_usage.py` 记账 |
 | `vector_health.py` | 向量库健康检查 |
 | `character_ai.py` (73) | 角色卡 AI 生成接口 |
 | `pages.py` / `assets.py` | 主页/SPA 回退、静态资源与上传；`/config/<path>` 在 `assets.py` 中封禁 `general.toml`、`site.json`、`network.json`、`penetration.json` |
@@ -203,7 +204,7 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 | `data/config/` | 用户配置（`.gitignore` 已忽略，首次启动从模板幂等生成）：`general.toml` 是唯一「人类设置」入口，段包括 `appearance/language/notification/autosave/room_console/chat/ai*/character_rules/scenario/window/update/site_agent/site/network*`；另有 `roles/`、`aiplatform/`（首次保存时创建）、`aimodel/`；遗留 `site.json`/`network.json`/`penetration.json` 仅兼容读取，用 `config migrate` 并入 TOML |
 | `data/occupations/` / `data/weapons/` / `data/character_skills.json` | 职业、武器目录与角色技能表 |
 | `data/runtime/users/` | `users.sqlite3`、IP 配置 |
-| `data/runtime/rooms/<room_id>/` | `info.json`、`messages.json`、`autosave.json`、`nodes/`、`console.jsonl` |
+| `data/runtime/rooms/<room_id>/` | `info.json`、`messages.json`、`autosave.json`、`usage.json`、`nodes/`、`console.jsonl` |
 | `data/runtime/agent/` | 网站 Agent：`conversations/<user_id>/`、`actions/`（待确认操作，TTL 默认 5 分钟）、`audit/`（JSONL 滚动审计）、`usage/<user_id>/`（逐日 token） |
 | `data/runtime/room_archives/` | 房间归档快照（含控制台日志） |
 | `data/runtime/characters/` / `character_gallery/` | 角色卡与广场 |
@@ -269,7 +270,8 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 | 权限/角色 | `permission_config.py`、`role_config.py`、`routes/users.py`、`routes/auth.py` |
 | 向量检索/Embedding | `agents/vector_store.py`、`agents/embedding_provider.py`、`setup_embedding.py`、`routes/vector_health.py` |
 | 房间控制台 | `room_console_commands.py`、`room_log.py`、`routes/room_console.py`、`frontend/src/app/room-console.ts` |
-| 网站 Agent | `site_agent.py`、`site_agent_auth.py`、`site_agent_config.py`、`site_agent_prompt.py`、`site_agent_store.py`、`site_agent_tools/*`、`routes/site_agent.py`、`frontend/src/react/agent/*`；写操作走 `character_service.py` / `scenario_service.py` |
+| 网站 Agent | `site_agent.py`、`site_agent_auth.py`、`site_agent_config.py`、`site_agent_prompt.py`、`site_agent_store.py`、`site_agent_tools/*`（含 `settings` / `profile` / `rooms` 消息工具）、`routes/site_agent.py`、`frontend/src/react/agent/*`；写操作走 `character_service.py` / `scenario_service.py`；网站设置读写额外要求 ADMIN/OWNER |
+| 房间 AI 用量 | `room_usage.py`、`agents/telemetry.py`、`routes/rooms.py`、`frontend/src/app/rooms.ts`、`frontend/src/react/home/HomeChat.tsx`；仅房主/房间管理员可见 |
 | 服务器控制台 | `console_commands.py`、`docs/console-commands.md` |
 | 前端页面/样式 | `frontend/src/index/fragments/*`、`frontend/src/app/*`、`frontend/src/styles/*` |
 | 国际化 | `frontend/src/locales/zh_cn.json`、`en_us.json`、`frontend/src/app/i18n.ts` |
