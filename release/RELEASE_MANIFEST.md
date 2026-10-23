@@ -1,4 +1,4 @@
-# 帷幕 The Veil · AI 跑团平台 v0.5.0b
+# 帷幕 The Veil · AI 跑团平台 v0.5.3b
 
 这是可用于 GitHub Release 的源码发布包，包含后端源码、前端源码、已构建的 `dist/public`、默认配置与一键启动脚本。
 
@@ -6,7 +6,7 @@
 
 - 前端 TypeScript 类型检查：通过
 - 前端生产构建：通过
-- 后端测试：`pytest` 372 passed / 1 skipped
+- 后端测试：`pytest` 599 passed
 - 发布包敏感信息扫描：不应包含本地 `.env`、运行时密钥、日志、缓存、本地数据库或依赖目录
 - 发布包内容核对：不应包含 `.gitignore`、`.gitattributes`、`docs/`、`tests/`、`data/scenarios/`、`data/runtime/`
 
@@ -20,6 +20,7 @@
 - **不含开发侧内容**：不打包 `tests/` 与开发 / 校验脚本（如 `scripts/verify.ps1`）。
 - **保留一键启动脚本**：`start.cmd` 与根目录的 `start-bootstrap.ps1` 必须打包，二者共同实现「无需预装 Python 的一键启动」。
 - **随包提供许可证清单**：`THIRD-PARTY-LICENSES.md` 列出运行与构建所用第三方依赖及其许可证，供合规分发参考。
+- **随包提供自托管指南**：根目录的 `SELF-HOSTING-GUIDE.txt` 必须复制进发布包根目录。该文件**不被 Git 跟踪**（已在 `.gitignore` 中忽略），打包时需要从工作区手动带入；它是给普通用户看的纯文本安装、启动、联机、备份与排错说明。
 
 ## 启动
 
@@ -31,4 +32,4 @@ AI 平台 API key 仅应通过运行时配置写入 `data/runtime/config/aiplatf
 
 ## 本次更新
 
-详见仓库 `release/changelog/v0.5.0b.md`（changelog 不随发布包分发）。
+详见仓库 `release/changelog/v0.5.3b.md`（changelog 不随发布包分发）。

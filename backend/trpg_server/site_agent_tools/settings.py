@@ -51,6 +51,11 @@ def _settings():
 
 
 def _section_values(data: dict[str, Any], section: str) -> dict[str, Any]:
+    # 合并后的配置同时保留顶层点号段名（如 ``network.penetration.settings``）
+    # 和普通嵌套结构，必须优先匹配顶层键，否则密钥打码与读取都会失效。
+    exact = data.get(section)
+    if isinstance(exact, dict):
+        return exact
     current: Any = data
     for part in section.split("."):
         if not isinstance(current, dict):

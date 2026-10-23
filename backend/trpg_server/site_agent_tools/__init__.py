@@ -160,7 +160,11 @@ def _make_wrapper(spec: ToolSpec, actor: Any, context: ToolContext, config: Any)
             return preview.to_dict()
 
         data = preview.data if isinstance(preview.data, dict) else {}
+        # 预览函数用 ``apply_args`` 提供真正要落盘的参数（如角色卡的 payload），
+        # 确认时必须使用它而不是模型的原始入参；``action_args`` 为历史别名。
         action_args = data.pop("action_args", None)
+        if not isinstance(action_args, dict):
+            action_args = data.pop("apply_args", None)
         action = create_action(
             actor_id=actor.user_id,
             conversation_id=context.conversation_id,

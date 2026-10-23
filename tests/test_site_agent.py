@@ -1,12 +1,12 @@
 """网站 Agent 的基础单元测试：权限矩阵、角色配置、参数白名单、提示词与存储。"""
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from flask import Flask
-
-from types import SimpleNamespace
 
 from trpg_server import permission_config, role_config
 from trpg_server import site_agent_store
@@ -18,7 +18,15 @@ from trpg_server.site_agent_auth import (
     sensitive_node_allowed,
 )
 from trpg_server.site_agent_prompt import detect_injection, untrusted_block
-from trpg_server.site_agent_tools.base import ToolArgumentError, ToolSpec, sanitize_arguments
+from trpg_server.site_agent_tools import _make_wrapper
+from trpg_server.site_agent_tools.base import ToolArgumentError, ToolContext, ToolResult, ToolSpec, sanitize_arguments
+from trpg_server.site_agent_tools.rooms import _is_room_manager
+from trpg_server.site_agent_tools.settings import (
+    get_general_settings,
+    apply_update_settings,
+    _check_update_settings,
+)
+from trpg_server.config import invalidate_settings_cache
 
 
 @pytest.fixture()
@@ -178,3 +186,152 @@ class TestConversationStore:
     def test_other_users_cannot_read_conversation(self, agent_app):
         conversation = site_agent_store.create_conversation(1)
         assert site_agent_store.load_conversation(2, conversation["id"]) is None
+
+
+class TestWriteToolConfirmation:
+    def _spec(self) -> ToolSpec:
+        def preview(actor, arguments, context):
+            return ToolResult.success(
+                {"apply_args": {"value": "curated"}, "summary": "确认后写入"},
+                summary="确认后写入",
+            )
+
+        def apply(actor, arguments, context):
+            return ToolResult.success({"value": arguments.get("value")})
+
+        return ToolSpec(
+            name="demo.write",
+            description="demo write",
+            parameters={"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]},
+            risk="write",
+            preview=preview,
+            apply=apply,
+        )
+
+    def _actor(self) -> Actor:
+        return Actor(
+            user_id=1,
+            username="alice",
+            role="USER",
+            permissions=frozenset({"agent.use"}),
+            room_ids=frozenset({"room-1"}),
+        )
+
+    def test_confirmation_uses_apply_args_instead_of_raw_arguments(self, agent_app):
+        spec = self._spec()
+        context = ToolContext(actor=self._actor(), config=SimpleNamespace(), conversation_id="c_1", turn_id="t1")
+        wrapper = _make_wrapper(spec, self._actor(), context, SimpleNamespace(enabled=True, action_ttl_seconds=300))
+
+        result = wrapper({"value": "raw"})
+
+        action = site_agent_store.load_action(result["pending_action"]["action_id"])
+        assert action is not None
+        assert action["args"] == {"value": "curated"}
+        # 预览参数只用于执行，不进入展示给用户的 diff。
+        assert "apply_args" not in action["diff"]
+
+
+class TestRoomMessageAuthorization:
+    def _actor(self, *, user_id=1, admin=False):
+        return SimpleNamespace(user_id=user_id, is_admin=admin)
+
+    def _info(self, *, creator_id=1, members=None):
+        return {"creator_id": creator_id, "members": members or []}
+
+    def test_creator_and_room_roles_can_manage(self):
+        assert _is_room_manager(self._actor(), self._info()) is True
+        assert _is_room_manager(
+            self._actor(user_id=2),
+            self._info(creator_id=1, members=[{"user_id": 2, "is_active": True, "room_role": "admin"}]),
+        ) is True
+        assert _is_room_manager(
+            self._actor(user_id=2),
+            self._info(creator_id=1, members=[{"user_id": 2, "is_active": True, "room_role": "owner"}]),
+        ) is True
+
+    def test_regular_members_cannot_manage(self):
+        assert _is_room_manager(
+            self._actor(user_id=2),
+            self._info(creator_id=1, members=[{"user_id": 2, "is_active": True, "room_role": "player"}]),
+        ) is False
+        assert _is_room_manager(
+            self._actor(user_id=2),
+            self._info(creator_id=1, members=[{"user_id": 2, "is_active": False, "room_role": "admin"}]),
+        ) is False
+        assert _is_room_manager(self._actor(user_id=2, admin=True), self._info(creator_id=1)) is True
+
+
+class TestSiteSettingsGuards:
+    def _actor(self, role: str) -> Actor:
+        return Actor(
+            user_id=1,
+            username="alice",
+            role=role,
+            permissions=frozenset({"agent.use", "settings.general"}),
+            room_ids=frozenset(),
+        )
+
+    def _changes(self, section: str, key: str, value) -> dict:
+        return {"changes": [{"section": section, "key": key, "value": value}]}
+
+    @pytest.fixture()
+    def config_app(self, tmp_path: Path):
+        app = Flask(__name__)
+        app.config["CONFIG_DIR"] = tmp_path / "config"
+        with app.app_context():
+            invalidate_settings_cache()
+            yield app
+        invalidate_settings_cache()
+
+    def test_regular_user_is_denied_even_with_permission(self, config_app):
+        actor = self._actor("USER")
+        assert "管理员" in _check_update_settings(actor, self._changes("appearance", "theme", "x"))
+
+    def test_admin_can_change_regular_section(self, config_app):
+        assert _check_update_settings(self._actor("ADMIN"), self._changes("appearance", "theme", "x")) is None
+
+    def test_admin_cannot_change_owner_only_section(self, config_app):
+        message = _check_update_settings(self._actor("ADMIN"), self._changes("network", "port", 8086))
+        assert message and "OWNER" in message
+
+    def test_owner_can_change_owner_only_section(self, config_app):
+        assert _check_update_settings(self._actor("OWNER"), self._changes("network", "port", 8086)) is None
+
+    def test_secret_and_unknown_keys_are_rejected(self, config_app):
+        denied = _check_update_settings(
+            self._actor("OWNER"),
+            self._changes("network.penetration.settings", "auth_token", "leaked"),
+        )
+        assert denied and "密钥" in denied
+        unknown = _check_update_settings(self._actor("ADMIN"), self._changes("appearance", "nope", "x"))
+        assert unknown and "不支持" in unknown
+
+    def test_locked_keys_are_rejected(self, config_app, monkeypatch):
+        monkeypatch.setenv("AI_TRPG_CFG_NETWORK_PORT", "9000")
+        invalidate_settings_cache()
+        message = _check_update_settings(self._actor("OWNER"), self._changes("network", "port", 8086))
+        assert message and "锁定" in message
+
+    def test_secret_field_is_redacted_on_read(self, config_app, monkeypatch):
+        monkeypatch.setenv("AI_TRPG_CFG_NETWORK_PENETRATION_SETTINGS_AUTH_TOKEN", "super-secret")
+        invalidate_settings_cache()
+        result = get_general_settings(
+            self._actor("ADMIN"),
+            {},
+            ToolContext(actor=self._actor("ADMIN"), config=SimpleNamespace(), conversation_id="", turn_id=""),
+        )
+        assert result.ok is True
+        sections = result.data["sections"]
+        assert sections["network.penetration.settings"]["auth_token"] == "******"
+        assert "super-secret" not in json.dumps(sections, ensure_ascii=False)
+
+    def test_apply_writes_registered_key(self, config_app):
+        actor = self._actor("ADMIN")
+        result = apply_update_settings(
+            actor,
+            self._changes("appearance", "theme", "pattern_cyber_2"),
+            ToolContext(actor=actor, config=SimpleNamespace(), conversation_id="", turn_id=""),
+        )
+        assert result.ok is True
+        written = config_app.config["CONFIG_DIR"] / "general.toml"
+        assert "pattern_cyber_2" in written.read_text(encoding="utf-8")

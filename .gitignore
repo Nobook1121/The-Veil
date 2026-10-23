@@ -115,6 +115,9 @@ docs/样本
 /release/*.sha256
 /release/*.sha512
 
+# Self-hosting guide: shipped inside release packages, not tracked by git
+/SELF-HOSTING-GUIDE.txt
+
 #ignore wiki
 /docs/the-veil.wiki
 
