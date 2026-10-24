@@ -32,6 +32,26 @@ const PROVIDER_TYPE_OPTIONS = ["openai", "openai-compatible", "anthropic"];
 // 平台头像上传大小上限，data URL 会写进平台配置文件，需保持精简。
 const PLATFORM_ICON_MAX_BYTES = 1 * 1024 * 1024;
 
+// 「高级选项 → AI 请求设置」暴露的数值型请求参数。留空的字段不写入平台配置，
+// 运行时沿用默认请求模板 / 模型请求模板里的值；填写后覆盖同名键。
+const REQUEST_PARAM_FIELDS: Array<{
+    key: string;
+    labelKey: string;
+    label: string;
+    min?: string;
+    max?: string;
+    step: string;
+    integer?: boolean;
+}> = [
+    { key: "temperature", labelKey: "platform.request.temperature", label: "Temperature", min: "0", max: "2", step: "0.1" },
+    { key: "top_p", labelKey: "platform.request.top_p", label: "Top P", min: "0", max: "1", step: "0.01" },
+    { key: "top_k", labelKey: "platform.request.top_k", label: "Top K", min: "0", step: "1", integer: true },
+    { key: "max_tokens", labelKey: "platform.request.max_tokens", label: "最大输出 Token", min: "1", step: "1", integer: true },
+    { key: "presence_penalty", labelKey: "platform.request.presence_penalty", label: "存在惩罚", min: "-2", max: "2", step: "0.1" },
+    { key: "frequency_penalty", labelKey: "platform.request.frequency_penalty", label: "频率惩罚", min: "-2", max: "2", step: "0.1" },
+    { key: "seed", labelKey: "platform.request.seed", label: "随机种子 (seed)", min: "0", step: "1", integer: true },
+];
+
 // 弹窗内部元素 id 的稳定后缀：新增自定义平台时 platform 为空，用固定占位符。
 function platformModalKey(config: AIPlatformConfig): string {
     return config.platform || "new-platform";
@@ -427,6 +447,7 @@ function renderPlatformModalBody(config: AIPlatformConfig, isNew: boolean): void
     bindPlatformFormFields();
     bindTimeoutSlider(config.platform);
     bindResponsesApiDetect(config);
+    bindRequestParamInputs();
     bindModelEvents(config, isNew);
     bindPlatformModalFooter(config, isNew);
 }
@@ -495,6 +516,7 @@ function buildPlatformConfigHTML(config: AIPlatformConfig, isNew: boolean): stri
                         </select>
                         <small class="text-muted">${platformEscapeHtml(platformT("platform.form.currency_hint", "模型单价按该货币填写，房间用量会按此货币累计花费。"))}</small>
                     </div>
+                    ${buildRequestParamsSection(config)}
                     ${buildModelList(config, isNew)}
                     <div class="form-group mt-3">
                         <label for="modal-timeout-${id}">${platformEscapeHtml(platformT("platform.config.timeout_label", "超时设置 ({value} 秒)", { value: config.config.timeout }))}</label>
@@ -551,6 +573,41 @@ function refreshResponsesApiSection(config: AIPlatformConfig): void {
         toggle.disabled = config.config.responses_api_supported !== true;
         if (!config.config.responses_api_supported) toggle.checked = false;
     }
+}
+
+function buildRequestParamsSection(config: AIPlatformConfig): string {
+    const params = config.config.request_params || {};
+    const inputs = REQUEST_PARAM_FIELDS.map((field) => `
+            <label class="request-param">
+                <span>${platformEscapeHtml(platformT(field.labelKey, field.label))}</span>
+                <input type="number" class="form-control form-control-sm request-param-input"
+                    data-param="${field.key}"${field.min !== undefined ? ` min="${field.min}"` : ""}${field.max !== undefined ? ` max="${field.max}"` : ""}${field.integer ? ' data-integer="true"' : ""}
+                    step="${field.step}" value="${platformEscapeHtml(requestParamText(params[field.key]))}"
+                    placeholder="${platformEscapeHtml(platformT("platform.request.placeholder", "默认"))}">
+            </label>`).join("");
+    return `
+        <div class="form-group mt-3 request-params-section">
+            <h6>${platformEscapeHtml(platformT("platform.request.title", "AI 请求设置"))}</h6>
+            <small class="text-muted">${platformEscapeHtml(platformT("platform.request.hint", "留空表示沿用默认请求模板；填写后会覆盖模型请求模板中的同名参数。"))}</small>
+            <div class="request-params-grid">
+                ${inputs}
+                <label class="request-param">
+                    <span>${platformEscapeHtml(platformT("platform.request.stop", "停止词"))}</span>
+                    <input type="text" class="form-control form-control-sm request-param-input" data-param="stop"
+                        value="${platformEscapeHtml(requestParamText(params.stop))}"
+                        placeholder="${platformEscapeHtml(platformT("platform.request.stop_placeholder", "多个停止词用逗号分隔"))}">
+                </label>
+            </div>
+            <small class="text-muted">${platformEscapeHtml(platformT("platform.request.max_tokens_hint", "最大输出 Token 留空时遵循管理员设置的全局上限。"))}</small>
+        </div>
+    `;
+}
+
+// 把配置里的参数值渲染成输入框文本：数组（如 stop）用逗号连接，其余按原始值展示。
+function requestParamText(value: unknown): string {
+    if (Array.isArray(value)) return value.map((item) => String(item)).join(", ");
+    if (typeof value === "number" || typeof value === "string") return String(value);
+    return "";
 }
 
 function buildModelList(config: AIPlatformConfig, isNew: boolean): string {
@@ -622,6 +679,7 @@ function syncPlatformFormToConfig(config: AIPlatformConfig): void {
     if (providerType) config.config.provider_type = providerType.value;
     const currency = document.getElementById(`modal-currency-${id}`) as HTMLSelectElement | null;
     if (currency) config.config.currency = currency.value;
+    syncRequestParamsToConfig(config);
     document.querySelectorAll<HTMLInputElement>(".model-price-input").forEach((input) => {
         const model = config.models.find((item) => item.id === (input.dataset.model || ""));
         if (!model) return;
@@ -638,6 +696,48 @@ function syncPlatformFormToConfig(config: AIPlatformConfig): void {
     if (timeout) config.config.timeout = Number.parseInt(timeout.value, 10) || 30;
     const usePrev = document.getElementById(`modal-use-previous-response-${id}`) as HTMLInputElement | null;
     if (usePrev) config.config.use_previous_response_id = config.config.responses_api_supported === true && usePrev.checked;
+}
+
+// 读取「AI 请求设置」输入框：留空即删除该参数（回落到模板值），数字按输入范围裁剪。
+// 保留配置里可能存在但表单未展示的自定义参数（如 extra_body）。
+function syncRequestParamsToConfig(config: AIPlatformConfig): void {
+    const params: Record<string, unknown> = { ...(config.config.request_params || {}) };
+    document.querySelectorAll<HTMLInputElement>(".request-param-input").forEach((input) => {
+        const key = input.dataset.param || "";
+        if (!key) return;
+        const raw = input.value.trim();
+        if (!raw) {
+            delete params[key];
+            return;
+        }
+        if (key === "stop") {
+            const stops = raw.split(/[,，]/).map((item) => item.trim()).filter(Boolean);
+            if (stops.length) params[key] = stops;
+            else delete params[key];
+            return;
+        }
+        let value = Number(raw);
+        if (!Number.isFinite(value)) {
+            delete params[key];
+            return;
+        }
+        if (input.dataset.integer === "true") value = Math.round(value);
+        if (input.min !== "") value = Math.max(Number(input.min), value);
+        if (input.max !== "") value = Math.min(Number(input.max), value);
+        params[key] = value;
+    });
+    if (Object.keys(params).length) config.config.request_params = params;
+    else delete config.config.request_params;
+}
+
+// 输入框失焦时立即回写到草稿，避免随后触发弹窗重渲染（如添加模型）丢掉未保存的参数。
+function bindRequestParamInputs(): void {
+    document.querySelectorAll<HTMLInputElement>(".request-param-input").forEach((input) => {
+        input.addEventListener("change", () => {
+            const draft = platformModalState?.config;
+            if (draft) syncRequestParamsToConfig(draft);
+        });
+    });
 }
 
 function bindPasswordToggles(): void {

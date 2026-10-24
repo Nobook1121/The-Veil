@@ -1312,6 +1312,30 @@
     padding: 4px 14px 14px;
 }
 
+/* 高级选项：AI 请求设置 */
+.request-params-section h6 {
+    margin: 0 0 4px;
+}
+
+.request-params-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 10px 14px;
+    margin: 10px 0 6px;
+}
+
+.request-params-grid .request-param {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+}
+
+.request-params-grid .request-param input {
+    width: 100%;
+}
+
 .model-default-option {
     display: inline-flex;
     align-items: center;

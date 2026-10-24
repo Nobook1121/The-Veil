@@ -48,6 +48,9 @@ interface AIPlatformConfig {
         base_url_full?: boolean;
         // 平台默认模型 id，用于测试连接等默认选型。
         default_model?: string;
+        // 平台级请求参数（temperature / top_p / top_k / max_tokens 等），在「高级选项」
+        // 中配置；运行时优先级高于默认请求模板与模型请求模板的同名键。
+        request_params?: Record<string, unknown>;
         responses_api_supported?: boolean;
         responses_api_checked_at?: string;
         responses_api_detail?: string;

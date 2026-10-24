@@ -53,16 +53,39 @@ def _resolve_config_dir(config_dir: str | Path | None) -> Path:
     return Path(config_dir)
 
 
+def load_platform_request_params(
+    config_dir: str | Path | None,
+    platform: str | None,
+) -> dict[str, Any]:
+    """读取平台级请求参数（平台配置里的 ``config.request_params``）。
+
+    这些参数由管理员在「平台配置 → 高级选项 → AI 请求设置」中填写。缺失、类型
+    不符或平台为空时返回空对象，不因配置问题阻断请求。
+    """
+    if not platform:
+        return {}
+    root = _resolve_config_dir(config_dir)
+    platform_config = read_json(root / "aiplatform" / f"{platform}.json", default={})
+    if not isinstance(platform_config, dict):
+        return {}
+    section = platform_config.get("config")
+    if not isinstance(section, dict):
+        return {}
+    params = section.get("request_params")
+    return dict(params) if isinstance(params, dict) else {}
+
+
 def load_request_template(
     config_dir: str | Path | None,
     platform: str | None,
     model: str | None,
 ) -> dict[str, Any]:
-    """读取「默认请求模板 + 模型请求模板」合并后的请求参数。
+    """读取「默认请求模板 + 模型请求模板 + 平台请求参数」合并后的请求参数。
 
     默认模板来自 ``aiplatform/default-request.json``，模型模板来自
-    ``aimodel/<平台>/<模型>.json``，后者覆盖前者。文件缺失或非法时按空对象处理，
-    不因模板问题阻断请求。
+    ``aimodel/<平台>/<模型>.json``；平台级 ``config.request_params`` 最后合并，
+    即管理员在高级选项里显式填写的参数优先级最高（覆盖前两者的同名键）。
+    文件缺失或非法时按空对象处理，不因模板问题阻断请求。
     """
     root = _resolve_config_dir(config_dir)
     template: dict[str, Any] = {}
@@ -76,6 +99,8 @@ def load_request_template(
         model_template = read_json(model_file, default={})
         if isinstance(model_template, dict):
             template.update(model_template)
+
+    template.update(load_platform_request_params(root, platform))
     return template
 
 

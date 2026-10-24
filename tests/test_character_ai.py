@@ -309,6 +309,34 @@ def test_build_request_payload_applies_template_and_token_policy(tmp_path):
     assert payload3["max_tokens"] == 4096
 
 
+def test_build_request_payload_platform_request_params_override_templates(tmp_path):
+    from trpg_server.agents.ai_request import build_request_payload
+
+    # 平台级请求参数（高级选项 → AI 请求设置）优先于默认模板与模型模板。
+    (tmp_path / "aiplatform").mkdir()
+    (tmp_path / "aiplatform" / "default-request.json").write_text(
+        json.dumps({"temperature": 0.7, "top_p": 0.9}), encoding="utf-8"
+    )
+    (tmp_path / "aiplatform" / "deepseek.json").write_text(
+        json.dumps(
+            {"config": {"request_params": {"temperature": 0.2, "top_k": 40}}},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "aimodel" / "deepseek").mkdir(parents=True)
+    (tmp_path / "aimodel" / "deepseek" / "m1.json").write_text(
+        json.dumps({"temperature": 0.9}), encoding="utf-8"
+    )
+
+    payload = build_request_payload(
+        "deepseek", "m1", [{"role": "user", "content": "hi"}], config_dir=tmp_path
+    )
+    assert payload["temperature"] == 0.2
+    assert payload["top_k"] == 40
+    assert payload["top_p"] == 0.9
+
+
 def test_parse_character_generation_handles_fences_and_wrappers():
     raw = "```json\n{\n  \"attributes\": {\"STR\": 50}, \"name\": \"张三\"\n}\n```"
     parsed = parse_character_generation(raw)
