@@ -106,7 +106,8 @@ def serve_config(filename):
 
 @bp.route("/data/characters/<path:filename>")
 def serve_character_data(filename):
-    return _with_no_cache(send_from_directory(CHARACTERS_DIR, filename))
+    characters_dir = current_app.config.get("CHARACTERS_DIR", CHARACTERS_DIR)
+    return _with_no_cache(send_from_directory(characters_dir, filename))
 
 
 @bp.route("/data/tools/<path:filename>")

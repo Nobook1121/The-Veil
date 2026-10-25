@@ -1,0 +1,33 @@
+{
+  "id": "sniperRifles",
+  "category": "狙击步枪",
+  "order": 70,
+  "weapons": [
+    {
+      "id": "barrettM82",
+      "name": "巴雷特M82",
+      "skill": { "skillKey": "firearms", "specialtyKey": "rifleShotgun", "label": "射击(步/霰)" },
+      "damage": "2D10+1D8+6",
+      "attacks": "1",
+      "impale": true,
+      "range": "250",
+      "ammo": "11",
+      "malfunction": "96",
+      "eras": ["现代"],
+      "price": "3000"
+    },
+    {
+      "id": "ptrd41",
+      "name": "PTRD-41反坦克步枪",
+      "skill": { "skillKey": "firearms", "specialtyKey": "rifleShotgun", "label": "射击(步/霰)" },
+      "damage": "2D10+1D10+8",
+      "attacks": "1",
+      "impale": true,
+      "range": "230",
+      "ammo": "5",
+      "malfunction": "94",
+      "eras": ["现代"],
+      "price": "1500"
+    }
+  ]
+}

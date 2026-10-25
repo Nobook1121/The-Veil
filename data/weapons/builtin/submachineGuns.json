@@ -1,0 +1,85 @@
+{
+  "id": "submachineGuns",
+  "category": "冲锋枪",
+  "order": 60,
+  "weapons": [
+    {
+      "id": "mp18",
+      "name": "MP18/I/MP28/II",
+      "skill": { "skillKey": "firearms", "specialtyKey": "submachineGun", "label": "射击(冲锋枪)" },
+      "damage": "1D10",
+      "attacks": "1(2)或全自动",
+      "impale": true,
+      "range": "20",
+      "ammo": "20/30/32",
+      "malfunction": "96",
+      "eras": ["1920s"],
+      "price": "1000/20000"
+    },
+    {
+      "id": "mp5",
+      "name": "MP5",
+      "skill": { "skillKey": "firearms", "specialtyKey": "submachineGun", "label": "射击(冲锋枪)" },
+      "damage": "1D10",
+      "attacks": "1(2)或全自动",
+      "impale": true,
+      "range": "20",
+      "ammo": "15/30",
+      "malfunction": "97",
+      "eras": ["现代"],
+      "price": "N/A"
+    },
+    {
+      "id": "mac11",
+      "name": "MAC-11",
+      "skill": { "skillKey": "firearms", "specialtyKey": "submachineGun", "label": "射击(冲锋枪)" },
+      "damage": "1D10",
+      "attacks": "1(3)或全自动",
+      "impale": true,
+      "range": "15",
+      "ammo": "32",
+      "malfunction": "96",
+      "eras": ["现代"],
+      "price": "-/750"
+    },
+    {
+      "id": "vz61",
+      "name": "蝎式",
+      "skill": { "skillKey": "firearms", "specialtyKey": "submachineGun", "label": "射击(冲锋枪)" },
+      "damage": "1D8",
+      "attacks": "1(3)或全自动",
+      "impale": true,
+      "range": "15",
+      "ammo": "20",
+      "malfunction": "96",
+      "eras": ["现代"],
+      "price": "N/A"
+    },
+    {
+      "id": "thompson",
+      "name": "汤普森",
+      "skill": { "skillKey": "firearms", "specialtyKey": "submachineGun", "label": "射击(冲锋枪)" },
+      "damage": "1D10+2",
+      "attacks": "1或全自动",
+      "impale": true,
+      "range": "20",
+      "ammo": "20/30/50",
+      "malfunction": "96",
+      "eras": ["1920s"],
+      "price": "1000/20000"
+    },
+    {
+      "id": "uzi",
+      "name": "乌兹",
+      "skill": { "skillKey": "firearms", "specialtyKey": "submachineGun", "label": "射击(冲锋枪)" },
+      "damage": "1D10",
+      "attacks": "1(2)或全自动",
+      "impale": true,
+      "range": "20",
+      "ammo": "32",
+      "malfunction": "98",
+      "eras": ["现代"],
+      "price": "-/1000"
+    }
+  ]
+}

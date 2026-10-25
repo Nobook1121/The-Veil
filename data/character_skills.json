@@ -359,6 +359,11 @@
           "key": "heavyWeapon",
           "labelKey": "skillSpecialties.firearms.heavyWeapon",
           "base": 10
+        },
+        {
+          "key": "flamethrower",
+          "labelKey": "skillSpecialties.firearms.flamethrower",
+          "base": 10
         }
       ]
     },
@@ -881,6 +886,7 @@
       "skillSpecialties.firearms.bow": "弓弩",
       "skillSpecialties.firearms.machineGun": "机枪",
       "skillSpecialties.firearms.heavyWeapon": "重武器",
+      "skillSpecialties.firearms.flamethrower": "喷射器",
       "skills.dodge": "闪避",
       "skills.throw": "投掷",
       "skills.demolitions": "爆破",

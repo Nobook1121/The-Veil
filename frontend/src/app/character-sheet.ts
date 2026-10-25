@@ -104,6 +104,8 @@ interface COC7Weapon {
 interface WeaponCatalogPayload {
     id: string;
     name: string;
+    category?: string;
+    categoryOrder?: number;
     skill: {
         skillKey?: string;
         specialtyKey?: string;
@@ -544,6 +546,11 @@ interface Window {
     let activeSkillCategoryFilter = "全部技能";
     let editorSkills: COC7Skill[] = [];
     let WEAPON_CATALOG: WeaponCatalogPayload[] = [];
+    let CUSTOM_WEAPONS: WeaponCatalogPayload[] = [];
+    let customWeaponsCardId = "";
+    let customWeaponsDirty = false;
+    let customWeaponEditingId = "";
+    const expandedWeaponCategories = new Set<string>();
     let occupationSkillPointsManuallyEdited = false;
     let personalInterestPointsManuallyEdited = false;
     let combatStatsManuallyEdited = false;
@@ -1357,6 +1364,8 @@ interface Window {
         return {
             id: String(payload.id || "").trim(),
             name: String(payload.name || "未命名武器").slice(0, 60),
+            category: String(payload.category || "常规").trim() || "常规",
+            categoryOrder: Number.isFinite(Number(payload.categoryOrder)) ? Number(payload.categoryOrder) : 10,
             skill: {
                 skillKey: String(payload.skill?.skillKey || "").trim(),
                 specialtyKey: String(payload.skill?.specialtyKey || "").trim(),
@@ -1736,6 +1745,7 @@ interface Window {
         occupationTemplateModal = occupationModalElement && typeof bootstrap !== "undefined" ? new bootstrap.Modal(occupationModalElement) : null;
         const weaponPickerModalElement = byId("characterWeaponPickerModal");
         weaponPickerModal = weaponPickerModalElement && typeof bootstrap !== "undefined" ? new bootstrap.Modal(weaponPickerModalElement) : null;
+        weaponPickerModalElement?.addEventListener("hidden.bs.modal", () => closeCustomWeaponForm());
         const skillSpecialtyModalElement = byId("skillSpecialtyModal");
         skillSpecialtyModal = skillSpecialtyModalElement && typeof bootstrap !== "undefined" ? new bootstrap.Modal(skillSpecialtyModalElement) : null;
         const skillBaseSettingsModalElement = byId("skillBaseSettingsModal");
@@ -1847,8 +1857,11 @@ interface Window {
         byId("characterWeaponTableBody")?.addEventListener("input", handleWeaponTableInput);
         byId("characterWeaponTableBody")?.addEventListener("change", handleWeaponTableInput);
         byId("characterWeaponTableBody")?.addEventListener("click", handleWeaponTableClick);
+        byId("characterWeaponTableBody")?.addEventListener("keydown", handleWeaponTableKeydown);
         byId("characterWeaponCatalogList")?.addEventListener("click", handleWeaponCatalogClick);
         byId("createCustomWeapon")?.addEventListener("click", createCustomWeaponRow);
+        byId("cancelCustomWeapon")?.addEventListener("click", closeCustomWeaponForm);
+        byId("saveCustomWeapon")?.addEventListener("click", saveCustomWeaponFromForm);
         byId("removeCurrentWeapon")?.addEventListener("click", removeCurrentWeaponRow);
         byId("addCharacterCompanion")?.addEventListener("click", () => addRelationshipRow());
         byId("characterCompanionList")?.addEventListener("click", handleRelationshipRowClick);
@@ -2182,11 +2195,8 @@ interface Window {
         return `
             <tr data-weapon-row-id="${rowId}">
                 <td>
-                    <div class="character-input-shell">
-                        <input type="text" class="form-control form-control-sm character-weapon-name-input" data-weapon-name="${rowId}" value="${escapeHtml(weapon.name)}" placeholder="选择或输入武器">
-                        <button type="button" class="character-input-action" data-weapon-picker-trigger="${rowId}" title="从武器库选择" aria-label="从武器库选择">
-                            <i class="fa fa-list" aria-hidden="true"></i>
-                        </button>
+                    <div class="character-weapon-name-field" data-weapon-picker-trigger="${rowId}" role="button" tabindex="0" aria-haspopup="dialog" title="点击选择武器">
+                        <input type="text" class="form-control form-control-sm character-weapon-name-input" data-weapon-name="${rowId}" value="${escapeHtml(weapon.name)}" placeholder="点击选择武器" readonly>
                     </div>
                 </td>
                 <td>
@@ -2268,7 +2278,7 @@ interface Window {
     }
 
     function isWeaponSkillKey(skillKey: string): boolean {
-        return ["fighting", "firearms", "throw", "demolitions", "artillery"].includes(skillKey);
+        return ["fighting", "firearms", "throw", "demolitions", "artillery", "electricalRepair"].includes(skillKey);
     }
 
     function dedupeWeaponSkillChoices(choices: Array<{ value: string; label: string; skillKey: string; specialtyKey: string }>): Array<{ value: string; label: string; skillKey: string; specialtyKey: string }> {
@@ -2301,36 +2311,134 @@ interface Window {
     }
 
     function handleWeaponTableClick(event: Event): void {
-        const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-weapon-picker-trigger]");
-        if (!button) return;
-        openWeaponPicker(button.dataset.weaponPickerTrigger || "");
+        const target = event.target as HTMLElement;
+        const shell = target.closest<HTMLElement>("[data-weapon-picker-trigger]");
+        if (!shell) return;
+        openWeaponPicker(shell.dataset.weaponPickerTrigger || "");
     }
 
-    function openWeaponPicker(rowId: string): void {
+    function handleWeaponTableKeydown(event: KeyboardEvent): void {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        const shell = (event.target as HTMLElement).closest<HTMLElement>("[data-weapon-picker-trigger]");
+        if (!shell) return;
+        event.preventDefault();
+        openWeaponPicker(shell.dataset.weaponPickerTrigger || "");
+    }
+
+    async function openWeaponPicker(rowId: string): Promise<void> {
         pendingWeaponPickerTarget = rowId;
         setInputValue("weaponPickerTargetRow", rowId);
+        const editingId = getInputValue("characterEditingId");
+        if (editingId && !activeGalleryEditId) {
+            await loadCustomWeapons(editingId);
+        }
         renderWeaponCatalog();
         weaponPickerModal?.show();
+    }
+
+    async function loadCustomWeapons(characterId: string): Promise<void> {
+        if (!characterId) return;
+        if (customWeaponsCardId === characterId) return;
+        customWeaponsCardId = characterId;
+        try {
+            const response = await TrpgApi.get<ApiResponse<{ weapons?: WeaponCatalogPayload[] }>>(
+                `/api/characters/${encodeURIComponent(characterId)}/weapons`
+            );
+            CUSTOM_WEAPONS = response.success && response.data?.weapons
+                ? response.data.weapons.map(normalizeWeaponCatalog)
+                : [];
+        } catch (error) {
+            console.warn("加载自定义武器失败:", error);
+            CUSTOM_WEAPONS = [];
+        }
+    }
+
+    async function persistCustomWeapons(characterId: string): Promise<void> {
+        if (!characterId || activeGalleryEditId) return;
+        try {
+            const response = await TrpgApi.put<ApiResponse<{ weapons?: WeaponCatalogPayload[] }>>(
+                `/api/characters/${encodeURIComponent(characterId)}/weapons`,
+                { weapons: CUSTOM_WEAPONS }
+            );
+            if (response.success && response.data?.weapons) {
+                CUSTOM_WEAPONS = response.data.weapons.map(normalizeWeaponCatalog);
+                customWeaponsCardId = characterId;
+                customWeaponsDirty = false;
+            }
+        } catch (error) {
+            console.warn("保存自定义武器失败:", error);
+        }
+    }
+
+    function weaponCategories(): Array<{ name: string; order: number; weapons: WeaponCatalogPayload[] }> {
+        const groups = new Map<string, { name: string; order: number; weapons: WeaponCatalogPayload[] }>();
+        WEAPON_CATALOG.forEach((weapon) => {
+            const name = weapon.category || "常规";
+            const order = Number(weapon.categoryOrder) || 10;
+            if (!groups.has(name)) groups.set(name, { name, order, weapons: [] });
+            groups.get(name)?.weapons.push(weapon);
+        });
+        return Array.from(groups.values()).sort((a, b) => a.order - b.order);
+    }
+
+    function renderWeaponCatalogCard(weapon: WeaponCatalogPayload, custom = false): string {
+        return `
+            <article class="character-weapon-catalog-card${custom ? " is-custom" : ""}">
+                <div class="character-weapon-catalog-head">
+                    <strong>${escapeHtml(weapon.name)}</strong>
+                    <span class="character-weapon-catalog-skill">【${escapeHtml(formatWeaponCatalogSkillLabel(weapon))}】</span>
+                    <button type="button" class="btn btn-sm btn-primary" data-equip-${custom ? "custom-weapon" : "weapon"}="${escapeHtml(weapon.id)}">装备</button>
+                </div>
+                <div class="character-weapon-catalog-stats">
+                    <span>伤害: ${escapeHtml(weapon.damage)}</span>
+                    <span>次数: ${escapeHtml(weapon.attacks)}</span>
+                    <span>贯穿: ${weapon.impale ? "贯穿" : "非贯穿"}</span>
+                    <span>射程: ${escapeHtml(weapon.range)}</span>
+                    <span>装弹量: ${escapeHtml(weapon.ammo)}</span>
+                    <span>故障率: ${escapeHtml(weapon.malfunction)}</span>
+                    <span>年代: ${escapeHtml(weapon.eras.join("、") || "不限")}</span>
+                    <span>价格: ${escapeHtml(weapon.price)}</span>
+                </div>
+                ${custom ? `<div class="character-weapon-catalog-actions">
+                    <button type="button" class="btn btn-sm btn-outline-light" data-edit-custom-weapon="${escapeHtml(weapon.id)}">编辑</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" data-delete-custom-weapon="${escapeHtml(weapon.id)}">删除</button>
+                </div>` : ""}
+            </article>
+        `;
+    }
+
+    function renderWeaponCategorySection(name: string, weapons: WeaponCatalogPayload[], custom: boolean): string {
+        const expanded = expandedWeaponCategories.has(name);
+        const label = custom ? "自定义武器" : name;
+        return `
+            <section class="character-weapon-category">
+                <button type="button" class="character-weapon-category-header${expanded ? " is-open" : ""}" data-toggle-weapon-category="${escapeHtml(name)}" aria-expanded="${expanded}">
+                    <span class="character-weapon-category-name">${escapeHtml(label)}</span>
+                    <span class="character-weapon-category-count">${weapons.length}</span>
+                    <i class="fa fa-chevron-right character-weapon-category-arrow" aria-hidden="true"></i>
+                </button>
+                <div class="character-weapon-category-grid" ${expanded ? "" : "hidden"}>
+                    ${weapons.map((weapon) => renderWeaponCatalogCard(weapon, custom)).join("")}
+                </div>
+            </section>
+        `;
     }
 
     function renderWeaponCatalog(): void {
         const container = byId("characterWeaponCatalogList");
         if (!container) return;
-        container.innerHTML = WEAPON_CATALOG.map((weapon) => `
-            <article class="character-weapon-catalog-card">
-                <div>
-                    <strong>${escapeHtml(weapon.name)}</strong>
-                    <span>${escapeHtml(weapon.skill.label || formatWeaponCatalogSkillLabel(weapon))}</span>
-                </div>
-                <small>${escapeHtml(weapon.damage)} · ${escapeHtml(weapon.range)} · ${weapon.impale ? "贯穿" : "非贯穿"}</small>
-                <small>次数 ${escapeHtml(weapon.attacks)} · 装弹 ${escapeHtml(weapon.ammo)} · 故障 ${escapeHtml(weapon.malfunction)}</small>
-                <small>年代 ${escapeHtml(weapon.eras.join("、") || "不限")} · 价格 ${escapeHtml(weapon.price)}</small>
-                <button type="button" class="btn btn-sm btn-primary" data-equip-weapon="${escapeHtml(weapon.id)}">装备</button>
-            </article>
-        `).join("") || `<div class="background-note">暂无预设武器</div>`;
+        const categories = weaponCategories();
+        const customSection = CUSTOM_WEAPONS.length
+            ? renderWeaponCategorySection("自定义", CUSTOM_WEAPONS, true)
+            : "";
+        const sections = categories
+            .map((category) => renderWeaponCategorySection(category.name, category.weapons, false))
+            .join("");
+        container.innerHTML = (customSection + sections) || `<div class="background-note">暂无预设武器</div>`;
     }
 
     function formatWeaponCatalogSkillLabel(weapon: WeaponCatalogPayload): string {
+        if (weapon.skill.label) return weapon.skill.label;
         const baseName = skillNameById(weapon.skill.skillKey || "");
         const specialty = weapon.skill.skillKey && weapon.skill.specialtyKey
             ? localizeSkillSpecialty(weapon.skill.skillKey, weapon.skill.specialtyKey)
@@ -2339,12 +2447,142 @@ interface Window {
     }
 
     function handleWeaponCatalogClick(event: Event): void {
-        const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-equip-weapon]");
-        if (!button) return;
-        const preset = WEAPON_CATALOG.find((weapon) => weapon.id === button.dataset.equipWeapon);
-        if (!preset) return;
-        applyWeaponToRow(presetWeaponToCharacterWeapon(preset));
+        const target = event.target as HTMLElement;
+        const toggle = target.closest<HTMLButtonElement>("[data-toggle-weapon-category]");
+        if (toggle) {
+            const name = toggle.dataset.toggleWeaponCategory || "";
+            const grid = toggle.nextElementSibling;
+            if (!(grid instanceof HTMLElement)) return;
+            const willOpen = grid.hidden;
+            grid.hidden = !willOpen;
+            toggle.classList.toggle("is-open", willOpen);
+            toggle.setAttribute("aria-expanded", String(willOpen));
+            if (willOpen) {
+                expandedWeaponCategories.add(name);
+            } else {
+                expandedWeaponCategories.delete(name);
+            }
+            return;
+        }
+        const equip = target.closest<HTMLButtonElement>("[data-equip-weapon]");
+        if (equip) {
+            const preset = WEAPON_CATALOG.find((weapon) => weapon.id === equip.dataset.equipWeapon);
+            if (!preset) return;
+            applyWeaponToRow(presetWeaponToCharacterWeapon(preset));
+            weaponPickerModal?.hide();
+            return;
+        }
+        const equipCustom = target.closest<HTMLButtonElement>("[data-equip-custom-weapon]");
+        if (equipCustom) {
+            const custom = CUSTOM_WEAPONS.find((weapon) => weapon.id === equipCustom.dataset.equipCustomWeapon);
+            if (!custom) return;
+            applyWeaponToRow(presetWeaponToCharacterWeapon(custom));
+            weaponPickerModal?.hide();
+            return;
+        }
+        const editCustom = target.closest<HTMLButtonElement>("[data-edit-custom-weapon]");
+        if (editCustom) {
+            const custom = CUSTOM_WEAPONS.find((weapon) => weapon.id === editCustom.dataset.editCustomWeapon);
+            if (custom) openCustomWeaponForm(custom);
+            return;
+        }
+        const deleteCustom = target.closest<HTMLButtonElement>("[data-delete-custom-weapon]");
+        if (deleteCustom) {
+            void deleteCustomWeapon(deleteCustom.dataset.deleteCustomWeapon || "");
+        }
+    }
+
+    function openCustomWeaponForm(weapon?: WeaponCatalogPayload): void {
+        customWeaponEditingId = weapon?.id || "";
+        const skillSelect = byId<HTMLSelectElement>("customWeaponSkill");
+        if (skillSelect) {
+            skillSelect.innerHTML = getWeaponSkillChoices().map((choice) => (
+                `<option value="${escapeHtml(choice.value)}">${escapeHtml(choice.label)}</option>`
+            )).join("");
+            skillSelect.value = weapon
+                ? weaponSkillValue({
+                    skillKey: weapon.skill.skillKey || "",
+                    specialtyKey: weapon.skill.specialtyKey || "",
+                    skill: weapon.skill.label || ""
+                })
+                : "fighting|brawl";
+        }
+        setInputValue("customWeaponName", weapon?.name || "");
+        setInputValue("customWeaponDamage", weapon?.damage || "");
+        setInputValue("customWeaponRange", weapon?.range || "");
+        setInputValue("customWeaponImpale", weapon?.impale ? "true" : "false");
+        setInputValue("customWeaponAttacks", weapon?.attacks || "");
+        setInputValue("customWeaponAmmo", weapon?.ammo || "");
+        setInputValue("customWeaponMalfunction", weapon?.malfunction || "");
+        setInputValue("customWeaponPrice", weapon?.price || "");
+        setInputValue("customWeaponEras", (weapon?.eras || []).join(", "));
+        setInputValue("customWeaponNote", "");
+        byId("characterWeaponCatalogPane")?.setAttribute("hidden", "");
+        byId("characterWeaponCustomForm")?.removeAttribute("hidden");
+        byId<HTMLInputElement>("customWeaponName")?.focus();
+    }
+
+    function closeCustomWeaponForm(): void {
+        customWeaponEditingId = "";
+        byId("characterWeaponCustomForm")?.setAttribute("hidden", "");
+        byId("characterWeaponCatalogPane")?.removeAttribute("hidden");
+    }
+
+    function saveCustomWeaponFromForm(): void {
+        const name = getInputValue("customWeaponName");
+        if (!name) {
+            notify("请填写武器名称。", "error");
+            return;
+        }
+        const { skillKey, specialtyKey } = parseWeaponSkillSelectValue(getInputValue("customWeaponSkill"));
+        const skillSelect = byId<HTMLSelectElement>("customWeaponSkill");
+        const skillLabel = skillSelect?.selectedOptions[0]?.textContent?.trim() || "";
+        const eras = getInputValue("customWeaponEras")
+            .split(/[,，、]/)
+            .map((era) => era.trim())
+            .filter(Boolean);
+        const weapon = normalizeWeaponCatalog({
+            id: customWeaponEditingId || `custom-${Date.now().toString(36)}`,
+            name,
+            category: "自定义",
+            categoryOrder: 999,
+            skill: { skillKey, specialtyKey, label: skillLabel },
+            damage: getInputValue("customWeaponDamage") || "1D3",
+            attacks: getInputValue("customWeaponAttacks") || "1",
+            impale: getInputValue("customWeaponImpale") === "true",
+            range: getInputValue("customWeaponRange") || "接触",
+            ammo: getInputValue("customWeaponAmmo") || "N/A",
+            malfunction: getInputValue("customWeaponMalfunction") || "N/A",
+            eras,
+            price: getInputValue("customWeaponPrice") || "N/A"
+        });
+        const existingIndex = CUSTOM_WEAPONS.findIndex((item) => item.id === weapon.id);
+        if (existingIndex >= 0) {
+            CUSTOM_WEAPONS[existingIndex] = weapon;
+        } else {
+            CUSTOM_WEAPONS.push(weapon);
+        }
+        const row = presetWeaponToCharacterWeapon(weapon);
+        row.note = getInputValue("customWeaponNote");
+        applyWeaponToRow(row);
+        closeCustomWeaponForm();
         weaponPickerModal?.hide();
+        customWeaponsDirty = true;
+        const editingId = getInputValue("characterEditingId");
+        if (editingId && !activeGalleryEditId) {
+            void persistCustomWeapons(editingId);
+        }
+    }
+
+    async function deleteCustomWeapon(weaponId: string): Promise<void> {
+        if (!weaponId) return;
+        CUSTOM_WEAPONS = CUSTOM_WEAPONS.filter((weapon) => weapon.id !== weaponId);
+        customWeaponsDirty = true;
+        renderWeaponCatalog();
+        const editingId = getInputValue("characterEditingId");
+        if (editingId && !activeGalleryEditId) {
+            await persistCustomWeapons(editingId);
+        }
     }
 
     function presetWeaponToCharacterWeapon(preset: WeaponCatalogPayload): COC7Weapon {
@@ -2374,8 +2612,7 @@ interface Window {
     }
 
     function createCustomWeaponRow(): void {
-        applyWeaponToRow(createEmptyWeapon());
-        weaponPickerModal?.hide();
+        openCustomWeaponForm();
     }
 
     function removeCurrentWeaponRow(): void {
@@ -2475,6 +2712,14 @@ interface Window {
             return;
         }
         const target = card ? cloneCard(card) : createCharacterCard();
+        CUSTOM_WEAPONS = [];
+        customWeaponsCardId = "";
+        customWeaponsDirty = false;
+        expandedWeaponCategories.clear();
+        closeCustomWeaponForm();
+        if (card?.id && !activeGalleryEditId) {
+            void loadCustomWeapons(card.id);
+        }
         setInputValue("characterEditingId", card?.id || "");
         setInputValue("characterName", target.name);
         const boundPlayerId = target.playerId && target.playerId !== PLAYER_UNBOUND_LABEL
@@ -3213,6 +3458,9 @@ interface Window {
             setButtonBusy("saveCharacter", false);
         }
         if (!savedCard) return;
+        if (!activeGalleryEditId && customWeaponsDirty) {
+            await persistCustomWeapons(savedCard.id);
+        }
         if (activeGalleryEditId) {
             galleryCards = galleryCards.map((item) => item.id === activeGalleryEditId ? savedCard as COC7CharacterCard : item);
             activeGalleryEditId = "";

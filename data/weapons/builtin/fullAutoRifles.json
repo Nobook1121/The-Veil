@@ -1,0 +1,111 @@
+{
+  "id": "fullAutoRifles",
+  "category": "全自动步枪",
+  "order": 40,
+  "weapons": [
+    {
+      "id": "ak47",
+      "name": "AK-47或AKM",
+      "skill": { "skillKey": "firearms", "specialtyKey": "rifleShotgun", "label": "射击(步/霰)" },
+      "damage": "2D6+1",
+      "attacks": "1(2)或全自动",
+      "impale": true,
+      "range": "100",
+      "ammo": "30",
+      "malfunction": "100",
+      "eras": ["现代"],
+      "price": "200"
+    },
+    {
+      "id": "ak74",
+      "name": "AK-74",
+      "skill": { "skillKey": "firearms", "specialtyKey": "rifleShotgun", "label": "射击(步/霰)" },
+      "damage": "2D6+1",
+      "attacks": "1(2)或全自动",
+      "impale": true,
+      "range": "110",
+      "ammo": "30",
+      "malfunction": "97",
+      "eras": ["现代"],
+      "price": "1000"
+    },
+    {
+      "id": "fnFal",
+      "name": "FN FAL 突击步枪",
+      "skill": { "skillKey": "firearms", "specialtyKey": "rifleShotgun", "label": "射击(步/霰)" },
+      "damage": "2D6+4",
+      "attacks": "1-3发点射",
+      "impale": true,
+      "range": "110",
+      "ammo": "20",
+      "malfunction": "97",
+      "eras": ["现代"],
+      "price": "1500"
+    },
+    {
+      "id": "galil",
+      "name": "加利尔突击步枪",
+      "skill": { "skillKey": "firearms", "specialtyKey": "rifleShotgun", "label": "射击(步/霰)" },
+      "damage": "2D6",
+      "attacks": "1(2)或全自动",
+      "impale": true,
+      "range": "110",
+      "ammo": "20",
+      "malfunction": "98",
+      "eras": ["现代"],
+      "price": "2000"
+    },
+    {
+      "id": "m16a2",
+      "name": "M16A2",
+      "skill": { "skillKey": "firearms", "specialtyKey": "rifleShotgun", "label": "射击(步/霰)" },
+      "damage": "2D6",
+      "attacks": "1-3发点射",
+      "impale": true,
+      "range": "110",
+      "ammo": "30",
+      "malfunction": "97",
+      "eras": ["现代"],
+      "price": "N/A"
+    },
+    {
+      "id": "m4",
+      "name": "M4",
+      "skill": { "skillKey": "firearms", "specialtyKey": "rifleShotgun", "label": "射击(步/霰)" },
+      "damage": "2D6",
+      "attacks": "1或3发点射",
+      "impale": true,
+      "range": "90",
+      "ammo": "30",
+      "malfunction": "97",
+      "eras": ["现代"],
+      "price": "N/A"
+    },
+    {
+      "id": "steyrAug",
+      "name": "斯泰尔AUG",
+      "skill": { "skillKey": "firearms", "specialtyKey": "rifleShotgun", "label": "射击(步/霰)" },
+      "damage": "2D6",
+      "attacks": "1(2)或全自动",
+      "impale": true,
+      "range": "110",
+      "ammo": "30",
+      "malfunction": "99",
+      "eras": ["现代"],
+      "price": "1100"
+    },
+    {
+      "id": "berettaAr7090",
+      "name": "贝雷塔AR70/90",
+      "skill": { "skillKey": "firearms", "specialtyKey": "rifleShotgun", "label": "射击(步/霰)" },
+      "damage": "2D6",
+      "attacks": "1或全自动",
+      "impale": true,
+      "range": "110",
+      "ammo": "30",
+      "malfunction": "99",
+      "eras": ["现代"],
+      "price": "2800"
+    }
+  ]
+}

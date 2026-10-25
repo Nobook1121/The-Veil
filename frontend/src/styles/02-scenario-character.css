@@ -1927,15 +1927,77 @@ body.is-guest .guest-login-hint {
 
 .character-weapon-catalog-list {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 10px;
+}
+
+.character-weapon-category {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-panel);
+    overflow: hidden;
+}
+
+.character-weapon-category-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 12px 14px;
+    border: none;
+    color: var(--color-text);
+    background: var(--color-panel-muted);
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease;
+}
+
+.character-weapon-category-header:hover,
+.character-weapon-category-header.is-open {
+    color: var(--color-primary);
+    background: color-mix(in srgb, var(--color-primary) 12%, var(--color-panel));
+}
+
+.character-weapon-category-name {
+    flex: 1 1 auto;
+}
+
+.character-weapon-category-count {
+    min-width: 24px;
+    padding: 0 6px;
+    border-radius: 999px;
+    color: var(--color-muted);
+    background: color-mix(in srgb, var(--color-text) 10%, transparent);
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-align: center;
+}
+
+.character-weapon-category-arrow {
+    color: var(--color-muted);
+    transition: transform 0.18s ease;
+}
+
+.character-weapon-category-header.is-open .character-weapon-category-arrow {
+    transform: rotate(90deg);
+}
+
+.character-weapon-category-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 12px;
+}
+
+.character-weapon-category-grid[hidden] {
+    display: none;
 }
 
 .character-weapon-catalog-card {
     position: relative;
     display: grid;
-    gap: 6px;
-    min-height: 150px;
+    gap: 8px;
     padding: 12px;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
@@ -1948,15 +2010,105 @@ body.is-guest .guest-login-hint {
     font-size: 0.95rem;
 }
 
-.character-weapon-catalog-card span,
-.character-weapon-catalog-card small {
+.character-weapon-catalog-skill,
+.character-weapon-catalog-stats span {
     color: var(--color-muted);
-    font-size: 0.76rem;
+    font-size: 0.74rem;
 }
 
-.character-weapon-catalog-card .btn {
-    justify-self: end;
-    align-self: end;
+.character-weapon-catalog-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px 10px;
+}
+
+.character-weapon-name-field {
+    display: flex;
+    align-items: center;
+}
+
+.character-weapon-name-field .character-weapon-name-input {
+    cursor: pointer;
+    font-weight: 800;
+}
+
+.character-weapon-name-field:hover .character-weapon-name-input,
+.character-weapon-name-field:focus-within .character-weapon-name-input {
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+}
+
+.character-weapon-catalog-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.character-weapon-catalog-head strong {
+    min-width: 0;
+}
+
+.character-weapon-catalog-head .btn {
+    flex: none;
+    margin-left: auto;
+    align-self: center;
+}
+
+.character-weapon-catalog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.character-weapon-catalog-card.is-custom {
+    border-color: color-mix(in srgb, var(--color-primary) 45%, var(--border-subtle));
+}
+
+.character-weapon-custom-form {
+    display: grid;
+    gap: 12px;
+}
+
+.character-weapon-custom-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.character-weapon-custom-field {
+    display: grid;
+    gap: 4px;
+}
+
+.character-weapon-custom-field-wide {
+    grid-column: 1 / -1;
+}
+
+.character-weapon-custom-field label {
+    color: var(--color-muted);
+    font-size: 0.75rem;
+    font-weight: 800;
+}
+
+.character-weapon-custom-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+@media (max-width: 720px) {
+    .character-weapon-custom-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .character-weapon-category-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .character-weapon-catalog-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 .character-specialty-options {

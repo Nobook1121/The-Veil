@@ -54,6 +54,7 @@ def test_firearms_specialty_bases_include_sniper_rifle():
         "bow": 15,
         "machineGun": 10,
         "heavyWeapon": 10,
+        "flamethrower": 10,
     }
 
 

@@ -1,0 +1,85 @@
+{
+  "id": "machineGuns",
+  "category": "机枪",
+  "order": 80,
+  "weapons": [
+    {
+      "id": "gatling1882",
+      "name": "1882年式加特林",
+      "skill": { "skillKey": "firearms", "specialtyKey": "machineGun", "label": "射击(机枪)" },
+      "damage": "2D6+4",
+      "attacks": "全自动",
+      "impale": true,
+      "range": "100",
+      "ammo": "200",
+      "malfunction": "96",
+      "eras": ["1920s", "稀有"],
+      "price": "2000/14000"
+    },
+    {
+      "id": "browning1918",
+      "name": "M1918式勃朗宁自动步枪",
+      "skill": { "skillKey": "firearms", "specialtyKey": "machineGun", "label": "射击(机枪)" },
+      "damage": "2D6+4",
+      "attacks": "1(2)或全自动",
+      "impale": true,
+      "range": "90",
+      "ammo": "20",
+      "malfunction": "100",
+      "eras": ["1920s"],
+      "price": "800/1500"
+    },
+    {
+      "id": "browning1917",
+      "name": "勃朗宁M1917A1(7.62mm)",
+      "skill": { "skillKey": "firearms", "specialtyKey": "machineGun", "label": "射击(机枪)" },
+      "damage": "2D6+4",
+      "attacks": "全自动",
+      "impale": true,
+      "range": "150",
+      "ammo": "250",
+      "malfunction": "96",
+      "eras": ["1920s"],
+      "price": "3000/3万"
+    },
+    {
+      "id": "bren",
+      "name": "布伦轻机枪",
+      "skill": { "skillKey": "firearms", "specialtyKey": "machineGun", "label": "射击(机枪)" },
+      "damage": "2D6+4",
+      "attacks": "1或全自动",
+      "impale": true,
+      "range": "110",
+      "ammo": "30/100",
+      "malfunction": "96",
+      "eras": ["1920s"],
+      "price": "3000/5万"
+    },
+    {
+      "id": "lewis",
+      "name": "路易斯I型机枪",
+      "skill": { "skillKey": "firearms", "specialtyKey": "machineGun", "label": "射击(机枪)" },
+      "damage": "2D6+4",
+      "attacks": "全自动",
+      "impale": true,
+      "range": "110",
+      "ammo": "27/97",
+      "malfunction": "96",
+      "eras": ["1920s"],
+      "price": "3000/2万"
+    },
+    {
+      "id": "m134",
+      "name": "GE M134式7.62mm速射机枪",
+      "skill": { "skillKey": "firearms", "specialtyKey": "machineGun", "label": "射击(机枪)" },
+      "damage": "2D6+4",
+      "attacks": "全自动",
+      "impale": true,
+      "range": "200",
+      "ammo": "4000",
+      "malfunction": "98",
+      "eras": ["现代"],
+      "price": "N/A"
+    }
+  ]
+}

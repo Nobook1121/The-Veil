@@ -9,7 +9,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.json_store import read_json, write_json_atomic
-from trpg_server import character_service
+from trpg_server import character_service, weapon_catalog
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, success_response
@@ -104,10 +104,22 @@ def character_service_actor():
 
 
 def _iter_character_files():
+    """新目录结构 ``<id>/character.json`` 与旧平铺 ``<id>.json`` 都兼容。"""
     characters_dir = _get_characters_dir()
     if not characters_dir.exists():
         return []
-    return sorted(characters_dir.glob("*.json"))
+    paths = []
+    for item in sorted(characters_dir.iterdir()):
+        if item.is_dir():
+            card_path = item / "character.json"
+            if card_path.exists():
+                paths.append(card_path)
+    paths.extend(sorted(characters_dir.glob("*.json")))
+    return paths
+
+
+def _character_id_from_path(path):
+    return path.parent.name if path.name == "character.json" else path.stem
 
 
 def _iter_gallery_character_files():
@@ -360,6 +372,7 @@ def _runtime_to_test_character(character):
         "public_id": _as_text(character.get("public_id")),
         "publisher_id": character.get("publisher_id"),
         "publisher_name": _as_text(character.get("publisher_name")),
+        "avatar": _as_text(character.get("avatar")),
         "name": _as_text(character.get("name")),
         "playerId": _as_text(character.get("playerId")),
         "playerName": _as_text(character.get("playerName")),
@@ -473,6 +486,7 @@ def _test_character_to_runtime(character, fallback_id=""):
         "public_id": _as_text(character.get("public_id")),
         "publisher_id": character.get("publisher_id"),
         "publisher_name": _as_text(character.get("publisher_name")),
+        "avatar": _as_text(character.get("avatar")),
         "name": _as_text(character.get("name"), "未命名角色卡"),
         "playerId": _as_text(character.get("playerId") or character.get("playerName")),
         "playerName": _as_text(character.get("playerName")),
@@ -575,13 +589,6 @@ def _iter_builtin_occupation_files():
     return sorted(occupations_dir.glob("*.json"))
 
 
-def _iter_builtin_weapon_files():
-    weapons_dir = _get_weapons_dir() / "builtin"
-    if not weapons_dir.exists():
-        return []
-    return sorted(weapons_dir.glob("*.json"))
-
-
 def _skill_catalog_path():
     # 技能目录是随包发布的参考数据（data/character_skills.json），允许 app.config 覆盖便于测试注入。
     try:
@@ -610,7 +617,7 @@ def _owned_character_count(excluded_character_id=None):
     current_ids = _current_player_ids()
     count = 0
     for path in _iter_character_files():
-        character = _character_from_storage(read_json(path, default=None), path.stem)
+        character = _character_from_storage(read_json(path, default=None), _character_id_from_path(path))
         if not character:
             continue
         if excluded_character_id and str(character.get("id")) == str(excluded_character_id):
@@ -666,7 +673,20 @@ def _can_modify_gallery_character(character, permission_node):
 
 
 def _character_path(character_id):
-    return safe_join(_get_characters_dir(), _character_filename(character_id))
+    return character_service.character_json_path(character_id)
+
+
+def _legacy_character_path(character_id):
+    return character_service.legacy_character_path(character_id)
+
+
+def _character_storage_path(character_id):
+    """优先返回新目录结构，其次回退到旧平铺文件。"""
+    path = _character_path(character_id)
+    if path.exists():
+        return path
+    legacy = _legacy_character_path(character_id)
+    return legacy if legacy.exists() else path
 
 
 def _iter_room_info_files():
@@ -823,12 +843,7 @@ def list_builtin_weapons():
     if login_error:
         return login_error
 
-    weapons = []
-    for path in _iter_builtin_weapon_files():
-        weapon = read_json(path, default=None)
-        if isinstance(weapon, dict):
-            weapons.append(weapon)
-    weapons.sort(key=lambda item: str(item.get("id") or item.get("name") or ""))
+    weapons = weapon_catalog.load_preset_weapons(_get_weapons_dir())
     return success_response(weapons, "Weapon catalogs loaded successfully")
 
 
@@ -840,7 +855,7 @@ def list_characters():
 
     characters = []
     for path in _iter_character_files():
-        character = _character_from_storage(read_json(path, default=None), path.stem)
+        character = _character_from_storage(read_json(path, default=None), _character_id_from_path(path))
         if character and _can_access_character(character):
             characters.append(character)
     characters.sort(key=lambda item: item.get("updatedAt") or item.get("createdAt") or "", reverse=True)
@@ -980,7 +995,7 @@ def save_character(character_id):
     if login_error:
         return login_error
 
-    path = _character_path(character_id)
+    path = _character_storage_path(character_id)
     is_new_character = not path.exists()
     payload = request.get_json(silent=True) or {}
     try:
@@ -1009,14 +1024,14 @@ def delete_character(character_id):
     if login_error:
         return login_error
 
-    path = _character_path(character_id)
+    path = _character_storage_path(character_id)
     if not path.exists():
         return success_response(message="Character already deleted")
     character = _character_from_storage(read_json(path, default={}), character_id) or {}
     if character and not _can_access_character(character):
         return error_response("Permission denied", 403, "Permission denied")
     _unbind_deleted_character_from_rooms(character_id)
-    path.unlink()
+    character_service.delete_character_storage(character_id)
     log_user_action(
         logger,
         user_action_text(session.get("username"), "删除了角色卡"),
@@ -1025,3 +1040,38 @@ def delete_character(character_id):
         角色名=character.get("name"),
     )
     return success_response(message="Character deleted successfully")
+
+
+@bp.route("/api/characters/<character_id>/weapons", methods=["GET"])
+def list_character_weapons(character_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    try:
+        weapons = character_service.get_custom_weapons(character_service_actor(), character_id)
+    except character_service.CharacterServiceError as exc:
+        return error_response(exc.message, exc.status, exc.message)
+    return success_response({"weapons": weapons, "count": len(weapons)}, "Custom weapons loaded successfully")
+
+
+@bp.route("/api/characters/<character_id>/weapons", methods=["PUT"])
+def save_character_weapons(character_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    payload = request.get_json(silent=True) or {}
+    weapons = payload.get("weapons") if isinstance(payload, dict) else None
+    if not isinstance(weapons, list):
+        return error_response("weapons 必须是数组", 400, "Invalid weapons payload")
+    try:
+        saved = character_service.save_custom_weapons(character_service_actor(), character_id, weapons)
+    except character_service.CharacterServiceError as exc:
+        return error_response(exc.message, exc.status, exc.message)
+    log_user_action(
+        logger,
+        user_action_text(session.get("username"), "更新了角色卡自定义武器"),
+        用户ID=session.get("user_id"),
+        角色卡ID=character_id,
+        武器数量=len(saved),
+    )
+    return success_response({"weapons": saved, "count": len(saved)}, "Custom weapons saved successfully")

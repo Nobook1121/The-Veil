@@ -74,9 +74,9 @@ def load_occupation_catalog() -> list[dict[str, Any]]:
 
 
 def load_weapon_catalog() -> list[dict[str, Any]]:
-    weapons = _read_builtin_catalog("WEAPONS_DIR", WEAPONS_DIR)
-    weapons.sort(key=lambda item: str(item.get("id") or item.get("name") or ""))
-    return weapons
+    from trpg_server import weapon_catalog
+
+    return weapon_catalog.load_preset_weapons(Path(current_app.config.get("WEAPONS_DIR", WEAPONS_DIR)))
 
 
 def load_skill_catalog() -> list[dict[str, str]]:
