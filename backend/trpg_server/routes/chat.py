@@ -29,10 +29,12 @@ from trpg_server.agents.ruleset_knowledge import RulesetKnowledgeStore, search_r
 from trpg_server.agents.tools import default_tool_registry
 from trpg_server.agents.tools.room import get_room_snapshot
 from trpg_server.agents.room_state import append_room_event, project_room_state
-from trpg_server.agents.narrative.guards import GuardPolicy, apply_output_guard
+from trpg_server.agents.narrative.guards import apply_output_guard
 from trpg_server.agents.narrative.logger import log_event
 from trpg_server.agents.narrative.prompt_v2 import render_state_summary
-from trpg_server.agents.narrative.runtime import narrative_available
+from trpg_server.agents.narrative.prejudge import prepare_turn, render_contract, retrieval_candidates
+from trpg_server.agents.narrative.runtime import NarrativeRuntime, NarrativeRuntimeError, narrative_available
+from trpg_server.agents.narrative.runtime_settings import log_bypass_once, resolve_narrative_settings
 from trpg_server.agents.narrative.state_store import narrative_from_room_state
 from trpg_server.agents.narrative.store import NarrativeStoreError, load_bundle
 from trpg_server.scenario_store import load_scenario_by_id
@@ -414,6 +416,11 @@ def chat():
                 graph_enabled = narrative_available(agent_context)
             except (OSError, ValueError):
                 logger.warning("Narrative availability check failed for room %s", room_id, exc_info=True)
+        # 房间级档位（§12.5）：kill switch 立即退回旧编排，profile 决定是否走 JEV。
+        narrative_settings = resolve_narrative_settings({"house_rules": house_rules} if room_id else None)
+        if graph_enabled and not narrative_settings.enabled:
+            log_bypass_once(room_id)
+            graph_enabled = False
         agent_context.tool_state["graph_enabled"] = graph_enabled
         opening_messages = []
         opening_prompt = None
@@ -588,79 +595,131 @@ def chat():
                 active_scene = scenario_data.get("active_scene_id")
                 manifest = scenario_data.get("scene_manifest") if isinstance(scenario_data.get("scene_manifest"), list) else []
                 scene_static = next((item for item in manifest if isinstance(item, dict) and str(item.get("id")) == str(active_scene)), None)
-        scenario_results = []
-        if room_id:
-            _emit_thinking_stage(room_id, ai_request_id, "vector_search", "正在调用向量库")
-            try:
-                knowledge_service = KnowledgeBaseService(
-                    rooms_dir=current_app.config.get("ROOMS_DIR", ROOMS_DIR),
-                    scenarios_dir=current_app.config.get("SCENARIOS_DIR", SCENARIOS_DIR),
-                    vector_store=current_app.extensions.get("vector_store"),
-                    embedding_provider=current_app.extensions.get("embedding_provider"),
-                )
-                # 导入剧本只有知识块这一条剧情来源，多取几条降低"遗忘"概率；
-                # 检索 query 带上最近几轮对话，避免泛化输入每次都落到同一批兜底块。
-                retrieval_query = _retrieval_query(history, content)
-                retrieval_top_k = (
-                    runtime_config.retrieval_top_k_direct
-                    if direct_import
-                    else runtime_config.retrieval_top_k_default
-                )
-                scenario_results = knowledge_service.search(
-                    room_id,
-                    retrieval_query,
-                    top_k=retrieval_top_k,
-                    sticky_rounds=runtime_config.sticky_rounds,
-                    cooldown_rounds=runtime_config.cooldown_rounds,
-                    parent_max_chars=runtime_config.chunk_parent_max_chars,
-                    keyword_channel=runtime_config.keyword_channel_enabled,
-                    recursive_scanning=runtime_config.recursive_scanning,
-                    max_recursion_depth=runtime_config.max_recursion_depth,
-                    token_budget=runtime_config.lorebook_token_budget,
-                )
-                scenario_results = [
-                    item for item in scenario_results
-                    if isinstance(item, dict) and str(item.get("text") or "").strip()
-                ]
-                if direct_import:
-                    catalog = knowledge_service.catalog(room_id)
-                    if catalog:
-                        # 目录是稳定前缀（可命中 provider 前缀缓存），但仍用紧凑行格式
-                        # 而非 JSON，避免每行长键名把静态提示撑大、占用输入 token。
-                        catalog_lines = "\n".join(
-                            f"{item.get('chunk_id')}：{item.get('title')}" for item in catalog
-                        )
-                        system_prompt += (
-                            "\n【导入剧本目录】以下是本剧本的全部章节索引（chunk_id：标题），请据此把握剧情走向；"
-                            "需要某章细节时以每轮自动注入的 Knowledge retrieval 为准。\n"
-                            + catalog_lines
-                        )
-            except (OSError, ValueError):
-                logger.exception("Scenario retrieval failed")
-        rules_version = str((agent_context.room_info().get("rulesets") or {}).get("coc7") or "1") if room_id else "1"
-        projected_state = project_room_state(agent_context.room_state(), room_snapshot) if room_id else {}
-        # 图谱运行态摘要：确定性渲染，不依赖检索命中；没有位置且没有回合时不注入。
-        narrative_summary = ""
+        # ---- 图谱运行态 + JEV 预判断（§5.1 / §5.3）-------------------------
+        # 先做确定性预判，再用候选集约束检索；预判失败只降级、不阻断请求。
         narrative = None
+        narrative_summary = ""
         narrative_bundle = None
+        narrative_runtime = None
+        turn_contract = None
+        retrieval_candidate_ids: set[str] = set()
+        retrieval_candidate_titles: set[str] = set()
         if room_id:
             narrative = narrative_from_room_state(agent_context.room_state())
             if graph_enabled:
-                snapshot_room = (room_snapshot or {}).get("room") if isinstance(room_snapshot, dict) else {}
-                scenario_id = snapshot_room.get("scenario_id") if isinstance(snapshot_room, dict) else None
-                if scenario_id is not None and agent_context.scenarios_dir:
-                    try:
-                        descriptor, _ = load_scenario_by_id(
-                            agent_context.scenarios_dir,
-                            scenario_id,
-                            snapshot_room.get("scenario_version"),
+                try:
+                    narrative_runtime = NarrativeRuntime.load(agent_context)
+                except (NarrativeRuntimeError, OSError, ValueError, NarrativeStoreError):
+                    logger.warning("Narrative runtime load failed for room %s", room_id, exc_info=True)
+                if narrative_runtime is not None:
+                    narrative_bundle = narrative_runtime.bundle
+                else:
+                    # 图谱文件损坏不应阻断对话；退化为旧摘要路径。
+                    snapshot_room = (room_snapshot or {}).get("room") if isinstance(room_snapshot, dict) else {}
+                    scenario_id = snapshot_room.get("scenario_id") if isinstance(snapshot_room, dict) else None
+                    if scenario_id is not None and agent_context.scenarios_dir:
+                        try:
+                            descriptor, _ = load_scenario_by_id(
+                                agent_context.scenarios_dir,
+                                scenario_id,
+                                snapshot_room.get("scenario_version"),
+                            )
+                            if descriptor:
+                                narrative_bundle = load_bundle(descriptor.parent)
+                        except (OSError, ValueError, NarrativeStoreError):
+                            logger.warning("Narrative bundle load failed for room %s", room_id, exc_info=True)
+            if graph_enabled and narrative_runtime is not None and not scenario_start:
+                if narrative_settings.profile == "graph":
+                    turn_contract = prepare_turn(narrative_runtime, content)
+                    if turn_contract is not None:
+                        retrieval_candidate_ids, retrieval_candidate_titles = retrieval_candidates(
+                            narrative_runtime, turn_contract, content
                         )
-                        if descriptor:
-                            narrative_bundle = load_bundle(descriptor.parent)
-                    except (OSError, ValueError, NarrativeStoreError):
-                        # 图谱文件损坏不应阻断对话；摘要退化为使用节点 id。
-                        logger.warning("Narrative bundle load failed for room %s", room_id, exc_info=True)
+            if graph_enabled:
                 narrative_summary = render_state_summary(narrative, narrative_bundle)
+                if turn_contract is not None:
+                    contract_text = render_contract(turn_contract)
+                    narrative_summary = (
+                        f"{narrative_summary}\n\n{contract_text}".strip() if narrative_summary else contract_text
+                    )
+                    log_event(
+                        "jev.turn",
+                        room_id=str(room_id),
+                        intent=turn_contract.intent,
+                        confidence=turn_contract.confidence,
+                        candidates=len(retrieval_candidate_ids),
+                        denied=len(turn_contract.denied),
+                        skip_retrieval=turn_contract.skip_retrieval,
+                    )
+        scenario_results = []
+        if room_id:
+            # meta / combat 分支不需要剧情检索（§5.1）；预判失败时保持原有检索行为。
+            if turn_contract is not None and turn_contract.skip_retrieval:
+                log_event("retrieval.skipped", room_id=str(room_id), intent=turn_contract.intent)
+            else:
+                _emit_thinking_stage(room_id, ai_request_id, "vector_search", "正在调用向量库")
+                try:
+                    knowledge_service = KnowledgeBaseService(
+                        rooms_dir=current_app.config.get("ROOMS_DIR", ROOMS_DIR),
+                        scenarios_dir=current_app.config.get("SCENARIOS_DIR", SCENARIOS_DIR),
+                        vector_store=current_app.extensions.get("vector_store"),
+                        embedding_provider=current_app.extensions.get("embedding_provider"),
+                    )
+                    # 导入剧本只有知识块这一条剧情来源，多取几条降低"遗忘"概率；
+                    # 检索 query 带上最近几轮对话，避免泛化输入每次都落到同一批兜底块。
+                    retrieval_query = _retrieval_query(history, content)
+                    retrieval_top_k = (
+                        runtime_config.retrieval_top_k_direct
+                        if direct_import
+                        else runtime_config.retrieval_top_k_default
+                    )
+                    search_kwargs = {
+                        "top_k": retrieval_top_k,
+                        "sticky_rounds": runtime_config.sticky_rounds,
+                        "cooldown_rounds": runtime_config.cooldown_rounds,
+                        "parent_max_chars": runtime_config.chunk_parent_max_chars,
+                        "keyword_channel": runtime_config.keyword_channel_enabled,
+                        "recursive_scanning": runtime_config.recursive_scanning,
+                        "max_recursion_depth": runtime_config.max_recursion_depth,
+                        "token_budget": runtime_config.lorebook_token_budget,
+                    }
+                    constrained = bool(retrieval_candidate_ids or retrieval_candidate_titles)
+                    if constrained:
+                        search_kwargs["candidate_ids"] = retrieval_candidate_ids
+                        search_kwargs["candidate_titles"] = retrieval_candidate_titles
+                    scenario_results = knowledge_service.search(room_id, retrieval_query, **search_kwargs)
+                    if constrained and not scenario_results:
+                        # 候选集过窄时兜底一次全量检索，避免模型误以为剧本缺失。
+                        log_event(
+                            "retrieval.candidates_empty",
+                            room_id=str(room_id),
+                            candidates=len(retrieval_candidate_ids),
+                            titles=len(retrieval_candidate_titles),
+                        )
+                        search_kwargs.pop("candidate_ids", None)
+                        search_kwargs.pop("candidate_titles", None)
+                        scenario_results = knowledge_service.search(room_id, retrieval_query, **search_kwargs)
+                    scenario_results = [
+                        item for item in scenario_results
+                        if isinstance(item, dict) and str(item.get("text") or "").strip()
+                    ]
+                    if direct_import:
+                        catalog = knowledge_service.catalog(room_id)
+                        if catalog:
+                            # 目录是稳定前缀（可命中 provider 前缀缓存），但仍用紧凑行格式
+                            # 而非 JSON，避免每行长键名把静态提示撑大、占用输入 token。
+                            catalog_lines = "\n".join(
+                                f"{item.get('chunk_id')}：{item.get('title')}" for item in catalog
+                            )
+                            system_prompt += (
+                                "\n【导入剧本目录】以下是本剧本的全部章节索引（chunk_id：标题），请据此把握剧情走向；"
+                                "需要某章细节时以每轮自动注入的 Knowledge retrieval 为准。\n"
+                                + catalog_lines
+                            )
+                except (OSError, ValueError):
+                    logger.exception("Scenario retrieval failed")
+        rules_version = str((agent_context.room_info().get("rulesets") or {}).get("coc7") or "1") if room_id else "1"
+        projected_state = project_room_state(agent_context.room_state(), room_snapshot) if room_id else {}
         if effective_suggestions and isinstance(projected_state, dict):
             # Only AI-relevant active house rules reach the prompt, injected into
             # the dynamic room-state layer so the static prefix stays cacheable.
@@ -1054,12 +1113,13 @@ def chat():
         if result.notice:
             ai_response = f"{ai_response}\n\n{result.notice}" if ai_response else result.notice
         # 输出侧护栏：工具可能已经推进状态，因此按最新状态过滤，而不是请求开始时的快照。
-        if narrative_bundle is not None and ai_response:
+        # 档位来自房间房规（enforce/shadow/off），shadow 只观测不改正文（§12.5）。
+        if narrative_bundle is not None and ai_response and narrative_settings.guard != "off":
             ai_response = apply_output_guard(
                 ai_response,
                 narrative_bundle,
                 narrative_from_room_state(agent_context.room_state()),
-                GuardPolicy.for_mode("graph"),
+                narrative_settings.guard_policy(),
                 room_id=str(room_id) if room_id else None,
             )
         if not ai_response and opening_plan is not None:

@@ -773,6 +773,40 @@ class KnowledgeBaseService:
             self._chunks[key] = loaded or build_knowledge_chunks(scenario)
         return self._chunks[key]
 
+    @staticmethod
+    def _filter_by_candidates(
+        chunks: list[KnowledgeChunk],
+        candidate_ids: Iterable[str] | None,
+        candidate_titles: Iterable[str] | None,
+    ) -> list[KnowledgeChunk]:
+        """图谱约束检索（§5.4）：只在 JEV 候选集内取块，常驻块始终保留。
+
+        ``candidate_ids`` 可以是叙事节点 id、场景 id、章节或知识块 id；
+        ``candidate_titles`` 与章节/节点标题做大小写无关的精确匹配。
+        """
+        ids = {str(item).strip() for item in candidate_ids or [] if str(item).strip()}
+        titles = {str(item).strip().casefold() for item in candidate_titles or [] if str(item).strip()}
+        if not ids and not titles:
+            return chunks
+        kept: list[KnowledgeChunk] = []
+        for chunk in chunks:
+            if chunk.is_constant:
+                kept.append(chunk)
+                continue
+            if chunk.chunk_id in ids or (chunk.scene_id and str(chunk.scene_id) in ids):
+                kept.append(chunk)
+                continue
+            metadata = chunk.metadata if isinstance(chunk.metadata, Mapping) else {}
+            matched = False
+            for key in ("node_id", "module_id", "scene_id", "section", "title"):
+                value = str(metadata.get(key) or "").strip()
+                if value and (value in ids or value.casefold() in titles):
+                    matched = True
+                    break
+            if matched:
+                kept.append(chunk)
+        return kept
+
     def _eligible_chunks(
         self,
         scenario: Mapping[str, Any],
@@ -1001,6 +1035,8 @@ class KnowledgeBaseService:
         max_recursion_depth: int = 3,
         token_budget: int = 0,
         rng: Any = None,
+        candidate_ids: Iterable[str] | None = None,
+        candidate_titles: Iterable[str] | None = None,
     ) -> list[dict[str, Any]]:
         info = self._room_info(room_id)
         scenario = self._scenario(info.get("scenario_id"), info.get("scenario_version"))
@@ -1013,6 +1049,7 @@ class KnowledgeBaseService:
         filtered = self._eligible_chunks(
             scenario, scenario_id, scenario_version, current_scene, spoiler_level, audience
         )
+        filtered = self._filter_by_candidates(filtered, candidate_ids, candidate_titles)
         if not filtered:
             return []
         sections = _group_by_section(filtered)
@@ -1084,10 +1121,17 @@ def search(
     scenarios_dir: Path | None = None,
     top_k: int = 5,
     audience: str = "kp",
+    candidate_ids: Iterable[str] | None = None,
+    candidate_titles: Iterable[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Functional facade kept for API callers that do not need a long-lived service."""
     return KnowledgeBaseService(rooms_dir=rooms_dir, scenarios_dir=scenarios_dir).search(
-        room_id, query, top_k=top_k, audience=audience
+        room_id,
+        query,
+        top_k=top_k,
+        audience=audience,
+        candidate_ids=candidate_ids,
+        candidate_titles=candidate_titles,
     )
 
 

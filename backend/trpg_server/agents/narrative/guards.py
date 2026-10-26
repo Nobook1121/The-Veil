@@ -26,17 +26,32 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[。！？!?])|(?<=\n)")
 
 @dataclass(frozen=True)
 class GuardPolicy:
-    mode: str = "graph"
+    mode: str = "enforce"
     move_gate: bool = True
     spoiler_gate: bool = True
     result_gate: bool = True
     once_gate: bool = True
     progression_gate: bool = True
     declaration_check: bool = True
+    # shadow：照常扫描并记违规，但不改正文（§12.5 灰度观测）。
+    shadow: bool = False
 
     @classmethod
     def for_mode(cls, mode: str) -> "GuardPolicy":
-        if str(mode or "").strip().lower() in {"degraded", "legacy", "off"}:
+        normalized = str(mode or "").strip().lower()
+        if normalized == "off":
+            return cls(
+                mode="off",
+                move_gate=False,
+                spoiler_gate=False,
+                result_gate=False,
+                once_gate=False,
+                progression_gate=False,
+                declaration_check=False,
+            )
+        if normalized == "shadow":
+            return cls(mode="shadow", shadow=True)
+        if normalized in {"degraded", "legacy"}:
             return cls(
                 mode="degraded",
                 move_gate=False,
@@ -46,7 +61,7 @@ class GuardPolicy:
                 progression_gate=False,
                 declaration_check=True,
             )
-        return cls(mode="graph")
+        return cls(mode="enforce")
 
 
 @dataclass
@@ -165,17 +180,18 @@ def apply_output_guard(
     *,
     room_id: str | None = None,
 ) -> str:
-    policy = policy or GuardPolicy.for_mode("graph")
+    policy = policy or GuardPolicy.for_mode("enforce")
     if bundle is None or not policy.spoiler_gate:
         return text
     report = scan_output(text, bundle, narrative or {})
     if report.changed:
         logger.warning(
-            "narrative.guard.output_removed room=%s sentences=%s objects=%s",
+            "narrative.guard.%s room=%s sentences=%s objects=%s",
+            "shadow" if policy.shadow else "output_removed",
             room_id, report.removed_sentences,
             ",".join(item["object_id"] for item in report.violations[:5]),
         )
-    return report.text
+    return text if policy.shadow else report.text
 
 
 __all__ = [

@@ -56,6 +56,11 @@ HOUSE_RULE_DEFINITIONS = {
     # 技能基础值覆盖表：键为技能键（带专精时为 `skillKey.specialtyKey`），值为 0-99 整数。
     # 留空表示沿用下一优先级（用户个性化 > 管理员设置 > 技能目录默认值）。
     "skill_bases": {"type": "skill_bases", "default": {}, "ai_prompt": False},
+    # 图谱运行档位（§12.5）：留空表示跟随默认（profile=graph / guard=enforce）。
+    # narrative_enabled=false 是本房间的 kill switch，立即退回旧编排。
+    "narrative_enabled": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
+    "narrative_profile": {"type": "nullable_enum", "default": None, "values": ["graph", "degraded"], "ai_prompt": False},
+    "narrative_guard": {"type": "nullable_enum", "default": None, "values": ["off", "shadow", "enforce"], "ai_prompt": False},
 }
 DEFAULT_ROOM_HOUSE_RULES = {key: spec["default"] for key, spec in HOUSE_RULE_DEFINITIONS.items()}
 
