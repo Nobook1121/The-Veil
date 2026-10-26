@@ -13,6 +13,13 @@
         url?: string;
         type?: string;
         alt?: string;
+        thumb_path?: string;
+        thumb_url?: string;
+        poster_path?: string;
+        poster_url?: string;
+        width?: number;
+        height?: number;
+        duration_ms?: number;
         mime?: string;
         size?: number;
     }
@@ -157,6 +164,13 @@
         return state.resources.find((item) => assetId(item) === identifier || assetKey(item) === identifier) || null;
     }
 
+    /** 缩略图接口（§8.5）：服务端生成的 thumb/poster，缺失时后端回退原图。 */
+    function resourceThumb(resource: ResourceItem | null): string {
+        const identifier = resource ? assetKey(resource) : "";
+        if (!identifier || !state.scenarioId) return "";
+        return `/api/scripts/${state.scenarioId}/assets/${encodeURIComponent(identifier)}/thumb`;
+    }
+
     function bindingTarget(binding: TriggerBinding | undefined): { key: string; value: string } {
         const kind = binding?.kind || "enter";
         const key = BINDING_TARGET_KEY[kind] || "";
@@ -184,15 +198,15 @@
     }
 
     function attachmentThumb(attachment: TriggerAttachment): string {
-        if (attachment.url) return attachment.url;
         const resource = attachment.asset_id ? resourceById(attachment.asset_id) : null;
-        return resource?.url || "";
+        return resourceThumb(resource) || attachment.url || resource?.thumb_url || resource?.poster_url || resource?.url || "";
     }
 
     function attachmentChip(attachment: TriggerAttachment): string {
         const url = attachmentThumb(attachment);
         const alt = attachment.alt || attachment.caption || attachment.kind || "附件";
-        if (url && (attachment.kind || "image") === "image") {
+        const kind = attachment.kind || "image";
+        if (url && (kind === "image" || kind === "video")) {
             return `<span class="scenario-trigger-chip"><img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" loading="lazy"><span>${escapeHtml(alt)}</span></span>`;
         }
         return `<span class="scenario-trigger-chip"><i class="fa fa-paperclip" aria-hidden="true"></i><span>${escapeHtml(alt)}</span></span>`;

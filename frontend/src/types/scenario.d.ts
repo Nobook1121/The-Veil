@@ -11,6 +11,15 @@ interface ResourceRef {
     size: number;
     hash: string;
     content?: string;
+    /** 服务端派生：缩略图（长边 640），图片上传时生成。 */
+    thumb_path?: string;
+    thumb_url?: string;
+    /** 服务端派生：视频 poster 与时长，依赖 ffmpeg/ffprobe。 */
+    poster_path?: string;
+    poster_url?: string;
+    width?: number;
+    height?: number;
+    duration_ms?: number;
 }
 
 interface TriggerCondition {

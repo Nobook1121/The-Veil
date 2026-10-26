@@ -1,9 +1,14 @@
 import json
 from pathlib import Path
 
+import pymupdf
+
 from trpg_server.agents.context import AgentRequestContext
 from trpg_server.agents.tools.trigger import reveal_scenario_trigger
 from trpg_server.agents.trigger_system import (
+    delete_resource,
+    load_resources,
+    normalize_resource,
     persist_uploaded_resource,
     validate_trigger,
 )
@@ -143,3 +148,57 @@ def test_trigger_tool_rejects_unapproved_library_trigger(tmp_path):
 
     assert "error" in result
     assert result.get("reason") == "scenario_version_mismatch"
+
+
+def _png_bytes(width: int = 800, height: int = 600) -> bytes:
+    pixmap = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, width, height), False)
+    pixmap.clear_with(120)
+    return pixmap.tobytes("png")
+
+
+class ImageUpload(Upload):
+    filename = "battlemap.png"
+    mimetype = "image/png"
+
+
+def test_image_upload_generates_server_thumbnail(tmp_path):
+    # §8.5：图片上传时生成长边 640 的缩略图，并把尺寸写回资源引用。
+    ref = persist_uploaded_resource(tmp_path, 11, ImageUpload(_png_bytes()), "战场地图")
+
+    assert (ref["width"], ref["height"]) == (800, 600)
+    assert ref["thumb_path"] == f"assets/{ref['hash'][:16]}_thumb.jpg"
+    root = tmp_path / "scenario-11"
+    assert (root / ref["thumb_path"]).is_file()
+
+    stored = load_resources(tmp_path, 11)[0]
+    assert stored["thumb_path"] == ref["thumb_path"]
+    assert stored["width"] == 800
+
+
+def test_normalize_resource_keeps_derived_fields_and_rejects_unsafe_paths(tmp_path):
+    ref = persist_uploaded_resource(tmp_path, 11, ImageUpload(_png_bytes()), "战场地图")
+
+    normalized = normalize_resource({
+        **ref,
+        "thumb_path": "../escape.jpg",
+        "poster_path": "assets/poster.jpg",
+        "duration_ms": 1200,
+    })
+
+    assert "thumb_path" not in normalized
+    assert normalized["poster_path"] == "assets/poster.jpg"
+    assert normalized["duration_ms"] == 1200
+    assert normalized["width"] == 800
+
+
+def test_delete_resource_cleans_derived_thumbnail(tmp_path):
+    ref = persist_uploaded_resource(tmp_path, 11, ImageUpload(_png_bytes()), "战场地图")
+    root = tmp_path / "scenario-11"
+    original = root / ref["path"]
+    thumb = root / ref["thumb_path"]
+    assert original.is_file() and thumb.is_file()
+
+    assert delete_resource(tmp_path, 11, ref["hash"]) is True
+
+    assert not original.exists()
+    assert not thumb.exists()

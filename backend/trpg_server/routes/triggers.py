@@ -183,21 +183,25 @@ def asset_thumb(script_id, asset_id):
         return error_response("Resource not found", 404, "Resource not found")
 
     immutable = "private, max-age=31536000, immutable"
-    thumb_path = str(resource.get("thumb_path") or "").strip()
-    if thumb_path:
-        candidate = (root / thumb_path).resolve()
+    for key in ("thumb_path", "poster_path"):
+        relative = str(resource.get(key) or "").strip()
+        if not relative:
+            continue
+        candidate = (root / relative).resolve()
         try:
             candidate.relative_to(root.resolve())
         except ValueError:
-            return error_response("Resource not found", 404, "Resource not found")
+            continue
         if candidate.is_file():
             response = send_file(candidate, conditional=True)
             response.headers["Cache-Control"] = immutable
             return response
 
-    thumb_url = str(resource.get("thumb_url") or "").strip()
-    if thumb_url:
-        response = redirect(thumb_url, code=302)
+    for key in ("thumb_url", "poster_url"):
+        remote = str(resource.get(key) or "").strip()
+        if not remote:
+            continue
+        response = redirect(remote, code=302)
         response.headers["Cache-Control"] = immutable
         return response
 

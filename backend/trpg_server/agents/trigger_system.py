@@ -16,6 +16,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.media import cleanup_derivatives, image_derivatives, video_derivatives
 from trpg_server.security import normalize_filename, safe_join
 
 TRIGGER_TYPES = {"scene_enter", "event_triggered", "clue_found", "npc_dialogue", "player_action", "custom"}
@@ -33,12 +34,16 @@ class ResourceRef:
     size: int
     hash: str
     content: str | None = None
+    thumb_path: str | None = None
+    thumb_url: str | None = None
+    poster_path: str | None = None
+    poster_url: str | None = None
+    width: int | None = None
+    height: int | None = None
+    duration_ms: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        result = asdict(self)
-        if result.get("content") is None:
-            result.pop("content", None)
-        return result
+        return {key: value for key, value in asdict(self).items() if value is not None}
 
 
 @dataclass
@@ -120,7 +125,7 @@ def normalize_resource(value: dict[str, Any]) -> dict[str, Any]:
     alt = str(value.get("alt") or "").strip()
     if not alt:
         raise ValueError("resource alt is required")
-    return {
+    result = {
         "type": resource_type,
         "path": path,
         "url": str(value.get("url") or ""),
@@ -130,6 +135,21 @@ def normalize_resource(value: dict[str, Any]) -> dict[str, Any]:
         "hash": str(value.get("hash") or ""),
         **({"content": str(value.get("content"))} if value.get("content") is not None else {}),
     }
+    # 服务端派生字段（缩略图 / poster / 尺寸 / 时长）需在再次保存时保留，
+    # 否则前端回写资源引用会丢掉 media.py 生成的结果。
+    for key in ("thumb_path", "poster_path"):
+        relative = str(value.get(key) or "").replace("\\", "/").lstrip("/")
+        if relative and not relative.startswith("../") and "/../" not in relative:
+            result[key] = relative
+    for key in ("thumb_url", "poster_url"):
+        url = str(value.get(key) or "").strip()
+        if url:
+            result[key] = url
+    for key in ("width", "height", "duration_ms"):
+        number = _int(value.get(key), -1)
+        if number >= 0:
+            result[key] = number
+    return result
 
 
 def normalize_condition(value: dict[str, Any] | str | None) -> dict[str, Any]:
@@ -209,6 +229,13 @@ def persist_uploaded_resource(scenarios_dir: Path, script_id: str | int, uploade
     if inferred not in RESOURCE_TYPES:
         inferred = "file"
     ref = ResourceRef(inferred, f"assets/{filename}", f"/assets/scenarios/scenario-{script_id}/assets/{filename}", alt, mime, len(raw), digest)
+    derivatives = {}
+    if inferred == "image":
+        derivatives = image_derivatives(path, root / "assets", digest[:16])
+    elif inferred == "video":
+        derivatives = video_derivatives(path, root / "assets", digest[:16])
+    for key, value in derivatives.items():
+        setattr(ref, key, value)
     resources = load_resources(scenarios_dir, script_id)
     resources = [item for item in resources if item.get("hash") != digest]
     resources.append(ref.to_dict())
@@ -235,6 +262,7 @@ def delete_resource(scenarios_dir: Path, script_id: str | int, asset_id: str) ->
         path = safe_join(root, relative)
         if path.exists() and path.is_file():
             path.unlink()
+    cleanup_derivatives(root, removed)
     return True
 
 
