@@ -451,6 +451,10 @@ def _apply_attitude(narrative: dict[str, Any], event: Mapping[str, Any]) -> None
         entry["location"] = str(event.get("location") or "").strip() or None
     if "visible" in event:
         entry["visible"] = _as_bool(event.get("visible"), True)
+    if "known_clues" in event:
+        entry["known_clues"] = list(dict.fromkeys(
+            _str_list(entry.get("known_clues")) + _str_list(event.get("known_clues"))
+        ))
     npc_state[npc_id] = entry
     narrative["npc_state"] = npc_state
 
@@ -532,6 +536,11 @@ def apply_to_narrative(narrative: Mapping[str, Any], event: Mapping[str, Any]) -
             results = dict(state.get("interaction_results") or {})
             results[interaction_id] = result
             state["interaction_results"] = results
+        check = event.get("check")
+        if isinstance(check, Mapping):
+            checks = _dict_list(state.get("checks"))
+            checks.append({**dict(check), "turn": turn, "interaction_id": interaction_id})
+            state["checks"] = checks[-50:]
     elif kind == "check":
         check = event.get("check")
         if isinstance(check, Mapping):

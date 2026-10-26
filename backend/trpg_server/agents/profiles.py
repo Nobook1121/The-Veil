@@ -3,6 +3,23 @@ from pathlib import Path
 from typing import Any
 
 
+# 图谱模式：隐藏 redundant 场景模块工具，追加叙事运行工具（§5.6）。
+GRAPH_EXCLUDED_TOOLS = {
+    "room.get_scenario_module",
+    "room.activate_scenario_scene",
+}
+GRAPH_TOOL_NAMES = [
+    "narrative.get_current_location",
+    "narrative.lookup_location",
+    "narrative.list_exits",
+    "narrative.move_to_location",
+    "narrative.inspect_object",
+    "narrative.resolve_interaction",
+    "narrative.reveal_clue",
+    "narrative.update_npc_state",
+    "narrative.write_fact",
+]
+
 DEFAULT_KP_TOOLS = [
     "room.get_room_snapshot",
     "room.get_scenario_context",
@@ -32,6 +49,25 @@ class AgentProfile:
     wake_words: list[str] = field(default_factory=list)
     tool_names: list[str] = field(default_factory=list)
     context_providers: list[str] = field(default_factory=list)
+
+
+def expand_graph_tool_names(tool_names: list[str], *, graph_enabled: bool) -> list[str]:
+    """图谱模式替换 redundant 工具；普通房间保持原工具集不变。"""
+    if not graph_enabled:
+        return list(tool_names)
+    names = [name for name in tool_names if name not in GRAPH_EXCLUDED_TOOLS]
+    for name in GRAPH_TOOL_NAMES:
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def with_graph_tools(profile: AgentProfile, *, graph_enabled: bool) -> AgentProfile:
+    if not graph_enabled:
+        return profile
+    from dataclasses import replace
+
+    return replace(profile, tool_names=expand_graph_tool_names(profile.tool_names, graph_enabled=True))
 
 
 def resolve_agent_profile(

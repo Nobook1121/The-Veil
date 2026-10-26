@@ -15,7 +15,7 @@ from trpg_server.ai_capabilities import chat_completions_endpoint
 from trpg_server.agents.ai_request import merge_request_template
 from trpg_server.agents.config import load_ai_runtime_config
 from trpg_server.agents.context import build_agent_context
-from trpg_server.agents.profiles import resolve_agent_profile
+from trpg_server.agents.profiles import resolve_agent_profile, with_graph_tools
 from trpg_server.agents.runtime import run_agent_completion
 from trpg_server.agents.structured_output import apply_state_updates, parse_kp_response, validate_state_updates, validate_structured_response
 from trpg_server.agents.telemetry import build_provider_cache_key, calculate_cache_hit_rate, record_ai_usage
@@ -28,7 +28,9 @@ from trpg_server.agents.ruleset_knowledge import RulesetKnowledgeStore, search_r
 from trpg_server.agents.tools import default_tool_registry
 from trpg_server.agents.tools.room import get_room_snapshot
 from trpg_server.agents.room_state import append_room_event, project_room_state
+from trpg_server.agents.narrative.guards import GuardPolicy, apply_output_guard
 from trpg_server.agents.narrative.prompt_v2 import render_state_summary
+from trpg_server.agents.narrative.runtime import narrative_available
 from trpg_server.agents.narrative.state_store import narrative_from_room_state
 from trpg_server.agents.narrative.store import NarrativeStoreError, load_bundle
 from trpg_server.scenario_store import load_scenario_by_id
@@ -383,10 +385,21 @@ def chat():
         )
         if room_id:
             agent_context.tool_state["allow_action_suggestions"] = effective_suggestions
-        request_profile = _profile_for_request(
-            agent_profile,
-            agent_context.tool_state,
-            enable_suggestions=effective_suggestions,
+        # 有 narrative.json 的房间才启用图谱工具；普通房间保持原工具集与提示词。
+        graph_enabled = False
+        if room_id:
+            try:
+                graph_enabled = narrative_available(agent_context)
+            except (OSError, ValueError):
+                logger.warning("Narrative availability check failed for room %s", room_id, exc_info=True)
+        agent_context.tool_state["graph_enabled"] = graph_enabled
+        request_profile = with_graph_tools(
+            _profile_for_request(
+                agent_profile,
+                agent_context.tool_state,
+                enable_suggestions=effective_suggestions,
+            ),
+            graph_enabled=graph_enabled,
         )
         if room_id:
             room_snapshot = get_room_snapshot({}, agent_context)
@@ -568,24 +581,26 @@ def chat():
         projected_state = project_room_state(agent_context.room_state(), room_snapshot) if room_id else {}
         # 图谱运行态摘要：确定性渲染，不依赖检索命中；没有位置且没有回合时不注入。
         narrative_summary = ""
+        narrative = None
+        narrative_bundle = None
         if room_id:
             narrative = narrative_from_room_state(agent_context.room_state())
-            narrative_bundle = None
-            snapshot_room = (room_snapshot or {}).get("room") if isinstance(room_snapshot, dict) else {}
-            scenario_id = snapshot_room.get("scenario_id") if isinstance(snapshot_room, dict) else None
-            if scenario_id is not None and agent_context.scenarios_dir:
-                try:
-                    descriptor, _ = load_scenario_by_id(
-                        agent_context.scenarios_dir,
-                        scenario_id,
-                        snapshot_room.get("scenario_version"),
-                    )
-                    if descriptor:
-                        narrative_bundle = load_bundle(descriptor.parent)
-                except (OSError, ValueError, NarrativeStoreError):
-                    # 图谱文件损坏不应阻断对话；摘要退化为使用节点 id。
-                    logger.warning("Narrative bundle load failed for room %s", room_id, exc_info=True)
-            narrative_summary = render_state_summary(narrative, narrative_bundle)
+            if graph_enabled:
+                snapshot_room = (room_snapshot or {}).get("room") if isinstance(room_snapshot, dict) else {}
+                scenario_id = snapshot_room.get("scenario_id") if isinstance(snapshot_room, dict) else None
+                if scenario_id is not None and agent_context.scenarios_dir:
+                    try:
+                        descriptor, _ = load_scenario_by_id(
+                            agent_context.scenarios_dir,
+                            scenario_id,
+                            snapshot_room.get("scenario_version"),
+                        )
+                        if descriptor:
+                            narrative_bundle = load_bundle(descriptor.parent)
+                    except (OSError, ValueError, NarrativeStoreError):
+                        # 图谱文件损坏不应阻断对话；摘要退化为使用节点 id。
+                        logger.warning("Narrative bundle load failed for room %s", room_id, exc_info=True)
+                narrative_summary = render_state_summary(narrative, narrative_bundle)
         if effective_suggestions and isinstance(projected_state, dict):
             # Only AI-relevant active house rules reach the prompt, injected into
             # the dynamic room-state layer so the static prefix stays cacheable.
@@ -977,6 +992,15 @@ def chat():
         # 而不是让玩家面对一条没有任何说明的回复。
         if result.notice:
             ai_response = f"{ai_response}\n\n{result.notice}" if ai_response else result.notice
+        # 输出侧护栏：工具可能已经推进状态，因此按最新状态过滤，而不是请求开始时的快照。
+        if narrative_bundle is not None and ai_response:
+            ai_response = apply_output_guard(
+                ai_response,
+                narrative_bundle,
+                narrative_from_room_state(agent_context.room_state()),
+                GuardPolicy.for_mode("graph"),
+                room_id=str(room_id) if room_id else None,
+            )
         if not ai_response:
             return error_response(
                 "AI platform did not return a response",
