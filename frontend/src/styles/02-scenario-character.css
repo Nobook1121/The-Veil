@@ -2440,3 +2440,202 @@ body.is-guest .guest-login-hint {
     }
 }
 
+/* 世界树 / 图谱页签（设计文档 §8.1） */
+.scenario-tabs {
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+}
+
+.scenario-tab-content {
+    min-height: 320px;
+}
+
+.scenario-tree-toolbar,
+.scenario-validate-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.scenario-tree-toolbar input[type="search"] {
+    max-width: 320px;
+}
+
+.scenario-tree-layout {
+    display: grid;
+    grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);
+    gap: 1rem;
+    min-height: 420px;
+}
+
+.scenario-tree-list,
+.scenario-node-inspector {
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    max-height: 56vh;
+    overflow: auto;
+}
+
+.scenario-tree-list {
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.scenario-tree-node-button {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.35rem 0.5rem;
+    border: 0;
+    border-radius: 0.35rem;
+    background: transparent;
+    text-align: left;
+    color: inherit;
+}
+
+.scenario-tree-node-button:hover {
+    background: rgba(13, 110, 253, 0.08);
+}
+
+.scenario-tree-node.active > .scenario-tree-node-button {
+    background: rgba(13, 110, 253, 0.16);
+    font-weight: 600;
+}
+
+.scenario-tree-node-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.scenario-tree-node-kind {
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.scenario-tree-children {
+    margin-left: 0.85rem;
+    padding-left: 0.5rem;
+    border-left: 1px dashed var(--bs-border-color, #dee2e6);
+}
+
+.scenario-inspector-rows {
+    margin-bottom: 0.75rem;
+}
+
+.scenario-inspector-row {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 0.5rem;
+    padding: 0.3rem 0;
+    border-bottom: 1px dashed var(--bs-border-color, #dee2e6);
+    font-size: 0.86rem;
+}
+
+.scenario-inspector-row > span {
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.scenario-inspector-body,
+.scenario-inspector-kp,
+.scenario-inspector-edges {
+    margin-top: 0.75rem;
+}
+
+.scenario-inspector-pre {
+    white-space: pre-wrap;
+    font-size: 0.86rem;
+    max-height: 18vh;
+    overflow: auto;
+}
+
+.scenario-inspector-kp {
+    padding: 0.6rem 0.75rem;
+    border-left: 3px solid var(--bs-danger, #dc3545);
+    background: rgba(220, 53, 69, 0.06);
+    border-radius: 0.35rem;
+    font-size: 0.86rem;
+}
+
+.scenario-graph-canvas {
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.5rem;
+    min-height: 460px;
+    overflow: auto;
+    background:
+        linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px) 0 0 / 24px 24px,
+        linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px) 0 0 / 24px 24px,
+        var(--bs-body-bg, #ffffff);
+}
+
+.scenario-graph-canvas svg {
+    display: block;
+}
+
+.scenario-graph-node {
+    cursor: pointer;
+}
+
+.scenario-validate-order {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0;
+    font-size: 0.86rem;
+}
+
+.scenario-validate-results {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.scenario-validate-item {
+    border-left: 3px solid var(--bs-info, #0dcaf0);
+    background: rgba(13, 202, 240, 0.08);
+    border-radius: 0.35rem;
+    padding: 0.5rem 0.75rem;
+}
+
+.scenario-validate-item.scenario-validate-danger {
+    border-left-color: var(--bs-danger, #dc3545);
+    background: rgba(220, 53, 69, 0.07);
+}
+
+.scenario-validate-item.scenario-validate-warning {
+    border-left-color: var(--bs-warning, #ffc107);
+    background: rgba(255, 193, 7, 0.1);
+}
+
+.scenario-validate-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.scenario-generate-panel {
+    border: 1px dashed var(--bs-border-color, #dee2e6);
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    text-align: center;
+}
+
+@media (max-width: 768px) {
+    .scenario-tree-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .scenario-tree-list,
+    .scenario-node-inspector {
+        max-height: 40vh;
+    }
+}
+

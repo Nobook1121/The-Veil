@@ -9,6 +9,11 @@ interface Window {
     ScenarioModel: ScenarioModelConstructor;
     ScenarioView: ScenarioViewConstructor;
     ScenarioController: { new(): unknown };
+    ScenarioNarrative?: {
+        load: (scenarioId: number | string, options?: { readonly?: boolean }) => Promise<void>;
+        clear: () => void;
+        init: () => void;
+    };
     DiceTool: DiceToolConstructor;
     CheckTool: CheckToolConstructor;
     ToolManager: ToolManagerConstructor;

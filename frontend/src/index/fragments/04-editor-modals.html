@@ -7,6 +7,28 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" data-i18n-aria-label="scenario.modal.close" aria-label="关闭"></button>
                 </div>
                 <div class="modal-body">
+                    <ul class="nav nav-tabs scenario-tabs" id="scenarioTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="scenarioTabBasicBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabBasic" type="button" role="tab" aria-controls="scenarioTabBasic" aria-selected="true" data-i18n="scenario.tab.basic">基本</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="scenarioTabModulesBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabModules" type="button" role="tab" aria-controls="scenarioTabModules" aria-selected="false" data-i18n="scenario.tab.modules">模块</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="scenarioTabTreeBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabTree" type="button" role="tab" aria-controls="scenarioTabTree" aria-selected="false" data-i18n="scenario.tab.tree">世界树</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="scenarioTabGraphBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabGraph" type="button" role="tab" aria-controls="scenarioTabGraph" aria-selected="false" data-i18n="scenario.tab.graph">图谱</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="scenarioTabValidateBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabValidate" type="button" role="tab" aria-controls="scenarioTabValidate" aria-selected="false" data-i18n="scenario.tab.validate">校验</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="scenarioTabGenerateBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabGenerate" type="button" role="tab" aria-controls="scenarioTabGenerate" aria-selected="false" data-i18n="scenario.tab.generate">生成</button>
+                        </li>
+                    </ul>
+                    <div class="tab-content scenario-tab-content" id="scenarioTabContent">
+                    <div class="tab-pane fade show active" id="scenarioTabBasic" role="tabpanel" aria-labelledby="scenarioTabBasicBtn">
                     <div class="scenario-basic-layout">
                         <label class="form-group scenario-cover-field">
                             <span data-i18n="scenario.field.cover">封面图片</span>
@@ -48,7 +70,9 @@
                             </label>
                         </div>
                     </div>
+                    </div>
 
+                    <div class="tab-pane fade" id="scenarioTabModules" role="tabpanel" aria-labelledby="scenarioTabModulesBtn">
                     <section class="scenario-resource-panel" id="scenarioResourcePanel" hidden>
                         <div class="scenario-module-toolbar">
                             <div>
@@ -96,6 +120,56 @@
 
                     <div id="scenarioModules" class="scenario-module-list">
                         <!-- 模块将在这里动态生成 -->
+                    </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="scenarioTabTree" role="tabpanel" aria-labelledby="scenarioTabTreeBtn">
+                        <div class="scenario-tree-toolbar">
+                            <input type="search" class="form-control form-control-sm" id="scenarioTreeSearch" placeholder="搜索节点…" data-i18n-placeholder="scenario.tree.search">
+                            <span class="badge bg-secondary" id="scenarioTreeStatus" data-i18n="scenario.tree.empty_badge">未生成世界树</span>
+                        </div>
+                        <div class="scenario-tree-layout">
+                            <div class="scenario-tree-list" id="scenarioTreeList" role="tree">
+                                <p class="text-muted small mb-0" data-i18n="scenario.tree.empty">保存剧本并生成世界树后，可在此查看章节、地点与结局。</p>
+                            </div>
+                            <div class="scenario-node-inspector" id="scenarioNodeInspector">
+                                <p class="text-muted small mb-0" data-i18n="scenario.tree.select_hint">选择左侧节点查看详情。</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="scenarioTabGraph" role="tabpanel" aria-labelledby="scenarioTabGraphBtn">
+                        <p class="text-muted small mb-2" data-i18n="scenario.graph.readonly_hint">只读预览：节点位置按确定性布局排列；拖拽与缩放将在后续步骤开放。</p>
+                        <div class="scenario-graph-canvas" id="scenarioGraphCanvas"></div>
+                    </div>
+
+                    <div class="tab-pane fade" id="scenarioTabValidate" role="tabpanel" aria-labelledby="scenarioTabValidateBtn">
+                        <div class="scenario-validate-toolbar">
+                            <button type="button" class="btn btn-outline-primary btn-sm" id="scenarioValidateRun">
+                                <i class="fa fa-stethoscope" aria-hidden="true"></i>
+                                <span data-i18n="scenario.validate.run">运行校验</span>
+                            </button>
+                            <label class="scenario-validate-order">
+                                <input type="checkbox" id="scenarioValidateAllOrders">
+                                <span data-i18n="scenario.validate.all_orders">任意顺序模拟</span>
+                            </label>
+                            <span class="text-muted small" id="scenarioValidateSummary"></span>
+                        </div>
+                        <div class="scenario-validate-results" id="scenarioValidateResults">
+                            <p class="text-muted small mb-0" data-i18n="scenario.validate.hint">运行校验会检查死亡节点、死锁触发器、越级出口与禁词泄漏。</p>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="scenarioTabGenerate" role="tabpanel" aria-labelledby="scenarioTabGenerateBtn">
+                        <div class="scenario-generate-panel">
+                            <h6 data-i18n="scenario.generate.title">生成世界树</h6>
+                            <p class="text-muted small" data-i18n="scenario.generate.hint">保存剧本后，由确定性抽取与拓扑识别生成 World Tree。生成向导将在后续步骤接入；当前可先使用控制台 narrative build。</p>
+                            <button type="button" class="btn btn-outline-primary btn-sm" id="scenarioGenerateRun" disabled>
+                                <i class="fa fa-magic" aria-hidden="true"></i>
+                                <span data-i18n="scenario.generate.run">开始生成</span>
+                            </button>
+                        </div>
+                    </div>
                     </div>
                 </div>
                 <div class="modal-footer">
