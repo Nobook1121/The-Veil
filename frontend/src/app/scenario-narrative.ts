@@ -1342,9 +1342,18 @@
         }
     }
 
-    async function deleteSelectedEdge(): Promise<void> {
+    async function deleteSelectedEdge(confirmFirst = false): Promise<void> {
         const edge = edgeById(state.selectedEdgeId);
         if (!edge || !editable()) return;
+        if (confirmFirst) {
+            const confirmed = await window.TrpgDialog?.confirm({
+                title: t("scenario.graph.delete_edge", "删除连接"),
+                message: t("scenario.graph.delete_edge_confirm", "确定删除选中的连接？"),
+                confirmText: t("scenario.common.delete", "删除"),
+                danger: true,
+            });
+            if (!confirmed) return;
+        }
         try {
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ revision: number }>>(
                 `/api/scenarios/${state.scenarioId}/narrative/edges/${encodeURIComponent(edge.id)}`,
@@ -1750,12 +1759,25 @@
         document.addEventListener(
             "keydown",
             (event) => {
-                if (event.key !== "Escape" || state.mode !== "connect") return;
                 if (!byId("scenarioModal")?.classList.contains("show")) return;
+                if (event.key === "Escape" && state.mode === "connect") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    state.connectSource = "";
+                    setMode("select");
+                    return;
+                }
+                if ((event.key !== "Delete" && event.key !== "Backspace") || state.selectedEdgeId === "") return;
+                const target = event.target;
+                const typing =
+                    target instanceof HTMLElement &&
+                    (target.tagName === "INPUT" ||
+                        target.tagName === "TEXTAREA" ||
+                        target.tagName === "SELECT" ||
+                        target.isContentEditable);
+                if (typing) return;
                 event.preventDefault();
-                event.stopPropagation();
-                state.connectSource = "";
-                setMode("select");
+                void deleteSelectedEdge(true);
             },
             true,
         );

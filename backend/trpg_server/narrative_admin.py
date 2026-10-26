@@ -15,8 +15,10 @@ from trpg_server.agents.narrative.builder import (
     rebuild_all,
     rebuild_from_descriptor,
 )
+from trpg_server.agents.narrative.metrics import COUNTERS, load_metrics
 from trpg_server.agents.narrative.model import NarrativeBundle, TOPOLOGIES
 from trpg_server.agents.narrative.opening import begin_scenario, plan_scenario
+from trpg_server.agents.narrative.runtime_settings import resolve_narrative_settings
 from trpg_server.agents.narrative.store import (
     build_index,
     bundle_summary,
@@ -769,7 +771,41 @@ def _visibility_command(
     return True, "\n".join(lines)
 
 
-def _stats_command(scenarios_dir: Path | str, flags: set[str]) -> tuple[bool, str]:
+def _room_metrics_rows(rooms_dir: Path | str | None) -> list[dict[str, Any]]:
+    """§10.6 / §12.6：按房间运行档位聚合 `metrics.json`，用于灰度对比。"""
+    if not rooms_dir:
+        return []
+    root = Path(rooms_dir)
+    if not root.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for room_dir in sorted(root.iterdir()):
+        if not room_dir.is_dir():
+            continue
+        state = read_json(room_dir / "state.json", default={})
+        if not isinstance(state, dict) or not state:
+            continue
+        rules = state.get("house_rules") if isinstance(state.get("house_rules"), dict) else {}
+        settings = resolve_narrative_settings({"house_rules": rules})
+        metrics = load_metrics(room_dir)
+        rows.append(
+            {
+                "room": room_dir.name,
+                "profile": settings.profile,
+                "guard": settings.guard,
+                "source": settings.source,
+                "metrics": {name: metrics.get(name, 0) for name in COUNTERS},
+                "avg_latency_ms": metrics.get("avg_latency_ms", 0),
+            }
+        )
+    return rows
+
+
+def _stats_command(
+    scenarios_dir: Path | str,
+    flags: set[str],
+    rooms_dir: Path | str | None = None,
+) -> tuple[bool, str]:
     rows: list[dict[str, Any]] = []
     total_nodes = total_edges = total_warnings = total_errors = 0
     topology_counts: dict[str, int] = {}
@@ -798,6 +834,16 @@ def _stats_command(scenarios_dir: Path | str, flags: set[str]) -> tuple[bool, st
                 "generated_at": bundle.generated_at,
             }
         )
+    room_rows = _room_metrics_rows(rooms_dir)
+    by_profile: dict[str, dict[str, Any]] = {}
+    for row in room_rows:
+        bucket = by_profile.setdefault(
+            row["profile"],
+            {"profile": row["profile"], "rooms": 0, **{name: 0 for name in COUNTERS}},
+        )
+        bucket["rooms"] += 1
+        for name in COUNTERS:
+            bucket[name] += int(row["metrics"].get(name, 0) or 0)
     payload = {
         "scenarios": rows,
         "totals": {
@@ -809,6 +855,8 @@ def _stats_command(scenarios_dir: Path | str, flags: set[str]) -> tuple[bool, st
             "errors": total_errors,
             "topology": topology_counts,
         },
+        "rooms": room_rows,
+        "by_profile": sorted(by_profile.values(), key=lambda item: item["profile"]),
     }
     if "json" in flags:
         return True, _json(payload)
@@ -818,6 +866,14 @@ def _stats_command(scenarios_dir: Path | str, flags: set[str]) -> tuple[bool, st
         f"{totals['nodes']} 节点 / {totals['edges']} 边，{totals['errors']} error / {totals['warnings']} warn",
         "  拓扑分布：" + ("、".join(f"{key}={value}" for key, value in sorted(topology_counts.items())) or "-"),
     ]
+    if payload["by_profile"]:
+        lines.append("  房间指标（按档位）：")
+        for item in payload["by_profile"]:
+            lines.append(
+                f"    profile={item['profile']} rooms={item['rooms']} "
+                f"turns={item['turn_count']} guard_denied={item['guard_denied']} "
+                f"trigger_fired={item['triggers_fired']} opening_fallback={item['opening_fallbacks']}"
+            )
     missing = [row["scenario"] for row in rows if not row.get("exists")]
     if missing:
         lines.append("  未生成：" + "、".join(missing))
@@ -918,7 +974,7 @@ def handle_narrative_command(
     if subcommand == "visibility":
         return _visibility_command(rest, scenarios_dir, flags, confirm)
     if subcommand == "stats":
-        return _stats_command(scenarios_dir, flags)
+        return _stats_command(scenarios_dir, flags, rooms_dir)
     return False, (
         f"未知 narrative 子命令：{subcommand}（可用 status/validate/topology/build/opening/"
         "rebuild-index/diff/backfill/media/visibility/stats）"

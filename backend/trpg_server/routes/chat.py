@@ -649,6 +649,7 @@ def chat():
                     log_event(
                         "jev.turn",
                         room_id=str(room_id),
+                        profile=narrative_settings.profile,
                         intent=turn_contract.intent,
                         confidence=turn_contract.confidence,
                         candidates=len(retrieval_candidate_ids),
@@ -659,7 +660,12 @@ def chat():
         if room_id:
             # meta / combat 分支不需要剧情检索（§5.1）；预判失败时保持原有检索行为。
             if turn_contract is not None and turn_contract.skip_retrieval:
-                log_event("retrieval.skipped", room_id=str(room_id), intent=turn_contract.intent)
+                log_event(
+                    "retrieval.skipped",
+                    room_id=str(room_id),
+                    profile=narrative_settings.profile,
+                    intent=turn_contract.intent,
+                )
             else:
                 _emit_thinking_stage(room_id, ai_request_id, "vector_search", "正在调用向量库")
                 try:
@@ -697,6 +703,7 @@ def chat():
                         log_event(
                             "retrieval.candidates_empty",
                             room_id=str(room_id),
+                            profile=narrative_settings.profile,
                             candidates=len(retrieval_candidate_ids),
                             titles=len(retrieval_candidate_titles),
                         )
@@ -1146,6 +1153,7 @@ def chat():
             log_event(
                 "opening.fallback",
                 room_id=str(room_id) if room_id else None,
+                profile=narrative_settings.profile,
                 scenario_id=opening_plan.scenario_id,
                 location_id=opening_plan.location_id,
                 mode=opening_plan.opening_mode,

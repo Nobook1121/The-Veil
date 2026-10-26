@@ -87,6 +87,38 @@ def test_rebuild_index_and_stats(tmp_path):
     assert payload["totals"]["nodes"] >= 1
 
 
+def test_stats_groups_room_metrics_by_profile(tmp_path):
+    root = _prepare(tmp_path)
+    handle_narrative_command(["build", "7", "--yes"], root)
+    rooms = tmp_path / "rooms"
+    graph_room = rooms / "room-graph"
+    degraded_room = rooms / "room-degraded"
+    graph_room.mkdir(parents=True)
+    degraded_room.mkdir(parents=True)
+    write_json_atomic(graph_room / "state.json", {"house_rules": {"narrative_profile": "graph"}})
+    write_json_atomic(degraded_room / "state.json", {"house_rules": {"narrative_profile": "degraded"}})
+    write_json_atomic(
+        graph_room / "metrics.json",
+        {"turn_count": 3, "guard_denied": 1, "triggers_fired": 2},
+    )
+    write_json_atomic(degraded_room / "metrics.json", {"turn_count": 5, "opening_fallbacks": 1})
+
+    ok, text = handle_narrative_command(["stats", "--json"], root, rooms_dir=rooms)
+    assert ok
+    payload = json.loads(text)
+    assert len(payload["rooms"]) == 2
+    by_profile = {item["profile"]: item for item in payload["by_profile"]}
+    assert by_profile["graph"]["turn_count"] == 3
+    assert by_profile["graph"]["guard_denied"] == 1
+    assert by_profile["graph"]["triggers_fired"] == 2
+    assert by_profile["degraded"]["turn_count"] == 5
+    assert by_profile["degraded"]["opening_fallbacks"] == 1
+
+    ok, text = handle_narrative_command(["stats"], root, rooms_dir=rooms)
+    assert ok
+    assert "房间指标（按档位）" in text
+
+
 def test_diff_between_versions(tmp_path):
     root = _prepare(tmp_path)
     scenario_dir = root / "scenario-7"

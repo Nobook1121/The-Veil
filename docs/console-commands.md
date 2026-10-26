@@ -215,7 +215,7 @@ narrative backfill [--yes] [--json]                      为存量剧本回填 b
 narrative media <scenario-id> [--missing] [--json]       列出媒体资产与缺失项
 narrative media verify <scenario-id> [--fix-thumbs] [--yes] [--json]
 narrative visibility <scenario-id> [--review|--auto] [--yes] [--json]
-narrative stats [--json]                                 全站世界树规模与质量总览
+narrative stats [--json]                                 全站世界树规模、质量总览与房间指标（按 profile 分组）
 ```
 
 - `status`：显示拓扑、节点/边数量、入口、`build_hash`、不可达地点与孤立资产；省略 ID 时列出全部剧本。
