@@ -36,3 +36,23 @@ def test_index_and_assets_are_served_with_no_cache(tmp_path: Path):
     stylesheet = client.get("/js/react/main.css")
     assert stylesheet.status_code == 200
     assert "no-cache" in stylesheet.headers.get("Cache-Control", "")
+
+
+def test_content_addressed_scenario_assets_are_immutable(tmp_path: Path):
+    """§9：按 hash 命名的素材内容与文件名绑定，可长期缓存；其它剧本文件仍 no-cache。"""
+    assets_dir = tmp_path / "scenarios" / "scenario-7" / "assets"
+    assets_dir.mkdir(parents=True)
+    (assets_dir / "0123456789abcdef.png").write_bytes(b"png")
+    (assets_dir / "0123456789abcdef_thumb.jpg").write_bytes(b"jpg")
+    (assets_dir / "legacy.png").write_bytes(b"png")
+
+    client = _client(tmp_path)
+    hashed = client.get("/assets/scenarios/scenario-7/assets/0123456789abcdef.png")
+    assert hashed.status_code == 200
+    assert hashed.headers.get("Cache-Control") == "private, max-age=31536000, immutable"
+
+    thumb = client.get("/assets/scenarios/scenario-7/assets/0123456789abcdef_thumb.jpg")
+    assert "immutable" in thumb.headers.get("Cache-Control", "")
+
+    legacy = client.get("/assets/scenarios/scenario-7/assets/legacy.png")
+    assert "no-cache" in legacy.headers.get("Cache-Control", "")
