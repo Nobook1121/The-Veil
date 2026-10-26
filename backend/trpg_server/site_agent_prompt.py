@@ -92,7 +92,8 @@ def build_system_prompt(
             "4. 新增正文默认继承父节点 visibility；需要公开时显式声明；不得把 kp_notes 改写成可讲述正文。\n"
             "5. 标 hidden 必须同时给 reveal_when；无法给出条件时标 needs_review，不得猜 public。\n"
             "6. 只能收紧可见性：可把 public 改为 hidden/kp_only，不能把 kp_only 放开为 public。\n"
-            "7. 写操作先调用 narrative.propose_patch 生成预览，不要直接声称已保存；发布必须由用户完成。"
+            "7. 写操作先调用 narrative.propose_patch 或 narrative.expand_node 生成预览，不要直接声称已保存；发布必须由用户完成。\n"
+            "8. 生成或扩写正文后调用 narrative.classify_visibility 复核；不得自行把 kp_only 降级为 public。"
         )
     return "\n\n".join(
         [

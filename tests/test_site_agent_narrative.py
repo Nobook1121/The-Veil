@@ -83,3 +83,48 @@ def test_readonly_import_is_rejected(monkeypatch):
     )
     assert not result.ok
     assert "只读" in result.error
+
+
+def test_classify_visibility_returns_patches_without_writing(monkeypatch):
+    bundle = _bundle()
+    monkeypatch.setattr(tools, "_bundle", lambda actor, sid: ({"id": 7}, bundle, Path(".")))
+    result = tools.classify_visibility_tool(None, {"scenario_id": 7, "scope": "all"}, _context())
+    assert result.ok, result.error
+    nodes = {item["id"]: item for item in result.data["items"] if item["type"] == "node"}
+    edges = {item["id"]: item for item in result.data["items"] if item["type"] == "edge"}
+    assert nodes["clue-1"]["visibility"] == "kp_only"
+    assert nodes["room-a"]["visibility"] == "public"
+    assert "e1" in edges and edges["e1"]["current"] == "hidden"
+    assert bundle.node("clue-1").visibility == "kp_only"
+
+    bad = tools.classify_visibility_tool(None, {"scenario_id": 7, "scope": "unknown"}, _context())
+    assert not bad.ok
+
+
+def test_expand_node_previews_patch_and_inherits_visibility(monkeypatch, tmp_path):
+    bundle = _bundle()
+    monkeypatch.setattr(tools, "_bundle", lambda actor, sid: ({"id": 7}, bundle, tmp_path))
+    monkeypatch.setattr(tools, "save_bundle", lambda storage, patched: storage / "narrative.json")
+
+    args = {"scenario_id": 7, "node_id": "room-a", "body": "大厅中央有喷泉。", "instruction": "补充场景细节"}
+    preview = tools.preview_expand(None, args, _context())
+    assert preview.ok, preview.error
+    assert "room-a" in preview.data["diff"]["nodes"]["modified"]
+    assert preview.data["visibility"] == "public"
+    assert preview.data["apply_args"]["operations"][0]["op"] == "update_node"
+    assert bundle.node("room-a").body == "大厅"
+
+    tightened = tools.preview_expand(
+        None, {**args, "visibility": "kp_only"}, _context()
+    )
+    assert tightened.ok, tightened.error
+    assert tightened.data["visibility"] == "kp_only"
+
+    assert not tools.preview_expand(None, {"scenario_id": 7, "node_id": "missing", "body": "x"}, _context()).ok
+    assert not tools.preview_expand(
+        None, {**args, "base_version": 1}, _context()
+    ).ok
+
+    applied = tools.apply_patch(None, preview.data["apply_args"], _context())
+    assert applied.ok, applied.error
+    assert applied.data["revision"] == 4

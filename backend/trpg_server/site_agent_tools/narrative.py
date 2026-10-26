@@ -184,6 +184,92 @@ def validate_tool(actor: Any, arguments: dict[str, Any], context: ToolContext) -
     )
 
 
+def _author_visibility(node: NarrativeNode, field: str) -> str | None:
+    """只在作者显式设置时返回当前值，自动判定项交给规则重新评估（§7.5.1）。"""
+    extra = node.extra if isinstance(node.extra, dict) else {}
+    if extra.get("visibility_source") not in {"author", "import"}:
+        return None
+    return field or None
+
+
+def classify_visibility_tool(actor: Any, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+    """§7.5.1 只做规则判定，返回每个对象的可见性补丁，不落盘。"""
+    try:
+        _, bundle, _ = _bundle(actor, _scenario_ref(arguments, context))
+    except scenario_service.ScenarioServiceError as exc:
+        return ToolResult.failure(exc.message)
+    scope = str(arguments.get("scope") or "node").strip().lower()
+    if scope not in {"node", "edge", "keyword", "all"}:
+        return ToolResult.failure("scope 只支持 node / edge / keyword / all")
+    items: list[dict[str, Any]] = []
+    if scope in {"node", "keyword", "all"}:
+        for node in bundle.nodes:
+            decision = classify_visibility(
+                kind=node.kind,
+                title=node.title,
+                summary=node.summary,
+                body=node.body,
+                kp_notes=node.kp_notes,
+                keywords=node.keywords,
+                reveal_when=node.reveal_when,
+                explicit=_author_visibility(node, normalize_visibility(node.visibility)),
+            )
+            extra = node.extra if isinstance(node.extra, dict) else {}
+            current = normalize_visibility(node.visibility)
+            proposed = tighten(current, decision.visibility)
+            if scope in {"node", "all"}:
+                items.append(
+                    {
+                        "type": "node",
+                        "id": node.id,
+                        "current": current,
+                        "visibility": proposed,
+                        "score": round(decision.confidence, 2),
+                        "evidence": list(decision.reasons),
+                        "source": decision.source,
+                        "needs_review": bool(decision.needs_review or extra.get("needs_review")),
+                    }
+                )
+            if scope in {"keyword", "all"} and (node.keywords or node.aliases):
+                keyword_current = normalize_visibility(extra.get("keywords_visibility") or "public")
+                items.append(
+                    {
+                        "type": "keyword",
+                        "id": node.id,
+                        "current": keyword_current,
+                        "visibility": tighten(keyword_current, decision.keywords_visibility),
+                        "score": round(decision.confidence, 2),
+                        "evidence": list(decision.reasons),
+                        "needs_review": bool(extra.get("needs_review")),
+                    }
+                )
+            if len(items) >= 200:
+                break
+    if scope in {"edge", "all"}:
+        for edge in bundle.edges:
+            extra = edge.extra if isinstance(edge.extra, dict) else {}
+            author = extra.get("visibility_source") in {"author", "import"}
+            items.append(
+                {
+                    "type": "edge",
+                    "id": edge.id,
+                    "current": normalize_visibility(edge.visibility),
+                    "visibility": normalize_visibility(edge.visibility),
+                    "score": 1.0 if author else 0.6,
+                    "evidence": ["author"] if author else ["inherit"],
+                    "source": "author" if author else "auto",
+                    "needs_review": bool(extra.get("needs_review")),
+                }
+            )
+            if len(items) >= 200:
+                break
+    truncated = len(items) >= 200
+    return ToolResult.success(
+        {"items": items[:200], "truncated": truncated, "scope": scope, "strategy": str(arguments.get("strategy") or "auto")},
+        summary=f"可见性判定：{len(items[:200])} 项（{scope}，规则模式）",
+    )
+
+
 # --------------------------------------------------------------------------- 写
 
 
@@ -381,6 +467,55 @@ def preview_patch(actor: Any, arguments: dict[str, Any], context: ToolContext) -
     )
 
 
+_EXPAND_FIELDS = {"body", "summary", "objects", "interactions"}
+
+
+def preview_expand(actor: Any, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+    """§8.4 节点扩写：只返回补丁预览，可见性默认继承父节点，不落盘。"""
+    try:
+        scenario, bundle, _ = _bundle(actor, _scenario_ref(arguments, context))
+    except scenario_service.ScenarioServiceError as exc:
+        return ToolResult.failure(exc.message)
+    denied = _writable(scenario)
+    if denied:
+        return ToolResult.failure(denied)
+    node_id = str(arguments.get("node_id") or "").strip()
+    node = bundle.node(node_id)
+    if node is None:
+        return ToolResult.failure("找不到该节点")
+    base_version = arguments.get("base_version")
+    if base_version is not None and int(base_version) != _revision(bundle):
+        return ToolResult.failure(f"剧本已更新（当前版本 {_revision(bundle)}），请重新读取后再试")
+    fields = {key: arguments[key] for key in _EXPAND_FIELDS if arguments.get(key) is not None}
+    if not fields:
+        return ToolResult.failure("请提供扩写内容（body / summary / objects / interactions）")
+    visibility = str(arguments.get("visibility") or "").strip()
+    if visibility:
+        if visibility not in VISIBILITY_STATES:
+            return ToolResult.failure(f"可见性不合法：{visibility}")
+        fields["visibility"] = visibility
+    operation = {"op": "update_node", "node_id": node_id, "node": {"id": node_id, **fields}}
+    patched, ignored = _apply_operations(bundle, [operation])
+    expanded = patched.node(node_id)
+    extra = expanded.extra if expanded is not None and isinstance(expanded.extra, dict) else {}
+    return ToolResult.success(
+        {
+            "diff": _diff(bundle, patched),
+            "ignored": ignored[:20],
+            "instruction": str(arguments.get("instruction") or "")[:500],
+            "visibility": normalize_visibility(expanded.visibility) if expanded else normalize_visibility(node.visibility),
+            "needs_review": bool(extra.get("needs_review")),
+            "base_version": _revision(bundle),
+            "apply_args": {
+                "scenario_id": scenario.get("id"),
+                "base_version": _revision(bundle),
+                "operations": [operation],
+            },
+        },
+        summary=f"已生成「{node.title or node_id}」扩写预览（待确认）",
+    )
+
+
 def apply_patch(actor: Any, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     try:
         scenario, bundle, storage = _bundle(actor, _scenario_ref(arguments, context))
@@ -518,6 +653,49 @@ NARRATIVE_TOOLS = [
         risk="read",
         required_permission="scenarios.preview",
         handler=validate_tool,
+    ),
+    ToolSpec(
+        name="narrative.classify_visibility",
+        description=(
+            "按 §7.5.1 规则判定可见性（不调用模型、不落盘），返回每个对象的 "
+            "visibility / score / evidence / needs_review 补丁。scope 支持 node / edge / keyword / all。"
+        ),
+        parameters=schema(
+            {
+                "scenario_id": {"type": "integer"},
+                "scope": {"type": "string", "enum": ["node", "edge", "keyword", "all"]},
+                "strategy": {"type": "string", "enum": ["auto", "rules_only"]},
+            },
+            ["scenario_id"],
+        ),
+        risk="read",
+        required_permission="scenarios.preview",
+        handler=classify_visibility_tool,
+    ),
+    ToolSpec(
+        name="narrative.expand_node",
+        description=(
+            "扩写节点正文 / 摘要 / 物件 / 交互，返回补丁 diff，不落盘；扩写内容默认继承父节点可见性，"
+            "需要公开时显式传 visibility=public（只能收紧或显式声明）。"
+        ),
+        parameters=schema(
+            {
+                "scenario_id": {"type": "integer"},
+                "node_id": {"type": "string", "maxLength": 80},
+                "instruction": {"type": "string", "maxLength": 500},
+                "base_version": {"type": "integer", "minimum": 0},
+                "body": {"type": "string"},
+                "summary": {"type": "string"},
+                "objects": {"type": "array"},
+                "interactions": {"type": "array"},
+                "visibility": {"type": "string", "enum": ["public", "hidden", "kp_only"]},
+            },
+            ["scenario_id", "node_id"],
+        ),
+        risk="write",
+        required_permission="scenarios.create",
+        preview=preview_expand,
+        apply=apply_patch,
     ),
     ToolSpec(
         name="narrative.propose_patch",
