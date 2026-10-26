@@ -134,6 +134,24 @@
     overflow-x: auto;
 }
 
+.room-narrative-triggers {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.room-narrative-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.4rem 0.55rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.4rem;
+    background: var(--bs-body-bg, #fff);
+    font-size: 0.85rem;
+}
+
 .room-binding-table {
     min-width: 720px;
     table-layout: fixed;

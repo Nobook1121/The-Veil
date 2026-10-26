@@ -21,6 +21,11 @@ interface Window {
         init: () => void;
         syncRevision: (revision: number) => void;
     };
+    RoomNarrative?: {
+        load: (roomId: string) => Promise<void>;
+        clear: () => void;
+        init: () => void;
+    };
     DiceTool: DiceToolConstructor;
     CheckTool: CheckToolConstructor;
     ToolManager: ToolManagerConstructor;

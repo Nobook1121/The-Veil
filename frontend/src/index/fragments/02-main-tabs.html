@@ -278,6 +278,35 @@
                                     <p class="small text-muted mb-0" id="roomDetailUsage" hidden></p>
                                 </div>
                             </div>
+                            <!-- 世界树运行态：当前地点、队伍分布、时钟与 KP 手动触发 -->
+                            <div class="card mb-4" id="roomNarrativePanel" data-room-sensitive hidden>
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <h5 class="card-title mb-0" data-i18n="room.narrative.title">世界树运行态</h5>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="roomNarrativeRefresh" data-i18n="room.narrative.refresh">刷新</button>
+                                    </div>
+                                    <div id="roomNarrativeStatus" class="small text-muted mb-3"></div>
+                                    <div class="row g-3">
+                                        <div class="col-md-6">
+                                            <h6 class="mb-2" data-i18n="room.narrative.current_location">当前地点</h6>
+                                            <div id="roomNarrativeLocation" class="small"></div>
+                                            <div id="roomNarrativeKpOnly" class="small text-warning mt-2" hidden data-i18n="room.narrative.kp_hint">该地点尚未向玩家揭示。</div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <h6 class="mb-2" data-i18n="room.narrative.party">队伍分布</h6>
+                                            <div id="roomNarrativeParty" class="small"></div>
+                                        </div>
+                                    </div>
+                                    <div class="mt-3">
+                                        <h6 class="mb-2" data-i18n="room.narrative.clocks">进度时钟</h6>
+                                        <ul class="list-group list-group-flush" id="roomNarrativeClocks"></ul>
+                                    </div>
+                                    <div class="mt-3">
+                                        <h6 class="mb-2" data-i18n="room.narrative.triggers">可触发事件</h6>
+                                        <div id="roomNarrativeTriggers" class="room-narrative-triggers"></div>
+                                    </div>
+                                </div>
+                            </div>
                             <div class="card mb-4" data-room-sensitive>
                                 <div class="card-body">
                                     <h5 class="card-title" data-i18n="room.detail.bindings">角色绑定</h5>
