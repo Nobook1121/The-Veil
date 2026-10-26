@@ -60,6 +60,65 @@ def _codes(report_or_issues) -> list[str]:
     return [issue.code for issue in issues]
 
 
+def test_trigger_validation_reports_broken_references() -> None:
+    bundle = NarrativeBundle(
+        topology="hybrid",
+        nodes=[
+            _node("a", objects=[{"id": "obj_ok", "name": "物件"}]),
+            _node("clue_1", kind="clue"),
+            _node("npc_1", kind="npc"),
+            _node("clock_1", kind="clock"),
+        ],
+        edges=[],
+        triggers=[
+            {
+                "id": "good", "label": "正常",
+                "binding": {"kind": "enter", "location_id": "a"},
+                "attachments": [{"id": "att_1", "kind": "richtext", "body": "正文"}],
+            },
+            {
+                "id": "bad_location", "label": "坏地点",
+                "binding": {"kind": "enter", "location_id": "missing"},
+                "content": "文本",
+            },
+            {
+                "id": "bad_object", "label": "坏物件",
+                "binding": {"kind": "interaction", "location_id": "a", "object_id": "missing"},
+                "content": "文本",
+            },
+            {
+                "id": "bad_clue", "label": "坏线索",
+                "binding": {"kind": "clue", "clue_id": "missing"},
+                "content": "文本",
+            },
+            {
+                "id": "bad_asset", "label": "坏素材",
+                "binding": {"kind": "enter", "location_id": "a"},
+                "attachments": [{"id": "att_2", "kind": "image", "asset_id": "missing_asset"}],
+            },
+            {
+                "id": "manual", "label": "无条件",
+                "binding": {"kind": "manual"},
+                "content": "文本",
+            },
+            {
+                "id": "good", "label": "重复",
+                "binding": {"kind": "enter", "location_id": "a"},
+                "content": "文本",
+            },
+        ],
+    )
+    report = validate_bundle(bundle)
+    codes = _codes(report)
+    assert "trigger.unknown_location" in codes
+    assert "trigger.unknown_object" in codes
+    assert "trigger.unknown_clue" in codes
+    assert "trigger.missing_asset" in codes
+    assert "trigger.duplicate_id" in codes
+    assert "trigger.manual_without_condition" in codes
+    assert "trigger.invalid_binding" not in codes
+
+
 def test_missing_entry_and_ending_are_errors() -> None:
     bundle = NarrativeBundle(
         topology="hybrid",

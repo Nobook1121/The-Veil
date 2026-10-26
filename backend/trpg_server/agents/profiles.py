@@ -7,6 +7,7 @@ from typing import Any
 GRAPH_EXCLUDED_TOOLS = {
     "room.get_scenario_module",
     "room.activate_scenario_scene",
+    "trigger.reveal_scenario_trigger",
 }
 GRAPH_TOOL_NAMES = [
     "narrative.get_current_location",
@@ -18,6 +19,8 @@ GRAPH_TOOL_NAMES = [
     "narrative.reveal_clue",
     "narrative.update_npc_state",
     "narrative.write_fact",
+    "trigger.list_available",
+    "trigger.request",
 ]
 
 DEFAULT_KP_TOOLS = [

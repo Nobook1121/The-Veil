@@ -37,6 +37,8 @@ from trpg_server.agents.narrative.ledger import (
 )
 from trpg_server.agents.narrative.layout import apply_layout
 from trpg_server.agents.narrative.prompt_v2 import render_state_summary
+from trpg_server.agents.narrative.publisher import MAX_MESSAGES_PER_TURN, publish_hits
+from trpg_server.agents.narrative.resolver import TriggerHit, TriggerResolver
 from trpg_server.agents.narrative.state_store import (
     apply_event,
     default_narrative_state,
@@ -47,6 +49,11 @@ from trpg_server.agents.narrative.state_store import (
     write_keyframe,
 )
 from trpg_server.agents.narrative.topology import TopologyDecision, detect_topology
+from trpg_server.agents.narrative.triggers import (
+    adapt_triggers,
+    normalize_asset,
+    normalize_trigger_spec,
+)
 from trpg_server.agents.narrative.validate import (
     ValidationIssue,
     ValidationReport,
@@ -66,14 +73,18 @@ __all__ = [
     "ConditionResult",
     "ExtractedNarrative",
     "LedgerVisibilityError",
+    "MAX_MESSAGES_PER_TURN",
     "NarrativeBundle",
     "NarrativeEdge",
     "NarrativeIndex",
     "NarrativeNode",
     "Section",
     "TopologyDecision",
+    "TriggerHit",
+    "TriggerResolver",
     "ValidationIssue",
     "ValidationReport",
+    "adapt_triggers",
     "append_fact",
     "append_ledger_event",
     "apply_event",
@@ -100,7 +111,10 @@ __all__ = [
     "merge_edges",
     "narrative_path",
     "normalize_narrative_state",
+    "normalize_trigger_spec",
+    "normalize_asset",
     "normalize_visibility",
+    "publish_hits",
     "read_ledger_events",
     "rebuild_all",
     "rebuild_from_descriptor",

@@ -470,6 +470,12 @@ def _apply_trigger_fire(narrative: dict[str, Any], event: Mapping[str, Any], tur
     check_id = str(event.get("check_id") or "").strip()
     if check_id:
         entry["check_id"] = check_id
+    pc = str(event.get("pc") or "").strip()
+    if pc:
+        pcs = _str_list(entry.get("pcs"))
+        if pc not in pcs:
+            pcs.append(pc)
+        entry["pcs"] = pcs[-50:]
     fires[trigger_id] = entry
     narrative["trigger_fires"] = fires
 

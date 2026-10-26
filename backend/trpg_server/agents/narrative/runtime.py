@@ -21,6 +21,8 @@ from trpg_server.agents.narrative.model import (
     NarrativeEdge,
     NarrativeNode,
 )
+from trpg_server.agents.narrative.publisher import publish_hits
+from trpg_server.agents.narrative.resolver import TriggerResolver
 from trpg_server.agents.narrative.state_store import apply_event, load_narrative_state
 from trpg_server.agents.narrative.store import (
     MOVEMENT_EDGE_TYPES,
@@ -348,6 +350,95 @@ class NarrativeRuntime:
             )
         return events
 
+    # ---- 触发器 -----------------------------------------------------------
+    def _auto_triggers(
+        self,
+        kind: str,
+        context: Mapping[str, Any] | None = None,
+        *,
+        pc: str | None = None,
+        source: str | None = None,
+        audience: str = "player",
+    ) -> dict[str, Any]:
+        """状态变更后由引擎自动求值；返回值并入工具结果，前端统一持久化。"""
+        context = dict(context or {})
+        resolver = TriggerResolver(self.bundle, self.narrative)
+        hits, denied = resolver.evaluate(kind, context, pc=pc, audience=audience)
+        if not hits:
+            return {"triggers_fired": [], "trigger_denied": denied}
+        messages = publish_hits(hits, binding=context, source=source or kind, audience=audience)
+        payloads = [
+            {
+                "kind": "trigger_fire",
+                "trigger_id": hit.trigger_id,
+                "pc": _text(pc) or None,
+                "check_id": hit.check_id,
+                "group": hit.group,
+                "source": source or kind,
+            }
+            for hit in hits
+        ]
+        self.record_batch(payloads, summary="触发 " + "、".join(hit.trigger_id for hit in hits))
+        return {
+            "triggers_fired": [hit.trigger_id for hit in hits],
+            "direct_messages": messages,
+            "trigger_denied": denied,
+        }
+
+    def request_trigger(
+        self,
+        trigger_id: Any,
+        *,
+        condition_met: bool | None = None,
+        check_id: str | None = None,
+        pc: str | None = None,
+        action_text: str = "",
+        audience: str = "player",
+    ) -> dict[str, Any]:
+        resolver = TriggerResolver(self.bundle, self.narrative)
+        hits, denied = resolver.request(
+            trigger_id,
+            pc=pc,
+            condition_met=condition_met,
+            check_id=check_id,
+            action_text=action_text,
+            audience=audience,
+        )
+        if not hits:
+            return {
+                "triggered": False,
+                "trigger_id": _text(trigger_id),
+                "denied": denied,
+            }
+        messages = publish_hits(hits, binding={"check_id": check_id}, source="manual", audience=audience)
+        self.record_batch(
+            [
+                {
+                    "kind": "trigger_fire",
+                    "trigger_id": hit.trigger_id,
+                    "pc": _text(pc) or None,
+                    "check_id": check_id or hit.check_id,
+                    "group": hit.group,
+                    "source": "manual",
+                }
+                for hit in hits
+            ],
+            summary="手动触发 " + "、".join(hit.trigger_id for hit in hits),
+        )
+        return {
+            "triggered": True,
+            "trigger_id": hits[0].trigger_id,
+            "direct_messages": messages,
+            "denied": denied,
+        }
+
+    def list_available_triggers(self) -> dict[str, Any]:
+        resolver = TriggerResolver(self.bundle, self.narrative)
+        return {
+            "location_id": self.location_id,
+            "triggers": resolver.available(),
+        }
+
     def move(self, target_ref: Any, *, actor: str | None = None) -> dict[str, Any]:
         target = self.resolve_node(target_ref, kinds=("location", "ending"))
         if target is None:
@@ -378,16 +469,24 @@ class NarrativeRuntime:
                     + "；".join(str(item) for item in gate.missing)
                 )
 
+        visited_before = self.is_visited(target.id)
         event = self.record(
             {"kind": "move", "to": target.id, "from": self.location_id, "actor": _text(actor) or None},
             summary=f"移动到 {target.title or target.id}",
+        )
+        trigger_result = self._auto_triggers(
+            "enter",
+            {"location_id": target.id, "first_time": not visited_before},
+            pc=actor,
+            source="enter",
         )
         return {
             "moved": True,
             "location_id": target.id,
             "title": target.title or target.id,
-            "visited_before": self.is_visited(target.id),
+            "visited_before": visited_before,
             "event_id": event["id"],
+            **trigger_result,
         }
 
     def _find_object(self, reference: Any) -> tuple[NarrativeNode, dict[str, Any], str, bool]:
@@ -447,6 +546,7 @@ class NarrativeRuntime:
         total: int | None = None,
         roll: int | None = None,
         pc: str | None = None,
+        check_id: str | None = None,
     ) -> dict[str, Any]:
         _, obj, _, newly_revealed = self._find_object(object_ref)
         interactions = [item for item in (obj.get("interactions") or []) if isinstance(item, Mapping)]
@@ -462,6 +562,17 @@ class NarrativeRuntime:
 
         interaction_id = _text(interaction.get("id"))
         normalized_result = _normalize_result(result)
+        check_record = self._check_record(check_id) if check_id else None
+        if check_id and check_record is None:
+            raise NarrativeRuntimeError(f"检定记录 {check_id} 不存在或不属于本房间")
+        if check_record is not None:
+            recorded_skill = _text(check_record.get("skill"))
+            expected_skill = _text(interaction.get("skill") or skill)
+            if recorded_skill and expected_skill and recorded_skill.casefold() != expected_skill.casefold():
+                raise NarrativeRuntimeError("检定技能与交互要求不一致")
+            recorded_result = _normalize_result(check_record.get("result"))
+            if _result_family(recorded_result) != _result_family(normalized_result):
+                raise NarrativeRuntimeError("检定结果与结算结果不一致")
         repeatable = bool(interaction.get("repeatable", True))
         results = self.narrative.get("interaction_results") or {}
         if not repeatable and isinstance(results, Mapping) and interaction_id in results:
@@ -485,7 +596,9 @@ class NarrativeRuntime:
             "interaction_id": interaction_id,
             "result": normalized_result,
             "check": {
+                "check_id": _text(check_id) or None,
                 "skill": _text(skill or interaction.get("skill")),
+                "difficulty": _text(interaction.get("difficulty")) or None,
                 "result": normalized_result,
                 "total": total,
                 "roll": roll,
@@ -503,6 +616,22 @@ class NarrativeRuntime:
             payloads,
             summary=f"交互 {obj.get('name') or object_ref} / {normalized_result}",
         )
+        trigger_result = self._auto_triggers(
+            "interaction",
+            {
+                "location_id": self.location_id,
+                "object_id": _text(obj.get("id")),
+                "interaction_id": interaction_id,
+                "result": normalized_result,
+                "skill": _text(skill or interaction.get("skill")),
+                "difficulty": _text(interaction.get("difficulty")) or None,
+                "check_id": _text(check_id) or None,
+                "success": _result_family(normalized_result) == "success",
+            },
+            pc=pc,
+            source="interaction",
+        )
+        clock_result = self._auto_triggers("clock", {}, pc=pc, source="clock")
         return {
             "resolved": True,
             "interaction_id": interaction_id,
@@ -510,6 +639,7 @@ class NarrativeRuntime:
             "outcome_text": outcome_text,
             "effects_applied": applied,
             "repeatable": repeatable,
+            **_merge_trigger_results(trigger_result, clock_result),
         }
 
     def reveal_clue(self, reference: Any, *, pc: str | None = None) -> dict[str, Any]:
@@ -530,12 +660,16 @@ class NarrativeRuntime:
             {"kind": "clue", "clue_id": clue.id, "pc": _text(pc) or None},
             summary=f"揭示线索 {clue.title or clue.id}",
         )
+        trigger_result = self._auto_triggers(
+            "clue", {"clue_id": clue.id}, pc=pc, source="clue"
+        )
         return {
             "revealed": True,
             "clue_id": clue.id,
             "title": clue.title or clue.id,
             "summary": clue.summary,
             "body": clue.body,
+            **trigger_result,
         }
 
     def update_npc_state(self, reference: Any, arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -558,7 +692,28 @@ class NarrativeRuntime:
             payload["known_clues"] = _str_list(arguments.get("known_clues"))
         self.record(payload, summary=f"更新 NPC {npc.title or npc.id}")
         entry = (self.narrative.get("npc_state") or {}).get(npc.id) or {}
-        return {"updated": True, "npc_id": npc.id, "title": npc.title or npc.id, "state": dict(entry)}
+        change = "attitude" if ("value" in arguments or "delta" in arguments) else "state"
+        trigger_result = self._auto_triggers(
+            "npc",
+            {"npc_id": npc.id, "event": change},
+            pc=_text(arguments.get("pc")) or None,
+            source="npc",
+        )
+        return {
+            "updated": True,
+            "npc_id": npc.id,
+            "title": npc.title or npc.id,
+            "state": dict(entry),
+            **trigger_result,
+        }
+
+    def _check_record(self, check_id: Any) -> Mapping[str, Any] | None:
+        expected = _text(check_id)
+        checks = self.narrative.get("checks")
+        for item in checks if isinstance(checks, list) else []:
+            if isinstance(item, Mapping) and _text(item.get("check_id") or item.get("id")) == expected:
+                return item
+        return None
 
     def lookup_location(self, query: str) -> dict[str, Any]:
         matches = self.location_candidates(query)
@@ -586,6 +741,28 @@ def _normalize_result(value: Any) -> str:
         "大失败": "fumble",
     }
     return mapping.get(text, text or "success")
+
+
+def _result_family(value: Any) -> str:
+    normalized = _normalize_result(value)
+    if normalized in {"extreme_success", "hard_success", "success"}:
+        return "success"
+    if normalized in {"fail", "fumble"}:
+        return "fail"
+    return normalized
+
+
+def _merge_trigger_results(*results: Mapping[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = {
+        "triggers_fired": [],
+        "trigger_denied": [],
+        "direct_messages": [],
+    }
+    for result in results:
+        merged["triggers_fired"].extend(result.get("triggers_fired") or [])
+        merged["trigger_denied"].extend(result.get("trigger_denied") or [])
+        merged["direct_messages"].extend(result.get("direct_messages") or [])
+    return merged
 
 
 def _effect_payloads(effects: Mapping[str, Any]) -> list[dict[str, Any]]:

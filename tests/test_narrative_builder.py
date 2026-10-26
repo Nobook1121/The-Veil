@@ -66,6 +66,22 @@ def test_build_without_save_does_not_touch_disk(tmp_path):
     assert result.bundle.warnings is not None
 
 
+def test_build_includes_adapted_triggers_and_assets(tmp_path):
+    scenario = _scenario()
+    scenario["assets"] = [{
+        "id": "asset_map", "kind": "image", "url": "http://example.test/map.png", "alt": "地图",
+    }]
+    scenario["modules"][0]["triggers"] = [{
+        "id": "trg_map", "type": "scene_enter", "display_name": "地图",
+        "content_mode": "image", "asset_url": "http://example.test/map.png", "asset_name": "地图",
+    }]
+    result = build_from_scenario(scenario, scenario_dir=tmp_path / "scenario-44", save=False)
+    assert [item["id"] for item in result.bundle.triggers] == ["trg_map"]
+    assert result.bundle.triggers[0]["binding"]["kind"] == "enter"
+    assert result.bundle.triggers[0]["attachments"][0]["kind"] == "image"
+    assert any(asset["url"] == "http://example.test/map.png" for asset in result.bundle.assets)
+
+
 def test_build_from_markdown_document(tmp_path):
     document = "# 第一幕\n### 大厅\n大厅与玄关相连。\n### 玄关\n从玄关可以回到大厅。\n# 结局 离开\n"
     result = build_narrative(document, scenario_id="44", scenario_dir=tmp_path / "scenario-44", save=True)

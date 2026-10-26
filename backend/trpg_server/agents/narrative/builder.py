@@ -32,6 +32,7 @@ from trpg_server.agents.narrative.store import (
     scenario_id_from_dir,
 )
 from trpg_server.agents.narrative.topology import TopologyDecision, detect_topology
+from trpg_server.agents.narrative.triggers import adapt_triggers, load_scenario_assets
 from trpg_server.agents.narrative.validate import ValidationReport, validate_bundle
 from trpg_server.json_store import read_json
 from trpg_server.scenario_documents import ParsedDocument
@@ -96,6 +97,13 @@ def build_narrative(
     )
     bundle = NarrativeBundle(scenario_id=sid, scenario_version=version, nodes=list(extracted.nodes))
 
+    asset_source = load_scenario_assets(scenario_dir)
+    if not asset_source:
+        asset_source = scenario.get("assets")
+    adapted = adapt_triggers(scenario, assets=asset_source if isinstance(asset_source, list) else None)
+    bundle.triggers = list(adapted["triggers"])
+    bundle.assets = list(adapted["assets"])
+
     text_by_node = {node.id: node.body for node in bundle.nodes}
     incoming = build_structural_edges(bundle.nodes, sections=extracted.sections, text_by_node=text_by_node)
     bundle.edges = merge_edges(bundle.edges, incoming)
@@ -118,6 +126,7 @@ def build_narrative(
     report = validate_bundle(bundle, index=index)
 
     warnings = list(extracted.warnings)
+    warnings.extend(adapted.get("warnings") or [])
     for issue in report.issues:
         if issue.level in {"warn", "error"}:
             warnings.append(

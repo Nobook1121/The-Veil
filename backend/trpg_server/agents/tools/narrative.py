@@ -59,6 +59,7 @@ def resolve_interaction(arguments: dict[str, Any], context: Any) -> dict[str, An
         total=_int_or_none(arguments.get("total")),
         roll=_int_or_none(arguments.get("roll")),
         pc=arguments.get("pc"),
+        check_id=arguments.get("check_id"),
     )
 
 
@@ -226,6 +227,7 @@ RESOLVE_INTERACTION_TOOL = AgentTool(
             "total": {"type": "integer", "description": "检定总值。"},
             "roll": {"type": "integer", "description": "骰点。"},
             "pc": {"type": "string", "description": "执行检定的 PC id。"},
+            "check_id": {"type": "string", "description": "可选：已记录的检定 check_id，引擎会校验结果一致。"},
         },
         "required": ["object", "result"],
     },

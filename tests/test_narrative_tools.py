@@ -25,6 +25,7 @@ from trpg_server.agents.tools.narrative import (
     resolve_interaction,
     write_fact,
 )
+from trpg_server.agents.tools.narrative_triggers import TRIGGER_RUNTIME_TOOL_NAMES
 
 
 def _bundle() -> NarrativeBundle:
@@ -68,15 +69,16 @@ def _context(tmp_path: Path) -> SimpleNamespace:
 
 def test_registry_contains_narrative_tools() -> None:
     registry = default_tool_registry()
-    for name in NARRATIVE_TOOL_NAMES:
+    for name in [*NARRATIVE_TOOL_NAMES, *TRIGGER_RUNTIME_TOOL_NAMES]:
         assert registry.get(name) is not None
 
 
 def test_graph_profile_names_stay_in_sync() -> None:
-    assert GRAPH_TOOL_NAMES == NARRATIVE_TOOL_NAMES
+    assert GRAPH_TOOL_NAMES == [*NARRATIVE_TOOL_NAMES, *TRIGGER_RUNTIME_TOOL_NAMES]
     expanded = expand_graph_tool_names(DEFAULT_KP_TOOLS, graph_enabled=True)
     assert "room.get_scenario_module" not in expanded
     assert "room.activate_scenario_scene" not in expanded
+    assert "trigger.reveal_scenario_trigger" not in expanded
     assert all(name in expanded for name in GRAPH_TOOL_NAMES)
 
     unchanged = expand_graph_tool_names(DEFAULT_KP_TOOLS, graph_enabled=False)

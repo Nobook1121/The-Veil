@@ -32,6 +32,13 @@ from trpg_server.agents.narrative.store import (
     resolve_start,
 )
 from trpg_server.agents.narrative.visibility import normalize_visibility
+from trpg_server.agents.narrative.triggers import (
+    ATTACHMENT_KINDS,
+    BINDING_KINDS,
+    ONCE_SCOPES,
+    TRIGGER_VISIBILITIES,
+    normalize_trigger_spec,
+)
 
 MOVEMENT_EDGE_TYPES = frozenset({"adjacent", "portal", "next", "leads_to"})
 _LEVEL_ORDER = {"error": 0, "warn": 1, "info": 2}
@@ -1194,6 +1201,7 @@ def validate_bundle(
     _check_ending_reachability(bundle, start, movement, issues)
     _check_hard_gates(bundle, node_map, resources, reachable, issues)
     _check_next_chains(bundle, node_ids, issues)
+    _check_triggers(bundle, node_map, resources, reachable, issues)
 
     endings = bundle.nodes_of("ending")
     if bundle.topology == "linear":
@@ -1216,6 +1224,173 @@ def validate_bundle(
         error_count=error_count,
         warning_count=warning_count,
     )
+
+
+def _check_triggers(
+    bundle: NarrativeBundle,
+    node_map: Mapping[str, NarrativeNode],
+    resources: "_Resources",
+    reachable: set[str],
+    issues: list[ValidationIssue],
+) -> None:
+    if not bundle.triggers:
+        return
+    assets = {
+        str(item.get("id")): item
+        for item in bundle.assets
+        if isinstance(item, Mapping) and item.get("id")
+    }
+    object_owners: dict[str, str] = {}
+    for node in bundle.nodes:
+        for obj in node.objects or []:
+            if isinstance(obj, Mapping) and str(obj.get("id") or "").strip():
+                object_owners.setdefault(str(obj["id"]), node.id)
+
+    seen: set[str] = set()
+    for index, raw in enumerate(bundle.triggers):
+        if not isinstance(raw, Mapping):
+            issues.append(ValidationIssue(
+                code="trigger.invalid", level="error",
+                message=f"第 {index + 1} 个触发器不是对象",
+                rule="trigger",
+                suggestion="触发器必须是对象并包含 binding。",
+            ))
+            continue
+        spec = normalize_trigger_spec(raw, assets_by_id=assets, index=index)
+        if spec is None:
+            issues.append(ValidationIssue(
+                code="trigger.invalid_binding", level="error",
+                message=f"触发器 {raw.get('id') or index} 的 binding 无效",
+                rule="trigger",
+                suggestion="binding.kind 必须是 interaction/enter/clock/event/clue/npc/manual。",
+            ))
+            continue
+        trigger_id = spec["id"]
+        if trigger_id in seen:
+            issues.append(ValidationIssue(
+                code="trigger.duplicate_id", level="error",
+                message=f"触发器 id 重复：{trigger_id}",
+                rule="trigger",
+                suggestion="为每个触发器分配唯一 id。",
+            ))
+        seen.add(trigger_id)
+        binding = spec["binding"]
+        kind = str(binding.get("kind") or "")
+        if kind not in BINDING_KINDS:
+            issues.append(ValidationIssue(
+                code="trigger.invalid_binding", level="error",
+                message=f"触发器 {trigger_id} 的 binding.kind 无效：{kind}",
+                rule="trigger",
+            ))
+            continue
+        location_id = str(binding.get("location_id") or "")
+        if kind in {"enter", "interaction"} and location_id:
+            if location_id not in node_map:
+                issues.append(ValidationIssue(
+                    code="trigger.unknown_location", level="error",
+                    message=f"触发器 {trigger_id} 引用的地点不存在：{location_id}",
+                    rule="trigger",
+                    suggestion="修正 binding.location_id，或重建世界树。",
+                ))
+            elif location_id not in reachable:
+                issues.append(ValidationIssue(
+                    code="trigger.unreachable_location", level="warn",
+                    message=f"触发器 {trigger_id} 绑定在不可达地点：{location_id}",
+                    rule="trigger",
+                ))
+        object_id = str(binding.get("object_id") or "")
+        if kind == "interaction" and object_id:
+            if object_id not in object_owners:
+                issues.append(ValidationIssue(
+                    code="trigger.unknown_object", level="error",
+                    message=f"触发器 {trigger_id} 引用的物件不存在：{object_id}",
+                    rule="trigger",
+                ))
+            elif location_id and object_owners.get(object_id) != location_id:
+                issues.append(ValidationIssue(
+                    code="trigger.object_location_mismatch", level="warn",
+                    message=f"触发器 {trigger_id} 的物件 {object_id} 不在 {location_id}",
+                    rule="trigger",
+                ))
+        if kind == "clue" and binding.get("clue_id") and binding["clue_id"] not in resources.clues_defined:
+            issues.append(ValidationIssue(
+                code="trigger.unknown_clue", level="error",
+                message=f"触发器 {trigger_id} 引用的线索不存在：{binding['clue_id']}",
+                rule="trigger",
+            ))
+        if kind == "npc" and binding.get("npc_id") and binding["npc_id"] not in node_map:
+            issues.append(ValidationIssue(
+                code="trigger.unknown_npc", level="error",
+                message=f"触发器 {trigger_id} 引用的 NPC 不存在：{binding['npc_id']}",
+                rule="trigger",
+            ))
+        if kind == "clock" and binding.get("clock_id") and binding["clock_id"] not in resources.clocks_defined:
+            issues.append(ValidationIssue(
+                code="trigger.unknown_clock", level="warn",
+                message=f"触发器 {trigger_id} 引用的时钟不在剧本包中：{binding['clock_id']}",
+                rule="trigger",
+            ))
+        if kind == "event" and binding.get("event_id") and binding["event_id"] not in resources.flags_defined:
+            if binding["event_id"] not in node_map:
+                issues.append(ValidationIssue(
+                    code="trigger.unknown_event", level="warn",
+                    message=f"触发器 {trigger_id} 引用的事件无法在包内确认：{binding['event_id']}",
+                    rule="trigger",
+                ))
+        if kind == "manual" and not spec.get("condition") and not binding.get("keyword"):
+            issues.append(ValidationIssue(
+                code="trigger.manual_without_condition", level="warn",
+                message=f"manual 触发器 {trigger_id} 没有条件或关键词，可能被模型随意请求",
+                rule="trigger",
+                suggestion="补充 condition 或 keyword。",
+            ))
+        if spec.get("needs_review"):
+            issues.append(ValidationIssue(
+                code="trigger.review_needed", level="warn",
+                message=f"触发器 {trigger_id} 的旧条件无法结构化，发布前需人工确认",
+                rule="trigger",
+            ))
+        if spec["visibility"] not in TRIGGER_VISIBILITIES:
+            issues.append(ValidationIssue(
+                code="trigger.invalid_visibility", level="error",
+                message=f"触发器 {trigger_id} 的 visibility 无效：{spec['visibility']}",
+                rule="trigger",
+            ))
+        if spec["once_scope"] not in ONCE_SCOPES:
+            issues.append(ValidationIssue(
+                code="trigger.invalid_once_scope", level="error",
+                message=f"触发器 {trigger_id} 的 once_scope 无效：{spec['once_scope']}",
+                rule="trigger",
+            ))
+        seen_attachments: set[str] = set()
+        for attachment in spec["attachments"]:
+            attachment_id = attachment["id"]
+            if attachment_id in seen_attachments:
+                issues.append(ValidationIssue(
+                    code="trigger.duplicate_attachment", level="warn",
+                    message=f"触发器 {trigger_id} 的附件 id 重复：{attachment_id}",
+                    rule="trigger",
+                ))
+            seen_attachments.add(attachment_id)
+            if attachment["kind"] not in ATTACHMENT_KINDS:
+                issues.append(ValidationIssue(
+                    code="trigger.invalid_attachment_kind", level="error",
+                    message=f"触发器 {trigger_id} 的附件类型无效：{attachment['kind']}",
+                    rule="trigger",
+                ))
+            asset_id = str(attachment.get("asset_id") or "")
+            if not asset_id and not attachment.get("url") and attachment.get("body") is None:
+                issues.append(ValidationIssue(
+                    code="trigger.missing_asset", level="error",
+                    message=f"触发器 {trigger_id} 的附件 {attachment_id} 没有素材或 URL",
+                    rule="trigger",
+                ))
+            elif asset_id and asset_id not in assets and not attachment.get("url"):
+                issues.append(ValidationIssue(
+                    code="trigger.missing_asset", level="error",
+                    message=f"触发器 {trigger_id} 引用的素材不存在：{asset_id}",
+                    rule="trigger",
+                ))
 
 
 # ---------------------------------------------------------------------------

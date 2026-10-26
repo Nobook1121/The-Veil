@@ -713,7 +713,7 @@ function findRoleForMessage(message: string): ChatRoleConfig | undefined {
 // 因此不会改变提示词注入的判定，也不会影响 KP 的正常输出。
 const CHAT_SANITIZE_CONFIG: Record<string, unknown> = {
     FORBID_TAGS: ["script", "style", "iframe", "object", "embed", "base", "meta", "link"],
-    ADD_ATTR: ["controls", "preload", "poster", "playsinline", "target", "rel", "loading"],
+    ADD_ATTR: ["controls", "preload", "poster", "playsinline", "target", "rel", "loading", "download"],
 };
 
 function renderMarkdown(content: string): string {
@@ -731,6 +731,46 @@ function renderMarkdown(content: string): string {
         console.error("Markdown 渲染失败:", error);
         return chatEscapeHtml(content);
     }
+}
+
+/**
+ * 触发器附件渲染：metadata.attachments 来自引擎的 TriggerSpec。
+ * richtext 直接并入正文；图片/视频/音频/文件按类型生成媒体卡片。
+ * 所有文本与属性都先转义，再由 renderMarkdown 的 DOMPurify 统一净化。
+ */
+function renderTriggerAttachments(attachments: unknown): string {
+    if (!Array.isArray(attachments) || attachments.length === 0) return "";
+    const parts: string[] = [];
+    attachments.forEach((raw) => {
+        if (!raw || typeof raw !== "object") return;
+        const attachment = raw as Record<string, unknown>;
+        const kind = String(attachment.kind || "file").toLowerCase();
+        const body = typeof attachment.body === "string" ? attachment.body.trim() : "";
+        if (kind === "richtext") {
+            if (body) parts.push(body);
+            return;
+        }
+        const url = typeof attachment.url === "string" ? attachment.url.trim() : "";
+        if (!url) return;
+        const alt = String(attachment.alt || attachment.caption || "附件");
+        if (kind === "image") {
+            parts.push(`<img src="${chatEscapeHtml(url)}" alt="${chatEscapeHtml(alt)}">`);
+            return;
+        }
+        if (kind === "video") {
+            const poster = typeof attachment.poster_url === "string" && attachment.poster_url
+                ? ` poster="${chatEscapeHtml(attachment.poster_url)}"`
+                : "";
+            parts.push(`<video class="trigger-attachment-video" src="${chatEscapeHtml(url)}" controls preload="metadata" playsinline${poster}></video>`);
+            return;
+        }
+        if (kind === "audio") {
+            parts.push(`<audio class="trigger-attachment-audio" src="${chatEscapeHtml(url)}" controls preload="metadata"></audio>`);
+            return;
+        }
+        parts.push(`<a class="trigger-attachment-file" href="${chatEscapeHtml(url)}" target="_blank" rel="noopener" download>${chatEscapeHtml(alt)}</a>`);
+    });
+    return parts.length > 0 ? `\n\n${parts.join("\n\n")}` : "";
 }
 
 // 头像解析：优先用消息自带头像；玩家消息若属于当前登录用户，沿用导航栏头像，
@@ -1227,9 +1267,13 @@ function renderRoomMessage(message: ChatMessage | null, animate = false): void {
             }
         }
     }
-    const displayMessage = message.type === "trigger" && metadata.asset_url && message.content && !message.content.includes(String(metadata.asset_url))
+    let displayMessage = message.type === "trigger" && metadata.asset_url && message.content && !message.content.includes(String(metadata.asset_url))
         ? { ...message, content: `${message.content}\n\n[${metadata.asset_name || "附件"}](${metadata.asset_url})` }
         : message;
+    const attachmentMarkdown = message.type === "trigger" ? renderTriggerAttachments(metadata.attachments) : "";
+    if (attachmentMarkdown) {
+        displayMessage = { ...displayMessage, content: `${displayMessage.content}${attachmentMarkdown}` };
+    }
     const renderedId = addMessage(
         type,
         displayMessage.sender_name || displayMessage.sender || defaultSenderName(type),
