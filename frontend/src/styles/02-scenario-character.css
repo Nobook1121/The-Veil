@@ -2966,6 +2966,137 @@ body.is-guest .guest-login-hint {
     margin-bottom: 0.75rem;
 }
 
+/* 剧本导入向导：替代旧版「正在转换剧本文档」进度弹窗 */
+.scenario-import-wizard .modal-content {
+    border: 1px solid var(--theme-border-subtle);
+    border-radius: var(--theme-radius-md);
+    background: var(--theme-bg-panel);
+    color: var(--theme-text-primary);
+    box-shadow: var(--theme-shadow-lg);
+}
+
+.scenario-import-wizard .modal-header {
+    gap: var(--theme-space-md);
+    padding: var(--theme-space-lg);
+    border-bottom: 1px solid var(--theme-border-subtle);
+}
+
+.scenario-import-kicker {
+    margin: 0 0 var(--theme-space-xs);
+    font-size: var(--theme-font-size-2xs);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--theme-text-muted);
+}
+
+.scenario-import-wizard .modal-title {
+    font-size: var(--theme-font-size-lg);
+    font-weight: 600;
+    color: var(--theme-text-primary);
+}
+
+.scenario-import-file {
+    margin: var(--theme-space-xs) 0 0;
+    font-size: var(--theme-font-size-sm);
+    color: var(--theme-text-muted);
+    word-break: break-all;
+}
+
+.scenario-import-percent {
+    flex: none;
+    font-size: var(--theme-font-size-xl);
+    font-weight: 600;
+    line-height: 1;
+    color: var(--theme-accent-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.scenario-import-wizard .modal-body {
+    padding: var(--theme-space-lg);
+}
+
+.scenario-import-track {
+    height: 6px;
+    border-radius: var(--theme-radius-pill);
+    background: var(--theme-bg-panel-muted);
+    overflow: hidden;
+}
+
+.scenario-import-track-fill {
+    height: 100%;
+    width: 0;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--theme-accent-primary), var(--theme-accent-secondary));
+    transition: width 0.4s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.scenario-import-wizard.is-error .scenario-import-track-fill {
+    background: var(--theme-danger);
+}
+
+.scenario-import-wizard.is-error .scenario-import-percent {
+    color: var(--theme-danger);
+}
+
+.scenario-import-steps {
+    list-style: none;
+    margin: var(--theme-space-lg) 0 0;
+    padding: 0;
+    display: grid;
+    gap: var(--theme-space-md);
+}
+
+.scenario-import-step {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: var(--theme-space-sm);
+    align-items: start;
+}
+
+.scenario-import-step-mark {
+    font-size: var(--theme-font-size-base);
+    line-height: 1.4;
+    color: var(--theme-border-strong);
+}
+
+.scenario-import-step-text strong {
+    display: block;
+    font-size: var(--theme-font-size-sm);
+    font-weight: 600;
+    color: var(--theme-text-muted);
+}
+
+.scenario-import-step-text small {
+    display: block;
+    margin-top: 2px;
+    font-size: var(--theme-font-size-xs);
+    color: var(--theme-text-muted);
+}
+
+.scenario-import-step[data-state="active"] .scenario-import-step-mark,
+.scenario-import-step[data-state="active"] .scenario-import-step-text strong {
+    color: var(--theme-accent-primary);
+}
+
+.scenario-import-step[data-state="complete"] .scenario-import-step-mark,
+.scenario-import-step[data-state="complete"] .scenario-import-step-text strong {
+    color: var(--theme-success);
+}
+
+.scenario-import-step[data-state="error"] .scenario-import-step-mark,
+.scenario-import-step[data-state="error"] .scenario-import-step-text strong {
+    color: var(--theme-danger);
+}
+
+.scenario-import-hint {
+    display: flex;
+    align-items: center;
+    gap: var(--theme-space-xs);
+    margin: var(--theme-space-lg) 0 0;
+    font-size: var(--theme-font-size-xs);
+    color: var(--theme-text-muted);
+}
+
 .scenario-generate-preview-stat {
     text-align: center;
 }

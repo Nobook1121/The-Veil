@@ -20,7 +20,9 @@ let allUserRecords: AdminUserRecord[] = [];
 function initTabs(): void {
     try {
         const navLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>("#sidebar .nav-link"));
-        const tabContents = Array.from(document.querySelectorAll<HTMLElement>(".tab-content"));
+        // 只收集主内容区的一级页签：弹窗内的 Bootstrap .tab-content（如剧本编辑器的六个页签）
+        // 不能参与主导航切换，否则会被清掉 active 或被误判为页面容器。
+        const tabContents = Array.from(document.querySelectorAll<HTMLElement>("#mainContent > .tab-content"));
 
         if (navLinks.length === 0 || tabContents.length === 0) {
             console.error("无法找到导航链接或标签内容");
@@ -84,7 +86,7 @@ function handleMainNavigationClick(
 
 function switchMainTab(tabId: string, options: { clearNav?: boolean } = {}): void {
     const navLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>("#sidebar .nav-link"));
-    const tabContents = Array.from(document.querySelectorAll<HTMLElement>(".tab-content"));
+    const tabContents = Array.from(document.querySelectorAll<HTMLElement>("#mainContent > .tab-content"));
     tabContents.forEach((tab) => tab.classList.remove("active"));
     const targetTab = document.getElementById(tabId);
     if (!targetTab) {

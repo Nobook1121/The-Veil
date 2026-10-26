@@ -595,21 +595,43 @@ class ScenarioView {
     showConversionProgress(fileName: string): void {
         this.closeConversionProgress();
         const modal = document.createElement("div");
-        modal.className = "modal fade";
+        modal.className = "modal fade scenario-import-wizard";
         modal.id = "scenarioConversionProgressModal";
         modal.tabIndex = -1;
         modal.setAttribute("data-bs-backdrop", "static");
         modal.setAttribute("data-bs-keyboard", "false");
+        const stages: Array<[string, string]> = [
+            ["读取文档并提取文本", "解析文件编码与段落"],
+            ["分析文档结构与章节", "识别场景、线索与结局"],
+            ["生成场景与结局模块", "整理为可编辑的剧本结构"],
+            ["校验并打开编辑器", "检查必填项并准备审核"],
+        ];
         modal.innerHTML = `
             <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content">
-                    <div class="modal-header"><h5 class="modal-title">正在转换剧本文档</h5></div>
-                    <div class="modal-body">
-                        <p class="text-muted small mb-3" data-conversion-file></p>
-                        <div class="progress mb-3" role="progressbar" aria-label="剧本转换进度"><div class="progress-bar progress-bar-striped progress-bar-animated" data-conversion-progress style="width: 0%">0%</div></div>
-                        <div class="list-group list-group-flush" data-conversion-stages>
-                            ${["读取文档并提取文本", "分析文档结构与章节", "生成场景/结局模块", "校验并准备编辑器"].map((label, index) => `<div class="list-group-item px-0 d-flex align-items-center gap-2" data-conversion-stage="${index}"><span class="conversion-stage-icon">○</span><span>${label}</span><small class="ms-auto text-muted" data-conversion-stage-detail></small></div>`).join("")}
+                    <div class="modal-header align-items-start">
+                        <div>
+                            <p class="scenario-import-kicker">SCENARIO IMPORT</p>
+                            <h5 class="modal-title">正在导入剧本</h5>
+                            <p class="scenario-import-file" data-conversion-file></p>
                         </div>
+                        <span class="scenario-import-percent" data-conversion-percent>0%</span>
+                    </div>
+                    <div class="modal-body">
+                        <div class="scenario-import-track" role="progressbar" aria-label="剧本导入进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-conversion-track>
+                            <div class="scenario-import-track-fill" data-conversion-progress></div>
+                        </div>
+                        <ol class="scenario-import-steps" data-conversion-stages>
+                            ${stages.map(([label, hint], index) => `
+                            <li class="scenario-import-step" data-conversion-stage="${index}" data-state="pending">
+                                <span class="scenario-import-step-mark" aria-hidden="true"><i class="fa fa-circle-o"></i></span>
+                                <div class="scenario-import-step-text">
+                                    <strong>${label}</strong>
+                                    <small data-conversion-stage-detail>${hint}</small>
+                                </div>
+                            </li>`).join("")}
+                        </ol>
+                        <p class="scenario-import-hint"><i class="fa fa-info-circle" aria-hidden="true"></i> 导入过程中请勿关闭窗口，完成后会自动打开剧本编辑器。</p>
                     </div>
                 </div>
             </div>`;
@@ -625,39 +647,50 @@ class ScenarioView {
         const item = modal.querySelector<HTMLElement>(`[data-conversion-stage="${stage}"]`);
         if (item) {
             item.dataset.state = state;
-            const icon = item.querySelector<HTMLElement>(".conversion-stage-icon");
-            if (icon) icon.textContent = state === "complete" ? "✓" : state === "active" ? "●" : state === "error" ? "!" : "○";
+            const mark = item.querySelector<HTMLElement>(".scenario-import-step-mark i");
+            if (mark) {
+                const icon = state === "complete" ? "fa-check-circle" : state === "error" ? "fa-times-circle" : state === "active" ? "fa-dot-circle-o" : "fa-circle-o";
+                mark.className = `fa ${icon}`;
+            }
             const detailNode = item.querySelector<HTMLElement>("[data-conversion-stage-detail]");
-            if (detailNode) detailNode.textContent = detail;
+            if (detailNode && detail) detailNode.textContent = detail;
         }
-        const progress = modal.querySelector<HTMLElement>("[data-conversion-progress]");
-        if (progress) {
-            // Keep the current stage visibly alive while a long AI request is
-            // running. Stage completion advances the bar; active stages use a
-            // stable midpoint instead of appearing frozen at 37%.
-            const value = state === "complete" ? Math.min(100, (stage + 1) * 25) : state === "active" ? Math.min(96, stage * 25 + 20) : stage * 25;
-            progress.style.width = `${value}%`;
-            progress.textContent = state === "active" ? `${value}% · 处理中` : `${value}%`;
-            progress.classList.toggle("progress-bar-animated", state === "active");
-            progress.classList.toggle("bg-danger", state === "error");
-            if (this.conversionProgressTimer !== null) {
-                window.clearInterval(this.conversionProgressTimer);
-                this.conversionProgressTimer = null;
-            }
-            if (state === "active") {
-                let animatedValue = Number.parseInt(progress.style.width, 10) || value;
-                this.conversionProgressTimer = window.setInterval(() => {
-                    if (!this.conversionProgressModal || !progress.isConnected) return;
-                    animatedValue = Math.min(92, animatedValue + 1);
-                    progress.style.width = `${animatedValue}%`;
-                    progress.textContent = `${animatedValue}% · 处理中`;
-                    if (animatedValue >= 92 && this.conversionProgressTimer !== null) {
-                        window.clearInterval(this.conversionProgressTimer);
-                        this.conversionProgressTimer = null;
-                    }
-                }, 900);
-            }
+        modal.classList.toggle("is-error", state === "error");
+        // 活跃阶段用稳定的中间值推进，长请求期间不会看起来卡在 37% 不动。
+        const value = state === "complete" ? Math.min(100, (stage + 1) * 25) : state === "active" ? Math.min(96, stage * 25 + 20) : stage * 25;
+        this.setConversionProgressValue(value);
+        if (this.conversionProgressTimer !== null) {
+            window.clearInterval(this.conversionProgressTimer);
+            this.conversionProgressTimer = null;
         }
+        if (state === "active") {
+            let animatedValue = this.conversionProgressValue();
+            this.conversionProgressTimer = window.setInterval(() => {
+                if (!this.conversionProgressModal) return;
+                animatedValue = Math.min(92, animatedValue + 1);
+                this.setConversionProgressValue(animatedValue);
+                if (animatedValue >= 92 && this.conversionProgressTimer !== null) {
+                    window.clearInterval(this.conversionProgressTimer);
+                    this.conversionProgressTimer = null;
+                }
+            }, 900);
+        }
+    }
+
+    private conversionProgressValue(): number {
+        const fill = this.conversionProgressModal?.querySelector<HTMLElement>("[data-conversion-progress]");
+        return Math.max(0, Math.min(100, Number.parseFloat(fill?.style.width || "0") || 0));
+    }
+
+    private setConversionProgressValue(value: number): void {
+        const modal = this.conversionProgressModal;
+        if (!modal) return;
+        const clamped = Math.max(0, Math.min(100, value));
+        const fill = modal.querySelector<HTMLElement>("[data-conversion-progress]");
+        if (fill) fill.style.width = `${clamped}%`;
+        const percent = modal.querySelector<HTMLElement>("[data-conversion-percent]");
+        if (percent) percent.textContent = `${Math.round(clamped)}%`;
+        modal.querySelector<HTMLElement>("[data-conversion-track]")?.setAttribute("aria-valuenow", String(Math.round(clamped)));
     }
 
     updateImportJobProgress(job: ScenarioImportJob): void {
@@ -666,13 +699,8 @@ class ScenarioView {
         const meta = job.stage_meta || {};
         const total = Number(meta.totalChunks || 0);
         const processed = Number(meta.processedChunks || 0);
-        this.updateConversionProgress(index, job.status === "failed" ? "error" : job.status === "done" ? "complete" : "active", total ? `${processed}/${total} blocks` : job.current_stage);
-        const progress = this.conversionProgressModal?.querySelector<HTMLElement>("[data-conversion-progress]");
-        if (progress) {
-            const value = Math.max(0, Math.min(100, Number(job.progress || 0)));
-            progress.style.width = `${value}%`;
-            progress.textContent = `${Math.round(value)}%${total ? ` · ${processed}/${total}` : ""}`;
-        }
+        this.updateConversionProgress(index, job.status === "failed" ? "error" : job.status === "done" ? "complete" : "active", total ? `${processed}/${total} 个分块` : "");
+        this.setConversionProgressValue(Number(job.progress || 0));
     }
 
     closeConversionProgress(): void {

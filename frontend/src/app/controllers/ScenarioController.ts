@@ -99,7 +99,7 @@ class ScenarioController {
             : null;
         if (choice === "direct" && !metadata) return;
         this.view.showConversionProgress(file.name);
-        this.view.updateConversionProgress(0, "active", "Uploading document");
+        this.view.updateConversionProgress(0, "active", "正在上传文档");
         try {
             if (choice === "direct" && metadata) {
                 const form = new FormData();
@@ -110,16 +110,16 @@ class ScenarioController {
                 form.append("playerCount", String(metadata.playerCount));
                 form.append("description", metadata.description);
                 const started = await this.model.createImportJob(form, (value) => {
-                    this.view.updateConversionProgress(0, "active", `${Math.round(value)}% uploaded`);
+                    this.view.updateConversionProgress(0, "active", `已上传 ${Math.round(value)}%`);
                 });
                 sessionStorage.setItem("ai-trpg:scenario-import-job", started.jobId);
                 const finished = await this.model.waitForImportJob(started.jobId, (progress) => this.view.updateImportJobProgress(progress));
                 const scenario = await this.model.publishImport(started.scriptId || finished.script_id, started.jobId);
                 sessionStorage.removeItem("ai-trpg:scenario-import-job");
-                this.view.updateConversionProgress(3, "complete", "Vector index ready");
+                this.view.updateConversionProgress(3, "complete", "知识库索引已就绪");
                 this.view.closeConversionProgress();
                 this.renderScenarioList();
-                this.view.showMessage(`Direct import completed: ${scenario.title}`);
+                this.view.showMessage(`文档已直接导入并发布：${scenario.title}`);
                 return;
             }
 
@@ -127,21 +127,21 @@ class ScenarioController {
             // made before parsing starts and the source can be replaced by
             // selecting another document if the generated draft is unsuitable.
             this.view.updateConversionProgress(0, "complete");
-            this.view.updateConversionProgress(1, "active", "Extracting sections");
+            this.view.updateConversionProgress(1, "active", "正在提取章节");
             const converted = await this.model.convertScriptFile(file, title);
             this.view.updateConversionProgress(1, "complete");
-            this.view.updateConversionProgress(2, "complete", "Draft ready for review");
+            this.view.updateConversionProgress(2, "complete", "草稿已生成，等待审核");
             this.view.updateConversionProgress(3, "complete");
             this.view.closeConversionProgress();
             await this.view.openCreateModal();
             this.view.fillDraftData(converted);
             this.view.setImportReviewReadOnly(true);
-            this.view.showMessage("Review mode is ready. Upload another document to replace this draft, or publish it after checking.");
+            this.view.showMessage("已进入审核模式：可重新上传文档替换草稿，或检查后发布。");
         } catch (error) {
             this.view.updateConversionProgress(1, "error", scenarioErrorMessage(error));
             await new Promise((resolve) => window.setTimeout(resolve, 500));
             this.view.closeConversionProgress();
-            this.view.showMessage(`Scenario import failed: ${scenarioErrorMessage(error)}`, true);
+            this.view.showMessage(`剧本导入失败：${scenarioErrorMessage(error)}`, true);
         }
     }
 

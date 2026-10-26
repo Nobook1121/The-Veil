@@ -151,20 +151,22 @@ h1, h2, h3, h4, h5, h6 {
     transition: margin-left 0.3s ease, width 0.3s ease;
 }
 
-.tab-content {
+/* 仅限主内容区的一级标签页：#scenarioTabContent 等弹窗内的 Bootstrap 页签
+   同样带 .tab-content，若被这里的 display:none 命中，页签正文会整块消失。 */
+#mainContent > .tab-content {
     display: none;
     height: 100%;
     flex-direction: column;
 }
 
-.tab-content.active {
+#mainContent > .tab-content.active {
     display: flex;
     animation: pageViewEnter 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
 /* 除主页（聊天区自带滚动容器）外，其余标签页由直接子容器负责滚动。
    这样内容超出一屏时会出现滚轮可下滑的滚动条，而不是被 .col-10 的 overflow:hidden 裁掉。 */
-.tab-content > *:not(#react-home-root) {
+#mainContent > .tab-content > *:not(#react-home-root) {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
