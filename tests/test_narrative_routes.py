@@ -662,6 +662,25 @@ def test_generate_from_premise_builds_skeleton(tmp_path):
     assert result["base_revision"] == 0
 
 
+def test_generate_with_ai_fill_without_platform_warns(tmp_path):
+    _write_scenario(tmp_path, modules=[])
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    started = client.post(
+        "/api/scenarios/7/narrative/generate",
+        json={"options": {"source": "premise", "premise": "山中古堡", "ai_fill": True}},
+        headers=CSRF,
+    )
+    assert started.status_code == 202
+    data = _wait_generate_job(client, started.get_json()["data"]["job_id"])
+
+    assert data["job"]["status"] == "done"
+    result = data["result"]
+    assert any(item["code"] == "generate.ai_fill_unavailable" for item in result["warnings"])
+    assert result["bundle"]["meta"]["ai_fill"]["filled"] == 0
+
+
 def test_asset_thumb_falls_back_to_original_image(tmp_path):
     _write_scenario(tmp_path, bundle=_bundle())
     assets_dir = tmp_path / "scenarios" / "scenario-7" / "assets"

@@ -10,7 +10,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from trpg_server.agents.narrative.builder import build_narrative
 from trpg_server.agents.narrative.model import TOPOLOGIES, NarrativeBundle, NarrativeEdge, utc_now_iso
@@ -251,6 +251,7 @@ def generate_preview(
     options: GenerateOptions,
     *,
     current: NarrativeBundle | None = None,
+    ai_filler: Callable[[NarrativeBundle, str, Path], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     warnings: list[dict[str, Any]] = []
     modules = _modules_from_descriptor(descriptor)
@@ -277,7 +278,7 @@ def generate_preview(
             else:
                 warnings.append(_warning("generate.no_document", "该剧本没有可用的文档或模块内容。", "warning"))
 
-    if options.ai_fill:
+    if options.ai_fill and ai_filler is None:
         warnings.append(
             _warning("generate.ai_fill_unavailable", "AI 语义补全尚未接入模型，本次仅使用确定性抽取。", "warning")
         )
@@ -298,6 +299,14 @@ def generate_preview(
         clock_added = _add_clocks(bundle, options)
         if branch_added or clock_added:
             bundle.meta["generated_extras"] = {"branch_edges": branch_added, "clocks": clock_added}
+    if options.ai_fill and ai_filler is not None:
+        fill = ai_filler(bundle, document, storage)
+        warnings.extend(fill.get("warnings") or [])
+        bundle.meta["ai_fill"] = {
+            "filled": fill.get("filled", 0),
+            "calls": fill.get("calls", 0),
+            "skipped": fill.get("skipped", 0),
+        }
     bundle.meta["free_order"] = options.free_order
     bundle.meta["generator"] = "narrative.generate.v1"
     bundle.build_hash = ""
@@ -372,7 +381,12 @@ def run_generate_job(app, job_id: str) -> None:
         current = load_bundle(storage, use_cache=False)
         options = GenerateOptions.from_payload(job.get("options"))
         store.update(job_id, stage="generating", progress=40)
-        preview = generate_preview(descriptor, storage, options, current=current)
+        ai_filler = None
+        if options.ai_fill:
+            from trpg_server.agents.narrative.generate_ai import make_ai_filler
+
+            ai_filler = make_ai_filler(str(descriptor.get("title") or ""))
+        preview = generate_preview(descriptor, storage, options, current=current, ai_filler=ai_filler)
         preview["scenario_id"] = job.get("scenario_id")
         preview["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         store.save_result(job_id, preview)
