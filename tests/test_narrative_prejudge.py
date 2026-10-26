@@ -9,6 +9,7 @@ from trpg_server.agents.narrative.prejudge import (
     INTENT_INVESTIGATE,
     INTENT_META,
     INTENT_MOVE,
+    _node_keyword_hit,
     classify_intent,
     clear_cache,
     prepare_turn,
@@ -200,6 +201,33 @@ def test_resolve_narrative_settings_reads_room_overrides() -> None:
 
     invalid = resolve_narrative_settings({"house_rules": {"narrative_guard": "loud"}})
     assert invalid.guard == "enforce"
+
+
+def test_keyword_weight_and_match_mode() -> None:
+    """§8.2：整词模式对拉丁词做边界判断，权重直接影响关键词命中分。"""
+    node = NarrativeNode(id="room_gate", kind="location", title="Hall", keywords=["gate"])
+    assert _node_keyword_hit(node, "the gate is open") == 1.0
+    assert _node_keyword_hit(node, "aggregate") == 0.0
+
+    node.keyword_match = "substring"
+    assert _node_keyword_hit(node, "aggregate") == 1.0
+
+    node.keyword_weight = 0.5
+    assert _node_keyword_hit(node, "the gate is open") == 0.5
+
+
+def test_keyword_weight_and_match_roundtrip_clamps() -> None:
+    node = NarrativeNode.from_dict(
+        {"id": "room_gate", "title": "门厅", "keyword_weight": 5, "keyword_match": "substring"}
+    )
+    assert node.keyword_weight == 2.0
+    assert node.to_dict()["keyword_match"] == "substring"
+
+    fallback = NarrativeNode.from_dict(
+        {"id": "room_x", "title": "走廊", "keyword_weight": -3, "keyword_match": "regex"}
+    )
+    assert fallback.keyword_weight == 0.0
+    assert fallback.keyword_match == "word"
 
 
 def test_guard_policy_shadow_logs_but_keeps_text() -> None:

@@ -167,6 +167,8 @@ class NarrativeNode:
     negative_keywords: list[str] = field(default_factory=list)
     scope: str = "local"
     constant: bool = False
+    keyword_weight: float = 1.0
+    keyword_match: str = "word"
     visibility: str = VISIBILITY_PUBLIC
     kp_notes: str | None = None
     reveal_when: dict[str, Any] | None = None
@@ -200,6 +202,8 @@ class NarrativeNode:
             "negative_keywords": list(self.negative_keywords),
             "scope": self.scope,
             "constant": self.constant,
+            "keyword_weight": self.keyword_weight,
+            "keyword_match": self.keyword_match,
             "visibility": self.visibility,
             "kp_notes": self.kp_notes,
             "reveal_when": self.reveal_when,
@@ -219,6 +223,7 @@ class NarrativeNode:
             "scene_role", "access", "repeatable", "beats", "objects", "completion",
             "on_enter", "on_reenter", "keywords", "aliases", "negative_keywords",
             "scope", "constant", "visibility", "kp_notes", "reveal_when",
+            "keyword_weight", "keyword_match",
             "spoiler_level", "token_cost", "layout", "source", "content_hash",
         }
         node_id = slugify_id(data.get("id") or data.get("node_id") or data.get("title"))
@@ -260,6 +265,12 @@ class NarrativeNode:
             negative_keywords=_str_list(data.get("negative_keywords")),
             scope=str(data.get("scope") or "local").strip().lower(),
             constant=_as_bool(data.get("constant")),
+            keyword_weight=max(0.0, min(2.0, _as_float(data.get("keyword_weight"), 1.0))),
+            keyword_match=(
+                "substring"
+                if str(data.get("keyword_match") or "word").strip().lower() == "substring"
+                else "word"
+            ),
             visibility=visibility,
             kp_notes=str(data.get("kp_notes") or "").strip() or None,
             reveal_when=dict(reveal_when) if isinstance(reveal_when, Mapping) else None,
@@ -512,6 +523,8 @@ def collect_worldbook_entries(bundle: NarrativeBundle) -> list[dict[str, Any]]:
                 "negative_keywords": list(node.negative_keywords),
                 "scope": node.scope,
                 "constant": node.constant,
+                "keyword_weight": node.keyword_weight,
+                "keyword_match": node.keyword_match,
                 "visibility": node.visibility,
                 "kp_notes": node.kp_notes,
                 "reveal_when": node.reveal_when,

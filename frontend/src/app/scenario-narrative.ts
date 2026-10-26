@@ -25,6 +25,8 @@
         negative_keywords?: string[];
         scope?: string;
         constant?: boolean;
+        keyword_weight?: number;
+        keyword_match?: string;
         kp_notes?: string;
         objects?: unknown[];
         layout?: { x?: number; y?: number };
@@ -675,6 +677,16 @@
                             <span>${escapeHtml(t("scenario.tree.constant", "常驻"))}</span>
                             <input type="checkbox" id="scenarioNodeConstant" ${node.constant ? "checked" : ""}>
                         </label>
+                        <label class="form-group">
+                            <span>${escapeHtml(t("scenario.tree.keyword_weight", "权重"))}</span>
+                            <input type="number" class="form-control form-control-sm" id="scenarioNodeKeywordWeight" min="0" max="2" step="0.1" value="${escapeHtml(String(node.keyword_weight ?? 1))}">
+                        </label>
+                        <label class="form-group">
+                            <span>${escapeHtml(t("scenario.tree.keyword_match", "匹配模式"))}</span>
+                            <select class="form-select form-select-sm" id="scenarioNodeKeywordMatch">
+                                ${(["word", "substring"] as const).map((value) => `<option value="${value}"${(node.keyword_match || "word") === value ? " selected" : ""}>${escapeHtml(t(`scenario.tree.keyword_match_${value}`, value === "substring" ? "子串" : "整词"))}</option>`).join("")}
+                            </select>
+                        </label>
                     </div>
                     <div id="scenarioNodeKeywordCandidates" class="scenario-keyword-candidates"></div>
                     ${conflicts.length ? `<p class="scenario-keyword-conflict">${escapeHtml(t("scenario.tree.keyword_conflict", "全局关键词同时绑定多个节点；建议改为局部作用域或加否定词。"))} ${conflicts.map((item) => `<strong>${escapeHtml(item.key)}</strong> → ${escapeHtml(item.others.join("、"))}`).join("；")}</p>` : ""}
@@ -803,6 +815,9 @@
         const negativeKeywords = splitTerms(byId<HTMLInputElement>("scenarioNodeNegativeKeywords")?.value);
         const scope = byId<HTMLSelectElement>("scenarioNodeScope")?.value || "local";
         const constant = byId<HTMLInputElement>("scenarioNodeConstant")?.checked === true;
+        const rawWeight = Number(byId<HTMLInputElement>("scenarioNodeKeywordWeight")?.value);
+        const keywordWeight = Number.isFinite(rawWeight) ? Math.max(0, Math.min(2, rawWeight)) : 1;
+        const keywordMatch = byId<HTMLSelectElement>("scenarioNodeKeywordMatch")?.value === "substring" ? "substring" : "word";
         const layoutLocked = byId<HTMLInputElement>("scenarioNodeLayoutLocked")?.checked === true;
         const reveal = readReveal("scenarioNode");
         const revealWhen = visibility === "hidden" ? revealToCondition(reveal) : null;
@@ -815,7 +830,7 @@
         try {
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ node: GraphNode; revision: number }>>(
                 `/api/scenarios/${state.scenarioId}/narrative/nodes/${encodeURIComponent(node.id)}`,
-                { method: "PATCH", body: { base_revision: state.revision, title, visibility, body, kp_notes: kpNotes, keywords, aliases, negative_keywords: negativeKeywords, scope, constant, reveal_when: revealWhen, layout_locked: layoutLocked } },
+                { method: "PATCH", body: { base_revision: state.revision, title, visibility, body, kp_notes: kpNotes, keywords, aliases, negative_keywords: negativeKeywords, scope, constant, keyword_weight: keywordWeight, keyword_match: keywordMatch, reveal_when: revealWhen, layout_locked: layoutLocked } },
             );
             if (!response.ok || !data?.success || !data.data) {
                 if (response.status === 409) {
@@ -1730,6 +1745,20 @@
             void saveOpening();
         });
         byId("scenarioOpeningPreviewBtn")?.addEventListener("click", () => previewOpening());
+
+        // §8.1.6：连线模式下 Esc 退出连线，避免误关整个编辑弹窗。
+        document.addEventListener(
+            "keydown",
+            (event) => {
+                if (event.key !== "Escape" || state.mode !== "connect") return;
+                if (!byId("scenarioModal")?.classList.contains("show")) return;
+                event.preventDefault();
+                event.stopPropagation();
+                state.connectSource = "";
+                setMode("select");
+            },
+            true,
+        );
     }
 
     function renderAll(): void {

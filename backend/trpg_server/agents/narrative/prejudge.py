@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -154,12 +155,22 @@ def link_targets(runtime: Any, message: str, *, limit: int = 6) -> list[dict[str
     return result
 
 
-def _node_keyword_hit(node: NarrativeNode, folded_text: str) -> bool:
+def _name_matches(name: str, folded_text: str, mode: str) -> bool:
+    """整词模式对拉丁词做边界判断；中文没有词边界，仍按子串处理（§8.2）。"""
+    if mode == "substring" or not name.isascii():
+        return name in folded_text
+    pattern = re.compile(r"(?<![a-z0-9])" + re.escape(name) + r"(?![a-z0-9])")
+    return bool(pattern.search(folded_text))
+
+
+def _node_keyword_hit(node: NarrativeNode, folded_text: str) -> float:
+    weight = max(0.0, min(2.0, float(node.keyword_weight or 1.0)))
+    mode = "substring" if node.keyword_match == "substring" else "word"
     for value in (node.title, *node.aliases, *node.keywords):
         name = _text(value)
-        if len(name) >= 2 and name.casefold() in folded_text:
-            return True
-    return False
+        if len(name) >= 2 and _name_matches(name.casefold(), folded_text, mode):
+            return weight
+    return 0.0
 
 
 def _unresolved_hook(runtime: Any, node: NarrativeNode) -> bool:
