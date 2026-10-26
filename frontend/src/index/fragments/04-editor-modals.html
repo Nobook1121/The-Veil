@@ -187,6 +187,14 @@
                                 <i class="fa fa-expand" aria-hidden="true"></i>
                                 <span>适配视图</span>
                             </button>
+                            <div class="btn-group btn-group-sm" role="group" aria-label="图谱视图">
+                                <button type="button" class="btn btn-outline-secondary active" id="scenarioGraphViewKp" data-graph-view="kp" data-i18n="scenario.visibility.view_kp">KP 视图</button>
+                                <button type="button" class="btn btn-outline-secondary" id="scenarioGraphViewPlayer" data-graph-view="player" data-i18n="scenario.visibility.view_player">玩家视图</button>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="scenarioGraphPlayerPreview">
+                                <i class="fa fa-eye" aria-hidden="true"></i>
+                                <span data-i18n="scenario.visibility.player_preview">玩家预览</span>
+                            </button>
                             <span class="text-muted small" id="scenarioGraphHint"></span>
                         </div>
                         <div class="scenario-graph-edge-actions" id="scenarioGraphEdgeActions"></div>
@@ -230,7 +238,28 @@
                 </div>
             </div>
         </div>
-    </div>    <div class="modal fade" id="roomCharacterBindModal" tabindex="-1" aria-labelledby="roomCharacterBindModalLabel" aria-hidden="true">
+    </div>
+
+    <div class="modal fade" id="scenarioPlayerPreviewModal" tabindex="-1" aria-labelledby="scenarioPlayerPreviewModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="scenarioPlayerPreviewModalLabel" data-i18n="scenario.visibility.player_preview">玩家预览</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small" data-i18n="scenario.visibility.player_preview_hint">按玩家可见性渲染既有剧本数据：不请求模型，也不写入房间状态。</p>
+                    <div class="scenario-player-preview" id="scenarioPlayerPreviewBody"></div>
+                </div>
+                <div class="modal-footer">
+                    <span class="text-muted small me-auto" id="scenarioPlayerPreviewSummary"></span>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="common.close">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="roomCharacterBindModal" tabindex="-1" aria-labelledby="roomCharacterBindModalLabel" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">

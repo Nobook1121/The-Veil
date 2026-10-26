@@ -2703,6 +2703,101 @@ body.is-guest .guest-login-hint {
     cursor: pointer;
 }
 
+.scenario-reveal-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    border: 1px dashed var(--bs-warning, #ffc107);
+    border-radius: 0.4rem;
+    background: rgba(255, 193, 7, 0.06);
+}
+
+.scenario-reveal-fields[hidden] {
+    display: none !important;
+}
+
+.scenario-reveal-fields .form-group {
+    flex: 1 1 8rem;
+    margin: 0;
+}
+
+.scenario-reveal-hint {
+    margin: 0.35rem 0 0;
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.35rem;
+    background: rgba(108, 117, 125, 0.12);
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.8rem;
+}
+
+.scenario-edge-visibility {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0;
+    font-size: 0.86rem;
+}
+
+.scenario-edge-visibility .form-select {
+    width: auto;
+    min-width: 92px;
+}
+
+.scenario-graph-canvas.is-player-view {
+    cursor: default;
+}
+
+.scenario-player-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.scenario-preview-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.scenario-preview-group h6 {
+    margin: 0;
+}
+
+.scenario-preview-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.5rem;
+    background: var(--bs-body-bg, #ffffff);
+}
+
+.scenario-preview-card header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.scenario-preview-card.is-hidden {
+    border-style: dashed;
+    background: rgba(108, 117, 125, 0.1);
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.scenario-preview-card.is-kp {
+    border-style: dotted;
+    background: rgba(33, 37, 41, 0.08);
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.scenario-preview-keywords {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+}
+
 .scenario-trigger-panel {
     margin-top: 1rem;
     border: 1px solid var(--bs-border-color, #dee2e6);

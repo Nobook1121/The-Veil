@@ -25,6 +25,9 @@
         objects?: unknown[];
         layout?: { x?: number; y?: number };
         layout_locked?: boolean;
+        reveal_when?: unknown;
+        source?: string;
+        spoiler_level?: number;
     }
 
     interface GraphEdge {
@@ -36,6 +39,7 @@
         visibility?: string;
         hard?: boolean;
         condition?: unknown;
+        reveal_when?: unknown;
     }
 
     interface GraphBundle {
@@ -107,6 +111,7 @@
         search: string;
         validation: ValidationPayload | null;
         mode: GraphMode;
+        viewMode: "kp" | "player";
         connectSource: string;
         positions: Map<string, { x: number; y: number }>;
         view: { x: number; y: number; k: number };
@@ -152,6 +157,97 @@
         kp_only: "仅 KP",
     };
 
+    const REVEAL_LABEL: Record<string, string> = {
+        skill: "检定成功",
+        clue: "发现线索",
+        clock: "时钟达到",
+        flag: "旗标成立",
+    };
+
+    interface RevealSpec {
+        type: "" | "skill" | "clue" | "clock" | "flag";
+        target: string;
+        threshold: number;
+    }
+
+    function revealOf(value: unknown): RevealSpec {
+        if (!value || typeof value !== "object") return { type: "", target: "", threshold: 0 };
+        const raw = value as Record<string, unknown>;
+        if (raw.skill) return { type: "skill", target: String(raw.skill), threshold: Number(raw.difficulty || 0) };
+        if (raw.clue) return { type: "clue", target: String(raw.clue), threshold: 0 };
+        if (raw.flag) return { type: "flag", target: String(raw.flag), threshold: 0 };
+        if (raw.clock) return { type: "clock", target: String(raw.clock), threshold: Number(raw.gte ?? 0) };
+        return { type: "", target: "", threshold: 0 };
+    }
+
+    function revealToCondition(spec: RevealSpec): Record<string, unknown> | null {
+        if (!spec.type || !spec.target) return null;
+        if (spec.type === "skill") return { skill: spec.target, difficulty: spec.threshold };
+        if (spec.type === "clock") return { clock: spec.target, gte: spec.threshold };
+        if (spec.type === "clue") return { clue: spec.target };
+        return { flag: spec.target };
+    }
+
+    function revealSummary(value: unknown): string {
+        const spec = revealOf(value);
+        if (!spec.type || !spec.target) return t("scenario.visibility.no_reveal", "未设置揭示条件");
+        const label = REVEAL_LABEL[spec.type] || spec.type;
+        const threshold = spec.type === "skill" || spec.type === "clock" ? ` ≥ ${spec.threshold}` : "";
+        return `${label}：${spec.target}${threshold}`;
+    }
+
+    /** 节点与边共用的揭示条件编辑区（§8.7）。 */
+    function revealFieldsMarkup(prefix: string, value: unknown): string {
+        const reveal = revealOf(value);
+        const options = (["skill", "clue", "clock", "flag"] as const)
+            .map((type) => `<option value="${type}"${reveal.type === type ? " selected" : ""}>${escapeHtml(REVEAL_LABEL[type])}</option>`)
+            .join("");
+        return `
+            <label class="form-group">
+                <span>${escapeHtml(t("scenario.visibility.reveal_when", "揭示条件"))}</span>
+                <select class="form-select form-select-sm" id="${prefix}RevealType">
+                    <option value=""${reveal.type === "" ? " selected" : ""}>${escapeHtml(t("scenario.visibility.no_reveal", "未设置（需人工复核）"))}</option>
+                    ${options}
+                </select>
+            </label>
+            <label class="form-group">
+                <span>${escapeHtml(t("scenario.visibility.reveal_target", "目标"))}</span>
+                <input type="text" class="form-control form-control-sm" id="${prefix}RevealTarget" value="${escapeHtml(reveal.target)}" placeholder="${escapeHtml(t("scenario.visibility.reveal_target_hint", "技能名 / 线索、时钟或旗标 id"))}">
+            </label>
+            <label class="form-group">
+                <span>${escapeHtml(t("scenario.visibility.reveal_threshold", "难度 / 阈值"))}</span>
+                <input type="number" class="form-control form-control-sm" id="${prefix}RevealThreshold" min="0" value="${Number(reveal.threshold || 0)}">
+            </label>`;
+    }
+
+    function revealBlockMarkup(prefix: string, value: unknown, visibility: string): string {
+        return `
+            <div class="scenario-reveal-fields" id="${prefix}Reveal"${visibility === "hidden" ? "" : " hidden"}>
+                ${revealFieldsMarkup(prefix, value)}
+            </div>
+            <p class="scenario-reveal-hint${visibility === "kp_only" ? "" : " d-none"}" id="${prefix}KpHint">${escapeHtml(t("scenario.visibility.kp_only_hint", "仅 KP：内容永远不会进入玩家提示词、检索与界面。"))}</p>`;
+    }
+
+    function readReveal(prefix: string): RevealSpec {
+        return {
+            type: (byId<HTMLSelectElement>(`${prefix}RevealType`)?.value || "") as RevealSpec["type"],
+            target: byId<HTMLInputElement>(`${prefix}RevealTarget`)?.value.trim() || "",
+            threshold: Number(byId<HTMLInputElement>(`${prefix}RevealThreshold`)?.value || 0),
+        };
+    }
+
+    function syncVisibilityFields(prefix: string, visibility: string): void {
+        byId(`${prefix}Reveal`)?.toggleAttribute("hidden", visibility !== "hidden");
+        byId(`${prefix}KpHint`)?.classList.toggle("d-none", visibility !== "kp_only");
+        syncRevealType(prefix);
+    }
+
+    function syncRevealType(prefix: string): void {
+        const type = byId<HTMLSelectElement>(`${prefix}RevealType`)?.value || "";
+        const threshold = byId<HTMLInputElement>(`${prefix}RevealThreshold`);
+        if (threshold) threshold.disabled = type !== "skill" && type !== "clock";
+    }
+
     const state: NarrativeState = {
         scenarioId: 0,
         bundle: null,
@@ -163,6 +259,7 @@
         search: "",
         validation: null,
         mode: "select",
+        viewMode: "kp",
         connectSource: "",
         positions: new Map(),
         view: { x: 40, y: 40, k: 1 },
@@ -326,6 +423,7 @@
             ["ID", `<code>${escapeHtml(node.id)}</code>`],
             ["类型", escapeHtml(meta.label)],
             ["父节点", parentOf(node) ? escapeHtml(nodeById(parentOf(node))?.title || parentOf(node)) : "—"],
+            ["来源", escapeHtml(node.source === "author" ? t("scenario.visibility.source_author", "作者编辑") : t("scenario.visibility.source_auto", "自动识别"))],
             ["场景角色", escapeHtml(node.scene_role || "—")],
             ["进入方式", escapeHtml(node.access || "—")],
             ["可重复", node.repeatable === false ? "否" : "是"],
@@ -337,6 +435,9 @@
                 "可见性",
                 `<span class="badge bg-${visibility === "public" ? "success" : visibility === "kp_only" ? "danger" : "warning"}">${escapeHtml(VISIBILITY_LABEL[visibility] || visibility)}</span>`,
             ]);
+            if (visibility === "hidden") {
+                rows.push(["揭示条件", escapeHtml(revealSummary(node.reveal_when))]);
+            }
         }
         const editForm = canEdit ? `
             <div class="scenario-inspector-edit">
@@ -349,6 +450,11 @@
                     <select class="form-select form-select-sm" id="scenarioNodeVisibility">
                         ${(["public", "hidden", "kp_only"] as const).map((value) => `<option value="${value}"${visibility === value ? " selected" : ""}>${escapeHtml(VISIBILITY_LABEL[value])}</option>`).join("")}
                     </select>
+                </label>
+                ${revealBlockMarkup("scenarioNode", node.reveal_when, visibility)}
+                <label class="form-group">
+                    <span>${escapeHtml(t("scenario.tree.edit_body", "正文"))}</span>
+                    <textarea class="form-control form-control-sm" id="scenarioNodeBody" rows="5">${escapeHtml(node.body || "")}</textarea>
                 </label>
                 <label class="form-group">
                     <span>${escapeHtml(t("scenario.tree.edit_kp_notes", "KP 备注"))}</span>
@@ -380,6 +486,7 @@
                     return `<li><code>${arrow}</code> ${escapeHtml(other?.title || otherId)} <span class="text-muted">${escapeHtml(edge.type || "")}</span>${hard}</li>`;
                 }).join("")}</ul>` : `<p class="text-muted small mb-0">${escapeHtml(t("scenario.tree.no_edges", "暂无连接。"))}</p>`}
             </div>`;
+        if (canEdit) syncRevealType("scenarioNode");
     }
 
     function selectNode(nodeId: string): void {
@@ -402,7 +509,10 @@
         const title = byId<HTMLInputElement>("scenarioNodeTitle")?.value.trim() || "";
         const visibility = byId<HTMLSelectElement>("scenarioNodeVisibility")?.value || "public";
         const kpNotes = byId<HTMLTextAreaElement>("scenarioNodeKpNotes")?.value.trim() || "";
+        const body = byId<HTMLTextAreaElement>("scenarioNodeBody")?.value || "";
         const layoutLocked = byId<HTMLInputElement>("scenarioNodeLayoutLocked")?.checked === true;
+        const reveal = readReveal("scenarioNode");
+        const revealWhen = visibility === "hidden" ? revealToCondition(reveal) : null;
         if (!title) {
             showNotification(t("scenario.tree.title_required", "节点标题不能为空。"), "warning");
             return;
@@ -412,7 +522,7 @@
         try {
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ node: GraphNode; revision: number }>>(
                 `/api/scenarios/${state.scenarioId}/narrative/nodes/${encodeURIComponent(node.id)}`,
-                { method: "PATCH", body: { base_revision: state.revision, title, visibility, kp_notes: kpNotes, layout_locked: layoutLocked } },
+                { method: "PATCH", body: { base_revision: state.revision, title, visibility, body, kp_notes: kpNotes, reveal_when: revealWhen, layout_locked: layoutLocked } },
             );
             if (!response.ok || !data?.success || !data.data) {
                 if (response.status === 409) {
@@ -526,27 +636,61 @@
         const from = positions.get(edge.from);
         const to = positions.get(edge.to);
         if (!from || !to) return "";
-        const dashed = edge.hard ? "" : ` stroke-dasharray="6 4"`;
-        const color = edge.hard ? "#c0392b" : "#8a94a6";
+        const playerMode = state.viewMode === "player";
+        const fromNode = nodeById(edge.from);
+        const toNode = nodeById(edge.to);
+        if (playerMode) {
+            if (!fromNode || !toNode) return "";
+            if ((fromNode.visibility || "public") === "kp_only" || (toNode.visibility || "public") === "kp_only") return "";
+            if ((edge.visibility || "public") === "kp_only") return "";
+        }
+        const hiddenEdge = (edge.visibility || "public") !== "public";
+        const dashed = edge.hard && !hiddenEdge ? "" : ` stroke-dasharray="6 4"`;
+        const color = hiddenEdge ? "#adb5bd" : edge.hard ? "#c0392b" : "#8a94a6";
         const active = state.selectedEdgeId === edge.id;
-        return `<line class="scenario-graph-edge${active ? " active" : ""}" data-edge-id="${escapeHtml(edge.id)}" data-edge-from="${escapeHtml(edge.from)}" data-edge-to="${escapeHtml(edge.to)}" x1="${from.x + 85}" y1="${from.y + 24}" x2="${to.x + 85}" y2="${to.y + 24}" stroke="${active ? "#f08c00" : color}" stroke-width="${active ? 2.6 : 1.6}"${dashed}><title>${escapeHtml(edge.label || edge.type || "")}</title></line>`;
+        return `<line class="scenario-graph-edge${active ? " active" : ""}" data-edge-id="${escapeHtml(edge.id)}" data-edge-from="${escapeHtml(edge.from)}" data-edge-to="${escapeHtml(edge.to)}" x1="${from.x + 85}" y1="${from.y + 24}" x2="${to.x + 85}" y2="${to.y + 24}" stroke="${active ? "#f08c00" : color}" stroke-width="${active ? 2.6 : 1.6}"${dashed}><title>${escapeHtml(edge.label || edge.type || "")}${hiddenEdge ? " · 隐藏" : ""}</title></line>`;
     }
 
     function nodeMarkup(node: GraphNode, positions: Map<string, { x: number; y: number }>): string {
         const position = positions.get(node.id);
         if (!position) return "";
+        const visibility = node.visibility || "public";
+        const playerMode = state.viewMode === "player";
+        if (playerMode && visibility === "kp_only") return "";
         const meta = kindMeta(node.kind);
         const selected = state.selectedId === node.id;
         const connectSource = state.connectSource === node.id;
         const title = node.title.length > 10 ? `${node.title.slice(0, 10)}…` : node.title;
-        const stroke = connectSource ? "#f08c00" : meta.color;
-        const fill = selected ? meta.color : "#ffffff";
-        const textColor = selected ? "#ffffff" : "#212529";
-        return `<g class="scenario-graph-node${selected ? " active" : ""}${connectSource ? " source" : ""}" data-node-id="${escapeHtml(node.id)}" data-x="${position.x}" data-y="${position.y}" transform="translate(${position.x},${position.y})">
-            <rect width="170" height="48" rx="8" fill="${fill}" stroke="${stroke}" stroke-width="${connectSource ? 3 : 1.6}"></rect>
+        let stroke = meta.color;
+        let fill = "#ffffff";
+        let textColor = "#212529";
+        let dash = "";
+        if (visibility === "hidden") {
+            fill = playerMode ? "#e9ecef" : "#fff3bf";
+            stroke = playerMode ? "#adb5bd" : "#f08c00";
+            textColor = "#495057";
+            dash = ` stroke-dasharray="5 4"`;
+        } else if (visibility === "kp_only") {
+            fill = "#dee2e6";
+            stroke = "#868e96";
+            textColor = "#495057";
+            dash = ` stroke-dasharray="3 3"`;
+        }
+        if (selected) {
+            fill = meta.color;
+            textColor = "#ffffff";
+            dash = "";
+        }
+        if (connectSource) stroke = "#f08c00";
+        const badge = playerMode
+            ? (visibility === "hidden" ? t("scenario.visibility.hidden_placeholder", "未揭示") : meta.label)
+            : (visibility === "kp_only" ? "KP ONLY" : visibility === "hidden" ? t("scenario.visibility.hidden_placeholder", "未揭示") : meta.label);
+        return `<g class="scenario-graph-node${selected ? " active" : ""}${connectSource ? " source" : ""}" data-node-id="${escapeHtml(node.id)}" data-visibility="${escapeHtml(visibility)}" data-x="${position.x}" data-y="${position.y}" transform="translate(${position.x},${position.y})">
+            <rect width="170" height="48" rx="8" fill="${fill}" stroke="${stroke}" stroke-width="${connectSource ? 3 : 1.6}"${dash}></rect>
             <text x="12" y="21" font-size="12" fill="${textColor}">${escapeHtml(title || node.id)}</text>
-            <text x="12" y="37" font-size="10" fill="${selected ? "#ffffff" : meta.color}">${escapeHtml(meta.label)}</text>
+            <text x="12" y="37" font-size="10" fill="${selected ? "#ffffff" : textColor}">${escapeHtml(badge)}</text>
             ${node.layout_locked ? `<text x="154" y="14" font-size="10" fill="${selected ? "#ffffff" : "#868e96"}">🔒</text>` : ""}
+            ${visibility === "kp_only" ? `<text x="154" y="40" font-size="10" fill="${selected ? "#ffffff" : "#868e96"}">🔐</text>` : ""}
         </g>`;
     }
 
@@ -565,8 +709,12 @@
         const nodes = bundle.nodes.map((node) => nodeMarkup(node, positions)).join("");
         canvas.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" height="100%" role="img" aria-label="世界树图谱"><g id="scenarioGraphViewport">${edges}${nodes}</g></svg>`;
         applyView();
-        setGraphHint(modeHint(state.mode));
+        setGraphHint(state.viewMode === "player" ? playerHint() : modeHint(state.mode));
         renderEdgeActions();
+    }
+
+    function playerHint(): string {
+        return t("scenario.visibility.player_hint", "玩家视图：只显示公开内容；隐藏节点灰显，仅 KP 内容不会出现。");
     }
 
     function renderEdgeActions(): void {
@@ -579,10 +727,50 @@
         }
         const other = nodeById(edge.to);
         const owner = nodeById(edge.from);
+        const visibility = edge.visibility || "public";
         container.innerHTML = `
             <span class="small"><code>${escapeHtml(owner?.title || edge.from)}</code> → <code>${escapeHtml(other?.title || edge.to)}</code> <span class="text-muted">${escapeHtml(edge.type || "")}</span></span>
+            <label class="scenario-edge-visibility">
+                <span>${escapeHtml(t("scenario.tree.edit_visibility", "可见性"))}</span>
+                <select class="form-select form-select-sm" id="scenarioEdgeVisibility">
+                    ${(["public", "hidden", "kp_only"] as const).map((value) => `<option value="${value}"${visibility === value ? " selected" : ""}>${escapeHtml(VISIBILITY_LABEL[value])}</option>`).join("")}
+                </select>
+            </label>
+            ${revealBlockMarkup("scenarioEdge", edge.reveal_when, visibility)}
+            <button type="button" class="btn btn-sm btn-outline-primary" data-edge-save>${escapeHtml(t("scenario.graph.save_edge", "保存边"))}</button>
             <button type="button" class="btn btn-sm btn-outline-${edge.hard ? "secondary" : "danger"}" data-edge-toggle>${escapeHtml(edge.hard ? t("scenario.graph.make_soft", "改为 soft") : t("scenario.graph.make_hard", "改为 hard"))}</button>
             <button type="button" class="btn btn-sm btn-outline-danger" data-edge-delete>${escapeHtml(t("scenario.graph.delete_edge", "删除边"))}</button>`;
+        syncRevealType("scenarioEdge");
+    }
+
+    async function saveEdge(): Promise<void> {
+        const edge = edgeById(state.selectedEdgeId);
+        if (!edge || !state.scenarioId || !editable()) return;
+        const visibility = byId<HTMLSelectElement>("scenarioEdgeVisibility")?.value || "public";
+        const reveal = readReveal("scenarioEdge");
+        const revealWhen = visibility === "hidden" ? revealToCondition(reveal) : null;
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ edge: GraphEdge; revision: number }>>(
+                `/api/scenarios/${state.scenarioId}/narrative/edges/${encodeURIComponent(edge.id)}`,
+                { method: "PATCH", body: { base_revision: state.revision, visibility, reveal_when: revealWhen } },
+            );
+            if (!response.ok || !data?.success || !data.data) {
+                if (response.status === 409) {
+                    await handleConflict();
+                    return;
+                }
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            applyRevision(data.data.revision);
+            if (state.bundle) {
+                state.bundle.edges = state.bundle.edges.map((item) => (item.id === data.data!.edge.id ? data.data!.edge : item));
+            }
+            renderGraph();
+            showNotification(t("scenario.graph.edge_saved", "边已保存。"), "success");
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            showNotification(message, "error");
+        }
     }
 
     function setMode(mode: GraphMode): void {
@@ -593,6 +781,112 @@
         });
         setGraphHint(modeHint(mode));
         renderGraph();
+    }
+
+    function setViewMode(mode: "kp" | "player"): void {
+        state.viewMode = mode;
+        state.connectSource = "";
+        document.querySelectorAll<HTMLElement>("[data-graph-view]").forEach((button) => {
+            button.classList.toggle("active", button.dataset.graphView === mode);
+        });
+        byId("scenarioGraphCanvas")?.classList.toggle("is-player-view", mode === "player");
+        renderGraph();
+    }
+
+    function resetViewMode(): void {
+        state.viewMode = "kp";
+        document.querySelectorAll<HTMLElement>("[data-graph-view]").forEach((button) => {
+            button.classList.toggle("active", button.dataset.graphView === "kp");
+        });
+        byId("scenarioGraphCanvas")?.classList.toggle("is-player-view", false);
+    }
+
+    interface PreviewEntry {
+        node: GraphNode;
+        visibility: "public" | "hidden" | "kp_only";
+    }
+
+    function previewEntryMarkup(entry: PreviewEntry): string {
+        const { node, visibility } = entry;
+        const meta = kindMeta(node.kind);
+        if (visibility === "public") {
+            const excerpt = [node.summary || "", node.body || ""].filter(Boolean).join(" ").slice(0, 180);
+            return `
+                <article class="scenario-preview-card">
+                    <header><span class="badge bg-light text-dark">${escapeHtml(meta.label)}</span><strong>${escapeHtml(node.title || node.id)}</strong></header>
+                    ${excerpt ? `<p class="mb-0">${escapeHtml(excerpt)}${excerpt.length >= 180 ? "…" : ""}</p>` : ""}
+                    ${(node.keywords || []).length ? `<div class="scenario-preview-keywords">${node.keywords!.map((word) => `<span class="badge bg-light text-dark">${escapeHtml(word)}</span>`).join(" ")}</div>` : ""}
+                </article>`;
+        }
+        if (visibility === "hidden") {
+            return `
+                <article class="scenario-preview-card is-hidden">
+                    <header><span class="badge bg-warning text-dark">${escapeHtml(t("scenario.visibility.hidden_placeholder", "未揭示"))}</span><strong>${escapeHtml(node.title || node.id)}</strong></header>
+                    <p class="mb-0 small">${escapeHtml(t("scenario.visibility.hidden_reason", "玩家暂不可见，满足揭示条件后出现："))}${escapeHtml(revealSummary(node.reveal_when))}</p>
+                </article>`;
+        }
+        return `
+            <article class="scenario-preview-card is-kp">
+                <header><span class="badge bg-secondary">KP ONLY</span><strong>${escapeHtml(node.title || node.id)}</strong></header>
+                <p class="mb-0 small">${escapeHtml(t("scenario.visibility.kp_only_hint", "仅 KP：内容永远不会进入玩家提示词、检索与界面。"))}</p>
+            </article>`;
+    }
+
+    function renderPlayerPreview(): void {
+        const body = byId("scenarioPlayerPreviewBody");
+        const summary = byId("scenarioPlayerPreviewSummary");
+        if (!body) return;
+        const bundle = state.bundle;
+        if (!bundle || bundle.nodes.length === 0) {
+            body.innerHTML = `<p class="text-muted small mb-0">${escapeHtml(t("scenario.visibility.player_empty", "当前剧本没有可预览的节点。"))}</p>`;
+            if (summary) summary.textContent = "";
+            return;
+        }
+        const entries: PreviewEntry[] = sortNodes(bundle.nodes).map((node) => ({
+            node,
+            visibility: ((node.visibility || "public") === "kp_only" ? "kp_only" : (node.visibility || "public") === "hidden" ? "hidden" : "public"),
+        }));
+        const visibleEdges = (bundle.edges || []).filter((edge) => {
+            const from = nodeById(edge.from);
+            const to = nodeById(edge.to);
+            return (edge.visibility || "public") === "public"
+                && (from?.visibility || "public") === "public"
+                && (to?.visibility || "public") === "public";
+        }).length;
+        const groups: Array<[string, "public" | "hidden" | "kp_only"]> = [
+            ["scenario.visibility.group_public", "public"],
+            ["scenario.visibility.group_hidden", "hidden"],
+            ["scenario.visibility.group_kp", "kp_only"],
+        ];
+        const fallback: Record<string, string> = {
+            "scenario.visibility.group_public": "玩家可见",
+            "scenario.visibility.group_hidden": "未揭示（满足条件后出现）",
+            "scenario.visibility.group_kp": "仅 KP（玩家永不可见）",
+        };
+        body.innerHTML = groups.map(([key, group]) => {
+            const items = entries.filter((entry) => entry.visibility === group);
+            if (items.length === 0) return "";
+            return `<section class="scenario-preview-group"><h6>${escapeHtml(t(key, fallback[key] || key))} <span class="text-muted small">${items.length}</span></h6>${items.map(previewEntryMarkup).join("")}</section>`;
+        }).join("");
+        const counts = {
+            public: entries.filter((entry) => entry.visibility === "public").length,
+            hidden: entries.filter((entry) => entry.visibility === "hidden").length,
+            kp: entries.filter((entry) => entry.visibility === "kp_only").length,
+        };
+        if (summary) {
+            summary.textContent = `${counts.public} ${t("scenario.visibility.count_visible", "可见")} · ${counts.hidden} ${t("scenario.visibility.count_hidden", "未揭示")} · ${counts.kp} ${t("scenario.visibility.count_kp", "仅 KP")} · ${visibleEdges} ${t("scenario.visibility.count_edges", "可见连接")}`;
+        }
+    }
+
+    function openPlayerPreview(): void {
+        if (!state.bundle) {
+            showNotification(t("scenario.tree.save_first", "请先保存剧本，再查看世界树。"), "warning");
+            return;
+        }
+        renderPlayerPreview();
+        const modal = byId("scenarioPlayerPreviewModal");
+        const api = (window as unknown as { bootstrap?: { Modal?: { getOrCreateInstance: (element: Element) => { show: () => void } } } }).bootstrap?.Modal;
+        if (modal) api?.getOrCreateInstance(modal).show();
     }
 
     function clientToWorld(clientX: number, clientY: number): { x: number; y: number } {
@@ -694,7 +988,7 @@
     }
 
     async function handleNodeClick(nodeId: string): Promise<void> {
-        if (state.mode === "connect" && editable()) {
+        if (state.mode === "connect" && editable() && state.viewMode === "kp") {
             if (!state.connectSource) {
                 state.connectSource = nodeId;
                 renderGraph();
@@ -831,7 +1125,7 @@
             if (nodeTarget) {
                 const nodeId = nodeTarget.getAttribute("data-node-id") || "";
                 const node = nodeById(nodeId);
-                if (state.mode === "select" && editable() && node && !node.layout_locked) {
+                if (state.mode === "select" && state.viewMode === "kp" && editable() && node && !node.layout_locked) {
                     const world = clientToWorld(pointer.clientX, pointer.clientY);
                     const origin = state.positions.get(nodeId) || { x: 0, y: 0 };
                     state.drag = {
@@ -936,6 +1230,10 @@
 
         byId("scenarioGraphEdgeActions")?.addEventListener("click", (event) => {
             const target = event.target as HTMLElement;
+            if (target.closest("[data-edge-save]")) {
+                void saveEdge();
+                return;
+            }
             if (target.closest("[data-edge-toggle]")) {
                 void toggleEdgeHard();
                 return;
@@ -945,13 +1243,23 @@
             }
         });
 
+        byId("scenarioGraphEdgeActions")?.addEventListener("change", (event) => {
+            const target = event.target as HTMLSelectElement;
+            if (target.id === "scenarioEdgeVisibility") syncVisibilityFields("scenarioEdge", target.value);
+            if (target.id === "scenarioEdgeRevealType") syncRevealType("scenarioEdge");
+        });
+
         document.querySelectorAll<HTMLElement>("[data-graph-mode]").forEach((button) => {
             button.addEventListener("click", () => setMode((button.dataset.graphMode as GraphMode) || "select"));
+        });
+        document.querySelectorAll<HTMLElement>("[data-graph-view]").forEach((button) => {
+            button.addEventListener("click", () => setViewMode(button.dataset.graphView === "player" ? "player" : "kp"));
         });
         byId("scenarioGraphFit")?.addEventListener("click", () => fitView());
         byId("scenarioGraphAutoLayout")?.addEventListener("click", () => {
             void autoLayout();
         });
+        byId("scenarioGraphPlayerPreview")?.addEventListener("click", () => openPlayerPreview());
     }
 
     function renderAll(): void {
@@ -973,6 +1281,7 @@
         state.search = "";
         state.validation = null;
         state.mode = "select";
+        resetViewMode();
         const search = byId<HTMLInputElement>("scenarioTreeSearch");
         if (search) search.value = "";
         const results = byId("scenarioValidateResults");
@@ -1031,6 +1340,7 @@
         state.positions = new Map();
         state.drag = null;
         state.pan = null;
+        resetViewMode();
         const search = byId<HTMLInputElement>("scenarioTreeSearch");
         if (search) search.value = "";
         setStatus(t("scenario.tree.empty_badge", "未生成世界树"), "secondary");
@@ -1116,6 +1426,11 @@
             if ((event.target as HTMLElement).closest("#scenarioNodeSave")) {
                 void saveNode();
             }
+        });
+        byId("scenarioNodeInspector")?.addEventListener("change", (event) => {
+            const target = event.target as HTMLSelectElement;
+            if (target.id === "scenarioNodeVisibility") syncVisibilityFields("scenarioNode", target.value);
+            if (target.id === "scenarioNodeRevealType") syncRevealType("scenarioNode");
         });
         bindGraphEvents();
     }

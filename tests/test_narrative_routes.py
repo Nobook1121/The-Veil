@@ -121,6 +121,45 @@ def test_patch_node_updates_fields_and_bumps_revision(tmp_path):
     assert saved["meta"]["revision"] == 3
 
 
+def test_patch_node_saves_reveal_when(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _patch_node(
+        client,
+        visibility="hidden",
+        reveal_when={"skill": "侦查", "difficulty": 2},
+    )
+
+    assert response.status_code == 200
+    saved = json.loads((tmp_path / "scenarios" / "scenario-7" / "narrative.json").read_text(encoding="utf-8"))
+    node = next(item for item in saved["nodes"] if item["id"] == "room")
+    assert node["visibility"] == "hidden"
+    assert node["reveal_when"] == {"skill": "侦查", "difficulty": 2}
+
+
+def test_patch_edge_saves_visibility_and_reveal_when(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.patch(
+        "/api/scenarios/7/narrative/edges/edge_hall_room",
+        json={"base_revision": 2, "visibility": "hidden", "reveal_when": {"clue": "clue_key"}},
+        headers=CSRF,
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["revision"] == 3
+    saved = json.loads((tmp_path / "scenarios" / "scenario-7" / "narrative.json").read_text(encoding="utf-8"))
+    edge = next(item for item in saved["edges"] if item["id"] == "edge_hall_room")
+    assert edge["visibility"] == "hidden"
+    assert edge["reveal_when"] == {"clue": "clue_key"}
+    assert edge["from"] == "hall"
+    assert edge["to"] == "room"
+
+
 def test_patch_node_rejects_stale_revision(tmp_path):
     _write_scenario(tmp_path, bundle=_bundle())
     client = _app(tmp_path).test_client()
