@@ -90,6 +90,7 @@ def build_prompt_layers(
     ruleset_results: list[dict[str, Any]] | None = None,
     retrieval_full: bool = False,
     room_snapshot_message: str | None = None,
+    narrative_summary: str | None = None,
 ) -> PromptLayers:
     scenario_static = _scenario_static_content(scenario)
     scene_static = _scene_static_content(scene)
@@ -149,6 +150,11 @@ def build_prompt_layers(
         }
     )
     dynamic_segments.append("room_state")
+    # 图谱运行态摘要由状态确定性渲染，不依赖检索；放在房间状态之后、快照之前，
+    # 保证 KP 每轮都能看到位置/队伍/背包/线索/出口，而不是每次重读整份 state。
+    if narrative_summary:
+        dynamic_messages.append({"role": "system", "content": str(narrative_summary)})
+        dynamic_segments.append("narrative_state")
     # 房间快照（成员、HP/SAN、场景清单）每轮都变，放在动态块的最末尾、历史之前。
     # 易变内容后移，前面的静态层与检索卡片才能组成跨请求共享的可缓存前缀。
     if room_snapshot_message:

@@ -60,6 +60,28 @@ def test_prompt_cache_key_excludes_room_and_dynamic_values():
     assert first.static_prefix == second.static_prefix
 
 
+def test_prompt_layers_inject_narrative_summary_before_room_snapshot():
+    result = build_prompt_layers(
+        global_rules="GLOBAL",
+        scenario={"id": "scenario-1", "version": "3", "core": "CORE"},
+        scene={"id": "scene-2", "version": "5", "content": "SCENE"},
+        room_state={"room_id": "room-a"},
+        history=[],
+        user_input="look",
+        rules_version="7",
+        narrative_summary="【当前状态】第 3 轮\n位置：门厅（hall）",
+        room_snapshot_message="SNAPSHOT",
+    )
+
+    contents = [message["content"] for message in result.messages]
+    summary_index = next(index for index, text in enumerate(contents) if "【当前状态】" in text)
+    snapshot_index = next(index for index, text in enumerate(contents) if text == "SNAPSHOT")
+    assert summary_index < snapshot_index
+    assert "narrative_state" in result.segments
+    assert "【当前状态】" not in result.static_prefix
+    assert "【当前状态】" not in result.cache_key
+
+
 def test_prompt_layers_place_retrieval_after_static_layers():
     result = build_prompt_layers(
         global_rules="GLOBAL",

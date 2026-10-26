@@ -27,7 +27,25 @@ from trpg_server.agents.narrative.store import (
     narrative_path,
     save_bundle,
 )
+from trpg_server.agents.narrative.ledger import (
+    LedgerVisibilityError,
+    append_fact,
+    append_ledger_event,
+    load_facts,
+    read_ledger_events,
+    save_summary,
+)
 from trpg_server.agents.narrative.layout import apply_layout
+from trpg_server.agents.narrative.prompt_v2 import render_state_summary
+from trpg_server.agents.narrative.state_store import (
+    apply_event,
+    default_narrative_state,
+    load_narrative_state,
+    normalize_narrative_state,
+    replay_narrative,
+    save_narrative_state,
+    write_keyframe,
+)
 from trpg_server.agents.narrative.topology import TopologyDecision, detect_topology
 from trpg_server.agents.narrative.validate import (
     ValidationIssue,
@@ -47,6 +65,7 @@ __all__ = [
     "BuildResult",
     "ConditionResult",
     "ExtractedNarrative",
+    "LedgerVisibilityError",
     "NarrativeBundle",
     "NarrativeEdge",
     "NarrativeIndex",
@@ -55,6 +74,9 @@ __all__ = [
     "TopologyDecision",
     "ValidationIssue",
     "ValidationReport",
+    "append_fact",
+    "append_ledger_event",
+    "apply_event",
     "apply_layout",
     "assert_no_kp_only",
     "build_from_scenario",
@@ -64,6 +86,7 @@ __all__ = [
     "bundle_summary",
     "classify_visibility",
     "condition_atoms",
+    "default_narrative_state",
     "detect_sections",
     "detect_topology",
     "evaluate_condition",
@@ -72,12 +95,21 @@ __all__ = [
     "forbidden_names",
     "is_visible_to_player",
     "load_bundle",
+    "load_facts",
+    "load_narrative_state",
     "merge_edges",
     "narrative_path",
+    "normalize_narrative_state",
     "normalize_visibility",
+    "read_ledger_events",
     "rebuild_all",
     "rebuild_from_descriptor",
+    "render_state_summary",
+    "replay_narrative",
     "save_bundle",
+    "save_narrative_state",
+    "save_summary",
     "simulate_any_order",
     "validate_bundle",
+    "write_keyframe",
 ]

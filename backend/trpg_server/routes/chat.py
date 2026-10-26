@@ -28,6 +28,10 @@ from trpg_server.agents.ruleset_knowledge import RulesetKnowledgeStore, search_r
 from trpg_server.agents.tools import default_tool_registry
 from trpg_server.agents.tools.room import get_room_snapshot
 from trpg_server.agents.room_state import append_room_event, project_room_state
+from trpg_server.agents.narrative.prompt_v2 import render_state_summary
+from trpg_server.agents.narrative.state_store import narrative_from_room_state
+from trpg_server.agents.narrative.store import NarrativeStoreError, load_bundle
+from trpg_server.scenario_store import load_scenario_by_id
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
 from trpg_server.room_log import log_room_event
@@ -562,6 +566,26 @@ def chat():
                 logger.exception("Scenario retrieval failed")
         rules_version = str((agent_context.room_info().get("rulesets") or {}).get("coc7") or "1") if room_id else "1"
         projected_state = project_room_state(agent_context.room_state(), room_snapshot) if room_id else {}
+        # 图谱运行态摘要：确定性渲染，不依赖检索命中；没有位置且没有回合时不注入。
+        narrative_summary = ""
+        if room_id:
+            narrative = narrative_from_room_state(agent_context.room_state())
+            narrative_bundle = None
+            snapshot_room = (room_snapshot or {}).get("room") if isinstance(room_snapshot, dict) else {}
+            scenario_id = snapshot_room.get("scenario_id") if isinstance(snapshot_room, dict) else None
+            if scenario_id is not None and agent_context.scenarios_dir:
+                try:
+                    descriptor, _ = load_scenario_by_id(
+                        agent_context.scenarios_dir,
+                        scenario_id,
+                        snapshot_room.get("scenario_version"),
+                    )
+                    if descriptor:
+                        narrative_bundle = load_bundle(descriptor.parent)
+                except (OSError, ValueError, NarrativeStoreError):
+                    # 图谱文件损坏不应阻断对话；摘要退化为使用节点 id。
+                    logger.warning("Narrative bundle load failed for room %s", room_id, exc_info=True)
+            narrative_summary = render_state_summary(narrative, narrative_bundle)
         if effective_suggestions and isinstance(projected_state, dict):
             # Only AI-relevant active house rules reach the prompt, injected into
             # the dynamic room-state layer so the static prefix stays cacheable.
@@ -580,6 +604,7 @@ def chat():
             ruleset_results=[],
             retrieval_full=direct_import,
             room_snapshot_message=room_snapshot_message,
+            narrative_summary=narrative_summary,
         )
         _emit_thinking_stage(room_id, ai_request_id, "vector_search_done", "向量库检索完成")
         # 提示词分段估算：把本次输入 token 拆到静态前缀/知识库/历史/本轮输入等分段，
