@@ -14,6 +14,8 @@ interface Window {
         clear: () => void;
         init: () => void;
         syncRevision: (revision: number) => void;
+        revision: () => number;
+        canEdit: () => boolean;
     };
     ScenarioTriggers?: {
         load: (scenarioId: number | string, options?: { readonly?: boolean }) => Promise<void>;

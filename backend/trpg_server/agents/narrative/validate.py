@@ -525,6 +525,15 @@ def _check_start(bundle: NarrativeBundle, node_map: dict[str, NarrativeNode], is
 
 def _check_visibility(bundle: NarrativeBundle, issues: list[ValidationIssue]) -> None:
     for node in bundle.nodes:
+        if node.extra.get("needs_review"):
+            issues.append(ValidationIssue(
+                code="visibility.needs_review",
+                level="warn",
+                message=f"节点 {node.id} 的可见性由自动判定产生，需要作者复核。",
+                node_id=node.id,
+                rule="§8.7",
+                suggestion="在可见性面板确认，或改为 public / hidden / kp_only。",
+            ))
         if normalize_visibility(node.visibility) == VISIBILITY_HIDDEN and not _truthy_condition(node.reveal_when):
             issues.append(ValidationIssue(
                 code="visibility.hidden_without_reveal",
@@ -535,6 +544,15 @@ def _check_visibility(bundle: NarrativeBundle, issues: list[ValidationIssue]) ->
                 suggestion="补充 reveal_when，或改为 public / kp_only。",
             ))
     for edge in bundle.edges:
+        if edge.extra.get("needs_review"):
+            issues.append(ValidationIssue(
+                code="visibility.needs_review",
+                level="warn",
+                message=f"边 {edge.id} 的可见性由自动判定产生，需要作者复核。",
+                edge_id=edge.id or None,
+                rule="§8.7",
+                suggestion="在可见性面板确认，或改为 public / hidden / kp_only。",
+            ))
         if normalize_visibility(edge.visibility) == VISIBILITY_HIDDEN and not _truthy_condition(edge.reveal_when):
             issues.append(ValidationIssue(
                 code="visibility.hidden_without_reveal",

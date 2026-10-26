@@ -81,6 +81,31 @@ def _patch_node(client, node_id="room", **body):
     return client.patch(f"/api/scenarios/7/narrative/nodes/{node_id}", json=payload, headers=CSRF)
 
 
+def test_visibility_review_clears_flag_and_keeps_visibility(tmp_path):
+    # §8.7：接受自动判定只清除 needs_review，不改变可见性。
+    bundle = _bundle()
+    bundle["nodes"][1]["visibility"] = "hidden"
+    bundle["nodes"][1]["needs_review"] = True
+    bundle["nodes"][1]["visibility_source"] = "auto"
+    _write_scenario(tmp_path, bundle=bundle)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.post(
+        "/api/scenarios/7/narrative/visibility/review",
+        json={"target": "node:room", "base_revision": 2},
+        headers=CSRF,
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["revision"] == 3
+    stored = json.loads((tmp_path / "scenarios" / "scenario-7" / "narrative.json").read_text(encoding="utf-8"))
+    node = next(item for item in stored["nodes"] if item["id"] == "room")
+    assert node["visibility"] == "hidden"
+    assert "needs_review" not in node
+    assert node["visibility_source"] == "author"
+
+
 def test_get_narrative_returns_bundle_and_permissions(tmp_path):
     _write_scenario(tmp_path, bundle=_bundle())
     client = _app(tmp_path).test_client()

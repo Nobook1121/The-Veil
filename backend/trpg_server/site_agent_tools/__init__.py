@@ -20,6 +20,7 @@ from trpg_server.site_agent_tools.base import (
     sanitize_arguments,
 )
 from trpg_server.site_agent_tools.characters import CHARACTER_TOOLS
+from trpg_server.site_agent_tools.narrative import NARRATIVE_TOOLS
 from trpg_server.site_agent_tools.permissions import PERMISSION_TOOLS
 from trpg_server.site_agent_tools.profile import PROFILE_TOOLS
 from trpg_server.site_agent_tools.rooms import ROOM_TOOLS
@@ -31,6 +32,7 @@ from trpg_server.site_agent_tools.utilities import UTILITY_TOOLS
 ALL_TOOL_SPECS: tuple[ToolSpec, ...] = tuple(
     CHARACTER_TOOLS
     + SCENARIO_TOOLS
+    + NARRATIVE_TOOLS
     + PERMISSION_TOOLS
     + USER_TOOLS
     + UTILITY_TOOLS

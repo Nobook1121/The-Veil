@@ -13,7 +13,7 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from trpg_server.agents.narrative.conditions import ConditionResult, evaluate_condition
-from trpg_server.agents.narrative.ledger import append_ledger_event
+from trpg_server.agents.narrative.ledger import append_ledger_event, read_ledger_events
 from trpg_server.agents.narrative.model import (
     VISIBILITY_KP_ONLY,
     VISIBILITY_PUBLIC,
@@ -23,7 +23,12 @@ from trpg_server.agents.narrative.model import (
 )
 from trpg_server.agents.narrative.publisher import publish_hits
 from trpg_server.agents.narrative.resolver import TriggerResolver
-from trpg_server.agents.narrative.state_store import apply_event, load_narrative_state
+from trpg_server.agents.narrative.state_store import (
+    KEYFRAME_INTERVAL,
+    apply_event,
+    load_narrative_state,
+    write_keyframe,
+)
 from trpg_server.agents.narrative.store import (
     MOVEMENT_EDGE_TYPES,
     NarrativeIndex,
@@ -331,7 +336,38 @@ class NarrativeRuntime:
             raise NarrativeRuntimeError("房间目录不可用，无法写入状态")
         append_ledger_event(self.room_dir, event, bundle=self.bundle)
         self.narrative = apply_event(self.room_dir, event)
+        self._keyframe_if_needed([event])
         return event
+
+    def _keyframe_reason(self, events: list[Mapping[str, Any]]) -> str:
+        """按 §6.4.2 选择关键帧原因：移动 / 时钟阈值 / 每 10 回合。"""
+        for event in events:
+            kind = str(event.get("kind") or "").lower()
+            if kind == "move":
+                return "move"
+            if kind == "clock":
+                clock_id = _text(event.get("clock_id"))
+                clock = (self.narrative.get("clocks") or {}).get(clock_id) or {}
+                threshold = _as_int(clock.get("threshold"), 0)
+                if threshold and _as_int(clock.get("value"), 0) >= threshold:
+                    return "clock_reach"
+        turn = _as_int((self.narrative.get("clock") or {}).get("turn"), 0)
+        if turn and turn % KEYFRAME_INTERVAL == 0:
+            return "interval"
+        return ""
+
+    def _keyframe_if_needed(self, events: list[Mapping[str, Any]]) -> None:
+        reason = self._keyframe_reason(events)
+        if not reason or self.room_dir is None:
+            return
+        turn = _as_int((self.narrative.get("clock") or {}).get("turn"), 0)
+        ledger_seq = 0
+        try:
+            recent = read_ledger_events(self.room_dir, limit=1)
+            ledger_seq = _as_int(recent[-1].get("_seq"), 0) if recent else 0
+            write_keyframe(self.room_dir, self.narrative, turn=turn, reason=reason, ledger_seq=ledger_seq)
+        except Exception:  # 关键帧失败不得阻断主流程（§6.4.6）
+            logger.warning("narrative.keyframe.write_failed room=%s reason=%s", self.room_dir.name, reason, exc_info=True)
 
     def record_batch(self, payloads: list[Mapping[str, Any]], *, summary: str = "") -> list[dict[str, Any]]:
         """一次原子状态写入 + 一条账本摘要；用于交互结果的多效果。"""
@@ -358,6 +394,7 @@ class NarrativeRuntime:
                 },
                 bundle=self.bundle,
             )
+        self._keyframe_if_needed(events)
         return events
 
     # ---- 触发器 -----------------------------------------------------------

@@ -27,6 +27,7 @@ from trpg_server.agents.narrative.store import (
     scenario_dir_for_descriptor,
 )
 from trpg_server.agents.narrative.topology import detect_topology
+from trpg_server.agents.narrative.quality import compute_quality
 from trpg_server.agents.narrative.validate import simulate_any_order, validate_bundle
 from trpg_server.agents.narrative.visibility import classify_visibility
 from trpg_server.json_store import read_json, write_json_atomic
@@ -143,8 +144,11 @@ def _validate_command(args: list[str], scenarios_dir: Path | str, flags: set[str
     index = build_index(bundle)
     report = validate_bundle(bundle, index=index)
     simulated = simulate_any_order(bundle) if "simulate" in flags else []
+    order_ok = None if "simulate" not in flags else not any(issue.level == "error" for issue in simulated)
+    quality = compute_quality(bundle, order_independent=order_ok)
     payload = report.to_dict()
     payload["simulated"] = [issue.__dict__ for issue in simulated]
+    payload["quality"] = quality.to_dict()
     if "json" in flags:
         return report.ok and not any(issue.level == "error" for issue in simulated), _json(payload)
 
@@ -158,6 +162,11 @@ def _validate_command(args: list[str], scenarios_dir: Path | str, flags: set[str
         lines.append(f"  … 其余 {len(report.issues) - 50} 条已省略（--json 查看全部）")
     for issue in simulated[:20]:
         lines.append(_format_issue(issue))
+    failed = quality.failed
+    lines.append(
+        f"  质量指标：{len(quality.metrics) - len(failed)}/{len(quality.metrics)} 达标"
+        + (f"；未达标 {'、'.join(item.label for item in failed)}" if failed else "")
+    )
     return report.ok and not any(issue.level == "error" for issue in simulated), "\n".join(lines)
 
 

@@ -33,6 +33,15 @@ def _node(
     )
 
 
+def test_needs_review_nodes_enter_visibility_review_queue() -> None:
+    # §8.7：自动判定的可见性必须进入复核队列，发布前提示。
+    node = _node("room")
+    node.extra["needs_review"] = True
+    bundle = NarrativeBundle(nodes=[node], edges=[])
+    issues = validate_bundle(bundle).issues
+    assert any(issue.code == "visibility.needs_review" and issue.node_id == "room" for issue in issues)
+
+
 def _edge(
     from_id: str,
     to_id: str,

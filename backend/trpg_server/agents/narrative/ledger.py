@@ -21,10 +21,13 @@ from trpg_server.json_store import read_json, write_json_atomic
 logger = logging.getLogger(__name__)
 
 STORY_LEDGER_FILENAME = "story_ledger.jsonl"
+LEDGER_MANIFEST_FILENAME = "ledger_manifest.json"
 FACTS_FILENAME = "facts.json"
 SUMMARIES_FILENAME = "summaries.json"
 MAX_LEDGER_SUMMARY = 500
 MAX_KEYFRAME_EVENTS = 2000
+# 单个账本段超过该体积时切分（§6.4.5）；段文件只读保留，重放按 manifest 顺序。
+LEDGER_SEGMENT_BYTES = 4 * 1024 * 1024
 
 EVENT_KINDS = (
     "action", "dialogue", "discovery", "state_change", "check",
@@ -85,6 +88,45 @@ def ledger_path(room_dir: Path | str) -> Path:
     return Path(room_dir) / STORY_LEDGER_FILENAME
 
 
+def _manifest_path(directory: Path) -> Path:
+    return directory / LEDGER_MANIFEST_FILENAME
+
+
+def _segments(directory: Path) -> list[str]:
+    payload = read_json(_manifest_path(directory), default={})
+    items = payload.get("segments") if isinstance(payload, Mapping) else None
+    if not isinstance(items, list):
+        return []
+    return [
+        str(item).strip()
+        for item in items
+        if str(item or "").strip() and "/" not in str(item) and "\\" not in str(item) and ".." not in str(item)
+    ]
+
+
+def _rotate_if_needed(directory: Path) -> None:
+    """账本过大时切分到 `story_ledger.0001.jsonl` 并写 manifest（§6.4.5）。"""
+    active = ledger_path(directory)
+    try:
+        if not active.exists() or active.stat().st_size < LEDGER_SEGMENT_BYTES:
+            return
+    except OSError:
+        return
+    segments = _segments(directory)
+    next_index = len(segments) + 1
+    name = f"story_ledger.{next_index:04d}.jsonl"
+    while (directory / name).exists():
+        next_index += 1
+        name = f"story_ledger.{next_index:04d}.jsonl"
+    active.rename(directory / name)
+    segments.append(name)
+    write_json_atomic(_manifest_path(directory), {
+        "segments": segments,
+        "updated_at": _now_text(),
+    })
+    logger.info("narrative.ledger.rotate room=%s segment=%s", directory.name, name)
+
+
 def append_ledger_event(
     room_dir: Path | str,
     event: Mapping[str, Any],
@@ -127,6 +169,7 @@ def append_ledger_event(
             item[extra] = str(event.get(extra))
 
     line = json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n"
+    _rotate_if_needed(directory)
     with ledger_path(directory).open("a", encoding="utf-8") as handle:
         handle.write(line)
         handle.flush()
@@ -139,20 +182,25 @@ def append_ledger_event(
 
 
 def _iter_raw_events(room_dir: Path | str) -> Iterable[tuple[int, dict[str, Any]]]:
-    path = ledger_path(room_dir)
-    if not path.exists():
-        return
-    with path.open("r", encoding="utf-8") as handle:
-        for index, line in enumerate(handle, 1):
-            text = line.strip()
-            if not text:
-                continue
-            try:
-                payload = json.loads(text)
-            except (TypeError, ValueError):
-                continue
-            if isinstance(payload, dict):
-                yield index, payload
+    directory = Path(room_dir)
+    paths = [directory / name for name in _segments(directory)]
+    paths.append(ledger_path(directory))
+    seq = 0
+    for path in paths:
+        if not path.exists():
+            continue
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                text = line.strip()
+                if not text:
+                    continue
+                seq += 1
+                try:
+                    payload = json.loads(text)
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(payload, dict):
+                    yield seq, payload
 
 
 def read_ledger_events(
@@ -180,8 +228,16 @@ def read_ledger_events(
 
 
 def ledger_size(room_dir: Path | str) -> int:
-    path = ledger_path(room_dir)
-    return path.stat().st_size if path.exists() else 0
+    directory = Path(room_dir)
+    paths = [directory / name for name in _segments(directory)]
+    paths.append(ledger_path(directory))
+    total = 0
+    for path in paths:
+        try:
+            total += path.stat().st_size if path.exists() else 0
+        except OSError:
+            continue
+    return total
 
 
 def facts_path(room_dir: Path | str) -> Path:

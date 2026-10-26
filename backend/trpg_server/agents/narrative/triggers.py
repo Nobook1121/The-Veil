@@ -114,7 +114,7 @@ def asset_from_resource_ref(resource: Mapping[str, Any] | None, *, origin: str =
     path = _text(resource.get("path"))
     digest = _text(resource.get("hash"))
     return normalize_asset({
-        "id": (digest[:16] if digest else "") or _stable_id("asset", url or path),
+        "id": _text(resource.get("asset_id")) or (digest[:16] if digest else "") or _stable_id("asset", url or path),
         "sha256": digest,
         "kind": resource.get("type"),
         "mime": resource.get("mime"),

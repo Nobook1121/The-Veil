@@ -11,6 +11,8 @@ class ScenarioView {
     private currentScenarios: Scenario[] = [];
     /** 正在编辑的是文档直接导入的剧本：没有场景卡，因此不要求场景/结局模块。 */
     private directImportEditing = false;
+    /** 触发器资源库缓存（§8.6）：用于搜索 / 类型筛选 / 替换。 */
+    private scenarioResources: ResourceRef[] = [];
     /** 允许直接关闭编辑器（保存/发布成功、或用户已在草稿确认框中选择）。 */
     private closeAllowed = false;
     /** 打开编辑器时的表单快照；与当前值比较即可判断「是否有未保存改动」。 */
@@ -558,6 +560,12 @@ class ScenarioView {
         resourceDropzone?.addEventListener("dragleave", () => resourceDropzone.classList.remove("is-dragging"));
         resourceDropzone?.addEventListener("drop", (event) => { event.preventDefault(); resourceDropzone.classList.remove("is-dragging"); const files = (event as DragEvent).dataTransfer?.files; if (files) void this.uploadResourceFiles(files); });
         resourceFiles?.addEventListener("change", () => { if (resourceFiles.files) void this.uploadResourceFiles(resourceFiles.files); resourceFiles.value = ""; });
+        const resourceSearch = document.getElementById("scenarioResourceSearch") as HTMLInputElement | null;
+        resourceSearch?.addEventListener("input", () => this.renderResourceList());
+        document.getElementById("scenarioResourceTypeFilter")?.addEventListener("change", () => this.renderResourceList());
+        document.getElementById("scenarioResourceList")?.addEventListener("click", (event) => this.handleResourceLibraryClick(event));
+        const replaceFile = document.getElementById("scenarioResourceReplaceFile") as HTMLInputElement | null;
+        replaceFile?.addEventListener("change", () => { if (replaceFile.files?.[0]) void this.replaceResourceFile(replaceFile.files[0]); replaceFile.value = ""; });
         const modal = document.getElementById("scenarioModal");
         modal?.addEventListener("shown.bs.modal", () => {
             // 动画结束后再记录基线：此时填充草稿 / 导入审核数据都已写入表单，
@@ -730,6 +738,9 @@ class ScenarioView {
 
     private resetScenarioForm(): void {
         this.directImportEditing = false;
+        this.scenarioResources = [];
+        const resourceList = document.getElementById("scenarioResourceList");
+        if (resourceList) resourceList.innerHTML = "";
         requiredElement("scenarioModal").dataset.scenarioId = "";
         input("scenarioTitle").value = "";
         input("scenarioPublicId").value = scenarioT("scenario.cover.auto", "保存后自动生成");
@@ -812,7 +823,90 @@ class ScenarioView {
         if (!list) return;
         const response = await TrpgApi.requestWithResponse<ApiResponse<ResourceRef[]>>(`/api/scripts/${scenarioId}/assets`);
         if (!response.response.ok || !response.data.success || !Array.isArray(response.data.data)) return;
-        list.innerHTML = response.data.data.map((resource) => `<div class="scenario-resource-row" data-resource-hash="${scenarioEscapeHtml(resource.hash)}"><span>${scenarioEscapeHtml(resource.alt)}</span><small>${scenarioEscapeHtml(resource.mime)} · ${resource.size} bytes</small></div>`).join("");
+        this.scenarioResources = response.data.data;
+        this.renderResourceList();
+    }
+
+    private resourceKey(resource: ResourceRef): string {
+        return resource.asset_id || resource.hash || resource.path || resource.url || "";
+    }
+
+    private renderResourceList(): void {
+        const list = document.getElementById("scenarioResourceList");
+        if (!list) return;
+        const search = (document.getElementById("scenarioResourceSearch") as HTMLInputElement | null)?.value.trim().toLowerCase() || "";
+        const type = (document.getElementById("scenarioResourceTypeFilter") as HTMLSelectElement | null)?.value || "";
+        const visible = this.scenarioResources.filter((resource) => {
+            if (type && resource.type !== type) return false;
+            if (!search) return true;
+            return [resource.alt, resource.path, resource.type, resource.mime, resource.asset_id]
+                .join(" ").toLowerCase().includes(search);
+        });
+        if (visible.length === 0) {
+            const scenarioId = document.getElementById("scenarioModal")?.dataset.scenarioId;
+            const empty = this.scenarioResources.length === 0 && scenarioId
+                ? "还没有素材，上传图片/视频/音频/富文本或文件"
+                : "没有匹配的素材";
+            list.innerHTML = `<div class="scenario-resource-empty">${scenarioEscapeHtml(empty)}</div>`;
+            return;
+        }
+        const scenarioId = document.getElementById("scenarioModal")?.dataset.scenarioId || "";
+        const tk = (key: string, fallback: string) => scenarioT(key, fallback);
+        const editable = !this.directImportEditing && Boolean(scenarioId);
+        list.innerHTML = visible.map((resource) => {
+            const key = this.resourceKey(resource);
+            const thumb = scenarioId && key
+                ? `<img class="scenario-resource-thumb" src="/api/scripts/${scenarioId}/assets/${encodeURIComponent(key)}/thumb" alt="${scenarioEscapeHtml(resource.alt)}" loading="lazy">`
+                : `<div class="scenario-resource-thumb is-file"><i class="fa fa-file" aria-hidden="true"></i></div>`;
+            const sizeKb = resource.size ? `${(resource.size / 1024).toFixed(1)} KB` : "0 KB";
+            return `<div class="scenario-resource-row" data-resource-id="${scenarioEscapeHtml(key)}">
+                ${thumb}
+                <strong>${scenarioEscapeHtml(resource.alt)}</strong>
+                <div class="scenario-resource-chips">
+                    <span class="scenario-resource-chip">${scenarioEscapeHtml(tk(`scenario.trigger.media_${resource.type}`, resource.type))}</span>
+                    <span class="scenario-resource-chip">${sizeKb}</span>
+                    <span class="scenario-resource-chip">${scenarioEscapeHtml(tk("scenario.trigger.used_by", "被引用"))} ${resource.used_by ?? 0}</span>
+                </div>
+                <div class="scenario-resource-actions">
+                    <small>${scenarioEscapeHtml(resource.mime)}</small>
+                    ${editable ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-replace-resource="${scenarioEscapeHtml(key)}">${scenarioEscapeHtml(tk("scenario.trigger.replace", "替换"))}</button>` : ""}
+                </div>
+            </div>`;
+        }).join("");
+    }
+
+    private handleResourceLibraryClick(event: Event): void {
+        const target = event.target as HTMLElement;
+        const replaceButton = target.closest<HTMLElement>("[data-replace-resource]");
+        if (!replaceButton) return;
+        const input = document.getElementById("scenarioResourceReplaceFile") as HTMLInputElement | null;
+        if (!input) return;
+        input.dataset.resourceId = replaceButton.dataset.replaceResource || "";
+        input.click();
+    }
+
+    private async replaceResourceFile(file: File): Promise<void> {
+        const scenarioId = Number.parseInt(document.getElementById("scenarioModal")?.dataset.scenarioId || "", 10);
+        const assetId = (document.getElementById("scenarioResourceReplaceFile") as HTMLInputElement | null)?.dataset.resourceId || "";
+        if (!Number.isFinite(scenarioId) || scenarioId <= 0 || !assetId) return;
+        const description = await window.TrpgDialog?.prompt({
+            title: "替换素材",
+            message: `将用 ${file.name} 替换当前素材，原有引用会保留。资源描述（留空则沿用原描述）`,
+            defaultValue: "",
+            confirmText: "替换",
+        });
+        if (description == null) return;
+        try {
+            const form = new FormData();
+            form.append("file", file, file.name);
+            if (description.trim()) form.append("alt", description.trim());
+            const response = await TrpgApi.requestWithResponse<ApiResponse<ResourceRef>>(`/api/scripts/${scenarioId}/assets/${encodeURIComponent(assetId)}/replace`, { method: "POST", body: form });
+            if (!response.response.ok || !response.data.success) throw new Error(response.data.message || "素材替换失败");
+            this.showMessage("素材已替换，引用保持不变");
+            await this.loadResourceList(scenarioId);
+        } catch (error) {
+            this.showMessage(error instanceof Error ? error.message : "素材替换失败", true);
+        }
     }
 
     private addModule(): void {

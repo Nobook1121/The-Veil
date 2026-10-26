@@ -23,6 +23,8 @@ MAX_VISIT_LOG = 200
 MAX_APPLIED_EVENT_IDS = 200
 MAX_KEYFRAMES = 20
 KEYFRAME_KEEP_FIRST = 1
+# 每 N 回合写一次关键帧（§6.4.2）；移动与时钟阈值另行触发。
+KEYFRAME_INTERVAL = 10
 
 _LOCATION_OF_STATE_KEYS = ("location", "cursor", "active_scene_id")
 _PC_STATE_DEFAULTS = {
@@ -725,6 +727,7 @@ def _now_text() -> str:
 
 
 __all__ = [
+    "KEYFRAME_INTERVAL",
     "NARRATIVE_KEY",
     "STORY_KEYFRAMES_FILENAME",
     "apply_event",

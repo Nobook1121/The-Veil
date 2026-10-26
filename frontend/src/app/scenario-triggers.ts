@@ -8,6 +8,8 @@
     "use strict";
 
     interface ResourceItem {
+        asset_id?: string;
+        used_by?: number;
         hash?: string;
         path?: string;
         url?: string;
@@ -152,11 +154,12 @@
     }
 
     function assetKey(resource: ResourceItem): string {
-        return resource.hash || resource.path || resource.url || "";
+        return resource.asset_id || resource.hash || resource.path || resource.url || "";
     }
 
     function assetId(resource: ResourceItem): string {
-        const key = assetKey(resource);
+        if (resource.asset_id) return resource.asset_id;
+        const key = resource.hash || resource.path || resource.url || "";
         return key ? `asset_${key.slice(0, 16)}` : "";
     }
 
@@ -166,7 +169,7 @@
 
     /** 缩略图接口（§8.5）：服务端生成的 thumb/poster，缺失时后端回退原图。 */
     function resourceThumb(resource: ResourceItem | null): string {
-        const identifier = resource ? assetKey(resource) : "";
+        const identifier = resource ? (resource.asset_id || resource.hash || resource.path || "") : "";
         if (!identifier || !state.scenarioId) return "";
         return `/api/scripts/${state.scenarioId}/assets/${encodeURIComponent(identifier)}/thumb`;
     }

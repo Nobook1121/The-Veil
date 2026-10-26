@@ -4,6 +4,7 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="scenarioModalLabel" data-i18n="scenario.modal.create">创建剧本</h5>
+                    <button type="button" class="btn btn-sm btn-outline-primary ms-auto me-2" id="scenarioAgentToggle" data-i18n="scenario.narrative.agent.title">AI 创作助手</button>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" data-i18n-aria-label="scenario.modal.close" aria-label="关闭"></button>
                 </div>
                 <div class="modal-body">
@@ -27,6 +28,23 @@
                             <button class="nav-link" id="scenarioTabGenerateBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabGenerate" type="button" role="tab" aria-controls="scenarioTabGenerate" aria-selected="false" data-i18n="scenario.tab.generate">生成</button>
                         </li>
                     </ul>
+                    <aside class="scenario-agent-panel" id="scenarioAgentPanel" hidden aria-label="AI 创作助手">
+                        <header class="scenario-agent-head">
+                            <div>
+                                <strong data-i18n="scenario.narrative.agent.title">AI 创作助手</strong>
+                                <p class="text-muted small mb-0" id="scenarioAgentContext" data-i18n="scenario.narrative.agent.context">仅发送当前剧本与选中节点</p>
+                            </div>
+                            <button type="button" class="btn-close" id="scenarioAgentClose" aria-label="关闭助手"></button>
+                        </header>
+                        <div class="scenario-agent-messages" id="scenarioAgentMessages">
+                            <p class="text-muted small mb-0" data-i18n="scenario.narrative.agent.empty">在世界树/图谱页签选中节点后，可以让助手补写正文、物件、结果或关键词。</p>
+                        </div>
+                        <form class="scenario-agent-form" id="scenarioAgentForm">
+                            <textarea class="form-control form-control-sm" id="scenarioAgentInput" rows="2" placeholder="例如：为当前节点补一个书架线索与成功/失败结果" aria-label="给 AI 创作助手的指令"></textarea>
+                            <button type="submit" class="btn btn-sm btn-primary" id="scenarioAgentSend">发送</button>
+                        </form>
+                        <p class="text-muted small mb-0 mt-2" data-i18n="scenario.narrative.agent.notice">助手只生成草稿改动，发布仍需你点击“保存并发布”。</p>
+                    </aside>
                     <div class="tab-content scenario-tab-content" id="scenarioTabContent">
                     <div class="tab-pane fade show active" id="scenarioTabBasic" role="tabpanel" aria-labelledby="scenarioTabBasicBtn">
                     <div class="scenario-basic-layout">
@@ -84,6 +102,18 @@
                             <i class="fa fa-cloud-upload" aria-hidden="true"></i>
                             <span>拖拽多个文件到此处，或点击选择</span>
                             <input id="scenarioResourceFiles" type="file" multiple hidden accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,audio/wav,text/html,text/markdown,.pdf,.txt,.zip">
+                            <input id="scenarioResourceReplaceFile" type="file" hidden accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,audio/wav,text/html,text/markdown,.pdf,.txt,.zip">
+                        </div>
+                        <div class="scenario-resource-toolbar">
+                            <input id="scenarioResourceSearch" type="search" class="form-control form-control-sm" placeholder="搜索素材名称 / 路径 / 类型" aria-label="搜索素材">
+                            <select id="scenarioResourceTypeFilter" class="form-select form-select-sm" aria-label="按类型筛选素材">
+                                <option value="">全部类型</option>
+                                <option value="image">图片</option>
+                                <option value="video">视频</option>
+                                <option value="audio">音频</option>
+                                <option value="richtext">富文本</option>
+                                <option value="file">文件</option>
+                            </select>
                         </div>
                         <div class="progress mt-2" id="scenarioResourceProgress" hidden><div class="progress-bar" role="progressbar" style="width:0%">0%</div></div>
                         <div class="scenario-resource-list mt-3" id="scenarioResourceList"></div>

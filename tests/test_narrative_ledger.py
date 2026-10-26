@@ -45,6 +45,23 @@ def test_ledger_append_is_idempotent_and_searchable(tmp_path) -> None:
     assert [item["id"] for item in read_ledger_events(tmp_path, limit=2)] == ["evt_2", "evt_3"]
 
 
+def test_ledger_rotates_into_segments_and_keeps_global_order(tmp_path, monkeypatch) -> None:
+    # §6.4.5：账本过大时按段切分，重放跨段保持顺序与全局序号。
+    import trpg_server.agents.narrative.ledger as ledger_module
+
+    append_ledger_event(tmp_path, {"id": "evt_1", "turn": 1, "kind": "action", "summary": "一"})
+    monkeypatch.setattr(ledger_module, "LEDGER_SEGMENT_BYTES", 1)
+    append_ledger_event(tmp_path, {"id": "evt_2", "turn": 2, "kind": "action", "summary": "二"})
+    append_ledger_event(tmp_path, {"id": "evt_3", "turn": 3, "kind": "action", "summary": "三"})
+
+    assert (tmp_path / "story_ledger.0001.jsonl").exists()
+    assert (tmp_path / "ledger_manifest.json").exists()
+    events = read_ledger_events(tmp_path)
+    assert [item["id"] for item in events] == ["evt_1", "evt_2", "evt_3"]
+    assert [item["_seq"] for item in events] == [1, 2, 3]
+    assert ledger_size(tmp_path) > 0
+
+
 def test_ledger_rejects_kp_only_names(tmp_path) -> None:
     with pytest.raises(LedgerVisibilityError):
         append_ledger_event(

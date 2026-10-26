@@ -85,6 +85,20 @@
         info_count: number;
         issues: ValidationIssue[];
         order_simulation?: { ok: boolean; issues: ValidationIssue[] };
+        quality?: {
+            topology: string;
+            total: number;
+            passed: number;
+            failed: string[];
+            metrics: {
+                key: string;
+                label: string;
+                value: string | number | boolean | null;
+                target: string;
+                passed: boolean | null;
+                detail: string;
+            }[];
+        };
         revision: number;
     }
 
@@ -1778,6 +1792,7 @@
             window.requestAnimationFrame(() => fitView());
             window.ScenarioTriggers?.syncRevision(state.revision);
             emitSelection(null);
+            if (state.canEdit) void runValidation();
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             setStatus(t("scenario.tree.load_failed", "世界树加载失败"), "danger");
@@ -1808,8 +1823,34 @@
         setEmpty(t("scenario.tree.empty", "保存剧本并生成世界树后，可在此查看章节、地点与结局。"));
         const results = byId("scenarioValidateResults");
         if (results) results.innerHTML = `<p class="text-muted small mb-0">${escapeHtml(t("scenario.validate.hint", "运行校验会检查死亡节点、死锁触发器、越级出口与禁词泄漏。"))}</p>`;
+        updatePublishGuard(0);
         emitSelection(null);
         showTab("basic");
+    }
+
+    function updatePublishGuard(count: number): void {
+        const button = byId<HTMLButtonElement>("saveScenario");
+        if (!button) return;
+        button.classList.toggle("scenario-publish-blocked", count > 0);
+        button.title = count > 0
+            ? t("scenario.visibility.publish_blocked", "还有 {count} 项可见性待复核，发布前请先处理。").replace("{count}", String(count))
+            : "";
+    }
+
+    async function acceptReviewIssue(target: string): Promise<void> {
+        if (!state.scenarioId) return;
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ revision: number }>>(
+                `/api/scenarios/${state.scenarioId}/narrative/visibility/review`,
+                { method: "POST", body: { target, base_revision: state.revision } },
+            );
+            if (!response.ok || !data?.success) throw new Error(data?.message || `HTTP ${response.status}`);
+            if (data.data?.revision != null) state.revision = data.data.revision;
+            await runValidation();
+            showNotification(t("scenario.visibility.review_accepted", "已确认该可见性判定。"), "success");
+        } catch (error) {
+            showNotification(error instanceof Error ? error.message : String(error), "error");
+        }
     }
 
     function renderValidation(payload: ValidationPayload): void {
@@ -1819,9 +1860,14 @@
             summary.textContent = `${payload.ok ? t("scenario.validate.ok", "通过") : t("scenario.validate.failed", "存在问题")} · ${payload.error_count} error · ${payload.warning_count} warn`;
         }
         if (!results) return;
+        const quality = payload.quality;
+        const qualityMarkup = quality
+            ? `<section class="scenario-validate-group"><h6 class="scenario-validate-group-title">${escapeHtml(t("scenario.validate.quality", "质量指标"))} <span class="badge bg-${quality.failed.length ? "warning text-dark" : "success"}">${quality.passed}/${quality.total}</span></h6><div class="d-flex flex-wrap gap-2">${quality.metrics.map((metric) => `<span class="badge bg-${metric.passed === false ? "danger" : metric.passed === true ? "success" : "secondary"}" title="${escapeHtml(`${metric.target} · ${metric.detail}`)}">${escapeHtml(metric.label)} ${escapeHtml(String(metric.value ?? "-"))}</span>`).join("")}</div></section>`
+            : "";
         const issues = payload.issues || [];
         if (issues.length === 0) {
-            results.innerHTML = `<p class="text-success small mb-0">${escapeHtml(t("scenario.validate.clean", "未发现问题。"))}</p>`;
+            updatePublishGuard(0);
+            results.innerHTML = `<p class="text-success small mb-0">${escapeHtml(t("scenario.validate.clean", "未发现问题。"))}</p>${qualityMarkup}`;
             return;
         }
         const levelVariant: Record<string, string> = { error: "danger", warn: "warning", info: "info" };
@@ -1838,10 +1884,15 @@
                 </div>
                 <div class="small">${escapeHtml(issue.message)}</div>
                 ${issue.suggestion ? `<div class="small text-muted">${escapeHtml(issue.suggestion)}</div>` : ""}
+                ${issue.code === "visibility.needs_review"
+                    ? `<button type="button" class="btn btn-sm btn-outline-success scenario-validate-accept" data-review-target="${escapeHtml(issue.node_id ? `node:${issue.node_id}` : `edge:${issue.edge_id || ""}`)}">${escapeHtml(t("scenario.visibility.accept_review", "确认该判定"))}</button>`
+                    : ""}
             </div>`;
         const reviewItems = items.filter((issue) => issue.code.startsWith("visibility.") || issue.code === "trigger.needs_review");
         const otherItems = items.filter((issue) => !reviewItems.includes(issue));
+        updatePublishGuard(reviewItems.filter((issue) => issue.code === "visibility.needs_review").length);
         results.innerHTML = [
+            qualityMarkup,
             reviewItems.length
                 ? `<section class="scenario-validate-group"><h6 class="scenario-validate-group-title">${escapeHtml(t("scenario.visibility.review_queue", "待复核可见性"))} <span class="badge bg-warning text-dark">${reviewItems.length}</span></h6>${reviewItems.map(issueMarkup).join("")}</section>`
                 : "",
@@ -2068,6 +2119,11 @@
             if (target?.dataset.nodeId) selectNode(target.dataset.nodeId);
         });
         byId("scenarioValidateResults")?.addEventListener("click", (event) => {
+            const accept = (event.target as HTMLElement).closest<HTMLElement>(".scenario-validate-accept");
+            if (accept?.dataset.reviewTarget) {
+                void acceptReviewIssue(accept.dataset.reviewTarget);
+                return;
+            }
             const target = (event.target as HTMLElement).closest<HTMLElement>(".scenario-validate-jump");
             if (target?.dataset.nodeId) selectNode(target.dataset.nodeId);
         });
@@ -2106,7 +2162,14 @@
         bindGraphEvents();
     }
 
-    window.ScenarioNarrative = { load, clear, init, syncRevision };
+    window.ScenarioNarrative = {
+        load,
+        clear,
+        init,
+        syncRevision,
+        revision: () => state.revision,
+        canEdit: () => state.canEdit && !state.readonly,
+    };
 
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", init);

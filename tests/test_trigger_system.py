@@ -10,6 +10,9 @@ from trpg_server.agents.trigger_system import (
     load_resources,
     normalize_resource,
     persist_uploaded_resource,
+    replace_uploaded_resource,
+    resource_identifier,
+    resource_matches,
     validate_trigger,
 )
 
@@ -202,3 +205,31 @@ def test_delete_resource_cleans_derived_thumbnail(tmp_path):
 
     assert not original.exists()
     assert not thumb.exists()
+
+
+def test_replace_resource_keeps_asset_id_and_cleans_old_files(tmp_path):
+    # §8.6：替换文件保留 asset_id，避免触发器引用失效；旧文件与派生图一并清理。
+    first = persist_uploaded_resource(tmp_path, 12, ImageUpload(_png_bytes()), "旧图")
+    assert first["thumb_path"]
+    second = ImageUpload(_png_bytes(200, 200))
+    second.filename = "new.png"
+
+    replaced = replace_uploaded_resource(tmp_path, 12, first["asset_id"], second)
+
+    assert replaced["asset_id"] == first["asset_id"]
+    assert replaced["hash"] != first["hash"]
+    assert (replaced["width"], replaced["height"]) == (200, 200)
+    root = tmp_path / "scenario-12"
+    assert not (root / first["path"]).exists()
+    assert not (root / first["thumb_path"]).exists()
+    assert (root / replaced["path"]).is_file()
+    stored = load_resources(tmp_path, 12)
+    assert len(stored) == 1
+    assert resource_identifier(stored[0]) == first["asset_id"]
+
+
+def test_resource_matches_accepts_legacy_hash_and_asset_id(tmp_path):
+    ref = persist_uploaded_resource(tmp_path, 13, Upload(), "线索")
+    assert resource_matches(ref, ref["hash"])
+    assert resource_matches(ref, ref["asset_id"])
+    assert resource_matches(ref, resource_identifier(ref))

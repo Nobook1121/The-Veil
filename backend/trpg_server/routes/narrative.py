@@ -23,6 +23,7 @@ from trpg_server.agents.narrative.store import (
     save_bundle,
 )
 from trpg_server.agents.narrative.triggers import normalize_asset, normalize_trigger_spec
+from trpg_server.agents.narrative.quality import compute_quality
 from trpg_server.agents.narrative.validate import simulate_any_order, validate_bundle
 from trpg_server.agents.narrative.visibility import classify_visibility
 from trpg_server.json_store import read_json
@@ -288,6 +289,44 @@ def patch_edge(scenario_id: int, edge_id: str):
     return success_response({"edge": updated.to_dict(), "revision": revision}, "Edge updated")
 
 
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/visibility/review", methods=["POST"])
+def review_visibility(scenario_id: int):
+    """接受自动可见性判定（§8.7）：清除 needs_review，但保留当前可见性。"""
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    denied = _require_edit(storage, descriptor)
+    if denied is not None:
+        return denied
+
+    payload = _payload()
+    conflict = _check_base_revision(bundle, payload)
+    if conflict is not None:
+        return conflict
+    target = str(payload.get("target") or "").strip()
+    kind, _, target_id = target.partition(":")
+    if kind == "node":
+        node = bundle.node(target_id)
+        if node is None:
+            return error_response("Node not found", 404, "Node not found")
+        node.extra.pop("needs_review", None)
+        node.extra["visibility_source"] = "author"
+    elif kind == "edge":
+        edge = next((item for item in bundle.edges if item.id == target_id), None)
+        if edge is None:
+            return error_response("Edge not found", 404, "Edge not found")
+        edge.extra.pop("needs_review", None)
+        edge.extra["visibility_source"] = "author"
+    else:
+        return error_response("target must be node:<id> or edge:<id>", 400, "Invalid target")
+    revision = _commit(storage, bundle, scenario_id=scenario_id)
+    return success_response({"target": target, "revision": revision}, "Visibility reviewed")
+
+
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/edges", methods=["POST"])
 def create_edge(scenario_id: int):
     """在图谱连线模式下创建一条边（§8.3）；只写 narrative.json。"""
@@ -497,12 +536,15 @@ def validate_narrative(scenario_id: int):
     payload = _payload()
     report = validate_bundle(bundle)
     data = report.to_dict()
+    order_ok = None
     if payload.get("all_orders"):
         issues = simulate_any_order(bundle)
+        order_ok = not any(issue.level == "error" for issue in issues)
         data["order_simulation"] = {
-            "ok": not any(issue.level == "error" for issue in issues),
+            "ok": order_ok,
             "issues": [issue.to_dict() for issue in issues],
         }
+    data["quality"] = compute_quality(bundle, order_independent=order_ok).to_dict()
     data["revision"] = _revision(bundle)
     return success_response(data, "Validation finished")
 

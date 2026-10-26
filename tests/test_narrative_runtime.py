@@ -8,7 +8,11 @@ import pytest
 
 from trpg_server.agents.narrative.model import NarrativeBundle, NarrativeEdge, NarrativeNode
 from trpg_server.agents.narrative.runtime import NarrativeRuntime, NarrativeRuntimeError, narrative_available
-from trpg_server.agents.narrative.state_store import load_narrative_state, save_narrative_state
+from trpg_server.agents.narrative.state_store import (
+    load_keyframes,
+    load_narrative_state,
+    save_narrative_state,
+)
 from trpg_server.agents.narrative.store import build_index, save_bundle
 
 
@@ -90,6 +94,25 @@ def _runtime(tmp_path: Path, *, clock: int = 0) -> NarrativeRuntime:
         room_id="room-1",
         room_dir=tmp_path,
     )
+
+
+def test_keyframes_written_on_move_clock_reach_and_turn_interval(tmp_path) -> None:
+    # §6.4.2：移动 / 时钟阈值 / 每 10 回合自动写关键帧。
+    runtime = _runtime(tmp_path)
+
+    runtime.record({"kind": "move", "to": "room_cellar"}, summary="移动到地下室")
+    assert load_keyframes(tmp_path)[-1]["reason"] == "move"
+
+    runtime.record(
+        {"kind": "clock", "clock_id": "clock_flood", "value": 10, "threshold": 10, "turn": 11},
+        summary="血池上涨",
+    )
+    assert load_keyframes(tmp_path)[-1]["reason"] == "clock_reach"
+
+    runtime.record({"kind": "flag", "name": "lamp_checked", "value": True, "turn": 20}, summary="检查提灯")
+    frames = load_keyframes(tmp_path)
+    assert frames[-1]["reason"] == "interval"
+    assert frames[-1]["turn"] == 20
 
 
 def test_location_card_hides_unrevealed_objects_and_marks_blocked_exit(tmp_path) -> None:

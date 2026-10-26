@@ -10,6 +10,10 @@ interface ResourceRef {
     mime: string;
     size: number;
     hash: string;
+    /** 稳定素材 ID（§8.6）：替换文件后保持不变，触发器引用不失效。 */
+    asset_id?: string;
+    /** 被剧本触发器 / 世界树引用的次数（列表接口返回）。 */
+    used_by?: number;
     content?: string;
     /** 服务端派生：缩略图（长边 640），图片上传时生成。 */
     thumb_path?: string;
