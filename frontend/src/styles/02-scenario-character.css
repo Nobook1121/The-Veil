@@ -2530,6 +2530,28 @@ body.is-guest .guest-login-hint {
     margin-bottom: 0.75rem;
 }
 
+.scenario-inspector-edit {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0.65rem;
+    margin-bottom: 0.75rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.5rem;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.scenario-inspector-edit .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin: 0;
+    font-size: 0.82rem;
+}
+
+.scenario-inspector-edit .btn {
+    justify-self: start;
+}
+
 .scenario-inspector-row {
     display: grid;
     grid-template-columns: 92px minmax(0, 1fr);

@@ -79,6 +79,7 @@
         bundle: GraphBundle | null;
         revision: number;
         readonly: boolean;
+        canEdit: boolean;
         selectedId: string;
         search: string;
         validation: ValidationPayload | null;
@@ -109,6 +110,7 @@
         bundle: null,
         revision: 0,
         readonly: false,
+        canEdit: false,
         selectedId: "",
         search: "",
         validation: null,
@@ -241,24 +243,53 @@
             return;
         }
         const meta = kindMeta(node.kind);
+        const editable = state.canEdit && !state.readonly;
         const edges = (state.bundle?.edges || []).filter((edge) => edge.from === node.id || edge.to === node.id);
+        const visibility = node.visibility || "public";
         const rows: Array<[string, string]> = [
             ["ID", `<code>${escapeHtml(node.id)}</code>`],
             ["类型", escapeHtml(meta.label)],
             ["父节点", node.parent_id ? escapeHtml(nodeById(node.parent_id)?.title || node.parent_id) : "—"],
-            ["可见性", `<span class="badge bg-${node.visibility === "public" ? "success" : node.visibility === "kp_only" ? "danger" : "warning"}">${escapeHtml(VISIBILITY_LABEL[node.visibility || "public"] || node.visibility || "公开")}</span>`],
             ["场景角色", escapeHtml(node.scene_role || "—")],
             ["进入方式", escapeHtml(node.access || "—")],
             ["可重复", node.repeatable === false ? "否" : "是"],
             ["物件数", String(Array.isArray(node.objects) ? node.objects.length : 0)],
             ["关键词", (node.keywords || []).length ? node.keywords!.map((word) => `<span class="badge bg-light text-dark">${escapeHtml(word)}</span>`).join(" ") : "—"],
         ];
+        if (!editable) {
+            rows.splice(3, 0, [
+                "可见性",
+                `<span class="badge bg-${visibility === "public" ? "success" : visibility === "kp_only" ? "danger" : "warning"}">${escapeHtml(VISIBILITY_LABEL[visibility] || visibility)}</span>`,
+            ]);
+        }
+        const editForm = editable ? `
+            <div class="scenario-inspector-edit">
+                <label class="form-group">
+                    <span>${escapeHtml(t("scenario.tree.edit_title", "标题"))}</span>
+                    <input type="text" class="form-control form-control-sm" id="scenarioNodeTitle" value="${escapeHtml(node.title)}">
+                </label>
+                <label class="form-group">
+                    <span>${escapeHtml(t("scenario.tree.edit_visibility", "可见性"))}</span>
+                    <select class="form-select form-select-sm" id="scenarioNodeVisibility">
+                        ${(["public", "hidden", "kp_only"] as const).map((value) => `<option value="${value}"${visibility === value ? " selected" : ""}>${escapeHtml(VISIBILITY_LABEL[value])}</option>`).join("")}
+                    </select>
+                </label>
+                <label class="form-group">
+                    <span>${escapeHtml(t("scenario.tree.edit_kp_notes", "KP 备注"))}</span>
+                    <textarea class="form-control form-control-sm" id="scenarioNodeKpNotes" rows="3">${escapeHtml(node.kp_notes || "")}</textarea>
+                </label>
+                <button type="button" class="btn btn-primary btn-sm" id="scenarioNodeSave">
+                    <i class="fa fa-save" aria-hidden="true"></i>
+                    <span>${escapeHtml(t("scenario.tree.save_node", "保存节点"))}</span>
+                </button>
+            </div>` : "";
         inspector.innerHTML = `
             <h6 class="mb-2"><i class="fa ${meta.icon}" style="color:${meta.color}" aria-hidden="true"></i> ${escapeHtml(node.title || node.id)}</h6>
             ${node.summary ? `<p class="text-muted small">${escapeHtml(node.summary)}</p>` : ""}
+            ${editForm}
             <div class="scenario-inspector-rows">${rows.map(([label, value]) => `<div class="scenario-inspector-row"><span>${escapeHtml(label)}</span><div>${value}</div></div>`).join("")}</div>
             ${node.body ? `<div class="scenario-inspector-body"><h6>${escapeHtml(t("scenario.tree.body", "正文"))}</h6><div class="scenario-inspector-pre">${escapeHtml(node.body)}</div></div>` : ""}
-            ${node.kp_notes ? `<div class="scenario-inspector-kp"><h6>${escapeHtml(t("scenario.tree.kp_notes", "KP 备注"))}</h6><div>${escapeHtml(node.kp_notes)}</div></div>` : ""}
+            ${!editable && node.kp_notes ? `<div class="scenario-inspector-kp"><h6>${escapeHtml(t("scenario.tree.kp_notes", "KP 备注"))}</h6><div>${escapeHtml(node.kp_notes)}</div></div>` : ""}
             <div class="scenario-inspector-edges">
                 <h6>${escapeHtml(t("scenario.tree.edges", "连接"))}</h6>
                 ${edges.length ? `<ul class="list-unstyled small mb-0">${edges.map((edge) => {
@@ -274,6 +305,46 @@
         state.selectedId = nodeId;
         renderTree();
         renderInspector();
+    }
+
+    async function saveNode(): Promise<void> {
+        const node = nodeById(state.selectedId);
+        if (!node || !state.scenarioId || !state.canEdit || state.readonly) return;
+        const title = byId<HTMLInputElement>("scenarioNodeTitle")?.value.trim() || "";
+        const visibility = byId<HTMLSelectElement>("scenarioNodeVisibility")?.value || "public";
+        const kpNotes = byId<HTMLTextAreaElement>("scenarioNodeKpNotes")?.value.trim() || "";
+        if (!title) {
+            showNotification(t("scenario.tree.title_required", "节点标题不能为空。"), "warning");
+            return;
+        }
+        const button = byId<HTMLButtonElement>("scenarioNodeSave");
+        if (button) button.disabled = true;
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ node: GraphNode; revision: number }>>(
+                `/api/scenarios/${state.scenarioId}/narrative/nodes/${encodeURIComponent(node.id)}`,
+                { method: "PATCH", body: { base_revision: state.revision, title, visibility, kp_notes: kpNotes } },
+            );
+            if (!response.ok || !data?.success || !data.data) {
+                if (response.status === 409) {
+                    showNotification(t("scenario.tree.conflict", "节点已被其他编辑修改，正在刷新…"), "warning");
+                    await load(state.scenarioId, { readonly: state.readonly });
+                    return;
+                }
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            state.revision = data.data.revision;
+            const saved = data.data.node;
+            if (state.bundle) {
+                state.bundle.nodes = state.bundle.nodes.map((item) => (item.id === saved.id ? { ...item, ...saved } : item));
+            }
+            renderAll();
+            showNotification(t("scenario.tree.saved", "节点已保存。"), "success");
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            showNotification(message, "error");
+        } finally {
+            if (button) button.disabled = false;
+        }
     }
 
     function nodePositions(bundle: GraphBundle): Map<string, { x: number; y: number }> {
@@ -344,6 +415,7 @@
         state.bundle = null;
         state.revision = 0;
         state.readonly = options.readonly === true;
+        state.canEdit = false;
         state.selectedId = "";
         state.search = "";
         state.validation = null;
@@ -376,6 +448,7 @@
             state.bundle = data.data.bundle;
             state.revision = data.data.revision;
             state.readonly = Boolean(data.data.permissions?.readonly);
+            state.canEdit = Boolean(data.data.permissions?.can_edit);
             const counts = data.data.summary?.counts || {};
             setStatus(
                 `${t("scenario.tree.revision", "修订")} ${state.revision} · ${counts.nodes ?? state.bundle.nodes.length} ${t("scenario.tree.nodes", "节点")} · ${state.bundle.topology || "hybrid"}`,
@@ -394,6 +467,7 @@
         state.bundle = null;
         state.revision = 0;
         state.readonly = false;
+        state.canEdit = false;
         state.selectedId = "";
         state.search = "";
         state.validation = null;
@@ -476,6 +550,11 @@
         });
         byId("scenarioValidateRun")?.addEventListener("click", () => {
             void runValidation();
+        });
+        byId("scenarioNodeInspector")?.addEventListener("click", (event) => {
+            if ((event.target as HTMLElement).closest("#scenarioNodeSave")) {
+                void saveNode();
+            }
         });
     }
 
