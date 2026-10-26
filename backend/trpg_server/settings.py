@@ -33,6 +33,9 @@ HISTORY_DIR = RUNTIME_DIR / "history"
 LOGS_DIR = RUNTIME_DIR / "logs"
 KNOWLEDGE_BASES_DIR = RUNTIME_DIR / "knowledge-bases"
 SCENARIO_IMPORTS_DIR = RUNTIME_DIR / "scenario_imports"
+# 世界树生成向导的任务状态与预览结果；与剧本目录分离，避免污染已发布版本。
+NARRATIVE_JOBS_DIR = RUNTIME_DIR / "narrative_jobs"
+NARRATIVE_GENERATE_WORKERS = 2
 # 网站 Agent：会话、待确认操作、审计与用量都隔离在独立目录，避免与房间数据混用。
 AGENT_DIR = RUNTIME_DIR / "agent"
 AGENT_MAX_CONVERSATIONS_PER_USER = 30

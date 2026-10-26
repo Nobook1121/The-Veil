@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 from trpg_server.app_factory import create_app
 
@@ -29,6 +30,7 @@ def _app(tmp_path, role="ADMIN"):
         "CHARACTERS_DIR": tmp_path / "characters",
         "ROOM_ARCHIVES_DIR": tmp_path / "room-archives",
         "HISTORY_DIR": tmp_path / "history",
+        "NARRATIVE_JOBS_DIR": tmp_path / "narrative-jobs",
     })
 
 
@@ -53,7 +55,7 @@ def _bundle(revision=2):
     }
 
 
-def _write_scenario(tmp_path, *, import_mode="edit", owner_id=1, bundle=None):
+def _write_scenario(tmp_path, *, import_mode="edit", owner_id=1, bundle=None, modules=None):
     storage = tmp_path / "scenarios" / "scenario-7"
     storage.mkdir(parents=True, exist_ok=True)
     descriptor = {
@@ -61,7 +63,7 @@ def _write_scenario(tmp_path, *, import_mode="edit", owner_id=1, bundle=None):
         "title": "测试剧本",
         "owner_id": owner_id,
         "import_mode": import_mode,
-        "modules": [],
+        "modules": modules if modules is not None else [],
     }
     (storage / "scenario.json").write_text(json.dumps(descriptor, ensure_ascii=False), encoding="utf-8")
     if bundle is not None:
@@ -582,6 +584,175 @@ def test_narrative_start_get_and_put(tmp_path):
     assert data["start"]["opening_mode"] == "hybrid"
     assert data["start"]["public_intro"] == ["第一段", "第二段"]
     assert data["start"]["allow_enter_triggers"] is False
+
+
+def _wait_generate_job(client, job_id, timeout=10.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        response = client.get(f"/api/scenarios/7/narrative/jobs/{job_id}")
+        assert response.status_code == 200
+        data = response.get_json()["data"]
+        if data["job"]["status"] in {"done", "failed"}:
+            return data
+        time.sleep(0.05)
+    raise AssertionError("generation job did not finish in time")
+
+
+def test_generate_from_modules_returns_preview_without_saving(tmp_path):
+    modules = [
+        {"id": "m1", "module_type": "scene", "title": "大厅", "content": "线索：血书"},
+        {"id": "m2", "module_type": "scene", "title": "书房", "content": "NPC：管家"},
+    ]
+    _write_scenario(tmp_path, bundle=_bundle(), modules=modules)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    started = client.post(
+        "/api/scenarios/7/narrative/generate",
+        json={"options": {"source": "modules", "topology": "linear"}},
+        headers=CSRF,
+    )
+    assert started.status_code == 202
+    job_id = started.get_json()["data"]["job_id"]
+
+    data = _wait_generate_job(client, job_id)
+    assert data["job"]["status"] == "done"
+    result = data["result"]
+    assert result["topology"]["topology"] == "linear"
+    assert result["topology"]["source"] == "author"
+    assert result["base_revision"] == 2
+    titles = {node["title"] for node in result["bundle"]["nodes"]}
+    assert {"大厅", "书房"} <= titles
+    assert result["diff"]["counts"]["nodes_added"] > 0
+
+    saved = json.loads((tmp_path / "scenarios" / "scenario-7" / "narrative.json").read_text(encoding="utf-8"))
+    assert saved["meta"]["revision"] == 2
+    assert [node["id"] for node in saved["nodes"]] == ["hall", "room"]
+
+
+def test_generate_from_premise_builds_skeleton(tmp_path):
+    _write_scenario(tmp_path, modules=[])
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    started = client.post(
+        "/api/scenarios/7/narrative/generate",
+        json={
+            "options": {
+                "source": "premise",
+                "premise": "调查山中古堡",
+                "topology": "hybrid",
+                "acts": 2,
+                "scenes_per_act": 2,
+                "endings": 1,
+                "clocks": 1,
+                "branch": "medium",
+            }
+        },
+        headers=CSRF,
+    )
+    assert started.status_code == 202
+    data = _wait_generate_job(client, started.get_json()["data"]["job_id"])
+    result = data["result"]
+
+    kinds = {node["kind"] for node in result["bundle"]["nodes"]}
+    assert {"act", "area", "location", "ending"} <= kinds
+    assert len(result["bundle"]["clocks"]) == 1
+    assert any(item["code"] == "generate.premise_skeleton" for item in result["warnings"])
+    assert result["base_revision"] == 0
+
+
+def test_asset_thumb_falls_back_to_original_image(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    assets_dir = tmp_path / "scenarios" / "scenario-7" / "assets"
+    assets_dir.mkdir(parents=True)
+    image = assets_dir / "pic.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n")
+    (tmp_path / "scenarios" / "scenario-7" / "assets.json").write_text(
+        json.dumps(
+            [
+                {
+                    "type": "image",
+                    "path": "assets/pic.png",
+                    "url": "/assets/scenarios/scenario-7/assets/pic.png",
+                    "alt": "",
+                    "mime": "image/png",
+                    "size": 8,
+                    "hash": "asset-hash",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.get("/api/scripts/7/assets/asset-hash/thumb")
+    missing = client.get("/api/scripts/7/assets/unknown/thumb")
+
+    assert response.status_code == 200
+    assert response.data.startswith(b"\x89PNG")
+    assert response.headers["Cache-Control"].startswith("private")
+    assert missing.status_code == 404
+
+
+def test_suggest_keywords_returns_new_candidates(tmp_path):
+    modules = [
+        {
+            "id": "m1",
+            "module_type": "scene",
+            "title": "古堡大厅",
+            "content": "调查员反复提到「银钥匙」，并注意到墙上的纹章。",
+            "keywords": ["大厅"],
+        }
+    ]
+    _write_scenario(tmp_path, bundle=_bundle(), modules=modules)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.post("/api/scenarios/7/knowledge/suggest-keywords", json={"limit": 8}, headers=CSRF)
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["count"] == 1
+    suggestion = data["suggestions"][0]
+    assert suggestion["module_id"] == "m1"
+    assert "银钥匙" in suggestion["suggested"]
+    assert "大厅" not in suggestion["suggested"]
+
+
+def test_generate_is_blocked_for_direct_import(tmp_path):
+    _write_scenario(tmp_path, import_mode="direct", bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.post(
+        "/api/scenarios/7/narrative/generate",
+        json={"options": {"source": "document"}},
+        headers=CSRF,
+    )
+
+    assert response.status_code == 403
+
+
+def test_generate_job_is_owner_scoped(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    admin_client = _app(tmp_path).test_client()
+    _login(admin_client)
+    started = admin_client.post(
+        "/api/scenarios/7/narrative/generate",
+        json={"options": {"source": "document"}},
+        headers=CSRF,
+    )
+    job_id = started.get_json()["data"]["job_id"]
+    _wait_generate_job(admin_client, job_id)
+
+    other_client = _app(tmp_path, role="USER").test_client()
+    _login(other_client, user_id=2, role="USER")
+    response = other_client.get(f"/api/scenarios/7/narrative/jobs/{job_id}")
+
+    assert response.status_code == 403
+
 
 
 def test_narrative_start_rejects_readonly_import(tmp_path):

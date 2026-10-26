@@ -18,6 +18,7 @@ from trpg_server.security import register_session_guard
 from trpg_server.socket_events import register_socket_events
 from trpg_server.settings import LOGS_DIR, SECRET_KEY, SESSION_COOKIE_SECURE, USERS_DIR, WEAPONS_DIR, ROOM_ARCHIVES_DIR
 from trpg_server.settings import SCENARIO_IMPORTS_DIR, SCENARIO_IMPORT_MAX_BYTES, SCENARIO_IMPORT_WORKERS, SETUP_EMBEDDING_UPLOAD_MAX_BYTES
+from trpg_server.settings import NARRATIVE_JOBS_DIR, NARRATIVE_GENERATE_WORKERS
 from trpg_server.settings import VECTOR_DB_URL, VECTOR_DB_PATH, VECTOR_DB_API_KEY, VECTOR_BACKEND, VECTOR_BACKEND_EXPLICIT, EMBEDDED_VECTOR_DB_PATH, SCENARIOS_DIR, EMBEDDING_BASE_URL, EMBEDDING_API_KEY, EMBEDDING_MODEL, EMBEDDING_DIMENSIONS, OCR_ENABLED, OCR_LANG, LOCAL_EMBEDDING_MODEL_PATH, PADDLEOCR_HOME, AI_PLATFORM_SECRET_DIR, CONFIG_DIR
 from trpg_server.agents.vector_store import create_vector_store
 from trpg_server.agents.embedding_provider import select_embedding_provider
@@ -26,6 +27,7 @@ from trpg_server.ai_capabilities import chat_completions_endpoint
 from trpg_server.ai_platform_config import load_platform_config
 from trpg_server.agents.ocr_provider import PaddleOcrProvider
 from trpg_server.scenario_import_jobs import ImportJobStore
+from trpg_server.narrative_jobs import NarrativeJobStore
 from concurrent.futures import ThreadPoolExecutor
 from trpg_server.users.database import UserDatabase
 from trpg_server.users.migrations import migrate_json_users
@@ -71,6 +73,8 @@ def create_app(config=None):
         SCENARIO_IMPORTS_DIR=SCENARIO_IMPORTS_DIR,
         SCENARIO_IMPORT_MAX_BYTES=SCENARIO_IMPORT_MAX_BYTES,
         SCENARIO_IMPORT_WORKERS=SCENARIO_IMPORT_WORKERS,
+        NARRATIVE_JOBS_DIR=NARRATIVE_JOBS_DIR,
+        NARRATIVE_GENERATE_WORKERS=NARRATIVE_GENERATE_WORKERS,
         VECTOR_DB_URL=VECTOR_DB_URL, VECTOR_DB_PATH=VECTOR_DB_PATH, VECTOR_DB_API_KEY=VECTOR_DB_API_KEY,
         VECTOR_BACKEND=VECTOR_BACKEND, VECTOR_BACKEND_EXPLICIT=VECTOR_BACKEND_EXPLICIT, EMBEDDED_VECTOR_DB_PATH=EMBEDDED_VECTOR_DB_PATH,
         SCENARIOS_DIR=SCENARIOS_DIR,
@@ -100,6 +104,13 @@ def create_app(config=None):
     app.extensions["scenario_import_store"] = ImportJobStore(app.config["SCENARIO_IMPORTS_DIR"])
     app.extensions["scenario_import_store"].recover_interrupted()
     app.extensions["scenario_import_executor"] = ThreadPoolExecutor(max_workers=app.config["SCENARIO_IMPORT_WORKERS"])
+    # 世界树生成向导：任务状态持久化在独立目录，预览结果只落 result.json，
+    # 不触碰剧本目录下的 narrative.json（应用草稿仍走 PUT /narrative）。
+    app.extensions["narrative_generate_store"] = NarrativeJobStore(app.config["NARRATIVE_JOBS_DIR"])
+    app.extensions["narrative_generate_store"].recover_interrupted()
+    app.extensions["narrative_generate_executor"] = ThreadPoolExecutor(
+        max_workers=max(1, int(app.config.get("NARRATIVE_GENERATE_WORKERS") or 1))
+    )
     # 云端 embedding 接口默认关闭：环境变量没显式配置时，只有管理员在设置页开启后才会读取
     # AI 平台配置里的 embedding 段；关闭时一律回落到本地模型（可用时）或哈希向量。
     cloud_embedding_enabled = load_ai_runtime_config(app.config["CONFIG_DIR"]).cloud_embedding_enabled
@@ -309,6 +320,7 @@ def register_blueprints(app):
     from trpg_server.routes.knowledge_bases import bp as knowledge_bases_bp
     from trpg_server.routes.pages import bp as pages_bp
     from trpg_server.routes.rooms import bp as rooms_bp
+    from trpg_server.routes.room_narrative import bp as room_narrative_bp
     from trpg_server.routes.room_console import bp as room_console_bp
     from trpg_server.routes.dice_rolls import bp as dice_rolls_bp
     from trpg_server.routes.dice_textures import bp as dice_textures_bp
@@ -337,6 +349,7 @@ def register_blueprints(app):
     app.register_blueprint(config_bp)
     app.register_blueprint(setup_bp)
     app.register_blueprint(rooms_bp)
+    app.register_blueprint(room_narrative_bp)
     app.register_blueprint(room_console_bp)
     app.register_blueprint(dice_rolls_bp)
     app.register_blueprint(dice_textures_bp)

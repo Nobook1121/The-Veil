@@ -229,11 +229,84 @@
                     <div class="tab-pane fade" id="scenarioTabGenerate" role="tabpanel" aria-labelledby="scenarioTabGenerateBtn">
                         <div class="scenario-generate-panel">
                             <h6 data-i18n="scenario.generate.title">生成世界树</h6>
-                            <p class="text-muted small" data-i18n="scenario.generate.hint">保存剧本后，由确定性抽取与拓扑识别生成 World Tree。生成向导将在后续步骤接入；当前可先使用控制台 narrative build。</p>
-                            <button type="button" class="btn btn-outline-primary btn-sm" id="scenarioGenerateRun" disabled>
-                                <i class="fa fa-magic" aria-hidden="true"></i>
-                                <span data-i18n="scenario.generate.run">开始生成</span>
-                            </button>
+                            <p class="text-muted small mb-3" data-i18n="scenario.generate.hint">选择来源后生成预览；预览不会改动当前草稿，确认后再「应用到草稿」。</p>
+                            <div class="scenario-generate-source" role="radiogroup" aria-label="生成来源">
+                                <label class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="scenarioGenerateSource" value="document" checked>
+                                    <span class="form-check-label" data-i18n="scenario.generate.source.document">当前文档</span>
+                                </label>
+                                <label class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="scenarioGenerateSource" value="modules">
+                                    <span class="form-check-label" data-i18n="scenario.generate.source.modules">现有模块</span>
+                                </label>
+                                <label class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="scenarioGenerateSource" value="premise">
+                                    <span class="form-check-label" data-i18n="scenario.generate.source.premise">一句梗概</span>
+                                </label>
+                            </div>
+                            <textarea id="scenarioGeneratePremise" class="form-control form-control-sm scenario-generate-premise" rows="2" disabled
+                                      placeholder="例如：调查山中古堡，找出失踪的守夜人"
+                                      data-i18n-placeholder="scenario.generate.premise.placeholder"></textarea>
+                            <div class="scenario-generate-options">
+                                <label class="scenario-generate-field">
+                                    <span data-i18n="scenario.generate.topology">拓扑</span>
+                                    <select class="form-select form-select-sm" id="scenarioGenerateTopology">
+                                        <option value="auto" data-i18n="scenario.narrative.topology.auto">自动识别</option>
+                                        <option value="linear" data-i18n="scenario.narrative.topology.linear">线性</option>
+                                        <option value="hub" data-i18n="scenario.narrative.topology.hub">枢纽</option>
+                                        <option value="sandbox" data-i18n="scenario.narrative.topology.sandbox">沙盒</option>
+                                        <option value="hybrid" data-i18n="scenario.narrative.topology.hybrid">混合</option>
+                                    </select>
+                                </label>
+                                <label class="scenario-generate-field">
+                                    <span data-i18n="scenario.generate.acts">区域</span>
+                                    <input type="number" class="form-control form-control-sm" id="scenarioGenerateActs" min="1" max="8" value="2">
+                                </label>
+                                <label class="scenario-generate-field">
+                                    <span data-i18n="scenario.generate.scenes">每个区域房间</span>
+                                    <input type="number" class="form-control form-control-sm" id="scenarioGenerateScenes" min="1" max="8" value="3">
+                                </label>
+                                <label class="scenario-generate-field">
+                                    <span data-i18n="scenario.generate.endings">结局数</span>
+                                    <input type="number" class="form-control form-control-sm" id="scenarioGenerateEndings" min="0" max="6" value="2">
+                                </label>
+                                <label class="scenario-generate-field">
+                                    <span data-i18n="scenario.generate.clocks">全局时钟</span>
+                                    <input type="number" class="form-control form-control-sm" id="scenarioGenerateClocks" min="0" max="4" value="1">
+                                </label>
+                                <label class="scenario-generate-field">
+                                    <span data-i18n="scenario.generate.branch">分支度</span>
+                                    <select class="form-select form-select-sm" id="scenarioGenerateBranch">
+                                        <option value="low" data-i18n="scenario.generate.branch.low">低</option>
+                                        <option value="medium" selected data-i18n="scenario.generate.branch.medium">中</option>
+                                        <option value="high" data-i18n="scenario.generate.branch.high">高</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <div class="scenario-generate-toggles">
+                                <label class="form-check form-check-inline">
+                                    <input class="form-check-input" type="checkbox" id="scenarioGenerateFreeOrder" checked>
+                                    <span class="form-check-label" data-i18n="scenario.generate.free_order">允许任意顺序</span>
+                                </label>
+                                <label class="form-check form-check-inline">
+                                    <input class="form-check-input" type="checkbox" id="scenarioGenerateAiFill">
+                                    <span class="form-check-label" data-i18n="scenario.generate.ai_fill">AI 语义补全</span>
+                                </label>
+                            </div>
+                            <div class="scenario-generate-actions">
+                                <button type="button" class="btn btn-primary btn-sm" id="scenarioGenerateRun">
+                                    <i class="fa fa-magic" aria-hidden="true"></i>
+                                    <span data-i18n="scenario.generate.run">开始生成</span>
+                                </button>
+                                <button type="button" class="btn btn-outline-success btn-sm" id="scenarioGenerateApply" disabled>
+                                    <i class="fa fa-check" aria-hidden="true"></i>
+                                    <span data-i18n="scenario.generate.apply">应用到草稿</span>
+                                </button>
+                                <span class="text-muted small" id="scenarioGenerateStatus"></span>
+                            </div>
+                            <div class="scenario-generate-preview" id="scenarioGeneratePreview">
+                                <p class="text-muted small mb-0" data-i18n="scenario.generate.preview.empty">还没有生成预览。</p>
+                            </div>
                         </div>
                     </div>
                     </div>

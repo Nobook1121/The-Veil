@@ -263,6 +263,15 @@ class TriggerResolver:
             hit.spec = {**hit.spec, "missing_assets": missing}
         return hit
 
+    def force_hit(
+        self, trigger_id: Any, *, audience: str = "player", check_id: str | None = None
+    ) -> TriggerHit | None:
+        """房主/管理员手动触发：跳过条件、冷却与见证，只保留附件可见性过滤。"""
+        spec = self.trigger(trigger_id)
+        if spec is None:
+            return None
+        return self._make_hit(spec, audience=audience, check_id=check_id)
+
     def evaluate(
         self,
         kind: str,

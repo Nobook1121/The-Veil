@@ -12,6 +12,8 @@ from typing import Any, Mapping
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.agents.narrative.logger import log_event
+from trpg_server.agents.narrative.generate import GenerateOptions
+from trpg_server.agents.narrative.keywords import suggest_module_keywords
 from trpg_server.agents.narrative.model import NarrativeBundle, NarrativeEdge, TOPOLOGIES, normalize_start
 from trpg_server.agents.narrative.store import (
     build_index,
@@ -24,6 +26,7 @@ from trpg_server.agents.narrative.triggers import normalize_asset, normalize_tri
 from trpg_server.agents.narrative.validate import simulate_any_order, validate_bundle
 from trpg_server.agents.narrative.visibility import classify_visibility
 from trpg_server.json_store import read_json
+from trpg_server.narrative_jobs import public_job_payload, submit_generate_job
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, server_error, success_response
 
@@ -803,3 +806,80 @@ def patch_topology(scenario_id: int):
         },
         "Topology updated",
     )
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/knowledge/suggest-keywords", methods=["POST"])
+def suggest_keywords(scenario_id: int):
+    """世界书关键词候选（§8.5）。只读计算，不写剧本。"""
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    if not _can_use_permission("scenarios.preview"):
+        return error_response("Permission denied", 403, "Permission denied")
+    _descriptor_path, storage = _resolve(scenario_id)
+    if storage is None:
+        return error_response("Scenario not found", 404, "Scenario not found")
+    descriptor = _descriptor(storage)
+
+    payload = _payload()
+    module_ids = payload.get("module_ids")
+    result = suggest_module_keywords(
+        descriptor,
+        limit=payload.get("limit") or 8,
+        module_ids=[str(item) for item in module_ids] if isinstance(module_ids, list) else None,
+    )
+    return success_response(result, "Keyword suggestions loaded")
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/generate", methods=["POST"])
+def generate_narrative(scenario_id: int):
+    """启动一次生成预览（§8.5）。只创建任务，不写 narrative.json。"""
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    storage, descriptor, _bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    denied = _require_edit(storage, descriptor)
+    if denied is not None:
+        return denied
+
+    payload = _payload()
+    options = GenerateOptions.from_payload(payload.get("options") if isinstance(payload.get("options"), Mapping) else payload)
+    store = current_app.extensions["narrative_generate_store"]
+    job = store.create(
+        owner_id=str(session.get("user_id") or ""),
+        scenario_id=scenario_id,
+        options=options.to_dict(),
+    )
+    submit_generate_job(current_app._get_current_object(), job["id"])
+    log_event(
+        "narrative.generate.start",
+        scenario_id=scenario_id,
+        job_id=job["id"],
+        user_id=session.get("user_id"),
+        source=options.source,
+        topology=options.topology,
+    )
+    return success_response({"job_id": job["id"], "job": public_job_payload(job)}, "Generation started", 202)
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/jobs/<job_id>", methods=["GET"])
+def get_generate_job(scenario_id: int, job_id: str):
+    """轮询生成进度；完成时一并返回预览结果（bundle + diff）。"""
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    if not _can_use_permission("scenarios.preview"):
+        return error_response("Permission denied", 403, "Permission denied")
+    store = current_app.extensions["narrative_generate_store"]
+    job = store.get(job_id)
+    if not isinstance(job, Mapping) or int(job.get("scenario_id") or 0) != scenario_id:
+        return error_response("Job not found", 404, "Job not found")
+    if str(job.get("owner_id") or "") != str(session.get("user_id") or "") and not _can_use_permission("scenarios.manage_all"):
+        return error_response("Permission denied", 403, "Permission denied")
+
+    data: dict[str, Any] = {"job": public_job_payload(job)}
+    if job.get("status") == "done":
+        result = store.load_result(job_id)
+        if isinstance(result, Mapping):
+            data["result"] = result
+    return success_response(data, "Job loaded")
+

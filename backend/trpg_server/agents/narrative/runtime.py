@@ -432,6 +432,41 @@ class NarrativeRuntime:
             "denied": denied,
         }
 
+    def force_trigger(
+        self,
+        trigger_id: Any,
+        *,
+        pc: str | None = None,
+        audience: str = "player",
+        actor_id: str | None = None,
+    ) -> dict[str, Any]:
+        """房主/管理员手动触发：跳过条件求值，仍按可见性过滤附件。"""
+        resolver = TriggerResolver(self.bundle, self.narrative)
+        if resolver.trigger(trigger_id) is None:
+            return {"triggered": False, "trigger_id": _text(trigger_id), "reason": "trigger_not_found"}
+        hit = resolver.force_hit(trigger_id, audience=audience)
+        if hit is None:
+            return {"triggered": False, "trigger_id": _text(trigger_id), "reason": "attachment_unavailable"}
+        messages = publish_hits([hit], binding={}, source="manual_force", audience=audience)
+        event = self._event(
+            {
+                "kind": "trigger_fire",
+                "trigger_id": hit.trigger_id,
+                "pc": _text(pc) or None,
+                "group": hit.group,
+                "source": "manual_force",
+                "actor_id": _text(actor_id) or None,
+            },
+            summary="手动触发 " + hit.trigger_id,
+        )
+        self.record_batch([event], summary="手动触发 " + hit.trigger_id)
+        return {
+            "triggered": True,
+            "trigger_id": hit.trigger_id,
+            "direct_messages": messages,
+            "event_id": event.get("id"),
+        }
+
     def list_available_triggers(self) -> dict[str, Any]:
         resolver = TriggerResolver(self.bundle, self.narrative)
         return {

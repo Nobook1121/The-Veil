@@ -2646,8 +2646,114 @@ body.is-guest .guest-login-hint {
 .scenario-generate-panel {
     border: 1px dashed var(--bs-border-color, #dee2e6);
     border-radius: 0.5rem;
-    padding: 1.5rem;
+    padding: 1.25rem;
+    text-align: left;
+}
+
+.scenario-generate-source,
+.scenario-generate-toggles {
+    margin: 0.75rem 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.scenario-generate-premise {
+    margin: 0.75rem 0;
+    resize: none;
+}
+
+.scenario-generate-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 0.75rem;
+    margin: 0.75rem 0;
+}
+
+.scenario-generate-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.875rem;
+}
+
+.scenario-generate-field > span {
+    font-weight: 500;
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.scenario-generate-actions {
+    margin: 1rem 0 0.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.scenario-generate-preview {
+    margin-top: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.375rem;
+    background: var(--bs-light-bg-subtle, #f8f9fa);
+}
+
+.scenario-generate-preview-empty {
     text-align: center;
+}
+
+.scenario-generate-preview-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.scenario-generate-preview-stat {
+    text-align: center;
+}
+
+.scenario-generate-preview-stat > strong {
+    display: block;
+    font-size: 1.25rem;
+    line-height: 1.2;
+}
+
+.scenario-generate-preview-changes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.scenario-generate-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.scenario-generate-badge.added {
+    background: rgba(25, 135, 84, 0.1);
+    color: var(--bs-success, #198754);
+}
+
+.scenario-generate-badge.removed {
+    background: rgba(220, 53, 69, 0.1);
+    color: var(--bs-danger, #dc3545);
+}
+
+.scenario-generate-badge.modified {
+    background: rgba(13, 110, 253, 0.1);
+    color: var(--bs-primary, #0d6efd);
+}
+
+.scenario-generate-badge.info {
+    background: rgba(108, 117, 125, 0.12);
+    color: var(--bs-secondary-color, #6c757d);
 }
 
 .scenario-graph-toolbar {

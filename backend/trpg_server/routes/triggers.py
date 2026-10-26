@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from uuid import uuid4
 
-from flask import Blueprint, current_app, request, session
+from flask import Blueprint, current_app, redirect, request, send_file, session
 
 from trpg_server.agents.trigger_system import (
     delete_resource,
@@ -160,6 +160,67 @@ def remove_asset(script_id, asset_id):
         文件=asset_id,
     )
     return success_response(message="Resource deleted successfully")
+
+
+@bp.route("/api/scripts/<int:script_id>/assets/<asset_id>/thumb", methods=["GET"])
+def asset_thumb(script_id, asset_id):
+    """缩略图（§8.5）：优先 thumb_path，其次 thumb_url；图片资源回退原图。"""
+    if (error := _login_required()) is not None:
+        return error
+    descriptor, scenario = _scenario(script_id)
+    if not descriptor or not scenario:
+        return error_response("Scenario not found", 404, "Scenario not found")
+    root = descriptor.parent
+    resource = next(
+        (
+            item
+            for item in load_resources(_storage_root(descriptor), script_id)
+            if str(item.get("hash") or item.get("path")) == str(asset_id)
+        ),
+        None,
+    )
+    if resource is None:
+        return error_response("Resource not found", 404, "Resource not found")
+
+    immutable = "private, max-age=31536000, immutable"
+    thumb_path = str(resource.get("thumb_path") or "").strip()
+    if thumb_path:
+        candidate = (root / thumb_path).resolve()
+        try:
+            candidate.relative_to(root.resolve())
+        except ValueError:
+            return error_response("Resource not found", 404, "Resource not found")
+        if candidate.is_file():
+            response = send_file(candidate, conditional=True)
+            response.headers["Cache-Control"] = immutable
+            return response
+
+    thumb_url = str(resource.get("thumb_url") or "").strip()
+    if thumb_url:
+        response = redirect(thumb_url, code=302)
+        response.headers["Cache-Control"] = immutable
+        return response
+
+    if str(resource.get("type") or "") != "image":
+        return error_response("Thumbnail not available", 404, "Thumbnail not available")
+    original = str(resource.get("path") or "").strip()
+    if original:
+        candidate = (root / original).resolve()
+        try:
+            candidate.relative_to(root.resolve())
+        except ValueError:
+            return error_response("Resource not found", 404, "Resource not found")
+        if candidate.is_file():
+            response = send_file(candidate, conditional=True)
+            response.headers["Cache-Control"] = immutable
+            return response
+
+    url = str(resource.get("url") or "").strip()
+    if url.startswith("/"):
+        response = redirect(url, code=302)
+        response.headers["Cache-Control"] = immutable
+        return response
+    return error_response("Thumbnail not available", 404, "Thumbnail not available")
 
 
 def _find_card_attachment(scenario: dict, card_id: str):
