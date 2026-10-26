@@ -13,7 +13,7 @@ from flask import Blueprint, current_app, request, session
 
 from trpg_server.agents.narrative.logger import log_event
 from trpg_server.agents.narrative.generate import GenerateOptions
-from trpg_server.agents.narrative.keywords import suggest_module_keywords
+from trpg_server.agents.narrative.keywords import suggest_module_keywords, suggest_node_keywords
 from trpg_server.agents.narrative.model import NarrativeBundle, NarrativeEdge, TOPOLOGIES, normalize_start
 from trpg_server.agents.narrative.store import (
     build_index,
@@ -822,6 +822,19 @@ def suggest_keywords(scenario_id: int):
 
     payload = _payload()
     module_ids = payload.get("module_ids")
+    node_ids = payload.get("node_ids")
+    if str(payload.get("target") or "").strip().lower() == "node" or isinstance(node_ids, list):
+        try:
+            bundle = load_bundle(storage)
+        except Exception:
+            logger.exception("Failed to load narrative bundle for keyword suggestions: %s", scenario_id)
+            return server_error("Failed to load narrative")
+        result = suggest_node_keywords(
+            bundle.nodes,
+            limit=payload.get("limit") or 8,
+            node_ids=[str(item) for item in node_ids] if isinstance(node_ids, list) else None,
+        )
+        return success_response(result, "Keyword suggestions loaded")
     result = suggest_module_keywords(
         descriptor,
         limit=payload.get("limit") or 8,

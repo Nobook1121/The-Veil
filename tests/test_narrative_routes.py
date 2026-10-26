@@ -721,6 +721,58 @@ def test_suggest_keywords_returns_new_candidates(tmp_path):
     assert "大厅" not in suggestion["suggested"]
 
 
+def test_suggest_node_keywords_extracts_from_body(tmp_path):
+    bundle = _bundle()
+    bundle["nodes"][1]["keywords"] = ["房间"]
+    bundle["nodes"][1]["body"] = "调查员进入「青铜镜」前反复查看青铜镜，镜面上刻着纹章。"
+    _write_scenario(tmp_path, bundle=bundle)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.post(
+        "/api/scenarios/7/knowledge/suggest-keywords",
+        json={"target": "node", "node_ids": ["room"], "limit": 8},
+        headers=CSRF,
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["count"] == 1
+    suggestion = data["suggestions"][0]
+    assert suggestion["node_id"] == "room"
+    assert suggestion["current"] == ["房间"]
+    keys = [item["key"] for item in suggestion["suggested"]]
+    assert "青铜镜" in keys
+    assert "房间" not in keys
+    candidate = next(item for item in suggestion["suggested"] if item["key"] == "青铜镜")
+    assert candidate["source"] in {"quoted", "body"}
+    assert 0 < candidate["confidence"] <= 1
+
+
+def test_patch_node_persists_keywords_and_scope(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _patch_node(
+        client,
+        keywords=["老陈"],
+        aliases=["陈叔"],
+        negative_keywords=["假的"],
+        scope="global",
+        constant=True,
+    )
+
+    assert response.status_code == 200
+    saved = json.loads((tmp_path / "scenarios" / "scenario-7" / "narrative.json").read_text(encoding="utf-8"))
+    node = next(item for item in saved["nodes"] if item["id"] == "room")
+    assert node["keywords"] == ["老陈"]
+    assert node["aliases"] == ["陈叔"]
+    assert node["negative_keywords"] == ["假的"]
+    assert node["scope"] == "global"
+    assert node["constant"] is True
+
+
 def test_generate_is_blocked_for_direct_import(tmp_path):
     _write_scenario(tmp_path, import_mode="direct", bundle=_bundle())
     client = _app(tmp_path).test_client()

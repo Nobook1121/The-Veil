@@ -21,6 +21,10 @@
         parent?: string | null;
         parent_id?: string;
         keywords?: string[];
+        aliases?: string[];
+        negative_keywords?: string[];
+        scope?: string;
+        constant?: boolean;
         kp_notes?: string;
         objects?: unknown[];
         layout?: { x?: number; y?: number };
@@ -339,6 +343,65 @@
         generateBusy: false,
     };
 
+    interface KeywordCandidate {
+        key: string;
+        source: string;
+        confidence: number;
+    }
+
+    /** 「从正文提取」的候选只对当前节点生效，切换节点即失效。 */
+    let keywordCandidates: { nodeId: string; items: KeywordCandidate[] } | null = null;
+
+    function splitTerms(value: string | undefined): string[] {
+        const seen = new Set<string>();
+        const result: string[] = [];
+        for (const item of String(value || "").split(/[,，、;；\n]+/)) {
+            const word = item.trim();
+            if (!word) continue;
+            const folded = word.toLowerCase();
+            if (seen.has(folded)) continue;
+            seen.add(folded);
+            result.push(word);
+        }
+        return result;
+    }
+
+    function keywordSourceLabel(source: string): string {
+        if (source === "title") return t("scenario.tree.candidate_source_title", "标题");
+        if (source === "quoted") return t("scenario.tree.candidate_source_quoted", "引号专名");
+        return t("scenario.tree.candidate_source_body", "正文");
+    }
+
+    function globalKeywordConflicts(node: GraphNode): Array<{ key: string; others: string[] }> {
+        if ((node.scope || "local") !== "global") return [];
+        const owners = new Map<string, string[]>();
+        for (const item of state.bundle?.nodes || []) {
+            if ((item.scope || "local") !== "global") continue;
+            const keys = new Set(
+                [...(item.keywords || []), ...(item.aliases || [])]
+                    .map((word) => word.trim().toLowerCase())
+                    .filter(Boolean),
+            );
+            for (const key of keys) {
+                const ids = owners.get(key) || [];
+                if (!ids.includes(item.id)) ids.push(item.id);
+                owners.set(key, ids);
+            }
+        }
+        const seen = new Set<string>();
+        const result: Array<{ key: string; others: string[] }> = [];
+        for (const word of [...(node.keywords || []), ...(node.aliases || [])]) {
+            const folded = word.trim().toLowerCase();
+            if (!folded || seen.has(folded)) continue;
+            seen.add(folded);
+            const others = (owners.get(folded) || []).filter((id) => id !== node.id);
+            if (others.length) {
+                result.push({ key: word, others: others.map((id) => nodeById(id)?.title || id) });
+            }
+        }
+        return result;
+    }
+
     function byId<T extends HTMLElement = HTMLElement>(id: string): T | null {
         return document.getElementById(id) as T | null;
     }
@@ -519,6 +582,8 @@
         }
         const meta = kindMeta(node.kind);
         const canEdit = editable();
+        const conflicts = globalKeywordConflicts(node);
+        const conflictKeys = new Set(conflicts.map((item) => item.key.trim().toLowerCase()));
         const edges = (state.bundle?.edges || []).filter((edge) => edge.from === node.id || edge.to === node.id);
         const visibility = node.visibility || "public";
         const rows: Array<[string, string]> = [
@@ -530,7 +595,10 @@
             ["进入方式", escapeHtml(node.access || "—")],
             ["可重复", node.repeatable === false ? "否" : "是"],
             ["物件数", String(Array.isArray(node.objects) ? node.objects.length : 0)],
-            ["关键词", (node.keywords || []).length ? node.keywords!.map((word) => `<span class="badge bg-light text-dark">${escapeHtml(word)}</span>`).join(" ") : "—"],
+            ["关键词", (node.keywords || []).length ? node.keywords!.map((word) => {
+                const danger = conflictKeys.has(String(word).trim().toLowerCase());
+                return `<span class="badge ${danger ? "bg-danger" : "bg-light text-dark"}">${escapeHtml(word)}</span>`;
+            }).join(" ") : "—"],
         ];
         if (!canEdit) {
             rows.splice(3, 0, [
@@ -562,6 +630,41 @@
                     <span>${escapeHtml(t("scenario.tree.edit_kp_notes", "KP 备注"))}</span>
                     <textarea class="form-control form-control-sm" id="scenarioNodeKpNotes" rows="3">${escapeHtml(node.kp_notes || "")}</textarea>
                 </label>
+                <div class="scenario-keyword-panel">
+                    <div class="scenario-keyword-head">
+                        <span>${escapeHtml(t("scenario.tree.keywords", "关键词"))}</span>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="scenarioNodeExtractKeywords">
+                            <i class="fa fa-magic" aria-hidden="true"></i>
+                            <span>${escapeHtml(t("scenario.tree.extract_keywords", "从正文提取"))}</span>
+                        </button>
+                    </div>
+                    <label class="form-group">
+                        <span>${escapeHtml(t("scenario.tree.edit_keywords", "主关键词"))} <small class="text-muted">${escapeHtml(t("scenario.tree.edit_keywords_hint", "逗号或换行分隔"))}</small></span>
+                        <input type="text" class="form-control form-control-sm${conflicts.length ? " is-invalid" : ""}" id="scenarioNodeKeywords" value="${escapeHtml((node.keywords || []).join(", "))}">
+                    </label>
+                    <label class="form-group">
+                        <span>${escapeHtml(t("scenario.tree.edit_aliases", "别名"))}</span>
+                        <input type="text" class="form-control form-control-sm" id="scenarioNodeAliases" value="${escapeHtml((node.aliases || []).join(", "))}">
+                    </label>
+                    <label class="form-group">
+                        <span>${escapeHtml(t("scenario.tree.edit_negative_keywords", "否定词"))}</span>
+                        <input type="text" class="form-control form-control-sm" id="scenarioNodeNegativeKeywords" value="${escapeHtml((node.negative_keywords || []).join(", "))}">
+                    </label>
+                    <div class="scenario-keyword-options">
+                        <label class="form-group">
+                            <span>${escapeHtml(t("scenario.tree.edit_scope", "作用域"))}</span>
+                            <select class="form-select form-select-sm" id="scenarioNodeScope">
+                                ${(["local", "global"] as const).map((value) => `<option value="${value}"${(node.scope || "local") === value ? " selected" : ""}>${escapeHtml(t(`scenario.tree.scope_${value}`, value === "global" ? "全局" : "局部"))}</option>`).join("")}
+                            </select>
+                        </label>
+                        <label class="scenario-module-toggle">
+                            <span>${escapeHtml(t("scenario.tree.constant", "常驻"))}</span>
+                            <input type="checkbox" id="scenarioNodeConstant" ${node.constant ? "checked" : ""}>
+                        </label>
+                    </div>
+                    <div id="scenarioNodeKeywordCandidates" class="scenario-keyword-candidates"></div>
+                    ${conflicts.length ? `<p class="scenario-keyword-conflict">${escapeHtml(t("scenario.tree.keyword_conflict", "全局关键词同时绑定多个节点；建议改为局部作用域或加否定词。"))} ${conflicts.map((item) => `<strong>${escapeHtml(item.key)}</strong> → ${escapeHtml(item.others.join("、"))}`).join("；")}</p>` : ""}
+                </div>
                 <label class="scenario-module-toggle">
                     <span>${escapeHtml(t("scenario.graph.lock_layout", "锁定布局"))}</span>
                     <input type="checkbox" id="scenarioNodeLayoutLocked" ${node.layout_locked ? "checked" : ""}>
@@ -588,12 +691,81 @@
                     return `<li><code>${arrow}</code> ${escapeHtml(other?.title || otherId)} <span class="text-muted">${escapeHtml(edge.type || "")}</span>${hard}</li>`;
                 }).join("")}</ul>` : `<p class="text-muted small mb-0">${escapeHtml(t("scenario.tree.no_edges", "暂无连接。"))}</p>`}
             </div>`;
-        if (canEdit) syncRevealType("scenarioNode");
+        if (canEdit) {
+            syncRevealType("scenarioNode");
+            renderKeywordCandidates(node);
+        }
+    }
+
+    function renderKeywordCandidates(node: GraphNode): void {
+        const host = byId("scenarioNodeKeywordCandidates");
+        if (!host) return;
+        const cached = keywordCandidates && keywordCandidates.nodeId === node.id ? keywordCandidates : null;
+        if (!cached) {
+            host.innerHTML = "";
+            return;
+        }
+        if (!cached.items.length) {
+            host.innerHTML = `<p class="text-muted small mb-0">${escapeHtml(t("scenario.tree.candidate_empty", "正文中没有新的候选实体。"))}</p>`;
+            return;
+        }
+        const coverage = t("scenario.tree.candidate_coverage", "正文中还有 {count} 个候选实体未被关键词覆盖。")
+            .replace("{count}", String(cached.items.length));
+        host.innerHTML = `
+            <p class="scenario-keyword-coverage">${escapeHtml(coverage)}</p>
+            <div class="scenario-keyword-chips">
+                ${cached.items.map((item, index) => `<button type="button" class="scenario-keyword-chip" data-keyword-index="${index}" title="${escapeHtml(t("scenario.tree.candidate_add", "加入主关键词"))}">
+                    <span>${escapeHtml(item.key)}</span>
+                    <small>${escapeHtml(keywordSourceLabel(item.source))} · ${item.confidence.toFixed(2)}</small>
+                </button>`).join("")}
+            </div>`;
+    }
+
+    function applyKeywordCandidate(index: number): void {
+        if (!keywordCandidates) return;
+        const item = keywordCandidates.items[index];
+        const input = byId<HTMLInputElement>("scenarioNodeKeywords");
+        if (!item || !input) return;
+        const values = splitTerms(input.value);
+        if (!values.some((word) => word.toLowerCase() === item.key.toLowerCase())) values.push(item.key);
+        input.value = values.join(", ");
+        input.classList.remove("is-invalid");
+        keywordCandidates.items.splice(index, 1);
+        const node = nodeById(keywordCandidates.nodeId);
+        if (node) renderKeywordCandidates(node);
+    }
+
+    async function extractNodeKeywords(): Promise<void> {
+        const node = nodeById(state.selectedId);
+        if (!node || !state.scenarioId || !editable()) return;
+        const button = byId<HTMLButtonElement>("scenarioNodeExtractKeywords");
+        if (button) button.disabled = true;
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ suggestions: Array<{ node_id: string; suggested: KeywordCandidate[] }> }>>(
+                `/api/scenarios/${state.scenarioId}/knowledge/suggest-keywords`,
+                { method: "POST", body: { target: "node", node_ids: [node.id], limit: 8 } },
+            );
+            if (!response.ok || !data?.success || !data.data) {
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            const entry = (data.data.suggestions || []).find((item) => item.node_id === node.id);
+            keywordCandidates = { nodeId: node.id, items: entry?.suggested || [] };
+            renderKeywordCandidates(node);
+            if (!keywordCandidates.items.length) {
+                showNotification(t("scenario.tree.candidate_empty", "正文中没有新的候选实体。"), "warning");
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            showNotification(message || t("scenario.tree.keyword_extract_failed", "关键词提取失败。"), "error");
+        } finally {
+            if (button) button.disabled = false;
+        }
     }
 
     function selectNode(nodeId: string): void {
         state.selectedId = nodeId;
         state.selectedEdgeId = "";
+        keywordCandidates = null;
         renderTree();
         renderInspector();
         renderGraph();
@@ -612,6 +784,11 @@
         const visibility = byId<HTMLSelectElement>("scenarioNodeVisibility")?.value || "public";
         const kpNotes = byId<HTMLTextAreaElement>("scenarioNodeKpNotes")?.value.trim() || "";
         const body = byId<HTMLTextAreaElement>("scenarioNodeBody")?.value || "";
+        const keywords = splitTerms(byId<HTMLInputElement>("scenarioNodeKeywords")?.value);
+        const aliases = splitTerms(byId<HTMLInputElement>("scenarioNodeAliases")?.value);
+        const negativeKeywords = splitTerms(byId<HTMLInputElement>("scenarioNodeNegativeKeywords")?.value);
+        const scope = byId<HTMLSelectElement>("scenarioNodeScope")?.value || "local";
+        const constant = byId<HTMLInputElement>("scenarioNodeConstant")?.checked === true;
         const layoutLocked = byId<HTMLInputElement>("scenarioNodeLayoutLocked")?.checked === true;
         const reveal = readReveal("scenarioNode");
         const revealWhen = visibility === "hidden" ? revealToCondition(reveal) : null;
@@ -624,7 +801,7 @@
         try {
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ node: GraphNode; revision: number }>>(
                 `/api/scenarios/${state.scenarioId}/narrative/nodes/${encodeURIComponent(node.id)}`,
-                { method: "PATCH", body: { base_revision: state.revision, title, visibility, body, kp_notes: kpNotes, reveal_when: revealWhen, layout_locked: layoutLocked } },
+                { method: "PATCH", body: { base_revision: state.revision, title, visibility, body, kp_notes: kpNotes, keywords, aliases, negative_keywords: negativeKeywords, scope, constant, reveal_when: revealWhen, layout_locked: layoutLocked } },
             );
             if (!response.ok || !data?.success || !data.data) {
                 if (response.status === 409) {
@@ -1560,6 +1737,7 @@
         state.search = "";
         state.validation = null;
         state.mode = "select";
+        keywordCandidates = null;
         resetViewMode();
         resetGeneratePanel();
         const search = byId<HTMLInputElement>("scenarioTreeSearch");
@@ -1621,6 +1799,7 @@
         state.positions = new Map();
         state.drag = null;
         state.pan = null;
+        keywordCandidates = null;
         resetViewMode();
         resetGeneratePanel();
         const search = byId<HTMLInputElement>("scenarioTreeSearch");
@@ -1896,9 +2075,17 @@
             void runValidation();
         });
         byId("scenarioNodeInspector")?.addEventListener("click", (event) => {
-            if ((event.target as HTMLElement).closest("#scenarioNodeSave")) {
+            const target = event.target as HTMLElement;
+            if (target.closest("#scenarioNodeSave")) {
                 void saveNode();
+                return;
             }
+            if (target.closest("#scenarioNodeExtractKeywords")) {
+                void extractNodeKeywords();
+                return;
+            }
+            const chip = target.closest<HTMLElement>("[data-keyword-index]");
+            if (chip) applyKeywordCandidate(Number(chip.dataset.keywordIndex));
         });
         byId("scenarioNodeInspector")?.addEventListener("change", (event) => {
             const target = event.target as HTMLSelectElement;
