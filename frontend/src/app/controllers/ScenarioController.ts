@@ -271,8 +271,15 @@ class ScenarioController {
         };
         saveButton.onclick = () => {
             void runSaveButtonCooldown(saveButton, async () => {
+                const complete = () => {
+                    restoreCreateHandler();
+                    this.renderScenarioList();
+                    this.view.closeModal();
+                    this.view.showMessage("剧本更新成功");
+                };
+                let scenarioData: ScenarioInput | null = null;
                 try {
-                    const scenarioData = this.view.getFormData();
+                    scenarioData = this.view.getFormData();
                     const tempScenario: Pick<Scenario, "id" | "cover" | "title"> = {
                         id,
                         title: scenarioData.title,
@@ -283,12 +290,31 @@ class ScenarioController {
 
                     const updatedScenario = await this.model.updateScenario(id, scenarioData);
                     void updatedScenario;
-
-                    restoreCreateHandler();
-                    this.renderScenarioList();
-                    this.view.closeModal();
-                    this.view.showMessage("剧本更新成功");
+                    complete();
                 } catch (error) {
+                    const blockers = publishBlockerDetail(error);
+                    if (blockers && scenarioData) {
+                        const confirmed = await window.TrpgDialog?.confirm({
+                            title: "世界树校验未通过",
+                            message: publishBlockerMessage(blockers),
+                            confirmText: "强制发布",
+                            danger: true,
+                        });
+                        if (confirmed) {
+                            try {
+                                await this.model.updateScenario(id, { ...scenarioData, force_narrative: true });
+                                complete();
+                                return;
+                            } catch (retryError) {
+                                console.error("强制发布剧本时出错:", retryError);
+                                this.view.showMessage(scenarioErrorMessage(retryError), true);
+                                restoreCreateHandler();
+                                return;
+                            }
+                        }
+                        restoreCreateHandler();
+                        return;
+                    }
                     console.error("更新剧本时出错:", error);
                     this.view.showMessage(scenarioErrorMessage(error), true);
                     restoreCreateHandler();
@@ -435,6 +461,33 @@ function inputElement(id: string): HTMLInputElement | null {
 
 function scenarioErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+interface PublishBlockerDetail {
+    errors?: number;
+    needs_review?: number;
+    issues?: { message?: string }[];
+}
+
+/** 后端以 `code=narrative_publish_blocked` 标记世界树校验拦截（§14.2 硬闸门）。 */
+function publishBlockerDetail(error: unknown): PublishBlockerDetail | null {
+    const candidate = error as { code?: string; detail?: unknown } | null;
+    if (!candidate || candidate.code !== "narrative_publish_blocked") return null;
+    return candidate.detail && typeof candidate.detail === "object"
+        ? (candidate.detail as PublishBlockerDetail)
+        : {};
+}
+
+function publishBlockerMessage(detail: PublishBlockerDetail): string {
+    const errors = Number(detail.errors ?? 0);
+    const review = Number(detail.needs_review ?? 0);
+    const parts: string[] = [];
+    if (errors > 0) parts.push(`${errors} 条校验错误`);
+    if (review > 0) parts.push(`${review} 项可见性待复核`);
+    const first = detail.issues?.find((issue) => issue.message)?.message;
+    const head = `世界树尚有${parts.join("、") || "未解决的问题"}。`;
+    const tail = first ? `\n首个问题：${first}` : "";
+    return `${head}${tail}\n\n强制发布会写入日志，玩家侧可能出现剧本断裂或未复核的隐藏内容。`;
 }
 
 window.ScenarioController = ScenarioController;

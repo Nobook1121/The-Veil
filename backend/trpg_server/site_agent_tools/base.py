@@ -36,6 +36,8 @@ class ToolContext:
     turn_id: str
     room_id: str | None = None
     room_info: dict[str, Any] | None = None
+    # 剧本弹窗注入的上下文（§8.4.1）：scenario_id / selected_node_id / base_version / tab。
+    scenario_context: dict[str, Any] | None = None
     ip: str = ""
     attachments: list[dict[str, Any]] = field(default_factory=list)
     pending_actions: list[dict[str, Any]] = field(default_factory=list)

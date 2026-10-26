@@ -7,6 +7,7 @@
 import json
 import logging
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import requests
@@ -15,7 +16,7 @@ from trpg_server.ai_capabilities import chat_completions_endpoint
 from trpg_server.agents.ai_request import merge_request_template
 from trpg_server.agents.config import load_ai_runtime_config
 from trpg_server.agents.context import build_agent_context
-from trpg_server.agents.profiles import resolve_agent_profile
+from trpg_server.agents.profiles import resolve_agent_profile, with_graph_tools
 from trpg_server.agents.runtime import run_agent_completion
 from trpg_server.agents.structured_output import apply_state_updates, parse_kp_response, validate_state_updates, validate_structured_response
 from trpg_server.agents.telemetry import build_provider_cache_key, calculate_cache_hit_rate, record_ai_usage
@@ -28,6 +29,18 @@ from trpg_server.agents.ruleset_knowledge import RulesetKnowledgeStore, search_r
 from trpg_server.agents.tools import default_tool_registry
 from trpg_server.agents.tools.room import get_room_snapshot
 from trpg_server.agents.room_state import append_room_event, project_room_state
+from trpg_server.agents.narrative.guards import apply_output_guard_report
+from trpg_server.agents.narrative.logger import log_event
+from trpg_server.agents.narrative.metrics import bump as bump_narrative_metrics
+from trpg_server.agents.narrative.metrics import observe as observe_narrative_metrics
+from trpg_server.agents.narrative.prompt_v2 import render_state_summary
+from trpg_server.agents.narrative.prejudge import prepare_turn, render_contract, retrieval_candidates
+from trpg_server.agents.narrative.runtime import NarrativeRuntime, NarrativeRuntimeError, narrative_available
+from trpg_server.agents.narrative.runtime_settings import log_bypass_once, resolve_narrative_settings
+from trpg_server.agents.narrative.state_store import narrative_from_room_state
+from trpg_server.agents.narrative.store import NarrativeStoreError, load_bundle
+from trpg_server.agents.narrative.trace import append_trace
+from trpg_server.scenario_store import load_scenario_by_id
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
 from trpg_server.room_log import log_room_event
@@ -41,6 +54,7 @@ from trpg_server.settings import (
     KNOWLEDGE_BASES_DIR,
 )
 from trpg_server.routes.chat_helpers import (
+    _begin_graph_scenario,
     _build_agent_requester,
     _build_knowledge_usage,
     _can_start_scenario,
@@ -64,6 +78,8 @@ from trpg_server.routes.chat_helpers import (
     _mark_scenario_started,
     _maybe_remember_important_action,
     _message_response,
+    _opening_fallback_text,
+    _opening_request_text,
     _notify_platform_switch,
     _profile_for_request,
     _request_allows_check,
@@ -210,8 +226,44 @@ def _build_platform_request_state(platform_id, platform_config, runtime_config, 
     }
 
 
+def _opening_fallback_payload(opening_plan, scenario_started_at, room_id):
+    """模型超时/空回复时，用确定性开场包完成开场（§5.9）。
+
+    固定与混合模式本来就会发布开场；模型模式在这里补发玩家可见开场，
+    避免玩家在开局回合看到空回复。
+    """
+    if opening_plan is None:
+        return None
+    content = _opening_fallback_text(opening_plan)
+    messages = opening_plan.messages(force_intro=True)
+    log_event(
+        "opening.fallback",
+        room_id=str(room_id) if room_id else None,
+        scenario_id=opening_plan.scenario_id,
+        location_id=opening_plan.location_id,
+        mode=opening_plan.opening_mode,
+        messages=len(messages),
+    )
+    return success_response(
+        message=None,
+        content=content,
+        token_count=0,
+        direct_message=messages[0] if messages else None,
+        direct_messages=messages,
+        tool_messages=[],
+        suggestions=[],
+        suggestions_owner=None,
+        scenario_started_at=scenario_started_at,
+        ending_reached=False,
+        structured_output=None,
+    )
+
+
 @bp.route("/api/chat", methods=["POST"])
 def chat():
+    # 提前声明：异常分支需要用它们判断开场是否已由服务端发布。
+    scenario_started_at = None
+    opening_plan = None
     try:
         message_data = request.get_json(silent=True)
         if not message_data:
@@ -285,6 +337,7 @@ def chat():
             request_content=content,
             config_dir=current_app.config.get("CONFIG_DIR", CONFIG_DIR),
         )
+        scenario_start_user_id = None
         if scenario_start:
             if not room_id or not agent_context.room_dir:
                 return error_response("A room is required to start the scenario", 400, "Room is required")
@@ -294,27 +347,7 @@ def chat():
                 return error_response("Permission denied", 403, "Only room managers can start the scenario")
             if room_info.get("scenario_started_at"):
                 return error_response("Scenario has already started", 409, "Scenario already started")
-            content = (
-                "@KP [系统开场任务] 请读取当前房间快照和起始场景所需的剧本模块，"
-                "直接为所有玩家进行简洁、有代入感的开场导入。不要声称玩家说了‘开始’，"
-                "不要替玩家决定行动，不要在结尾列出选项。"
-            )
-            agent_context = build_agent_context(
-                room_id=room_id,
-                rooms_dir=current_app.config.get("ROOMS_DIR", ROOMS_DIR),
-                scenarios_dir=current_app.config.get("SCENARIOS_DIR", SCENARIOS_DIR),
-                user_id=session_user_id,
-                agent_id=agent_profile.id,
-                request_content=content,
-                config_dir=current_app.config.get("CONFIG_DIR", CONFIG_DIR),
-            )
-        agent_context.tool_state.update(
-            {
-                "allow_checks": _request_allows_check(content),
-                "allow_unconditional_trigger": _request_allows_manual_trigger(content),
-                "allow_scene_transition": _request_allows_scene_transition(content),
-            }
-        )
+            scenario_start_user_id = session_user_id
         # 骰子动画档位与玩家投掷：房间规则优先，管理员默认兜底（工具自身也会兜底）。
         from trpg_server.agents.dice_settings import resolve_dice_settings
 
@@ -364,6 +397,7 @@ def chat():
                 room_id, ai_request_id, stage, label
             )
         runtime_config = load_ai_runtime_config(_get_config_dir())
+        turn_started_at = time.perf_counter()
         # 本地响应缓存的 TTL 可在设置页调整：命中即整次跳过上游请求，是最直接的省 token
         # 手段。这里把配置回写到模块级单例，保证新写入的条目使用新的过期时间。
         _SEMANTIC_CACHE.default_ttl = runtime_config.semantic_cache_ttl
@@ -379,10 +413,64 @@ def chat():
         )
         if room_id:
             agent_context.tool_state["allow_action_suggestions"] = effective_suggestions
-        request_profile = _profile_for_request(
-            agent_profile,
-            agent_context.tool_state,
-            enable_suggestions=effective_suggestions,
+        # 有 narrative.json 的房间才启用图谱工具；普通房间保持原工具集与提示词。
+        graph_enabled = False
+        if room_id:
+            try:
+                graph_enabled = narrative_available(agent_context)
+            except (OSError, ValueError):
+                logger.warning("Narrative availability check failed for room %s", room_id, exc_info=True)
+        # 房间级档位（§12.5）：kill switch 立即退回旧编排，profile 决定是否走 JEV。
+        narrative_settings = resolve_narrative_settings({"house_rules": house_rules} if room_id else None)
+        if graph_enabled and not narrative_settings.enabled:
+            log_bypass_once(room_id)
+            graph_enabled = False
+        agent_context.tool_state["graph_enabled"] = graph_enabled
+        opening_messages = []
+        opening_prompt = None
+        if scenario_start:
+            if graph_enabled:
+                try:
+                    opening_plan = _begin_graph_scenario(agent_context)
+                except Exception as exc:  # noqa: BLE001 - 开局失败必须给出明确错误
+                    logger.warning(
+                        "Graph scenario start failed room_id=%s error=%s",
+                        room_id,
+                        type(exc).__name__,
+                        exc_info=True,
+                    )
+                    return error_response("Scenario opening unavailable", 500, str(exc))
+                content = _opening_request_text(opening_plan)
+                opening_prompt = opening_plan.prompt_text()
+                opening_messages = opening_plan.messages()
+                # 开机即标记已开始：即使随后模型超时，确定性开场也已经落库。
+                scenario_started_at = _mark_scenario_started(agent_context.room_dir, scenario_start_user_id)
+            else:
+                content = (
+                    "@KP [系统开场任务] 请读取当前房间快照和起始场景所需的剧本模块，"
+                    "直接为所有玩家进行简洁、有代入感的开场导入。不要声称玩家说了‘开始’，"
+                    "不要替玩家决定行动，不要在结尾列出选项。"
+                )
+            # 用 replace 保留骰子设置、检索回调等已注入的 tool_state。
+            agent_context = replace(
+                agent_context,
+                user_id=scenario_start_user_id or agent_context.user_id,
+                request_content=content,
+            )
+        agent_context.tool_state.update(
+            {
+                "allow_checks": _request_allows_check(content),
+                "allow_unconditional_trigger": _request_allows_manual_trigger(content),
+                "allow_scene_transition": _request_allows_scene_transition(content),
+            }
+        )
+        request_profile = with_graph_tools(
+            _profile_for_request(
+                agent_profile,
+                agent_context.tool_state,
+                enable_suggestions=effective_suggestions,
+            ),
+            graph_enabled=graph_enabled,
         )
         if room_id:
             room_snapshot = get_room_snapshot({}, agent_context)
@@ -511,55 +599,136 @@ def chat():
                 active_scene = scenario_data.get("active_scene_id")
                 manifest = scenario_data.get("scene_manifest") if isinstance(scenario_data.get("scene_manifest"), list) else []
                 scene_static = next((item for item in manifest if isinstance(item, dict) and str(item.get("id")) == str(active_scene)), None)
+        # ---- 图谱运行态 + JEV 预判断（§5.1 / §5.3）-------------------------
+        # 先做确定性预判，再用候选集约束检索；预判失败只降级、不阻断请求。
+        narrative = None
+        narrative_summary = ""
+        narrative_bundle = None
+        narrative_runtime = None
+        turn_contract = None
+        retrieval_candidate_ids: set[str] = set()
+        retrieval_candidate_titles: set[str] = set()
+        if room_id:
+            narrative = narrative_from_room_state(agent_context.room_state())
+            if graph_enabled:
+                try:
+                    narrative_runtime = NarrativeRuntime.load(agent_context)
+                except (NarrativeRuntimeError, OSError, ValueError, NarrativeStoreError):
+                    logger.warning("Narrative runtime load failed for room %s", room_id, exc_info=True)
+                if narrative_runtime is not None:
+                    narrative_bundle = narrative_runtime.bundle
+                else:
+                    # 图谱文件损坏不应阻断对话；退化为旧摘要路径。
+                    snapshot_room = (room_snapshot or {}).get("room") if isinstance(room_snapshot, dict) else {}
+                    scenario_id = snapshot_room.get("scenario_id") if isinstance(snapshot_room, dict) else None
+                    if scenario_id is not None and agent_context.scenarios_dir:
+                        try:
+                            descriptor, _ = load_scenario_by_id(
+                                agent_context.scenarios_dir,
+                                scenario_id,
+                                snapshot_room.get("scenario_version"),
+                            )
+                            if descriptor:
+                                narrative_bundle = load_bundle(descriptor.parent)
+                        except (OSError, ValueError, NarrativeStoreError):
+                            logger.warning("Narrative bundle load failed for room %s", room_id, exc_info=True)
+            if graph_enabled and narrative_runtime is not None and not scenario_start:
+                if narrative_settings.profile == "graph":
+                    turn_contract = prepare_turn(narrative_runtime, content)
+                    if turn_contract is not None:
+                        retrieval_candidate_ids, retrieval_candidate_titles = retrieval_candidates(
+                            narrative_runtime, turn_contract, content
+                        )
+            if graph_enabled:
+                narrative_summary = render_state_summary(narrative, narrative_bundle)
+                if turn_contract is not None:
+                    contract_text = render_contract(turn_contract)
+                    narrative_summary = (
+                        f"{narrative_summary}\n\n{contract_text}".strip() if narrative_summary else contract_text
+                    )
+                    log_event(
+                        "jev.turn",
+                        room_id=str(room_id),
+                        profile=narrative_settings.profile,
+                        intent=turn_contract.intent,
+                        confidence=turn_contract.confidence,
+                        candidates=len(retrieval_candidate_ids),
+                        denied=len(turn_contract.denied),
+                        skip_retrieval=turn_contract.skip_retrieval,
+                    )
         scenario_results = []
         if room_id:
-            _emit_thinking_stage(room_id, ai_request_id, "vector_search", "正在调用向量库")
-            try:
-                knowledge_service = KnowledgeBaseService(
-                    rooms_dir=current_app.config.get("ROOMS_DIR", ROOMS_DIR),
-                    scenarios_dir=current_app.config.get("SCENARIOS_DIR", SCENARIOS_DIR),
-                    vector_store=current_app.extensions.get("vector_store"),
-                    embedding_provider=current_app.extensions.get("embedding_provider"),
+            # meta / combat 分支不需要剧情检索（§5.1）；预判失败时保持原有检索行为。
+            if turn_contract is not None and turn_contract.skip_retrieval:
+                log_event(
+                    "retrieval.skipped",
+                    room_id=str(room_id),
+                    profile=narrative_settings.profile,
+                    intent=turn_contract.intent,
                 )
-                # 导入剧本只有知识块这一条剧情来源，多取几条降低"遗忘"概率；
-                # 检索 query 带上最近几轮对话，避免泛化输入每次都落到同一批兜底块。
-                retrieval_query = _retrieval_query(history, content)
-                retrieval_top_k = (
-                    runtime_config.retrieval_top_k_direct
-                    if direct_import
-                    else runtime_config.retrieval_top_k_default
-                )
-                scenario_results = knowledge_service.search(
-                    room_id,
-                    retrieval_query,
-                    top_k=retrieval_top_k,
-                    sticky_rounds=runtime_config.sticky_rounds,
-                    cooldown_rounds=runtime_config.cooldown_rounds,
-                    parent_max_chars=runtime_config.chunk_parent_max_chars,
-                    keyword_channel=runtime_config.keyword_channel_enabled,
-                    recursive_scanning=runtime_config.recursive_scanning,
-                    max_recursion_depth=runtime_config.max_recursion_depth,
-                    token_budget=runtime_config.lorebook_token_budget,
-                )
-                scenario_results = [
-                    item for item in scenario_results
-                    if isinstance(item, dict) and str(item.get("text") or "").strip()
-                ]
-                if direct_import:
-                    catalog = knowledge_service.catalog(room_id)
-                    if catalog:
-                        # 目录是稳定前缀（可命中 provider 前缀缓存），但仍用紧凑行格式
-                        # 而非 JSON，避免每行长键名把静态提示撑大、占用输入 token。
-                        catalog_lines = "\n".join(
-                            f"{item.get('chunk_id')}：{item.get('title')}" for item in catalog
+            else:
+                _emit_thinking_stage(room_id, ai_request_id, "vector_search", "正在调用向量库")
+                try:
+                    knowledge_service = KnowledgeBaseService(
+                        rooms_dir=current_app.config.get("ROOMS_DIR", ROOMS_DIR),
+                        scenarios_dir=current_app.config.get("SCENARIOS_DIR", SCENARIOS_DIR),
+                        vector_store=current_app.extensions.get("vector_store"),
+                        embedding_provider=current_app.extensions.get("embedding_provider"),
+                    )
+                    # 导入剧本只有知识块这一条剧情来源，多取几条降低"遗忘"概率；
+                    # 检索 query 带上最近几轮对话，避免泛化输入每次都落到同一批兜底块。
+                    retrieval_query = _retrieval_query(history, content)
+                    retrieval_top_k = (
+                        runtime_config.retrieval_top_k_direct
+                        if direct_import
+                        else runtime_config.retrieval_top_k_default
+                    )
+                    search_kwargs = {
+                        "top_k": retrieval_top_k,
+                        "sticky_rounds": runtime_config.sticky_rounds,
+                        "cooldown_rounds": runtime_config.cooldown_rounds,
+                        "parent_max_chars": runtime_config.chunk_parent_max_chars,
+                        "keyword_channel": runtime_config.keyword_channel_enabled,
+                        "recursive_scanning": runtime_config.recursive_scanning,
+                        "max_recursion_depth": runtime_config.max_recursion_depth,
+                        "token_budget": runtime_config.lorebook_token_budget,
+                    }
+                    constrained = bool(retrieval_candidate_ids or retrieval_candidate_titles)
+                    if constrained:
+                        search_kwargs["candidate_ids"] = retrieval_candidate_ids
+                        search_kwargs["candidate_titles"] = retrieval_candidate_titles
+                    scenario_results = knowledge_service.search(room_id, retrieval_query, **search_kwargs)
+                    if constrained and not scenario_results:
+                        # 候选集过窄时兜底一次全量检索，避免模型误以为剧本缺失。
+                        log_event(
+                            "retrieval.candidates_empty",
+                            room_id=str(room_id),
+                            profile=narrative_settings.profile,
+                            candidates=len(retrieval_candidate_ids),
+                            titles=len(retrieval_candidate_titles),
                         )
-                        system_prompt += (
-                            "\n【导入剧本目录】以下是本剧本的全部章节索引（chunk_id：标题），请据此把握剧情走向；"
-                            "需要某章细节时以每轮自动注入的 Knowledge retrieval 为准。\n"
-                            + catalog_lines
-                        )
-            except (OSError, ValueError):
-                logger.exception("Scenario retrieval failed")
+                        search_kwargs.pop("candidate_ids", None)
+                        search_kwargs.pop("candidate_titles", None)
+                        scenario_results = knowledge_service.search(room_id, retrieval_query, **search_kwargs)
+                    scenario_results = [
+                        item for item in scenario_results
+                        if isinstance(item, dict) and str(item.get("text") or "").strip()
+                    ]
+                    if direct_import:
+                        catalog = knowledge_service.catalog(room_id)
+                        if catalog:
+                            # 目录是稳定前缀（可命中 provider 前缀缓存），但仍用紧凑行格式
+                            # 而非 JSON，避免每行长键名把静态提示撑大、占用输入 token。
+                            catalog_lines = "\n".join(
+                                f"{item.get('chunk_id')}：{item.get('title')}" for item in catalog
+                            )
+                            system_prompt += (
+                                "\n【导入剧本目录】以下是本剧本的全部章节索引（chunk_id：标题），请据此把握剧情走向；"
+                                "需要某章细节时以每轮自动注入的 Knowledge retrieval 为准。\n"
+                                + catalog_lines
+                            )
+                except (OSError, ValueError):
+                    logger.exception("Scenario retrieval failed")
         rules_version = str((agent_context.room_info().get("rulesets") or {}).get("coc7") or "1") if room_id else "1"
         projected_state = project_room_state(agent_context.room_state(), room_snapshot) if room_id else {}
         if effective_suggestions and isinstance(projected_state, dict):
@@ -580,6 +749,8 @@ def chat():
             ruleset_results=[],
             retrieval_full=direct_import,
             room_snapshot_message=room_snapshot_message,
+            narrative_summary=narrative_summary,
+            opening_pack=opening_prompt,
         )
         _emit_thinking_stage(room_id, ai_request_id, "vector_search_done", "向量库检索完成")
         # 提示词分段估算：把本次输入 token 拆到静态前缀/知识库/历史/本轮输入等分段，
@@ -865,9 +1036,9 @@ def chat():
         direct_message = None
         if isinstance(result.response_data, dict):
             direct_message = result.response_data.get("direct_message")
-        direct_messages = result.direct_messages or []
-        if direct_message and not direct_messages:
-            direct_messages = [direct_message]
+        direct_messages = [*opening_messages, *(result.direct_messages or [])]
+        if direct_message and direct_message not in direct_messages:
+            direct_messages.append(direct_message)
 
         # Action options staged by the KP via room.suggest_actions. These are
         # rendered as buttons in the chat UI (owner-interactive, read-only for
@@ -952,12 +1123,107 @@ def chat():
         # 而不是让玩家面对一条没有任何说明的回复。
         if result.notice:
             ai_response = f"{ai_response}\n\n{result.notice}" if ai_response else result.notice
+        # 输出侧护栏：工具可能已经推进状态，因此按最新状态过滤，而不是请求开始时的快照。
+        # 档位来自房间房规（enforce/shadow/off），shadow 只观测不改正文（§12.5）。
+        guard_report = None
+        if narrative_bundle is not None and ai_response and narrative_settings.guard != "off":
+            guard_report = apply_output_guard_report(
+                ai_response,
+                narrative_bundle,
+                narrative_from_room_state(agent_context.room_state()),
+                narrative_settings.guard_policy(),
+                room_id=str(room_id) if room_id else None,
+            )
+            ai_response = guard_report.text
+            if guard_report.changed:
+                log_room_event(
+                    message=(
+                        f"护栏拦截：移除 {guard_report.removed_sentences} 句未解锁内容"
+                        f"（{len(guard_report.violations)} 个对象）"
+                    ),
+                    actor="narrative",
+                    room_id=room_id,
+                    rooms_dir=current_app.config.get("ROOMS_DIR"),
+                    logger_=logger,
+                    source="narrative",
+                    guard_mode=narrative_settings.guard,
+                )
+        if not ai_response and opening_plan is not None:
+            ai_response = _opening_fallback_text(opening_plan)
+            log_event(
+                "opening.fallback",
+                room_id=str(room_id) if room_id else None,
+                profile=narrative_settings.profile,
+                scenario_id=opening_plan.scenario_id,
+                location_id=opening_plan.location_id,
+                mode=opening_plan.opening_mode,
+                reason="empty_response",
+            )
         if not ai_response:
             return error_response(
                 "AI platform did not return a response",
                 400,
                 "No response",
             )
+        if room_id and agent_context.room_dir and (graph_enabled or narrative_bundle is not None):
+            try:
+                post_state = narrative_from_room_state(agent_context.room_state())
+                clock = post_state.get("clock") if isinstance(post_state.get("clock"), dict) else {}
+                turn_no = int(clock.get("turn") or 0)
+                location = post_state.get("location")
+                index = narrative_runtime.index if narrative_runtime is not None else None
+                violations = list(guard_report.violations) if guard_report is not None else []
+                changed = bool(guard_report is not None and guard_report.changed)
+                append_trace(
+                    agent_context.room_dir,
+                    {
+                        "turn": turn_no,
+                        "topology": narrative_runtime.bundle.topology if narrative_runtime is not None else "-",
+                        "location": location,
+                        "reachable": sorted(index.exits.get(location) or []) if index is not None and location else [],
+                        "blocked": [
+                            item.get("to") for item in (turn_contract.reachable_exits if turn_contract else ())
+                            if item.get("blocked")
+                        ],
+                        "branch": turn_contract.intent if turn_contract is not None else "-",
+                        "contract": {
+                            "intent": turn_contract.intent if turn_contract else "-",
+                            "targets": [item.get("id") for item in (turn_contract.targets if turn_contract else ())],
+                            "allowed": len(turn_contract.allowed) if turn_contract else 0,
+                            "forbidden": list(turn_contract.forbidden[:10]) if turn_contract else [],
+                        },
+                        "retrieval": {
+                            "lexical": len(scenario_results),
+                            "vector": bool(scenario_results),
+                            "injected": [str(item.get("chunk_id") or "") for item in scenario_results[:8]],
+                            "excluded_unvisited": 0,
+                        },
+                        "guard": {
+                            "decision": "removed" if changed and narrative_settings.guard == "enforce" else "allow",
+                            "violations": len(violations),
+                            "shadow": narrative_settings.guard == "shadow",
+                        },
+                        "tokens": {"context": prompt_tokens, "completion": completion_tokens},
+                        "latency_ms": {"total": round((time.perf_counter() - turn_started_at) * 1000, 2)},
+                    },
+                )
+                bump_narrative_metrics(
+                    agent_context.room_dir,
+                    turn_count=1,
+                    retrieval_hits=len(scenario_results),
+                    guard_violation=len(violations),
+                    guard_denied=len(violations) if (changed and narrative_settings.guard == "enforce") else 0,
+                    spoiler_denied=len(violations) if narrative_settings.guard == "enforce" else 0,
+                )
+                observe_narrative_metrics(
+                    agent_context.room_dir,
+                    {
+                        "context_tokens": prompt_tokens,
+                        "latency_ms": round((time.perf_counter() - turn_started_at) * 1000, 2),
+                    },
+                )
+            except (OSError, ValueError, TypeError):
+                logger.warning("Narrative trace/metrics write failed for room %s", room_id, exc_info=True)
         log_room_event(
             message=user_action_text(session.get("username") or user_id, "收到 AI 回复"),
             actor=session.get("username") or user_id,
@@ -1000,8 +1266,7 @@ def chat():
         else:
             write_json_atomic(history_file, history[-20:])
 
-        scenario_started_at = None
-        if scenario_start and agent_context.room_dir:
+        if scenario_start and agent_context.room_dir and not scenario_started_at:
             scenario_started_at = _mark_scenario_started(agent_context.room_dir, session.get("user_id"))
             logger.info("scenario_started room_id=%s user_id=%s", room_id, session.get("user_id"))
 
@@ -1037,8 +1302,14 @@ def chat():
             ),
         )
     except requests.exceptions.Timeout:
+        fallback = _opening_fallback_payload(opening_plan, scenario_started_at, room_id)
+        if fallback is not None:
+            return fallback
         return error_response("AI platform request timeout", 504, "Request timeout")
     except requests.exceptions.ConnectionError:
+        fallback = _opening_fallback_payload(opening_plan, scenario_started_at, room_id)
+        if fallback is not None:
+            return fallback
         return error_response("Cannot connect to AI platform", 503, "Connection error")
     except json.JSONDecodeError as exc:
         logger.exception("Failed to parse AI platform response")

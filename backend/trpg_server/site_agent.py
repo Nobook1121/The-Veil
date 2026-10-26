@@ -193,6 +193,7 @@ def run_turn(
     content: str,
     conversation_id: str | None = None,
     room_id: str | None = None,
+    scenario_context: dict[str, Any] | None = None,
     ip: str = "",
 ) -> dict[str, Any]:
     config = _config()
@@ -212,7 +213,15 @@ def run_turn(
     if not acquire_turn_lock(actor.user_id):
         raise SiteAgentError("turn_in_progress", "上一轮对话仍在处理，请稍候", 429)
     try:
-        return _run_turn_locked(actor, config=config, text=text, conversation_id=conversation_id, room_id=room_id, ip=ip)
+        return _run_turn_locked(
+            actor,
+            config=config,
+            text=text,
+            conversation_id=conversation_id,
+            room_id=room_id,
+            scenario_context=scenario_context,
+            ip=ip,
+        )
     finally:
         release_turn_lock(actor.user_id)
 
@@ -225,9 +234,15 @@ def _run_turn_locked(
     conversation_id: str | None,
     room_id: str | None,
     ip: str,
+    scenario_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     room = _room_context(actor, room_id)
-    conversation = _get_conversation(actor, conversation_id, {"room_id": room.get("room_id")} if room else None)
+    context_data: dict[str, Any] = {}
+    if room:
+        context_data["room_id"] = room.get("room_id")
+    if scenario_context:
+        context_data.update({key: value for key, value in scenario_context.items() if value not in (None, "")})
+    conversation = _get_conversation(actor, conversation_id, context_data or None)
     user_message = append_message(conversation, role="user", content=text)
     save_conversation(conversation, max_messages=config.max_messages_per_conversation)
 
@@ -251,6 +266,7 @@ def _run_turn_locked(
         turn_id=turn_id,
         room_id=room.get("room_id") if room else None,
         room_info=room,
+        scenario_context=scenario_context,
         ip=ip,
         event_callback=lambda event, payload: _emit(actor.user_id, event, payload),
     )
@@ -275,6 +291,7 @@ def _run_turn_locked(
         config=config,
         tools=[spec for spec in specs],
         room_context=room,
+        scenario_context=scenario_context,
     )
     messages = [{"role": "system", "content": system_prompt}, *_history(conversation, config.max_history_messages)]
 

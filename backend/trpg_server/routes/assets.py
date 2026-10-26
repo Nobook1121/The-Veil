@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import re
 from uuid import uuid4
 
 from flask import Blueprint, Response, current_app, request, send_from_directory, session
@@ -57,6 +58,18 @@ def _with_no_cache(response):
     return response
 
 
+# 素材按内容寻址（`assets/<hash16>[_{thumb,poster}].<ext>`），内容变化必然换名，
+# 因此可以长期缓存；其余剧本静态文件仍保持 no-cache 以便覆盖更新。
+_HASH_ASSET_PATH = re.compile(
+    r"(?:^|/)assets/[0-9a-f]{16}(?:_(?:thumb|poster))?\.[A-Za-z0-9]{1,8}$"
+)
+
+
+def _with_immutable_cache(response):
+    response.headers["Cache-Control"] = "private, max-age=31536000, immutable"
+    return response
+
+
 @bp.route("/assets/avatars/<path:filename>")
 def serve_avatar(filename):
     return _with_no_cache(send_from_directory(AVATARS_DIR, filename))
@@ -69,7 +82,11 @@ def serve_scenario_cover(filename):
 
 @bp.route("/assets/scenarios/<path:filename>")
 def serve_scenario_asset(filename):
-    return _with_no_cache(send_from_directory(current_app.config.get("SCENARIOS_DIR", SCENARIOS_DIR), filename))
+    response = send_from_directory(current_app.config.get("SCENARIOS_DIR", SCENARIOS_DIR), filename)
+    normalized = filename.replace("\\", "/")
+    if _HASH_ASSET_PATH.search(normalized):
+        return _with_immutable_cache(response)
+    return _with_no_cache(response)
 
 
 @bp.route("/assets/aiplatform/<path:filename>")

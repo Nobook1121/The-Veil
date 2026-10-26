@@ -160,6 +160,14 @@ def archive_room(rooms_dir: Any, room_id: Any, *, app: Any = None) -> dict[str, 
     info["updated_at"] = now
     write_json_atomic(room_dir / "info.json", info)
 
+    try:
+        from trpg_server.agents.narrative.state_store import write_keyframe
+
+        if isinstance(state.get("narrative"), dict) and state["narrative"]:
+            write_keyframe(room_dir, reason="archive")
+    except Exception:  # noqa: BLE001 - 关键帧失败不阻断归档
+        logger.warning("narrative.keyframe.archive_failed room=%s", room_dir.name, exc_info=True)
+
     snapshot_built = False
     if app is not None:
         try:

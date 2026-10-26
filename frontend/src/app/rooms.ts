@@ -596,9 +596,11 @@ async function enterRoom(room: Room): Promise<void> {
     window.setChatReadOnly?.(invisibleView);
     applyInvisibleRoomView(invisibleView);
     if (invisibleView) {
+        window.RoomNarrative?.clear();
         renderRoomNodeList([]);
         return;
     }
+    void window.RoomNarrative?.load(room.id);
     await enforceSelfCardSkillBaseLimit(room);
     window.joinSocketRoom?.(room.id);
     await loadRoomNodes();
@@ -643,6 +645,7 @@ function applyInvisibleRoomView(invisible: boolean): void {
 }
 
 function showRoomListView(): void {
+    window.RoomNarrative?.clear();
     setDisplay("save-list-view", "block");
     setDisplay("save-detail-view", "none");
     void loadRoomsList();

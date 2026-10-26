@@ -85,7 +85,14 @@ class ScenarioModel {
         });
 
         if (!response.ok || !data.success || !isScenario(data.data)) {
-            throw new Error(data.message || data.error || `API 请求失败: ${response.status}`);
+            const payload = data as ApiResponse<unknown> & { code?: string };
+            const error = new Error(data.message || data.error || `API 请求失败: ${response.status}`) as Error & {
+                code?: string | undefined;
+                detail?: unknown;
+            };
+            error.code = payload.code;
+            error.detail = data.data;
+            throw error;
         }
 
         const index = this.scenarios.findIndex((scenario) => scenario.id === id);

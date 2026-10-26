@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # 仅供前端展示、不参与模型推理的字段。这些字段会在工具结果回传给模型前被剥离：
 # 它们本身是 UI 载体（骰娘消息、直接消息），塞进 role="tool" 只会让后续每一轮
 # prompt 重复计入同样的内容，白白放大输入 token。
-UI_ONLY_TOOL_RESULT_KEYS = frozenset({"visible_message", "direct_message"})
+UI_ONLY_TOOL_RESULT_KEYS = frozenset({"visible_message", "direct_message", "direct_messages"})
 
 # 各厂商 usage 的字段结构差异很大（尤其是缓存字段）。首次遇到一种新结构时打一条完整
 # 原文，方便直接确认平台到底有没有上报缓存信息；相同结构不再重复打印，避免刷屏。
@@ -549,6 +549,10 @@ def run_agent_completion(
                 direct_message = result["direct_message"]
                 if isinstance(direct_message, dict):
                     direct_messages.append(direct_message)
+            if isinstance(result, dict) and isinstance(result.get("direct_messages"), list):
+                for direct_message in result["direct_messages"]:
+                    if isinstance(direct_message, dict):
+                        direct_messages.append(direct_message)
 
             if isinstance(result, dict) and isinstance(result.get("visible_message"), dict):
                 tool_messages.append(result["visible_message"])

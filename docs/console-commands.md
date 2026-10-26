@@ -197,6 +197,54 @@ scenario reindex <scenario-id> [--yes]
 剧本保留分块），仅当索引缺失时才从场景卡 `modules` 重建，**不会把已导入的知识覆盖为空**。
 会调用 embedding，可能较慢。
 
+### 世界树 / 图谱（narrative）
+
+`narrative` 命令组只读或重建剧本目录下的 `narrative.json`，不会改动 `scenario.json`。
+
+```text
+narrative status [<scenario-id>] [--json]                查看单个或全部剧本的生成状态
+narrative validate <scenario-id> [--simulate] [--json]   拓扑分档校验；--simulate 追加乱序模拟
+narrative topology <scenario-id> [--json]                查看拓扑判定、置信度与证据
+narrative build <scenario-id>|--all [--yes] [--json]     生成 / 重建 narrative.json
+narrative opening <room-id> [--publish|--repair] [--yes] [--json]  预览 / 发布开局
+narrative opening set <scenario-id> --location <node-id> [--mode fixed|model|hybrid] [--yes]
+narrative topology <scenario-id> --set <linear|hub|sandbox|hybrid> [--yes]
+narrative rebuild-index <scenario-id> [--json]           重建派生索引（仅内存，不写盘）
+narrative diff <scenario-id> <from-version> <to-version> [--json]  对比两版世界树
+narrative backfill [--yes] [--json]                      为存量剧本回填 bundle；缺省预演
+narrative media <scenario-id> [--missing] [--json]       列出媒体资产与缺失项
+narrative media verify <scenario-id> [--fix-thumbs] [--yes] [--json]
+narrative visibility <scenario-id> [--review|--auto] [--yes] [--json]
+narrative stats [--json]                                 全站世界树规模、质量总览与房间指标（按 profile 分组）
+```
+
+- `status`：显示拓扑、节点/边数量、入口、`build_hash`、不可达地点与孤立资产；省略 ID 时列出全部剧本。
+- `validate`：运行通用规则包 + 当前拓扑包，输出 `error/warn` 与修复建议；`--simulate` 额外检测隐式顺序依赖、自锁门控与不可达结局。
+- `topology`：输出自动判定结果、存储值、边类型统计与可达地点数量；带 `--set` 时为人工锁定分档（需确认，`source` 记为 `author`）。
+- `build`：默认**预演**（只打印结果、不写盘）；加 `--yes` 或在交互确认时输入 `y` 才真正写入 `narrative.json`。`--all` 批量处理所有剧本。
+- `opening`：默认只预览开局包（起始地点、开场白、附件、可见出口、触发器的数量），不写盘；`--publish` 重置房间运行态并把开场消息写入 `messages.json`，`--repair` 只补发开场、不重置已有进度。
+- `opening set`：直接修改 `narrative.json` 的起始地点与开场模式（需确认）。
+- `rebuild-index`：重建内存派生索引并失效缓存，只读取、不写盘。
+- `diff`：按剧本版本号分别构建 bundle 后对比节点/边的增删改；版本不存在时返回失败。
+- `backfill`：给缺少 `narrative.json` 的存量剧本生成只读 bundle；默认预演，`--yes` 才写盘。
+- `media` / `media verify`：列出 `assets.json` 内的媒体资产，标出类型、MIME、本地文件、缩略图与 poster 缺失；`--fix-thumbs` 可补生成派生文件。
+- `visibility`：按确定性规则给出三态可见性判定与复核标记；`--review` 只看需要复核的项，`--auto` 在确认后写回自动项的可见性。
+- `stats`：汇总全部剧本的节点/边规模、校验错误与拓扑分布。
+- 所有子命令支持 `--json`，便于脚本与前端消费。
+
+```text
+narrative status 12
+narrative validate 12 --simulate
+narrative topology 12 --json
+narrative topology 12 --set hybrid --yes
+narrative build 12 --yes
+narrative build --all --yes
+narrative diff 12 1 2
+narrative media verify 12 --fix-thumbs --yes
+narrative visibility 12 --review
+narrative stats
+```
+
 ## 用户管理
 
 ```text
@@ -354,14 +402,40 @@ dice reroll <off|limited|unlimited|inherit> [--yes]（设置重投模式）
 dice reroll-limit <1-20|inherit> [--yes]（设置「指定次数」模式的上限）
 dice pending                （列出本房间等待玩家投掷的请求）
 dice cancel [request-id] [--yes]（取消待投掷请求，缺省取消最早一条）
+narrative                   （等同 narrative status：能力档、拓扑、位置与护栏）
+narrative status            （世界树开关、能力档、拓扑、版本、位置、回合与指标）
+narrative state [--json]    （位置、旗标、时钟、地点状态、线索与触发记录）
+narrative map [--depth N]   （当前可达地图，标记已访问/未揭示/门控）
+narrative exits             （当前地点出口与缺失条件）
+narrative ledger [--limit N] [--key-only] [--search <text>]（账本事件）
+narrative facts [--entity <id>] [--status <s>]（事实三元组）
+narrative clocks            （全局时钟与阈值）
+narrative triggers [--location <id>] [--object <id>] [--fired]（触发器与触发次数）
+narrative trigger fire <id> [--yes]（手动触发触发器，破坏性）
+narrative media [--missing] （本房间已发媒体与缺失素材）
+narrative opening [--publish|--repair] [--yes]（预览/补发开场）
+narrative trace [--turn N] [--limit N]（JEV/检索/护栏轨迹）
+narrative summary [--rebuild] [--yes]（查看或重建摘要）
+narrative reset <location-id> [--yes]（重置队伍位置，破坏性）
+narrative unlock <edge|location> [--yes]（手动跳过条件门控，破坏性）
+narrative guard <off|shadow|enforce> [--yes]（切换本房间护栏模式）
+narrative profile <graph|degraded> [--yes]（切换本房间能力档）
+narrative rebuild-state [--yes]（从关键帧+账本重放恢复运行态，破坏性）
 ```
 
 `dice animation set` / `dice player-roll` / `dice reroll` / `dice reroll-limit` 只写入本房间的房规
 字段（`inherit` 或 `null` 表示继承管理员默认），不会修改站点级配置；`dice level` / `dice player`
 为旧写法别名，仍可使用。`dice cancel` 会让 AI 收到「投掷被管理员取消」，并将其作为工具结果继续对话。
 
-破坏性命令（`log clear`、`archive`）同样遵循「缺省预演、确认后执行」的约定：网页控制台先
-返回预演文本，再由交互确认框决定是否真正执行（服务器控制台则用 `--yes` / `-y` 跳过确认）。
+破坏性命令（`log clear`、`archive`、`narrative reset` / `unlock` / `trigger fire` /
+`rebuild-state`）同样遵循「缺省预演、确认后执行」的约定：网页控制台先返回预演文本，
+再由交互确认框决定是否真正执行（服务器控制台则用 `--yes` / `-y` 跳过确认）。
+
+房间 `narrative` 命令只读写本房间的运行态、账本、轨迹与房规：
+`trace` 读取房间目录下的 `narrative_trace.jsonl`（最近 2000 条）；`media` 只列本房间
+消息附件；`opening` 固定作用于当前房间；`guard` / `profile` 写入房规
+`narrative_guard` / `narrative_profile`，下次请求生效；`rebuild-state` 用最近关键帧 +
+账本重放覆盖当前状态。任何跨房间或站点级操作都会被拒绝。
 
 成员的 `kick` / `promote` 只调整**房间内角色**（`owner` / `admin` / `member`）：不能提升为房间
 所有者，也不会授予网站级 `ADMIN` / `OWNER`，更不复用网站控制台的 `user promote` 实现。

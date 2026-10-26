@@ -118,16 +118,43 @@ def delete_agent_conversation(conversation_id):
         return error_response(exc.message, exc.status, exc.message)
 
 
+def _scenario_context(actor, payload: dict) -> dict | None:
+    """剧本编辑器上下文（§8.4.1）：只保留可访问剧本的最小字段。"""
+    raw = payload.get("scenario_id")
+    if raw in (None, ""):
+        return None
+    try:
+        scenario_id = int(raw)
+    except (TypeError, ValueError):
+        return None
+    try:
+        from trpg_server import scenario_service
+
+        scenario = scenario_service.get_for_actor(actor, scenario_id)
+    except Exception:
+        return None
+    context = {
+        "scenario_id": scenario_id,
+        "scenario_title": scenario.get("title"),
+        "selected_node_id": payload.get("selected_node_id") or "",
+        "base_version": payload.get("base_version"),
+        "tab": payload.get("tab") or "",
+    }
+    return {key: value for key, value in context.items() if value not in (None, "")} or None
+
+
 @bp.route("/api/agent/turn", methods=["POST"])
 def agent_turn():
     try:
         actor = _actor()
         payload = request.get_json(silent=True) or {}
+        scenario_context = _scenario_context(actor, payload)
         result = site_agent.run_turn(
             actor,
             content=str(payload.get("content") or ""),
             conversation_id=payload.get("conversation_id"),
             room_id=payload.get("room_id"),
+            scenario_context=scenario_context,
             ip=request.remote_addr or "",
         )
         return success_response(result, "Agent reply")

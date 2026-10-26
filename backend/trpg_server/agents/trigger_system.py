@@ -16,6 +16,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.media import cleanup_derivatives, image_derivatives, video_derivatives
 from trpg_server.security import normalize_filename, safe_join
 
 TRIGGER_TYPES = {"scene_enter", "event_triggered", "clue_found", "npc_dialogue", "player_action", "custom"}
@@ -32,13 +33,18 @@ class ResourceRef:
     mime: str
     size: int
     hash: str
+    asset_id: str | None = None
     content: str | None = None
+    thumb_path: str | None = None
+    thumb_url: str | None = None
+    poster_path: str | None = None
+    poster_url: str | None = None
+    width: int | None = None
+    height: int | None = None
+    duration_ms: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        result = asdict(self)
-        if result.get("content") is None:
-            result.pop("content", None)
-        return result
+        return {key: value for key, value in asdict(self).items() if value is not None}
 
 
 @dataclass
@@ -120,7 +126,7 @@ def normalize_resource(value: dict[str, Any]) -> dict[str, Any]:
     alt = str(value.get("alt") or "").strip()
     if not alt:
         raise ValueError("resource alt is required")
-    return {
+    result = {
         "type": resource_type,
         "path": path,
         "url": str(value.get("url") or ""),
@@ -128,8 +134,24 @@ def normalize_resource(value: dict[str, Any]) -> dict[str, Any]:
         "mime": str(value.get("mime") or mimetypes.guess_type(path)[0] or "application/octet-stream"),
         "size": max(0, _int(value.get("size"))),
         "hash": str(value.get("hash") or ""),
+        **({"asset_id": str(value["asset_id"])} if value.get("asset_id") else {}),
         **({"content": str(value.get("content"))} if value.get("content") is not None else {}),
     }
+    # 服务端派生字段（缩略图 / poster / 尺寸 / 时长）需在再次保存时保留，
+    # 否则前端回写资源引用会丢掉 media.py 生成的结果。
+    for key in ("thumb_path", "poster_path"):
+        relative = str(value.get(key) or "").replace("\\", "/").lstrip("/")
+        if relative and not relative.startswith("../") and "/../" not in relative:
+            result[key] = relative
+    for key in ("thumb_url", "poster_url"):
+        url = str(value.get(key) or "").strip()
+        if url:
+            result[key] = url
+    for key in ("width", "height", "duration_ms"):
+        number = _int(value.get(key), -1)
+        if number >= 0:
+            result[key] = number
+    return result
 
 
 def normalize_condition(value: dict[str, Any] | str | None) -> dict[str, Any]:
@@ -182,6 +204,39 @@ def _assets_file(root: Path) -> Path:
     return root / "assets.json"
 
 
+def resource_identifier(item: Mapping[str, Any]) -> str:
+    """稳定的素材标识（§8.6）：优先 `asset_id`，旧数据回退 hash/path。
+
+    `asset_id` 在“替换文件”时保持不变，避免触发器引用失效；hash 仍随内容变化，
+    继续用于内容寻址与缓存。
+    """
+    explicit = str(item.get("asset_id") or "").strip()
+    if explicit:
+        return explicit
+    digest = str(item.get("hash") or "").strip()
+    if digest:
+        return f"asset_{digest[:16]}"
+    return str(item.get("path") or item.get("url") or "")
+
+
+def _identifier_candidates(item: Mapping[str, Any]) -> set[str]:
+    digest = str(item.get("hash") or "").strip()
+    candidates = {
+        str(item.get("asset_id") or ""),
+        str(item.get("hash") or ""),
+        str(item.get("path") or ""),
+        str(item.get("url") or ""),
+        resource_identifier(item),
+    }
+    if digest:
+        candidates.add(f"asset_{digest[:16]}")
+    return {value for value in candidates if value}
+
+
+def resource_matches(item: Mapping[str, Any], asset_id: str) -> bool:
+    return str(asset_id) in _identifier_candidates(item)
+
+
 def load_resources(scenarios_dir: Path, script_id: str | int) -> list[dict[str, Any]]:
     value = read_json(_assets_file(_scenario_root(scenarios_dir, script_id)), default=[])
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
@@ -208,7 +263,23 @@ def persist_uploaded_resource(scenarios_dir: Path, script_id: str | int, uploade
     inferred = resource_type or ("image" if mime.startswith("image/") else "video" if mime.startswith("video/") else "audio" if mime.startswith("audio/") else "file")
     if inferred not in RESOURCE_TYPES:
         inferred = "file"
-    ref = ResourceRef(inferred, f"assets/{filename}", f"/assets/scenarios/scenario-{script_id}/assets/{filename}", alt, mime, len(raw), digest)
+    ref = ResourceRef(
+        inferred,
+        f"assets/{filename}",
+        f"/assets/scenarios/scenario-{script_id}/assets/{filename}",
+        alt,
+        mime,
+        len(raw),
+        digest,
+        asset_id=f"asset_{digest[:16]}",
+    )
+    derivatives = {}
+    if inferred == "image":
+        derivatives = image_derivatives(path, root / "assets", digest[:16])
+    elif inferred == "video":
+        derivatives = video_derivatives(path, root / "assets", digest[:16])
+    for key, value in derivatives.items():
+        setattr(ref, key, value)
     resources = load_resources(scenarios_dir, script_id)
     resources = [item for item in resources if item.get("hash") != digest]
     resources.append(ref.to_dict())
@@ -222,8 +293,7 @@ def delete_resource(scenarios_dir: Path, script_id: str | int, asset_id: str) ->
     kept = []
     removed = None
     for item in resources:
-        identifier = str(item.get("hash") or item.get("path") or "")
-        if identifier == str(asset_id):
+        if resource_matches(item, asset_id):
             removed = item
         else:
             kept.append(item)
@@ -233,9 +303,66 @@ def delete_resource(scenarios_dir: Path, script_id: str | int, asset_id: str) ->
     relative = str(removed.get("path") or "")
     if relative and not relative.startswith("../"):
         path = safe_join(root, relative)
-        if path.exists() and path.is_file():
+        still_used = any(str(item.get("path") or "") == relative for item in kept)
+        if path.exists() and path.is_file() and not still_used:
             path.unlink()
+    cleanup_derivatives(root, removed)
     return True
+
+
+_REPLACED_CLEARABLE = (
+    "thumb_path", "thumb_url", "poster_path", "poster_url",
+    "width", "height", "duration_ms", "content",
+)
+
+
+def replace_uploaded_resource(
+    scenarios_dir: Path,
+    script_id: str | int,
+    asset_id: str,
+    uploaded: Any,
+    *,
+    alt: str | None = None,
+    resource_type: str | None = None,
+) -> dict[str, Any]:
+    """替换素材文件并保留原 `asset_id`（§8.6），旧文件在无引用时清理。"""
+    root = _scenario_root(scenarios_dir, script_id)
+    resources = load_resources(scenarios_dir, script_id)
+    index = next((pos for pos, item in enumerate(resources) if resource_matches(item, asset_id)), None)
+    if index is None:
+        raise LookupError("resource not found")
+    previous = resources[index]
+    stable_id = str(previous.get("asset_id") or resource_identifier(previous))
+
+    fresh = persist_uploaded_resource(scenarios_dir, script_id, uploaded, (alt or previous.get("alt") or "").strip(), resource_type)
+    # persist_uploaded_resource 已写入新条目；回读后去掉旧条目与新条目，再合并成一条稳定引用。
+    remaining = [
+        item
+        for item in load_resources(scenarios_dir, script_id)
+        if str(item.get("hash") or "") != str(fresh.get("hash") or "")
+        and not resource_matches(item, stable_id)
+        and item != previous
+    ]
+
+    merged = {key: value for key, value in previous.items() if key not in _REPLACED_CLEARABLE}
+    merged.update(fresh)
+    merged["asset_id"] = stable_id
+    if alt is not None and str(alt).strip():
+        merged["alt"] = str(alt).strip()[:500]
+    merged = normalize_resource(merged) | {"asset_id": stable_id}
+
+    ordered = remaining + [merged]
+    save_resources(scenarios_dir, script_id, ordered)
+
+    previous_path = str(previous.get("path") or "")
+    if previous_path and previous_path != str(merged.get("path") or "") and not previous_path.startswith("../"):
+        still_used = any(str(item.get("path") or "") == previous_path for item in ordered)
+        if not still_used:
+            old_file = safe_join(root, previous_path)
+            if old_file.exists() and old_file.is_file():
+                old_file.unlink()
+            cleanup_derivatives(root, previous)
+    return merged
 
 
 def trigger_cards(scenario: dict[str, Any]) -> list[dict[str, Any]]:

@@ -30,6 +30,9 @@ from trpg_server.scenario_store import (
 )
 from trpg_server.agents.config import ai_debug_enabled, load_ai_runtime_config
 from trpg_server.agents.http_retry import post_with_retry
+from trpg_server.agents.narrative.logger import log_event
+from trpg_server.agents.narrative.publish import narrative_publish_blockers
+from trpg_server.agents.narrative.store import find_scenario_storage
 from trpg_server.agents.versioning import next_scenario_version, normalize_semver, scenario_content_changed
 from trpg_server.ai_capabilities import chat_completions_endpoint
 from trpg_server.scenario_importer import convert_script_to_scenario, convert_with_ai, extract_script_text
@@ -573,8 +576,10 @@ def update_scenario(scenario_id):
             return login_error
 
         scenario_data = request.get_json(silent=True)
-        if not scenario_data:
+        if not isinstance(scenario_data, dict) or not scenario_data:
             return error_response("Please provide scenario data", 400, "No data")
+        scenario_input = dict(scenario_data)
+        force_narrative = bool(scenario_input.pop("force_narrative", False))
 
         target_file, existing_scenario = _find_scenario_file(scenario_id)
         if target_file is None:
@@ -589,11 +594,30 @@ def update_scenario(scenario_id):
         if not _can_use_permission("scenarios.edit"):
             return error_response("Permission denied", 403, "Permission denied")
 
+        _, narrative_dir = find_scenario_storage(_scenarios_dir(), str(scenario_id))
+        blockers = narrative_publish_blockers(narrative_dir) if narrative_dir is not None else None
+        if blockers is not None:
+            if not force_narrative:
+                return error_response(
+                    "发布被阻止：世界树校验未通过",
+                    409,
+                    "narrative.publish_blocked",
+                    data=blockers,
+                    code="narrative_publish_blocked",
+                )
+            log_event(
+                "publish.forced",
+                scenario_id=scenario_id,
+                user_id=session.get("user_id"),
+                errors=blockers["errors"],
+                needs_review=blockers["needs_review"],
+            )
+
         try:
             saved_scenario = scenario_service.apply_update(
                 scenario_service_actor(),
                 scenario_id,
-                scenario_data,
+                scenario_input,
             )
         except scenario_service.ScenarioServiceError as exc:
             return error_response(exc.message, exc.status, exc.message)

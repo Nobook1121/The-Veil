@@ -93,6 +93,7 @@ function renderKnowledgeSection(section: KnowledgeSectionInfo): string {
             </summary>
             <div class="scenario-knowledge-body">
                 <p class="text-muted small">${scenarioEscapeHtml(section.preview)}</p>
+                ${section.keyword_spoiler ? `<p class="scenario-knowledge-warning small">检测到可能剧透的关键词；玩家侧命中会泄露信息，建议把「关键词可见性」设为仅 KP。</p>` : ""}
                 <div class="scenario-knowledge-grid">
                     <label class="form-group"><span>触发词（逗号分隔）</span><textarea class="form-control" rows="2" data-field="keywords">${scenarioEscapeHtml(section.keywords.join("、"))}</textarea></label>
                     <label class="form-group"><span>副键（逗号分隔）</span><textarea class="form-control" rows="2" data-field="secondary_keywords">${scenarioEscapeHtml(section.secondary_keywords.join("、"))}</textarea></label>
@@ -101,6 +102,16 @@ function renderKnowledgeSection(section: KnowledgeSectionInfo): string {
                         ${option("and_all", "全部命中", section.secondary_logic)}
                         ${option("not_any", "全不命中", section.secondary_logic)}
                         ${option("not_all", "非全命中", section.secondary_logic)}
+                    </select></label>
+                    <label class="form-group"><span>条目可见性</span><select class="form-select" data-field="visibility">
+                        ${option("public", "公开", section.visibility)}
+                        ${option("hidden", "隐藏", section.visibility)}
+                        ${option("kp_only", "仅 KP", section.visibility)}
+                    </select></label>
+                    <label class="form-group"><span>关键词可见性</span><select class="form-select" data-field="keywords_visibility">
+                        ${option("public", "公开", section.keywords_visibility)}
+                        ${option("hidden", "隐藏", section.keywords_visibility)}
+                        ${option("kp_only", "仅 KP", section.keywords_visibility)}
                     </select></label>
                     <label class="form-group"><span>分层</span><select class="form-select" data-field="tier">
                         ${option("core", "core（优先）", section.tier)}

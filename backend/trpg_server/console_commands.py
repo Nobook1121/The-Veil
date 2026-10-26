@@ -30,6 +30,7 @@ from trpg_server.character_ai import (
     scenario_context_from_record,
 )
 from trpg_server.logging_config import log_user_action, user_action_text
+from trpg_server.narrative_admin import handle_narrative_command
 from trpg_server.scenario_admin import (
     delete_scenario,
     list_scenarios,
@@ -219,6 +220,15 @@ def execute_console_command(
                 _scenario_reindex_command(args[1:], scenarios_dir, vector_store, embedding_provider, confirm=confirm)
             )
 
+    if domain == "narrative" and subcommand:
+        ok, text = handle_narrative_command(
+            parts[1:],
+            _resolve_scenarios_dir(scenarios_dir),
+            rooms_dir=rooms_dir,
+            confirm=confirm,
+        )
+        return _log_result(ConsoleCommandResult(ok, text))
+
     if domain == "vector" and subcommand:
         if subcommand == "health":
             return _log_result(_vector_health_command(vector_store, embedding_provider, ocr_provider))
@@ -324,6 +334,25 @@ def command_help_text() -> str:
             "  scenario delete <id> [--vectors-only|--force]    （删剧本；--yes 跳过确认）",
             "  scenario validate <id>                           （校验剧本/索引/向量一致性）",
             "  scenario reindex <id> [--yes]                    （重建剧本知识索引与向量）",
+            "  narrative status [<id>] [--json]                 （查看世界树/图谱生成状态）",
+            "  narrative validate <id> [--simulate] [--json]    （拓扑分档校验与乱序模拟）",
+            "  narrative topology <id> [--json]                 （查看拓扑判定与证据）",
+            "  narrative build <id>|--all [--yes] [--json]      （生成/重建 narrative.json；缺省预演）",
+            "  narrative opening <房间id> [--publish|--repair] [--yes] [--json]",
+            "                                                   （预览/发布开局；--repair 不重置）",
+            "  narrative opening set <id> --location <节点> [--mode fixed|model|hybrid] [--yes]",
+            "                                                   （设置起始地点与开场模式）",
+            "  narrative topology <id> --set <linear|hub|sandbox|hybrid> [--yes]",
+            "                                                   （手工锁定拓扑分档）",
+            "  narrative rebuild-index <id> [--json]            （重建派生索引，仅内存）",
+            "  narrative diff <id> <from> <to> [--json]         （对比两个剧本版本的世界树）",
+            "  narrative backfill [--yes] [--json]              （为存量剧本回填 bundle；缺省预演）",
+            "  narrative media <id> [--missing] [--json]        （列出媒体资产与缺失项）",
+            "  narrative media verify <id> [--fix-thumbs] [--yes] [--json]",
+            "                                                   （校验媒体；可补生成缩略图/poster）",
+            "  narrative visibility <id> [--review|--auto] [--yes] [--json]",
+            "                                                   （三态可见性判定；--auto 写回自动项）",
+            "  narrative stats [--json]                         （全站世界树规模与质量总览）",
             "  vector health                                    （向量库/embedding/OCR 状态）",
             "  vector prune [--yes]                             （清理孤儿向量）",
             "  knowledge list [search]                          （列出规则集与各剧本知识/向量数）",

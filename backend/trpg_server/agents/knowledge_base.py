@@ -17,6 +17,8 @@ from typing import Any, Iterable, Mapping
 
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.scenario_store import load_scenario_by_id
+from trpg_server.agents.narrative.model import VISIBILITY_KP_ONLY
+from trpg_server.agents.narrative.visibility import is_visible_to_player, keyword_is_spoiler, normalize_visibility
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,8 @@ class KnowledgeChunk:
     unlock_condition: str | None
     text: str
     chunk_id: str
+    # 关键词本身的可见性：公开 / 隐藏 / 仅 KP。仅 KP 的触发词不会对玩家侧激活该条目。
+    keywords_visibility: str = "public"
     embedding: list[float] | None = None
     source_ref: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
@@ -130,7 +134,8 @@ def build_knowledge_chunks(scenario: Mapping[str, Any] | None) -> list[Knowledge
                 scenario_version=_version(module, "scenario_version", default=scenario_version),
                 scene_id=str(scene_id) if scene_id not in (None, "") else None,
                 card_type=card_type,
-                visibility=str(module.get("visibility") or "player_visible"),
+                visibility=normalize_visibility(module.get("visibility")),
+                keywords_visibility=normalize_visibility(module.get("keywords_visibility")),
                 spoiler_level=max(0, _int(module.get("spoiler_level"), 0)),
                 unlock_condition=(str(module.get("unlock_condition")) if module.get("unlock_condition") else None),
                 text=text,
@@ -616,6 +621,9 @@ def apply_lorebook_update(chunk: KnowledgeChunk, values: Mapping[str, Any]) -> K
         updates["tier"] = tier if tier in TIER_VALUES else "background"
     if "group" in values:
         updates["group"] = str(values["group"] or "").strip()
+    for field in ("visibility", "keywords_visibility"):
+        if field in values:
+            updates[field] = normalize_visibility(values[field])
     for field in LOREBOOK_BOOL_FIELDS:
         if field in values:
             updates[field] = bool(values[field])
@@ -639,6 +647,9 @@ def list_knowledge_sections(chunks: Iterable[KnowledgeChunk]) -> list[dict[str, 
                 "preview": (head.text or "")[:160],
                 "keywords": list(head.keywords or []),
                 "secondary_keywords": list(head.secondary_keywords or []),
+                "visibility": normalize_visibility(head.visibility),
+                "keywords_visibility": normalize_visibility(head.keywords_visibility),
+                "keyword_spoiler": any(keyword_is_spoiler(item) for item in (head.keywords or [])),
                 "secondary_logic": head.secondary_logic,
                 "is_constant": bool(head.is_constant),
                 "tier": head.tier,
@@ -762,6 +773,40 @@ class KnowledgeBaseService:
             self._chunks[key] = loaded or build_knowledge_chunks(scenario)
         return self._chunks[key]
 
+    @staticmethod
+    def _filter_by_candidates(
+        chunks: list[KnowledgeChunk],
+        candidate_ids: Iterable[str] | None,
+        candidate_titles: Iterable[str] | None,
+    ) -> list[KnowledgeChunk]:
+        """图谱约束检索（§5.4）：只在 JEV 候选集内取块，常驻块始终保留。
+
+        ``candidate_ids`` 可以是叙事节点 id、场景 id、章节或知识块 id；
+        ``candidate_titles`` 与章节/节点标题做大小写无关的精确匹配。
+        """
+        ids = {str(item).strip() for item in candidate_ids or [] if str(item).strip()}
+        titles = {str(item).strip().casefold() for item in candidate_titles or [] if str(item).strip()}
+        if not ids and not titles:
+            return chunks
+        kept: list[KnowledgeChunk] = []
+        for chunk in chunks:
+            if chunk.is_constant:
+                kept.append(chunk)
+                continue
+            if chunk.chunk_id in ids or (chunk.scene_id and str(chunk.scene_id) in ids):
+                kept.append(chunk)
+                continue
+            metadata = chunk.metadata if isinstance(chunk.metadata, Mapping) else {}
+            matched = False
+            for key in ("node_id", "module_id", "scene_id", "section", "title"):
+                value = str(metadata.get(key) or "").strip()
+                if value and (value in ids or value.casefold() in titles):
+                    matched = True
+                    break
+            if matched:
+                kept.append(chunk)
+        return kept
+
     def _eligible_chunks(
         self,
         scenario: Mapping[str, Any],
@@ -782,7 +827,7 @@ class KnowledgeBaseService:
                 continue
             if chunk.spoiler_level > spoiler_level:
                 continue
-            if audience != "kp" and chunk.visibility == "kp_only":
+            if audience != "kp" and not is_visible_to_player(chunk.visibility):
                 continue
             eligible.append(chunk)
         return eligible
@@ -907,13 +952,15 @@ class KnowledgeBaseService:
                 break
         return entries
 
-    def _keyword_candidates(self, chunks: list[KnowledgeChunk], query: str, enabled: bool) -> list[_Candidate]:
+    def _keyword_candidates(self, chunks: list[KnowledgeChunk], query: str, enabled: bool, audience: str = "kp") -> list[_Candidate]:
         """关键词通道候选：主键命中即激活（副键按 ``secondary_logic`` 过滤）。"""
         if not enabled:
             return []
         candidates: list[_Candidate] = []
         for chunk in chunks:
             if chunk.is_constant:
+                continue
+            if audience != "kp" and normalize_visibility(chunk.keywords_visibility) == VISIBILITY_KP_ONLY:
                 continue
             hit, score = _keyword_hit(chunk, query)
             if hit:
@@ -988,6 +1035,8 @@ class KnowledgeBaseService:
         max_recursion_depth: int = 3,
         token_budget: int = 0,
         rng: Any = None,
+        candidate_ids: Iterable[str] | None = None,
+        candidate_titles: Iterable[str] | None = None,
     ) -> list[dict[str, Any]]:
         info = self._room_info(room_id)
         scenario = self._scenario(info.get("scenario_id"), info.get("scenario_version"))
@@ -1000,6 +1049,7 @@ class KnowledgeBaseService:
         filtered = self._eligible_chunks(
             scenario, scenario_id, scenario_version, current_scene, spoiler_level, audience
         )
+        filtered = self._filter_by_candidates(filtered, candidate_ids, candidate_titles)
         if not filtered:
             return []
         sections = _group_by_section(filtered)
@@ -1015,7 +1065,7 @@ class KnowledgeBaseService:
             if chunk.is_constant
         ]
         # 双通道：关键词命中就直接激活（不再依赖语义相似度）；无命中才走 BM25+向量。
-        hits = self._keyword_candidates(filtered, str(query or ""), keyword_channel)
+        hits = self._keyword_candidates(filtered, str(query or ""), keyword_channel, audience)
         if hits:
             candidates = constants + hits
         else:
@@ -1071,10 +1121,17 @@ def search(
     scenarios_dir: Path | None = None,
     top_k: int = 5,
     audience: str = "kp",
+    candidate_ids: Iterable[str] | None = None,
+    candidate_titles: Iterable[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Functional facade kept for API callers that do not need a long-lived service."""
     return KnowledgeBaseService(rooms_dir=rooms_dir, scenarios_dir=scenarios_dir).search(
-        room_id, query, top_k=top_k, audience=audience
+        room_id,
+        query,
+        top_k=top_k,
+        audience=audience,
+        candidate_ids=candidate_ids,
+        candidate_titles=candidate_titles,
     )
 
 

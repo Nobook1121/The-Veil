@@ -56,6 +56,11 @@ HOUSE_RULE_DEFINITIONS = {
     # 技能基础值覆盖表：键为技能键（带专精时为 `skillKey.specialtyKey`），值为 0-99 整数。
     # 留空表示沿用下一优先级（用户个性化 > 管理员设置 > 技能目录默认值）。
     "skill_bases": {"type": "skill_bases", "default": {}, "ai_prompt": False},
+    # 图谱运行档位（§12.5）：留空表示跟随默认（profile=graph / guard=enforce）。
+    # narrative_enabled=false 是本房间的 kill switch，立即退回旧编排。
+    "narrative_enabled": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
+    "narrative_profile": {"type": "nullable_enum", "default": None, "values": ["graph", "degraded"], "ai_prompt": False},
+    "narrative_guard": {"type": "nullable_enum", "default": None, "values": ["off", "shadow", "enforce"], "ai_prompt": False},
 }
 DEFAULT_ROOM_HOUSE_RULES = {key: spec["default"] for key, spec in HOUSE_RULE_DEFINITIONS.items()}
 
@@ -1948,6 +1953,18 @@ def delete_room_node(room_id, node_filename):
     return success_response(message="Room node deleted successfully")
 
 
+def _keyframe_for_autosave(room_dir):
+    """自动存档前写入关键帧（§6.4.2）；失败只记日志，不阻断存档。"""
+    try:
+        from trpg_server.agents.narrative.state_store import write_keyframe
+
+        state = read_json(Path(room_dir) / "state.json", default={})
+        if isinstance(state, dict) and isinstance(state.get("narrative"), dict) and state["narrative"]:
+            write_keyframe(room_dir, reason="autosave")
+    except Exception:  # noqa: BLE001 - 关键帧失败不影响自动存档
+        logger.warning("narrative.keyframe.autosave_failed room=%s", getattr(room_dir, "name", room_dir), exc_info=True)
+
+
 def _write_room_autosave(room_dir, room_id, messages, *, username=None, user_id=None):
     """写入自动存档节点并裁剪旧节点。
 
@@ -1962,6 +1979,7 @@ def _write_room_autosave(room_dir, room_id, messages, *, username=None, user_id=
         "automatic": True,
         "messages": messages,
     }
+    _keyframe_for_autosave(room_dir)
     nodes_dir = room_dir / "nodes"
     nodes_dir.mkdir(parents=True, exist_ok=True)
     write_json_atomic(nodes_dir / autosave["filename"], autosave)

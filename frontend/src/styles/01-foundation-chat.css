@@ -1109,6 +1109,42 @@ input[type="search"] {
     background: rgba(0, 0, 0, 0.85);
 }
 
+/* 触发器附件：音频与文件卡片；图片沿用 chat-media-thumb，视频沿用内嵌播放器样式。 */
+.markdown-body video.trigger-attachment-video {
+    display: block;
+    width: auto;
+    max-width: min(100%, 360px);
+    max-height: 240px;
+    margin: 6px 0;
+    border-radius: var(--theme-radius-xs);
+    background: #000;
+}
+
+.markdown-body audio.trigger-attachment-audio {
+    display: block;
+    width: min(100%, 360px);
+    margin: 6px 0;
+}
+
+.markdown-body a.trigger-attachment-file {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: min(100%, 360px);
+    margin: 6px 0;
+    padding: 8px 12px;
+    border: 1px solid var(--theme-border-color, rgba(255, 255, 255, 0.16));
+    border-radius: var(--theme-radius-sm, 8px);
+    background: var(--theme-surface-muted, rgba(255, 255, 255, 0.04));
+    color: var(--theme-accent, #7cc4ff);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+}
+
+.markdown-body a.trigger-attachment-file:hover {
+    border-color: var(--theme-accent, #7cc4ff);
+}
+
 body.chat-media-lightbox-open {
     overflow: hidden;
 }

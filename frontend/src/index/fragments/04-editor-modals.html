@@ -4,9 +4,49 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="scenarioModalLabel" data-i18n="scenario.modal.create">创建剧本</h5>
+                    <button type="button" class="btn btn-sm btn-outline-primary ms-auto me-2" id="scenarioAgentToggle" data-i18n="scenario.narrative.agent.title">AI 创作助手</button>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" data-i18n-aria-label="scenario.modal.close" aria-label="关闭"></button>
                 </div>
                 <div class="modal-body">
+                    <ul class="nav nav-tabs scenario-tabs" id="scenarioTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="scenarioTabBasicBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabBasic" type="button" role="tab" aria-controls="scenarioTabBasic" aria-selected="true" data-i18n="scenario.tab.basic">基本</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="scenarioTabModulesBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabModules" type="button" role="tab" aria-controls="scenarioTabModules" aria-selected="false" data-i18n="scenario.tab.modules">模块</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="scenarioTabTreeBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabTree" type="button" role="tab" aria-controls="scenarioTabTree" aria-selected="false" data-i18n="scenario.tab.tree">世界树</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="scenarioTabGraphBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabGraph" type="button" role="tab" aria-controls="scenarioTabGraph" aria-selected="false" data-i18n="scenario.tab.graph">图谱</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="scenarioTabValidateBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabValidate" type="button" role="tab" aria-controls="scenarioTabValidate" aria-selected="false" data-i18n="scenario.tab.validate">校验</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="scenarioTabGenerateBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabGenerate" type="button" role="tab" aria-controls="scenarioTabGenerate" aria-selected="false" data-i18n="scenario.tab.generate">生成</button>
+                        </li>
+                    </ul>
+                    <aside class="scenario-agent-panel" id="scenarioAgentPanel" hidden aria-label="AI 创作助手">
+                        <header class="scenario-agent-head">
+                            <div>
+                                <strong data-i18n="scenario.narrative.agent.title">AI 创作助手</strong>
+                                <p class="text-muted small mb-0" id="scenarioAgentContext" data-i18n="scenario.narrative.agent.context">仅发送当前剧本与选中节点</p>
+                            </div>
+                            <button type="button" class="btn-close" id="scenarioAgentClose" aria-label="关闭助手"></button>
+                        </header>
+                        <div class="scenario-agent-messages" id="scenarioAgentMessages">
+                            <p class="text-muted small mb-0" data-i18n="scenario.narrative.agent.empty">在世界树/图谱页签选中节点后，可以让助手补写正文、物件、结果或关键词。</p>
+                        </div>
+                        <form class="scenario-agent-form" id="scenarioAgentForm">
+                            <textarea class="form-control form-control-sm" id="scenarioAgentInput" rows="2" placeholder="例如：为当前节点补一个书架线索与成功/失败结果" aria-label="给 AI 创作助手的指令"></textarea>
+                            <button type="submit" class="btn btn-sm btn-primary" id="scenarioAgentSend">发送</button>
+                        </form>
+                        <p class="text-muted small mb-0 mt-2" data-i18n="scenario.narrative.agent.notice">助手只生成草稿改动，发布仍需你点击“保存并发布”。</p>
+                    </aside>
+                    <div class="tab-content scenario-tab-content" id="scenarioTabContent">
+                    <div class="tab-pane fade show active" id="scenarioTabBasic" role="tabpanel" aria-labelledby="scenarioTabBasicBtn">
                     <div class="scenario-basic-layout">
                         <label class="form-group scenario-cover-field">
                             <span data-i18n="scenario.field.cover">封面图片</span>
@@ -48,7 +88,9 @@
                             </label>
                         </div>
                     </div>
+                    </div>
 
+                    <div class="tab-pane fade" id="scenarioTabModules" role="tabpanel" aria-labelledby="scenarioTabModulesBtn">
                     <section class="scenario-resource-panel" id="scenarioResourcePanel" hidden>
                         <div class="scenario-module-toolbar">
                             <div>
@@ -60,6 +102,18 @@
                             <i class="fa fa-cloud-upload" aria-hidden="true"></i>
                             <span>拖拽多个文件到此处，或点击选择</span>
                             <input id="scenarioResourceFiles" type="file" multiple hidden accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,audio/wav,text/html,text/markdown,.pdf,.txt,.zip">
+                            <input id="scenarioResourceReplaceFile" type="file" hidden accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,audio/wav,text/html,text/markdown,.pdf,.txt,.zip">
+                        </div>
+                        <div class="scenario-resource-toolbar">
+                            <input id="scenarioResourceSearch" type="search" class="form-control form-control-sm" placeholder="搜索素材名称 / 路径 / 类型" aria-label="搜索素材">
+                            <select id="scenarioResourceTypeFilter" class="form-select form-select-sm" aria-label="按类型筛选素材">
+                                <option value="">全部类型</option>
+                                <option value="image">图片</option>
+                                <option value="video">视频</option>
+                                <option value="audio">音频</option>
+                                <option value="richtext">富文本</option>
+                                <option value="file">文件</option>
+                            </select>
                         </div>
                         <div class="progress mt-2" id="scenarioResourceProgress" hidden><div class="progress-bar" role="progressbar" style="width:0%">0%</div></div>
                         <div class="scenario-resource-list mt-3" id="scenarioResourceList"></div>
@@ -97,6 +151,205 @@
                     <div id="scenarioModules" class="scenario-module-list">
                         <!-- 模块将在这里动态生成 -->
                     </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="scenarioTabTree" role="tabpanel" aria-labelledby="scenarioTabTreeBtn">
+                        <div class="scenario-tree-toolbar">
+                            <input type="search" class="form-control form-control-sm" id="scenarioTreeSearch" placeholder="搜索节点…" data-i18n-placeholder="scenario.tree.search">
+                            <span class="badge bg-secondary" id="scenarioTreeStatus" data-i18n="scenario.tree.empty_badge">未生成世界树</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary ms-auto" id="scenarioOpeningOpen">
+                                <i class="fa fa-flag" aria-hidden="true"></i>
+                                <span data-i18n="scenario.visibility.opening_title">开场配置</span>
+                            </button>
+                        </div>
+                        <div class="scenario-tree-layout">
+                            <div class="scenario-tree-list" id="scenarioTreeList" role="tree">
+                                <p class="text-muted small mb-0" data-i18n="scenario.tree.empty">保存剧本并生成世界树后，可在此查看章节、地点与结局。</p>
+                            </div>
+                            <div class="scenario-node-inspector" id="scenarioNodeInspector">
+                                <p class="text-muted small mb-0" data-i18n="scenario.tree.select_hint">选择左侧节点查看详情。</p>
+                            </div>
+                        </div>
+                        <section class="scenario-trigger-panel" id="scenarioTriggerPanel">
+                            <div class="scenario-trigger-panel-head">
+                                <div>
+                                    <h6>触发器与媒体</h6>
+                                    <p class="text-muted small mb-0">选中节点查看绑定的触发器；测试只在编辑器中预览，不写入房间。</p>
+                                </div>
+                                <div class="scenario-trigger-panel-actions">
+                                    <input type="search" class="form-control form-control-sm" id="scenarioTriggerSearch" placeholder="筛选触发器…">
+                                    <button type="button" class="btn btn-sm btn-primary" id="scenarioTriggerAdd">
+                                        <i class="fa fa-plus" aria-hidden="true"></i>
+                                        <span>添加触发器</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="scenario-trigger-test-result" id="scenarioTriggerTestResult" hidden></div>
+                            <div class="scenario-trigger-editor" id="scenarioTriggerEditor" hidden></div>
+                            <div class="scenario-trigger-list" id="scenarioTriggerList">
+                                <p class="text-muted small mb-0">选择一个节点后，这里会列出绑定到它的触发器。</p>
+                            </div>
+                        </section>
+                    </div>
+
+                    <div class="tab-pane fade" id="scenarioTabGraph" role="tabpanel" aria-labelledby="scenarioTabGraphBtn">
+                        <div class="scenario-graph-toolbar">
+                            <div class="btn-group btn-group-sm" role="group" aria-label="图谱模式">
+                                <button type="button" class="btn btn-outline-secondary active" id="scenarioGraphModeSelect" data-graph-mode="select">选择</button>
+                                <button type="button" class="btn btn-outline-secondary" id="scenarioGraphModeConnect" data-graph-mode="connect">连线</button>
+                                <button type="button" class="btn btn-outline-secondary" id="scenarioGraphModePan" data-graph-mode="pan">平移</button>
+                            </div>
+                            <div class="btn-group btn-group-sm" role="group" aria-label="撤销与重做">
+                                <button type="button" class="btn btn-outline-secondary" id="scenarioGraphUndo" disabled title="撤销 (Ctrl+Z)">
+                                    <i class="fa fa-undo" aria-hidden="true"></i>
+                                    <span data-i18n="scenario.graph.undo">撤销</span>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" id="scenarioGraphRedo" disabled title="重做 (Ctrl+Y)">
+                                    <i class="fa fa-redo" aria-hidden="true"></i>
+                                    <span data-i18n="scenario.graph.redo">重做</span>
+                                </button>
+                            </div>
+                            <select class="form-select form-select-sm scenario-graph-edge-type" id="scenarioGraphEdgeType" aria-label="连线类型">
+                                <option value="adjacent" selected>相邻</option>
+                                <option value="portal">通道</option>
+                                <option value="next">顺序</option>
+                                <option value="leads_to">通向</option>
+                                <option value="requires">需要</option>
+                                <option value="reveals">揭示</option>
+                                <option value="triggers">触发</option>
+                                <option value="mentions">提及</option>
+                            </select>
+                            <label class="scenario-graph-hard-toggle">
+                                <input type="checkbox" id="scenarioGraphEdgeHard">
+                                <span>hard</span>
+                            </label>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="scenarioGraphAutoLayout">
+                                <i class="fa fa-sitemap" aria-hidden="true"></i>
+                                <span>自动布局</span>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="scenarioGraphReclassify">
+                                <i class="fa fa-magic" aria-hidden="true"></i>
+                                <span data-i18n="scenario.visibility.bulk_reclassify">重新自动判定</span>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="scenarioGraphFit">
+                                <i class="fa fa-expand" aria-hidden="true"></i>
+                                <span>适配视图</span>
+                            </button>
+                            <div class="btn-group btn-group-sm" role="group" aria-label="图谱视图">
+                                <button type="button" class="btn btn-outline-secondary active" id="scenarioGraphViewKp" data-graph-view="kp" data-i18n="scenario.visibility.view_kp">KP 视图</button>
+                                <button type="button" class="btn btn-outline-secondary" id="scenarioGraphViewPlayer" data-graph-view="player" data-i18n="scenario.visibility.view_player">玩家视图</button>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="scenarioGraphPlayerPreview">
+                                <i class="fa fa-eye" aria-hidden="true"></i>
+                                <span data-i18n="scenario.visibility.player_preview">玩家预览</span>
+                            </button>
+                            <span class="text-muted small" id="scenarioGraphHint"></span>
+                        </div>
+                        <div class="scenario-graph-edge-actions" id="scenarioGraphEdgeActions"></div>
+                        <div class="scenario-graph-canvas" id="scenarioGraphCanvas"></div>
+                    </div>
+
+                    <div class="tab-pane fade" id="scenarioTabValidate" role="tabpanel" aria-labelledby="scenarioTabValidateBtn">
+                        <div class="scenario-validate-toolbar">
+                            <button type="button" class="btn btn-outline-primary btn-sm" id="scenarioValidateRun">
+                                <i class="fa fa-stethoscope" aria-hidden="true"></i>
+                                <span data-i18n="scenario.validate.run">运行校验</span>
+                            </button>
+                            <label class="scenario-validate-order">
+                                <input type="checkbox" id="scenarioValidateAllOrders">
+                                <span data-i18n="scenario.validate.all_orders">任意顺序模拟</span>
+                            </label>
+                            <span class="text-muted small" id="scenarioValidateSummary" aria-live="polite"></span>
+                        </div>
+                        <div class="scenario-validate-results" id="scenarioValidateResults" aria-live="polite">
+                            <p class="text-muted small mb-0" data-i18n="scenario.validate.hint">运行校验会检查死亡节点、死锁触发器、越级出口与禁词泄漏。</p>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="scenarioTabGenerate" role="tabpanel" aria-labelledby="scenarioTabGenerateBtn">
+                        <div class="scenario-generate-panel">
+                            <h6 data-i18n="scenario.generate.title">生成世界树</h6>
+                            <p class="text-muted small mb-3" data-i18n="scenario.generate.hint">选择来源后生成预览；预览不会改动当前草稿，确认后再「应用到草稿」。</p>
+                            <div class="scenario-generate-source" role="radiogroup" aria-label="生成来源">
+                                <label class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="scenarioGenerateSource" value="document" checked>
+                                    <span class="form-check-label" data-i18n="scenario.generate.source.document">当前文档</span>
+                                </label>
+                                <label class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="scenarioGenerateSource" value="modules">
+                                    <span class="form-check-label" data-i18n="scenario.generate.source.modules">现有模块</span>
+                                </label>
+                                <label class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="scenarioGenerateSource" value="premise">
+                                    <span class="form-check-label" data-i18n="scenario.generate.source.premise">一句梗概</span>
+                                </label>
+                            </div>
+                            <textarea id="scenarioGeneratePremise" class="form-control form-control-sm scenario-generate-premise" rows="2" disabled
+                                      placeholder="例如：调查山中古堡，找出失踪的守夜人"
+                                      data-i18n-placeholder="scenario.generate.premise.placeholder"></textarea>
+                            <div class="scenario-generate-options">
+                                <label class="scenario-generate-field">
+                                    <span data-i18n="scenario.generate.topology">拓扑</span>
+                                    <select class="form-select form-select-sm" id="scenarioGenerateTopology">
+                                        <option value="auto" data-i18n="scenario.narrative.topology.auto">自动识别</option>
+                                        <option value="linear" data-i18n="scenario.narrative.topology.linear">线性</option>
+                                        <option value="hub" data-i18n="scenario.narrative.topology.hub">枢纽</option>
+                                        <option value="sandbox" data-i18n="scenario.narrative.topology.sandbox">沙盒</option>
+                                        <option value="hybrid" data-i18n="scenario.narrative.topology.hybrid">混合</option>
+                                    </select>
+                                </label>
+                                <label class="scenario-generate-field">
+                                    <span data-i18n="scenario.generate.acts">区域</span>
+                                    <input type="number" class="form-control form-control-sm" id="scenarioGenerateActs" min="1" max="8" value="2">
+                                </label>
+                                <label class="scenario-generate-field">
+                                    <span data-i18n="scenario.generate.scenes">每个区域房间</span>
+                                    <input type="number" class="form-control form-control-sm" id="scenarioGenerateScenes" min="1" max="8" value="3">
+                                </label>
+                                <label class="scenario-generate-field">
+                                    <span data-i18n="scenario.generate.endings">结局数</span>
+                                    <input type="number" class="form-control form-control-sm" id="scenarioGenerateEndings" min="0" max="6" value="2">
+                                </label>
+                                <label class="scenario-generate-field">
+                                    <span data-i18n="scenario.generate.clocks">全局时钟</span>
+                                    <input type="number" class="form-control form-control-sm" id="scenarioGenerateClocks" min="0" max="4" value="1">
+                                </label>
+                                <label class="scenario-generate-field">
+                                    <span data-i18n="scenario.generate.branch">分支度</span>
+                                    <select class="form-select form-select-sm" id="scenarioGenerateBranch">
+                                        <option value="low" data-i18n="scenario.generate.branch.low">低</option>
+                                        <option value="medium" selected data-i18n="scenario.generate.branch.medium">中</option>
+                                        <option value="high" data-i18n="scenario.generate.branch.high">高</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <div class="scenario-generate-toggles">
+                                <label class="form-check form-check-inline">
+                                    <input class="form-check-input" type="checkbox" id="scenarioGenerateFreeOrder" checked>
+                                    <span class="form-check-label" data-i18n="scenario.generate.free_order">允许任意顺序</span>
+                                </label>
+                                <label class="form-check form-check-inline">
+                                    <input class="form-check-input" type="checkbox" id="scenarioGenerateAiFill">
+                                    <span class="form-check-label" data-i18n="scenario.generate.ai_fill">AI 语义补全</span>
+                                </label>
+                            </div>
+                            <div class="scenario-generate-actions">
+                                <button type="button" class="btn btn-primary btn-sm" id="scenarioGenerateRun">
+                                    <i class="fa fa-magic" aria-hidden="true"></i>
+                                    <span data-i18n="scenario.generate.run">开始生成</span>
+                                </button>
+                                <button type="button" class="btn btn-outline-success btn-sm" id="scenarioGenerateApply" disabled>
+                                    <i class="fa fa-check" aria-hidden="true"></i>
+                                    <span data-i18n="scenario.generate.apply">应用到草稿</span>
+                                </button>
+                                <span class="text-muted small" id="scenarioGenerateStatus"></span>
+                            </div>
+                            <div class="scenario-generate-preview" id="scenarioGeneratePreview">
+                                <p class="text-muted small mb-0" data-i18n="scenario.generate.preview.empty">还没有生成预览。</p>
+                            </div>
+                        </div>
+                    </div>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
@@ -106,7 +359,79 @@
                 </div>
             </div>
         </div>
-    </div>    <div class="modal fade" id="roomCharacterBindModal" tabindex="-1" aria-labelledby="roomCharacterBindModalLabel" aria-hidden="true">
+    </div>
+
+    <div class="modal fade" id="scenarioPlayerPreviewModal" tabindex="-1" aria-labelledby="scenarioPlayerPreviewModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="scenarioPlayerPreviewModalLabel" data-i18n="scenario.visibility.player_preview">玩家预览</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small" data-i18n="scenario.visibility.player_preview_hint">按玩家可见性渲染既有剧本数据：不请求模型，也不写入房间状态。</p>
+                    <div class="scenario-player-preview" id="scenarioPlayerPreviewBody"></div>
+                </div>
+                <div class="modal-footer">
+                    <span class="text-muted small me-auto" id="scenarioPlayerPreviewSummary"></span>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="common.close">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="scenarioOpeningModal" tabindex="-1" aria-labelledby="scenarioOpeningModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="scenarioOpeningModalLabel" data-i18n="scenario.visibility.opening_title">开场配置</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="scenario-opening-grid">
+                        <label class="form-group">
+                            <span data-i18n="scenario.visibility.opening_location">起始地点</span>
+                            <select class="form-select form-select-sm" id="scenarioOpeningLocation"></select>
+                        </label>
+                        <label class="form-group">
+                            <span data-i18n="scenario.visibility.opening_mode">开场模式</span>
+                            <select class="form-select form-select-sm" id="scenarioOpeningMode">
+                                <option value="fixed" data-i18n="scenario.visibility.opening_mode_fixed">固定文本</option>
+                                <option value="model" data-i18n="scenario.visibility.opening_mode_model">交给模型</option>
+                                <option value="hybrid" data-i18n="scenario.visibility.opening_mode_hybrid">固定 + 模型续写</option>
+                            </select>
+                        </label>
+                    </div>
+                    <label class="form-group">
+                        <span data-i18n="scenario.visibility.opening_intro">公开开场（每段一行，空行分段）</span>
+                        <textarea class="form-control form-control-sm" id="scenarioOpeningIntro" rows="6"></textarea>
+                    </label>
+                    <label class="form-group">
+                        <span data-i18n="scenario.visibility.kp_notes">KP 附注（仅 KP 可见）</span>
+                        <textarea class="form-control form-control-sm" id="scenarioOpeningKpTruth" rows="3"></textarea>
+                    </label>
+                    <div class="scenario-opening-flags">
+                        <label class="form-check"><input class="form-check-input" type="checkbox" id="scenarioOpeningEnterTriggers"><span data-i18n="scenario.visibility.opening_enter_triggers">允许开场触发进入触发器</span></label>
+                        <label class="form-check"><input class="form-check-input" type="checkbox" id="scenarioOpeningModelContinue"><span data-i18n="scenario.visibility.opening_model_continue">允许模型在固定开场后续写</span></label>
+                    </div>
+                    <div class="scenario-opening-preview">
+                        <div class="d-flex align-items-center gap-2">
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="scenarioOpeningPreviewBtn" data-i18n="scenario.visibility.opening_preview">按玩家视角预览开场</button>
+                            <span class="text-muted small" data-i18n="scenario.visibility.player_preview_hint">按玩家可见性渲染既有剧本数据：不请求模型，也不写入房间状态。</span>
+                        </div>
+                        <div class="scenario-opening-bubbles" id="scenarioOpeningPreview"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <span class="text-muted small me-auto" id="scenarioOpeningStatus"></span>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="common.cancel">取消</button>
+                    <button type="button" class="btn btn-primary" id="scenarioOpeningSave" data-i18n="common.save">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="roomCharacterBindModal" tabindex="-1" aria-labelledby="roomCharacterBindModalLabel" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">

@@ -34,6 +34,7 @@ class AIRuntimeConfig:
         "state_update": "",
         "summarization": "",
         "schema_repair": "",
+        "narrative_fill": "",
     })
     # Prompt-compaction knobs. These bound how much *redundant* context is sent
     # to the model without capping tool-call rounds or the response max_tokens.

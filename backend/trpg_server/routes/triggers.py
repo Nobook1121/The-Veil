@@ -4,16 +4,19 @@ import logging
 from pathlib import Path
 from uuid import uuid4
 
-from flask import Blueprint, current_app, request, session
+from flask import Blueprint, current_app, redirect, request, send_file, session
 
 from trpg_server.agents.trigger_system import (
     delete_resource,
     load_resources,
     normalize_attachment,
     persist_uploaded_resource,
+    replace_uploaded_resource,
+    resource_identifier,
+    resource_matches,
     trigger_cards,
 )
-from trpg_server.json_store import read_json
+from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
 from trpg_server.responses import error_response, success_response
 from trpg_server.scenario_store import load_scenario_by_id, load_scenario_record, save_scenario_record, scenario_descriptor_paths
@@ -67,6 +70,93 @@ def _storage_root(descriptor: Path) -> Path:
     return descriptor.parent.parent
 
 
+def _usage_map(descriptor: Path, scenario: dict) -> dict[str, int]:
+    """统计每个素材被剧本触发器 / 世界树触发器引用的次数（§8.6）。"""
+    import json
+
+    blob_parts: list[str] = []
+    for key in ("triggers", "opening", "assets"):
+        value = scenario.get(key)
+        if value:
+            blob_parts.append(json.dumps(value, ensure_ascii=False, default=str))
+    narrative_path = descriptor.parent / "narrative.json"
+    payload = read_json(narrative_path, default={})
+    if isinstance(payload, dict):
+        for key in ("triggers", "assets"):
+            if payload.get(key):
+                blob_parts.append(json.dumps(payload[key], ensure_ascii=False, default=str))
+    blob = "\n".join(blob_parts)
+    usage: dict[str, int] = {}
+    for item in load_resources(_storage_root(descriptor), scenario.get("id")):
+        identifiers = [
+            str(item.get("hash") or ""),
+            str(item.get("path") or ""),
+            str(item.get("url") or ""),
+        ]
+        usage[resource_identifier(item)] = sum(
+            blob.count(value) for value in identifiers if value
+        )
+    return usage
+
+
+def _replace_exact(value, mapping: dict[str, str]):
+    """递归替换完全匹配的字符串（仅用于资源 hash/path/url 这类精确引用）。"""
+    if isinstance(value, str):
+        return mapping.get(value, value)
+    if isinstance(value, list):
+        return [_replace_exact(item, mapping) for item in value]
+    if isinstance(value, dict):
+        return {key: _replace_exact(item, mapping) for key, item in value.items()}
+    return value
+
+
+def _sync_replaced_references(descriptor: Path, scenario: dict, previous: dict, current: dict) -> None:
+    """素材替换后同步剧本与 `narrative.json` 中的旧引用（§8.6）。"""
+    mapping = {}
+    for key in ("hash", "path", "url"):
+        old = str(previous.get(key) or "").strip()
+        new = str(current.get(key) or "").strip()
+        if old and new and old != new:
+            mapping[old] = new
+    if mapping:
+        for key in ("triggers", "trigger_cards", "opening", "assets", "modules"):
+            if key in scenario:
+                scenario[key] = _replace_exact(scenario[key], mapping)
+
+    narrative_path = descriptor.parent / "narrative.json"
+    payload = read_json(narrative_path, default={})
+    if not isinstance(payload, dict):
+        return
+    changed = False
+    identifier = str(previous.get("asset_id") or resource_identifier(previous))
+    assets = payload.get("assets")
+    if isinstance(assets, list):
+        for item in assets:
+            if not isinstance(item, dict):
+                continue
+            asset_key = str(item.get("id") or item.get("asset_id") or "")
+            if asset_key:
+                matched = asset_key == identifier or resource_matches(previous, asset_key)
+            else:
+                matched = bool(previous.get("hash")) and str(item.get("sha256") or "") == str(previous.get("hash"))
+            if matched:
+                for field in ("url", "thumb_url", "poster_url", "sha256", "mime", "kind"):
+                    source = {"sha256": "hash", "kind": "type", "mime": "mime", "url": "url",
+                              "thumb_url": "thumb_url", "poster_url": "poster_url"}.get(field)
+                    if source and current.get(source):
+                        value = current[source]
+                        if field == "kind":
+                            value = str(current.get("type") or value)
+                        item[field] = value
+                item["bytes"] = int(current.get("size") or 0)
+                for field in ("width", "height", "duration_ms"):
+                    if current.get(field) is not None:
+                        item[field] = current[field]
+                changed = True
+    if changed:
+        write_json_atomic(narrative_path, payload)
+
+
 @bp.route("/api/scripts/<int:script_id>/assets", methods=["GET"])
 def list_assets(script_id):
     if (error := _login_required()) is not None:
@@ -74,7 +164,12 @@ def list_assets(script_id):
     descriptor, scenario = _scenario(script_id)
     if not descriptor or not scenario:
         return error_response("Scenario not found", 404, "Scenario not found")
-    return success_response(load_resources(_storage_root(descriptor), script_id))
+    resources = load_resources(_storage_root(descriptor), script_id)
+    usage = _usage_map(descriptor, scenario)
+    for item in resources:
+        item.setdefault("asset_id", resource_identifier(item))
+        item["used_by"] = usage.get(resource_identifier(item), 0)
+    return success_response(resources)
 
 
 @bp.route("/api/scripts/<int:script_id>/assets", methods=["POST"])
@@ -123,7 +218,7 @@ def update_asset(script_id, asset_id):
     payload = request.get_json(silent=True) or {}
     resources = load_resources(_storage_root(descriptor), script_id)
     for item in resources:
-        if str(item.get("hash") or item.get("path")) == str(asset_id):
+        if resource_matches(item, asset_id):
             if "alt" in payload:
                 alt = str(payload.get("alt") or "").strip()
                 if not alt:
@@ -138,6 +233,49 @@ def update_asset(script_id, asset_id):
             save_resources(_storage_root(descriptor), script_id, resources)
             return success_response(item)
     return error_response("Resource not found", 404, "Resource not found")
+
+
+@bp.route("/api/scripts/<int:script_id>/assets/<asset_id>/replace", methods=["POST"])
+def replace_asset(script_id, asset_id):
+    """替换素材文件但保留 `asset_id`（§8.6），避免触发器引用失效。"""
+    if (error := _login_required()) is not None:
+        return error
+    descriptor, scenario = _scenario(script_id)
+    if not descriptor or not scenario:
+        return error_response("Scenario not found", 404, "Scenario not found")
+    if not _can_edit(scenario):
+        _log_denied(script_id)
+        return error_response("Permission denied", 403, "Permission denied")
+    uploaded = request.files.get("file") or (request.files.getlist("files") or [None])[0]
+    if uploaded is None:
+        return error_response("Please provide a file", 400, "No files")
+    previous = next(
+        (item for item in load_resources(_storage_root(descriptor), script_id) if resource_matches(item, asset_id)),
+        None,
+    )
+    if previous is None:
+        return error_response("Resource not found", 404, "Resource not found")
+    try:
+        item = replace_uploaded_resource(
+            _storage_root(descriptor),
+            script_id,
+            asset_id,
+            uploaded,
+            alt=request.form.get("alt"),
+            resource_type=request.form.get("type"),
+        )
+    except ValueError as exc:
+        return error_response(str(exc), 400, "Invalid resource")
+    _sync_replaced_references(descriptor, scenario, previous, item)
+    _save_scenario(descriptor, scenario)
+    log_user_action(
+        logger,
+        user_action_text(session.get("username"), "替换了触发器资源"),
+        用户ID=session.get("user_id"),
+        剧本ID=script_id,
+        资源ID=asset_id,
+    )
+    return success_response(item, "Resource replaced successfully")
 
 
 @bp.route("/api/scripts/<int:script_id>/assets/<asset_id>", methods=["DELETE"])
@@ -160,6 +298,71 @@ def remove_asset(script_id, asset_id):
         文件=asset_id,
     )
     return success_response(message="Resource deleted successfully")
+
+
+@bp.route("/api/scripts/<int:script_id>/assets/<asset_id>/thumb", methods=["GET"])
+def asset_thumb(script_id, asset_id):
+    """缩略图（§8.5）：优先 thumb_path，其次 thumb_url；图片资源回退原图。"""
+    if (error := _login_required()) is not None:
+        return error
+    descriptor, scenario = _scenario(script_id)
+    if not descriptor or not scenario:
+        return error_response("Scenario not found", 404, "Scenario not found")
+    root = descriptor.parent
+    resource = next(
+        (
+            item
+            for item in load_resources(_storage_root(descriptor), script_id)
+            if resource_matches(item, asset_id)
+        ),
+        None,
+    )
+    if resource is None:
+        return error_response("Resource not found", 404, "Resource not found")
+
+    immutable = "private, max-age=31536000, immutable"
+    for key in ("thumb_path", "poster_path"):
+        relative = str(resource.get(key) or "").strip()
+        if not relative:
+            continue
+        candidate = (root / relative).resolve()
+        try:
+            candidate.relative_to(root.resolve())
+        except ValueError:
+            continue
+        if candidate.is_file():
+            response = send_file(candidate, conditional=True)
+            response.headers["Cache-Control"] = immutable
+            return response
+
+    for key in ("thumb_url", "poster_url"):
+        remote = str(resource.get(key) or "").strip()
+        if not remote:
+            continue
+        response = redirect(remote, code=302)
+        response.headers["Cache-Control"] = immutable
+        return response
+
+    if str(resource.get("type") or "") != "image":
+        return error_response("Thumbnail not available", 404, "Thumbnail not available")
+    original = str(resource.get("path") or "").strip()
+    if original:
+        candidate = (root / original).resolve()
+        try:
+            candidate.relative_to(root.resolve())
+        except ValueError:
+            return error_response("Resource not found", 404, "Resource not found")
+        if candidate.is_file():
+            response = send_file(candidate, conditional=True)
+            response.headers["Cache-Control"] = immutable
+            return response
+
+    url = str(resource.get("url") or "").strip()
+    if url.startswith("/"):
+        response = redirect(url, code=302)
+        response.headers["Cache-Control"] = immutable
+        return response
+    return error_response("Thumbnail not available", 404, "Thumbnail not available")
 
 
 def _find_card_attachment(scenario: dict, card_id: str):

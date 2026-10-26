@@ -67,6 +67,8 @@ intent_classification = ""
 state_update = ""
 summarization = ""
 schema_repair = ""
+# 世界树生成向导的「AI 语义补全」任务模型；留空则用平台声明的小模型 / 主模型。
+narrative_fill = ""
 
 [ai.prompt]
 snapshot_manifest_summary_cap = 140

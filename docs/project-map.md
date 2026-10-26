@@ -6,7 +6,7 @@
 ## 1. 项目定位
 
 **帷幕 The Veil**：自托管的 AI 跑团（TRPG）平台。AI 担任 KP/守秘人，真人玩家在同一房间聊天中掷骰、交流、推进剧情。
-仓库名 `the-veil`，当前开发版本 `v0.5.3b`（`package.json` 版本号尚未 bump，仍为 `0.5.0-b`），Apache-2.0。
+仓库名 `the-veil`，当前开发版本 `v0.5.4b`（`package.json` 版本号尚未 bump，仍为 `0.5.0-b`），Apache-2.0。
 
 技术栈：
 
@@ -46,7 +46,7 @@
 | `frontend/src/` | 前端源码（TS、HTML 片段、样式、i18n、模板） |
 | `dist/public/` | 前端构建产物（发布包内置，禁止手改） |
 | `data/` | 持久化数据（剧本、资源、配置、运行时数据；`data/config/` 不入库，首次启动生成） |
-| `tests/` | pytest 测试（62 个 `test_*.py`；v0.5.3b 变更日志记录全量 583 passed） |
+| `tests/` | pytest 测试（62 个 `test_*.py`；v0.5.4b 变更日志记录全量 756 passed） |
 | `scripts/` | 构建、迁移、验证、导入辅助脚本 |
 | `config/` | 配置模板（`templates/general.toml`、`templates/roles/`、`templates/aiplatform/`）与示例环境配置（`vector-embedding-ocr.example.env`） |
 | `docs/` | 开发文档、API 文档、格式说明、本地 wiki |
