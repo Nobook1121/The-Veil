@@ -12,7 +12,7 @@ from typing import Any, Mapping
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.agents.narrative.logger import log_event
-from trpg_server.agents.narrative.model import NarrativeBundle, TOPOLOGIES
+from trpg_server.agents.narrative.model import NarrativeBundle, NarrativeEdge, TOPOLOGIES
 from trpg_server.agents.narrative.store import (
     build_index,
     bundle_summary,
@@ -20,6 +20,7 @@ from trpg_server.agents.narrative.store import (
     load_bundle,
     save_bundle,
 )
+from trpg_server.agents.narrative.triggers import normalize_asset, normalize_trigger_spec
 from trpg_server.agents.narrative.validate import simulate_any_order, validate_bundle
 from trpg_server.json_store import read_json
 from trpg_server.permission_config import is_role_allowed, permission_config_path
@@ -277,6 +278,74 @@ def patch_edge(scenario_id: int, edge_id: str):
     return success_response({"edge": updated.to_dict(), "revision": revision}, "Edge updated")
 
 
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/edges", methods=["POST"])
+def create_edge(scenario_id: int):
+    """在图谱连线模式下创建一条边（§8.3）；只写 narrative.json。"""
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    denied = _require_edit(storage, descriptor)
+    if denied is not None:
+        return denied
+
+    payload = _payload()
+    conflict = _check_base_revision(bundle, payload)
+    if conflict is not None:
+        return conflict
+
+    data = {key: value for key, value in payload.items() if key != "base_revision"}
+    data.setdefault("source", "author")
+    edge = NarrativeEdge.from_dict(data)
+    if edge is None:
+        return error_response("Invalid edge", 400, "Edge requires from and to")
+    if not bundle.node(edge.from_id) or not bundle.node(edge.to_id):
+        return error_response("Invalid edge endpoints", 400, "Edge endpoints must exist")
+    if edge.from_id == edge.to_id:
+        return error_response("Invalid edge endpoints", 400, "Edge cannot link a node to itself")
+    duplicate = any(
+        item.id == edge.id
+        or (item.from_id == edge.from_id and item.to_id == edge.to_id and item.type == edge.type)
+        for item in bundle.edges
+    )
+    if duplicate:
+        return error_response("Edge already exists", 409, f"duplicate edge {edge.id}")
+
+    bundle.edges.append(edge)
+    revision = _commit(storage, bundle, scenario_id=scenario_id)
+    return success_response({"edge": edge.to_dict(), "revision": revision}, "Edge created", 201)
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/edges/<edge_id>", methods=["DELETE"])
+def delete_edge(scenario_id: int, edge_id: str):
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    denied = _require_edit(storage, descriptor)
+    if denied is not None:
+        return denied
+
+    payload = _payload()
+    if "base_revision" not in payload and request.args.get("base_revision") not in (None, ""):
+        payload["base_revision"] = request.args.get("base_revision")
+    conflict = _check_base_revision(bundle, payload)
+    if conflict is not None:
+        return conflict
+    kept = [item for item in bundle.edges if item.id != edge_id]
+    if len(kept) == len(bundle.edges):
+        return error_response("Edge not found", 404, "Edge not found")
+    bundle.edges = kept
+    revision = _commit(storage, bundle, scenario_id=scenario_id)
+    return success_response({"revision": revision, "edge_id": edge_id}, "Edge deleted")
+
+
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/validate", methods=["POST"])
 def validate_narrative(scenario_id: int):
     if "user_id" not in session:
@@ -323,6 +392,250 @@ def get_topology(scenario_id: int):
         },
         "Topology loaded",
     )
+
+
+def _asset_map(bundle: NarrativeBundle) -> dict[str, dict[str, Any]]:
+    return {str(item.get("id")): item for item in bundle.assets if isinstance(item, Mapping)}
+
+
+def _trigger_values(payload: Mapping[str, Any]) -> dict[str, Any]:
+    raw = payload.get("trigger")
+    return dict(raw) if isinstance(raw, Mapping) else dict(payload)
+
+
+def _trigger_id_conflict(bundle: NarrativeBundle, trigger_id: str, *, exclude: str = "") -> bool:
+    return any(
+        str(item.get("id")) == trigger_id and trigger_id != exclude
+        for item in bundle.triggers
+        if isinstance(item, Mapping)
+    )
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/triggers", methods=["GET"])
+def list_triggers(scenario_id: int):
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    if not _can_use_permission("scenarios.preview"):
+        return error_response("Permission denied", 403, "Permission denied")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    return success_response(
+        {
+            "triggers": bundle.triggers,
+            "assets": bundle.assets,
+            "revision": _revision(bundle),
+            "permissions": _permissions(descriptor),
+        },
+        "Triggers loaded",
+    )
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/triggers", methods=["POST"])
+def create_trigger(scenario_id: int):
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    denied = _require_edit(storage, descriptor)
+    if denied is not None:
+        return denied
+
+    payload = _payload()
+    conflict = _check_base_revision(bundle, payload)
+    if conflict is not None:
+        return conflict
+    spec = normalize_trigger_spec(
+        _trigger_values(payload),
+        assets_by_id=_asset_map(bundle),
+        index=len(bundle.triggers),
+    )
+    if spec is None:
+        return error_response("Invalid trigger", 400, "A supported binding is required")
+    if _trigger_id_conflict(bundle, str(spec["id"])):
+        return error_response("Trigger already exists", 409, f"duplicate trigger {spec['id']}")
+    bundle.triggers.append(spec)
+    revision = _commit(storage, bundle, scenario_id=scenario_id)
+    return success_response({"trigger": spec, "revision": revision}, "Trigger created", 201)
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/triggers/<trigger_id>", methods=["PUT"])
+def update_trigger(scenario_id: int, trigger_id: str):
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    denied = _require_edit(storage, descriptor)
+    if denied is not None:
+        return denied
+
+    payload = _payload()
+    conflict = _check_base_revision(bundle, payload)
+    if conflict is not None:
+        return conflict
+    current = next((item for item in bundle.triggers if str(item.get("id")) == trigger_id), None)
+    if current is None:
+        return error_response("Trigger not found", 404, "Trigger not found")
+    data = dict(current)
+    data.update(_trigger_values(payload))
+    data["id"] = trigger_id
+    spec = normalize_trigger_spec(data, assets_by_id=_asset_map(bundle), index=0)
+    if spec is None:
+        return error_response("Invalid trigger", 400, "A supported binding is required")
+    bundle.triggers = [spec if str(item.get("id")) == trigger_id else item for item in bundle.triggers]
+    revision = _commit(storage, bundle, scenario_id=scenario_id)
+    return success_response({"trigger": spec, "revision": revision}, "Trigger updated")
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/triggers/<trigger_id>", methods=["DELETE"])
+def delete_trigger(scenario_id: int, trigger_id: str):
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    denied = _require_edit(storage, descriptor)
+    if denied is not None:
+        return denied
+    payload = _payload()
+    if "base_revision" not in payload and request.args.get("base_revision") not in (None, ""):
+        payload["base_revision"] = request.args.get("base_revision")
+    conflict = _check_base_revision(bundle, payload)
+    if conflict is not None:
+        return conflict
+    kept = [item for item in bundle.triggers if str(item.get("id")) != trigger_id]
+    if len(kept) == len(bundle.triggers):
+        return error_response("Trigger not found", 404, "Trigger not found")
+    bundle.triggers = kept
+    revision = _commit(storage, bundle, scenario_id=scenario_id)
+    return success_response({"revision": revision, "trigger_id": trigger_id}, "Trigger deleted")
+
+
+def _resolve_binding(bundle: NarrativeBundle, binding: Mapping[str, Any]) -> tuple[bool, str]:
+    kind = str(binding.get("kind") or "")
+    if kind == "enter":
+        location = str(binding.get("location_id") or "")
+        return (bool(bundle.node(location)), location) if location else (False, "enter requires location_id")
+    if kind == "interaction":
+        location = str(binding.get("location_id") or "")
+        if location and not bundle.node(location):
+            return False, f"location {location} not found"
+        return True, location or "any location"
+    if kind in {"clue", "npc"}:
+        key = "clue_id" if kind == "clue" else "npc_id"
+        node_id = str(binding.get(key) or "")
+        if not node_id:
+            return False, f"{kind} requires {key}"
+        return (bundle.node(node_id) is not None, node_id)
+    if kind == "event":
+        event_id = str(binding.get("event_id") or "")
+        if not event_id:
+            return False, "event requires event_id"
+        known = {str(item.get("id")) for item in bundle.flags if isinstance(item, Mapping)}
+        known |= {str(item.get("id")) for item in bundle.clocks if isinstance(item, Mapping)}
+        return (event_id in known or bundle.node(event_id) is not None, event_id)
+    if kind == "clock":
+        clock_id = str(binding.get("clock_id") or "")
+        if not clock_id:
+            return False, "clock requires clock_id"
+        known = {str(item.get("id")) for item in bundle.clocks if isinstance(item, Mapping)}
+        return (clock_id in known, clock_id)
+    return True, "manual"
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/triggers/<trigger_id>/test", methods=["POST"])
+def test_trigger(scenario_id: int, trigger_id: str):
+    """确定性预览：只解析绑定与附件，不写房间状态（§8.6）。"""
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    if not _can_use_permission("scenarios.preview"):
+        return error_response("Permission denied", 403, "Permission denied")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    spec = next((item for item in bundle.triggers if str(item.get("id")) == trigger_id), None)
+    if spec is None:
+        return error_response("Trigger not found", 404, "Trigger not found")
+
+    binding = spec.get("binding") if isinstance(spec.get("binding"), Mapping) else {}
+    resolved, target = _resolve_binding(bundle, binding)
+    assets = _asset_map(bundle)
+    attachments = []
+    warnings = []
+    for attachment in spec.get("attachments") or []:
+        asset_id = str(attachment.get("asset_id") or "")
+        asset = assets.get(asset_id) if asset_id else None
+        url = attachment.get("url") or (asset or {}).get("url") or ""
+        body = attachment.get("body")
+        if not url and body in (None, ""):
+            warnings.append(f"附件 {attachment.get('id')} 没有可用内容")
+        attachments.append(
+            {
+                "id": attachment.get("id"),
+                "kind": attachment.get("kind"),
+                "url": url,
+                "body": body,
+                "caption": attachment.get("caption"),
+                "alt": attachment.get("alt") or (asset or {}).get("alt"),
+                "visibility": attachment.get("visibility"),
+                "spoiler_level": attachment.get("spoiler_level", 0),
+            }
+        )
+    return success_response(
+        {
+            "ok": resolved,
+            "trigger_id": trigger_id,
+            "binding": binding,
+            "resolved_target": target,
+            "content": spec.get("content"),
+            "attachments": attachments,
+            "warnings": warnings,
+        },
+        "Trigger preview ready",
+    )
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/assets/<asset_id>", methods=["PATCH"])
+def patch_asset(scenario_id: int, asset_id: str):
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    denied = _require_edit(storage, descriptor)
+    if denied is not None:
+        return denied
+    payload = _payload()
+    conflict = _check_base_revision(bundle, payload)
+    if conflict is not None:
+        return conflict
+    current = next((item for item in bundle.assets if str(item.get("id")) == asset_id), None)
+    if current is None:
+        return error_response("Asset not found", 404, "Asset not found")
+    data = dict(current)
+    for key in ("alt", "caption", "name", "body", "visibility"):
+        if key in payload:
+            data[key] = payload[key]
+    updated = normalize_asset(data)
+    if updated is None:
+        return error_response("Invalid asset", 400, "Asset metadata is invalid")
+    bundle.assets = [updated if str(item.get("id")) == asset_id else item for item in bundle.assets]
+    revision = _commit(storage, bundle, scenario_id=scenario_id)
+    return success_response({"asset": updated, "revision": revision}, "Asset updated")
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/topology", methods=["PATCH"])

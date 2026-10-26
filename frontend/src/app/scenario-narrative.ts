@@ -1,9 +1,9 @@
 /**
- * 剧本世界树 / 图谱页签（设计文档 §8.1–§8.2）。
+ * 剧本世界树 / 图谱页签（设计文档 §8.1–§8.3、§8.7）。
  *
- * 只读展示：从 `/api/scenarios/<id>/narrative` 读取 story graph，按
- * act → area → location → ending 渲染树，并用确定性坐标画只读图谱。
- * 编辑、拖拽与生成向导在后续步骤接入。
+ * 世界树负责按 act → area → location → ending 展示结构并编辑节点；
+ * 图谱提供选择 / 连线 / 平移缩放三种模式，拖拽节点会写回 `layout`。
+ * 触发器与媒体编辑由 `scenario-triggers.ts` 负责，两者通过修订号同步。
  */
 (function (window: Window): void {
     "use strict";
@@ -18,11 +18,13 @@
         access?: string;
         visibility?: string;
         repeatable?: boolean;
+        parent?: string | null;
         parent_id?: string;
         keywords?: string[];
         kp_notes?: string;
         objects?: unknown[];
         layout?: { x?: number; y?: number };
+        layout_locked?: boolean;
     }
 
     interface GraphEdge {
@@ -74,6 +76,26 @@
         revision: number;
     }
 
+    type GraphMode = "select" | "connect" | "pan";
+
+    interface DragState {
+        nodeId: string;
+        pointerId: number;
+        startWorldX: number;
+        startWorldY: number;
+        originX: number;
+        originY: number;
+        moved: boolean;
+    }
+
+    interface PanState {
+        pointerId: number;
+        startClientX: number;
+        startClientY: number;
+        originX: number;
+        originY: number;
+    }
+
     interface NarrativeState {
         scenarioId: number;
         bundle: GraphBundle | null;
@@ -81,8 +103,16 @@
         readonly: boolean;
         canEdit: boolean;
         selectedId: string;
+        selectedEdgeId: string;
         search: string;
         validation: ValidationPayload | null;
+        mode: GraphMode;
+        connectSource: string;
+        positions: Map<string, { x: number; y: number }>;
+        view: { x: number; y: number; k: number };
+        drag: DragState | null;
+        pan: PanState | null;
+        draggingFrame: number | null;
     }
 
     const KIND_META: Record<string, { label: string; icon: string; color: string; order: number }> = {
@@ -99,6 +129,23 @@
         clock: { label: "时钟", icon: "fa-clock", color: "#f08c00", order: 10 },
     };
 
+    const EDGE_TYPES: Array<[string, string]> = [
+        ["adjacent", "相邻"],
+        ["portal", "通道"],
+        ["next", "顺序"],
+        ["leads_to", "通向"],
+        ["requires", "需要"],
+        ["reveals", "揭示"],
+        ["knows", "知情"],
+        ["inhabits", "居住"],
+        ["uses", "使用"],
+        ["contains", "包含"],
+        ["triggers", "触发"],
+        ["conflicts", "冲突"],
+        ["mentions", "提及"],
+        ["alias", "别名"],
+    ];
+
     const VISIBILITY_LABEL: Record<string, string> = {
         public: "公开",
         hidden: "隐藏",
@@ -112,8 +159,16 @@
         readonly: false,
         canEdit: false,
         selectedId: "",
+        selectedEdgeId: "",
         search: "",
         validation: null,
+        mode: "select",
+        connectSource: "",
+        positions: new Map(),
+        view: { x: 40, y: 40, k: 1 },
+        drag: null,
+        pan: null,
+        draggingFrame: null,
     };
 
     function byId<T extends HTMLElement = HTMLElement>(id: string): T | null {
@@ -139,6 +194,10 @@
         return KIND_META[kind] || { label: kind || "节点", icon: "fa-circle", color: "#868e96", order: 99 };
     }
 
+    function editable(): boolean {
+        return state.canEdit && !state.readonly;
+    }
+
     function showTab(tab: "basic" | "modules" | "tree" | "graph" | "validate" | "generate"): void {
         const button = byId<HTMLButtonElement>(`scenarioTab${tab.charAt(0).toUpperCase()}${tab.slice(1)}Btn`);
         if (!button) return;
@@ -160,10 +219,20 @@
         if (inspector) inspector.innerHTML = `<p class="text-muted small mb-0">${escapeHtml(t("scenario.tree.select_hint", "选择左侧节点查看详情。"))}</p>`;
         const graph = byId("scenarioGraphCanvas");
         if (graph) graph.innerHTML = `<p class="text-muted small p-3 mb-0">${escapeHtml(message)}</p>`;
+        setGraphHint("");
+        renderEdgeActions();
     }
 
     function nodeById(nodeId: string): GraphNode | null {
         return state.bundle?.nodes.find((node) => node.id === nodeId) || null;
+    }
+
+    function parentOf(node: GraphNode): string {
+        return node.parent || node.parent_id || "";
+    }
+
+    function edgeById(edgeId: string): GraphEdge | null {
+        return state.bundle?.edges.find((edge) => edge.id === edgeId) || null;
     }
 
     function matchesSearch(node: GraphNode): boolean {
@@ -177,6 +246,12 @@
             const kindDiff = kindMeta(left.kind).order - kindMeta(right.kind).order;
             return kindDiff !== 0 ? kindDiff : left.title.localeCompare(right.title, "zh-Hans-CN");
         });
+    }
+
+    function emitSelection(node: GraphNode | null): void {
+        document.dispatchEvent(new CustomEvent("scenario:node-selected", {
+            detail: node ? { nodeId: node.id, title: node.title, kind: node.kind } : { nodeId: "", title: "", kind: "" },
+        }));
     }
 
     function nodeRow(node: GraphNode): string {
@@ -213,7 +288,8 @@
         const children = new Map<string, GraphNode[]>();
         const roots: GraphNode[] = [];
         for (const node of bundle.nodes) {
-            const parent = node.parent_id && byIdMap.has(node.parent_id) ? node.parent_id : "";
+            const parentKey = parentOf(node);
+            const parent = parentKey && byIdMap.has(parentKey) ? parentKey : "";
             if (!parent) {
                 roots.push(node);
                 continue;
@@ -243,26 +319,26 @@
             return;
         }
         const meta = kindMeta(node.kind);
-        const editable = state.canEdit && !state.readonly;
+        const canEdit = editable();
         const edges = (state.bundle?.edges || []).filter((edge) => edge.from === node.id || edge.to === node.id);
         const visibility = node.visibility || "public";
         const rows: Array<[string, string]> = [
             ["ID", `<code>${escapeHtml(node.id)}</code>`],
             ["类型", escapeHtml(meta.label)],
-            ["父节点", node.parent_id ? escapeHtml(nodeById(node.parent_id)?.title || node.parent_id) : "—"],
+            ["父节点", parentOf(node) ? escapeHtml(nodeById(parentOf(node))?.title || parentOf(node)) : "—"],
             ["场景角色", escapeHtml(node.scene_role || "—")],
             ["进入方式", escapeHtml(node.access || "—")],
             ["可重复", node.repeatable === false ? "否" : "是"],
             ["物件数", String(Array.isArray(node.objects) ? node.objects.length : 0)],
             ["关键词", (node.keywords || []).length ? node.keywords!.map((word) => `<span class="badge bg-light text-dark">${escapeHtml(word)}</span>`).join(" ") : "—"],
         ];
-        if (!editable) {
+        if (!canEdit) {
             rows.splice(3, 0, [
                 "可见性",
                 `<span class="badge bg-${visibility === "public" ? "success" : visibility === "kp_only" ? "danger" : "warning"}">${escapeHtml(VISIBILITY_LABEL[visibility] || visibility)}</span>`,
             ]);
         }
-        const editForm = editable ? `
+        const editForm = canEdit ? `
             <div class="scenario-inspector-edit">
                 <label class="form-group">
                     <span>${escapeHtml(t("scenario.tree.edit_title", "标题"))}</span>
@@ -278,6 +354,10 @@
                     <span>${escapeHtml(t("scenario.tree.edit_kp_notes", "KP 备注"))}</span>
                     <textarea class="form-control form-control-sm" id="scenarioNodeKpNotes" rows="3">${escapeHtml(node.kp_notes || "")}</textarea>
                 </label>
+                <label class="scenario-module-toggle">
+                    <span>${escapeHtml(t("scenario.graph.lock_layout", "锁定布局"))}</span>
+                    <input type="checkbox" id="scenarioNodeLayoutLocked" ${node.layout_locked ? "checked" : ""}>
+                </label>
                 <button type="button" class="btn btn-primary btn-sm" id="scenarioNodeSave">
                     <i class="fa fa-save" aria-hidden="true"></i>
                     <span>${escapeHtml(t("scenario.tree.save_node", "保存节点"))}</span>
@@ -289,30 +369,40 @@
             ${editForm}
             <div class="scenario-inspector-rows">${rows.map(([label, value]) => `<div class="scenario-inspector-row"><span>${escapeHtml(label)}</span><div>${value}</div></div>`).join("")}</div>
             ${node.body ? `<div class="scenario-inspector-body"><h6>${escapeHtml(t("scenario.tree.body", "正文"))}</h6><div class="scenario-inspector-pre">${escapeHtml(node.body)}</div></div>` : ""}
-            ${!editable && node.kp_notes ? `<div class="scenario-inspector-kp"><h6>${escapeHtml(t("scenario.tree.kp_notes", "KP 备注"))}</h6><div>${escapeHtml(node.kp_notes)}</div></div>` : ""}
+            ${!canEdit && node.kp_notes ? `<div class="scenario-inspector-kp"><h6>${escapeHtml(t("scenario.tree.kp_notes", "KP 备注"))}</h6><div>${escapeHtml(node.kp_notes)}</div></div>` : ""}
             <div class="scenario-inspector-edges">
                 <h6>${escapeHtml(t("scenario.tree.edges", "连接"))}</h6>
                 ${edges.length ? `<ul class="list-unstyled small mb-0">${edges.map((edge) => {
                     const otherId = edge.from === node.id ? edge.to : edge.from;
                     const other = nodeById(otherId);
                     const arrow = edge.from === node.id ? "→" : "←";
-                    return `<li><code>${arrow}</code> ${escapeHtml(other?.title || otherId)} <span class="text-muted">${escapeHtml(edge.type || "")}</span></li>`;
+                    const hard = edge.hard ? ` <span class="badge bg-danger">hard</span>` : "";
+                    return `<li><code>${arrow}</code> ${escapeHtml(other?.title || otherId)} <span class="text-muted">${escapeHtml(edge.type || "")}</span>${hard}</li>`;
                 }).join("")}</ul>` : `<p class="text-muted small mb-0">${escapeHtml(t("scenario.tree.no_edges", "暂无连接。"))}</p>`}
             </div>`;
     }
 
     function selectNode(nodeId: string): void {
         state.selectedId = nodeId;
+        state.selectedEdgeId = "";
         renderTree();
         renderInspector();
+        renderGraph();
+        emitSelection(nodeById(nodeId));
+    }
+
+    async function handleConflict(): Promise<void> {
+        showNotification(t("scenario.tree.conflict", "内容已被其他编辑修改，正在刷新…"), "warning");
+        await load(state.scenarioId, { readonly: state.readonly });
     }
 
     async function saveNode(): Promise<void> {
         const node = nodeById(state.selectedId);
-        if (!node || !state.scenarioId || !state.canEdit || state.readonly) return;
+        if (!node || !state.scenarioId || !editable()) return;
         const title = byId<HTMLInputElement>("scenarioNodeTitle")?.value.trim() || "";
         const visibility = byId<HTMLSelectElement>("scenarioNodeVisibility")?.value || "public";
         const kpNotes = byId<HTMLTextAreaElement>("scenarioNodeKpNotes")?.value.trim() || "";
+        const layoutLocked = byId<HTMLInputElement>("scenarioNodeLayoutLocked")?.checked === true;
         if (!title) {
             showNotification(t("scenario.tree.title_required", "节点标题不能为空。"), "warning");
             return;
@@ -322,17 +412,16 @@
         try {
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ node: GraphNode; revision: number }>>(
                 `/api/scenarios/${state.scenarioId}/narrative/nodes/${encodeURIComponent(node.id)}`,
-                { method: "PATCH", body: { base_revision: state.revision, title, visibility, kp_notes: kpNotes } },
+                { method: "PATCH", body: { base_revision: state.revision, title, visibility, kp_notes: kpNotes, layout_locked: layoutLocked } },
             );
             if (!response.ok || !data?.success || !data.data) {
                 if (response.status === 409) {
-                    showNotification(t("scenario.tree.conflict", "节点已被其他编辑修改，正在刷新…"), "warning");
-                    await load(state.scenarioId, { readonly: state.readonly });
+                    await handleConflict();
                     return;
                 }
                 throw new Error(data?.message || `HTTP ${response.status}`);
             }
-            state.revision = data.data.revision;
+            applyRevision(data.data.revision);
             const saved = data.data.node;
             if (state.bundle) {
                 state.bundle.nodes = state.bundle.nodes.map((item) => (item.id === saved.id ? { ...item, ...saved } : item));
@@ -347,7 +436,31 @@
         }
     }
 
-    function nodePositions(bundle: GraphBundle): Map<string, { x: number; y: number }> {
+    function applyRevision(revision: number): void {
+        state.revision = revision;
+        window.ScenarioTriggers?.syncRevision(revision);
+        updateStatusBadge();
+    }
+
+    function syncRevision(revision: number): void {
+        state.revision = revision;
+        updateStatusBadge();
+    }
+
+    function updateStatusBadge(): void {
+        if (!state.bundle) return;
+        const counts = state.bundle.nodes.length;
+        setStatus(
+            `${t("scenario.tree.revision", "修订")} ${state.revision} · ${counts} ${t("scenario.tree.nodes", "节点")} · ${state.bundle.topology || "hybrid"}`,
+            "success",
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // 图谱
+    // ------------------------------------------------------------------
+
+    function defaultPositions(bundle: GraphBundle): Map<string, { x: number; y: number }> {
         const positions = new Map<string, { x: number; y: number }>();
         const counters = new Map<number, number>();
         for (const node of sortNodes(bundle.nodes)) {
@@ -359,9 +472,82 @@
             const level = kindMeta(node.kind).order <= 3 ? kindMeta(node.kind).order : 2;
             const index = counters.get(level) || 0;
             counters.set(level, index + 1);
-            positions.set(node.id, { x: 60 + level * 240, y: 50 + index * 110 });
+            positions.set(node.id, { x: 60 + level * 240, y: 60 + index * 100 });
         }
         return positions;
+    }
+
+    function viewportSize(): { width: number; height: number } {
+        const canvas = byId("scenarioGraphCanvas");
+        const width = canvas?.clientWidth || 900;
+        const height = canvas?.clientHeight || 520;
+        return { width: Math.max(320, width), height: Math.max(320, height) };
+    }
+
+    function applyView(): void {
+        const viewport = byId("scenarioGraphViewport");
+        if (!viewport) return;
+        viewport.setAttribute("transform", `translate(${state.view.x},${state.view.y}) scale(${state.view.k})`);
+    }
+
+    function fitView(): void {
+        if (state.positions.size === 0) return;
+        const values = [...state.positions.values()];
+        const minX = Math.min(...values.map((item) => item.x));
+        const minY = Math.min(...values.map((item) => item.y));
+        const maxX = Math.max(...values.map((item) => item.x)) + 180;
+        const maxY = Math.max(...values.map((item) => item.y)) + 70;
+        const { width, height } = viewportSize();
+        const k = Math.max(0.25, Math.min(1.4, Math.min(width / (maxX - minX), height / (maxY - minY))));
+        state.view = {
+            x: (width - (maxX - minX) * k) / 2 - minX * k,
+            y: (height - (maxY - minY) * k) / 2 - minY * k,
+            k,
+        };
+        applyView();
+    }
+
+    function setGraphHint(text: string): void {
+        const hint = byId("scenarioGraphHint");
+        if (hint) hint.textContent = text;
+    }
+
+    function modeHint(mode: GraphMode): string {
+        if (mode === "connect") {
+            return t("scenario.graph.hint_connect", "连线：依次点击起点与终点节点。");
+        }
+        if (mode === "pan") {
+            return t("scenario.graph.hint_pan", "平移：拖拽画布移动，滚轮缩放。");
+        }
+        return t("scenario.graph.hint_select", "选择：点击节点查看详情，拖拽节点调整布局。");
+    }
+
+    function edgeMarkup(edge: GraphEdge, positions: Map<string, { x: number; y: number }>): string {
+        const from = positions.get(edge.from);
+        const to = positions.get(edge.to);
+        if (!from || !to) return "";
+        const dashed = edge.hard ? "" : ` stroke-dasharray="6 4"`;
+        const color = edge.hard ? "#c0392b" : "#8a94a6";
+        const active = state.selectedEdgeId === edge.id;
+        return `<line class="scenario-graph-edge${active ? " active" : ""}" data-edge-id="${escapeHtml(edge.id)}" data-edge-from="${escapeHtml(edge.from)}" data-edge-to="${escapeHtml(edge.to)}" x1="${from.x + 85}" y1="${from.y + 24}" x2="${to.x + 85}" y2="${to.y + 24}" stroke="${active ? "#f08c00" : color}" stroke-width="${active ? 2.6 : 1.6}"${dashed}><title>${escapeHtml(edge.label || edge.type || "")}</title></line>`;
+    }
+
+    function nodeMarkup(node: GraphNode, positions: Map<string, { x: number; y: number }>): string {
+        const position = positions.get(node.id);
+        if (!position) return "";
+        const meta = kindMeta(node.kind);
+        const selected = state.selectedId === node.id;
+        const connectSource = state.connectSource === node.id;
+        const title = node.title.length > 10 ? `${node.title.slice(0, 10)}…` : node.title;
+        const stroke = connectSource ? "#f08c00" : meta.color;
+        const fill = selected ? meta.color : "#ffffff";
+        const textColor = selected ? "#ffffff" : "#212529";
+        return `<g class="scenario-graph-node${selected ? " active" : ""}${connectSource ? " source" : ""}" data-node-id="${escapeHtml(node.id)}" data-x="${position.x}" data-y="${position.y}" transform="translate(${position.x},${position.y})">
+            <rect width="170" height="48" rx="8" fill="${fill}" stroke="${stroke}" stroke-width="${connectSource ? 3 : 1.6}"></rect>
+            <text x="12" y="21" font-size="12" fill="${textColor}">${escapeHtml(title || node.id)}</text>
+            <text x="12" y="37" font-size="10" fill="${selected ? "#ffffff" : meta.color}">${escapeHtml(meta.label)}</text>
+            ${node.layout_locked ? `<text x="154" y="14" font-size="10" fill="${selected ? "#ffffff" : "#868e96"}">🔒</text>` : ""}
+        </g>`;
     }
 
     function renderGraph(): void {
@@ -372,35 +558,400 @@
             setEmpty(t("scenario.tree.empty", "保存剧本并生成世界树后，可在此查看章节、地点与结局。"));
             return;
         }
-        const positions = nodePositions(bundle);
-        const values = [...positions.values()];
-        const minX = Math.min(...values.map((item) => item.x)) - 40;
-        const minY = Math.min(...values.map((item) => item.y)) - 40;
-        const maxX = Math.max(...values.map((item) => item.x)) + 220;
-        const maxY = Math.max(...values.map((item) => item.y)) + 100;
+        state.positions = defaultPositions(bundle);
+        const positions = state.positions;
+        const { width, height } = viewportSize();
+        const edges = bundle.edges.map((edge) => edgeMarkup(edge, positions)).join("");
+        const nodes = bundle.nodes.map((node) => nodeMarkup(node, positions)).join("");
+        canvas.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" height="100%" role="img" aria-label="世界树图谱"><g id="scenarioGraphViewport">${edges}${nodes}</g></svg>`;
+        applyView();
+        setGraphHint(modeHint(state.mode));
+        renderEdgeActions();
+    }
 
-        const edgeMarkup = bundle.edges.map((edge) => {
-            const from = positions.get(edge.from);
-            const to = positions.get(edge.to);
-            if (!from || !to) return "";
-            const dashed = edge.hard ? "" : ` stroke-dasharray="6 4"`;
-            const color = edge.hard ? "#c0392b" : "#8a94a6";
-            return `<line class="scenario-graph-edge" x1="${from.x + 85}" y1="${from.y + 24}" x2="${to.x + 85}" y2="${to.y + 24}" stroke="${color}" stroke-width="1.6"${dashed}><title>${escapeHtml(edge.label || edge.type || "")}</title></line>`;
-        }).join("");
+    function renderEdgeActions(): void {
+        const container = byId("scenarioGraphEdgeActions");
+        if (!container) return;
+        const edge = edgeById(state.selectedEdgeId);
+        if (!edge || !editable()) {
+            container.innerHTML = "";
+            return;
+        }
+        const other = nodeById(edge.to);
+        const owner = nodeById(edge.from);
+        container.innerHTML = `
+            <span class="small"><code>${escapeHtml(owner?.title || edge.from)}</code> → <code>${escapeHtml(other?.title || edge.to)}</code> <span class="text-muted">${escapeHtml(edge.type || "")}</span></span>
+            <button type="button" class="btn btn-sm btn-outline-${edge.hard ? "secondary" : "danger"}" data-edge-toggle>${escapeHtml(edge.hard ? t("scenario.graph.make_soft", "改为 soft") : t("scenario.graph.make_hard", "改为 hard"))}</button>
+            <button type="button" class="btn btn-sm btn-outline-danger" data-edge-delete>${escapeHtml(t("scenario.graph.delete_edge", "删除边"))}</button>`;
+    }
 
-        const nodeMarkup = bundle.nodes.map((node) => {
-            const position = positions.get(node.id)!;
-            const meta = kindMeta(node.kind);
-            const selected = state.selectedId === node.id;
-            const title = node.title.length > 10 ? `${node.title.slice(0, 10)}…` : node.title;
-            return `<g class="scenario-graph-node${selected ? " active" : ""}" data-node-id="${escapeHtml(node.id)}" transform="translate(${position.x},${position.y})">
-                <rect width="170" height="48" rx="8" fill="${selected ? meta.color : "#ffffff"}" stroke="${meta.color}" stroke-width="1.6"></rect>
-                <text x="12" y="21" font-size="12" fill="${selected ? "#ffffff" : "#212529"}">${escapeHtml(title || node.id)}</text>
-                <text x="12" y="37" font-size="10" fill="${selected ? "#ffffff" : meta.color}">${escapeHtml(meta.label)}</text>
-            </g>`;
-        }).join("");
+    function setMode(mode: GraphMode): void {
+        state.mode = mode;
+        state.connectSource = "";
+        document.querySelectorAll<HTMLElement>("[data-graph-mode]").forEach((button) => {
+            button.classList.toggle("active", button.dataset.graphMode === mode);
+        });
+        setGraphHint(modeHint(mode));
+        renderGraph();
+    }
 
-        canvas.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${maxX - minX} ${maxY - minY}" width="${Math.max(720, maxX - minX)}" height="${Math.max(360, maxY - minY)}" role="img" aria-label="世界树只读图谱">${edgeMarkup}${nodeMarkup}</svg>`;
+    function clientToWorld(clientX: number, clientY: number): { x: number; y: number } {
+        const canvas = byId("scenarioGraphCanvas");
+        const svg = canvas?.querySelector<SVGSVGElement>("svg");
+        if (!svg) return { x: 0, y: 0 };
+        const rect = svg.getBoundingClientRect();
+        const { width } = viewportSize();
+        const scale = width / (rect.width || width);
+        const localX = (clientX - rect.left) * scale;
+        const localY = (clientY - rect.top) * scale;
+        return { x: (localX - state.view.x) / state.view.k, y: (localY - state.view.y) / state.view.k };
+    }
+
+    function nodeElement(nodeId: string): SVGGElement | null {
+        const canvas = byId("scenarioGraphCanvas");
+        return canvas?.querySelector<SVGGElement>(`[data-node-id="${nodeId}"]`) || null;
+    }
+
+    function moveNodeVisual(nodeId: string, x: number, y: number): void {
+        const element = nodeElement(nodeId);
+        if (element) element.setAttribute("transform", `translate(${x},${y})`);
+        const canvas = byId("scenarioGraphCanvas");
+        canvas?.querySelectorAll<SVGLineElement>("[data-edge-from]").forEach((line) => {
+            const fromId = line.dataset.edgeFrom || "";
+            const toId = line.dataset.edgeTo || "";
+            if (fromId === nodeId) {
+                line.setAttribute("x1", String(x + 85));
+                line.setAttribute("y1", String(y + 24));
+            }
+            if (toId === nodeId) {
+                line.setAttribute("x2", String(x + 85));
+                line.setAttribute("y2", String(y + 24));
+            }
+        });
+    }
+
+    function scheduleNodeVisual(nodeId: string, x: number, y: number): void {
+        state.positions.set(nodeId, { x, y });
+        const node = nodeById(nodeId);
+        if (node) node.layout = { x, y };
+        if (state.draggingFrame !== null) return;
+        state.draggingFrame = window.requestAnimationFrame(() => {
+            state.draggingFrame = null;
+            moveNodeVisual(nodeId, x, y);
+        });
+    }
+
+    async function persistLayout(nodeId: string): Promise<void> {
+        const position = state.positions.get(nodeId);
+        if (!position || !state.scenarioId) return;
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ node: GraphNode; revision: number }>>(
+                `/api/scenarios/${state.scenarioId}/narrative/nodes/${encodeURIComponent(nodeId)}`,
+                { method: "PATCH", body: { base_revision: state.revision, layout: { x: position.x, y: position.y } } },
+            );
+            if (!response.ok || !data?.success || !data.data) {
+                if (response.status === 409) {
+                    await handleConflict();
+                    return;
+                }
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            applyRevision(data.data.revision);
+            const saved = data.data.node;
+            if (state.bundle) {
+                state.bundle.nodes = state.bundle.nodes.map((item) => (item.id === saved.id ? { ...item, ...saved } : item));
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            showNotification(message, "error");
+        }
+    }
+
+    async function connectNodes(sourceId: string, targetId: string): Promise<void> {
+        const type = (byId<HTMLSelectElement>("scenarioGraphEdgeType")?.value || "adjacent");
+        const hard = byId<HTMLInputElement>("scenarioGraphEdgeHard")?.checked === true;
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ edge: GraphEdge; revision: number }>>(
+                `/api/scenarios/${state.scenarioId}/narrative/edges`,
+                { method: "POST", body: { base_revision: state.revision, from: sourceId, to: targetId, type, hard, source: "author" } },
+            );
+            if (!response.ok || !data?.success || !data.data) {
+                if (response.status === 409) {
+                    showNotification(data?.message || t("scenario.graph.duplicate_edge", "这条连接已存在。"), "warning");
+                    return;
+                }
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            applyRevision(data.data.revision);
+            state.bundle?.edges.push(data.data.edge);
+            state.connectSource = "";
+            renderGraph();
+            showNotification(t("scenario.graph.edge_created", "连接已创建。"), "success");
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            showNotification(message, "error");
+        }
+    }
+
+    async function handleNodeClick(nodeId: string): Promise<void> {
+        if (state.mode === "connect" && editable()) {
+            if (!state.connectSource) {
+                state.connectSource = nodeId;
+                renderGraph();
+                return;
+            }
+            if (state.connectSource === nodeId) {
+                state.connectSource = "";
+                renderGraph();
+                return;
+            }
+            const source = state.connectSource;
+            state.connectSource = "";
+            await connectNodes(source, nodeId);
+            return;
+        }
+        selectNode(nodeId);
+    }
+
+    async function toggleEdgeHard(): Promise<void> {
+        const edge = edgeById(state.selectedEdgeId);
+        if (!edge || !editable()) return;
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ edge: GraphEdge; revision: number }>>(
+                `/api/scenarios/${state.scenarioId}/narrative/edges/${encodeURIComponent(edge.id)}`,
+                { method: "PATCH", body: { base_revision: state.revision, hard: !edge.hard } },
+            );
+            if (!response.ok || !data?.success || !data.data) {
+                if (response.status === 409) {
+                    await handleConflict();
+                    return;
+                }
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            applyRevision(data.data.revision);
+            if (state.bundle) {
+                state.bundle.edges = state.bundle.edges.map((item) => (item.id === data.data!.edge.id ? data.data!.edge : item));
+            }
+            renderGraph();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            showNotification(message, "error");
+        }
+    }
+
+    async function deleteSelectedEdge(): Promise<void> {
+        const edge = edgeById(state.selectedEdgeId);
+        if (!edge || !editable()) return;
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ revision: number }>>(
+                `/api/scenarios/${state.scenarioId}/narrative/edges/${encodeURIComponent(edge.id)}`,
+                { method: "DELETE", body: { base_revision: state.revision } },
+            );
+            if (!response.ok || !data?.success || !data.data) {
+                if (response.status === 409) {
+                    await handleConflict();
+                    return;
+                }
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            applyRevision(data.data.revision);
+            if (state.bundle) state.bundle.edges = state.bundle.edges.filter((item) => item.id !== edge.id);
+            state.selectedEdgeId = "";
+            renderGraph();
+            renderInspector();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            showNotification(message, "error");
+        }
+    }
+
+    function hierarchyLayout(bundle: GraphBundle): Map<string, { x: number; y: number }> {
+        const byIdMap = new Map(bundle.nodes.map((node) => [node.id, node]));
+        const depthCache = new Map<string, number>();
+        const depthOf = (node: GraphNode, guard = 0): number => {
+            if (depthCache.has(node.id)) return depthCache.get(node.id)!;
+            const parentKey = parentOf(node);
+            const parent = parentKey ? byIdMap.get(parentKey) : undefined;
+            const value = !parent || guard > 8 ? 0 : depthOf(parent, guard + 1) + 1;
+            depthCache.set(node.id, value);
+            return value;
+        };
+        const counters = new Map<number, number>();
+        const positions = new Map<string, { x: number; y: number }>();
+        for (const node of sortNodes(bundle.nodes)) {
+            if (node.layout_locked && typeof node.layout?.x === "number" && typeof node.layout?.y === "number") {
+                positions.set(node.id, { x: node.layout.x, y: node.layout.y });
+                continue;
+            }
+            const depth = Math.min(6, depthOf(node));
+            const row = counters.get(depth) || 0;
+            counters.set(depth, row + 1);
+            positions.set(node.id, { x: 60 + depth * 250, y: 60 + row * 100 });
+        }
+        return positions;
+    }
+
+    async function autoLayout(): Promise<void> {
+        const bundle = state.bundle;
+        if (!bundle || !editable() || !state.scenarioId) return;
+        const positions = hierarchyLayout(bundle);
+        const nodes = bundle.nodes.map((node) => {
+            const position = positions.get(node.id);
+            return position ? { ...node, layout: { x: position.x, y: position.y } } : node;
+        });
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ bundle: GraphBundle; revision: number }>>(
+                `/api/scenarios/${state.scenarioId}/narrative`,
+                { method: "PUT", body: { base_revision: state.revision, bundle: { ...bundle, nodes } } },
+            );
+            if (!response.ok || !data?.success || !data.data) {
+                if (response.status === 409) {
+                    await handleConflict();
+                    return;
+                }
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            state.bundle = data.data.bundle;
+            applyRevision(data.data.revision);
+            renderAll();
+            fitView();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            showNotification(message, "error");
+        }
+    }
+
+    function bindGraphEvents(): void {
+        const canvas = byId("scenarioGraphCanvas");
+        if (!canvas) return;
+
+        canvas.addEventListener("pointerdown", (event) => {
+            const pointer = event as PointerEvent;
+            const nodeTarget = (pointer.target as Element).closest?.<SVGGElement>("[data-node-id]");
+            if (nodeTarget) {
+                const nodeId = nodeTarget.getAttribute("data-node-id") || "";
+                const node = nodeById(nodeId);
+                if (state.mode === "select" && editable() && node && !node.layout_locked) {
+                    const world = clientToWorld(pointer.clientX, pointer.clientY);
+                    const origin = state.positions.get(nodeId) || { x: 0, y: 0 };
+                    state.drag = {
+                        nodeId,
+                        pointerId: pointer.pointerId,
+                        startWorldX: world.x,
+                        startWorldY: world.y,
+                        originX: origin.x,
+                        originY: origin.y,
+                        moved: false,
+                    };
+                    canvas.setPointerCapture?.(pointer.pointerId);
+                    pointer.preventDefault();
+                }
+                return;
+            }
+            if (state.mode === "pan") {
+                state.pan = {
+                    pointerId: pointer.pointerId,
+                    startClientX: pointer.clientX,
+                    startClientY: pointer.clientY,
+                    originX: state.view.x,
+                    originY: state.view.y,
+                };
+                canvas.setPointerCapture?.(pointer.pointerId);
+                pointer.preventDefault();
+            }
+        });
+
+        canvas.addEventListener("pointermove", (event) => {
+            const pointer = event as PointerEvent;
+            if (state.drag && pointer.pointerId === state.drag.pointerId) {
+                const world = clientToWorld(pointer.clientX, pointer.clientY);
+                const x = Math.round(state.drag.originX + (world.x - state.drag.startWorldX));
+                const y = Math.round(state.drag.originY + (world.y - state.drag.startWorldY));
+                if (Math.abs(x - state.drag.originX) > 2 || Math.abs(y - state.drag.originY) > 2) {
+                    state.drag.moved = true;
+                }
+                scheduleNodeVisual(state.drag.nodeId, x, y);
+                return;
+            }
+            if (state.pan && pointer.pointerId === state.pan.pointerId) {
+                const canvasRect = canvas.getBoundingClientRect();
+                const scale = viewportSize().width / (canvasRect.width || 1);
+                state.view.x = state.pan.originX + (pointer.clientX - state.pan.startClientX) * scale;
+                state.view.y = state.pan.originY + (pointer.clientY - state.pan.startClientY) * scale;
+                applyView();
+            }
+        });
+
+        const finishPointer = (event: PointerEvent): void => {
+            if (state.drag && event.pointerId === state.drag.pointerId) {
+                const drag = state.drag;
+                state.drag = null;
+                if (drag.moved) {
+                    const position = state.positions.get(drag.nodeId);
+                    if (position) void persistLayout(drag.nodeId);
+                } else {
+                    void handleNodeClick(drag.nodeId);
+                }
+                return;
+            }
+            if (state.pan && event.pointerId === state.pan.pointerId) {
+                state.pan = null;
+            }
+        };
+        canvas.addEventListener("pointerup", finishPointer);
+        canvas.addEventListener("pointercancel", finishPointer);
+
+        canvas.addEventListener("wheel", (event) => {
+            const wheel = event as WheelEvent;
+            wheel.preventDefault();
+            const before = clientToWorld(wheel.clientX, wheel.clientY);
+            const factor = wheel.deltaY < 0 ? 1.12 : 1 / 1.12;
+            const nextK = Math.max(0.2, Math.min(2.5, state.view.k * factor));
+            const canvasRect = canvas.getBoundingClientRect();
+            const scale = viewportSize().width / (canvasRect.width || 1);
+            const localX = (wheel.clientX - canvasRect.left) * scale;
+            const localY = (wheel.clientY - canvasRect.top) * scale;
+            state.view.k = nextK;
+            state.view.x = localX - before.x * nextK;
+            state.view.y = localY - before.y * nextK;
+            applyView();
+        }, { passive: false });
+
+        canvas.addEventListener("click", (event) => {
+            const target = event.target as Element;
+            const edgeTarget = target.closest?.<SVGLineElement>("[data-edge-id]");
+            if (edgeTarget) {
+                state.selectedEdgeId = edgeTarget.getAttribute("data-edge-id") || "";
+                state.selectedId = "";
+                renderGraph();
+                renderInspector();
+                emitSelection(null);
+                return;
+            }
+            if (!target.closest?.("[data-node-id]")) {
+                state.selectedEdgeId = "";
+                renderEdgeActions();
+            }
+        });
+
+        byId("scenarioGraphEdgeActions")?.addEventListener("click", (event) => {
+            const target = event.target as HTMLElement;
+            if (target.closest("[data-edge-toggle]")) {
+                void toggleEdgeHard();
+                return;
+            }
+            if (target.closest("[data-edge-delete]")) {
+                void deleteSelectedEdge();
+            }
+        });
+
+        document.querySelectorAll<HTMLElement>("[data-graph-mode]").forEach((button) => {
+            button.addEventListener("click", () => setMode((button.dataset.graphMode as GraphMode) || "select"));
+        });
+        byId("scenarioGraphFit")?.addEventListener("click", () => fitView());
+        byId("scenarioGraphAutoLayout")?.addEventListener("click", () => {
+            void autoLayout();
+        });
     }
 
     function renderAll(): void {
@@ -417,8 +968,11 @@
         state.readonly = options.readonly === true;
         state.canEdit = false;
         state.selectedId = "";
+        state.selectedEdgeId = "";
+        state.connectSource = "";
         state.search = "";
         state.validation = null;
+        state.mode = "select";
         const search = byId<HTMLInputElement>("scenarioTreeSearch");
         if (search) search.value = "";
         const results = byId("scenarioValidateResults");
@@ -429,6 +983,7 @@
         if (!state.scenarioId) {
             setStatus(t("scenario.tree.empty_badge", "未生成世界树"), "secondary");
             setEmpty(t("scenario.tree.save_first", "请先保存剧本，再查看世界树。"));
+            emitSelection(null);
             return;
         }
 
@@ -441,6 +996,7 @@
                 if (response.status === 404) {
                     setStatus(t("scenario.tree.empty_badge", "未生成世界树"), "warning");
                     setEmpty(t("scenario.tree.not_generated", "该剧本还没有世界树。运行 narrative build 生成后再查看。"));
+                    emitSelection(null);
                     return;
                 }
                 throw new Error(data?.message || `HTTP ${response.status}`);
@@ -449,12 +1005,11 @@
             state.revision = data.data.revision;
             state.readonly = Boolean(data.data.permissions?.readonly);
             state.canEdit = Boolean(data.data.permissions?.can_edit);
-            const counts = data.data.summary?.counts || {};
-            setStatus(
-                `${t("scenario.tree.revision", "修订")} ${state.revision} · ${counts.nodes ?? state.bundle.nodes.length} ${t("scenario.tree.nodes", "节点")} · ${state.bundle.topology || "hybrid"}`,
-                "success",
-            );
+            updateStatusBadge();
             renderAll();
+            window.requestAnimationFrame(() => fitView());
+            window.ScenarioTriggers?.syncRevision(state.revision);
+            emitSelection(null);
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             setStatus(t("scenario.tree.load_failed", "世界树加载失败"), "danger");
@@ -469,14 +1024,20 @@
         state.readonly = false;
         state.canEdit = false;
         state.selectedId = "";
+        state.selectedEdgeId = "";
+        state.connectSource = "";
         state.search = "";
         state.validation = null;
+        state.positions = new Map();
+        state.drag = null;
+        state.pan = null;
         const search = byId<HTMLInputElement>("scenarioTreeSearch");
         if (search) search.value = "";
         setStatus(t("scenario.tree.empty_badge", "未生成世界树"), "secondary");
         setEmpty(t("scenario.tree.empty", "保存剧本并生成世界树后，可在此查看章节、地点与结局。"));
         const results = byId("scenarioValidateResults");
         if (results) results.innerHTML = `<p class="text-muted small mb-0">${escapeHtml(t("scenario.validate.hint", "运行校验会检查死亡节点、死锁触发器、越级出口与禁词泄漏。"))}</p>`;
+        emitSelection(null);
         showTab("basic");
     }
 
@@ -493,7 +1054,11 @@
             return;
         }
         const levelVariant: Record<string, string> = { error: "danger", warn: "warning", info: "info" };
-        results.innerHTML = issues.map((issue) => `
+        const items = issues.slice();
+        if (payload.order_simulation && !payload.order_simulation.ok) {
+            items.push(...payload.order_simulation.issues.filter((issue) => issue.level === "error"));
+        }
+        results.innerHTML = items.map((issue) => `
             <div class="scenario-validate-item scenario-validate-${escapeHtml(levelVariant[issue.level] || "info")}">
                 <div class="scenario-validate-head">
                     <span class="badge bg-${escapeHtml(levelVariant[issue.level] || "info")}">${escapeHtml(issue.level)}</span>
@@ -540,10 +1105,6 @@
             const target = (event.target as HTMLElement).closest<HTMLElement>("[data-node-id]");
             if (target?.dataset.nodeId) selectNode(target.dataset.nodeId);
         });
-        byId("scenarioGraphCanvas")?.addEventListener("click", (event) => {
-            const target = (event.target as Element).closest<SVGElement>("[data-node-id]");
-            if (target?.getAttribute("data-node-id")) selectNode(target.getAttribute("data-node-id")!);
-        });
         byId("scenarioValidateResults")?.addEventListener("click", (event) => {
             const target = (event.target as HTMLElement).closest<HTMLElement>(".scenario-validate-jump");
             if (target?.dataset.nodeId) selectNode(target.dataset.nodeId);
@@ -556,9 +1117,10 @@
                 void saveNode();
             }
         });
+        bindGraphEvents();
     }
 
-    window.ScenarioNarrative = { load, clear, init };
+    window.ScenarioNarrative = { load, clear, init, syncRevision };
 
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", init);

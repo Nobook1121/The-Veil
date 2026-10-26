@@ -13,6 +13,13 @@ interface Window {
         load: (scenarioId: number | string, options?: { readonly?: boolean }) => Promise<void>;
         clear: () => void;
         init: () => void;
+        syncRevision: (revision: number) => void;
+    };
+    ScenarioTriggers?: {
+        load: (scenarioId: number | string, options?: { readonly?: boolean }) => Promise<void>;
+        clear: () => void;
+        init: () => void;
+        syncRevision: (revision: number) => void;
     };
     DiceTool: DiceToolConstructor;
     CheckTool: CheckToolConstructor;

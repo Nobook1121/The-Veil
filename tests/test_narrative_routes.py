@@ -262,3 +262,192 @@ def test_non_owner_cannot_edit(tmp_path):
     response = _patch_node(client, title="新")
 
     assert response.status_code == 403
+
+
+def _create_edge(client, **body):
+    payload = {"base_revision": 2, "from": "hall", "to": "room", "type": "portal"}
+    payload.update(body)
+    return client.post("/api/scenarios/7/narrative/edges", json=payload, headers=CSRF)
+
+
+def test_create_edge_appends_and_bumps_revision(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _create_edge(client, label="木门")
+
+    assert response.status_code == 201
+    data = response.get_json()["data"]
+    assert data["revision"] == 3
+    assert data["edge"]["label"] == "木门"
+    saved = json.loads((tmp_path / "scenarios" / "scenario-7" / "narrative.json").read_text(encoding="utf-8"))
+    assert any(edge.get("label") == "木门" for edge in saved["edges"])
+
+
+def test_create_edge_rejects_unknown_endpoint(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _create_edge(client, to="ghost")
+
+    assert response.status_code == 400
+
+
+def test_create_edge_rejects_duplicate(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _create_edge(client, type="adjacent")
+
+    assert response.status_code == 409
+
+
+def test_delete_edge_removes_and_bumps_revision(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.delete(
+        "/api/scenarios/7/narrative/edges/edge_hall_room",
+        json={"base_revision": 2},
+        headers=CSRF,
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["revision"] == 3
+    saved = json.loads((tmp_path / "scenarios" / "scenario-7" / "narrative.json").read_text(encoding="utf-8"))
+    assert saved["edges"] == []
+
+
+def test_delete_edge_requires_base_revision(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.delete("/api/scenarios/7/narrative/edges/edge_hall_room", headers=CSRF)
+
+    assert response.status_code == 409
+
+
+def _trigger_bundle():
+    bundle = _bundle()
+    bundle["assets"] = [{"id": "asset_pic", "kind": "image", "url": "/assets/pic.png", "alt": "旧图"}]
+    bundle["triggers"] = [
+        {
+            "id": "trg_intro",
+            "label": "开场",
+            "binding": {"kind": "enter", "location_id": "hall"},
+            "attachments": [{"asset_id": "asset_pic", "kind": "image", "visibility": "player_visible"}],
+        }
+    ]
+    return bundle
+
+
+def test_list_triggers_returns_specs_and_assets(tmp_path):
+    _write_scenario(tmp_path, bundle=_trigger_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.get("/api/scenarios/7/narrative/triggers")
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["triggers"][0]["id"] == "trg_intro"
+    assert data["assets"][0]["alt"] == "旧图"
+    assert data["revision"] == 2
+
+
+def test_create_and_test_trigger(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    created = client.post(
+        "/api/scenarios/7/narrative/triggers",
+        json={
+            "base_revision": 2,
+            "trigger": {
+                "id": "trg_lamp",
+                "label": "油灯",
+                "binding": {"kind": "enter", "location_id": "room"},
+                "content": "灯芯跳动。",
+                "attachments": [
+                    {"kind": "richtext", "body": "**灯芯**跳动。", "visibility": "player_visible"}
+                ],
+            },
+        },
+        headers=CSRF,
+    )
+    assert created.status_code == 201
+    assert created.get_json()["data"]["revision"] == 3
+
+    preview = client.post("/api/scenarios/7/narrative/triggers/trg_lamp/test", json={}, headers=CSRF)
+    assert preview.status_code == 200
+    data = preview.get_json()["data"]
+    assert data["ok"] is True
+    assert data["resolved_target"] == "room"
+    assert data["attachments"][0]["body"] == "**灯芯**跳动。"
+
+
+def test_trigger_preview_reports_missing_binding(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    client.post(
+        "/api/scenarios/7/narrative/triggers",
+        json={
+            "base_revision": 2,
+            "trigger": {"id": "trg_ghost", "binding": {"kind": "enter", "location_id": "ghost"}},
+        },
+        headers=CSRF,
+    )
+    preview = client.post("/api/scenarios/7/narrative/triggers/trg_ghost/test", json={}, headers=CSRF)
+
+    data = preview.get_json()["data"]
+    assert data["ok"] is False
+    assert data["resolved_target"] == "ghost"
+
+
+def test_update_and_delete_trigger(tmp_path):
+    _write_scenario(tmp_path, bundle=_trigger_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    updated = client.put(
+        "/api/scenarios/7/narrative/triggers/trg_intro",
+        json={"base_revision": 2, "label": "新开场", "once": False, "cooldown": 3},
+        headers=CSRF,
+    )
+    assert updated.status_code == 200
+    assert updated.get_json()["data"]["trigger"]["label"] == "新开场"
+    assert updated.get_json()["data"]["trigger"]["once"] is False
+
+    deleted = client.delete(
+        "/api/scenarios/7/narrative/triggers/trg_intro",
+        json={"base_revision": 3},
+        headers=CSRF,
+    )
+    assert deleted.status_code == 200
+    saved = json.loads((tmp_path / "scenarios" / "scenario-7" / "narrative.json").read_text(encoding="utf-8"))
+    assert saved["triggers"] == []
+
+
+def test_patch_asset_metadata(tmp_path):
+    _write_scenario(tmp_path, bundle=_trigger_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.patch(
+        "/api/scenarios/7/narrative/assets/asset_pic",
+        json={"base_revision": 2, "alt": "新图", "caption": "门后的画"},
+        headers=CSRF,
+    )
+
+    assert response.status_code == 200
+    asset = response.get_json()["data"]["asset"]
+    assert asset["alt"] == "新图"
+    assert asset["caption"] == "门后的画"

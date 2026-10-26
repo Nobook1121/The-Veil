@@ -136,10 +136,60 @@
                                 <p class="text-muted small mb-0" data-i18n="scenario.tree.select_hint">选择左侧节点查看详情。</p>
                             </div>
                         </div>
+                        <section class="scenario-trigger-panel" id="scenarioTriggerPanel">
+                            <div class="scenario-trigger-panel-head">
+                                <div>
+                                    <h6>触发器与媒体</h6>
+                                    <p class="text-muted small mb-0">选中节点查看绑定的触发器；测试只在编辑器中预览，不写入房间。</p>
+                                </div>
+                                <div class="scenario-trigger-panel-actions">
+                                    <input type="search" class="form-control form-control-sm" id="scenarioTriggerSearch" placeholder="筛选触发器…">
+                                    <button type="button" class="btn btn-sm btn-primary" id="scenarioTriggerAdd">
+                                        <i class="fa fa-plus" aria-hidden="true"></i>
+                                        <span>添加触发器</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="scenario-trigger-test-result" id="scenarioTriggerTestResult" hidden></div>
+                            <div class="scenario-trigger-editor" id="scenarioTriggerEditor" hidden></div>
+                            <div class="scenario-trigger-list" id="scenarioTriggerList">
+                                <p class="text-muted small mb-0">选择一个节点后，这里会列出绑定到它的触发器。</p>
+                            </div>
+                        </section>
                     </div>
 
                     <div class="tab-pane fade" id="scenarioTabGraph" role="tabpanel" aria-labelledby="scenarioTabGraphBtn">
-                        <p class="text-muted small mb-2" data-i18n="scenario.graph.readonly_hint">只读预览：节点位置按确定性布局排列；拖拽与缩放将在后续步骤开放。</p>
+                        <div class="scenario-graph-toolbar">
+                            <div class="btn-group btn-group-sm" role="group" aria-label="图谱模式">
+                                <button type="button" class="btn btn-outline-secondary active" id="scenarioGraphModeSelect" data-graph-mode="select">选择</button>
+                                <button type="button" class="btn btn-outline-secondary" id="scenarioGraphModeConnect" data-graph-mode="connect">连线</button>
+                                <button type="button" class="btn btn-outline-secondary" id="scenarioGraphModePan" data-graph-mode="pan">平移</button>
+                            </div>
+                            <select class="form-select form-select-sm scenario-graph-edge-type" id="scenarioGraphEdgeType" aria-label="连线类型">
+                                <option value="adjacent" selected>相邻</option>
+                                <option value="portal">通道</option>
+                                <option value="next">顺序</option>
+                                <option value="leads_to">通向</option>
+                                <option value="requires">需要</option>
+                                <option value="reveals">揭示</option>
+                                <option value="triggers">触发</option>
+                                <option value="mentions">提及</option>
+                            </select>
+                            <label class="scenario-graph-hard-toggle">
+                                <input type="checkbox" id="scenarioGraphEdgeHard">
+                                <span>hard</span>
+                            </label>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="scenarioGraphAutoLayout">
+                                <i class="fa fa-sitemap" aria-hidden="true"></i>
+                                <span>自动布局</span>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="scenarioGraphFit">
+                                <i class="fa fa-expand" aria-hidden="true"></i>
+                                <span>适配视图</span>
+                            </button>
+                            <span class="text-muted small" id="scenarioGraphHint"></span>
+                        </div>
+                        <div class="scenario-graph-edge-actions" id="scenarioGraphEdgeActions"></div>
                         <div class="scenario-graph-canvas" id="scenarioGraphCanvas"></div>
                     </div>
 

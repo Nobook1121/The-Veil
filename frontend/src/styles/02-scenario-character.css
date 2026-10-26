@@ -2650,6 +2650,279 @@ body.is-guest .guest-login-hint {
     text-align: center;
 }
 
+.scenario-graph-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.scenario-graph-edge-type {
+    width: auto;
+    min-width: 110px;
+}
+
+.scenario-graph-hard-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0;
+    font-size: 0.86rem;
+}
+
+.scenario-graph-edge-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    min-height: 0;
+    margin-bottom: 0.5rem;
+}
+
+.scenario-graph-edge-actions:empty {
+    display: none;
+}
+
+.scenario-graph-canvas {
+    cursor: grab;
+    touch-action: none;
+    overflow: hidden;
+    user-select: none;
+}
+
+.scenario-graph-node {
+    cursor: grab;
+}
+
+.scenario-graph-node.source {
+    cursor: crosshair;
+}
+
+.scenario-graph-edge {
+    cursor: pointer;
+}
+
+.scenario-trigger-panel {
+    margin-top: 1rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    background: var(--bs-body-bg, #ffffff);
+}
+
+.scenario-trigger-panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.scenario-trigger-panel-head h6 {
+    margin-bottom: 0.2rem;
+}
+
+.scenario-trigger-panel-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.scenario-trigger-panel-actions input[type="search"] {
+    min-width: 180px;
+}
+
+.scenario-trigger-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 46vh;
+    overflow: auto;
+}
+
+.scenario-trigger-card {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.5rem;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.scenario-trigger-card-main {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.scenario-trigger-card-title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.scenario-trigger-card-title code {
+    font-size: 0.75rem;
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.scenario-trigger-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+    font-size: 0.82rem;
+}
+
+.scenario-trigger-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex: 0 0 auto;
+}
+
+.scenario-trigger-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+}
+
+.scenario-trigger-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.15rem 0.45rem 0.15rem 0.15rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 999px;
+    background: var(--bs-body-bg, #ffffff);
+    font-size: 0.75rem;
+}
+
+.scenario-trigger-chip img {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.scenario-trigger-editor {
+    margin-bottom: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid var(--bs-primary, #0d6efd);
+    border-radius: 0.5rem;
+}
+
+.scenario-trigger-editor[hidden],
+.scenario-trigger-test-result[hidden] {
+    display: none;
+}
+
+.scenario-trigger-form-head,
+.scenario-trigger-attachments-head,
+.scenario-trigger-form-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+}
+
+.scenario-trigger-form-actions {
+    justify-content: flex-end;
+    margin-top: 0.75rem;
+    margin-bottom: 0;
+}
+
+.scenario-trigger-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.5rem;
+}
+
+.scenario-trigger-grid label,
+.scenario-trigger-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    margin: 0;
+    font-size: 0.8rem;
+}
+
+.scenario-trigger-inline {
+    flex-direction: row !important;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 1.1rem;
+}
+
+.scenario-trigger-content {
+    margin-top: 0.5rem;
+}
+
+.scenario-trigger-attachments {
+    margin-top: 0.65rem;
+}
+
+.scenario-trigger-attachment {
+    display: grid;
+    grid-template-columns: 90px minmax(120px, 1.2fr) minmax(100px, 1fr) minmax(100px, 1fr) 110px 70px auto;
+    gap: 0.35rem;
+    align-items: center;
+    margin-bottom: 0.4rem;
+}
+
+.scenario-trigger-attachment textarea {
+    grid-column: 1 / -1;
+}
+
+.scenario-trigger-preview {
+    padding: 0.6rem 0.75rem;
+    border-left: 3px solid var(--bs-info, #0dcaf0);
+    border-radius: 0.35rem;
+    background: rgba(13, 202, 240, 0.08);
+    margin-bottom: 0.75rem;
+}
+
+.scenario-trigger-preview.warn {
+    border-left-color: var(--bs-warning, #ffc107);
+    background: rgba(255, 193, 7, 0.1);
+}
+
+.scenario-trigger-preview-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+}
+
+.scenario-trigger-preview-attachment {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.3rem;
+    font-size: 0.84rem;
+}
+
+.scenario-trigger-preview-attachment img {
+    max-width: 160px;
+    max-height: 120px;
+    border-radius: 0.35rem;
+    object-fit: cover;
+}
+
+.scenario-trigger-preview-text {
+    margin: 0.3rem 0 0;
+    font-size: 0.84rem;
+    white-space: pre-wrap;
+}
+
 @media (max-width: 768px) {
     .scenario-tree-layout {
         grid-template-columns: 1fr;
@@ -2658,6 +2931,27 @@ body.is-guest .guest-login-hint {
     .scenario-tree-list,
     .scenario-node-inspector {
         max-height: 40vh;
+    }
+
+    .scenario-graph-toolbar {
+        align-items: stretch;
+    }
+
+    .scenario-graph-toolbar .btn,
+    .scenario-graph-toolbar .form-select {
+        flex: 1 1 auto;
+    }
+
+    .scenario-trigger-card {
+        flex-direction: column;
+    }
+
+    .scenario-trigger-attachment {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .scenario-trigger-attachment textarea {
+        grid-column: 1 / -1;
     }
 }
 

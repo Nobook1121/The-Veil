@@ -747,6 +747,7 @@ class ScenarioView {
         (requiredElement("scenarioModuleType") as HTMLSelectElement).value = "scene";
         updateScenarioModalTitle("scenario.modal.create", "创建剧本");
         window.ScenarioNarrative?.clear();
+        window.ScenarioTriggers?.clear();
     }
 
     private fillScenarioForm(scenario: Scenario): void {
@@ -768,6 +769,7 @@ class ScenarioView {
         (requiredElement("scenarioModuleType") as HTMLSelectElement).value = "scene";
         updateScenarioModalTitle("scenario.modal.edit", "编辑剧本");
         void window.ScenarioNarrative?.load(scenario.id, { readonly: this.directImportEditing });
+        void window.ScenarioTriggers?.load(scenario.id, { readonly: this.directImportEditing });
     }
 
     private async uploadResourceFiles(files: FileList): Promise<void> {
