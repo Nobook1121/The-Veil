@@ -490,3 +490,109 @@ def test_patch_asset_metadata(tmp_path):
     asset = response.get_json()["data"]["asset"]
     assert asset["alt"] == "新图"
     assert asset["caption"] == "门后的画"
+
+
+def test_reclassify_visibility_preview_then_apply(tmp_path):
+    bundle = _bundle()
+    bundle["nodes"].append({"id": "secret", "kind": "clue", "title": "真相", "visibility": "public"})
+    _write_scenario(tmp_path, bundle=bundle)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    preview = client.post(
+        "/api/scenarios/7/narrative/visibility/reclassify",
+        json={"base_revision": 2},
+        headers=CSRF,
+    )
+    assert preview.status_code == 200
+    data = preview.get_json()["data"]
+    assert data["applied"] is False
+    assert data["changed"] == 1
+    assert data["changes"][0]["id"] == "secret"
+    assert data["changes"][0]["to"] == "kp_only"
+    saved = json.loads((tmp_path / "scenarios" / "scenario-7" / "narrative.json").read_text(encoding="utf-8"))
+    node = next(item for item in saved["nodes"] if item["id"] == "secret")
+    assert node["visibility"] == "public"
+
+    applied = client.post(
+        "/api/scenarios/7/narrative/visibility/reclassify",
+        json={"base_revision": 2, "apply": True},
+        headers=CSRF,
+    )
+    assert applied.status_code == 200
+    result = applied.get_json()["data"]
+    assert result["applied"] is True
+    assert result["revision"] == 3
+    node = next(item for item in result["nodes"] if item["id"] == "secret")
+    assert node["visibility"] == "kp_only"
+    assert node["visibility_source"] == "auto"
+
+
+def test_reclassify_visibility_keeps_author_override(tmp_path):
+    bundle = _bundle()
+    bundle["nodes"].append({"id": "secret", "kind": "clue", "title": "真相", "visibility": "kp_only", "visibility_source": "author"})
+    _write_scenario(tmp_path, bundle=bundle)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.post(
+        "/api/scenarios/7/narrative/visibility/reclassify",
+        json={"base_revision": 2},
+        headers=CSRF,
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["changed"] == 0
+    assert data["auto"] == 2
+
+
+def test_narrative_start_get_and_put(tmp_path):
+    bundle = _bundle()
+    bundle["start"] = {"location_id": "hall", "opening_mode": "fixed", "public_intro": ["旧开场"], "kp_truth": "秘密"}
+    _write_scenario(tmp_path, bundle=bundle)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    read = client.get("/api/scenarios/7/narrative/start")
+    assert read.status_code == 200
+    payload = read.get_json()["data"]
+    assert payload["start"]["location_id"] == "hall"
+    assert payload["start"]["opening_mode"] == "fixed"
+    assert {item["id"] for item in payload["locations"]} == {"hall", "room"}
+
+    saved = client.put(
+        "/api/scenarios/7/narrative/start",
+        json={
+            "base_revision": 2,
+            "start": {
+                "location_id": "room",
+                "opening_mode": "hybrid",
+                "public_intro": ["第一段", "第二段"],
+                "kp_truth": "新的秘密",
+                "allow_enter_triggers": False,
+            },
+        },
+        headers=CSRF,
+    )
+    assert saved.status_code == 200
+    data = saved.get_json()["data"]
+    assert data["revision"] == 3
+    assert data["start"]["location_id"] == "room"
+    assert data["start"]["opening_mode"] == "hybrid"
+    assert data["start"]["public_intro"] == ["第一段", "第二段"]
+    assert data["start"]["allow_enter_triggers"] is False
+
+
+def test_narrative_start_rejects_readonly_import(tmp_path):
+    _write_scenario(tmp_path, import_mode="direct", bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.put(
+        "/api/scenarios/7/narrative/start",
+        json={"base_revision": 2, "start": {"location_id": "hall"}},
+        headers=CSRF,
+    )
+
+    assert response.status_code == 403

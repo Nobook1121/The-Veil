@@ -241,6 +241,9 @@ interface KnowledgeSectionInfo {
     preview: string;
     keywords: string[];
     secondary_keywords: string[];
+    visibility: string;
+    keywords_visibility: string;
+    keyword_spoiler: boolean;
     secondary_logic: string;
     is_constant: boolean;
     tier: string;

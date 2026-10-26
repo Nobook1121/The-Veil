@@ -127,6 +127,10 @@
                         <div class="scenario-tree-toolbar">
                             <input type="search" class="form-control form-control-sm" id="scenarioTreeSearch" placeholder="搜索节点…" data-i18n-placeholder="scenario.tree.search">
                             <span class="badge bg-secondary" id="scenarioTreeStatus" data-i18n="scenario.tree.empty_badge">未生成世界树</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary ms-auto" id="scenarioOpeningOpen">
+                                <i class="fa fa-flag" aria-hidden="true"></i>
+                                <span data-i18n="scenario.visibility.opening_title">开场配置</span>
+                            </button>
                         </div>
                         <div class="scenario-tree-layout">
                             <div class="scenario-tree-list" id="scenarioTreeList" role="tree">
@@ -182,6 +186,10 @@
                             <button type="button" class="btn btn-sm btn-outline-secondary" id="scenarioGraphAutoLayout">
                                 <i class="fa fa-sitemap" aria-hidden="true"></i>
                                 <span>自动布局</span>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="scenarioGraphReclassify">
+                                <i class="fa fa-magic" aria-hidden="true"></i>
+                                <span data-i18n="scenario.visibility.bulk_reclassify">重新自动判定</span>
                             </button>
                             <button type="button" class="btn btn-sm btn-outline-secondary" id="scenarioGraphFit">
                                 <i class="fa fa-expand" aria-hidden="true"></i>
@@ -254,6 +262,57 @@
                 <div class="modal-footer">
                     <span class="text-muted small me-auto" id="scenarioPlayerPreviewSummary"></span>
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="common.close">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="scenarioOpeningModal" tabindex="-1" aria-labelledby="scenarioOpeningModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="scenarioOpeningModalLabel" data-i18n="scenario.visibility.opening_title">开场配置</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="scenario-opening-grid">
+                        <label class="form-group">
+                            <span data-i18n="scenario.visibility.opening_location">起始地点</span>
+                            <select class="form-select form-select-sm" id="scenarioOpeningLocation"></select>
+                        </label>
+                        <label class="form-group">
+                            <span data-i18n="scenario.visibility.opening_mode">开场模式</span>
+                            <select class="form-select form-select-sm" id="scenarioOpeningMode">
+                                <option value="fixed" data-i18n="scenario.visibility.opening_mode_fixed">固定文本</option>
+                                <option value="model" data-i18n="scenario.visibility.opening_mode_model">交给模型</option>
+                                <option value="hybrid" data-i18n="scenario.visibility.opening_mode_hybrid">固定 + 模型续写</option>
+                            </select>
+                        </label>
+                    </div>
+                    <label class="form-group">
+                        <span data-i18n="scenario.visibility.opening_intro">公开开场（每段一行，空行分段）</span>
+                        <textarea class="form-control form-control-sm" id="scenarioOpeningIntro" rows="6"></textarea>
+                    </label>
+                    <label class="form-group">
+                        <span data-i18n="scenario.visibility.kp_notes">KP 附注（仅 KP 可见）</span>
+                        <textarea class="form-control form-control-sm" id="scenarioOpeningKpTruth" rows="3"></textarea>
+                    </label>
+                    <div class="scenario-opening-flags">
+                        <label class="form-check"><input class="form-check-input" type="checkbox" id="scenarioOpeningEnterTriggers"><span data-i18n="scenario.visibility.opening_enter_triggers">允许开场触发进入触发器</span></label>
+                        <label class="form-check"><input class="form-check-input" type="checkbox" id="scenarioOpeningModelContinue"><span data-i18n="scenario.visibility.opening_model_continue">允许模型在固定开场后续写</span></label>
+                    </div>
+                    <div class="scenario-opening-preview">
+                        <div class="d-flex align-items-center gap-2">
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="scenarioOpeningPreviewBtn" data-i18n="scenario.visibility.opening_preview">按玩家视角预览开场</button>
+                            <span class="text-muted small" data-i18n="scenario.visibility.player_preview_hint">按玩家可见性渲染既有剧本数据：不请求模型，也不写入房间状态。</span>
+                        </div>
+                        <div class="scenario-opening-bubbles" id="scenarioOpeningPreview"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <span class="text-muted small me-auto" id="scenarioOpeningStatus"></span>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="common.cancel">取消</button>
+                    <button type="button" class="btn btn-primary" id="scenarioOpeningSave" data-i18n="common.save">保存</button>
                 </div>
             </div>
         </div>

@@ -27,6 +27,9 @@
         layout_locked?: boolean;
         reveal_when?: unknown;
         source?: string;
+        visibility_source?: string;
+        visibility_confidence?: number;
+        visibility_reasons?: string[];
         spoiler_level?: number;
     }
 
@@ -37,6 +40,7 @@
         type?: string;
         label?: string;
         visibility?: string;
+        visibility_source?: string;
         hard?: boolean;
         condition?: unknown;
         reveal_when?: unknown;
@@ -78,6 +82,38 @@
         issues: ValidationIssue[];
         order_simulation?: { ok: boolean; issues: ValidationIssue[] };
         revision: number;
+    }
+
+    interface ReclassifyChange {
+        id: string;
+        title: string;
+        from: string;
+        to: string;
+        confidence: number;
+        reasons: string[];
+    }
+
+    interface ReclassifyPayload {
+        applied: boolean;
+        scanned: number;
+        auto: number;
+        changed: number;
+        changes: ReclassifyChange[];
+        nodes: GraphNode[];
+        revision: number;
+    }
+
+    interface StartLocation {
+        id: string;
+        title: string;
+        kind: string;
+    }
+
+    interface StartPayload {
+        start: Record<string, unknown>;
+        locations: StartLocation[];
+        revision: number;
+        permissions: { can_view: boolean; can_edit: boolean; readonly: boolean };
     }
 
     type GraphMode = "select" | "connect" | "pan";
@@ -407,6 +443,37 @@
         list.innerHTML = sortNodes(roots).map((node) => renderBranch(node)).join("");
     }
 
+    const REASON_LABEL: Record<string, string> = {
+        module: "KP 模块",
+        title_keyword: "标题关键词",
+        truth_phrase: "真相措辞",
+        stat_block: "数据块",
+        explicit_no_disclose: "明确禁止透露",
+        spatial_secret: "空间秘密",
+        reveal_verb: "揭示动作",
+        clue_default_hidden: "线索默认隐藏",
+        ending_default_kp_only: "结局默认仅 KP",
+        keyword_spoiler: "关键词剧透",
+        hidden_without_reveal_when: "隐藏但无揭示条件",
+        perceptible: "可感知",
+    };
+
+    function reasonLabel(raw: string): string {
+        const [name = "", suffix = ""] = String(raw || "").split(":", 2);
+        const label = REASON_LABEL[name] || name;
+        return suffix ? `${label}（${suffix}）` : label;
+    }
+
+    function visibilitySourceLabel(item: { visibility_source?: string; visibility_confidence?: number; visibility_reasons?: string[] }): string {
+        if ((item.visibility_source || "auto") === "author") {
+            return t("scenario.visibility.source_author", "作者设置");
+        }
+        const confidence = typeof item.visibility_confidence === "number" ? ` · ${item.visibility_confidence.toFixed(2)}` : "";
+        const reasons = (item.visibility_reasons || []).map(reasonLabel).slice(0, 3);
+        const reason = reasons.length ? ` · ${t("scenario.visibility.reason_prefix", "理由")}：${reasons.join("、")}` : "";
+        return `${t("scenario.visibility.auto_badge", "自动判定")}${confidence}${reason}`;
+    }
+
     function renderInspector(): void {
         const inspector = byId("scenarioNodeInspector");
         if (!inspector) return;
@@ -423,7 +490,7 @@
             ["ID", `<code>${escapeHtml(node.id)}</code>`],
             ["类型", escapeHtml(meta.label)],
             ["父节点", parentOf(node) ? escapeHtml(nodeById(parentOf(node))?.title || parentOf(node)) : "—"],
-            ["来源", escapeHtml(node.source === "author" ? t("scenario.visibility.source_author", "作者编辑") : t("scenario.visibility.source_auto", "自动识别"))],
+            ["可见性来源", escapeHtml(visibilitySourceLabel(node))],
             ["场景角色", escapeHtml(node.scene_role || "—")],
             ["进入方式", escapeHtml(node.access || "—")],
             ["可重复", node.repeatable === false ? "否" : "是"],
@@ -736,6 +803,7 @@
                     ${(["public", "hidden", "kp_only"] as const).map((value) => `<option value="${value}"${visibility === value ? " selected" : ""}>${escapeHtml(VISIBILITY_LABEL[value])}</option>`).join("")}
                 </select>
             </label>
+            <span class="text-muted small">${escapeHtml(visibilitySourceLabel(edge))}</span>
             ${revealBlockMarkup("scenarioEdge", edge.reveal_when, visibility)}
             <button type="button" class="btn btn-sm btn-outline-primary" data-edge-save>${escapeHtml(t("scenario.graph.save_edge", "保存边"))}</button>
             <button type="button" class="btn btn-sm btn-outline-${edge.hard ? "secondary" : "danger"}" data-edge-toggle>${escapeHtml(edge.hard ? t("scenario.graph.make_soft", "改为 soft") : t("scenario.graph.make_hard", "改为 hard"))}</button>
@@ -1115,6 +1183,172 @@
         }
     }
 
+    async function reclassifyVisibility(): Promise<void> {
+        if (!state.scenarioId || !editable() || !state.bundle) return;
+        const endpoint = `/api/scenarios/${state.scenarioId}/narrative/visibility/reclassify`;
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<ReclassifyPayload>>(
+                endpoint,
+                { method: "POST", body: { base_revision: state.revision, apply: false } },
+            );
+            if (!response.ok || !data?.success || !data.data) {
+                if (response.status === 409) {
+                    await handleConflict();
+                    return;
+                }
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            const preview = data.data;
+            if (preview.changed === 0) {
+                showNotification(t("scenario.visibility.bulk_none", "没有需要调整的自动判定条目。"), "info");
+                return;
+            }
+            const lines = preview.changes.slice(0, 8)
+                .map((change) => `${change.title}：${VISIBILITY_LABEL[change.from] || change.from} → ${VISIBILITY_LABEL[change.to] || change.to}`)
+                .join("\n");
+            const confirmed = await window.TrpgDialog?.confirm({
+                title: t("scenario.visibility.bulk_reclassify", "重新自动判定可见性"),
+                message: `${t("scenario.visibility.bulk_confirm", "仅调整自动判定的条目，作者设置的可见性不会被覆盖：")}\n${lines}${preview.changes.length > 8 ? "\n…" : ""}`,
+                confirmText: t("scenario.visibility.bulk_apply", "应用"),
+            });
+            if (!confirmed) return;
+            const applied = await TrpgApi.requestWithResponse<ApiResponse<ReclassifyPayload>>(
+                endpoint,
+                { method: "POST", body: { base_revision: state.revision, apply: true } },
+            );
+            if (!applied.response.ok || !applied.data?.success || !applied.data.data) {
+                if (applied.response.status === 409) {
+                    await handleConflict();
+                    return;
+                }
+                throw new Error(applied.data?.message || `HTTP ${applied.response.status}`);
+            }
+            const result = applied.data.data;
+            applyRevision(result.revision);
+            if (state.bundle) {
+                const updated = new Map(result.nodes.map((node) => [node.id, node]));
+                state.bundle.nodes = state.bundle.nodes.map((node) => updated.get(node.id) || node);
+            }
+            renderAll();
+            showNotification(
+                `${t("scenario.visibility.bulk_done", "已重新判定")} ${result.changed}`,
+                "success",
+            );
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            showNotification(message, "error");
+        }
+    }
+
+    let openingStart: Record<string, unknown> = {};
+
+    async function openOpeningEditor(): Promise<void> {
+        if (!state.scenarioId) {
+            showNotification(t("scenario.tree.save_first", "请先保存剧本，再查看世界树。"), "warning");
+            return;
+        }
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<StartPayload>>(
+                `/api/scenarios/${state.scenarioId}/narrative/start`,
+            );
+            if (!response.ok || !data?.success || !data.data) {
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            const payload = data.data;
+            openingStart = payload.start || {};
+            const locationSelect = byId<HTMLSelectElement>("scenarioOpeningLocation");
+            if (locationSelect) {
+                locationSelect.innerHTML = `<option value="">${escapeHtml(t("scenario.visibility.opening_location_none", "未设置"))}</option>`
+                    + payload.locations.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.title)}（${escapeHtml(item.kind)}）</option>`).join("");
+                locationSelect.value = String(openingStart.location_id || "");
+            }
+            const mode = byId<HTMLSelectElement>("scenarioOpeningMode");
+            if (mode) mode.value = String(openingStart.opening_mode || "hybrid");
+            const intro = byId<HTMLTextAreaElement>("scenarioOpeningIntro");
+            if (intro) {
+                intro.value = (Array.isArray(openingStart.public_intro) ? openingStart.public_intro as string[] : []).join("\n\n");
+            }
+            const kpTruth = byId<HTMLTextAreaElement>("scenarioOpeningKpTruth");
+            if (kpTruth) kpTruth.value = String(openingStart.kp_truth || "");
+            const enterTriggers = byId<HTMLInputElement>("scenarioOpeningEnterTriggers");
+            if (enterTriggers) enterTriggers.checked = openingStart.allow_enter_triggers !== false;
+            const modelContinue = byId<HTMLInputElement>("scenarioOpeningModelContinue");
+            if (modelContinue) modelContinue.checked = openingStart.allow_model_continuation !== false;
+
+            const readonly = payload.permissions?.readonly === true;
+            document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>(
+                "#scenarioOpeningModal input, #scenarioOpeningModal select, #scenarioOpeningModal textarea, #scenarioOpeningSave",
+            ).forEach((field) => { field.disabled = readonly; });
+            const status = byId("scenarioOpeningStatus");
+            if (status) status.textContent = readonly ? t("scenario.visibility.readonly", "只读剧本：可预览，不可保存。") : "";
+            const preview = byId("scenarioOpeningPreview");
+            if (preview) preview.innerHTML = "";
+            const modal = byId("scenarioOpeningModal");
+            const api = (window as unknown as { bootstrap?: { Modal?: { getOrCreateInstance: (element: Element) => { show: () => void } } } }).bootstrap?.Modal;
+            if (modal) api?.getOrCreateInstance(modal).show();
+        } catch (error) {
+            showNotification(error instanceof Error ? error.message : String(error), "error");
+        }
+    }
+
+    function readOpeningForm(): Record<string, unknown> | null {
+        const locationSelect = byId<HTMLSelectElement>("scenarioOpeningLocation");
+        if (!locationSelect) return null;
+        const intro = byId<HTMLTextAreaElement>("scenarioOpeningIntro")?.value || "";
+        return {
+            ...openingStart,
+            location_id: locationSelect.value || "",
+            opening_mode: byId<HTMLSelectElement>("scenarioOpeningMode")?.value || "hybrid",
+            public_intro: intro.split(/\n\s*\n|\n/).map((part) => part.trim()).filter(Boolean),
+            kp_truth: byId<HTMLTextAreaElement>("scenarioOpeningKpTruth")?.value.trim() || "",
+            allow_enter_triggers: byId<HTMLInputElement>("scenarioOpeningEnterTriggers")?.checked !== false,
+            allow_model_continuation: byId<HTMLInputElement>("scenarioOpeningModelContinue")?.checked !== false,
+        };
+    }
+
+    async function saveOpening(): Promise<void> {
+        if (!state.scenarioId || !editable()) return;
+        const start = readOpeningForm();
+        if (!start) return;
+        const button = byId<HTMLButtonElement>("scenarioOpeningSave");
+        if (button) button.disabled = true;
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ start: Record<string, unknown>; revision: number }>>(
+                `/api/scenarios/${state.scenarioId}/narrative/start`,
+                { method: "PUT", body: { base_revision: state.revision, start } },
+            );
+            if (!response.ok || !data?.success || !data.data) {
+                if (response.status === 409) {
+                    await handleConflict();
+                    return;
+                }
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            openingStart = data.data.start || {};
+            applyRevision(data.data.revision);
+            const status = byId("scenarioOpeningStatus");
+            if (status) status.textContent = t("scenario.visibility.opening_saved", "开场配置已保存。");
+            showNotification(t("scenario.visibility.opening_saved", "开场配置已保存。"), "success");
+        } catch (error) {
+            showNotification(error instanceof Error ? error.message : String(error), "error");
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
+    function previewOpening(): void {
+        const container = byId("scenarioOpeningPreview");
+        if (!container) return;
+        const start = readOpeningForm() || {};
+        const intro = Array.isArray(start.public_intro) ? start.public_intro as string[] : [];
+        const mode = String(start.opening_mode || "hybrid");
+        const bubbles = intro.map((paragraph) => `<div class="scenario-opening-bubble"><span class="scenario-opening-speaker">${escapeHtml(t("scenario.visibility.opening_narrator", "旁白"))}</span><p class="mb-0">${escapeHtml(paragraph)}</p></div>`);
+        if (mode !== "fixed") {
+            bubbles.push(`<div class="scenario-opening-note small text-muted">${escapeHtml(t("scenario.visibility.opening_model_note", "模型会在固定开场后继续叙事。"))}</div>`);
+        }
+        container.innerHTML = bubbles.length ? bubbles.join("") : `<p class="text-muted small mb-0">${escapeHtml(t("scenario.visibility.opening_empty", "尚未填写公开开场。"))}</p>`;
+    }
+
     function bindGraphEvents(): void {
         const canvas = byId("scenarioGraphCanvas");
         if (!canvas) return;
@@ -1259,7 +1493,17 @@
         byId("scenarioGraphAutoLayout")?.addEventListener("click", () => {
             void autoLayout();
         });
+        byId("scenarioGraphReclassify")?.addEventListener("click", () => {
+            void reclassifyVisibility();
+        });
         byId("scenarioGraphPlayerPreview")?.addEventListener("click", () => openPlayerPreview());
+        byId("scenarioOpeningOpen")?.addEventListener("click", () => {
+            void openOpeningEditor();
+        });
+        byId("scenarioOpeningSave")?.addEventListener("click", () => {
+            void saveOpening();
+        });
+        byId("scenarioOpeningPreviewBtn")?.addEventListener("click", () => previewOpening());
     }
 
     function renderAll(): void {
@@ -1368,7 +1612,7 @@
         if (payload.order_simulation && !payload.order_simulation.ok) {
             items.push(...payload.order_simulation.issues.filter((issue) => issue.level === "error"));
         }
-        results.innerHTML = items.map((issue) => `
+        const issueMarkup = (issue: ValidationIssue): string => `
             <div class="scenario-validate-item scenario-validate-${escapeHtml(levelVariant[issue.level] || "info")}">
                 <div class="scenario-validate-head">
                     <span class="badge bg-${escapeHtml(levelVariant[issue.level] || "info")}">${escapeHtml(issue.level)}</span>
@@ -1377,7 +1621,15 @@
                 </div>
                 <div class="small">${escapeHtml(issue.message)}</div>
                 ${issue.suggestion ? `<div class="small text-muted">${escapeHtml(issue.suggestion)}</div>` : ""}
-            </div>`).join("");
+            </div>`;
+        const reviewItems = items.filter((issue) => issue.code.startsWith("visibility.") || issue.code === "trigger.needs_review");
+        const otherItems = items.filter((issue) => !reviewItems.includes(issue));
+        results.innerHTML = [
+            reviewItems.length
+                ? `<section class="scenario-validate-group"><h6 class="scenario-validate-group-title">${escapeHtml(t("scenario.visibility.review_queue", "待复核可见性"))} <span class="badge bg-warning text-dark">${reviewItems.length}</span></h6>${reviewItems.map(issueMarkup).join("")}</section>`
+                : "",
+            otherItems.length ? otherItems.map(issueMarkup).join("") : "",
+        ].join("");
     }
 
     async function runValidation(): Promise<void> {

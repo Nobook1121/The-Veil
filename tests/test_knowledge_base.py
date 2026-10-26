@@ -531,9 +531,11 @@ def test_list_and_update_knowledge_section_lorebook_fields():
         chunks,
         "section:甲",
         {
-            "keywords": "铜钥匙, 铜钥匙，暗门",
+            "keywords": "铜钥匙, 铜钥匙，暗门，真相",
             "secondary_keywords": ["夜晚"],
             "secondary_logic": "and_all",
+            "visibility": "hidden",
+            "keywords_visibility": "kp_only",
             "is_constant": True,
             "tier": "CORE",
             "probability": 999,
@@ -546,7 +548,9 @@ def test_list_and_update_knowledge_section_lorebook_fields():
 
     assert count == 2
     by_id = {chunk.chunk_id: chunk for chunk in updated}
-    assert by_id["c1"].keywords == ["铜钥匙", "暗门"]  # 逗号/顿号混合分隔并去重
+    assert by_id["c1"].keywords == ["铜钥匙", "暗门", "真相"]  # 逗号/顿号混合分隔并去重
+    assert by_id["c1"].visibility == "hidden"
+    assert by_id["c1"].keywords_visibility == "kp_only"
     assert by_id["c2"].is_constant is True
     assert by_id["c1"].secondary_logic == "and_all"
     assert by_id["c1"].tier == "core"  # 大小写归一
@@ -557,6 +561,10 @@ def test_list_and_update_knowledge_section_lorebook_fields():
     assert by_id["c1"].trigger_chunks is True
     # 未命中的章节不受影响
     assert by_id["c3"].keywords is None
+    sections_after = list_knowledge_sections(updated)
+    assert sections_after[0]["visibility"] == "hidden"
+    assert sections_after[0]["keywords_visibility"] == "kp_only"
+    assert sections_after[0]["keyword_spoiler"] is True
 
 
 def test_update_knowledge_section_ignores_unknown_section():

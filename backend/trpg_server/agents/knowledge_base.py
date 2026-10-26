@@ -17,7 +17,8 @@ from typing import Any, Iterable, Mapping
 
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.scenario_store import load_scenario_by_id
-from trpg_server.agents.narrative.visibility import is_visible_to_player, normalize_visibility
+from trpg_server.agents.narrative.model import VISIBILITY_KP_ONLY
+from trpg_server.agents.narrative.visibility import is_visible_to_player, keyword_is_spoiler, normalize_visibility
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,8 @@ class KnowledgeChunk:
     unlock_condition: str | None
     text: str
     chunk_id: str
+    # 关键词本身的可见性：公开 / 隐藏 / 仅 KP。仅 KP 的触发词不会对玩家侧激活该条目。
+    keywords_visibility: str = "public"
     embedding: list[float] | None = None
     source_ref: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
@@ -132,6 +135,7 @@ def build_knowledge_chunks(scenario: Mapping[str, Any] | None) -> list[Knowledge
                 scene_id=str(scene_id) if scene_id not in (None, "") else None,
                 card_type=card_type,
                 visibility=normalize_visibility(module.get("visibility")),
+                keywords_visibility=normalize_visibility(module.get("keywords_visibility")),
                 spoiler_level=max(0, _int(module.get("spoiler_level"), 0)),
                 unlock_condition=(str(module.get("unlock_condition")) if module.get("unlock_condition") else None),
                 text=text,
@@ -617,6 +621,9 @@ def apply_lorebook_update(chunk: KnowledgeChunk, values: Mapping[str, Any]) -> K
         updates["tier"] = tier if tier in TIER_VALUES else "background"
     if "group" in values:
         updates["group"] = str(values["group"] or "").strip()
+    for field in ("visibility", "keywords_visibility"):
+        if field in values:
+            updates[field] = normalize_visibility(values[field])
     for field in LOREBOOK_BOOL_FIELDS:
         if field in values:
             updates[field] = bool(values[field])
@@ -640,6 +647,9 @@ def list_knowledge_sections(chunks: Iterable[KnowledgeChunk]) -> list[dict[str, 
                 "preview": (head.text or "")[:160],
                 "keywords": list(head.keywords or []),
                 "secondary_keywords": list(head.secondary_keywords or []),
+                "visibility": normalize_visibility(head.visibility),
+                "keywords_visibility": normalize_visibility(head.keywords_visibility),
+                "keyword_spoiler": any(keyword_is_spoiler(item) for item in (head.keywords or [])),
                 "secondary_logic": head.secondary_logic,
                 "is_constant": bool(head.is_constant),
                 "tier": head.tier,
@@ -908,13 +918,15 @@ class KnowledgeBaseService:
                 break
         return entries
 
-    def _keyword_candidates(self, chunks: list[KnowledgeChunk], query: str, enabled: bool) -> list[_Candidate]:
+    def _keyword_candidates(self, chunks: list[KnowledgeChunk], query: str, enabled: bool, audience: str = "kp") -> list[_Candidate]:
         """关键词通道候选：主键命中即激活（副键按 ``secondary_logic`` 过滤）。"""
         if not enabled:
             return []
         candidates: list[_Candidate] = []
         for chunk in chunks:
             if chunk.is_constant:
+                continue
+            if audience != "kp" and normalize_visibility(chunk.keywords_visibility) == VISIBILITY_KP_ONLY:
                 continue
             hit, score = _keyword_hit(chunk, query)
             if hit:
@@ -1016,7 +1028,7 @@ class KnowledgeBaseService:
             if chunk.is_constant
         ]
         # 双通道：关键词命中就直接激活（不再依赖语义相似度）；无命中才走 BM25+向量。
-        hits = self._keyword_candidates(filtered, str(query or ""), keyword_channel)
+        hits = self._keyword_candidates(filtered, str(query or ""), keyword_channel, audience)
         if hits:
             candidates = constants + hits
         else:

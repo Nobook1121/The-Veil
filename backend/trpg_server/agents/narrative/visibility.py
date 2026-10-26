@@ -74,6 +74,11 @@ def tighten(current: str, candidate: str) -> str:
     return current if visibility_rank(current) >= visibility_rank(candidate) else candidate
 
 
+def keyword_is_spoiler(keyword: Any) -> bool:
+    """关键词本身是否会剧透（供世界书编辑界面提示，不做运行时判断）。"""
+    return bool(_KEYWORD_SPOILER_RE.search(str(keyword or "")))
+
+
 def is_visible_to_player(visibility: str, *, revealed: bool = False) -> bool:
     state = normalize_visibility(visibility)
     if state == VISIBILITY_PUBLIC:

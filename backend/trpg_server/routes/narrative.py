@@ -12,7 +12,7 @@ from typing import Any, Mapping
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.agents.narrative.logger import log_event
-from trpg_server.agents.narrative.model import NarrativeBundle, NarrativeEdge, TOPOLOGIES
+from trpg_server.agents.narrative.model import NarrativeBundle, NarrativeEdge, TOPOLOGIES, normalize_start
 from trpg_server.agents.narrative.store import (
     build_index,
     bundle_summary,
@@ -22,6 +22,7 @@ from trpg_server.agents.narrative.store import (
 )
 from trpg_server.agents.narrative.triggers import normalize_asset, normalize_trigger_spec
 from trpg_server.agents.narrative.validate import simulate_any_order, validate_bundle
+from trpg_server.agents.narrative.visibility import classify_visibility
 from trpg_server.json_store import read_json
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, server_error, success_response
@@ -241,6 +242,10 @@ def patch_node(scenario_id: int, node_id: str):
     data.update({key: value for key, value in payload.items() if key != "base_revision"})
     data["id"] = node.id
     updated = type(node).from_dict(data)
+    if "visibility" in payload:
+        # 作者显式改过可见性后，批量自动判定不再覆盖它（§8.7）。
+        updated.extra["visibility_source"] = "author"
+        updated.extra.pop("needs_review", None)
     bundle.nodes = [updated if item.id == node.id else item for item in bundle.nodes]
     revision = _commit(storage, bundle, scenario_id=scenario_id)
     return success_response({"node": updated.to_dict(), "revision": revision}, "Node updated")
@@ -273,6 +278,8 @@ def patch_edge(scenario_id: int, edge_id: str):
     updated = type(edge).from_dict(data)
     if updated is None or not bundle.node(updated.from_id) or not bundle.node(updated.to_id):
         return error_response("Invalid edge endpoints", 400, "Edge endpoints must exist")
+    if "visibility" in payload:
+        updated.extra["visibility_source"] = "author"
     bundle.edges = [updated if item.id == edge.id else item for item in bundle.edges]
     revision = _commit(storage, bundle, scenario_id=scenario_id)
     return success_response({"edge": updated.to_dict(), "revision": revision}, "Edge updated")
@@ -344,6 +351,132 @@ def delete_edge(scenario_id: int, edge_id: str):
     bundle.edges = kept
     revision = _commit(storage, bundle, scenario_id=scenario_id)
     return success_response({"revision": revision, "edge_id": edge_id}, "Edge deleted")
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/visibility/reclassify", methods=["POST"])
+def reclassify_visibility(scenario_id: int):
+    """批量重新自动判定可见性（§8.7）：默认只预演，`apply=true` 才落盘。"""
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    denied = _require_edit(storage, descriptor)
+    if denied is not None:
+        return denied
+
+    payload = _payload()
+    conflict = _check_base_revision(bundle, payload)
+    if conflict is not None:
+        return conflict
+    apply = bool(payload.get("apply"))
+
+    changes: list[dict[str, Any]] = []
+    updated_nodes: list[dict[str, Any]] = []
+    auto_count = 0
+    for node in bundle.nodes:
+        if str(node.extra.get("visibility_source") or "auto") == "author":
+            continue
+        auto_count += 1
+        decision = classify_visibility(
+            kind=node.kind,
+            module_type="ending" if node.kind == "ending" else "",
+            title=node.title,
+            summary=node.summary,
+            body=node.body,
+            kp_notes=node.kp_notes or "",
+            keywords=node.keywords,
+            reveal_when=node.reveal_when,
+        )
+        if decision.visibility == node.visibility:
+            continue
+        changes.append({
+            "id": node.id,
+            "title": node.title or node.id,
+            "from": node.visibility,
+            "to": decision.visibility,
+            "confidence": round(decision.confidence, 2),
+            "reasons": list(decision.reasons),
+        })
+        if not apply:
+            continue
+        node.visibility = decision.visibility
+        node.spoiler_level = 2 if decision.visibility == "kp_only" else (1 if decision.visibility == "hidden" else 0)
+        node.extra["visibility_source"] = "auto"
+        node.extra["visibility_confidence"] = round(decision.confidence, 2)
+        node.extra["visibility_reasons"] = list(decision.reasons)
+        if decision.needs_review:
+            node.extra["needs_review"] = True
+        else:
+            node.extra.pop("needs_review", None)
+        updated_nodes.append(node.to_dict())
+
+    revision = _commit(storage, bundle, scenario_id=scenario_id) if apply and changes else _revision(bundle)
+    return success_response(
+        {
+            "applied": bool(apply and changes),
+            "scanned": len(bundle.nodes),
+            "auto": auto_count,
+            "changed": len(changes),
+            "changes": changes,
+            "nodes": updated_nodes,
+            "revision": revision,
+        },
+        "Visibility reclassified" if apply and changes else "Visibility reclassification preview",
+    )
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/start", methods=["GET"])
+def get_narrative_start(scenario_id: int):
+    """读取开场配置（§8.7），附可选的起始地点列表。"""
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    locations = [
+        {"id": node.id, "title": node.title or node.id, "kind": node.kind}
+        for node in bundle.nodes
+        if node.kind in ("act", "area", "location")
+    ]
+    return success_response(
+        {
+            "start": normalize_start(bundle.start),
+            "locations": locations,
+            "revision": _revision(bundle),
+            "permissions": _permissions(descriptor),
+        }
+    )
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/start", methods=["PUT"])
+def put_narrative_start(scenario_id: int):
+    """保存开场配置；只写 `narrative.json` 的 `start`。"""
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    denied = _require_edit(storage, descriptor)
+    if denied is not None:
+        return denied
+
+    payload = _payload()
+    conflict = _check_base_revision(bundle, payload)
+    if conflict is not None:
+        return conflict
+    start = payload.get("start")
+    if not isinstance(start, Mapping):
+        return error_response("start is required", 400, "Invalid payload")
+    bundle.start = normalize_start(start)
+    revision = _commit(storage, bundle, scenario_id=scenario_id)
+    return success_response({"start": bundle.start, "revision": revision}, "Opening saved")
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/validate", methods=["POST"])
