@@ -160,6 +160,8 @@ interface Scenario {
 
 type ScenarioInput = Omit<Scenario, "id" | "createdAt" | "updatedAt" | "owner_id"> & {
     id?: number;
+    /** 世界树校验未通过时，作者确认后强制发布。 */
+    force_narrative?: boolean;
 };
 
 interface ScenarioModelConstructor {

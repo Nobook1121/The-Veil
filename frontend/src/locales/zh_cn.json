@@ -90,6 +90,8 @@
     "scenario.graph.duplicate_edge": "这条连接已存在。",
     "scenario.graph.save_edge": "保存边",
     "scenario.graph.edge_saved": "边已保存。",
+    "scenario.graph.undo": "撤销",
+    "scenario.graph.redo": "重做",
     "scenario.visibility.public": "公开",
     "scenario.visibility.hidden": "隐藏",
     "scenario.visibility.kp_only": "仅 KP",

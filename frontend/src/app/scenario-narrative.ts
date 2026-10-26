@@ -368,6 +368,17 @@
     /** 「从正文提取」的候选只对当前节点生效，切换节点即失效。 */
     let keywordCandidates: { nodeId: string; items: KeywordCandidate[] } | null = null;
 
+    /** 图编辑撤销 / 重做（§8.1.6 / §8.1.2）：保存操作前的整包快照。 */
+    interface HistoryEntry {
+        bundle: GraphBundle;
+        revision: number;
+    }
+
+    const HISTORY_LIMIT = 30;
+    let undoStack: HistoryEntry[] = [];
+    let redoStack: HistoryEntry[] = [];
+    let restoringHistory = false;
+
     function splitTerms(value: string | undefined): string[] {
         const seen = new Set<string>();
         const result: string[] = [];
@@ -435,6 +446,16 @@
             "'": "&#39;",
         };
         return String(value ?? "").replace(/[&<>"']/g, (char) => entities[char] || char);
+    }
+
+    function isTypingTarget(target: EventTarget | null): boolean {
+        return (
+            target instanceof HTMLElement &&
+            (target.tagName === "INPUT" ||
+                target.tagName === "TEXTAREA" ||
+                target.tagName === "SELECT" ||
+                target.isContentEditable)
+        );
     }
 
     function kindMeta(kind: string): { label: string; icon: string; color: string; order: number } {
@@ -827,6 +848,7 @@
         }
         const button = byId<HTMLButtonElement>("scenarioNodeSave");
         if (button) button.disabled = true;
+        const history = pushHistory();
         try {
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ node: GraphNode; revision: number }>>(
                 `/api/scenarios/${state.scenarioId}/narrative/nodes/${encodeURIComponent(node.id)}`,
@@ -834,6 +856,7 @@
             );
             if (!response.ok || !data?.success || !data.data) {
                 if (response.status === 409) {
+                    discardHistory(history);
                     await handleConflict();
                     return;
                 }
@@ -847,6 +870,7 @@
             renderAll();
             showNotification(t("scenario.tree.saved", "节点已保存。"), "success");
         } catch (error) {
+            discardHistory(history);
             const message = error instanceof Error ? error.message : String(error);
             showNotification(message, "error");
         } finally {
@@ -863,6 +887,124 @@
     function syncRevision(revision: number): void {
         state.revision = revision;
         updateStatusBadge();
+    }
+
+    // ------------------------------------------------------------------
+    // 撤销 / 重做：操作前记录整包快照，恢复时走全量 PUT（带 base_revision）
+    // ------------------------------------------------------------------
+    function snapshotBundle(): HistoryEntry | null {
+        if (!state.bundle) return null;
+        try {
+            return { bundle: JSON.parse(JSON.stringify(state.bundle)) as GraphBundle, revision: state.revision };
+        } catch {
+            return null;
+        }
+    }
+
+    function resetHistory(): void {
+        undoStack = [];
+        redoStack = [];
+        updateHistoryButtons();
+    }
+
+    /** 在发起写请求前调用；失败时用 `discardHistory` 撤销这次记录。 */
+    function pushHistory(): HistoryEntry | null {
+        const entry = snapshotBundle();
+        if (!entry) return null;
+        undoStack.push(entry);
+        if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+        redoStack = [];
+        updateHistoryButtons();
+        return entry;
+    }
+
+    function discardHistory(entry: HistoryEntry | null): void {
+        if (!entry) return;
+        const index = undoStack.lastIndexOf(entry);
+        if (index >= 0) undoStack.splice(index, 1);
+        updateHistoryButtons();
+    }
+
+    function updateHistoryButtons(): void {
+        const allowed = editable();
+        const undo = byId<HTMLButtonElement>("scenarioGraphUndo");
+        const redo = byId<HTMLButtonElement>("scenarioGraphRedo");
+        if (undo) {
+            undo.disabled = !allowed || undoStack.length === 0;
+            undo.title = `${t("scenario.graph.undo", "撤销")} (Ctrl+Z)`;
+        }
+        if (redo) {
+            redo.disabled = !allowed || redoStack.length === 0;
+            redo.title = `${t("scenario.graph.redo", "重做")} (Ctrl+Y)`;
+        }
+    }
+
+    async function restoreHistory(entry: HistoryEntry): Promise<boolean> {
+        if (!state.scenarioId || !state.bundle) return false;
+        const bundle = JSON.parse(JSON.stringify(entry.bundle)) as GraphBundle & { meta?: Record<string, unknown> };
+        // 服务端以传入 meta.revision 作为基线累加；这里强制对齐当前修订号，
+        // 避免撤销把 revision 回退导致后续写请求全部冲突。
+        bundle.meta = { ...(bundle.meta || {}), revision: state.revision };
+        restoringHistory = true;
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ bundle: GraphBundle; revision: number }>>(
+                `/api/scenarios/${state.scenarioId}/narrative`,
+                { method: "PUT", body: { base_revision: state.revision, bundle } },
+            );
+            if (!response.ok || !data?.success || !data.data) {
+                if (response.status === 409) {
+                    await handleConflict();
+                    return false;
+                }
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            state.bundle = data.data.bundle;
+            applyRevision(data.data.revision);
+            keywordCandidates = null;
+            renderAll();
+            if (state.canEdit) void runValidation();
+            return true;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            showNotification(message, "error");
+            return false;
+        } finally {
+            restoringHistory = false;
+        }
+    }
+
+    async function undoHistory(): Promise<void> {
+        if (restoringHistory || !editable() || undoStack.length === 0) return;
+        const entry = undoStack.pop() as HistoryEntry;
+        const current = snapshotBundle();
+        const ok = await restoreHistory(entry);
+        if (!ok) {
+            undoStack.push(entry);
+            updateHistoryButtons();
+            return;
+        }
+        if (current) {
+            redoStack.push(current);
+            if (redoStack.length > HISTORY_LIMIT) redoStack.shift();
+        }
+        updateHistoryButtons();
+    }
+
+    async function redoHistory(): Promise<void> {
+        if (restoringHistory || !editable() || redoStack.length === 0) return;
+        const entry = redoStack.pop() as HistoryEntry;
+        const current = snapshotBundle();
+        const ok = await restoreHistory(entry);
+        if (!ok) {
+            redoStack.push(entry);
+            updateHistoryButtons();
+            return;
+        }
+        if (current) {
+            undoStack.push(current);
+            if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+        }
+        updateHistoryButtons();
     }
 
     function updateStatusBadge(): void {
@@ -1058,6 +1200,7 @@
         const visibility = byId<HTMLSelectElement>("scenarioEdgeVisibility")?.value || "public";
         const reveal = readReveal("scenarioEdge");
         const revealWhen = visibility === "hidden" ? revealToCondition(reveal) : null;
+        const history = pushHistory();
         try {
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ edge: GraphEdge; revision: number }>>(
                 `/api/scenarios/${state.scenarioId}/narrative/edges/${encodeURIComponent(edge.id)}`,
@@ -1065,6 +1208,7 @@
             );
             if (!response.ok || !data?.success || !data.data) {
                 if (response.status === 409) {
+                    discardHistory(history);
                     await handleConflict();
                     return;
                 }
@@ -1077,6 +1221,7 @@
             renderGraph();
             showNotification(t("scenario.graph.edge_saved", "边已保存。"), "success");
         } catch (error) {
+            discardHistory(history);
             const message = error instanceof Error ? error.message : String(error);
             showNotification(message, "error");
         }
@@ -1247,6 +1392,7 @@
     async function persistLayout(nodeId: string): Promise<void> {
         const position = state.positions.get(nodeId);
         if (!position || !state.scenarioId) return;
+        const history = pushHistory();
         try {
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ node: GraphNode; revision: number }>>(
                 `/api/scenarios/${state.scenarioId}/narrative/nodes/${encodeURIComponent(nodeId)}`,
@@ -1254,6 +1400,7 @@
             );
             if (!response.ok || !data?.success || !data.data) {
                 if (response.status === 409) {
+                    discardHistory(history);
                     await handleConflict();
                     return;
                 }
@@ -1265,6 +1412,7 @@
                 state.bundle.nodes = state.bundle.nodes.map((item) => (item.id === saved.id ? { ...item, ...saved } : item));
             }
         } catch (error) {
+            discardHistory(history);
             const message = error instanceof Error ? error.message : String(error);
             showNotification(message, "error");
         }
@@ -1273,6 +1421,7 @@
     async function connectNodes(sourceId: string, targetId: string): Promise<void> {
         const type = (byId<HTMLSelectElement>("scenarioGraphEdgeType")?.value || "adjacent");
         const hard = byId<HTMLInputElement>("scenarioGraphEdgeHard")?.checked === true;
+        const history = pushHistory();
         try {
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ edge: GraphEdge; revision: number }>>(
                 `/api/scenarios/${state.scenarioId}/narrative/edges`,
@@ -1280,6 +1429,7 @@
             );
             if (!response.ok || !data?.success || !data.data) {
                 if (response.status === 409) {
+                    discardHistory(history);
                     showNotification(data?.message || t("scenario.graph.duplicate_edge", "这条连接已存在。"), "warning");
                     return;
                 }
@@ -1291,6 +1441,7 @@
             renderGraph();
             showNotification(t("scenario.graph.edge_created", "连接已创建。"), "success");
         } catch (error) {
+            discardHistory(history);
             const message = error instanceof Error ? error.message : String(error);
             showNotification(message, "error");
         }
@@ -1319,6 +1470,7 @@
     async function toggleEdgeHard(): Promise<void> {
         const edge = edgeById(state.selectedEdgeId);
         if (!edge || !editable()) return;
+        const history = pushHistory();
         try {
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ edge: GraphEdge; revision: number }>>(
                 `/api/scenarios/${state.scenarioId}/narrative/edges/${encodeURIComponent(edge.id)}`,
@@ -1326,6 +1478,7 @@
             );
             if (!response.ok || !data?.success || !data.data) {
                 if (response.status === 409) {
+                    discardHistory(history);
                     await handleConflict();
                     return;
                 }
@@ -1337,6 +1490,7 @@
             }
             renderGraph();
         } catch (error) {
+            discardHistory(history);
             const message = error instanceof Error ? error.message : String(error);
             showNotification(message, "error");
         }
@@ -1354,6 +1508,7 @@
             });
             if (!confirmed) return;
         }
+        const history = pushHistory();
         try {
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ revision: number }>>(
                 `/api/scenarios/${state.scenarioId}/narrative/edges/${encodeURIComponent(edge.id)}`,
@@ -1361,6 +1516,7 @@
             );
             if (!response.ok || !data?.success || !data.data) {
                 if (response.status === 409) {
+                    discardHistory(history);
                     await handleConflict();
                     return;
                 }
@@ -1372,6 +1528,7 @@
             renderGraph();
             renderInspector();
         } catch (error) {
+            discardHistory(history);
             const message = error instanceof Error ? error.message : String(error);
             showNotification(message, "error");
         }
@@ -1411,6 +1568,7 @@
             const position = positions.get(node.id);
             return position ? { ...node, layout: { x: position.x, y: position.y } } : node;
         });
+        const history = pushHistory();
         try {
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ bundle: GraphBundle; revision: number }>>(
                 `/api/scenarios/${state.scenarioId}/narrative`,
@@ -1418,6 +1576,7 @@
             );
             if (!response.ok || !data?.success || !data.data) {
                 if (response.status === 409) {
+                    discardHistory(history);
                     await handleConflict();
                     return;
                 }
@@ -1428,6 +1587,7 @@
             renderAll();
             fitView();
         } catch (error) {
+            discardHistory(history);
             const message = error instanceof Error ? error.message : String(error);
             showNotification(message, "error");
         }
@@ -1462,11 +1622,13 @@
                 confirmText: t("scenario.visibility.bulk_apply", "应用"),
             });
             if (!confirmed) return;
+            const history = pushHistory();
             const applied = await TrpgApi.requestWithResponse<ApiResponse<ReclassifyPayload>>(
                 endpoint,
                 { method: "POST", body: { base_revision: state.revision, apply: true } },
             );
             if (!applied.response.ok || !applied.data?.success || !applied.data.data) {
+                discardHistory(history);
                 if (applied.response.status === 409) {
                     await handleConflict();
                     return;
@@ -1740,6 +1902,12 @@
             button.addEventListener("click", () => setViewMode(button.dataset.graphView === "player" ? "player" : "kp"));
         });
         byId("scenarioGraphFit")?.addEventListener("click", () => fitView());
+        byId("scenarioGraphUndo")?.addEventListener("click", () => {
+            void undoHistory();
+        });
+        byId("scenarioGraphRedo")?.addEventListener("click", () => {
+            void redoHistory();
+        });
         byId("scenarioGraphAutoLayout")?.addEventListener("click", () => {
             void autoLayout();
         });
@@ -1755,7 +1923,7 @@
         });
         byId("scenarioOpeningPreviewBtn")?.addEventListener("click", () => previewOpening());
 
-        // §8.1.6：连线模式下 Esc 退出连线，避免误关整个编辑弹窗。
+        // §8.1.6：Esc 退出连线；Ctrl+Z / Ctrl+Y 撤销重做；Delete 删除选中连接。
         document.addEventListener(
             "keydown",
             (event) => {
@@ -1767,15 +1935,21 @@
                     setMode("select");
                     return;
                 }
-                if ((event.key !== "Delete" && event.key !== "Backspace") || state.selectedEdgeId === "") return;
-                const target = event.target;
-                const typing =
-                    target instanceof HTMLElement &&
-                    (target.tagName === "INPUT" ||
-                        target.tagName === "TEXTAREA" ||
-                        target.tagName === "SELECT" ||
-                        target.isContentEditable);
-                if (typing) return;
+                const typing = isTypingTarget(event.target);
+                if ((event.ctrlKey || event.metaKey) && !typing) {
+                    const key = event.key.toLowerCase();
+                    if (key === "z") {
+                        event.preventDefault();
+                        void (event.shiftKey ? redoHistory() : undoHistory());
+                        return;
+                    }
+                    if (key === "y") {
+                        event.preventDefault();
+                        void redoHistory();
+                        return;
+                    }
+                }
+                if ((event.key !== "Delete" && event.key !== "Backspace") || state.selectedEdgeId === "" || typing) return;
                 event.preventDefault();
                 void deleteSelectedEdge(true);
             },
@@ -1803,6 +1977,7 @@
         state.validation = null;
         state.mode = "select";
         keywordCandidates = null;
+        resetHistory();
         resetViewMode();
         resetGeneratePanel();
         const search = byId<HTMLInputElement>("scenarioTreeSearch");
@@ -1840,6 +2015,7 @@
             updateStatusBadge();
             syncGeneratePanel();
             renderAll();
+            updateHistoryButtons();
             window.requestAnimationFrame(() => fitView());
             window.ScenarioTriggers?.syncRevision(state.revision);
             emitSelection(null);
@@ -1866,6 +2042,7 @@
         state.drag = null;
         state.pan = null;
         keywordCandidates = null;
+        resetHistory();
         resetViewMode();
         resetGeneratePanel();
         const search = byId<HTMLInputElement>("scenarioTreeSearch");

@@ -199,6 +199,16 @@
                                 <button type="button" class="btn btn-outline-secondary" id="scenarioGraphModeConnect" data-graph-mode="connect">连线</button>
                                 <button type="button" class="btn btn-outline-secondary" id="scenarioGraphModePan" data-graph-mode="pan">平移</button>
                             </div>
+                            <div class="btn-group btn-group-sm" role="group" aria-label="撤销与重做">
+                                <button type="button" class="btn btn-outline-secondary" id="scenarioGraphUndo" disabled title="撤销 (Ctrl+Z)">
+                                    <i class="fa fa-undo" aria-hidden="true"></i>
+                                    <span data-i18n="scenario.graph.undo">撤销</span>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" id="scenarioGraphRedo" disabled title="重做 (Ctrl+Y)">
+                                    <i class="fa fa-redo" aria-hidden="true"></i>
+                                    <span data-i18n="scenario.graph.redo">重做</span>
+                                </button>
+                            </div>
                             <select class="form-select form-select-sm scenario-graph-edge-type" id="scenarioGraphEdgeType" aria-label="连线类型">
                                 <option value="adjacent" selected>相邻</option>
                                 <option value="portal">通道</option>

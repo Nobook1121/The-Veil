@@ -90,6 +90,8 @@
     "scenario.graph.duplicate_edge": "This edge already exists.",
     "scenario.graph.save_edge": "Save edge",
     "scenario.graph.edge_saved": "Edge saved.",
+    "scenario.graph.undo": "Undo",
+    "scenario.graph.redo": "Redo",
     "scenario.visibility.public": "Public",
     "scenario.visibility.hidden": "Hidden",
     "scenario.visibility.kp_only": "KP only",

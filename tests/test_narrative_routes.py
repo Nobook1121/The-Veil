@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 
 from trpg_server.app_factory import create_app
@@ -863,3 +864,78 @@ def test_narrative_start_rejects_readonly_import(tmp_path):
     )
 
     assert response.status_code == 403
+
+
+def _put_scenario(client, **payload):
+    return client.put("/api/scenarios/7", json=payload, headers=CSRF)
+
+
+def test_publish_blocked_when_visibility_needs_review(tmp_path):
+    # §14.2 发布硬闸门：needs_review 未清零时返回 409，且不改写剧本。
+    bundle = _bundle()
+    bundle["nodes"][1]["visibility"] = "hidden"
+    bundle["nodes"][1]["reveal_when"] = {"flag": "door_open"}
+    bundle["nodes"][1]["needs_review"] = True
+    bundle["nodes"][1]["visibility_source"] = "auto"
+    bundle["nodes"].append({"id": "end", "kind": "ending", "title": "结局"})
+    bundle["edges"].append({"id": "edge_room_end", "from": "room", "to": "end", "type": "next"})
+    _write_scenario(tmp_path, bundle=bundle)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _put_scenario(client, title="更新后标题")
+
+    assert response.status_code == 409
+    payload = response.get_json()
+    assert payload["error"] == "narrative.publish_blocked"
+    assert payload["code"] == "narrative_publish_blocked"
+    assert payload["data"]["needs_review"] == 1
+    assert payload["data"]["errors"] == 0
+    descriptor = json.loads((tmp_path / "scenarios" / "scenario-7" / "scenario.json").read_text(encoding="utf-8"))
+    assert descriptor["title"] == "测试剧本"
+
+
+def test_publish_blocked_on_validation_error(tmp_path):
+    bundle = _bundle()
+    bundle["nodes"].append({"id": "hall", "kind": "location", "title": "重复节点"})
+    _write_scenario(tmp_path, bundle=bundle)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _put_scenario(client, title="更新后标题")
+
+    assert response.status_code == 409
+    payload = response.get_json()
+    assert payload["data"]["errors"] >= 1
+    assert payload["data"]["needs_review"] == 0
+
+
+def test_publish_force_bypasses_gate_and_logs(tmp_path, caplog):
+    # 强制发布：写入剧本描述，并在日志留下 publish.forced，且不持久化该标记。
+    bundle = _bundle()
+    bundle["nodes"][1]["needs_review"] = True
+    _write_scenario(tmp_path, bundle=bundle)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    with caplog.at_level(logging.INFO, logger="trpg_server.agents.narrative.logger"):
+        response = _put_scenario(client, title="强制发布标题", force_narrative=True)
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["title"] == "强制发布标题"
+    descriptor = json.loads((tmp_path / "scenarios" / "scenario-7" / "scenario.json").read_text(encoding="utf-8"))
+    assert descriptor["title"] == "强制发布标题"
+    assert "force_narrative" not in descriptor
+    assert any("narrative.publish.forced" in record.getMessage() for record in caplog.records)
+
+
+def test_publish_allowed_without_narrative(tmp_path):
+    # 没有世界树的旧剧本不受硬闸门影响。
+    _write_scenario(tmp_path)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _put_scenario(client, title="旧剧本改名")
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["title"] == "旧剧本改名"
