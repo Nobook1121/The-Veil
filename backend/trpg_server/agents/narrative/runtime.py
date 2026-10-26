@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from trpg_server.agents.narrative.conditions import ConditionResult, evaluate_condition
 from trpg_server.agents.narrative.ledger import append_ledger_event, read_ledger_events
+from trpg_server.agents.narrative.logger import log_event, log_warning
 from trpg_server.agents.narrative.model import (
     VISIBILITY_KP_ONLY,
     VISIBILITY_PUBLIC,
@@ -330,6 +331,36 @@ class NarrativeRuntime:
         event.setdefault("source", "kp")
         return event
 
+    def _turn(self) -> int:
+        return _as_int((self.narrative.get("clock") or {}).get("turn"), 0)
+
+    def _log_clock_events(self, events: list[dict[str, Any]]) -> None:
+        """§10.2：时钟推进与阈值到达；只看已落盘的状态值。"""
+        for event in events:
+            if str(event.get("kind") or "").lower() != "clock":
+                continue
+            clock_id = _text(event.get("clock_id"))
+            clock = (self.narrative.get("clocks") or {}).get(clock_id) or {}
+            value = _as_int(clock.get("value"), 0)
+            threshold = _as_int(clock.get("threshold"), 0)
+            log_event(
+                "clock.advance",
+                room_id=self.room_id or "",
+                turn=self._turn(),
+                clock_id=clock_id,
+                value=value,
+                threshold=threshold,
+            )
+            if threshold and value >= threshold:
+                log_event(
+                    "clock.reach",
+                    room_id=self.room_id or "",
+                    turn=self._turn(),
+                    clock_id=clock_id,
+                    value=value,
+                    action=_text(clock.get("action")) or "threshold",
+                )
+
     def record(self, payload: Mapping[str, Any], *, summary: str = "") -> dict[str, Any]:
         event = self._event(payload, summary=summary)
         if self.room_dir is None:
@@ -337,6 +368,7 @@ class NarrativeRuntime:
         append_ledger_event(self.room_dir, event, bundle=self.bundle)
         self.narrative = apply_event(self.room_dir, event)
         self._keyframe_if_needed([event])
+        self._log_clock_events([event])
         return event
 
     def _keyframe_reason(self, events: list[Mapping[str, Any]]) -> str:
@@ -395,6 +427,7 @@ class NarrativeRuntime:
                 bundle=self.bundle,
             )
         self._keyframe_if_needed(events)
+        self._log_clock_events(events)
         return events
 
     # ---- 触发器 -----------------------------------------------------------
@@ -543,10 +576,26 @@ class NarrativeRuntime:
         return result
 
     def move(self, target_ref: Any, *, actor: str | None = None) -> dict[str, Any]:
+        origin = self.location_id
+        turn = self._turn()
+
+        def _deny(reason: str, *, to: str | None = None, **extra: Any) -> None:
+            route: dict[str, Any] = {"from": origin or "", "to": to or _text(target_ref)}
+            log_warning(
+                "guard.move.denied",
+                room_id=self.room_id or "",
+                turn=turn,
+                reason=reason,
+                **route,
+                **extra,
+            )
+
         target = self.resolve_node(target_ref, kinds=("location", "ending"))
         if target is None:
+            _deny("unknown_target")
             raise NarrativeRuntimeError(f"找不到地点：{target_ref}")
         if target.visibility == VISIBILITY_KP_ONLY or not self.node_visible(target.id):
+            _deny("hidden", to=target.id)
             raise NarrativeRuntimeError("目标地点尚未向玩家揭示，不能移动")
         if target.id == self.location_id:
             return {"moved": False, "already_here": True, "location_id": target.id, "title": self.title(target.id)}
@@ -556,10 +605,12 @@ class NarrativeRuntime:
             for edge, condition in ((edge, self._edge_condition(edge, self.narrative)) for edge, target_id in self._movement_edges_from(self.location_id or "") if target_id == target.id)
         ]
         if not edges:
+            _deny("not_adjacent", to=target.id)
             raise NarrativeRuntimeError(f"从当前位置无法直接到达 {target.title or target.id}")
         usable = [edge for edge, condition in edges if condition.ok]
         if not usable:
             missing = edges[0][1].missing
+            _deny("condition", to=target.id, missing=list(missing))
             raise NarrativeRuntimeError(
                 f"前往 {target.title or target.id} 的条件未满足，缺少："
                 + "；".join(str(item) for item in missing)
@@ -567,6 +618,7 @@ class NarrativeRuntime:
         if target.kind == "ending" and target.completion:
             gate = evaluate_condition(target.completion, self.narrative)
             if not gate.ok:
+                _deny("ending_gate", to=target.id, missing=list(gate.missing))
                 raise NarrativeRuntimeError(
                     "结局条件未满足，不能进入结局；缺少："
                     + "；".join(str(item) for item in gate.missing)
@@ -576,6 +628,14 @@ class NarrativeRuntime:
         event = self.record(
             {"kind": "move", "to": target.id, "from": self.location_id, "actor": _text(actor) or None},
             summary=f"移动到 {target.title or target.id}",
+        )
+        route: dict[str, Any] = {"from": origin or "", "to": target.id}
+        log_event(
+            "narrative.move.free",
+            room_id=self.room_id or "",
+            turn=turn,
+            reason="revisit" if visited_before else "adjacent",
+            **route,
         )
         trigger_result = self._auto_triggers(
             "enter",
@@ -611,7 +671,15 @@ class NarrativeRuntime:
                 newly_revealed = state != VISIBILITY_PUBLIC and object_id not in self.revealed_ids()
                 if newly_revealed:
                     reveal_when = obj.get("reveal_when")
-                    if not reveal_when or not evaluate_condition(reveal_when, self.narrative).ok:
+                    condition = evaluate_condition(reveal_when, self.narrative) if reveal_when else None
+                    if condition is None or not condition.ok:
+                        log_warning(
+                            "guard.reveal.denied",
+                            room_id=self.room_id or "",
+                            turn=self._turn(),
+                            clue_id=object_id,
+                            missing=list(condition.missing) if condition else [],
+                        )
                         raise NarrativeRuntimeError("物件隐藏层尚未解锁")
                 return location, dict(obj), state, newly_revealed
         raise NarrativeRuntimeError(f"当前地点没有物件：{ref}")
@@ -652,6 +720,19 @@ class NarrativeRuntime:
         check_id: str | None = None,
     ) -> dict[str, Any]:
         _, obj, _, newly_revealed = self._find_object(object_ref)
+        object_id = _text(obj.get("id") or object_ref)
+        turn = self._turn()
+
+        def _deny(reason: str, interaction_id: str = "") -> None:
+            log_warning(
+                "guard.interaction.denied",
+                room_id=self.room_id or "",
+                turn=turn,
+                object_id=object_id,
+                interaction_id=interaction_id or _text(interaction_ref),
+                reason=reason,
+            )
+
         interactions = [item for item in (obj.get("interactions") or []) if isinstance(item, Mapping)]
         interaction = None
         for item in interactions:
@@ -661,20 +742,24 @@ class NarrativeRuntime:
         if interaction is None and len(interactions) == 1:
             interaction = interactions[0]
         if interaction is None:
+            _deny("unknown_interaction")
             raise NarrativeRuntimeError(f"物件 {object_ref} 没有交互：{interaction_ref}")
 
         interaction_id = _text(interaction.get("id"))
         normalized_result = _normalize_result(result)
         check_record = self._check_record(check_id) if check_id else None
         if check_id and check_record is None:
+            _deny("missing_check", interaction_id)
             raise NarrativeRuntimeError(f"检定记录 {check_id} 不存在或不属于本房间")
         if check_record is not None:
             recorded_skill = _text(check_record.get("skill"))
             expected_skill = _text(interaction.get("skill") or skill)
             if recorded_skill and expected_skill and recorded_skill.casefold() != expected_skill.casefold():
+                _deny("check_skill_mismatch", interaction_id)
                 raise NarrativeRuntimeError("检定技能与交互要求不一致")
             recorded_result = _normalize_result(check_record.get("result"))
             if _result_family(recorded_result) != _result_family(normalized_result):
+                _deny("check_result_mismatch", interaction_id)
                 raise NarrativeRuntimeError("检定结果与结算结果不一致")
         repeatable = bool(interaction.get("repeatable", True))
         results = self.narrative.get("interaction_results") or {}
@@ -690,6 +775,7 @@ class NarrativeRuntime:
         outcomes = interaction.get("outcomes") if isinstance(interaction.get("outcomes"), Mapping) else {}
         outcome = outcomes.get(normalized_result) or outcomes.get("any")
         if not isinstance(outcome, Mapping):
+            _deny("missing_outcome", interaction_id)
             raise NarrativeRuntimeError(f"交互 {interaction_id} 没有可用的结果文本")
         outcome_text = _text(outcome.get("text"))
         effects = outcome.get("effects") if isinstance(outcome.get("effects"), Mapping) else outcome
@@ -718,6 +804,15 @@ class NarrativeRuntime:
         self.record_batch(
             payloads,
             summary=f"交互 {obj.get('name') or object_ref} / {normalized_result}",
+        )
+        log_event(
+            "interaction.resolve",
+            room_id=self.room_id or "",
+            turn=self._turn(),
+            object_id=object_id,
+            interaction_id=interaction_id,
+            result=normalized_result,
+            effects=[str(item.get("kind") or "") for item in payloads],
         )
         trigger_result = self._auto_triggers(
             "interaction",

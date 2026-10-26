@@ -98,7 +98,7 @@ def _status_command(args: list[str], scenarios_dir: Path | str, flags: set[str])
         summary["storage"] = str(storage.parent) if storage else None
         if as_json:
             return True, _json(summary)
-        lines = [f"剧本 {summary.get('scenario_id') or storage.name} 世界树/图谱状态：", _status_line(summary)]
+        lines = [f"剧本 {summary.get('scenario_id') or (storage.name if storage else tokens[0])} 世界树/图谱状态：", _status_line(summary)]
         if summary.get("unreachable_locations"):
             lines.append(f"  不可达地点: {', '.join(summary['unreachable_locations'])}")
         if summary.get("orphan_assets"):
@@ -443,6 +443,8 @@ def _bundle_for_version(
     descriptor, scenario = load_scenario_by_id(Path(scenarios_dir), scenario_ref, version)
     if not descriptor:
         return None, f"剧本 {scenario_ref} 不存在版本 {version}。"
+    if not scenario:
+        return None, f"剧本 {scenario_ref} 的版本 {version} 数据缺失。"
     if descriptor.parent.name != "versions":
         return None, f"剧本 {scenario_ref} 不存在版本 {version}。"
     storage = descriptor.parent.parent

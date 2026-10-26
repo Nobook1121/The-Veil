@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 from uuid import uuid4
 
+from trpg_server.agents.narrative.logger import log_event
 from trpg_server.agents.narrative.model import NarrativeBundle
 from trpg_server.agents.narrative.visibility import assert_no_kp_only
 from trpg_server.json_store import read_json, write_json_atomic
@@ -174,9 +175,13 @@ def append_ledger_event(
         handle.write(line)
         handle.flush()
         os.fsync(handle.fileno())
-    logger.info(
-        "narrative.ledger.append room=%s turn=%s event=%s kind=%s key=%s",
-        directory.name, item["turn"], event_id, kind, item["key"],
+    log_event(
+        "ledger.append",
+        room_id=directory.name,
+        turn=item["turn"],
+        event_id=event_id,
+        kind=kind,
+        key=item["key"],
     )
     return item
 
@@ -353,6 +358,13 @@ def save_summary(
     }
     summaries[normalized_scope][key] = entry
     write_json_atomic(summaries_path(room_dir), summaries)
+    log_event(
+        "summary.compact",
+        room_id=Path(room_dir).name,
+        turn=entry["turn"],
+        scope=normalized_scope,
+        chars=len(entry["text"]),
+    )
     return entry
 
 

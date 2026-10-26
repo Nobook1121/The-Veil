@@ -316,7 +316,7 @@ def _parse_objects(section: Section) -> tuple[list[dict[str, Any]], list[dict[st
         body = _BULLET_RE.sub("", line).strip()
         outcome_match = _OUTCOME_RE.match(body)
         if outcome_match and current_object is not None:
-            outcome_key = outcome_match.group(1)
+            outcome_key = str(outcome_match.group(1) or "")
             text = outcome_match.group(2).strip()
             outcomes = current_object["interactions"][0]["outcomes"] if current_object["interactions"] else None
             if outcomes is not None:

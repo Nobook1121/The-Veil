@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator, Mapping
 
 from trpg_server.agents.narrative.conditions import evaluate_condition
+from trpg_server.agents.narrative.logger import log_event
 from trpg_server.agents.narrative.model import (
     VISIBILITY_HIDDEN,
     VISIBILITY_KP_ONLY,
@@ -1279,6 +1280,15 @@ def validate_bundle(
     error_count = sum(1 for issue in issues if issue.level == "error")
     warning_count = sum(1 for issue in issues if issue.level == "warn")
     issues = _truncate(issues, max_issues)
+    log_event(
+        "validate.done",
+        scenario_id=bundle.scenario_id,
+        topology=bundle.topology,
+        errors=error_count,
+        warnings=warning_count,
+        infos=max(0, len(issues) - error_count - warning_count),
+        order_independent=bool(bundle.meta.get("order_independent", False)),
+    )
     return ValidationReport(
         topology=bundle.topology,
         issues=issues,
@@ -1597,12 +1607,12 @@ def simulate_any_order(
         for clue_id in clues:
             clue_providers.setdefault(clue_id, set()).add(location_id)
     flag_providers: dict[str, set[str]] = {}
-    for location_id, flags in resources.flags.items():
-        for flag_id in flags:
+    for location_id, flag_ids in resources.flags.items():
+        for flag_id in flag_ids:
             flag_providers.setdefault(flag_id, set()).add(location_id)
     item_providers: dict[str, set[str]] = {}
-    for location_id, items in resources.items.items():
-        for item_id in items:
+    for location_id, item_ids in resources.items.items():
+        for item_id in item_ids:
             item_providers.setdefault(item_id, set()).add(location_id)
 
     issues: list[ValidationIssue] = []

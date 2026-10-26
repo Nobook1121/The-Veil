@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 from typing import Any, Mapping
 
+from trpg_server.agents.narrative.logger import log_event, log_warning
 from trpg_server.agents.room_state import load_room_state, save_room_state
 from trpg_server.json_store import read_json, write_json_atomic
 
@@ -336,7 +337,17 @@ def save_narrative_state(room_dir: Path | str, narrative: Mapping[str, Any]) -> 
     if inventory:
         state["items"] = list(dict.fromkeys(inventory))
 
-    saved = save_room_state(directory, state)
+    try:
+        saved = save_room_state(directory, state)
+    except Exception as exc:  # noqa: BLE001 - 持久化失败要留痕，但仍需抛给调用方
+        log_warning(
+            "state.persist.failed",
+            room_id=directory.name,
+            turn=_as_int((normalized.get("clock") or {}).get("turn"), 0),
+            path=str(directory / "state.json"),
+            reason=str(exc)[:200],
+        )
+        raise
     logger.debug(
         "narrative.state.saved room=%s location=%s turn=%s",
         directory.name, location, (normalized.get("clock") or {}).get("turn"),
@@ -677,9 +688,13 @@ def write_keyframe(
         keyframes = [keyframes[0], *keyframes[-(MAX_KEYFRAMES - 2):]]
     keyframes.append(keyframe)
     write_json_atomic(_keyframes_path(directory), {"keyframes": keyframes})
-    logger.info(
-        "narrative.keyframe.write room=%s turn=%s keyframe=%s reason=%s",
-        directory.name, turn, keyframe["keyframe_id"], keyframe["reason"],
+    log_event(
+        "ledger.keyframe.write",
+        room_id=directory.name,
+        turn=turn,
+        keyframe_id=keyframe["keyframe_id"],
+        reason=keyframe["reason"],
+        ledger_seq=keyframe["ledger_seq"],
     )
     return keyframe
 
@@ -693,11 +708,13 @@ def replay_narrative(room_dir: Path | str, *, events: list[Mapping[str, Any]] | 
     """关键帧 + 账本重放（§6.4.3）；校验失败时仍返回可用状态并记日志。"""
     directory = Path(room_dir)
     keyframe = latest_keyframe(directory)
+    replay_result = "ok"
     if keyframe and isinstance(keyframe.get("state"), Mapping):
         payload = keyframe["state"]
         checksum = str(keyframe.get("checksum") or "")
         if checksum and checksum != state_checksum(payload):
             logger.warning("narrative.keyframe.checksum_mismatch room=%s keyframe=%s", directory.name, keyframe.get("keyframe_id"))
+            replay_result = "checksum_mismatch"
         narrative = normalize_narrative_state(payload.get(NARRATIVE_KEY))
         after_seq = _as_int(keyframe.get("ledger_seq"), 0)
     else:
@@ -707,9 +724,20 @@ def replay_narrative(room_dir: Path | str, *, events: list[Mapping[str, Any]] | 
     if events is None:
         from trpg_server.agents.narrative.ledger import read_ledger_events
 
-        events = read_ledger_events(directory, after_seq=after_seq)
-    for event in events:
+        replayed_events: list[Mapping[str, Any]] = list(read_ledger_events(directory, after_seq=after_seq))
+    else:
+        replayed_events = events
+    if after_seq and replayed_events and _as_int(replayed_events[0].get("seq"), 0) > after_seq + 1:
+        replay_result = "gap"
+    for event in replayed_events:
         narrative = apply_to_narrative(narrative, event)
+    log_event(
+        "ledger.replay",
+        room_id=directory.name,
+        keyframe_id=str(keyframe.get("keyframe_id") or "") if keyframe else "",
+        events=len(replayed_events),
+        result=replay_result,
+    )
     return narrative
 
 

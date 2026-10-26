@@ -11,6 +11,7 @@ import logging
 import re
 import math
 import random
+import time
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 # 检索降级（embedding 失败 / 向量库查询失败）属于持续状态，
 # 只在首次出现时告警，避免每条消息、每轮工具调用都重复刷同一条日志。
 _logged_degradations: set[str] = set()
+# §10.2：预算裁剪按房间每天只记一次，避免每条消息都刷同一条日志。
+_budget_degraded_day: dict[str, str] = {}
 
 
 def _log_retrieval_degradation(kind: str, error: Exception) -> None:
@@ -36,6 +39,23 @@ def _log_retrieval_degradation(kind: str, error: Exception) -> None:
         kind,
         error,
         exc_info=True,
+    )
+
+
+def _log_budget_degraded(room_id: str, before: int, after: int) -> None:
+    day = time.strftime("%Y-%m-%d")
+    key = str(room_id or "")
+    if _budget_degraded_day.get(key) == day:
+        return
+    _budget_degraded_day[key] = day
+    from trpg_server.agents.narrative.logger import log_warning
+
+    log_warning(
+        "budget.degraded",
+        room_id=key,
+        before=before,
+        after=after,
+        dropped=max(0, before - after),
     )
 
 
@@ -1104,7 +1124,10 @@ class KnowledgeBaseService:
 
         ranked = candidates[:limit]
         results = [_render_section(item, sections, parent_max_chars) for item in ranked]
+        before_budget = len(results)
         results = _apply_token_budget(results, int(token_budget))
+        if len(results) < before_budget:
+            _log_budget_degraded(room_id, before_budget, len(results))
 
         rounds.append([_section_key(item.chunk) for item in ranked])
         cursor["rounds"] = rounds[-max(1, int(sticky_rounds), int(cooldown_rounds)):]

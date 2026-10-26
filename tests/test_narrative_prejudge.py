@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+import pytest
 
 from trpg_server.agents.knowledge_base import KnowledgeBaseService, KnowledgeChunk
 from trpg_server.agents.narrative.guards import GuardPolicy, apply_output_guard
@@ -16,7 +19,7 @@ from trpg_server.agents.narrative.prejudge import (
     render_contract,
     retrieval_candidates,
 )
-from trpg_server.agents.narrative.runtime import NarrativeRuntime
+from trpg_server.agents.narrative.runtime import NarrativeRuntime, NarrativeRuntimeError
 from trpg_server.agents.narrative.runtime_settings import resolve_narrative_settings
 from trpg_server.agents.narrative.state_store import load_narrative_state, save_narrative_state
 from trpg_server.agents.narrative.store import build_index
@@ -238,3 +241,33 @@ def test_guard_policy_shadow_logs_but_keeps_text() -> None:
     shadowed = apply_output_guard(text, bundle, {}, GuardPolicy.for_mode("shadow"))
     assert shadowed == text
     assert apply_output_guard(text, bundle, {}, GuardPolicy.for_mode("off")) == text
+
+
+def test_prepare_turn_emits_jev_events(tmp_path, caplog) -> None:
+    """§10.2：jev.verify / jev.cache_hit 应可在日志中 grep 到。"""
+    clear_cache()
+    runtime = _runtime(tmp_path)
+    with caplog.at_level(logging.INFO, logger="trpg_server.narrative"):
+        contract = prepare_turn(runtime, "我查看提灯")
+        cached = prepare_turn(runtime, "我查看提灯")
+    assert contract is not None and cached is contract
+    assert "narrative.jev.verify" in caplog.text
+    assert "narrative.jev.cache_hit" in caplog.text
+
+
+def test_move_and_clock_events_are_logged(tmp_path, caplog) -> None:
+    """§10.2：guard.move.denied / narrative.move.free / clock.advance / clock.reach。"""
+    runtime = _runtime(tmp_path)
+    with caplog.at_level(logging.INFO, logger="trpg_server.narrative"):
+        with pytest.raises(NarrativeRuntimeError):
+            runtime.move("room_cellar")
+    assert "narrative.guard.move.denied" in caplog.text
+
+    caplog.clear()
+    runtime.narrative["clocks"]["clock_flood"]["value"] = 10
+    with caplog.at_level(logging.INFO, logger="trpg_server.narrative"):
+        runtime.move("room_cellar")
+        runtime.record({"kind": "clock", "clock_id": "clock_flood", "value": 25})
+    assert "narrative.move.free" in caplog.text
+    assert "narrative.clock.advance" in caplog.text
+    assert "narrative.clock.reach" in caplog.text

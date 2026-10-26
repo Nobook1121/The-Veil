@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from trpg_server.agents.narrative.conditions import evaluate_condition
+from trpg_server.agents.narrative.logger import log_warning
 from trpg_server.agents.narrative.model import (
     VISIBILITY_HIDDEN,
     VISIBILITY_KP_ONLY,
@@ -192,6 +193,21 @@ def apply_output_guard_report(
             room_id, report.removed_sentences,
             ",".join(item["object_id"] for item in report.violations[:5]),
         )
+        log_warning(
+            "guard.postcheck.violation",
+            room_id=room_id or "",
+            shadow=policy.shadow,
+            sentences=report.removed_sentences,
+            objects=[item["object_id"] for item in report.violations],
+        )
+        for item in report.violations:
+            log_warning(
+                "guard.spoiler.denied",
+                room_id=room_id or "",
+                object_id=item["object_id"],
+                visibility=item["visibility"],
+                action="rewrite" if policy.shadow else "replace",
+            )
     report.text = text if policy.shadow else report.text
     return report
 

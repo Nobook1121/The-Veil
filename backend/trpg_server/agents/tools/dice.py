@@ -771,6 +771,19 @@ def _log_roll_result(
         )
     except Exception:  # noqa: BLE001 - 日志失败不影响投掷结果
         logger.warning("Failed to write dice result to room log", exc_info=True)
+    from trpg_server.agents.narrative.logger import log_event
+
+    log_event(
+        "check.resolve",
+        room_id=str(getattr(context, "room_id", "") or ""),
+        turn=_as_int(getattr(context, "turn", 0), 0),
+        check_id=str(result.get("check_id") or ""),
+        skill=str(result.get("skill") or result.get("name") or ""),
+        difficulty=str(result.get("difficulty") or ""),
+        rolled=result.get("roll"),
+        success_level=str(result.get("raw_success_level") or result.get("success_level") or ""),
+        success=bool(result.get("success")),
+    )
 
 
 def roll_coc_check(

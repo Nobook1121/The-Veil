@@ -31,6 +31,15 @@ def _as_list(value: Any) -> list[Any]:
     return [value]
 
 
+def _as_float(value: Any, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _lookup(state: Mapping[str, Any], key: str) -> Any:
     if key in state:
         return state[key]
@@ -198,11 +207,11 @@ def evaluate_condition(condition: Any, state: Mapping[str, Any], *, pc: str | No
             if isinstance(attitudes, Mapping):
                 raw = attitudes.get(npc)
                 value = raw.get("attitude") if isinstance(raw, Mapping) else raw
-            ok = isinstance(value, (int, float))
+            ok = isinstance(value, (int, float)) and not isinstance(value, bool)
             if ok and "gte" in spec:
-                ok = float(value) >= float(spec.get("gte") or 0)
+                ok = _as_float(value) >= _as_float(spec.get("gte"))
             elif ok and "lte" in spec:
-                ok = float(value) <= float(spec.get("lte") or 0)
+                ok = _as_float(value) <= _as_float(spec.get("lte"))
             if not ok:
                 result.ok = False
                 result.add({"attitude": dict(spec)})

@@ -215,7 +215,7 @@ def _opening_attachments(
             if asset_id:
                 trigger_attachments.setdefault(
                     asset_id,
-                    (attachment, _text(attachment.get("visibility")) or "public"),
+                    (dict(attachment), _text(attachment.get("visibility")) or "public"),
                 )
     result: list[dict[str, Any]] = []
     for reference in start.get("opening_attachments") or []:

@@ -710,8 +710,11 @@ def _force_password_reset(args: list[str], user_manager: Any) -> ConsoleCommandR
         return ConsoleCommandResult(False, "Password reset is not supported by the current user manager")
 
     result = reset(int(user["id"]))
-    success, message = result[0], result[1]
-    temp_password = result[2] if len(result) > 2 else None
+    if not isinstance(result, tuple) or len(result) < 2:
+        return ConsoleCommandResult(False, "Password reset returned an unexpected result")
+    success = bool(result[0])
+    message = str(result[1] or "")
+    temp_password = str(result[2]) if len(result) > 2 and result[2] else None
     if not success:
         return ConsoleCommandResult(False, message)
 

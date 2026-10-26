@@ -9,6 +9,7 @@ import logging
 import re
 import time
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from flask import current_app
@@ -74,8 +75,8 @@ def _deliver_structured_triggers(room_dir, room_info, scenario, requests):
     messages = read_json(messages_path, default=[])
     if not isinstance(messages, list):
         messages = []
-    state = read_json(Path(room_dir) / "state.json", default={})
-    state = state if isinstance(state, dict) else {}
+    raw_state = read_json(Path(room_dir) / "state.json", default={})
+    state: dict[str, Any] = raw_state if isinstance(raw_state, dict) else {}
     delivered = []
     from trpg_server.scenario_store import build_trigger_message
     for requested in requests if isinstance(requests, list) else []:
@@ -382,7 +383,8 @@ def _sync_room_active_scene(room_dir, scene_id, scenario):
     if not isinstance(info, dict) or str(info.get("active_scene_id") or "") == str(scene_id):
         return
     info["active_scene_id"] = str(scene_id)
-    manifest = scenario.get("scene_manifest") if isinstance(scenario, dict) and isinstance(scenario.get("scene_manifest"), list) else []
+    raw_manifest = scenario.get("scene_manifest") if isinstance(scenario, dict) else None
+    manifest: list[Any] = raw_manifest if isinstance(raw_manifest, list) else []
     module = next(
         (item for item in manifest if isinstance(item, dict) and str(item.get("id") or item.get("module_id")) == str(scene_id)),
         None,

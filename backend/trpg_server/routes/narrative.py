@@ -324,6 +324,13 @@ def review_visibility(scenario_id: int):
     else:
         return error_response("target must be node:<id> or edge:<id>", 400, "Invalid target")
     revision = _commit(storage, bundle, scenario_id=scenario_id)
+    log_event(
+        "visibility.override",
+        scenario_id=scenario_id,
+        user_id=session.get("user_id"),
+        target=target,
+        revision=revision,
+    )
     return success_response({"target": target, "revision": revision}, "Visibility reviewed")
 
 
@@ -456,6 +463,14 @@ def reclassify_visibility(scenario_id: int):
         updated_nodes.append(node.to_dict())
 
     revision = _commit(storage, bundle, scenario_id=scenario_id) if apply and changes else _revision(bundle)
+    log_event(
+        "visibility.classify",
+        scenario_id=scenario_id,
+        user_id=session.get("user_id"),
+        applied=bool(apply and changes),
+        scanned=len(bundle.nodes),
+        changed=len(changes),
+    )
     return success_response(
         {
             "applied": bool(apply and changes),

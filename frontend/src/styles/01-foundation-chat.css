@@ -1209,6 +1209,93 @@ body.chat-media-lightbox-open {
     background: rgba(255, 255, 255, 0.3);
 }
 
+.chat-media-lightbox-nav {
+    position: absolute;
+    top: 50%;
+    width: 44px;
+    height: 64px;
+    transform: translateY(-50%);
+    border: none;
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+    font-size: 2rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.18s ease;
+}
+
+.chat-media-lightbox-nav[hidden] {
+    display: none;
+}
+
+.chat-media-lightbox-nav.prev {
+    left: 16px;
+}
+
+.chat-media-lightbox-nav.next {
+    right: 16px;
+}
+
+.chat-media-lightbox-nav:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.chat-media-lightbox-tools {
+    position: absolute;
+    top: 16px;
+    left: 20px;
+    display: flex;
+    gap: 6px;
+}
+
+.chat-media-lightbox-tools[hidden] {
+    display: none;
+}
+
+.chat-media-lightbox-tools button {
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.16);
+    color: #fff;
+    font-size: 1.2rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.chat-media-lightbox-tools button:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.chat-media-lightbox-caption {
+    position: absolute;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 80vw;
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 0.85rem;
+    text-align: center;
+    pointer-events: none;
+}
+
+.chat-media-lightbox-image {
+    transition: transform 0.16s ease;
+}
+
+.chat-media-fallback {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px dashed var(--color-border, rgba(255, 255, 255, 0.24));
+    border-radius: var(--radius-sm);
+    color: var(--color-muted);
+    font-size: 0.82rem;
+}
+
 /* 「xxx 正在输入」提示，位于聊天输入框上方 */
 .chat-typing-indicator {
     min-height: 18px;

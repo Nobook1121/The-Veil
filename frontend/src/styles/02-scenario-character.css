@@ -2681,6 +2681,21 @@ body.is-guest .guest-login-hint {
     font-weight: 600;
 }
 
+.scenario-tree-node:focus-visible {
+    outline: 2px solid var(--bs-primary, #0d6efd);
+    outline-offset: -2px;
+    border-radius: 0.35rem;
+}
+
+.scenario-tree-node.dragging {
+    opacity: 0.55;
+}
+
+.scenario-tree-node.drag-invalid > .scenario-tree-node-button {
+    background: rgba(220, 53, 69, 0.16);
+    outline: 1px dashed var(--bs-danger, #dc3545);
+}
+
 .scenario-tree-node-title {
     flex: 1 1 auto;
     min-width: 0;

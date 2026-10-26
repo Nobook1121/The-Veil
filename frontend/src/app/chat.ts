@@ -755,7 +755,7 @@ function renderTriggerAttachments(attachments: unknown): string {
         if (!url) return;
         const alt = String(attachment.alt || attachment.caption || "附件");
         if (kind === "image") {
-            parts.push(`<img src="${chatEscapeHtml(url)}" alt="${chatEscapeHtml(alt)}">`);
+            parts.push(`<img class="chat-media-thumb trigger-attachment-image" src="${chatEscapeHtml(url)}" alt="${chatEscapeHtml(alt)}" loading="lazy" decoding="async">`);
             return;
         }
         if (kind === "video") {
@@ -817,52 +817,150 @@ function chatMediaKind(url: string): "video" | "image" | null {
     return null;
 }
 
-let chatMediaLightbox: HTMLElement | null = null;
+interface ChatMediaItem {
+    url: string;
+    kind: "image" | "video";
+    alt: string;
+}
 
-/** 网页内媒体预览浮层：图片/视频都在当前页面内放大显示，不跳转、不下载。 */
+let chatMediaLightbox: HTMLElement | null = null;
+let chatMediaLightboxItems: ChatMediaItem[] = [];
+let chatMediaLightboxIndex = 0;
+let chatMediaLightboxScale = 1;
+
+/** 媒体加载失败时的占位，避免聊天区出现空白或浏览器破图标（§8.1.7）。 */
+function showMediaFallback(element: HTMLElement, label: string): void {
+    const fallback = document.createElement("div");
+    fallback.className = "chat-media-fallback";
+    const icon = document.createElement("i");
+    icon.className = "fa fa-image";
+    icon.setAttribute("aria-hidden", "true");
+    const text = document.createElement("span");
+    text.textContent = `媒体加载失败：${label}`;
+    fallback.append(icon, text);
+    if (element.parentElement) element.replaceWith(fallback);
+}
+
+/** 网页内媒体预览浮层：图片/视频都在当前页面内放大显示，支持同消息切换与缩放。 */
 function ensureChatMediaLightbox(): HTMLElement {
     if (chatMediaLightbox && document.body.contains(chatMediaLightbox)) return chatMediaLightbox;
     const overlay = document.createElement("div");
     overlay.className = "chat-media-lightbox";
     overlay.hidden = true;
     overlay.innerHTML = `<button type="button" class="chat-media-lightbox-close" aria-label="关闭预览">&times;</button>`
-        + `<div class="chat-media-lightbox-body"></div>`;
-    const handleClose = (): void => closeChatMediaLightbox();
+        + `<button type="button" class="chat-media-lightbox-nav prev" aria-label="上一个">&#8249;</button>`
+        + `<button type="button" class="chat-media-lightbox-nav next" aria-label="下一个">&#8250;</button>`
+        + `<div class="chat-media-lightbox-tools" hidden>`
+        + `<button type="button" data-action="zoom-out" aria-label="缩小">&minus;</button>`
+        + `<button type="button" data-action="zoom-in" aria-label="放大">+</button>`
+        + `</div>`
+        + `<div class="chat-media-lightbox-body"></div>`
+        + `<div class="chat-media-lightbox-caption"></div>`;
     overlay.addEventListener("click", (event) => {
         const target = event.target as HTMLElement | null;
-        if (event.target === overlay || target?.classList.contains("chat-media-lightbox-close")) handleClose();
+        if (!target) return;
+        if (event.target === overlay || target.classList.contains("chat-media-lightbox-close")) {
+            closeChatMediaLightbox();
+            return;
+        }
+        if (target.closest(".chat-media-lightbox-nav.prev")) {
+            stepChatMediaLightbox(-1);
+            return;
+        }
+        if (target.closest(".chat-media-lightbox-nav.next")) {
+            stepChatMediaLightbox(1);
+            return;
+        }
+        const action = target.closest<HTMLElement>("[data-action]")?.dataset.action;
+        if (action === "zoom-in") zoomChatMediaLightbox(0.25);
+        if (action === "zoom-out") zoomChatMediaLightbox(-0.25);
     });
     document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && !overlay.hidden) handleClose();
+        if (overlay.hidden) return;
+        if (event.key === "Escape") {
+            closeChatMediaLightbox();
+            return;
+        }
+        if (event.key === "ArrowLeft") {
+            stepChatMediaLightbox(-1);
+            return;
+        }
+        if (event.key === "ArrowRight") {
+            stepChatMediaLightbox(1);
+            return;
+        }
+        if (event.key === "+" || event.key === "=") zoomChatMediaLightbox(0.25);
+        if (event.key === "-") zoomChatMediaLightbox(-0.25);
     });
     document.body.appendChild(overlay);
     chatMediaLightbox = overlay;
     return overlay;
 }
 
-function openChatMediaLightbox(url: string, kind: "video" | "image"): void {
-    if (!url) return;
-    const overlay = ensureChatMediaLightbox();
+function renderChatMediaLightbox(index: number): void {
+    const overlay = chatMediaLightbox;
+    const item = chatMediaLightboxItems[index];
+    if (!overlay || !item) return;
+    chatMediaLightboxIndex = index;
+    chatMediaLightboxScale = 1;
     const body = overlay.querySelector<HTMLElement>(".chat-media-lightbox-body");
     if (!body) return;
     body.innerHTML = "";
-    if (kind === "video") {
+    if (item.kind === "video") {
         const video = document.createElement("video");
-        video.src = url;
+        video.src = item.url;
         video.controls = true;
         video.autoplay = true;
         video.playsInline = true;
         video.className = "chat-media-lightbox-video";
+        video.addEventListener("error", () => showMediaFallback(video, item.alt || "视频"), { once: true });
         body.appendChild(video);
     } else {
         const image = document.createElement("img");
-        image.src = url;
-        image.alt = "图片预览";
+        image.src = item.url;
+        image.alt = item.alt || "图片预览";
         image.className = "chat-media-lightbox-image";
+        image.style.transform = "scale(1)";
+        image.addEventListener("error", () => showMediaFallback(image, item.alt || "图片"), { once: true });
         body.appendChild(image);
     }
+    const multiple = chatMediaLightboxItems.length > 1;
+    overlay.querySelectorAll<HTMLElement>(".chat-media-lightbox-nav").forEach((nav) => {
+        nav.hidden = !multiple;
+    });
+    const tools = overlay.querySelector<HTMLElement>(".chat-media-lightbox-tools");
+    if (tools) tools.hidden = item.kind !== "image";
+    const caption = overlay.querySelector<HTMLElement>(".chat-media-lightbox-caption");
+    if (caption) {
+        caption.textContent = multiple
+            ? `${index + 1} / ${chatMediaLightboxItems.length}${item.alt ? ` · ${item.alt}` : ""}`
+            : item.alt || "";
+    }
+}
+
+function openChatMediaLightbox(url: string, kind: "video" | "image", items?: ChatMediaItem[], index?: number): void {
+    if (!url) return;
+    const list = items && items.length > 0 ? items : [{ url, kind, alt: "" }];
+    const found = typeof index === "number" ? index : list.findIndex((entry) => entry.url === url);
+    const start = Math.max(0, Math.min(found < 0 ? 0 : found, list.length - 1));
+    chatMediaLightboxItems = list;
+    const overlay = ensureChatMediaLightbox();
+    renderChatMediaLightbox(start);
     overlay.hidden = false;
     document.body.classList.add("chat-media-lightbox-open");
+}
+
+function stepChatMediaLightbox(delta: number): void {
+    if (chatMediaLightboxItems.length < 2) return;
+    const total = chatMediaLightboxItems.length;
+    renderChatMediaLightbox((chatMediaLightboxIndex + delta + total) % total);
+}
+
+function zoomChatMediaLightbox(delta: number): void {
+    const image = chatMediaLightbox?.querySelector<HTMLImageElement>(".chat-media-lightbox-image");
+    if (!image) return;
+    chatMediaLightboxScale = Math.min(4, Math.max(0.5, chatMediaLightboxScale + delta));
+    image.style.transform = `scale(${chatMediaLightboxScale})`;
 }
 
 function closeChatMediaLightbox(): void {
@@ -871,7 +969,29 @@ function closeChatMediaLightbox(): void {
     const body = overlay.querySelector<HTMLElement>(".chat-media-lightbox-body");
     if (body) body.innerHTML = "";
     overlay.hidden = true;
+    chatMediaLightboxItems = [];
+    chatMediaLightboxIndex = 0;
     document.body.classList.remove("chat-media-lightbox-open");
+}
+
+/** 收集同一条消息内的媒体，供灯箱左右切换。 */
+function collectChatMedia(container: HTMLElement): ChatMediaItem[] {
+    const items: ChatMediaItem[] = [];
+    container.querySelectorAll<HTMLImageElement>("img.chat-media-thumb").forEach((image) => {
+        const url = image.currentSrc || image.src;
+        if (url) items.push({ url, kind: "image", alt: image.alt || "" });
+    });
+    container.querySelectorAll<HTMLVideoElement>("video").forEach((video) => {
+        const url = video.currentSrc || video.src || video.querySelector("source")?.src || "";
+        if (url) items.push({ url, kind: "video", alt: "" });
+    });
+    return items;
+}
+
+function openMediaFromContainer(container: HTMLElement, url: string, kind: "image" | "video"): void {
+    const items = collectChatMedia(container);
+    const index = items.findIndex((entry) => entry.url === url);
+    openChatMediaLightbox(url, kind, items, index >= 0 ? index : 0);
 }
 
 /** 后处理消息 HTML：图片显示为缩略图、视频链接替换为内嵌播放器，并统一绑定放大预览。 */
@@ -879,9 +999,24 @@ function enhanceMessageMedia(container: HTMLElement): void {
     container.querySelectorAll<HTMLImageElement>("img").forEach((image) => {
         image.classList.add("chat-media-thumb");
         image.loading = "lazy";
+        image.decoding = "async";
         if (image.dataset.mediaBound === "1") return;
         image.dataset.mediaBound = "1";
-        image.addEventListener("click", () => openChatMediaLightbox(image.currentSrc || image.src, "image"));
+        image.addEventListener("error", () => showMediaFallback(image, image.alt || "图片"), { once: true });
+        image.addEventListener("click", () => {
+            const url = image.currentSrc || image.src;
+            if (url) openMediaFromContainer(container, url, "image");
+        });
+    });
+
+    container.querySelectorAll<HTMLVideoElement>("video").forEach((video) => {
+        if (video.dataset.mediaBound === "1") return;
+        video.dataset.mediaBound = "1";
+        video.addEventListener("error", () => showMediaFallback(video, "视频"), { once: true });
+        video.addEventListener("dblclick", () => {
+            const url = video.currentSrc || video.src;
+            if (url) openMediaFromContainer(container, url, "video");
+        });
     });
 
     container.querySelectorAll<HTMLAnchorElement>("a[href]").forEach((anchor) => {
@@ -896,6 +1031,9 @@ function enhanceMessageMedia(container: HTMLElement): void {
         video.preload = "metadata";
         video.playsInline = true;
         video.className = "chat-media-video-player";
+        video.dataset.mediaBound = "1";
+        video.addEventListener("error", () => showMediaFallback(video, "视频"), { once: true });
+        video.addEventListener("dblclick", () => openMediaFromContainer(container, href, "video"));
         const expand = document.createElement("button");
         expand.type = "button";
         expand.className = "chat-media-video-expand";
@@ -905,7 +1043,7 @@ function enhanceMessageMedia(container: HTMLElement): void {
         expand.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            openChatMediaLightbox(href, "video");
+            openMediaFromContainer(container, href, "video");
         });
         wrapper.appendChild(video);
         wrapper.appendChild(expand);

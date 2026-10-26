@@ -14,6 +14,7 @@ from typing import Any, Callable
 from flask import current_app
 
 from trpg_server.agents.config import load_ai_runtime_config
+from trpg_server.agents.narrative.logger import log_event
 from trpg_server.agents.profiles import AgentProfile
 from trpg_server.agents.runtime import run_agent_completion
 from trpg_server.ai_capabilities import chat_completions_endpoint
@@ -101,14 +102,15 @@ def _platform_candidates(provider_id: Any = None) -> list[dict[str, Any]]:
         section = platform_config.get("config") if isinstance(platform_config, dict) else {}
         section = section if isinstance(section, dict) else {}
         api_key = section.get("api_key")
-        base_url = chat_completions_endpoint(section.get("base_url"))
+        base_url = chat_completions_endpoint(str(section.get("base_url") or ""))
         if not base_url:
             continue
         if not api_key and platform_id == "lmstudio":
             api_key = "lm-studio"
         elif not api_key:
             continue
-        models = platform_config.get("models") if isinstance(platform_config.get("models"), list) else []
+        raw_models = platform_config.get("models") if isinstance(platform_config, dict) else None
+        models: list[Any] = raw_models if isinstance(raw_models, list) else []
         model = next((item for item in models if item.get("enabled", True)), models[0] if models else None)
         candidates.append(
             {
@@ -153,7 +155,8 @@ def _build_requester(candidates: list[dict[str, Any]], runtime_config: Any) -> C
 
 
 def _history(conversation: dict[str, Any], max_messages: int) -> list[dict[str, str]]:
-    messages = conversation.get("messages") if isinstance(conversation.get("messages"), list) else []
+    raw_messages = conversation.get("messages")
+    messages: list[Any] = raw_messages if isinstance(raw_messages, list) else []
     result: list[dict[str, str]] = []
     for message in messages[-max_messages:]:
         role = str(message.get("role") or "")
@@ -395,7 +398,8 @@ def confirm_action(actor: Actor, action_id: str, *, apply: bool) -> dict[str, An
         _sync_conversation_attachment(actor, action, "rejected")
         return {"status": "rejected", "action_id": action_id}
 
-    action_args = action.get("args") if isinstance(action.get("args"), dict) else {}
+    raw_args = action.get("args")
+    action_args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
     room_id = str(action.get("room_id") or "") or None
     spec = next(
         (item for item in exposed_specs(actor, config, room_id=room_id) if item.name == action.get("tool")),
@@ -431,6 +435,22 @@ def confirm_action(actor: Actor, action_id: str, *, apply: bool) -> dict[str, An
             "summary": action.get("summary"),
         }
     )
+    if str(action.get("tool")) == "scenarios.save":
+        try:
+            raw_args = action.get("args")
+            arg_payload: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
+            raw_fields = arg_payload.get("fields")
+            fields: dict[str, Any] = raw_fields if isinstance(raw_fields, dict) else {}
+            log_event(
+                "agent.scenario.patch",
+                scenario_id=str(arg_payload.get("scenario_id") or ""),
+                preview_id=action_id,
+                ops=[str(key) for key in list(fields)[:20]],
+                user_id=str(actor.user_id),
+                result="applied",
+            )
+        except Exception:  # noqa: BLE001 - 事件日志失败不影响执行结果
+            logger.exception("Failed to log agent.scenario.patch for action %s", action_id)
     _sync_conversation_attachment(actor, action, "applied")
     return {"status": "applied", "action_id": action_id, "result": result.to_dict()}
 

@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from trpg_server.agents.narrative.logger import log_event, log_warning
 from trpg_server.agents.narrative.model import NarrativeNode
 from trpg_server.agents.narrative.visibility import forbidden_names
 
@@ -63,6 +64,27 @@ _CACHE_TTL_SECONDS = 300
 _CACHE_MAX_ENTRIES = 256
 _CACHE_LOCK = threading.Lock()
 _CACHE: dict[tuple[str, str, str, str], tuple[float, "TurnContract"]] = {}
+_FALLBACK_LOGGED: set[str] = set()
+
+
+def _turn(runtime: Any) -> int:
+    narrative = getattr(runtime, "narrative", None)
+    if not isinstance(narrative, Mapping):
+        return 0
+    clock = narrative.get("clock")
+    if not isinstance(clock, Mapping):
+        return 0
+    return _as_int(clock.get("turn"), 0)
+
+
+def _log_fallback(room_id: str, reason: str) -> None:
+    """§10.2：同房间同原因的降级只记一次，避免逐轮刷屏。"""
+    marker = f"{room_id}:{reason}"
+    with _CACHE_LOCK:
+        if marker in _FALLBACK_LOGGED:
+            return
+        _FALLBACK_LOGGED.add(marker)
+    log_warning("jev.fallback", room_id=room_id, reason=reason)
 
 
 def _text(value: Any) -> str:
@@ -142,6 +164,14 @@ def link_targets(runtime: Any, message: str, *, limit: int = 6) -> list[dict[str
         if name.casefold() not in folded:
             continue
         seen.add(object_id)
+        log_event(
+            "jev.entity_link",
+            room_id=_text(getattr(runtime, "room_id", None)) or "",
+            turn=_turn(runtime),
+            surface_hash=hashlib.sha1(name.casefold().encode("utf-8")).hexdigest()[:8],
+            entity_id=object_id,
+            confidence=confidence,
+        )
         result.append(
             {
                 "id": object_id,
@@ -457,10 +487,20 @@ def prepare_turn(runtime: Any, message: str) -> TurnContract | None:
     key = (room_id, location, text.casefold(), _state_hash(runtime.narrative))
     cached = _cache_lookup(key)
     if cached is not None:
+        log_event("jev.cache_hit", room_id=room_id or "", location=location or "", intent=cached.intent)
         return cached
     try:
         classification = classify_intent(text)
         intent = classification["intent"]
+        log_event(
+            "jev.judge",
+            room_id=room_id or "",
+            turn=_turn(runtime),
+            intent=intent,
+            branch=intent,
+            confidence=classification["confidence"],
+            source="rule",
+        )
         targets = link_targets(runtime, text)
         locations = candidate_locations(runtime, text, targets, intent)
         exits = [
@@ -499,9 +539,22 @@ def prepare_turn(runtime: Any, message: str) -> TurnContract | None:
             evidence=_evidence(runtime, contract),
         )
         _cache_store(key, contract)
+        log_event(
+            "jev.verify",
+            room_id=room_id or "",
+            location=location or "",
+            intent=contract.intent,
+            confidence=contract.confidence,
+            targets=len(contract.targets),
+            candidates=len(contract.candidate_locations),
+            allowed=len(contract.allowed),
+            forbidden=len(contract.forbidden),
+            denied=len(contract.denied),
+        )
         return contract
     except Exception:  # noqa: BLE001 - 预判失败必须降级，不影响主流程
         logger.warning("jev.prepare_failed room=%s", room_id or "-", exc_info=True)
+        _log_fallback(room_id, "prepare_failed")
         return None
 
 
@@ -510,9 +563,19 @@ def retrieval_candidates(runtime: Any, contract: TurnContract | None, message: s
     if contract is None:
         return set(), set()
     try:
-        return _candidate_ids(runtime, contract, _text(message).casefold())
+        ids, titles = _candidate_ids(runtime, contract, _text(message).casefold())
+        log_event(
+            "retrieval.graph",
+            room_id=_text(getattr(runtime, "room_id", None)) or "",
+            turn=_turn(runtime),
+            intent=contract.intent,
+            ids=len(ids),
+            titles=len(titles),
+        )
+        return ids, titles
     except Exception:  # noqa: BLE001
         logger.warning("jev.candidates_failed", exc_info=True)
+        _log_fallback(_text(getattr(runtime, "room_id", None)), "candidates_failed")
         return set(), set()
 
 

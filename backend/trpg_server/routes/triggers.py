@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from flask import Blueprint, current_app, redirect, request, send_file, session
@@ -18,6 +19,7 @@ from trpg_server.agents.trigger_system import (
 )
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
+from trpg_server.agents.narrative.logger import log_event, log_warning
 from trpg_server.responses import error_response, success_response
 from trpg_server.scenario_store import load_scenario_by_id, load_scenario_record, save_scenario_record, scenario_descriptor_paths
 from trpg_server.settings import ROOMS_DIR, SCENARIOS_DIR
@@ -87,7 +89,7 @@ def _usage_map(descriptor: Path, scenario: dict) -> dict[str, int]:
                 blob_parts.append(json.dumps(payload[key], ensure_ascii=False, default=str))
     blob = "\n".join(blob_parts)
     usage: dict[str, int] = {}
-    for item in load_resources(_storage_root(descriptor), scenario.get("id")):
+    for item in load_resources(_storage_root(descriptor), str(scenario.get("id") or descriptor.parent.parent.name)):
         identifiers = [
             str(item.get("hash") or ""),
             str(item.get("path") or ""),
@@ -194,7 +196,15 @@ def upload_assets(script_id):
                 return error_response("alt is required for every resource", 400, "Invalid metadata")
             results.append(persist_uploaded_resource(_storage_root(descriptor), script_id, uploaded, alt, request.form.get("type")))
     except ValueError as exc:
+        log_warning("media.sanitize.denied", scenario_id=script_id, reason=str(exc))
         return error_response(str(exc), 400, "Invalid resource")
+    log_event(
+        "media.asset.register",
+        scenario_id=script_id,
+        user_id=session.get("user_id"),
+        count=len(results),
+        assets=[str(item.get("id") or "") for item in results if isinstance(item, dict)],
+    )
     log_user_action(
         logger,
         user_action_text(session.get("username"), "上传了触发器资源"),
@@ -488,7 +498,8 @@ def update_trigger_card(script_id, trigger_id):
     if not descriptor or not scenario or not _can_edit(scenario):
         _log_denied(script_id)
         return error_response("Permission denied", 403, "Permission denied")
-    cards = scenario.get("trigger_cards") if isinstance(scenario.get("trigger_cards"), list) else []
+    raw_cards = scenario.get("trigger_cards")
+    cards: list[Any] = raw_cards if isinstance(raw_cards, list) else []
     card = next((item for item in cards if isinstance(item, dict) and str(item.get("id")) == str(trigger_id)), None)
     if card is None:
         return error_response("Trigger card not found", 404, "Trigger card not found")
@@ -522,6 +533,9 @@ def room_trigger_status(room_id):
     if not info:
         return error_response("Room not found", 404, "Room not found")
     state = read_json(room_dir / "state.json", default={})
-    _, scenario = load_scenario_by_id(_scenario_dir(), info.get("scenario_id"), scenario_version=info.get("scenario_version"))
+    raw_scenario_id = info.get("scenario_id") if isinstance(info, dict) else None
+    if raw_scenario_id in (None, ""):
+        return error_response("Room has no scenario", 404, "Room has no scenario")
+    _, scenario = load_scenario_by_id(_scenario_dir(), raw_scenario_id, scenario_version=info.get("scenario_version"))
     cards = trigger_cards(scenario or {})
     return success_response({"triggeredFiles": state.get("triggeredFiles", []), "triggerHistory": state.get("triggerHistory", []), "triggers": cards})

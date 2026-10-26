@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from trpg_server.agents.narrative.logger import log_event, log_warning
 from trpg_server.agents.narrative.model import (
     NarrativeBundle,
     content_fingerprint,
@@ -100,7 +102,21 @@ _cache_lock = threading.Lock()
 _bundle_cache: dict[str, tuple[float, NarrativeBundle]] = {}
 
 
+def _log_bundle_load(bundle: NarrativeBundle, *, cached: bool, started: float) -> None:
+    log_event(
+        "bundle.load",
+        scenario_id=bundle.scenario_id,
+        version=bundle.scenario_version,
+        nodes=len(bundle.nodes),
+        edges=len(bundle.edges),
+        topology=bundle.topology,
+        cached=cached,
+        latency_ms=round((time.monotonic() - started) * 1000, 1),
+    )
+
+
 def load_bundle(scenario_dir: Path | str, *, use_cache: bool = True) -> NarrativeBundle | None:
+    started = time.monotonic()
     path = narrative_path(scenario_dir)
     if not path.exists():
         return None
@@ -113,6 +129,7 @@ def load_bundle(scenario_dir: Path | str, *, use_cache: bool = True) -> Narrativ
         with _cache_lock:
             cached = _bundle_cache.get(cache_key)
         if cached and cached[0] == mtime:
+            _log_bundle_load(cached[1], cached=True, started=started)
             return cached[1]
     try:
         payload = read_json(path, default=None)
@@ -124,6 +141,7 @@ def load_bundle(scenario_dir: Path | str, *, use_cache: bool = True) -> Narrativ
     if use_cache:
         with _cache_lock:
             _bundle_cache[cache_key] = (mtime, bundle)
+    _log_bundle_load(bundle, cached=False, started=started)
     return bundle
 
 

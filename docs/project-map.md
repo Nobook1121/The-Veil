@@ -46,7 +46,7 @@
 | `frontend/src/` | 前端源码（TS、HTML 片段、样式、i18n、模板） |
 | `dist/public/` | 前端构建产物（发布包内置，禁止手改） |
 | `data/` | 持久化数据（剧本、资源、配置、运行时数据；`data/config/` 不入库，首次启动生成） |
-| `tests/` | pytest 测试（62 个 `test_*.py`；v0.5.4b 变更日志记录全量 756 passed） |
+| `tests/` | pytest 测试（86 个 `test_*.py`；v0.5.4b 变更日志记录全量 804 passed） |
 | `scripts/` | 构建、迁移、验证、导入辅助脚本 |
 | `config/` | 配置模板（`templates/general.toml`、`templates/roles/`、`templates/aiplatform/`）与示例环境配置（`vector-embedding-ocr.example.env`） |
 | `docs/` | 开发文档、API 文档、格式说明、本地 wiki |

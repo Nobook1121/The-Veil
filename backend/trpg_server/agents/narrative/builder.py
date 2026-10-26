@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -116,11 +117,19 @@ def build_narrative(
     scenario_dir: Path | str | None = None,
     save: bool = False,
 ) -> BuildResult:
+    started = time.monotonic()
     scenario = scenario or {}
     sid = str(scenario_id or scenario.get("id") or "").strip()
     version = str(scenario_version or scenario.get("version") or "1.0.0").strip()
     module_list = modules if modules is not None else _scenario_modules(scenario)
     text = _document_text(document)
+    log_event(
+        "build.start",
+        scenario_id=sid,
+        source="document" if document is not None else "modules",
+        sections=len(module_list),
+        llm_fill=bool(scenario.get("llm_fill")),
+    )
 
     extracted: ExtractedNarrative = extract_narrative(
         document if document is not None else "",
@@ -145,6 +154,13 @@ def build_narrative(
     bundle.topology = decision.topology
     bundle.topology_confidence = round(float(decision.confidence), 2)
     bundle.topology_source = decision.source
+    log_event(
+        "topology.detected",
+        scenario_id=sid,
+        topology=bundle.topology,
+        confidence=bundle.topology_confidence,
+        signals=list(decision.evidence)[:8],
+    )
     bundle.meta = {
         "start": bundle.start.get("location_id"),
         "generator": BUILDER_VERSION,
@@ -192,12 +208,15 @@ def build_narrative(
         path = save_bundle(scenario_dir, bundle, update_hash=False)
 
     log_event(
-        "build.completed",
+        "build.done",
         scenario_id=sid,
         nodes=len(bundle.nodes),
         edges=len(bundle.edges),
+        hard=sum(1 for edge in bundle.edges if edge.hard),
+        soft=sum(1 for edge in bundle.edges if not edge.hard),
         topology=bundle.topology,
         topology_confidence=bundle.topology_confidence,
+        elapsed_ms=round((time.monotonic() - started) * 1000, 1),
         errors=report.error_count,
         warnings=report.warning_count,
         positioned=positioned,

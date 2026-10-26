@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from trpg_server.agents.narrative.conditions import evaluate_condition
+from trpg_server.agents.narrative.logger import log_event, log_warning
 from trpg_server.agents.narrative.model import NarrativeBundle
 from trpg_server.agents.narrative.triggers import normalize_trigger_spec
 
@@ -261,6 +262,13 @@ class TriggerResolver:
         hit = TriggerHit(spec=dict(spec), attachments=attachments, check_id=check_id or None)
         if missing:
             hit.spec = {**hit.spec, "missing_assets": missing}
+            for asset_id in missing:
+                log_warning(
+                    "media.render.missing",
+                    room_id=_text(getattr(self, "room_id", "")) or "",
+                    trigger_id=_text(spec.get("id")),
+                    attachment_id=asset_id,
+                )
         return hit
 
     def force_hit(
@@ -316,6 +324,7 @@ class TriggerResolver:
                 denied.append({"trigger_id": trigger_id, "reason": "attachment_unavailable"})
                 continue
             hits.append(hit)
+        self._log_outcome(kind, hits, denied, audience=audience, pc=pc)
         return hits, denied
 
     def request(
@@ -330,40 +339,84 @@ class TriggerResolver:
     ) -> tuple[list[TriggerHit], list[dict[str, Any]]]:
         spec = self.trigger(trigger_id)
         if spec is None:
-            return [], [{"trigger_id": _text(trigger_id), "reason": "trigger_not_found"}]
+            denied_not_found = [{"trigger_id": _text(trigger_id), "reason": "trigger_not_found"}]
+            self._log_outcome("request", [], denied_not_found, audience=audience, pc=pc)
+            return [], denied_not_found
         denied: list[dict[str, Any]] = []
-        if not spec.get("enabled", True):
-            return [], [{"trigger_id": spec["id"], "reason": "disabled"}]
-        if condition_met is False:
-            return [], [{"trigger_id": spec["id"], "reason": "condition_not_met"}]
         binding = spec.get("binding") if isinstance(spec.get("binding"), Mapping) else {}
         kind = _text(binding.get("kind"))
+
+        def _reject(reason: str, **extra: Any) -> tuple[list[TriggerHit], list[dict[str, Any]]]:
+            item = {"trigger_id": spec["id"], "reason": reason, **extra}
+            denials = [*denied, item]
+            self._log_outcome(kind or "request", [], denials, audience=audience, pc=pc)
+            return [], denials
+
+        if not spec.get("enabled", True):
+            return _reject("disabled")
+        if condition_met is False:
+            return _reject("condition_not_met")
         condition = spec.get("condition")
         if kind == "manual" and condition_met is not True:
             if spec.get("needs_review") or (isinstance(condition, Mapping) and condition.get("note")):
-                return [], [{"trigger_id": spec["id"], "reason": "condition_not_met"}]
+                return _reject("condition_not_met")
         evidence_ok, evidence_reason = self._request_evidence(
             spec, kind=kind, check_id=check_id, action_text=action_text
         )
         if not evidence_ok:
-            return [], [{"trigger_id": spec["id"], "reason": evidence_reason}]
+            return _reject(evidence_reason)
         condition = spec.get("condition")
         if condition is not None:
             result = evaluate_condition(condition, self.narrative, pc=pc)
             if not result.ok:
-                denied.append({"trigger_id": spec["id"], "reason": "condition_not_met", "missing": result.missing})
-                return [], denied
+                return _reject("condition_not_met", missing=result.missing)
         if self._once_denied(spec, pc=pc):
-            return [], [{"trigger_id": spec["id"], "reason": "once"}]
+            return _reject("once")
         if self._cooldown_denied(spec):
-            return [], [{"trigger_id": spec["id"], "reason": "cooldown"}]
+            return _reject("cooldown")
         blocked, reason = self._visibility_denied(spec, audience=audience)
         if blocked:
-            return [], [{"trigger_id": spec["id"], "reason": reason}]
+            return _reject(reason)
         hit = self._make_hit(spec, audience=audience, check_id=check_id)
         if hit is None:
-            return [], [{"trigger_id": spec["id"], "reason": "attachment_unavailable"}]
+            return _reject("attachment_unavailable")
+        self._log_outcome(kind or "request", [hit], denied, audience=audience, pc=pc)
         return [hit], denied
+
+    def _log_outcome(
+        self,
+        kind: str,
+        hits: list[TriggerHit],
+        denied: list[dict[str, Any]],
+        *,
+        audience: str,
+        pc: str | None,
+    ) -> None:
+        """记录 trigger.evaluate / fire / denied（§10.2），不写正文与 KP 内容。"""
+        log_event(
+            "trigger.evaluate",
+            kind=kind,
+            audience=audience,
+            pc=pc or "",
+            hits=len(hits),
+            denied=len(denied),
+        )
+        for hit in hits:
+            log_event(
+                "trigger.fire",
+                trigger_id=hit.trigger_id,
+                group=hit.group,
+                kind=kind,
+                audience=audience,
+            )
+        for item in denied:
+            log_event(
+                "trigger.denied",
+                trigger_id=item.get("trigger_id"),
+                reason=item.get("reason"),
+                kind=kind,
+                audience=audience,
+            )
 
     def _request_evidence(
         self,

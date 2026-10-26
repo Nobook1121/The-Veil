@@ -89,7 +89,7 @@ def load_daily_ai_usage(log_dir: Path, day: str | None = None) -> dict[str, Any]
     retrieval_chunks = 0
     retrieval_latency_total = 0.0
     segment_totals: dict[str, int] = {}
-    totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cached_tokens": 0}
+    totals: dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cached_tokens": 0}
     # 命中率按「每次请求的命中率取平均」统计：本地缓存命中记为 100%，上游请求按厂商
     # 上报的 cached/prompt 计算。若沿用「总 cached / 总 prompt」，本地命中（token 全为
     # 0）会白白拉低平均，甚至让整体命中率永远显示 0。

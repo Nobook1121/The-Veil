@@ -233,3 +233,26 @@ def test_publish_hits_collapses_after_three_messages() -> None:
     assert len(messages) == 4
     assert messages[-1]["content"] == "还有 2 份资料。"
     assert messages[-1]["metadata"]["collapsed_count"] == 2
+
+
+def test_trigger_events_are_logged(caplog) -> None:
+    """§10.2：求值、触发与被拒都要有结构化事件名。"""
+    import logging
+
+    from trpg_server.agents.narrative.resolver import TriggerResolver
+
+    resolver = TriggerResolver(_bundle(), {"clock": {"turn": 0}})
+    with caplog.at_level(logging.INFO, logger="trpg_server.narrative"):
+        hits, denied = resolver.evaluate(
+            "interaction",
+            {"object_id": "obj_note", "interaction_id": "int_note", "result": "success"},
+            audience="player",
+        )
+    assert hits
+    assert any(item["reason"] == "visibility_denied" for item in denied)
+    text = caplog.text
+    assert "narrative.trigger.evaluate" in text
+    assert "narrative.trigger.fire" in text
+    assert "narrative.trigger.denied" in text
+    assert "visibility_denied" in text
+

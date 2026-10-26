@@ -109,7 +109,8 @@ def _platform_pricing(config_dir: Path | None, provider: str, model: str) -> tup
     config = read_json(path, default={})
     if not isinstance(config, dict):
         return 0.0, 0.0, DEFAULT_CURRENCY
-    config_section = config.get("config") if isinstance(config.get("config"), dict) else {}
+    raw_section = config.get("config")
+    config_section: dict[str, Any] = raw_section if isinstance(raw_section, dict) else {}
     currency = str(config_section.get("currency") or config.get("currency") or DEFAULT_CURRENCY).strip() or DEFAULT_CURRENCY
     for item in config.get("models") or []:
         if isinstance(item, dict) and str(item.get("id") or "") == str(model or ""):
