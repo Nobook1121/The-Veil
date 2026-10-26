@@ -207,21 +207,42 @@ narrative validate <scenario-id> [--simulate] [--json]   拓扑分档校验；--
 narrative topology <scenario-id> [--json]                查看拓扑判定、置信度与证据
 narrative build <scenario-id>|--all [--yes] [--json]     生成 / 重建 narrative.json
 narrative opening <room-id> [--publish|--repair] [--yes] [--json]  预览 / 发布开局
+narrative opening set <scenario-id> --location <node-id> [--mode fixed|model|hybrid] [--yes]
+narrative topology <scenario-id> --set <linear|hub|sandbox|hybrid> [--yes]
+narrative rebuild-index <scenario-id> [--json]           重建派生索引（仅内存，不写盘）
+narrative diff <scenario-id> <from-version> <to-version> [--json]  对比两版世界树
+narrative backfill [--yes] [--json]                      为存量剧本回填 bundle；缺省预演
+narrative media <scenario-id> [--missing] [--json]       列出媒体资产与缺失项
+narrative media verify <scenario-id> [--fix-thumbs] [--yes] [--json]
+narrative visibility <scenario-id> [--review|--auto] [--yes] [--json]
+narrative stats [--json]                                 全站世界树规模与质量总览
 ```
 
 - `status`：显示拓扑、节点/边数量、入口、`build_hash`、不可达地点与孤立资产；省略 ID 时列出全部剧本。
 - `validate`：运行通用规则包 + 当前拓扑包，输出 `error/warn` 与修复建议；`--simulate` 额外检测隐式顺序依赖、自锁门控与不可达结局。
-- `topology`：输出自动判定结果、存储值、边类型统计与可达地点数量。
+- `topology`：输出自动判定结果、存储值、边类型统计与可达地点数量；带 `--set` 时为人工锁定分档（需确认，`source` 记为 `author`）。
 - `build`：默认**预演**（只打印结果、不写盘）；加 `--yes` 或在交互确认时输入 `y` 才真正写入 `narrative.json`。`--all` 批量处理所有剧本。
 - `opening`：默认只预览开局包（起始地点、开场白、附件、可见出口、触发器的数量），不写盘；`--publish` 重置房间运行态并把开场消息写入 `messages.json`，`--repair` 只补发开场、不重置已有进度。
+- `opening set`：直接修改 `narrative.json` 的起始地点与开场模式（需确认）。
+- `rebuild-index`：重建内存派生索引并失效缓存，只读取、不写盘。
+- `diff`：按剧本版本号分别构建 bundle 后对比节点/边的增删改；版本不存在时返回失败。
+- `backfill`：给缺少 `narrative.json` 的存量剧本生成只读 bundle；默认预演，`--yes` 才写盘。
+- `media` / `media verify`：列出 `assets.json` 内的媒体资产，标出类型、MIME、本地文件、缩略图与 poster 缺失；`--fix-thumbs` 可补生成派生文件。
+- `visibility`：按确定性规则给出三态可见性判定与复核标记；`--review` 只看需要复核的项，`--auto` 在确认后写回自动项的可见性。
+- `stats`：汇总全部剧本的节点/边规模、校验错误与拓扑分布。
 - 所有子命令支持 `--json`，便于脚本与前端消费。
 
 ```text
 narrative status 12
 narrative validate 12 --simulate
 narrative topology 12 --json
+narrative topology 12 --set hybrid --yes
 narrative build 12 --yes
 narrative build --all --yes
+narrative diff 12 1 2
+narrative media verify 12 --fix-thumbs --yes
+narrative visibility 12 --review
+narrative stats
 ```
 
 ## 用户管理

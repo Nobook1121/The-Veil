@@ -10,20 +10,28 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from trpg_server.agents.narrative.builder import build_from_scenario, rebuild_all, rebuild_from_descriptor
+from trpg_server.agents.narrative.builder import (
+    build_from_scenario,
+    rebuild_all,
+    rebuild_from_descriptor,
+)
 from trpg_server.agents.narrative.model import NarrativeBundle, TOPOLOGIES
 from trpg_server.agents.narrative.opening import begin_scenario, plan_scenario
 from trpg_server.agents.narrative.store import (
     build_index,
     bundle_summary,
     find_scenario_storage,
+    invalidate_cache,
     load_bundle,
+    save_bundle,
     scenario_dir_for_descriptor,
 )
 from trpg_server.agents.narrative.topology import detect_topology
 from trpg_server.agents.narrative.validate import simulate_any_order, validate_bundle
+from trpg_server.agents.narrative.visibility import classify_visibility
 from trpg_server.json_store import read_json, write_json_atomic
-from trpg_server.scenario_store import load_scenario_by_id
+from trpg_server.media import image_derivatives, video_derivatives
+from trpg_server.scenario_store import load_scenario_by_id, scenario_version_path
 
 
 def _json(data: Any) -> str:
@@ -385,6 +393,481 @@ def _opening_command(
     return True, "\n".join(lines)
 
 
+def _flag_value(args: list[str], name: str) -> str | None:
+    """读取 ``--name value`` 形式的参数值（``_parse_args`` 只收集旗标名）。"""
+    target = f"--{name}"
+    for index, item in enumerate(args):
+        if item == target and index + 1 < len(args):
+            return args[index + 1]
+        if item.startswith(f"{target}="):
+            return item.split("=", 1)[1]
+    return None
+
+
+def _rebuild_index_command(args: list[str], scenarios_dir: Path | str, flags: set[str]) -> tuple[bool, str]:
+    tokens, _ = _parse_args(args)
+    if not tokens:
+        return False, "用法：narrative rebuild-index <剧本id> [--json]"
+    bundle, storage, error = _load_for_ref(scenarios_dir, tokens[0])
+    if bundle is None:
+        return False, error
+    index = build_index(bundle)
+    invalidate_cache(storage)
+    payload = {"summary": bundle_summary(bundle, index=index), "index": index.to_dict()}
+    if "json" in flags:
+        return True, _json(payload)
+    return True, "\n".join(
+        [
+            f"剧本 {bundle.scenario_id or tokens[0]} 索引已重建（内存派生，无写盘）：",
+            f"  节点 {len(bundle.nodes)} / 边 {len(bundle.edges)} / 邻接 {len(index.adjacency)}",
+            f"  可达 {len(index.reachable)} / 不可达 {len(index.unreachable_locations)} / 孤立资产 {len(index.orphan_assets)}",
+            "  提示：若正在运行房间，下一次请求会自动加载新索引。",
+        ]
+    )
+
+
+def _bundle_for_version(
+    scenarios_dir: Path | str, scenario_ref: str, version: str
+) -> tuple[NarrativeBundle | None, str]:
+    descriptor, scenario = load_scenario_by_id(Path(scenarios_dir), scenario_ref, version)
+    if not descriptor:
+        return None, f"剧本 {scenario_ref} 不存在版本 {version}。"
+    if descriptor.parent.name != "versions":
+        return None, f"剧本 {scenario_ref} 不存在版本 {version}。"
+    storage = descriptor.parent.parent
+    try:
+        result = build_from_scenario(scenario, scenario_dir=storage, save=False)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"版本 {version} 构建失败：{exc}"
+    return result.bundle, ""
+
+
+def _diff_map(bundle: NarrativeBundle) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    nodes = {node.id: {"kind": node.kind, "title": node.title, "visibility": node.visibility} for node in bundle.nodes}
+    edges = {
+        edge.id or f"{edge.from_id}->{edge.to_id}:{edge.type}": {
+            "from": edge.from_id,
+            "to": edge.to_id,
+            "type": edge.type,
+            "condition": edge.condition,
+        }
+        for edge in bundle.edges
+    }
+    return nodes, edges
+
+
+def _diff_command(args: list[str], scenarios_dir: Path | str, flags: set[str]) -> tuple[bool, str]:
+    tokens, _ = _parse_args(args)
+    if len(tokens) < 3:
+        return False, "用法：narrative diff <剧本id> <起始版本> <目标版本> [--json]"
+    ref, from_version, to_version = tokens[0], tokens[1], tokens[2]
+    old, error = _bundle_for_version(scenarios_dir, ref, from_version)
+    if old is None:
+        return False, error
+    new, error = _bundle_for_version(scenarios_dir, ref, to_version)
+    if new is None:
+        return False, error
+    old_nodes, old_edges = _diff_map(old)
+    new_nodes, new_edges = _diff_map(new)
+    payload = {
+        "scenario_id": new.scenario_id or ref,
+        "from_version": from_version,
+        "to_version": to_version,
+        "nodes": {
+            "added": sorted(set(new_nodes) - set(old_nodes)),
+            "removed": sorted(set(old_nodes) - set(new_nodes)),
+            "changed": sorted(
+                key for key in set(old_nodes) & set(new_nodes) if old_nodes[key] != new_nodes[key]
+            ),
+        },
+        "edges": {
+            "added": sorted(set(new_edges) - set(old_edges)),
+            "removed": sorted(set(old_edges) - set(new_edges)),
+            "changed": sorted(
+                key for key in set(old_edges) & set(new_edges) if old_edges[key] != new_edges[key]
+            ),
+        },
+    }
+    if "json" in flags:
+        return True, _json(payload)
+    lines = [
+        f"剧本 {payload['scenario_id']} 版本差异 {from_version} → {to_version}：",
+        f"  节点 +{len(payload['nodes']['added'])} / -{len(payload['nodes']['removed'])} / ~{len(payload['nodes']['changed'])}",
+        f"  边   +{len(payload['edges']['added'])} / -{len(payload['edges']['removed'])} / ~{len(payload['edges']['changed'])}",
+    ]
+    for label, values in (
+        ("新增节点", payload["nodes"]["added"]),
+        ("移除节点", payload["nodes"]["removed"]),
+        ("变更节点", payload["nodes"]["changed"]),
+        ("新增边", payload["edges"]["added"]),
+        ("移除边", payload["edges"]["removed"]),
+        ("变更边", payload["edges"]["changed"]),
+    ):
+        if values:
+            lines.append(f"  {label}: " + "、".join(values[:20]) + (" …" if len(values) > 20 else ""))
+    return True, "\n".join(lines)
+
+
+def _backfill_command(
+    scenarios_dir: Path | str, flags: set[str], confirm: Callable[[str], bool] | None
+) -> tuple[bool, str]:
+    save = "yes" in flags or "y" in flags
+    if not save and confirm is not None:
+        save = bool(confirm("为缺少 narrative.json 的存量剧本生成只读 bundle？未确认时仅预演。"))
+    rows: list[dict[str, Any]] = []
+    for storage in _iter_storage(scenarios_dir):
+        if (storage / "narrative.json").exists():
+            continue
+        descriptor = storage / "scenario.json"
+        if not descriptor.exists():
+            continue
+        try:
+            result = rebuild_from_descriptor(descriptor, save=save)
+            rows.append(
+                {
+                    "scenario": storage.name,
+                    "ok": True,
+                    "saved": save,
+                    "nodes": len(result.bundle.nodes),
+                    "edges": len(result.bundle.edges),
+                    "errors": result.report.error_count,
+                    "warnings": result.report.warning_count,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            rows.append({"scenario": storage.name, "ok": False, "error": str(exc)})
+    if "json" in flags:
+        return all(row["ok"] for row in rows), _json(rows)
+    if not rows:
+        return True, "所有存量剧本都已有 narrative.json，无需回填。"
+    lines = [f"回填{'已写入' if save else '预演（未写盘）'}：{len(rows)} 个剧本"]
+    for row in rows:
+        if row["ok"]:
+            lines.append(
+                f"  {row['scenario']}: ok（{row['nodes']} 节点 / {row['edges']} 边, "
+                f"{row['errors']} error / {row['warnings']} warn）"
+            )
+        else:
+            lines.append(f"  {row['scenario']}: 失败 - {row['error']}")
+    return all(row["ok"] for row in rows), "\n".join(lines)
+
+
+def _local_asset_file(storage: Path, digest: str) -> Path | None:
+    if not digest:
+        return None
+    assets_dir = storage / "assets"
+    if not assets_dir.is_dir():
+        return None
+    for pattern in (f"{digest[:16]}.*", f"{digest}.*"):
+        matches = [path for path in assets_dir.glob(pattern) if path.is_file()]
+        if matches:
+            return sorted(matches)[0]
+    return None
+
+
+def _asset_rows(bundle: NarrativeBundle, storage: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for asset in bundle.assets:
+        if not isinstance(asset, dict):
+            continue
+        digest = str(asset.get("sha256") or "")
+        kind = str(asset.get("kind") or "")
+        mime = str(asset.get("mime") or "")
+        remote = str(asset.get("url") or "").startswith(("http://", "https://"))
+        issues: list[str] = []
+        if kind not in {"image", "video", "audio", "richtext", "file"}:
+            issues.append("kind 非法")
+        if "/" not in mime:
+            issues.append("mime 缺失")
+        if not remote and not digest:
+            issues.append("缺少 sha256")
+        if kind == "image" and not asset.get("thumb_url"):
+            issues.append("缺少缩略图")
+        if kind == "video" and not asset.get("poster_url"):
+            issues.append("缺少 poster")
+        local = _local_asset_file(storage, digest)
+        if digest and not remote and local is None:
+            issues.append("本地文件缺失")
+        rows.append(
+            {
+                "id": asset.get("id"),
+                "kind": kind,
+                "alt": asset.get("alt") or asset.get("name") or "",
+                "url": asset.get("url") or "",
+                "sha256": digest,
+                "remote": remote,
+                "local": str(local) if local else None,
+                "thumb": bool(asset.get("thumb_url")),
+                "poster": bool(asset.get("poster_url")),
+                "issues": issues,
+            }
+        )
+    return rows
+
+
+def _media_command(args: list[str], scenarios_dir: Path | str, flags: set[str]) -> tuple[bool, str]:
+    tokens, _ = _parse_args(args)
+    if not tokens:
+        return False, "用法：narrative media <剧本id> [--missing] [--json]"
+    bundle, storage, error = _load_for_ref(scenarios_dir, tokens[0])
+    if bundle is None:
+        return False, error
+    rows = _asset_rows(bundle, storage) if storage else []
+    if "missing" in flags:
+        rows = [row for row in rows if row["issues"]]
+    if "json" in flags:
+        return True, _json(rows)
+    if not rows:
+        return True, "没有缺失/待补素材。" if "missing" in flags else "该剧本没有登记媒体资产。"
+    lines = [f"剧本 {bundle.scenario_id or tokens[0]} 媒体资产 {len(rows)} 项："]
+    for row in rows[:80]:
+        lines.append(
+            f"  {row['id']} [{row['kind']}] {row['alt'] or '-'} | "
+            f"{'缺失：' + '、'.join(row['issues']) if row['issues'] else '正常'}"
+        )
+    if len(rows) > 80:
+        lines.append(f"  … 其余 {len(rows) - 80} 项已省略（--json 查看全部）")
+    return True, "\n".join(lines)
+
+
+def _fix_asset_derivatives(asset: dict[str, Any], storage: Path) -> bool:
+    local = _local_asset_file(storage, str(asset.get("sha256") or ""))
+    if local is None:
+        return False
+    kind = str(asset.get("kind") or "")
+    assets_dir = local.parent
+    stem = local.stem
+    if kind == "image":
+        result = image_derivatives(local, assets_dir, stem)
+    elif kind == "video":
+        result = video_derivatives(local, assets_dir, stem)
+    else:
+        return False
+    return bool(result.get("thumb_path") or result.get("poster_path"))
+
+
+def _media_verify_command(
+    args: list[str],
+    scenarios_dir: Path | str,
+    flags: set[str],
+    confirm: Callable[[str], bool] | None,
+) -> tuple[bool, str]:
+    tokens, _ = _parse_args(args)
+    if not tokens:
+        return False, "用法：narrative media verify <剧本id> [--fix-thumbs] [--yes] [--json]"
+    bundle, storage, error = _load_for_ref(scenarios_dir, tokens[0])
+    if bundle is None:
+        return False, error
+    fix = "fix-thumbs" in flags
+    if fix and storage is not None and confirm is not None and "yes" not in flags and "y" not in flags:
+        fix = bool(confirm("补生成缺失的缩略图 / poster？"))
+    rows = _asset_rows(bundle, storage) if storage else []
+    fixed = 0
+    if fix and storage is not None:
+        for asset in bundle.assets:
+            if isinstance(asset, dict) and _fix_asset_derivatives(asset, storage):
+                fixed += 1
+    broken = [row for row in rows if row["issues"]]
+    payload = {"assets": rows, "broken": len(broken), "fixed": fixed, "fixed_applied": fix}
+    if "json" in flags:
+        return len(broken) == 0, _json(payload)
+    lines = [
+        f"媒体校验 {bundle.scenario_id or tokens[0]}：{len(rows)} 项，异常 {len(broken)} 项。"
+    ]
+    for row in broken[:40]:
+        lines.append(f"  {row['id']}：{'、'.join(row['issues'])}")
+    if fix:
+        lines.append(f"  已补生成派生文件 {fixed} 项。")
+    return len(broken) == 0, "\n".join(lines)
+
+
+def _visibility_row(kind: str, item: Any, *, is_edge: bool = False) -> dict[str, Any]:
+    explicit = str(item.extra.get("visibility_source") or "") == "author"
+    decision = classify_visibility(
+        kind=kind,
+        title=item.label if is_edge else item.title,
+        summary="",
+        body=str(item.kp_notes or ""),
+        kp_notes=str(item.kp_notes or ""),
+        keywords=list(item.extra.get("keywords") or []) if isinstance(item.extra, dict) else [],
+        reveal_when=item.reveal_when,
+        explicit=item.visibility if explicit else None,
+    )
+    payload = decision.to_dict()
+    payload.update(
+        {
+            "id": item.id or f"{item.from_id}->{item.to_id}",
+            "kind": "edge" if is_edge else item.kind,
+            "title": item.label if is_edge else item.title,
+            "current": item.visibility,
+        }
+    )
+    return payload
+
+
+def _visibility_command(
+    args: list[str],
+    scenarios_dir: Path | str,
+    flags: set[str],
+    confirm: Callable[[str], bool] | None,
+) -> tuple[bool, str]:
+    tokens, _ = _parse_args(args)
+    if not tokens:
+        return False, "用法：narrative visibility <剧本id> [--auto] [--review] [--json] [--yes]"
+    bundle, storage, error = _load_for_ref(scenarios_dir, tokens[0])
+    if bundle is None:
+        return False, error
+    rows = [_visibility_row(node.kind, node) for node in bundle.nodes]
+    rows += [_visibility_row("edge", edge, is_edge=True) for edge in bundle.edges]
+    if "review" in flags:
+        rows = [row for row in rows if row.get("needs_review")]
+    changed = 0
+    if "auto" in flags:
+        if confirm is not None and "yes" not in flags and "y" not in flags:
+            if not confirm("按自动判定写入可见性（只改自动项，不动作者显式设置）？"):
+                return True, "已取消，未写入。"
+        for node in bundle.nodes:
+            row = _visibility_row(node.kind, node)
+            if row["source"] != "auto" or row["needs_review"] or row["visibility"] == node.visibility:
+                continue
+            node.visibility = row["visibility"]
+            node.extra["visibility_source"] = "auto"
+            node.extra["visibility_reasons"] = row["visibility_reasons"]
+            changed += 1
+        for edge in bundle.edges:
+            row = _visibility_row("edge", edge, is_edge=True)
+            if row["source"] != "auto" or row["needs_review"] or row["visibility"] == edge.visibility:
+                continue
+            edge.visibility = row["visibility"]
+            edge.extra["visibility_source"] = "auto"
+            edge.extra["visibility_reasons"] = row["visibility_reasons"]
+            changed += 1
+        if changed and storage is not None:
+            save_bundle(storage, bundle)
+    payload = {"scenario_id": bundle.scenario_id or tokens[0], "rows": rows, "changed": changed}
+    if "json" in flags:
+        return True, _json(payload)
+    lines = [f"可见性判定 {bundle.scenario_id or tokens[0]}：{len(rows)} 项，需要复核 "
+             f"{sum(1 for row in rows if row.get('needs_review'))} 项，本次改写 {changed} 项。"]
+    for row in rows[:60]:
+        flag = " [复核]" if row.get("needs_review") else ""
+        lines.append(
+            f"  {row['id']} {row['kind']}：{row['current']} → {row['visibility']} "
+            f"({row['visibility_confidence']}, {row['source']}){flag}"
+        )
+    if len(rows) > 60:
+        lines.append(f"  … 其余 {len(rows) - 60} 项已省略（--json 查看全部）")
+    return True, "\n".join(lines)
+
+
+def _stats_command(scenarios_dir: Path | str, flags: set[str]) -> tuple[bool, str]:
+    rows: list[dict[str, Any]] = []
+    total_nodes = total_edges = total_warnings = total_errors = 0
+    topology_counts: dict[str, int] = {}
+    for storage in _iter_storage(scenarios_dir):
+        bundle = load_bundle(storage)
+        if bundle is None:
+            rows.append({"scenario": storage.name, "exists": False})
+            continue
+        index = build_index(bundle)
+        report = validate_bundle(bundle, index=index)
+        total_nodes += len(bundle.nodes)
+        total_edges += len(bundle.edges)
+        total_warnings += len(bundle.warnings)
+        total_errors += report.error_count
+        topology_counts[bundle.topology] = topology_counts.get(bundle.topology, 0) + 1
+        rows.append(
+            {
+                "scenario": storage.name,
+                "exists": True,
+                "topology": bundle.topology,
+                "nodes": len(bundle.nodes),
+                "edges": len(bundle.edges),
+                "warnings": len(bundle.warnings),
+                "errors": report.error_count,
+                "unreachable": index.unreachable_locations,
+                "generated_at": bundle.generated_at,
+            }
+        )
+    payload = {
+        "scenarios": rows,
+        "totals": {
+            "scenarios": len(rows),
+            "built": sum(1 for row in rows if row.get("exists")),
+            "nodes": total_nodes,
+            "edges": total_edges,
+            "warnings": total_warnings,
+            "errors": total_errors,
+            "topology": topology_counts,
+        },
+    }
+    if "json" in flags:
+        return True, _json(payload)
+    totals = payload["totals"]
+    lines = [
+        f"世界树总览：{totals['built']}/{totals['scenarios']} 已生成，"
+        f"{totals['nodes']} 节点 / {totals['edges']} 边，{totals['errors']} error / {totals['warnings']} warn",
+        "  拓扑分布：" + ("、".join(f"{key}={value}" for key, value in sorted(topology_counts.items())) or "-"),
+    ]
+    missing = [row["scenario"] for row in rows if not row.get("exists")]
+    if missing:
+        lines.append("  未生成：" + "、".join(missing))
+    return True, "\n".join(lines)
+
+
+def _topology_set_command(
+    args: list[str],
+    scenarios_dir: Path | str,
+    flags: set[str],
+    confirm: Callable[[str], bool] | None,
+) -> tuple[bool, str]:
+    tokens, _ = _parse_args(args)
+    value = _flag_value(args, "set")
+    if not tokens or not value:
+        return False, f"用法：narrative topology <剧本id> --set <{'|'.join(TOPOLOGIES)}> [--yes]"
+    if value not in TOPOLOGIES:
+        return False, f"未知拓扑：{value}（可用 {'/'.join(TOPOLOGIES)}）"
+    bundle, storage, error = _load_for_ref(scenarios_dir, tokens[0])
+    if bundle is None:
+        return False, error
+    previous = bundle.topology
+    if confirm is not None and "yes" not in flags and "y" not in flags:
+        if not confirm(f"把 {bundle.scenario_id or tokens[0]} 的拓扑从 {previous} 改为 {value}？"):
+            return True, "已取消，未写入。"
+    bundle.topology = value
+    bundle.topology_source = "author"
+    if storage is not None:
+        save_bundle(storage, bundle)
+    return True, f"拓扑已更新：{previous} → {value}（source=author，已写盘）。"
+
+
+def _opening_set_command(
+    args: list[str],
+    scenarios_dir: Path | str,
+    flags: set[str],
+    confirm: Callable[[str], bool] | None,
+) -> tuple[bool, str]:
+    tokens, _ = _parse_args(args)
+    location = _flag_value(args, "location")
+    mode = _flag_value(args, "mode") or "fixed"
+    if not tokens or not location:
+        return False, "用法：narrative opening set <剧本id> --location <id> [--mode fixed|model|hybrid] [--yes]"
+    if mode not in {"fixed", "model", "hybrid"}:
+        return False, f"未知开场模式：{mode}"
+    bundle, storage, error = _load_for_ref(scenarios_dir, tokens[0])
+    if bundle is None:
+        return False, error
+    if bundle.node(location) is None:
+        return False, f"剧本中没有地点 {location}。"
+    if confirm is not None and "yes" not in flags and "y" not in flags:
+        if not confirm(f"把 {bundle.scenario_id or tokens[0]} 的起始地点设为 {location}（{mode}）？"):
+            return True, "已取消，未写入。"
+    bundle.start = {"location_id": location, "opening_mode": mode}
+    if storage is not None:
+        save_bundle(storage, bundle)
+    return True, f"起始地点已设为 {location}（opening_mode={mode}，已写盘）。"
+
+
 def handle_narrative_command(
     args: list[str],
     scenarios_dir: Path | str,
@@ -404,12 +887,33 @@ def handle_narrative_command(
     if subcommand == "validate":
         return _validate_command(rest, scenarios_dir, flags)
     if subcommand == "topology":
+        if _flag_value(rest, "set") is not None:
+            return _topology_set_command(rest, scenarios_dir, flags, confirm)
         return _topology_command(rest, scenarios_dir, flags)
     if subcommand == "build":
         return _build_command(rest, scenarios_dir, flags, confirm)
     if subcommand == "opening":
+        if rest and str(rest[0]).strip().lower() == "set":
+            return _opening_set_command(rest[1:], scenarios_dir, flags, confirm)
         return _opening_command(rest, scenarios_dir, rooms_dir, flags, confirm)
-    return False, f"未知 narrative 子命令：{subcommand}（可用 status/validate/topology/build/opening）"
+    if subcommand == "rebuild-index":
+        return _rebuild_index_command(rest, scenarios_dir, flags)
+    if subcommand == "diff":
+        return _diff_command(rest, scenarios_dir, flags)
+    if subcommand == "backfill":
+        return _backfill_command(scenarios_dir, flags, confirm)
+    if subcommand == "media":
+        if tokens and tokens[0].strip().lower() == "verify":
+            return _media_verify_command(rest[1:], scenarios_dir, flags, confirm)
+        return _media_command(rest, scenarios_dir, flags)
+    if subcommand == "visibility":
+        return _visibility_command(rest, scenarios_dir, flags, confirm)
+    if subcommand == "stats":
+        return _stats_command(scenarios_dir, flags)
+    return False, (
+        f"未知 narrative 子命令：{subcommand}（可用 status/validate/topology/build/opening/"
+        "rebuild-index/diff/backfill/media/visibility/stats）"
+    )
 
 
 __all__ = ["handle_narrative_command"]
