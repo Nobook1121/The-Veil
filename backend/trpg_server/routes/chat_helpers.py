@@ -107,6 +107,22 @@ def _deliver_structured_triggers(room_dir, room_info, scenario, requests):
         state = read_json(Path(room_dir) / "state.json", default=state)
     if delivered:
         write_json_atomic(messages_path, messages[-200:])
+        try:
+            from trpg_server.room_log import log_room_event
+
+            labels = [
+                str((item.get("metadata") or {}).get("trigger_id") or "")
+                for item in delivered
+            ]
+            log_room_event(
+                Path(room_dir),
+                f"Trigger fired: {', '.join(label for label in labels if label)} attachments={len(delivered)}",
+                actor="narrative",
+                source="narrative",
+                room_id=room_info.get("id"),
+            )
+        except Exception:  # noqa: BLE001 - 审计日志失败不影响消息投递
+            logger.warning("structured_trigger_log_failed room_id=%s", room_info.get("id"))
     return delivered
 
 

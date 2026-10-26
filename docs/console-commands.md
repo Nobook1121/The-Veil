@@ -402,14 +402,40 @@ dice reroll <off|limited|unlimited|inherit> [--yes]（设置重投模式）
 dice reroll-limit <1-20|inherit> [--yes]（设置「指定次数」模式的上限）
 dice pending                （列出本房间等待玩家投掷的请求）
 dice cancel [request-id] [--yes]（取消待投掷请求，缺省取消最早一条）
+narrative                   （等同 narrative status：能力档、拓扑、位置与护栏）
+narrative status            （世界树开关、能力档、拓扑、版本、位置、回合与指标）
+narrative state [--json]    （位置、旗标、时钟、地点状态、线索与触发记录）
+narrative map [--depth N]   （当前可达地图，标记已访问/未揭示/门控）
+narrative exits             （当前地点出口与缺失条件）
+narrative ledger [--limit N] [--key-only] [--search <text>]（账本事件）
+narrative facts [--entity <id>] [--status <s>]（事实三元组）
+narrative clocks            （全局时钟与阈值）
+narrative triggers [--location <id>] [--object <id>] [--fired]（触发器与触发次数）
+narrative trigger fire <id> [--yes]（手动触发触发器，破坏性）
+narrative media [--missing] （本房间已发媒体与缺失素材）
+narrative opening [--publish|--repair] [--yes]（预览/补发开场）
+narrative trace [--turn N] [--limit N]（JEV/检索/护栏轨迹）
+narrative summary [--rebuild] [--yes]（查看或重建摘要）
+narrative reset <location-id> [--yes]（重置队伍位置，破坏性）
+narrative unlock <edge|location> [--yes]（手动跳过条件门控，破坏性）
+narrative guard <off|shadow|enforce> [--yes]（切换本房间护栏模式）
+narrative profile <graph|degraded> [--yes]（切换本房间能力档）
+narrative rebuild-state [--yes]（从关键帧+账本重放恢复运行态，破坏性）
 ```
 
 `dice animation set` / `dice player-roll` / `dice reroll` / `dice reroll-limit` 只写入本房间的房规
 字段（`inherit` 或 `null` 表示继承管理员默认），不会修改站点级配置；`dice level` / `dice player`
 为旧写法别名，仍可使用。`dice cancel` 会让 AI 收到「投掷被管理员取消」，并将其作为工具结果继续对话。
 
-破坏性命令（`log clear`、`archive`）同样遵循「缺省预演、确认后执行」的约定：网页控制台先
-返回预演文本，再由交互确认框决定是否真正执行（服务器控制台则用 `--yes` / `-y` 跳过确认）。
+破坏性命令（`log clear`、`archive`、`narrative reset` / `unlock` / `trigger fire` /
+`rebuild-state`）同样遵循「缺省预演、确认后执行」的约定：网页控制台先返回预演文本，
+再由交互确认框决定是否真正执行（服务器控制台则用 `--yes` / `-y` 跳过确认）。
+
+房间 `narrative` 命令只读写本房间的运行态、账本、轨迹与房规：
+`trace` 读取房间目录下的 `narrative_trace.jsonl`（最近 2000 条）；`media` 只列本房间
+消息附件；`opening` 固定作用于当前房间；`guard` / `profile` 写入房规
+`narrative_guard` / `narrative_profile`，下次请求生效；`rebuild-state` 用最近关键帧 +
+账本重放覆盖当前状态。任何跨房间或站点级操作都会被拒绝。
 
 成员的 `kick` / `promote` 只调整**房间内角色**（`owner` / `admin` / `member`）：不能提升为房间
 所有者，也不会授予网站级 `ADMIN` / `OWNER`，更不复用网站控制台的 `user promote` 实现。

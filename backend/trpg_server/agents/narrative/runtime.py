@@ -222,9 +222,19 @@ class NarrativeRuntime:
 
     @staticmethod
     def _edge_condition(edge: NarrativeEdge, narrative: Mapping[str, Any]) -> ConditionResult:
+        unlocked = narrative.get("unlocked") if isinstance(narrative.get("unlocked"), list) else []
+        keys = {str(item) for item in unlocked}
+        if edge.id and edge.id in keys:
+            return ConditionResult(True)
+        if edge.to_id and edge.to_id in keys:
+            return ConditionResult(True)
         if edge.hard and edge.condition:
             return evaluate_condition(edge.condition, narrative)
         return ConditionResult(True)
+
+    def edge_condition(self, edge: NarrativeEdge) -> ConditionResult:
+        """公开的边条件求值，供房间控制台展示门控原因。"""
+        return self._edge_condition(edge, self.narrative)
 
     def exits(self, *, include_blocked: bool = True, include_hidden: bool = False) -> list[dict[str, Any]]:
         location = self.location_id

@@ -41,7 +41,14 @@ _ROLE_RANK = {"": 0, ROOM_ROLE_MEMBER: 1, ROOM_ROLE_ADMIN: 2, ROOM_ROLE_OWNER: 3
 _ROLE_BY_NAME = {"member": 1, "admin": 2, "owner": 3}
 _MAX_LOG_LIMIT = 500
 # 已归档房间禁止的破坏性房间命令（domain, subcommand）。
-_DESTRUCTIVE_AFTER_ARCHIVE = {("archive", ""), ("log", "clear")}
+_DESTRUCTIVE_AFTER_ARCHIVE = {
+    ("archive", ""),
+    ("log", "clear"),
+    ("narrative", "reset"),
+    ("narrative", "unlock"),
+    ("narrative", "trigger"),
+    ("narrative", "rebuild-state"),
+}
 
 
 def _settings():

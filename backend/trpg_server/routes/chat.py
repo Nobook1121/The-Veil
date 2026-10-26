@@ -29,14 +29,17 @@ from trpg_server.agents.ruleset_knowledge import RulesetKnowledgeStore, search_r
 from trpg_server.agents.tools import default_tool_registry
 from trpg_server.agents.tools.room import get_room_snapshot
 from trpg_server.agents.room_state import append_room_event, project_room_state
-from trpg_server.agents.narrative.guards import apply_output_guard
+from trpg_server.agents.narrative.guards import apply_output_guard_report
 from trpg_server.agents.narrative.logger import log_event
+from trpg_server.agents.narrative.metrics import bump as bump_narrative_metrics
+from trpg_server.agents.narrative.metrics import observe as observe_narrative_metrics
 from trpg_server.agents.narrative.prompt_v2 import render_state_summary
 from trpg_server.agents.narrative.prejudge import prepare_turn, render_contract, retrieval_candidates
 from trpg_server.agents.narrative.runtime import NarrativeRuntime, NarrativeRuntimeError, narrative_available
 from trpg_server.agents.narrative.runtime_settings import log_bypass_once, resolve_narrative_settings
 from trpg_server.agents.narrative.state_store import narrative_from_room_state
 from trpg_server.agents.narrative.store import NarrativeStoreError, load_bundle
+from trpg_server.agents.narrative.trace import append_trace
 from trpg_server.scenario_store import load_scenario_by_id
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
@@ -394,6 +397,7 @@ def chat():
                 room_id, ai_request_id, stage, label
             )
         runtime_config = load_ai_runtime_config(_get_config_dir())
+        turn_started_at = time.perf_counter()
         # 本地响应缓存的 TTL 可在设置页调整：命中即整次跳过上游请求，是最直接的省 token
         # 手段。这里把配置回写到模块级单例，保证新写入的条目使用新的过期时间。
         _SEMANTIC_CACHE.default_ttl = runtime_config.semantic_cache_ttl
@@ -1114,14 +1118,29 @@ def chat():
             ai_response = f"{ai_response}\n\n{result.notice}" if ai_response else result.notice
         # 输出侧护栏：工具可能已经推进状态，因此按最新状态过滤，而不是请求开始时的快照。
         # 档位来自房间房规（enforce/shadow/off），shadow 只观测不改正文（§12.5）。
+        guard_report = None
         if narrative_bundle is not None and ai_response and narrative_settings.guard != "off":
-            ai_response = apply_output_guard(
+            guard_report = apply_output_guard_report(
                 ai_response,
                 narrative_bundle,
                 narrative_from_room_state(agent_context.room_state()),
                 narrative_settings.guard_policy(),
                 room_id=str(room_id) if room_id else None,
             )
+            ai_response = guard_report.text
+            if guard_report.changed:
+                log_room_event(
+                    message=(
+                        f"护栏拦截：移除 {guard_report.removed_sentences} 句未解锁内容"
+                        f"（{len(guard_report.violations)} 个对象）"
+                    ),
+                    actor="narrative",
+                    room_id=room_id,
+                    rooms_dir=current_app.config.get("ROOMS_DIR"),
+                    logger_=logger,
+                    source="narrative",
+                    guard_mode=narrative_settings.guard,
+                )
         if not ai_response and opening_plan is not None:
             ai_response = _opening_fallback_text(opening_plan)
             log_event(
@@ -1138,6 +1157,65 @@ def chat():
                 400,
                 "No response",
             )
+        if room_id and agent_context.room_dir and (graph_enabled or narrative_bundle is not None):
+            try:
+                post_state = narrative_from_room_state(agent_context.room_state())
+                clock = post_state.get("clock") if isinstance(post_state.get("clock"), dict) else {}
+                turn_no = int(clock.get("turn") or 0)
+                location = post_state.get("location")
+                index = narrative_runtime.index if narrative_runtime is not None else None
+                violations = list(guard_report.violations) if guard_report is not None else []
+                changed = bool(guard_report is not None and guard_report.changed)
+                append_trace(
+                    agent_context.room_dir,
+                    {
+                        "turn": turn_no,
+                        "topology": narrative_runtime.bundle.topology if narrative_runtime is not None else "-",
+                        "location": location,
+                        "reachable": sorted(index.exits.get(location) or []) if index is not None and location else [],
+                        "blocked": [
+                            item.get("to") for item in (turn_contract.reachable_exits if turn_contract else ())
+                            if item.get("blocked")
+                        ],
+                        "branch": turn_contract.intent if turn_contract is not None else "-",
+                        "contract": {
+                            "intent": turn_contract.intent if turn_contract else "-",
+                            "targets": [item.get("id") for item in (turn_contract.targets if turn_contract else ())],
+                            "allowed": len(turn_contract.allowed) if turn_contract else 0,
+                            "forbidden": list(turn_contract.forbidden[:10]) if turn_contract else [],
+                        },
+                        "retrieval": {
+                            "lexical": len(scenario_results),
+                            "vector": bool(scenario_results),
+                            "injected": [str(item.get("chunk_id") or "") for item in scenario_results[:8]],
+                            "excluded_unvisited": 0,
+                        },
+                        "guard": {
+                            "decision": "removed" if changed and narrative_settings.guard == "enforce" else "allow",
+                            "violations": len(violations),
+                            "shadow": narrative_settings.guard == "shadow",
+                        },
+                        "tokens": {"context": prompt_tokens, "completion": completion_tokens},
+                        "latency_ms": {"total": round((time.perf_counter() - turn_started_at) * 1000, 2)},
+                    },
+                )
+                bump_narrative_metrics(
+                    agent_context.room_dir,
+                    turn_count=1,
+                    retrieval_hits=len(scenario_results),
+                    guard_violation=len(violations),
+                    guard_denied=len(violations) if (changed and narrative_settings.guard == "enforce") else 0,
+                    spoiler_denied=len(violations) if narrative_settings.guard == "enforce" else 0,
+                )
+                observe_narrative_metrics(
+                    agent_context.room_dir,
+                    {
+                        "context_tokens": prompt_tokens,
+                        "latency_ms": round((time.perf_counter() - turn_started_at) * 1000, 2),
+                    },
+                )
+            except (OSError, ValueError, TypeError):
+                logger.warning("Narrative trace/metrics write failed for room %s", room_id, exc_info=True)
         log_room_event(
             message=user_action_text(session.get("username") or user_id, "收到 AI 回复"),
             actor=session.get("username") or user_id,

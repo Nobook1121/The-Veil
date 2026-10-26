@@ -172,17 +172,18 @@ def scan_output(text: str, bundle: NarrativeBundle, narrative: Mapping[str, Any]
     return GuardReport(text=sanitized if removed else original, violations=violations, removed_sentences=removed)
 
 
-def apply_output_guard(
+def apply_output_guard_report(
     text: str,
     bundle: NarrativeBundle | None,
     narrative: Mapping[str, Any] | None,
     policy: GuardPolicy | None = None,
     *,
     room_id: str | None = None,
-) -> str:
+) -> GuardReport:
+    """与 ``apply_output_guard`` 相同，但返回完整报告供指标与轨迹记录。"""
     policy = policy or GuardPolicy.for_mode("enforce")
     if bundle is None or not policy.spoiler_gate:
-        return text
+        return GuardReport(text=text)
     report = scan_output(text, bundle, narrative or {})
     if report.changed:
         logger.warning(
@@ -191,7 +192,19 @@ def apply_output_guard(
             room_id, report.removed_sentences,
             ",".join(item["object_id"] for item in report.violations[:5]),
         )
-    return text if policy.shadow else report.text
+    report.text = text if policy.shadow else report.text
+    return report
+
+
+def apply_output_guard(
+    text: str,
+    bundle: NarrativeBundle | None,
+    narrative: Mapping[str, Any] | None,
+    policy: GuardPolicy | None = None,
+    *,
+    room_id: str | None = None,
+) -> str:
+    return apply_output_guard_report(text, bundle, narrative, policy, room_id=room_id).text
 
 
 __all__ = [

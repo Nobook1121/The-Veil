@@ -17,6 +17,7 @@ from trpg_server import room_admin
 from trpg_server.agents import room_state
 from trpg_server.json_store import read_json
 from trpg_server.room_log import clear_room_log, log_room_event, read_room_log
+from trpg_server.room_narrative_commands import ROOM_NARRATIVE_HELP, handle_room_narrative_command
 from trpg_server.settings import ROOMS_DIR
 
 logger = logging.getLogger(__name__)
@@ -38,10 +39,15 @@ ROOM_COMMAND_WHITELIST: dict[str, set[str]] = {
     "autosave": set(),
     "archive": set(),
     "dice": {"status", "animation", "player-roll", "reroll", "reroll-limit", "pending", "cancel", "level", "player"},
+    "narrative": {
+        "status", "state", "map", "exits", "ledger", "facts", "clocks", "triggers",
+        "trigger", "media", "opening", "trace", "summary", "reset", "unlock",
+        "guard", "profile", "rebuild-state",
+    },
 }
 
 # 不带子命令时默认执行的子命令（例如 `members` 等价于 `members list`）。
-DEFAULT_SUBS: dict[str, str] = {"members": "list", "dice": "status"}
+DEFAULT_SUBS: dict[str, str] = {"members": "list", "dice": "status", "narrative": "status"}
 
 
 @dataclass
@@ -103,6 +109,7 @@ def room_command_help_text() -> str:
             "  dice reroll-limit <1-20|inherit> [--yes]（设置指定次数模式的上限）",
             "  dice pending                （列出本房间等待玩家投掷的请求）",
             "  dice cancel [request_id] [--yes]（取消本房间待投掷请求，缺省取消最早的一条）",
+            *ROOM_NARRATIVE_HELP().splitlines(),
             "  说明：破坏性命令缺省为「预演」，加 --yes 或在交互确认时输入 y 才会真正执行。",
             "  说明：成员命令只调整房间内角色（房主/管理员/成员），不会授予网站级权限。",
         ]
@@ -199,6 +206,18 @@ def execute_room_command(
         if sub == "cancel":
             return _dice_cancel_command(room_id, rest, flags, confirm)
         return _dice_status_command(room_dir, room_id)
+    if domain == "narrative":
+        ok, message = handle_room_narrative_command(
+            parts[1:],
+            room_id=room_id,
+            room_dir=room_dir,
+            rooms_dir=resolved_rooms_dir,
+            app=app,
+            actor=actor,
+            actor_id=actor_id,
+            confirm=confirm,
+        )
+        return RoomCommandResult(ok, message)
     return RoomCommandResult(False, f"未知命令: {parts[0]}")
 
 
