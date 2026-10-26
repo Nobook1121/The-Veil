@@ -221,7 +221,12 @@ def execute_console_command(
             )
 
     if domain == "narrative" and subcommand:
-        ok, text = handle_narrative_command(parts[1:], _resolve_scenarios_dir(scenarios_dir), confirm=confirm)
+        ok, text = handle_narrative_command(
+            parts[1:],
+            _resolve_scenarios_dir(scenarios_dir),
+            rooms_dir=rooms_dir,
+            confirm=confirm,
+        )
         return _log_result(ConsoleCommandResult(ok, text))
 
     if domain == "vector" and subcommand:
@@ -333,6 +338,8 @@ def command_help_text() -> str:
             "  narrative validate <id> [--simulate] [--json]    （拓扑分档校验与乱序模拟）",
             "  narrative topology <id> [--json]                 （查看拓扑判定与证据）",
             "  narrative build <id>|--all [--yes] [--json]      （生成/重建 narrative.json；缺省预演）",
+            "  narrative opening <房间id> [--publish|--repair] [--yes] [--json]",
+            "                                                   （预览/发布开局；--repair 不重置）",
             "  vector health                                    （向量库/embedding/OCR 状态）",
             "  vector prune [--yes]                             （清理孤儿向量）",
             "  knowledge list [search]                          （列出规则集与各剧本知识/向量数）",

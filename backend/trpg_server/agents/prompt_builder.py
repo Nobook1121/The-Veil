@@ -91,6 +91,7 @@ def build_prompt_layers(
     retrieval_full: bool = False,
     room_snapshot_message: str | None = None,
     narrative_summary: str | None = None,
+    opening_pack: str | None = None,
 ) -> PromptLayers:
     scenario_static = _scenario_static_content(scenario)
     scene_static = _scene_static_content(scene)
@@ -152,6 +153,10 @@ def build_prompt_layers(
     dynamic_segments.append("room_state")
     # 图谱运行态摘要由状态确定性渲染，不依赖检索；放在房间状态之后、快照之前，
     # 保证 KP 每轮都能看到位置/队伍/背包/线索/出口，而不是每次重读整份 state。
+    if opening_pack:
+        # 开场包只在开局回合注入；确定性内容，不随历史增长。
+        dynamic_messages.append({"role": "system", "content": str(opening_pack)})
+        dynamic_segments.append("opening_pack")
     if narrative_summary:
         dynamic_messages.append({"role": "system", "content": str(narrative_summary)})
         dynamic_segments.append("narrative_state")

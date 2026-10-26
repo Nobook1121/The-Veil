@@ -48,6 +48,10 @@ TOPOLOGIES = ("linear", "hub", "sandbox", "hybrid")
 SCENE_ROLES = ("stage", "hub", "room", "event", "ending")
 ACCESS_MODES = ("free", "gated", "one_way")
 
+# 开场叙事模式（§5.9）：fixed 服务端固定文本，model 交给模型，hybrid 两者兼有。
+OPENING_MODES = ("fixed", "model", "hybrid")
+DEFAULT_OPENING_MODE = "hybrid"
+
 _ID_RE = re.compile(r"[^A-Za-z0-9_\-\u4e00-\u9fff]+")
 
 
@@ -97,6 +101,45 @@ def _dict_list(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, (list, tuple)):
         return []
     return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def normalize_start(value: Any) -> dict[str, Any]:
+    """归一化剧本开场配置（§5.9）。兼容 ``"start": "hall"`` 旧写法。"""
+    if isinstance(value, str):
+        value = {"location_id": value}
+    data = dict(value) if isinstance(value, Mapping) else {}
+    mode = str(data.get("opening_mode") or "").strip().lower()
+    if mode not in OPENING_MODES:
+        if data.get("fixed_opening") is not None:
+            mode = "fixed" if _as_bool(data.get("fixed_opening")) else "hybrid"
+        else:
+            mode = DEFAULT_OPENING_MODE
+    raw_intro = data.get("public_intro")
+    if isinstance(raw_intro, str):
+        intro = [
+            part.strip()
+            for part in re.split(r"\n\s*\n|\n", raw_intro)
+            if part.strip()
+        ]
+    else:
+        intro = _str_list(raw_intro)
+    known = {
+        "location_id", "start_location", "opening_module_id", "opening_mode",
+        "fixed_opening", "public_intro", "opening_attachments", "attachments",
+        "allow_enter_triggers", "allow_model_continuation", "kp_truth",
+    }
+    normalized = {
+        "location_id": str(data.get("location_id") or data.get("start_location") or "").strip() or None,
+        "opening_module_id": str(data.get("opening_module_id") or "").strip() or None,
+        "opening_mode": mode,
+        "public_intro": intro,
+        "opening_attachments": _str_list(data.get("opening_attachments") or data.get("attachments")),
+        "allow_enter_triggers": _as_bool(data.get("allow_enter_triggers"), True),
+        "allow_model_continuation": _as_bool(data.get("allow_model_continuation"), True),
+        "kp_truth": str(data.get("kp_truth") or "").strip(),
+    }
+    normalized.update({key: item for key, item in data.items() if key not in known})
+    return normalized
 
 
 @dataclass
@@ -338,6 +381,7 @@ class NarrativeBundle:
     build_hash: str = ""
     generated_at: str = ""
     source_document_hash: str = ""
+    start: dict[str, Any] = field(default_factory=dict)
     meta: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -383,6 +427,7 @@ class NarrativeBundle:
             "build_hash": self.build_hash,
             "generated_at": self.generated_at,
             "source_document_hash": self.source_document_hash,
+            "start": dict(self.start),
             "nodes": [node.to_dict() for node in self.nodes],
             "edges": [edge.to_dict() for edge in self.edges],
             "triggers": [dict(item) for item in self.triggers],
@@ -423,6 +468,11 @@ class NarrativeBundle:
             build_hash=str(data.get("build_hash") or ""),
             generated_at=str(data.get("generated_at") or ""),
             source_document_hash=str(data.get("source_document_hash") or ""),
+            start=normalize_start(
+                data.get("start")
+                if data.get("start") is not None
+                else (data.get("meta") or {}).get("start") if isinstance(data.get("meta"), Mapping) else None
+            ),
             meta=dict(data.get("meta")) if isinstance(data.get("meta"), Mapping) else {},
         )
 

@@ -22,6 +22,7 @@ from trpg_server.agents.narrative.model import (
     TOPOLOGIES,
     NarrativeBundle,
     content_fingerprint,
+    normalize_start,
     utc_now_iso,
 )
 from trpg_server.agents.narrative.store import (
@@ -74,6 +75,37 @@ def _explicit_topology(scenario: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _module_type(module: Mapping[str, Any]) -> str:
+    return str(module.get("module_type") or module.get("type") or "").strip().lower()
+
+
+def _start_config(scenario: Mapping[str, Any], modules: list[dict[str, Any]]) -> dict[str, Any]:
+    """从剧本描述符生成 `bundle.start`（§5.9）。"""
+    start = normalize_start(
+        scenario.get("start")
+        if scenario.get("start") is not None
+        else (scenario.get("start_location") or "")
+    )
+    modules_by_id = {
+        str(module.get("id") or "").strip(): module
+        for module in modules
+        if str(module.get("id") or "").strip()
+    }
+    opening_module = None
+    if start.get("opening_module_id"):
+        opening_module = modules_by_id.get(str(start["opening_module_id"]))
+    if opening_module is None:
+        opening_module = next((module for module in modules if _module_type(module) == "opening"), None)
+        if opening_module is not None:
+            start["opening_module_id"] = str(opening_module.get("id") or "").strip() or None
+    if opening_module is not None and not str(scenario.get("start") or "").strip():
+        # 只有作者未显式指定模式时才采用模块级 fixed_opening。
+        raw_start = scenario.get("start")
+        if not isinstance(raw_start, Mapping) or not raw_start.get("opening_mode"):
+            start["opening_mode"] = "fixed" if bool(opening_module.get("fixed_opening")) else start["opening_mode"]
+    return start
+
+
 def build_narrative(
     document: ParsedDocument | str | None = None,
     *,
@@ -103,6 +135,7 @@ def build_narrative(
     adapted = adapt_triggers(scenario, assets=asset_source if isinstance(asset_source, list) else None)
     bundle.triggers = list(adapted["triggers"])
     bundle.assets = list(adapted["assets"])
+    bundle.start = _start_config(scenario, module_list)
 
     text_by_node = {node.id: node.body for node in bundle.nodes}
     incoming = build_structural_edges(bundle.nodes, sections=extracted.sections, text_by_node=text_by_node)
@@ -113,7 +146,7 @@ def build_narrative(
     bundle.topology_confidence = round(float(decision.confidence), 2)
     bundle.topology_source = decision.source
     bundle.meta = {
-        "start": str(scenario.get("start") or scenario.get("start_location") or "").strip() or None,
+        "start": bundle.start.get("location_id"),
         "generator": BUILDER_VERSION,
         "topology_evidence": list(decision.evidence),
     }
@@ -121,12 +154,24 @@ def build_narrative(
 
     positioned = apply_layout(bundle)
     index = build_index(bundle)
-    if not bundle.meta.get("start"):
-        bundle.meta["start"] = index.start
-    report = validate_bundle(bundle, index=index)
-
     warnings = list(extracted.warnings)
     warnings.extend(adapted.get("warnings") or [])
+    start_location = str(bundle.start.get("location_id") or "").strip()
+    if start_location and bundle.node(start_location) is None:
+        warnings.append(
+            {
+                "code": "start.unknown_location",
+                "level": "error",
+                "message": f"剧本起始地点 {start_location} 不存在，已回退到 {index.start or '-'}。",
+                "node_id": start_location,
+                "edge_id": None,
+            }
+        )
+        bundle.start["location_id"] = None
+    if not bundle.start.get("location_id"):
+        bundle.start["location_id"] = index.start
+    bundle.meta["start"] = bundle.start.get("location_id")
+    report = validate_bundle(bundle, index=index)
     for issue in report.issues:
         if issue.level in {"warn", "error"}:
             warnings.append(

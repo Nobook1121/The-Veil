@@ -7,6 +7,7 @@
 import json
 import logging
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import requests
@@ -29,6 +30,7 @@ from trpg_server.agents.tools import default_tool_registry
 from trpg_server.agents.tools.room import get_room_snapshot
 from trpg_server.agents.room_state import append_room_event, project_room_state
 from trpg_server.agents.narrative.guards import GuardPolicy, apply_output_guard
+from trpg_server.agents.narrative.logger import log_event
 from trpg_server.agents.narrative.prompt_v2 import render_state_summary
 from trpg_server.agents.narrative.runtime import narrative_available
 from trpg_server.agents.narrative.state_store import narrative_from_room_state
@@ -47,6 +49,7 @@ from trpg_server.settings import (
     KNOWLEDGE_BASES_DIR,
 )
 from trpg_server.routes.chat_helpers import (
+    _begin_graph_scenario,
     _build_agent_requester,
     _build_knowledge_usage,
     _can_start_scenario,
@@ -70,6 +73,8 @@ from trpg_server.routes.chat_helpers import (
     _mark_scenario_started,
     _maybe_remember_important_action,
     _message_response,
+    _opening_fallback_text,
+    _opening_request_text,
     _notify_platform_switch,
     _profile_for_request,
     _request_allows_check,
@@ -216,8 +221,44 @@ def _build_platform_request_state(platform_id, platform_config, runtime_config, 
     }
 
 
+def _opening_fallback_payload(opening_plan, scenario_started_at, room_id):
+    """模型超时/空回复时，用确定性开场包完成开场（§5.9）。
+
+    固定与混合模式本来就会发布开场；模型模式在这里补发玩家可见开场，
+    避免玩家在开局回合看到空回复。
+    """
+    if opening_plan is None:
+        return None
+    content = _opening_fallback_text(opening_plan)
+    messages = opening_plan.messages(force_intro=True)
+    log_event(
+        "opening.fallback",
+        room_id=str(room_id) if room_id else None,
+        scenario_id=opening_plan.scenario_id,
+        location_id=opening_plan.location_id,
+        mode=opening_plan.opening_mode,
+        messages=len(messages),
+    )
+    return success_response(
+        message=None,
+        content=content,
+        token_count=0,
+        direct_message=messages[0] if messages else None,
+        direct_messages=messages,
+        tool_messages=[],
+        suggestions=[],
+        suggestions_owner=None,
+        scenario_started_at=scenario_started_at,
+        ending_reached=False,
+        structured_output=None,
+    )
+
+
 @bp.route("/api/chat", methods=["POST"])
 def chat():
+    # 提前声明：异常分支需要用它们判断开场是否已由服务端发布。
+    scenario_started_at = None
+    opening_plan = None
     try:
         message_data = request.get_json(silent=True)
         if not message_data:
@@ -291,6 +332,7 @@ def chat():
             request_content=content,
             config_dir=current_app.config.get("CONFIG_DIR", CONFIG_DIR),
         )
+        scenario_start_user_id = None
         if scenario_start:
             if not room_id or not agent_context.room_dir:
                 return error_response("A room is required to start the scenario", 400, "Room is required")
@@ -300,27 +342,7 @@ def chat():
                 return error_response("Permission denied", 403, "Only room managers can start the scenario")
             if room_info.get("scenario_started_at"):
                 return error_response("Scenario has already started", 409, "Scenario already started")
-            content = (
-                "@KP [系统开场任务] 请读取当前房间快照和起始场景所需的剧本模块，"
-                "直接为所有玩家进行简洁、有代入感的开场导入。不要声称玩家说了‘开始’，"
-                "不要替玩家决定行动，不要在结尾列出选项。"
-            )
-            agent_context = build_agent_context(
-                room_id=room_id,
-                rooms_dir=current_app.config.get("ROOMS_DIR", ROOMS_DIR),
-                scenarios_dir=current_app.config.get("SCENARIOS_DIR", SCENARIOS_DIR),
-                user_id=session_user_id,
-                agent_id=agent_profile.id,
-                request_content=content,
-                config_dir=current_app.config.get("CONFIG_DIR", CONFIG_DIR),
-            )
-        agent_context.tool_state.update(
-            {
-                "allow_checks": _request_allows_check(content),
-                "allow_unconditional_trigger": _request_allows_manual_trigger(content),
-                "allow_scene_transition": _request_allows_scene_transition(content),
-            }
-        )
+            scenario_start_user_id = session_user_id
         # 骰子动画档位与玩家投掷：房间规则优先，管理员默认兜底（工具自身也会兜底）。
         from trpg_server.agents.dice_settings import resolve_dice_settings
 
@@ -393,6 +415,44 @@ def chat():
             except (OSError, ValueError):
                 logger.warning("Narrative availability check failed for room %s", room_id, exc_info=True)
         agent_context.tool_state["graph_enabled"] = graph_enabled
+        opening_messages = []
+        opening_prompt = None
+        if scenario_start:
+            if graph_enabled:
+                try:
+                    opening_plan = _begin_graph_scenario(agent_context)
+                except Exception as exc:  # noqa: BLE001 - 开局失败必须给出明确错误
+                    logger.warning(
+                        "Graph scenario start failed room_id=%s error=%s",
+                        room_id,
+                        type(exc).__name__,
+                        exc_info=True,
+                    )
+                    return error_response("Scenario opening unavailable", 500, str(exc))
+                content = _opening_request_text(opening_plan)
+                opening_prompt = opening_plan.prompt_text()
+                opening_messages = opening_plan.messages()
+                # 开机即标记已开始：即使随后模型超时，确定性开场也已经落库。
+                scenario_started_at = _mark_scenario_started(agent_context.room_dir, scenario_start_user_id)
+            else:
+                content = (
+                    "@KP [系统开场任务] 请读取当前房间快照和起始场景所需的剧本模块，"
+                    "直接为所有玩家进行简洁、有代入感的开场导入。不要声称玩家说了‘开始’，"
+                    "不要替玩家决定行动，不要在结尾列出选项。"
+                )
+            # 用 replace 保留骰子设置、检索回调等已注入的 tool_state。
+            agent_context = replace(
+                agent_context,
+                user_id=scenario_start_user_id or agent_context.user_id,
+                request_content=content,
+            )
+        agent_context.tool_state.update(
+            {
+                "allow_checks": _request_allows_check(content),
+                "allow_unconditional_trigger": _request_allows_manual_trigger(content),
+                "allow_scene_transition": _request_allows_scene_transition(content),
+            }
+        )
         request_profile = with_graph_tools(
             _profile_for_request(
                 agent_profile,
@@ -620,6 +680,7 @@ def chat():
             retrieval_full=direct_import,
             room_snapshot_message=room_snapshot_message,
             narrative_summary=narrative_summary,
+            opening_pack=opening_prompt,
         )
         _emit_thinking_stage(room_id, ai_request_id, "vector_search_done", "向量库检索完成")
         # 提示词分段估算：把本次输入 token 拆到静态前缀/知识库/历史/本轮输入等分段，
@@ -905,9 +966,9 @@ def chat():
         direct_message = None
         if isinstance(result.response_data, dict):
             direct_message = result.response_data.get("direct_message")
-        direct_messages = result.direct_messages or []
-        if direct_message and not direct_messages:
-            direct_messages = [direct_message]
+        direct_messages = [*opening_messages, *(result.direct_messages or [])]
+        if direct_message and direct_message not in direct_messages:
+            direct_messages.append(direct_message)
 
         # Action options staged by the KP via room.suggest_actions. These are
         # rendered as buttons in the chat UI (owner-interactive, read-only for
@@ -1001,6 +1062,16 @@ def chat():
                 GuardPolicy.for_mode("graph"),
                 room_id=str(room_id) if room_id else None,
             )
+        if not ai_response and opening_plan is not None:
+            ai_response = _opening_fallback_text(opening_plan)
+            log_event(
+                "opening.fallback",
+                room_id=str(room_id) if room_id else None,
+                scenario_id=opening_plan.scenario_id,
+                location_id=opening_plan.location_id,
+                mode=opening_plan.opening_mode,
+                reason="empty_response",
+            )
         if not ai_response:
             return error_response(
                 "AI platform did not return a response",
@@ -1049,8 +1120,7 @@ def chat():
         else:
             write_json_atomic(history_file, history[-20:])
 
-        scenario_started_at = None
-        if scenario_start and agent_context.room_dir:
+        if scenario_start and agent_context.room_dir and not scenario_started_at:
             scenario_started_at = _mark_scenario_started(agent_context.room_dir, session.get("user_id"))
             logger.info("scenario_started room_id=%s user_id=%s", room_id, session.get("user_id"))
 
@@ -1086,8 +1156,14 @@ def chat():
             ),
         )
     except requests.exceptions.Timeout:
+        fallback = _opening_fallback_payload(opening_plan, scenario_started_at, room_id)
+        if fallback is not None:
+            return fallback
         return error_response("AI platform request timeout", 504, "Request timeout")
     except requests.exceptions.ConnectionError:
+        fallback = _opening_fallback_payload(opening_plan, scenario_started_at, room_id)
+        if fallback is not None:
+            return fallback
         return error_response("Cannot connect to AI platform", 503, "Connection error")
     except json.JSONDecodeError as exc:
         logger.exception("Failed to parse AI platform response")

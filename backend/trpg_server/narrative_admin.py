@@ -6,20 +6,24 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any, Callable
 
 from trpg_server.agents.narrative.builder import build_from_scenario, rebuild_all, rebuild_from_descriptor
 from trpg_server.agents.narrative.model import NarrativeBundle, TOPOLOGIES
+from trpg_server.agents.narrative.opening import begin_scenario, plan_scenario
 from trpg_server.agents.narrative.store import (
     build_index,
     bundle_summary,
     find_scenario_storage,
     load_bundle,
+    scenario_dir_for_descriptor,
 )
 from trpg_server.agents.narrative.topology import detect_topology
 from trpg_server.agents.narrative.validate import simulate_any_order, validate_bundle
-from trpg_server.json_store import read_json
+from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.scenario_store import load_scenario_by_id
 
 
 def _json(data: Any) -> str:
@@ -284,15 +288,113 @@ def _build_command(
     return ok, _json(payload) if as_json else text
 
 
+def _room_scenario(rooms_dir: Path | str, room_id: str) -> tuple[Path | None, dict[str, Any]]:
+    room_dir = Path(rooms_dir) / room_id
+    if not room_dir.exists():
+        return None, {}
+    info = read_json(room_dir / "info.json", default={})
+    return room_dir, info if isinstance(info, dict) else {}
+
+
+def _opening_command(
+    args: list[str],
+    scenarios_dir: Path | str,
+    rooms_dir: Path | str | None,
+    flags: set[str],
+    confirm: Callable[[str], bool] | None,
+) -> tuple[bool, str]:
+    tokens, _ = _parse_args(args)
+    if not tokens:
+        return False, "用法：narrative opening <房间id> [--dry-run|--publish|--repair] [--yes] [--json]"
+    if rooms_dir is None:
+        return False, "控制台未配置房间目录，无法执行 narrative opening。"
+    room_id = tokens[0]
+    room_dir, info = _room_scenario(rooms_dir, room_id)
+    if room_dir is None:
+        return False, f"找不到房间 {room_id}。"
+    scenario_id = info.get("scenario_id")
+    if scenario_id in (None, ""):
+        return False, f"房间 {room_id} 没有绑定剧本。"
+    descriptor, scenario = load_scenario_by_id(
+        Path(scenarios_dir), scenario_id, info.get("scenario_version")
+    )
+    if not descriptor:
+        return False, f"房间绑定的剧本 {scenario_id} 不存在。"
+    storage = scenario_dir_for_descriptor(descriptor)
+    if not (storage / "narrative.json").exists() and (storage.parent / "narrative.json").exists():
+        storage = storage.parent
+    bundle = load_bundle(storage)
+    if bundle is None:
+        return False, "剧本尚未生成 narrative.json，先运行 narrative build。"
+    scenario = scenario if isinstance(scenario, dict) else {}
+    publish = "publish" in flags or "repair" in flags
+    repair = "repair" in flags
+    if publish and confirm is not None and "yes" not in flags and "y" not in flags:
+        action = "补发" if repair else "重置并发布"
+        if not confirm(f"确认对房间 {room_id} {action}开场？"):
+            publish = False
+    version = str(info.get("scenario_version") or "")
+    try:
+        plan = plan_scenario(room_dir, bundle, scenario, scenario_version=version)
+        if publish and not repair:
+            plan = begin_scenario(
+                room_dir, bundle, scenario,
+                scenario_version=version,
+                room_id=room_id,
+            )
+    except Exception as exc:  # noqa: BLE001
+        return False, f"开场生成失败：{exc}"
+    messages = plan.messages(force_intro=repair) if publish else []
+    if publish and messages:
+        messages_path = room_dir / "messages.json"
+        existing = read_json(messages_path, default=[])
+        existing = existing if isinstance(existing, list) else []
+        for item in messages:
+            item.setdefault("id", f"opening-{int(time.time() * 1000)}-{len(existing)}")
+            item.setdefault("time", time.strftime("%H:%M"))
+            item.setdefault("created_at", time.strftime("%Y-%m-%d %H:%M:%S"))
+            existing.append(item)
+        write_json_atomic(messages_path, existing[-200:])
+        info["scenario_started_at"] = info.get("scenario_started_at") or time.strftime("%Y-%m-%d %H:%M:%S")
+        info["scenario_started_by"] = info.get("scenario_started_by") or "console"
+        write_json_atomic(room_dir / "info.json", info)
+    payload = plan.to_dict()
+    payload["published"] = bool(publish)
+    payload["message_count"] = len(messages)
+    if "json" in flags:
+        return True, _json(payload)
+    lines = [
+        f"房间 {room_id} 开局预览：{'已发布' if publish else '未写盘'}",
+        f"  剧本 {plan.scenario_id} | 起始地点 {plan.location_id or '-'} | 模式 {plan.opening_mode}",
+        f"  开场白 {len(plan.pack.get('public_intro') or [])} 段 | 附件 {len(plan.pack.get('attachments') or [])} | "
+        f"触发器 {len(plan.triggers_fired)}",
+    ]
+    if plan.missing_intro:
+        lines.append("  警告：剧本缺少玩家可见开场白，已使用最小开场。")
+    exits = [
+        str(item.get("label") or item.get("title"))
+        for item in plan.pack.get("exits") or []
+        if isinstance(item, dict) and not item.get("blocked")
+    ]
+    if exits:
+        lines.append("  可见出口：" + "、".join(exits[:12]))
+    if plan.warnings:
+        lines.append("  警告：" + "；".join(plan.warnings[:10]))
+    if publish:
+        lines.append(f"  已写入 messages.json {len(messages)} 条。")
+    return True, "\n".join(lines)
+
+
 def handle_narrative_command(
     args: list[str],
     scenarios_dir: Path | str,
     *,
+    rooms_dir: Path | str | None = None,
     confirm: Callable[[str], bool] | None = None,
 ) -> tuple[bool, str]:
     """分发 `narrative <subcommand>`；返回 (ok, 文本)。"""
     if not args:
-        return False, "用法：narrative status|validate|topology|build ..."
+        return False, "用法：narrative status|validate|topology|build|opening ..."
     subcommand = str(args[0]).strip().lower()
     rest = args[1:]
     tokens, flags = _parse_args(rest)
@@ -305,7 +407,9 @@ def handle_narrative_command(
         return _topology_command(rest, scenarios_dir, flags)
     if subcommand == "build":
         return _build_command(rest, scenarios_dir, flags, confirm)
-    return False, f"未知 narrative 子命令：{subcommand}（可用 status/validate/topology/build）"
+    if subcommand == "opening":
+        return _opening_command(rest, scenarios_dir, rooms_dir, flags, confirm)
+    return False, f"未知 narrative 子命令：{subcommand}（可用 status/validate/topology/build/opening）"
 
 
 __all__ = ["handle_narrative_command"]

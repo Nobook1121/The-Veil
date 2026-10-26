@@ -36,6 +36,16 @@ from trpg_server.agents.narrative.ledger import (
     save_summary,
 )
 from trpg_server.agents.narrative.layout import apply_layout
+from trpg_server.agents.narrative.opening import (
+    OpeningError,
+    OpeningPlan,
+    begin_scenario,
+    build_opening_pack,
+    opening_message,
+    plan_scenario,
+    render_opening_prompt,
+    resolve_start_config,
+)
 from trpg_server.agents.narrative.prompt_v2 import render_state_summary
 from trpg_server.agents.narrative.publisher import MAX_MESSAGES_PER_TURN, publish_hits
 from trpg_server.agents.narrative.resolver import TriggerHit, TriggerResolver
@@ -45,6 +55,7 @@ from trpg_server.agents.narrative.state_store import (
     load_narrative_state,
     normalize_narrative_state,
     replay_narrative,
+    reset_narrative_state,
     save_narrative_state,
     write_keyframe,
 )
@@ -75,6 +86,8 @@ __all__ = [
     "LedgerVisibilityError",
     "MAX_MESSAGES_PER_TURN",
     "NarrativeBundle",
+    "OpeningError",
+    "OpeningPlan",
     "NarrativeEdge",
     "NarrativeIndex",
     "NarrativeNode",
@@ -90,9 +103,11 @@ __all__ = [
     "apply_event",
     "apply_layout",
     "assert_no_kp_only",
+    "begin_scenario",
     "build_from_scenario",
     "build_index",
     "build_narrative",
+    "build_opening_pack",
     "build_structural_edges",
     "bundle_summary",
     "classify_visibility",
@@ -114,12 +129,17 @@ __all__ = [
     "normalize_trigger_spec",
     "normalize_asset",
     "normalize_visibility",
+    "opening_message",
+    "plan_scenario",
     "publish_hits",
     "read_ledger_events",
     "rebuild_all",
     "rebuild_from_descriptor",
     "render_state_summary",
+    "render_opening_prompt",
     "replay_narrative",
+    "reset_narrative_state",
+    "resolve_start_config",
     "save_bundle",
     "save_narrative_state",
     "save_summary",

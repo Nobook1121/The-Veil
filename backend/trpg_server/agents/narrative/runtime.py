@@ -439,6 +439,27 @@ class NarrativeRuntime:
             "triggers": resolver.available(),
         }
 
+    def fire_opening_triggers(
+        self,
+        *,
+        pc: str | None = None,
+        allow_enter: bool = True,
+    ) -> dict[str, Any]:
+        """开场地点的首次进入触发器（§5.9.3）。
+
+        只求值 ``enter`` 且 ``first_time=true`` 的触发器；重入触发器留待后续移动。
+        """
+        if not allow_enter:
+            return {"triggers_fired": [], "direct_messages": [], "trigger_denied": []}
+        result = self._auto_triggers(
+            "enter",
+            {"location_id": self.location_id, "first_time": True},
+            pc=pc,
+            source="opening",
+        )
+        result.setdefault("direct_messages", [])
+        return result
+
     def move(self, target_ref: Any, *, actor: str | None = None) -> dict[str, Any]:
         target = self.resolve_node(target_ref, kinds=("location", "ending"))
         if target is None:

@@ -191,6 +191,9 @@ class NarrativeIndex:
 
 
 def resolve_start(bundle: NarrativeBundle) -> str | None:
+    declared = bundle.start.get("location_id") if isinstance(getattr(bundle, "start", None), Mapping) else None
+    if isinstance(declared, str) and declared and bundle.node(declared):
+        return declared
     meta = bundle.meta if isinstance(bundle.meta, Mapping) else {}
     start = meta.get("start") or meta.get("start_location")
     if isinstance(start, str) and start and bundle.node(start):

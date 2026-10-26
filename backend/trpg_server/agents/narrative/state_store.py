@@ -342,6 +342,45 @@ def save_narrative_state(room_dir: Path | str, narrative: Mapping[str, Any]) -> 
     return saved
 
 
+_LEGACY_RESET = {
+    "clues": [],
+    "items": [],
+    "npc_attitudes": {},
+    "quests": [],
+    "timeline": [],
+    "rolling_summary": "",
+    "triggered_event_ids": [],
+    "triggeredFiles": [],
+    "triggerHistory": [],
+    "completed": False,
+    "ending_reached": False,
+}
+
+
+def reset_narrative_state(room_dir: Path | str, narrative: Mapping[str, Any]) -> dict[str, Any]:
+    """开局重置：写入全新运行态，并显式清空旧字段投影残留（§5.9）。
+
+    ``save_narrative_state`` 只在新值非空时覆盖旧字段；换绑或重新开局时若直接
+    调用它，上一局的线索/物品/NPC 态度会残留。这里统一清空这些投影字段。
+    """
+    directory = Path(room_dir)
+    normalized = normalize_narrative_state(narrative)
+    state = load_room_state(directory)
+    state[NARRATIVE_KEY] = normalized
+    state["active_scene_id"] = normalized.get("location")
+    state["cursor"] = normalized.get("location")
+    state["path"] = list(normalized.get("visit_log") or [])
+    state.update({key: value for key, value in _LEGACY_RESET.items()})
+    saved = save_room_state(directory, state)
+    logger.info(
+        "narrative.state.reset room=%s location=%s version=%s",
+        directory.name,
+        normalized.get("location"),
+        normalized.get("scenario_version"),
+    )
+    return saved
+
+
 def _apply_move(narrative: dict[str, Any], event: Mapping[str, Any], turn: int) -> None:
     target = str(event.get("to") or event.get("location_id") or "").strip()
     if not target:

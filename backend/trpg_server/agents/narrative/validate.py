@@ -482,6 +482,47 @@ def _check_parents(
             current = parent
 
 
+def _check_start(bundle: NarrativeBundle, node_map: dict[str, NarrativeNode], issues: list[ValidationIssue]) -> None:
+    """§5.9 开场配置：起始地点与开场附件必须真实存在。"""
+    start = bundle.start if isinstance(bundle.start, Mapping) else {}
+    location_id = str(start.get("location_id") or "").strip()
+    if location_id:
+        node = node_map.get(location_id)
+        if node is None:
+            issues.append(ValidationIssue(
+                code="start.unknown_location",
+                level="error",
+                message=f"开场起始地点 {location_id} 不存在。",
+                node_id=location_id,
+                rule="§5.9",
+                suggestion="修正 start.location_id，或在剧本中补建该地点节点。",
+            ))
+        elif node.kind not in {"location", "ending"}:
+            issues.append(ValidationIssue(
+                code="start.not_location",
+                level="warn",
+                message=f"开场起始节点 {location_id} 的类型是 {node.kind}，不是地点。",
+                node_id=location_id,
+                rule="§5.9",
+                suggestion="起始节点应指向 location 或 ending 节点。",
+            ))
+    asset_ids = {
+        str(asset.get("id") or "").strip()
+        for asset in bundle.assets
+        if isinstance(asset, Mapping) and str(asset.get("id") or "").strip()
+    }
+    for asset_id in start.get("opening_attachments") or []:
+        text = str(asset_id or "").strip()
+        if text and text not in asset_ids:
+            issues.append(ValidationIssue(
+                code="start.missing_asset",
+                level="warn",
+                message=f"开场附件 {text} 不在 assets 中。",
+                rule="§5.9",
+                suggestion="补充素材，或修正 opening_attachments。",
+            ))
+
+
 def _check_visibility(bundle: NarrativeBundle, issues: list[ValidationIssue]) -> None:
     for node in bundle.nodes:
         if normalize_visibility(node.visibility) == VISIBILITY_HIDDEN and not _truthy_condition(node.reveal_when):
@@ -649,7 +690,8 @@ def _entry_and_start(
             incoming[edge.to_id].add(edge.from_id)
     entries = [node.id for node in bundle.nodes if node.kind == "location" and not incoming.get(node.id)]
     meta = bundle.meta if isinstance(bundle.meta, Mapping) else {}
-    meta_start = meta.get("start") or meta.get("start_location")
+    declared = bundle.start.get("location_id") if isinstance(getattr(bundle, "start", None), Mapping) else None
+    meta_start = declared or meta.get("start") or meta.get("start_location")
     meta_start = str(meta_start) if isinstance(meta_start, str) and meta_start in location_ids else None
     if meta_start and meta_start not in entries:
         entries.append(meta_start)
@@ -1186,6 +1228,7 @@ def validate_bundle(
     _check_duplicate_node_ids(bundle, issues)
     _check_edges(bundle, node_ids, issues)
     _check_parents(node_map, issues)
+    _check_start(bundle, node_map, issues)
     _check_visibility(bundle, issues)
     _check_public_exits(bundle, index, node_map, issues)
     _check_endings(bundle, node_map, issues)

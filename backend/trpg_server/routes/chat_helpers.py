@@ -277,6 +277,70 @@ def _build_knowledge_usage(result, scenario_results):
     }
 
 
+def _begin_graph_scenario(agent_context):
+    """图谱房间开局：确定性初始化运行态并生成开场包（§5.9）。"""
+    from trpg_server.agents.narrative import OpeningError, begin_scenario
+    from trpg_server.agents.narrative.store import load_bundle, scenario_dir_for_descriptor
+    from trpg_server.scenario_store import load_scenario_by_id
+
+    room_dir = getattr(agent_context, "room_dir", None)
+    scenarios_dir = getattr(agent_context, "scenarios_dir", None)
+    room_info = agent_context.room_info() if callable(getattr(agent_context, "room_info", None)) else {}
+    room_info = room_info if isinstance(room_info, dict) else {}
+    scenario_id = room_info.get("scenario_id")
+    if not room_dir:
+        raise OpeningError("房间目录不可用，无法开局")
+    if not scenarios_dir or scenario_id in (None, ""):
+        raise OpeningError("当前房间没有绑定剧本，无法开局")
+    descriptor, scenario = load_scenario_by_id(
+        Path(scenarios_dir), scenario_id, room_info.get("scenario_version")
+    )
+    if not descriptor:
+        raise OpeningError(f"剧本 {scenario_id} 不存在，无法开局")
+    scenario_dir = scenario_dir_for_descriptor(Path(descriptor))
+    if not (scenario_dir / "narrative.json").exists() and (scenario_dir.parent / "narrative.json").exists():
+        # 版本化描述符位于 .versions/ 下，narrative.json 仍在剧本根目录。
+        scenario_dir = scenario_dir.parent
+    bundle = load_bundle(scenario_dir)
+    if bundle is None:
+        raise OpeningError("剧本尚未生成 narrative.json，无法开局")
+    return begin_scenario(
+        room_dir,
+        bundle,
+        scenario if isinstance(scenario, dict) else {},
+        scenario_version=str(room_info.get("scenario_version") or ""),
+        room_id=str(room_info.get("id") or getattr(agent_context, "room_id", "") or ""),
+    )
+
+
+def _opening_request_text(plan):
+    """开场回合的用户指令：按模式约束模型，不再让它临场猜开场。"""
+    mode = getattr(plan, "opening_mode", "hybrid")
+    if mode == "fixed":
+        return (
+            "@KP [系统开场] 开场内容已由系统发布。请只补充一两句氛围或感官细节，"
+            "不要重复或改写既定开场，不要引入新的地点、人物或线索。"
+        )
+    if mode == "model":
+        return (
+            "@KP [系统开场] 请严格依据开场包撰写开场叙事：只写玩家能观察到的内容，"
+            "不要声称玩家说了‘开始’，不要替玩家决定行动，不要在结尾列出选项。"
+        )
+    return (
+        "@KP [系统开场] 开场内容已由系统发布。请在此基础上推进一小步，"
+        "不要逐字复述开场，不要改写既定事实，不要替玩家决定行动。"
+    )
+
+
+def _opening_fallback_text(plan):
+    """模型失败时用确定性开场文本兜底。"""
+    pack = getattr(plan, "pack", None)
+    intro = pack.get("public_intro") if isinstance(pack, dict) else None
+    if isinstance(intro, list) and intro:
+        return "\n\n".join(str(item) for item in intro if str(item).strip())
+    return "故事从这里开始。"
+
+
 def _mark_scenario_started(room_dir, user_id):
     info_path = room_dir / "info.json"
     room_info = read_json(info_path, default={})

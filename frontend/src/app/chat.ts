@@ -652,7 +652,8 @@ async function persistLocalDiceMessage(content: string, metadata: Record<string,
 }
 
 async function persistDirectRoomMessage(message: ChatMessage): Promise<ChatMessage | null> {
-    if (!message.content) return null;
+    const attachments = (message.metadata as Record<string, unknown> | undefined)?.attachments;
+    if (!message.content && !(Array.isArray(attachments) && attachments.length > 0)) return null;
     const room = getCurrentRoom();
     if (!room) return message;
     if (room.invisible_view) return null;
@@ -1270,7 +1271,10 @@ function renderRoomMessage(message: ChatMessage | null, animate = false): void {
     let displayMessage = message.type === "trigger" && metadata.asset_url && message.content && !message.content.includes(String(metadata.asset_url))
         ? { ...message, content: `${message.content}\n\n[${metadata.asset_name || "附件"}](${metadata.asset_url})` }
         : message;
-    const attachmentMarkdown = message.type === "trigger" ? renderTriggerAttachments(metadata.attachments) : "";
+    const hasAttachments = Array.isArray(metadata.attachments) && metadata.attachments.length > 0;
+    const attachmentMarkdown = message.type === "trigger" || hasAttachments
+        ? renderTriggerAttachments(metadata.attachments)
+        : "";
     if (attachmentMarkdown) {
         displayMessage = { ...displayMessage, content: `${displayMessage.content}${attachmentMarkdown}` };
     }

@@ -206,12 +206,14 @@ narrative status [<scenario-id>] [--json]                查看单个或全部�
 narrative validate <scenario-id> [--simulate] [--json]   拓扑分档校验；--simulate 追加乱序模拟
 narrative topology <scenario-id> [--json]                查看拓扑判定、置信度与证据
 narrative build <scenario-id>|--all [--yes] [--json]     生成 / 重建 narrative.json
+narrative opening <room-id> [--publish|--repair] [--yes] [--json]  预览 / 发布开局
 ```
 
 - `status`：显示拓扑、节点/边数量、入口、`build_hash`、不可达地点与孤立资产；省略 ID 时列出全部剧本。
 - `validate`：运行通用规则包 + 当前拓扑包，输出 `error/warn` 与修复建议；`--simulate` 额外检测隐式顺序依赖、自锁门控与不可达结局。
 - `topology`：输出自动判定结果、存储值、边类型统计与可达地点数量。
 - `build`：默认**预演**（只打印结果、不写盘）；加 `--yes` 或在交互确认时输入 `y` 才真正写入 `narrative.json`。`--all` 批量处理所有剧本。
+- `opening`：默认只预览开局包（起始地点、开场白、附件、可见出口、触发器的数量），不写盘；`--publish` 重置房间运行态并把开场消息写入 `messages.json`，`--repair` 只补发开场、不重置已有进度。
 - 所有子命令支持 `--json`，便于脚本与前端消费。
 
 ```text

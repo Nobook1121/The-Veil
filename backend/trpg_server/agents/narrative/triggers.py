@@ -100,6 +100,10 @@ def normalize_asset(raw: Mapping[str, Any] | None) -> dict[str, Any] | None:
         "poster_url": _text(raw.get("poster_url")),
         "origin": _text(raw.get("origin")) or "upload",
         "alt": _text(raw.get("alt")),
+        "caption": _text(raw.get("caption")),
+        "body": _text(raw.get("body")),
+        "name": _text(raw.get("name") or raw.get("title")),
+        "visibility": _text(raw.get("visibility")) or "public",
     }
 
 
