@@ -17,6 +17,7 @@ from typing import Any, Iterable, Mapping
 
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.scenario_store import load_scenario_by_id
+from trpg_server.agents.narrative.visibility import is_visible_to_player, normalize_visibility
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +131,7 @@ def build_knowledge_chunks(scenario: Mapping[str, Any] | None) -> list[Knowledge
                 scenario_version=_version(module, "scenario_version", default=scenario_version),
                 scene_id=str(scene_id) if scene_id not in (None, "") else None,
                 card_type=card_type,
-                visibility=str(module.get("visibility") or "player_visible"),
+                visibility=normalize_visibility(module.get("visibility")),
                 spoiler_level=max(0, _int(module.get("spoiler_level"), 0)),
                 unlock_condition=(str(module.get("unlock_condition")) if module.get("unlock_condition") else None),
                 text=text,
@@ -782,7 +783,7 @@ class KnowledgeBaseService:
                 continue
             if chunk.spoiler_level > spoiler_level:
                 continue
-            if audience != "kp" and chunk.visibility == "kp_only":
+            if audience != "kp" and not is_visible_to_player(chunk.visibility):
                 continue
             eligible.append(chunk)
         return eligible

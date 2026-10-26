@@ -154,6 +154,18 @@ def _pdf_document(raw: bytes, filename: str, ocr_provider=None) -> ParsedDocumen
         raise ScenarioDocumentError("Unable to read PDF document") from exc
 
 
+def _doc_document(raw: bytes, filename: str) -> ParsedDocument:
+    """旧版 .doc 走 scenario_importer 的 OLE 解析；直接当文本解码会得到乱码。"""
+    from trpg_server.scenario_importer import extract_script_text
+
+    try:
+        text = extract_script_text(raw, filename)
+    except ValueError as exc:
+        raise ScenarioDocumentError(str(exc)) from exc
+    document = _text_document(text.encode("utf-8"), Path(filename).with_suffix(".txt").name)
+    return ParsedDocument(filename=filename, markdown=document.markdown, blocks=document.blocks, page_count=None)
+
+
 def parse_scenario_document(raw: bytes, filename: str, ocr_provider=None) -> ParsedDocument:
     validate_scenario_upload(filename, len(raw), max(len(raw), 1))
     suffix = Path(filename).suffix.casefold()
@@ -161,6 +173,8 @@ def parse_scenario_document(raw: bytes, filename: str, ocr_provider=None) -> Par
         return _pdf_document(raw, filename, ocr_provider=ocr_provider)
     if suffix == ".docx":
         return _docx_document(raw, filename)
+    if suffix == ".doc":
+        return _doc_document(raw, filename)
     return _text_document(raw, filename)
 
 

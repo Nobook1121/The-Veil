@@ -197,6 +197,31 @@ scenario reindex <scenario-id> [--yes]
 剧本保留分块），仅当索引缺失时才从场景卡 `modules` 重建，**不会把已导入的知识覆盖为空**。
 会调用 embedding，可能较慢。
 
+### 世界树 / 图谱（narrative）
+
+`narrative` 命令组只读或重建剧本目录下的 `narrative.json`，不会改动 `scenario.json`。
+
+```text
+narrative status [<scenario-id>] [--json]                查看单个或全部剧本的生成状态
+narrative validate <scenario-id> [--simulate] [--json]   拓扑分档校验；--simulate 追加乱序模拟
+narrative topology <scenario-id> [--json]                查看拓扑判定、置信度与证据
+narrative build <scenario-id>|--all [--yes] [--json]     生成 / 重建 narrative.json
+```
+
+- `status`：显示拓扑、节点/边数量、入口、`build_hash`、不可达地点与孤立资产；省略 ID 时列出全部剧本。
+- `validate`：运行通用规则包 + 当前拓扑包，输出 `error/warn` 与修复建议；`--simulate` 额外检测隐式顺序依赖、自锁门控与不可达结局。
+- `topology`：输出自动判定结果、存储值、边类型统计与可达地点数量。
+- `build`：默认**预演**（只打印结果、不写盘）；加 `--yes` 或在交互确认时输入 `y` 才真正写入 `narrative.json`。`--all` 批量处理所有剧本。
+- 所有子命令支持 `--json`，便于脚本与前端消费。
+
+```text
+narrative status 12
+narrative validate 12 --simulate
+narrative topology 12 --json
+narrative build 12 --yes
+narrative build --all --yes
+```
+
 ## 用户管理
 
 ```text

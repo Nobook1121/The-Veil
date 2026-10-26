@@ -30,6 +30,7 @@ from trpg_server.character_ai import (
     scenario_context_from_record,
 )
 from trpg_server.logging_config import log_user_action, user_action_text
+from trpg_server.narrative_admin import handle_narrative_command
 from trpg_server.scenario_admin import (
     delete_scenario,
     list_scenarios,
@@ -219,6 +220,10 @@ def execute_console_command(
                 _scenario_reindex_command(args[1:], scenarios_dir, vector_store, embedding_provider, confirm=confirm)
             )
 
+    if domain == "narrative" and subcommand:
+        ok, text = handle_narrative_command(parts[1:], _resolve_scenarios_dir(scenarios_dir), confirm=confirm)
+        return _log_result(ConsoleCommandResult(ok, text))
+
     if domain == "vector" and subcommand:
         if subcommand == "health":
             return _log_result(_vector_health_command(vector_store, embedding_provider, ocr_provider))
@@ -324,6 +329,10 @@ def command_help_text() -> str:
             "  scenario delete <id> [--vectors-only|--force]    （删剧本；--yes 跳过确认）",
             "  scenario validate <id>                           （校验剧本/索引/向量一致性）",
             "  scenario reindex <id> [--yes]                    （重建剧本知识索引与向量）",
+            "  narrative status [<id>] [--json]                 （查看世界树/图谱生成状态）",
+            "  narrative validate <id> [--simulate] [--json]    （拓扑分档校验与乱序模拟）",
+            "  narrative topology <id> [--json]                 （查看拓扑判定与证据）",
+            "  narrative build <id>|--all [--yes] [--json]      （生成/重建 narrative.json；缺省预演）",
             "  vector health                                    （向量库/embedding/OCR 状态）",
             "  vector prune [--yes]                             （清理孤儿向量）",
             "  knowledge list [search]                          （列出规则集与各剧本知识/向量数）",
