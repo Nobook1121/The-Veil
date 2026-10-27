@@ -615,7 +615,7 @@ class ScenarioView {
                             <h5 class="modal-title">正在导入剧本</h5>
                             <p class="scenario-import-file" data-conversion-file></p>
                         </div>
-                        <span class="scenario-import-percent" data-conversion-percent>0%</span>
+                        <span class="scenario-import-percent" data-conversion-percent role="status" aria-live="polite">0%</span>
                     </div>
                     <div class="modal-body">
                         <div class="scenario-import-track" role="progressbar" aria-label="剧本导入进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-conversion-track>
@@ -700,6 +700,12 @@ class ScenarioView {
         const total = Number(meta.totalChunks || 0);
         const processed = Number(meta.processedChunks || 0);
         this.updateConversionProgress(index, job.status === "failed" ? "error" : job.status === "done" ? "complete" : "active", total ? `${processed}/${total} 个分块` : "");
+        // 导入任务能拿到真实进度：停掉阶段内的缓慢爬升计时器，否则每次轮询都会
+        // 先跳回阶段中点再被真实值覆盖，进度条会明显来回抖动。
+        if (this.conversionProgressTimer !== null) {
+            window.clearInterval(this.conversionProgressTimer);
+            this.conversionProgressTimer = null;
+        }
         this.setConversionProgressValue(Number(job.progress || 0));
     }
 

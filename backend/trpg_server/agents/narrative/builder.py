@@ -254,16 +254,21 @@ def build_from_scenario(
     )
 
 
-def rebuild_from_descriptor(descriptor_path: Path | str, *, save: bool = True) -> BuildResult:
-    descriptor = Path(descriptor_path)
-    scenario = read_json(descriptor, default={})
-    if not isinstance(scenario, Mapping):
-        raise ValueError(f"scenario.json 不是对象: {descriptor}")
+def _build_loaded(scenario: Mapping[str, Any], descriptor: Path, *, save: bool) -> BuildResult:
+    """用已读入的 scenario 字典建图，避免调用方与这里重复读取同一个 JSON。"""
     scenario_dir = scenario_dir_for_descriptor(descriptor)
     result = build_from_scenario(scenario, scenario_dir=scenario_dir, save=save)
     if not result.bundle.scenario_id:
         result.bundle.scenario_id = scenario_id_from_dir(scenario_dir)
     return result
+
+
+def rebuild_from_descriptor(descriptor_path: Path | str, *, save: bool = True) -> BuildResult:
+    descriptor = Path(descriptor_path)
+    scenario = read_json(descriptor, default={})
+    if not isinstance(scenario, Mapping):
+        raise ValueError(f"scenario.json 不是对象: {descriptor}")
+    return _build_loaded(scenario, descriptor, save=save)
 
 
 def ensure_built(descriptor_path: Path | str, *, save: bool = True) -> BuildResult | None:
@@ -277,10 +282,9 @@ def ensure_built(descriptor_path: Path | str, *, save: bool = True) -> BuildResu
     scenario = read_json(descriptor, default={})
     if not isinstance(scenario, Mapping) or not scenario.get("modules"):
         return None
-    scenario_dir = scenario_dir_for_descriptor(descriptor)
-    if has_narrative(scenario_dir):
+    if has_narrative(scenario_dir_for_descriptor(descriptor)):
         return None
-    return rebuild_from_descriptor(descriptor, save=save)
+    return _build_loaded(scenario, descriptor, save=save)
 
 
 def rebuild_all(scenarios_dir: Path | str) -> list[tuple[Path, BuildResult | None, str | None]]:
