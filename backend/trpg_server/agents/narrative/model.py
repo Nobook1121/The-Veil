@@ -21,6 +21,33 @@ VISIBILITY_HIDDEN = "hidden"
 VISIBILITY_KP_ONLY = "kp_only"
 VISIBILITY_STATES = (VISIBILITY_PUBLIC, VISIBILITY_HIDDEN, VISIBILITY_KP_ONLY)
 
+# 旧剧本字段映射：`secret` 属于隐藏层，`kp/gm/keeper` 属于 KP 专属。
+# 未识别的非空值一律收紧为 `kp_only`，避免未知值被当成 public 放行。
+_LEGACY_VISIBILITY = {
+    "public": VISIBILITY_PUBLIC,
+    "player_visible": VISIBILITY_PUBLIC,
+    "player": VISIBILITY_PUBLIC,
+    "visible": VISIBILITY_PUBLIC,
+    "hidden": VISIBILITY_HIDDEN,
+    "secret": VISIBILITY_HIDDEN,
+    "kp": VISIBILITY_KP_ONLY,
+    "kp_only": VISIBILITY_KP_ONLY,
+    "gm": VISIBILITY_KP_ONLY,
+    "keeper": VISIBILITY_KP_ONLY,
+}
+
+
+def normalize_visibility(value: Any, default: str = VISIBILITY_PUBLIC) -> str:
+    """旧值 `public/kp/player_visible` → 三态；未知非空值按 fail-closed 收紧。"""
+    text = str(value or "").strip().lower()
+    if not text:
+        return default
+    mapped = _LEGACY_VISIBILITY.get(text)
+    if mapped:
+        return mapped
+    return VISIBILITY_KP_ONLY
+
+
 # 节点类型：前四种属于定位树，其余是资产节点。
 TREE_KINDS = ("act", "area", "location", "ending")
 ASSET_KINDS = ("npc", "item", "clue", "concept", "interactable", "flag", "clock")
@@ -230,9 +257,7 @@ class NarrativeNode:
         kind = str(data.get("kind") or data.get("type") or "location").strip().lower()
         if kind not in NODE_KINDS:
             kind = "location"
-        visibility = str(data.get("visibility") or VISIBILITY_PUBLIC).strip().lower()
-        if visibility not in VISIBILITY_STATES:
-            visibility = VISIBILITY_PUBLIC
+        visibility = normalize_visibility(data.get("visibility"), VISIBILITY_PUBLIC)
         scene_role = data.get("scene_role")
         if kind == "ending":
             scene_role = "ending"
@@ -340,9 +365,7 @@ class NarrativeEdge:
         edge_type = str(data.get("type") or "adjacent").strip().lower()
         if edge_type not in EDGE_TYPES:
             edge_type = "mentions"
-        visibility = str(data.get("visibility") or VISIBILITY_PUBLIC).strip().lower()
-        if visibility not in VISIBILITY_STATES:
-            visibility = VISIBILITY_PUBLIC
+        visibility = normalize_visibility(data.get("visibility"), VISIBILITY_PUBLIC)
         condition = data.get("condition")
         reveal_when = data.get("reveal_when")
         evidence = data.get("evidence")

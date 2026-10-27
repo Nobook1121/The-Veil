@@ -27,6 +27,7 @@ from trpg_server.agents.narrative.resolver import TriggerResolver
 from trpg_server.agents.narrative.state_store import (
     KEYFRAME_INTERVAL,
     apply_event,
+    latest_keyframe,
     load_narrative_state,
     write_keyframe,
 )
@@ -56,6 +57,16 @@ def _as_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _str_list(value: Any) -> list[str]:
@@ -187,6 +198,14 @@ class NarrativeRuntime:
             return True
         return key in {str(item) for item in self.narrative.get("visit_log") or []}
 
+    def _ending_ready(self, node: NarrativeNode | None) -> bool:
+        """结局天然是 kp_only；completion 满足（或无 completion）时才对玩家开放。"""
+        if node is None or node.kind != "ending":
+            return False
+        if not node.completion:
+            return True
+        return evaluate_condition(node.completion, self.narrative).ok
+
     def resolve_node(self, reference: Any, *, kinds: tuple[str, ...] | None = None) -> NarrativeNode | None:
         ref = _text(reference)
         if not ref:
@@ -255,8 +274,9 @@ class NarrativeRuntime:
             target = self.node(target_id)
             if target is None:
                 continue
-            visible = _edge_visible(edge, revealed, self.narrative) and _node_visible(
-                target, revealed, self.narrative
+            ready = self._ending_ready(target)
+            visible = _edge_visible(edge, revealed, self.narrative) and (
+                ready or _node_visible(target, revealed, self.narrative)
             )
             if not visible and not include_hidden:
                 continue
@@ -270,6 +290,7 @@ class NarrativeRuntime:
                 "label": edge.label or target.title or target.id,
                 "type": edge.type,
                 "visible": visible,
+                "ready": ready,
                 "blocked": not condition.ok,
                 "missing": condition.missing,
                 "visited": self.is_visited(target.id),
@@ -393,8 +414,15 @@ class NarrativeRuntime:
         if not reason or self.room_dir is None:
             return
         turn = _as_int((self.narrative.get("clock") or {}).get("turn"), 0)
-        ledger_seq = 0
         try:
+            existing = latest_keyframe(self.room_dir)
+            if (
+                existing
+                and _as_int(existing.get("turn"), 0) == turn
+                and str(existing.get("reason") or "") == reason
+            ):
+                return
+            ledger_seq = 0
             recent = read_ledger_events(self.room_dir, limit=1)
             ledger_seq = _as_int(recent[-1].get("_seq"), 0) if recent else 0
             write_keyframe(self.room_dir, self.narrative, turn=turn, reason=reason, ledger_seq=ledger_seq)
@@ -402,12 +430,14 @@ class NarrativeRuntime:
             logger.warning("narrative.keyframe.write_failed room=%s reason=%s", self.room_dir.name, reason, exc_info=True)
 
     def record_batch(self, payloads: list[Mapping[str, Any]], *, summary: str = "") -> list[dict[str, Any]]:
-        """一次原子状态写入 + 一条账本摘要；用于交互结果的多效果。"""
+        """批量事件逐条落账后再一次性保存状态；账本与状态保持可重放。"""
         from trpg_server.agents.narrative.state_store import apply_to_narrative, save_narrative_state
 
         if self.room_dir is None:
             raise NarrativeRuntimeError("房间目录不可用，无法写入状态")
         events = [self._event(payload) for payload in payloads]
+        for event in events:
+            append_ledger_event(self.room_dir, event, bundle=self.bundle)
         narrative = self.narrative
         for event in events:
             narrative = apply_to_narrative(narrative, event)
@@ -423,6 +453,7 @@ class NarrativeRuntime:
                     "kind": "state_change",
                     "summary": summary,
                     "source": "kp",
+                    "event_ids": [str(event.get("id") or "") for event in events if event.get("id")],
                 },
                 bundle=self.bundle,
             )
@@ -594,19 +625,32 @@ class NarrativeRuntime:
         if target is None:
             _deny("unknown_target")
             raise NarrativeRuntimeError(f"找不到地点：{target_ref}")
-        if target.visibility == VISIBILITY_KP_ONLY or not self.node_visible(target.id):
+        ending_ready = self._ending_ready(target)
+        if not ending_ready and (
+            target.visibility == VISIBILITY_KP_ONLY or not self.node_visible(target.id)
+        ):
             _deny("hidden", to=target.id)
             raise NarrativeRuntimeError("目标地点尚未向玩家揭示，不能移动")
         if target.id == self.location_id:
             return {"moved": False, "already_here": True, "location_id": target.id, "title": self.title(target.id)}
 
-        edges = [
+        adjacent = [
             (edge, condition)
             for edge, condition in ((edge, self._edge_condition(edge, self.narrative)) for edge, target_id in self._movement_edges_from(self.location_id or "") if target_id == target.id)
         ]
-        if not edges:
+        if not adjacent:
             _deny("not_adjacent", to=target.id)
             raise NarrativeRuntimeError(f"从当前位置无法直接到达 {target.title or target.id}")
+        revealed = self.revealed_ids()
+        # 隐藏/kp_only 的移动边不能作为实际移动依据，否则玩家可通过模型绕过揭示。
+        edges = [
+            (edge, condition)
+            for edge, condition in adjacent
+            if _edge_visible(edge, revealed, self.narrative)
+        ]
+        if not edges:
+            _deny("hidden_edge", to=target.id)
+            raise NarrativeRuntimeError(f"通往 {target.title or target.id} 的路线尚未揭示")
         usable = [edge for edge, condition in edges if condition.ok]
         if not usable:
             missing = edges[0][1].missing
@@ -625,9 +669,11 @@ class NarrativeRuntime:
                 )
 
         visited_before = self.is_visited(target.id)
+        # 结局标题是 kp_only；账本摘要不能直接写入该专名，否则会被可见性闸门拒绝。
+        summary_text = "进入结局" if target.kind == "ending" else f"移动到 {target.title or target.id}"
         event = self.record(
             {"kind": "move", "to": target.id, "from": self.location_id, "actor": _text(actor) or None},
-            summary=f"移动到 {target.title or target.id}",
+            summary=summary_text,
         )
         route: dict[str, Any] = {"from": origin or "", "to": target.id}
         log_event(
@@ -773,7 +819,7 @@ class NarrativeRuntime:
             }
 
         outcomes = interaction.get("outcomes") if isinstance(interaction.get("outcomes"), Mapping) else {}
-        outcome = outcomes.get(normalized_result) or outcomes.get("any")
+        outcome = _pick_outcome(outcomes, normalized_result)
         if not isinstance(outcome, Mapping):
             _deny("missing_outcome", interaction_id)
             raise NarrativeRuntimeError(f"交互 {interaction_id} 没有可用的结果文本")
@@ -885,7 +931,7 @@ class NarrativeRuntime:
                 raise NarrativeRuntimeError(f"找不到 NPC 目标位置：{arguments.get('location')}")
             payload["location"] = target.id
         if "visible" in arguments:
-            payload["visible"] = bool(arguments.get("visible"))
+            payload["visible"] = _as_bool(arguments.get("visible"))
         if "known_clues" in arguments:
             payload["known_clues"] = _str_list(arguments.get("known_clues"))
         self.record(payload, summary=f"更新 NPC {npc.title or npc.id}")
@@ -939,6 +985,22 @@ def _normalize_result(value: Any) -> str:
         "大失败": "fumble",
     }
     return mapping.get(text, text or "success")
+
+
+def _pick_outcome(outcomes: Mapping[str, Any], result: str) -> Any:
+    """按结果族回退：大成功→困难成功→成功→any；大失败→失败→any。"""
+    chain = {
+        "extreme_success": ("extreme_success", "hard_success", "success", "any"),
+        "hard_success": ("hard_success", "success", "any"),
+        "success": ("success", "any"),
+        "fumble": ("fumble", "fail", "any"),
+        "fail": ("fail", "any"),
+    }.get(result, (result, "any"))
+    for key in chain:
+        value = outcomes.get(key)
+        if isinstance(value, Mapping):
+            return value
+    return None
 
 
 def _result_family(value: Any) -> str:

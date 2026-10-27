@@ -224,6 +224,72 @@ def test_lookup_location_hides_unrevealed_body(tmp_path) -> None:
     assert result["matches"][0]["visited"] is False
 
 
+def test_move_rejected_when_only_hidden_edge(tmp_path) -> None:
+    bundle = NarrativeBundle(
+        scenario_id="s1",
+        nodes=[
+            NarrativeNode(id="room_a", kind="location", title="门厅"),
+            NarrativeNode(id="room_b", kind="location", title="密室"),
+        ],
+        edges=[NarrativeEdge(
+            id="edge_hidden", from_id="room_a", to_id="room_b",
+            type="adjacent", visibility="hidden", bidirectional=True,
+        )],
+    )
+    save_narrative_state(tmp_path, {"location": "room_a"})
+    runtime = NarrativeRuntime(
+        bundle=bundle,
+        narrative=load_narrative_state(tmp_path),
+        index=build_index(bundle),
+        room_id="room-1",
+        room_dir=tmp_path,
+    )
+    with pytest.raises(NarrativeRuntimeError) as exc:
+        runtime.move("密室")
+    assert "路线尚未揭示" in str(exc.value)
+
+
+def test_kp_only_ending_reachable_when_completion_met(tmp_path) -> None:
+    bundle = NarrativeBundle(
+        scenario_id="s1",
+        nodes=[
+            NarrativeNode(id="room_a", kind="location", title="出口大厅"),
+            NarrativeNode(
+                id="ending_escape", kind="ending", title="逃出宅邸",
+                visibility="kp_only", completion={"flag": "door_open", "value": True},
+            ),
+        ],
+        edges=[NarrativeEdge(
+            id="edge_end", from_id="room_a", to_id="ending_escape",
+            type="leads_to", bidirectional=False,
+        )],
+    )
+    save_narrative_state(tmp_path, {"location": "room_a"})
+    runtime = NarrativeRuntime(
+        bundle=bundle,
+        narrative=load_narrative_state(tmp_path),
+        index=build_index(bundle),
+        room_id="room-1",
+        room_dir=tmp_path,
+    )
+
+    assert all(item["target_id"] != "ending_escape" for item in runtime.exits())
+    with pytest.raises(NarrativeRuntimeError):
+        runtime.move("逃出宅邸")
+
+    runtime.record({"kind": "flag", "name": "door_open", "value": True}, summary="打开大门")
+    entry = next(item for item in runtime.exits() if item["target_id"] == "ending_escape")
+    assert entry["ready"] is True
+    assert runtime.move("逃出宅邸")["moved"] is True
+
+
+def test_keyframe_once_per_turn_and_reason(tmp_path) -> None:
+    runtime = _runtime(tmp_path)
+    runtime.record({"kind": "move", "to": "room_cellar"}, summary="移动到地下室")
+    runtime.record({"kind": "move", "to": "room_hall"}, summary="回到门厅")
+    assert len(load_keyframes(tmp_path)) == 1
+
+
 def test_narrative_available_detects_bundle(tmp_path) -> None:
     scenarios = tmp_path / "scenarios"
     scenario_dir = scenarios / "s1"

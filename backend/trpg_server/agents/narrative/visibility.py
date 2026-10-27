@@ -17,20 +17,9 @@ from trpg_server.agents.narrative.model import (
     VISIBILITY_PUBLIC,
     VISIBILITY_STATES,
     NarrativeBundle,
+    normalize_visibility,
 )
 
-_LEGACY_MAP = {
-    "public": VISIBILITY_PUBLIC,
-    "player_visible": VISIBILITY_PUBLIC,
-    "player": VISIBILITY_PUBLIC,
-    "visible": VISIBILITY_PUBLIC,
-    "hidden": VISIBILITY_HIDDEN,
-    "secret": VISIBILITY_HIDDEN,
-    "kp": VISIBILITY_KP_ONLY,
-    "kp_only": VISIBILITY_KP_ONLY,
-    "gm": VISIBILITY_KP_ONLY,
-    "keeper": VISIBILITY_KP_ONLY,
-}
 _VISIBILITY_RANK = {VISIBILITY_PUBLIC: 0, VISIBILITY_HIDDEN: 1, VISIBILITY_KP_ONLY: 2}
 
 _KP_MODULE_TYPES = {"background", "opening", "preparation", "timeline", "monster", "ending"}
@@ -51,18 +40,6 @@ _REVEALABLE_RE = re.compile(r"技能|检定|线索|时钟|旗标|条件|需要|�
 _QUOTED_RE = re.compile(r"[「『“\"]([^「」『』”\"\n]{2,24})[」』”\"]")
 
 _GENERIC_NAMES = {"他", "她", "它", "他们", "她们", "玩家", "调查员", "守秘人", "真相", "秘密", "结局", "房间"}
-
-
-def normalize_visibility(value: Any, default: str = VISIBILITY_PUBLIC) -> str:
-    """旧值 `public/kp/player_visible` → 三态；未知值按 fail-closed 收紧。"""
-    text = str(value or "").strip().lower()
-    if not text:
-        return default
-    mapped = _LEGACY_MAP.get(text)
-    if mapped:
-        return mapped
-    # 未识别的可见性字段不能默认放行。
-    return VISIBILITY_KP_ONLY
 
 
 def visibility_rank(value: Any) -> int:
@@ -214,7 +191,11 @@ def classify_visibility(
 
 
 def forbidden_names(bundle: NarrativeBundle) -> list[str]:
-    """`kp_only` 与未揭示 `hidden` 的专名，供输出侧闸门使用。"""
+    """`kp_only` 与 `hidden` 节点的专名，供输出侧闸门使用。
+
+    与 `guards.forbidden_entries` 一致：只用标题/别名（keywords 是检索用普通
+    词，不能当专名）；物件的揭示状态依赖运行态，由 guards 在输出侧处理。
+    """
     names: list[str] = []
 
     def _add(value: Any) -> None:
@@ -225,14 +206,20 @@ def forbidden_names(bundle: NarrativeBundle) -> list[str]:
             names.append(text)
 
     for node in bundle.nodes:
-        if node.visibility != VISIBILITY_KP_ONLY:
-            continue
-        for value in (node.title, *node.aliases, *node.keywords):
-            _add(value)
-        for quoted in _QUOTED_RE.findall(node.kp_notes or ""):
-            _add(quoted)
+        if node.visibility == VISIBILITY_KP_ONLY:
+            for value in (node.title, *node.aliases):
+                _add(value)
+            for quoted in _QUOTED_RE.findall(node.kp_notes or ""):
+                _add(quoted)
+        elif node.visibility == VISIBILITY_HIDDEN and not node.reveal_when:
+            # 没有 reveal_when 的 hidden 永远不会被揭示，按专名拦截；带条件的
+            # hidden 交给运行态/输出侧判定，避免误伤已揭示内容。
+            for value in (node.title, *node.aliases):
+                _add(value)
     for edge in bundle.edges:
         if edge.visibility == VISIBILITY_KP_ONLY:
+            _add(edge.label)
+        elif edge.visibility == VISIBILITY_HIDDEN and not edge.reveal_when:
             _add(edge.label)
     return names
 

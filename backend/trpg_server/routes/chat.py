@@ -706,7 +706,8 @@ def chat():
                         search_kwargs["candidate_titles"] = retrieval_candidate_titles
                     scenario_results = knowledge_service.search(room_id, retrieval_query, **search_kwargs)
                     if constrained and not scenario_results:
-                        # 候选集过窄时兜底一次全量检索，避免模型误以为剧本缺失。
+                        # 候选集为空说明本轮预判没有命中任何可用片段；fail-closed 保持
+                        # 空结果，而不是撤销约束做全量检索，避免把未授权内容注入提示。
                         log_event(
                             "retrieval.candidates_empty",
                             room_id=str(room_id),
@@ -714,9 +715,6 @@ def chat():
                             candidates=len(retrieval_candidate_ids),
                             titles=len(retrieval_candidate_titles),
                         )
-                        search_kwargs.pop("candidate_ids", None)
-                        search_kwargs.pop("candidate_titles", None)
-                        scenario_results = knowledge_service.search(room_id, retrieval_query, **search_kwargs)
                     scenario_results = [
                         item for item in scenario_results
                         if isinstance(item, dict) and str(item.get("text") or "").strip()

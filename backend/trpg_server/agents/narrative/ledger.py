@@ -96,8 +96,12 @@ def _manifest_path(directory: Path) -> Path:
 def _segments(directory: Path) -> list[str]:
     payload = read_json(_manifest_path(directory), default={})
     items = payload.get("segments") if isinstance(payload, Mapping) else None
-    if not isinstance(items, list):
-        return []
+    if not isinstance(items, list) or not items:
+        # manifest 可能在轮转后丢失：按命名规则兜底，保证旧段仍可重放。
+        return sorted(
+            path.name
+            for path in directory.glob("story_ledger.[0-9][0-9][0-9][0-9].jsonl")
+        )
     return [
         str(item).strip()
         for item in items
@@ -168,8 +172,16 @@ def append_ledger_event(
     for extra in ("check_id", "object_id", "interaction_id", "trigger_id"):
         if event.get(extra):
             item[extra] = str(event.get(extra))
+    # 完整事件 payload 必须一起落盘：否则关键帧重放会丢掉 move/clue/item/clock
+    # 等字段，只能还原摘要，重建出的运行态与真实状态不一致。
+    payload = {
+        str(key): value
+        for key, value in event.items()
+        if str(key) not in {"payload", "_seq"}
+    }
+    item["payload"] = payload
 
-    line = json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n"
+    line = json.dumps(item, ensure_ascii=False, sort_keys=True, default=str) + "\n"
     _rotate_if_needed(directory)
     with ledger_path(directory).open("a", encoding="utf-8") as handle:
         handle.write(line)
@@ -230,6 +242,24 @@ def read_ledger_events(
     if limit is not None and limit > 0:
         events = events[-limit:]
     return events
+
+
+def clear_ledger(room_dir: Path | str) -> None:
+    """重开局：删掉活动账本、所有分段与 manifest，让重放从零开始。"""
+    directory = Path(room_dir)
+    names = set(_segments(directory))
+    names.update(path.name for path in directory.glob("story_ledger.[0-9][0-9][0-9][0-9].jsonl"))
+    for name in names:
+        try:
+            (directory / name).unlink()
+        except OSError:
+            continue
+    for path in (ledger_path(directory), _manifest_path(directory)):
+        try:
+            path.unlink()
+        except OSError:
+            continue
+    logger.info("narrative.ledger.cleared room=%s", directory.name)
 
 
 def ledger_size(room_dir: Path | str) -> int:
@@ -378,6 +408,7 @@ __all__ = [
     "SUMMARIES_FILENAME",
     "append_fact",
     "append_ledger_event",
+    "clear_ledger",
     "facts_path",
     "ledger_path",
     "ledger_size",

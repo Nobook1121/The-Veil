@@ -310,6 +310,7 @@ def _parse_objects(section: Section) -> tuple[list[dict[str, Any]], list[dict[st
     lines = [line.strip() for line in str(section.content or "").split("\n") if line.strip()]
 
     current_object: dict[str, Any] | None = None
+    current_interaction: dict[str, Any] | None = None
     outcome_key: str | None = None
     for line in lines:
         bullet = bool(_BULLET_RE.match(line))
@@ -318,8 +319,11 @@ def _parse_objects(section: Section) -> tuple[list[dict[str, Any]], list[dict[st
         if outcome_match and current_object is not None:
             outcome_key = str(outcome_match.group(1) or "")
             text = outcome_match.group(2).strip()
-            outcomes = current_object["interactions"][0]["outcomes"] if current_object["interactions"] else None
-            if outcomes is not None:
+            target = current_interaction or (
+                current_object["interactions"][0] if current_object["interactions"] else None
+            )
+            if target is not None:
+                outcomes = target["outcomes"]
                 outcomes.pop("any", None)
                 outcomes[_outcome_key(outcome_key)] = {"text": text}
             continue
@@ -329,8 +333,10 @@ def _parse_objects(section: Section) -> tuple[list[dict[str, Any]], list[dict[st
         # 已进入某个物件时，带技能的行优先当作该物件的交互，而不是新物件。
         if current_object is not None:
             head = re.split(r"[：:]", body, maxsplit=1)[0]
-            if _interaction_from_line(body, current_object["id"]) and not _OBJECT_HINT_RE.search(head):
-                current_object["interactions"].append(_interaction_from_line(body, current_object["id"]))
+            interaction = _interaction_from_line(body, current_object["id"])
+            if interaction and not _OBJECT_HINT_RE.search(head):
+                current_object["interactions"].append(interaction)
+                current_interaction = interaction
                 outcome_key = None
                 continue
 
@@ -354,26 +360,28 @@ def _parse_objects(section: Section) -> tuple[list[dict[str, Any]], list[dict[st
                 "interactions": [],
                 "visibility": "public",
             }
+            current_interaction = None
             interaction = _interaction_from_line(body, object_id)
             if interaction:
                 current_object["interactions"].append(interaction)
+                current_interaction = interaction
             objects.append(current_object)
             outcome_key = None
             continue
         if current_object is not None:
             interactions = current_object.get("interactions") or []
-            if interactions:
-                interaction = _interaction_from_line(body, current_object["id"])
-                if interaction:
-                    interactions.append(interaction)
-                    outcome_key = None
-                    continue
-                if outcome_key:
-                    key = _outcome_key(outcome_key)
-                    outcomes = interactions[0]["outcomes"]
-                    outcomes.setdefault(key, {"text": ""})
-                    outcomes[key]["text"] = f"{outcomes[key]['text']}\n{body}".strip()
-                    continue
+            interaction = _interaction_from_line(body, current_object["id"])
+            if interaction and interactions:
+                interactions.append(interaction)
+                current_interaction = interaction
+                outcome_key = None
+                continue
+            if outcome_key and current_interaction is not None:
+                key = _outcome_key(outcome_key)
+                outcomes = current_interaction["outcomes"]
+                outcomes.setdefault(key, {"text": ""})
+                outcomes[key]["text"] = f"{outcomes[key]['text']}\n{body}".strip()
+                continue
         if bullet:
             beat_id = _unique_id(used_ids, f"beat_{section.id}_{len(beats) + 1}")
             beats.append({"id": beat_id, "text": body, "required": False, "repeatable": False})
@@ -437,7 +445,11 @@ def _build_node(
         reveal_when=reveal_when,
         spoiler_level=2 if decision.visibility == VISIBILITY_KP_ONLY else (1 if decision.visibility == VISIBILITY_HIDDEN else 0),
         source="import",
-        extra={"visibility_confidence": round(decision.confidence, 2), "visibility_reasons": decision.reasons},
+        extra={
+            "visibility_confidence": round(decision.confidence, 2),
+            "visibility_reasons": decision.reasons,
+            "keywords_visibility": decision.keywords_visibility,
+        },
     )
 
 
@@ -570,6 +582,7 @@ def extract_narrative(
                     id=clue_id, kind="clue", title=name, parent=parent, summary=name,
                     keywords=[name], visibility=decision.visibility, reveal_when=_extract_reveal_when(section.content),
                     spoiler_level=1, source=source,
+                    extra={"keywords_visibility": decision.keywords_visibility},
                 )
             )
             warnings.append({"code": "visibility.needs_review", "node_id": clue_id, "reason": "clue_reveal_when_unresolved"})

@@ -462,7 +462,8 @@ def begin_scenario(
         raise OpeningError("剧本没有起始地点，无法开局")
     state = _fresh_state(bundle, scenario_version=scenario_version, location_id=location_id)
     reset_narrative_state(room_dir, state)
-    write_keyframe(room_dir, state, turn=0, reason="start")
+    # 账本已在 reset 中清空，起始关键帧从 seq=0 开始，重放不会跨局。
+    write_keyframe(room_dir, state, turn=0, reason="start", ledger_seq=0)
     log_event(
         "scenario.begin",
         room_id=room_id,

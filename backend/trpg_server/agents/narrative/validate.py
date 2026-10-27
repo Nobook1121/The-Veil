@@ -203,6 +203,7 @@ class _Resources:
     clocks_defined: set[str] = field(default_factory=set)
     interaction_ids: set[str] = field(default_factory=set)
     object_ids: set[str] = field(default_factory=set)
+    object_providers: dict[str, set[str]] = field(default_factory=dict)
 
 
 def _asset_ids(bundle: NarrativeBundle, kinds: set[str]) -> set[str]:
@@ -356,7 +357,12 @@ def _collect_resources(bundle: NarrativeBundle) -> _Resources:
     for node in bundle.nodes:
         for obj in node.objects:
             if isinstance(obj, Mapping):
-                resources.object_ids.update(_id_list(obj.get("id")))
+                object_ids = _id_list(obj.get("id"))
+                resources.object_ids.update(object_ids)
+                parent = node.id if node.kind == "location" else node.parent
+                if parent:
+                    for object_id in object_ids:
+                        resources.object_providers.setdefault(object_id, set()).add(parent)
                 for interaction in _as_list(obj.get("interactions")):
                     if isinstance(interaction, Mapping):
                         resources.interaction_ids.update(_id_list(interaction.get("id")))
@@ -723,8 +729,41 @@ def _undirected_reach(start: str | None, bundle: NarrativeBundle, movement: list
         return set()
     adjacency: dict[str, set[str]] = {node.id: set() for node in bundle.nodes}
     for edge in movement:
+        # 隐藏/kp_only 边在运行时会被 move 拒绝，不能算作可达路径。
+        if normalize_visibility(edge.visibility) != "public":
+            continue
         adjacency.setdefault(edge.from_id, set()).add(edge.to_id)
         adjacency.setdefault(edge.to_id, set()).add(edge.from_id)
+    seen = {start}
+    queue = deque([start])
+    while queue:
+        current = queue.popleft()
+        for target in adjacency.get(current, ()):
+            if target not in seen:
+                seen.add(target)
+                queue.append(target)
+    return seen
+
+
+def _player_reachable(
+    start: str | None,
+    bundle: NarrativeBundle,
+    movement: list[NarrativeEdge],
+) -> set[str]:
+    """玩家视角可达集：只经过 public 边与 public 节点（hidden/kp_only 均排除）。"""
+    public_nodes = {
+        node.id for node in bundle.nodes
+        if normalize_visibility(node.visibility) == "public"
+    }
+    if not start or start not in public_nodes:
+        return set()
+    adjacency: dict[str, set[str]] = {node_id: set() for node_id in public_nodes}
+    for edge in movement:
+        if normalize_visibility(edge.visibility) != "public":
+            continue
+        if edge.from_id in public_nodes and edge.to_id in public_nodes:
+            adjacency[edge.from_id].add(edge.to_id)
+            adjacency[edge.to_id].add(edge.from_id)
     seen = {start}
     queue = deque([start])
     while queue:
@@ -745,6 +784,7 @@ def _check_locations(
 ) -> None:
     incident = {edge.from_id for edge in movement} | {edge.to_id for edge in movement}
     start = index.start
+    player_reachable = _player_reachable(start, bundle, movement)
     for node in bundle.nodes_of("location"):
         if node.id not in incident and node.id != start:
             issues.append(ValidationIssue(
@@ -755,7 +795,12 @@ def _check_locations(
                 rule="§7.6 通用包#9",
                 suggestion="把它接到同 area 的 hub 或相邻地点；确实可选时标记 optional。",
             ))
-        if start and node.id not in index.reachable:
+        # hidden/kp_only 地点本来就该在揭示前不可达，不按玩家可达集报错。
+        if (
+            start
+            and normalize_visibility(node.visibility) == "public"
+            and node.id not in player_reachable
+        ):
             issues.append(ValidationIssue(
                 code="location.unreachable",
                 level="error",
@@ -846,7 +891,12 @@ def _atom_satisfiable(
         return target in reachable
     if "visited_object" in atom:
         target = str(atom.get("visited_object") or "").strip()
-        return (not target) or target in resources.object_ids
+        if not target:
+            return True
+        if target not in resources.object_ids:
+            return False
+        providers = resources.object_providers.get(target, set())
+        return not providers or bool(providers & reachable)
     atom_type = str(atom.get("type") or "").strip().lower()
     if atom_type == "location":
         target = str(atom.get("id") or "").strip()
@@ -1711,6 +1761,9 @@ def simulate_any_order(
         items: set[str] = set()
         clocks = dict(initial_clocks)
         current = start
+        # 每个排列独立统计命中结局，排列结束后再并入总集，避免跨排列
+        # 复用 reached 状态导致误判（§H6）。
+        perm_reached: set[str] = set()
 
         def current_state() -> dict[str, Any]:
             return _state(visited, clues, flags, items, clocks, check_skills)
@@ -1729,7 +1782,7 @@ def simulate_any_order(
         def mark_endings() -> None:
             state = current_state()
             for ending in endings:
-                if ending.id in reached_endings:
+                if ending.id in perm_reached:
                     continue
                 own = ending.extra.get("condition") if isinstance(ending.extra, Mapping) else None
                 if own and not evaluate_condition(own, state).ok:
@@ -1740,7 +1793,7 @@ def simulate_any_order(
                     if edge.hard and _truthy_condition(edge.condition):
                         if not evaluate_condition(edge.condition, state).ok:
                             continue
-                    reached_endings.add(ending.id)
+                    perm_reached.add(ending.id)
                     break
 
         apply_location(start)
@@ -1761,6 +1814,8 @@ def simulate_any_order(
                 current = location_id
                 budget -= 1
                 mark_endings()
+
+        reached_endings.update(perm_reached)
 
     for ending in endings:
         if ending.id in reached_endings:

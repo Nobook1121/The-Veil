@@ -113,3 +113,53 @@ def test_apply_to_narrative_does_not_touch_disk(tmp_path) -> None:
     assert updated["flags"]["door_open"] is True
     assert original["flags"] == {}
     assert not (tmp_path / "state.json").exists()
+
+
+def test_replay_restores_full_event_payload(tmp_path) -> None:
+    # 账本条目必须保留完整 payload，否则重放会丢掉 move 的 to / clue / item / clock。
+    write_keyframe(
+        tmp_path,
+        narrative_from_room_state({"narrative": {"location": "room_a"}}),
+        turn=0, reason="start", ledger_seq=0,
+    )
+    append_ledger_event(tmp_path, {"id": "e_move", "kind": "move", "to": "room_b", "turn": 1})
+    append_ledger_event(tmp_path, {
+        "id": "e_clue", "kind": "clue", "clue_id": "clue_blood", "pc": "pc_li", "turn": 1,
+    })
+    append_ledger_event(tmp_path, {
+        "id": "e_item", "kind": "item", "item_id": "lamp", "pc": "pc_li", "action": "add", "turn": 1,
+    })
+    append_ledger_event(tmp_path, {
+        "id": "e_clock", "kind": "clock", "clock_id": "clock_flood", "delta": 3, "threshold": 10, "turn": 1,
+    })
+
+    replayed = replay_narrative(tmp_path)
+    assert replayed["location"] == "room_b"
+    assert replayed["revealed_clues"] == ["clue_blood"]
+    assert replayed["pc_state"]["pc_li"]["inventory"] == ["lamp"]
+    assert replayed["clocks"]["clock_flood"]["value"] == 3
+    assert replayed["clock"]["turn"] == 1
+
+
+def test_reset_clears_ledger_so_replay_starts_fresh(tmp_path) -> None:
+    from trpg_server.agents.narrative.state_store import reset_narrative_state
+
+    apply_event(tmp_path, {"id": "old", "kind": "move", "to": "room_old", "turn": 5})
+    append_ledger_event(tmp_path, {"id": "old", "kind": "move", "to": "room_old", "turn": 5})
+    write_keyframe(
+        tmp_path,
+        narrative_from_room_state({"narrative": {"location": "room_old"}}),
+        turn=5, reason="interval", ledger_seq=1,
+    )
+    assert read_ledger_events(tmp_path)
+
+    reset_narrative_state(tmp_path, {"location": "room_new"})
+    write_keyframe(
+        tmp_path,
+        narrative_from_room_state({"narrative": {"location": "room_new"}}),
+        turn=0, reason="start", ledger_seq=0,
+    )
+
+    assert read_ledger_events(tmp_path) == []
+    assert replay_narrative(tmp_path)["location"] == "room_new"
+

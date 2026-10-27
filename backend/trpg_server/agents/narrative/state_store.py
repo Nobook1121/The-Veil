@@ -334,8 +334,8 @@ def save_narrative_state(room_dir: Path | str, narrative: Mapping[str, Any]) -> 
     for entry in (normalized.get("pc_state") or {}).values():
         if isinstance(entry, Mapping):
             inventory.extend(_str_list(entry.get("inventory")))
-    if inventory:
-        state["items"] = list(dict.fromkeys(inventory))
+    # 空背包也要显式写回，否则旧局遗留的 items 会一直残留。
+    state["items"] = list(dict.fromkeys(inventory))
 
     try:
         saved = save_room_state(directory, state)
@@ -385,6 +385,10 @@ def reset_narrative_state(room_dir: Path | str, narrative: Mapping[str, Any]) ->
     state["path"] = list(normalized.get("visit_log") or [])
     state.update({key: value for key, value in _LEGACY_RESET.items()})
     saved = save_room_state(directory, state)
+    # 重开局必须清空账本：否则关键帧重放会把上一局的事件重新叠加进来。
+    from trpg_server.agents.narrative.ledger import clear_ledger
+
+    clear_ledger(directory)
     logger.info(
         "narrative.state.reset room=%s location=%s version=%s",
         directory.name,
@@ -704,6 +708,22 @@ def latest_keyframe(room_dir: Path | str) -> dict[str, Any] | None:
     return keyframes[-1] if keyframes else None
 
 
+def _replay_event(event: Mapping[str, Any]) -> dict[str, Any]:
+    """把账本条目还原成可应用的事件：完整 payload 优先，`id` 用账本权威值。
+
+    账本 meta 会把未知 kind 归一成 ``action``，因此 payload 里的原始 kind
+    必须覆盖 meta，否则 clue/item/attitude 等事件在重放时会被丢掉。
+    """
+    payload = event.get("payload")
+    if not isinstance(payload, Mapping):
+        return {key: value for key, value in event.items() if key != "_seq"}
+    merged = {key: value for key, value in event.items() if key not in {"payload", "_seq"}}
+    merged.update({str(key): value for key, value in payload.items() if key != "payload"})
+    if event.get("id"):
+        merged["id"] = event["id"]
+    return merged
+
+
 def replay_narrative(room_dir: Path | str, *, events: list[Mapping[str, Any]] | None = None) -> dict[str, Any]:
     """关键帧 + 账本重放（§6.4.3）；校验失败时仍返回可用状态并记日志。"""
     directory = Path(room_dir)
@@ -727,10 +747,10 @@ def replay_narrative(room_dir: Path | str, *, events: list[Mapping[str, Any]] | 
         replayed_events: list[Mapping[str, Any]] = list(read_ledger_events(directory, after_seq=after_seq))
     else:
         replayed_events = events
-    if after_seq and replayed_events and _as_int(replayed_events[0].get("seq"), 0) > after_seq + 1:
+    if after_seq and replayed_events and _as_int(replayed_events[0].get("_seq"), 0) > after_seq + 1:
         replay_result = "gap"
     for event in replayed_events:
-        narrative = apply_to_narrative(narrative, event)
+        narrative = apply_to_narrative(narrative, _replay_event(event))
     log_event(
         "ledger.replay",
         room_id=directory.name,
