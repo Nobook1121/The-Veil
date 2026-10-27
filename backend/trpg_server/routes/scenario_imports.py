@@ -177,14 +177,14 @@ def publish_import(script_id):
     else:
         persist_knowledge_index(descriptor, stored, vector_store=vector_store, embedding_provider=provider)
     _store().update(job["id"], status="published", progress=100)
-    # 导入发布后自动建图（§8.2）：失败只记日志，不影响导入结果。
-    if str(scenario.get("import_mode") or "") != "direct" and scenario.get("modules"):
-        try:
-            from trpg_server.agents.narrative.builder import rebuild_from_descriptor
+    # 导入发布后自动补建图谱（§8.2）：只在该剧本还没有 narrative.json 时执行，
+    # 直接导入的剧本没有场景卡，ensure_built 会直接跳过；失败只记日志。
+    try:
+        from trpg_server.agents.narrative.builder import ensure_built
 
-            rebuild_from_descriptor(descriptor)
-        except Exception:  # noqa: BLE001
-            logger.warning("narrative.auto_build_failed scenario=%s", script_id, exc_info=True)
+        ensure_built(descriptor)
+    except Exception:  # noqa: BLE001
+        logger.warning("narrative.auto_build_failed scenario=%s", script_id, exc_info=True)
     log_user_action(
         logger,
         user_action_text(session.get("username"), "发布了导入任务"),

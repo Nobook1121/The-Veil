@@ -10,6 +10,7 @@ from trpg_server.agents.narrative.builder import (
     BuildResult,
     build_from_scenario,
     build_narrative,
+    ensure_built,
     rebuild_all,
     rebuild_from_descriptor,
 )
@@ -116,6 +117,7 @@ __all__ = [
     "detect_sections",
     "detect_topology",
     "evaluate_condition",
+    "ensure_built",
     "extract_narrative",
     "find_scenario_storage",
     "forbidden_names",

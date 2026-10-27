@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 from flask import Blueprint, current_app, request, session
 
+from trpg_server.agents.narrative.builder import ensure_built
 from trpg_server.agents.narrative.logger import log_event
 from trpg_server.agents.narrative.generate import GenerateOptions
 from trpg_server.agents.narrative.keywords import suggest_module_keywords, suggest_node_keywords
@@ -89,6 +90,11 @@ def _open_bundle(scenario_id: int) -> tuple[Path | None, dict[str, Any], Narrati
     descriptor = _descriptor(storage)
     try:
         bundle = load_bundle(storage)
+        if bundle is None:
+            # 导入审核发布的剧本保存后还没有世界树：首次读取时补建，作者打开
+            # 世界树 / 图谱页签即可看到自动生成的图谱，不必再手动跑命令。
+            if ensure_built(descriptor_path or (storage / "scenario.json")) is not None:
+                bundle = load_bundle(storage)
     except Exception:
         logger.exception("Failed to load narrative bundle: %s", scenario_id)
         return storage, descriptor, None, server_error("Failed to load narrative")
