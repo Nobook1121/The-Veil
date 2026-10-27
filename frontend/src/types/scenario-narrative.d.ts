@@ -292,6 +292,7 @@ interface NarrativeApi {
     syncGeneratePanel: () => void;
     syncGenerateSource: () => void;
     startGeneration: () => Promise<void>;
+    cancelGeneration: () => Promise<void>;
     applyGeneration: () => Promise<void>;
 }
 

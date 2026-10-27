@@ -4,7 +4,6 @@ import json
 from trpg_server.agents.narrative.builder import (
     build_from_scenario,
     build_narrative,
-    ensure_built,
     rebuild_from_descriptor,
 )
 from trpg_server.agents.narrative.model import TOPOLOGIES, VISIBILITY_KP_ONLY
@@ -104,30 +103,3 @@ def test_rebuild_from_descriptor(tmp_path):
     payload = json.loads(narrative_path(scenario_dir).read_text(encoding="utf-8"))
     assert payload["scenario_id"] == "45"
     assert payload["schema_version"] == 1
-
-
-def test_ensure_built_creates_first_time_and_skips_existing(tmp_path):
-    scenario_dir = tmp_path / "scenario-46"
-    scenario_dir.mkdir()
-    descriptor = scenario_dir / "scenario.json"
-    write_json_atomic(descriptor, {"id": "46", "modules": _scenario()["modules"]})
-
-    first = ensure_built(descriptor)
-    assert first is not None
-    built = narrative_path(scenario_dir)
-    assert built.exists()
-    before = built.read_bytes()
-
-    # 第二次保存不能覆盖作者已编辑的图谱
-    assert ensure_built(descriptor) is None
-    assert built.read_bytes() == before
-
-
-def test_ensure_built_skips_scenario_without_modules(tmp_path):
-    scenario_dir = tmp_path / "scenario-47"
-    scenario_dir.mkdir()
-    descriptor = scenario_dir / "scenario.json"
-    write_json_atomic(descriptor, {"id": "47", "modules": []})
-
-    assert ensure_built(descriptor) is None
-    assert not narrative_path(scenario_dir).exists()

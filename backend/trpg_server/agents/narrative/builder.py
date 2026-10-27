@@ -29,7 +29,6 @@ from trpg_server.agents.narrative.model import (
 from trpg_server.agents.narrative.store import (
     NarrativeIndex,
     build_index,
-    has_narrative,
     save_bundle,
     scenario_dir_for_descriptor,
     scenario_id_from_dir,
@@ -271,22 +270,6 @@ def rebuild_from_descriptor(descriptor_path: Path | str, *, save: bool = True) -
     return _build_loaded(scenario, descriptor, save=save)
 
 
-def ensure_built(descriptor_path: Path | str, *, save: bool = True) -> BuildResult | None:
-    """剧本首次保存后补建 `narrative.json`（导入审核发布走这条路径）。
-
-    只有「有场景卡」且「尚无 narrative.json」时才建图：已经存在的图谱可能是
-    作者用图谱编辑器改过的布局/可见性/连线，自动重建会静默覆盖，因此这里
-    只在缺失时补建一次。直接导入的剧本没有场景卡，不自动建图（设计 §7.9）。
-    """
-    descriptor = Path(descriptor_path)
-    scenario = read_json(descriptor, default={})
-    if not isinstance(scenario, Mapping) or not scenario.get("modules"):
-        return None
-    if has_narrative(scenario_dir_for_descriptor(descriptor)):
-        return None
-    return _build_loaded(scenario, descriptor, save=save)
-
-
 def rebuild_all(scenarios_dir: Path | str) -> list[tuple[Path, BuildResult | None, str | None]]:
     """批量重建；返回 (descriptor_path, result, error)。"""
     root = Path(scenarios_dir)
@@ -305,7 +288,6 @@ __all__ = [
     "BuildResult",
     "build_from_scenario",
     "build_narrative",
-    "ensure_built",
     "rebuild_all",
     "rebuild_from_descriptor",
 ]

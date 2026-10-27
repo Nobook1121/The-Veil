@@ -60,7 +60,7 @@
             if (!response.ok || !data?.success || !data.data) {
                 if (response.status === 404) {
                     setStatus(t("scenario.tree.empty_badge", "未生成世界树"), "warning");
-                    setEmpty(t("scenario.tree.not_generated", "该剧本还没有世界树。运行 narrative build 生成后再查看。"));
+                    renderNotBuiltState();
                     emitSelection(null);
                     return;
                 }
@@ -82,6 +82,63 @@
             const message = error instanceof Error ? error.message : String(error);
             setStatus(t("scenario.tree.load_failed", "世界树加载失败"), "danger");
             setEmpty(message);
+        }
+    }
+
+    /** 没有世界树时的空态：图谱页签给出「自动建图」入口，其它面板只给提示。 */
+    function renderNotBuiltState(): void {
+        const message = t("scenario.narrative.build.title", "该剧本还没有世界树");
+        const hint = t("scenario.narrative.build.hint", "按现有场景卡生成，生成后可在编辑器里继续调整。");
+        const readonlyHint = t("scenario.narrative.build.readonly", "直接导入的剧本没有场景卡，无法自动建图。");
+        const inline = `<p class="text-muted small mb-0">${escapeHtml(message)}</p>`;
+        const list = byId("scenarioTreeList");
+        if (list) list.innerHTML = inline;
+        const inspector = byId("scenarioNodeInspector");
+        if (inspector) inspector.innerHTML = inline;
+        const graph = byId("scenarioGraphCanvas");
+        if (!graph) return;
+        if (state.readonly) {
+            graph.innerHTML = `
+                <div class="scenario-graph-empty">
+                    <p class="mb-2">${escapeHtml(message)}</p>
+                    <p class="text-muted small mb-0">${escapeHtml(readonlyHint)}</p>
+                </div>`;
+            return;
+        }
+        graph.innerHTML = `
+            <div class="scenario-graph-empty">
+                <p class="mb-2">${escapeHtml(message)}</p>
+                <button type="button" class="btn btn-sm btn-primary" data-build-narrative>
+                    ${escapeHtml(t("scenario.narrative.build.action", "自动建图"))}
+                </button>
+                <p class="text-muted small mt-2 mb-0">${escapeHtml(hint)}</p>
+            </div>`;
+    }
+
+    /** 按现有场景卡手动建图；只在还没有 narrative.json 时由后端执行。 */
+    async function buildNarrative(trigger: HTMLButtonElement | null): Promise<void> {
+        if (!state.scenarioId) return;
+        const button = trigger || byId<HTMLButtonElement>("scenarioGraphCanvas")?.querySelector<HTMLButtonElement>("[data-build-narrative]") || null;
+        if (button) {
+            button.disabled = true;
+            button.textContent = t("scenario.narrative.build.building", "正在建图…");
+        }
+        setStatus(t("scenario.narrative.build.building", "正在建图…"), "secondary");
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<NarrativePayload>>(
+                `/api/scenarios/${state.scenarioId}/narrative/build`,
+                { method: "POST" },
+            );
+            if (!response.ok || !data?.success) {
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            showNotification(t("scenario.narrative.build.done", "世界树已生成。"), "success");
+            await load(state.scenarioId);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setStatus(t("scenario.tree.empty_badge", "未生成世界树"), "warning");
+            renderNotBuiltState();
+            showNotification(message, "error");
         }
     }
 
@@ -167,10 +224,24 @@
         byId("scenarioGenerateApply")?.addEventListener("click", () => {
             void api.applyGeneration();
         });
+        byId("scenarioGraphCanvas")?.addEventListener("click", (event) => {
+            const buildButton = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-build-narrative]");
+            if (buildButton) {
+                event.preventDefault();
+                void buildNarrative(buildButton);
+            }
+        });
+        byId("scenarioGenerateCancel")?.addEventListener("click", () => {
+            void api.cancelGeneration();
+        });
         api.syncGenerateSource();
         api.resetGeneratePanel();
         api.bindGraphEvents();
     }
+
+    // 各子模块通过 api 注册表回调这两个入口；漏注册会让 api.renderAll() /
+    // api.load() 变成 undefined，保存节点、撤销重做、冲突刷新都会抛错。
+    Object.assign(api, { renderAll, load });
 
     window.ScenarioNarrative = {
         load,

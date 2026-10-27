@@ -177,14 +177,8 @@ def publish_import(script_id):
     else:
         persist_knowledge_index(descriptor, stored, vector_store=vector_store, embedding_provider=provider)
     _store().update(job["id"], status="published", progress=100)
-    # 导入发布后自动补建图谱（§8.2）：只在该剧本还没有 narrative.json 时执行，
-    # 直接导入的剧本没有场景卡，ensure_built 会直接跳过；失败只记日志。
-    try:
-        from trpg_server.agents.narrative.builder import ensure_built
-
-        ensure_built(descriptor)
-    except Exception:  # noqa: BLE001
-        logger.warning("narrative.auto_build_failed scenario=%s", script_id, exc_info=True)
+    # 世界树不再在导入发布时自动构建：作者打开图谱页签后点「自动建图」，
+    # 或运行 narrative build 才会生成，避免未检查的图谱被静默写入。
     log_user_action(
         logger,
         user_action_text(session.get("username"), "发布了导入任务"),

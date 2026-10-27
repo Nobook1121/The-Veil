@@ -939,3 +939,53 @@ def test_publish_allowed_without_narrative(tmp_path):
 
     assert response.status_code == 200
     assert response.get_json()["data"]["title"] == "旧剧本改名"
+
+
+def test_cancel_pending_generate_job(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client)
+    store = app.extensions["narrative_generate_store"]
+    job = store.create(owner_id="1", scenario_id=7, options={"source": "modules"})
+
+    cancelled = client.delete(f"/api/scenarios/7/narrative/jobs/{job['id']}", headers=CSRF)
+
+    assert cancelled.status_code == 200
+    assert cancelled.get_json()["data"]["job"]["status"] == "cancelled"
+    read = client.get(f"/api/scenarios/7/narrative/jobs/{job['id']}")
+    assert read.get_json()["data"]["job"]["status"] == "cancelled"
+
+
+def test_cancel_generate_job_rejects_finished_job(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client)
+    store = app.extensions["narrative_generate_store"]
+    job = store.create(owner_id="1", scenario_id=7, options={"source": "modules"})
+    store.update(job["id"], status="done", stage="done", progress=100)
+
+    response = client.delete(f"/api/scenarios/7/narrative/jobs/{job['id']}", headers=CSRF)
+
+    assert response.status_code == 409
+    assert store.get(job["id"])["status"] == "done"
+
+
+def test_cancel_generate_job_checks_scenario_and_owner(tmp_path):
+    _write_scenario(tmp_path)
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client)
+    store = app.extensions["narrative_generate_store"]
+    job = store.create(owner_id="1", scenario_id=8, options={"source": "modules"})
+
+    # 任务不属于 URL 中的剧本
+    assert client.delete(f"/api/scenarios/7/narrative/jobs/{job['id']}", headers=CSRF).status_code == 404
+
+    # 任务属于该剧本但不是当前用户创建的，普通用户不能取消
+    user_app = _app(tmp_path, role="USER")
+    other = user_app.test_client()
+    _login(other, user_id=2, role="USER")
+    response = other.delete(f"/api/scenarios/8/narrative/jobs/{job['id']}", headers=CSRF)
+    assert response.status_code == 403

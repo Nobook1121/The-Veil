@@ -361,6 +361,15 @@ def _bundle_revision(bundle: NarrativeBundle | None) -> int:
         return 0
 
 
+def _update_active(store, job_id: str, **changes: Any) -> bool:
+    """任务已被取消时不再写状态，避免 cancelled 被 done / failed 覆盖。"""
+    job = store.get(job_id)
+    if isinstance(job, Mapping) and job.get("status") == "cancelled":
+        return False
+    store.update(job_id, **changes)
+    return True
+
+
 def run_generate_job(app, job_id: str) -> None:
     """线程池入口：读取任务参数、生成预览并落 result.json。"""
     store = app.extensions["narrative_generate_store"]
@@ -369,7 +378,8 @@ def run_generate_job(app, job_id: str) -> None:
         return
     if job.get("status") not in {"pending", "running"}:
         return
-    store.update(job_id, status="running", stage="loading", progress=10)
+    if not _update_active(store, job_id, status="running", stage="loading", progress=10):
+        return
     try:
         scenarios_dir = Path(app.config["SCENARIOS_DIR"])
         _, storage = find_scenario_storage(scenarios_dir, str(job.get("scenario_id")))
@@ -380,17 +390,22 @@ def run_generate_job(app, job_id: str) -> None:
             raise ValueError("scenario.json 不是对象")
         current = load_bundle(storage, use_cache=False)
         options = GenerateOptions.from_payload(job.get("options"))
-        store.update(job_id, stage="generating", progress=40)
+        if not _update_active(store, job_id, stage="generating", progress=40):
+            return
         ai_filler = None
         if options.ai_fill:
             from trpg_server.agents.narrative.generate_ai import make_ai_filler
 
             ai_filler = make_ai_filler(str(descriptor.get("title") or ""))
         preview = generate_preview(descriptor, storage, options, current=current, ai_filler=ai_filler)
+        # 慢调用（尤其 AI 补全）返回后可能已经被取消，此时丢弃结果。
+        if not _update_active(store, job_id):
+            return
         preview["scenario_id"] = job.get("scenario_id")
         preview["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         store.save_result(job_id, preview)
-        store.update(
+        _update_active(
+            store,
             job_id,
             status="done",
             stage="done",
@@ -406,7 +421,7 @@ def run_generate_job(app, job_id: str) -> None:
         )
     except Exception as exc:  # noqa: BLE001 - 任务失败要回传给前端
         logger.exception("Narrative generation failed: %s", job_id)
-        store.update(job_id, status="failed", stage="failed", progress=100, error=str(exc))
+        _update_active(store, job_id, status="failed", stage="failed", progress=100, error=str(exc))
 
 
 __all__ = ["GenerateOptions", "generate_preview", "run_generate_job"]

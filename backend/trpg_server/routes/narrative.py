@@ -5,13 +5,15 @@
 """
 from __future__ import annotations
 
+import functools
 import logging
+import threading
 from pathlib import Path
 from typing import Any, Mapping
 
 from flask import Blueprint, current_app, request, session
 
-from trpg_server.agents.narrative.builder import ensure_built
+from trpg_server.agents.narrative.builder import rebuild_from_descriptor
 from trpg_server.agents.narrative.logger import log_event
 from trpg_server.agents.narrative.generate import GenerateOptions
 from trpg_server.agents.narrative.keywords import suggest_module_keywords, suggest_node_keywords
@@ -20,6 +22,7 @@ from trpg_server.agents.narrative.store import (
     build_index,
     bundle_summary,
     find_scenario_storage,
+    has_narrative,
     load_bundle,
     save_bundle,
 )
@@ -34,6 +37,32 @@ from trpg_server.responses import error_response, server_error, success_response
 
 bp = Blueprint("narrative_api", __name__)
 logger = logging.getLogger(__name__)
+
+# 修订号检查（读）与 commit（写）之间必须互斥，否则两个并发保存都能通过
+# base_revision 校验、后写覆盖前写。按剧本 id 加进程级锁即可覆盖本应用的
+# 多线程部署；跨进程部署需要换成文件锁。
+_scenario_locks: dict[int, threading.Lock] = {}
+_scenario_locks_guard = threading.Lock()
+
+
+def _scenario_lock(scenario_id: int) -> threading.Lock:
+    with _scenario_locks_guard:
+        lock = _scenario_locks.get(scenario_id)
+        if lock is None:
+            lock = threading.Lock()
+            _scenario_locks[scenario_id] = lock
+        return lock
+
+
+def _scenario_locked(view):
+    """把一次「读-校验-写」串行化，供所有带 base_revision 的写接口使用。"""
+
+    @functools.wraps(view)
+    def wrapper(scenario_id: int, *args: Any, **kwargs: Any):
+        with _scenario_lock(scenario_id):
+            return view(scenario_id, *args, **kwargs)
+
+    return wrapper
 
 
 def _scenarios_dir() -> Path:
@@ -84,26 +113,12 @@ def _permissions(descriptor: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _open_bundle(scenario_id: int) -> tuple[Path | None, dict[str, Any], NarrativeBundle | None, Any]:
-    descriptor_path, storage = _resolve(scenario_id)
+    _, storage = _resolve(scenario_id)
     if storage is None:
         return None, {}, None, error_response("Scenario not found", 404, "Scenario not found")
     descriptor = _descriptor(storage)
     try:
         bundle = load_bundle(storage)
-        if bundle is None:
-            # 导入审核发布的剧本保存后还没有世界树：首次读取时补建，作者打开
-            # 世界树 / 图谱页签即可看到自动生成的图谱，不必再手动跑命令。
-            built = ensure_built(descriptor_path or (storage / "scenario.json"))
-            if built is not None:
-                log_event(
-                    "narrative.auto_build",
-                    scenario_id=scenario_id,
-                    user_id=session.get("user_id"),
-                    nodes=len(built.bundle.nodes),
-                    edges=len(built.bundle.edges),
-                    topology=built.bundle.topology,
-                )
-                bundle = load_bundle(storage)
     except Exception:
         logger.exception("Failed to load narrative bundle: %s", scenario_id)
         return storage, descriptor, None, server_error("Failed to load narrative")
@@ -203,7 +218,62 @@ def get_narrative(scenario_id: int):
     )
 
 
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/build", methods=["POST"])
+@_scenario_locked
+def build_narrative(scenario_id: int):
+    """按现有场景卡手动建图（图谱页签空态的「自动建图」按钮）。
+
+    只在该剧本还没有 `narrative.json` 时执行：已有图谱可能是作者用编辑器改过
+    的布局 / 可见性 / 连线，重建会静默覆盖，因此这里返回 409 让前端提示。
+    """
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    storage, descriptor, _bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if storage is None:
+        return error_response("Scenario not found", 404, "Scenario not found")
+    denied = _require_edit(storage, descriptor)
+    if denied is not None:
+        return denied
+    if has_narrative(storage):
+        return error_response("Narrative already exists", 409, "Narrative already exists")
+    if not descriptor.get("modules"):
+        return error_response(
+            "This scenario has no scenario cards to build from",
+            400,
+            "No modules",
+        )
+    try:
+        built = rebuild_from_descriptor(storage / "scenario.json")
+    except Exception:
+        logger.exception("Failed to build narrative: %s", scenario_id)
+        return server_error("Failed to build narrative")
+    bundle = built.bundle
+    if not bundle.nodes:
+        return error_response("No nodes were generated", 400, "Empty nodes")
+    log_event(
+        "narrative.build",
+        scenario_id=scenario_id,
+        user_id=session.get("user_id"),
+        nodes=len(bundle.nodes),
+        edges=len(bundle.edges),
+        topology=bundle.topology,
+    )
+    return success_response(
+        {
+            "bundle": bundle.to_dict(),
+            "summary": _summary_payload(bundle),
+            "revision": _revision(bundle),
+            "permissions": _permissions(descriptor),
+            "storage": str(storage),
+        },
+        "Narrative built",
+    )
+
+
 @bp.route("/api/scenarios/<int:scenario_id>/narrative", methods=["PUT"])
+@_scenario_locked
 def put_narrative(scenario_id: int):
     if "user_id" not in session:
         return error_response("Please login first", 401, "Not logged in")
@@ -237,6 +307,7 @@ def put_narrative(scenario_id: int):
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/nodes/<node_id>", methods=["PATCH"])
+@_scenario_locked
 def patch_node(scenario_id: int, node_id: str):
     if "user_id" not in session:
         return error_response("Please login first", 401, "Not logged in")
@@ -271,6 +342,7 @@ def patch_node(scenario_id: int, node_id: str):
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/edges/<edge_id>", methods=["PATCH"])
+@_scenario_locked
 def patch_edge(scenario_id: int, edge_id: str):
     if "user_id" not in session:
         return error_response("Please login first", 401, "Not logged in")
@@ -305,6 +377,7 @@ def patch_edge(scenario_id: int, edge_id: str):
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/visibility/review", methods=["POST"])
+@_scenario_locked
 def review_visibility(scenario_id: int):
     """接受自动可见性判定（§8.7）：清除 needs_review，但保留当前可见性。"""
     if "user_id" not in session:
@@ -350,6 +423,7 @@ def review_visibility(scenario_id: int):
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/edges", methods=["POST"])
+@_scenario_locked
 def create_edge(scenario_id: int):
     """在图谱连线模式下创建一条边（§8.3）；只写 narrative.json。"""
     if "user_id" not in session:
@@ -391,6 +465,7 @@ def create_edge(scenario_id: int):
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/edges/<edge_id>", methods=["DELETE"])
+@_scenario_locked
 def delete_edge(scenario_id: int, edge_id: str):
     if "user_id" not in session:
         return error_response("Please login first", 401, "Not logged in")
@@ -418,6 +493,7 @@ def delete_edge(scenario_id: int, edge_id: str):
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/visibility/reclassify", methods=["POST"])
+@_scenario_locked
 def reclassify_visibility(scenario_id: int):
     """批量重新自动判定可见性（§8.7）：默认只预演，`apply=true` 才落盘。"""
     if "user_id" not in session:
@@ -526,6 +602,7 @@ def get_narrative_start(scenario_id: int):
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/start", methods=["PUT"])
+@_scenario_locked
 def put_narrative_start(scenario_id: int):
     """保存开场配置；只写 `narrative.json` 的 `start`。"""
     if "user_id" not in session:
@@ -642,6 +719,7 @@ def list_triggers(scenario_id: int):
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/triggers", methods=["POST"])
+@_scenario_locked
 def create_trigger(scenario_id: int):
     if "user_id" not in session:
         return error_response("Please login first", 401, "Not logged in")
@@ -673,6 +751,7 @@ def create_trigger(scenario_id: int):
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/triggers/<trigger_id>", methods=["PUT"])
+@_scenario_locked
 def update_trigger(scenario_id: int, trigger_id: str):
     if "user_id" not in session:
         return error_response("Please login first", 401, "Not logged in")
@@ -704,6 +783,7 @@ def update_trigger(scenario_id: int, trigger_id: str):
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/triggers/<trigger_id>", methods=["DELETE"])
+@_scenario_locked
 def delete_trigger(scenario_id: int, trigger_id: str):
     if "user_id" not in session:
         return error_response("Please login first", 401, "Not logged in")
@@ -816,6 +896,7 @@ def test_trigger(scenario_id: int, trigger_id: str):
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/assets/<asset_id>", methods=["PATCH"])
+@_scenario_locked
 def patch_asset(scenario_id: int, asset_id: str):
     if "user_id" not in session:
         return error_response("Please login first", 401, "Not logged in")
@@ -847,6 +928,7 @@ def patch_asset(scenario_id: int, asset_id: str):
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/topology", methods=["PATCH"])
+@_scenario_locked
 def patch_topology(scenario_id: int):
     if "user_id" not in session:
         return error_response("Please login first", 401, "Not logged in")
@@ -967,4 +1049,28 @@ def get_generate_job(scenario_id: int, job_id: str):
         if isinstance(result, Mapping):
             data["result"] = result
     return success_response(data, "Job loaded")
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/jobs/<job_id>", methods=["DELETE"])
+def cancel_generate_job(scenario_id: int, job_id: str):
+    """取消正在生成的任务。worker 是协作式取消：长耗时的补全调用跑完后
+    才会看到 cancelled 并丢弃结果，所以这里只把任务标记为已取消。"""
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    store = current_app.extensions["narrative_generate_store"]
+    job = store.get(job_id)
+    if not isinstance(job, Mapping) or int(job.get("scenario_id") or 0) != scenario_id:
+        return error_response("Job not found", 404, "Job not found")
+    if str(job.get("owner_id") or "") != str(session.get("user_id") or "") and not _can_use_permission("scenarios.manage_all"):
+        return error_response("Permission denied", 403, "Permission denied")
+    if job.get("status") in {"done", "failed", "cancelled"}:
+        return error_response("Job already finished", 409, "Job already finished")
+    cancelled = store.request_cancel(job_id)
+    log_event(
+        "narrative.generate.cancel",
+        scenario_id=scenario_id,
+        job_id=job_id,
+        user_id=session.get("user_id"),
+    )
+    return success_response({"job": public_job_payload(cancelled)}, "Job cancelled")
 

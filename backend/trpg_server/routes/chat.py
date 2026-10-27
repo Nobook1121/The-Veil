@@ -1196,7 +1196,6 @@ def chat():
                             "lexical": len(scenario_results),
                             "vector": bool(scenario_results),
                             "injected": [str(item.get("chunk_id") or "") for item in scenario_results[:8]],
-                            "excluded_unvisited": 0,
                         },
                         "guard": {
                             "decision": "removed" if changed and narrative_settings.guard == "enforce" else "allow",

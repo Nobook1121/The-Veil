@@ -83,6 +83,12 @@
         if (run) run.disabled = !editable() || state.generateBusy;
         const apply = byId<HTMLButtonElement>("scenarioGenerateApply");
         if (apply) apply.disabled = !state.generateResult || !editable() || state.generateBusy;
+        const cancel = byId<HTMLButtonElement>("scenarioGenerateCancel");
+        if (cancel) {
+            const active = state.generateBusy && Boolean(state.generateJobId);
+            cancel.hidden = !active;
+            cancel.disabled = !active;
+        }
     }
 
     function resetGeneratePanel(): void {
@@ -104,6 +110,11 @@
             }
             const job = data.data.job;
             setGenerateStatus(`${job.progress || 0}% · ${job.stage || job.status}`);
+            if (job.status === "cancelled") {
+                const cancelled = new Error(t("scenario.narrative.job.cancelled", "已取消生成。"));
+                cancelled.name = "GenerationCancelled";
+                throw cancelled;
+            }
             if (job.status === "failed") {
                 throw new Error(job.error || t("scenario.generate.failed", "生成失败"));
             }
@@ -141,11 +152,35 @@
             setGenerateStatus(t("scenario.generate.preview.ready", "预览已生成"), "success");
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setGenerateStatus(message, "danger");
-            showNotification(message, "error");
+            const cancelled = error instanceof Error && error.name === "GenerationCancelled";
+            setGenerateStatus(message, cancelled ? "warning" : "danger");
+            showNotification(message, cancelled ? "warning" : "error");
         } finally {
             state.generateBusy = false;
             syncGeneratePanel();
+        }
+    }
+
+    /** 协作式取消：后端只把任务标记为 cancelled，worker 跑完当前调用后丢弃结果。 */
+    async function cancelGeneration(): Promise<void> {
+        const jobId = state.generateJobId;
+        if (!jobId || !state.generateBusy) return;
+        const button = byId<HTMLButtonElement>("scenarioGenerateCancel");
+        if (button) button.disabled = true;
+        setGenerateStatus(t("scenario.narrative.job.cancelling", "正在取消…"));
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<GenerateJobPayload>>(
+                `/api/scenarios/${state.scenarioId}/narrative/jobs/${encodeURIComponent(jobId)}`,
+                { method: "DELETE" },
+            );
+            if (!response.ok || !data?.success) {
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setGenerateStatus(message, "danger");
+            showNotification(message, "error");
+            if (button) button.disabled = false;
         }
     }
 
@@ -195,6 +230,7 @@
         syncGeneratePanel,
         syncGenerateSource,
         startGeneration,
+        cancelGeneration,
         applyGeneration,
     });
 })(window);

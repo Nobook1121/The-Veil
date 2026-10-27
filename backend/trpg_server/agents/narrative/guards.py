@@ -115,10 +115,12 @@ def forbidden_entries(bundle: NarrativeBundle, narrative: Mapping[str, Any]) -> 
                 entries.append(entry)
 
     for node in bundle.nodes:
+        # 只用标题与别名做禁词：keywords 是检索/匹配用的普通词（「书房」「地下室」
+        # 之类），把它们当专名会把正常叙述整句删掉。
         if node.visibility == VISIBILITY_KP_ONLY:
-            _add((node.title, *node.aliases, *node.keywords), node.id, VISIBILITY_KP_ONLY)
+            _add((node.title, *node.aliases), node.id, VISIBILITY_KP_ONLY)
         elif node.visibility == VISIBILITY_HIDDEN and node.id not in revealed and not _is_auto_revealed(node, narrative):
-            _add((node.title, *node.aliases, *node.keywords), node.id, VISIBILITY_HIDDEN)
+            _add((node.title, *node.aliases), node.id, VISIBILITY_HIDDEN)
 
         # 公开地点里的隐藏物件同样要拦；物件自己的 reveal_when 成立后放行。
         for obj in node.objects:

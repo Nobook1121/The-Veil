@@ -4,7 +4,6 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="scenarioModalLabel" data-i18n="scenario.modal.create">创建剧本</h5>
-                    <button type="button" class="btn btn-sm btn-outline-primary ms-auto me-2" id="scenarioAgentToggle" data-i18n="scenario.narrative.agent.title">AI 创作助手</button>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" data-i18n-aria-label="scenario.modal.close" aria-label="关闭"></button>
                 </div>
                 <div class="modal-body">
@@ -28,23 +27,6 @@
                             <button class="nav-link" id="scenarioTabGenerateBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabGenerate" type="button" role="tab" aria-controls="scenarioTabGenerate" aria-selected="false" data-i18n="scenario.tab.generate">生成</button>
                         </li>
                     </ul>
-                    <aside class="scenario-agent-panel" id="scenarioAgentPanel" hidden aria-label="AI 创作助手">
-                        <header class="scenario-agent-head">
-                            <div>
-                                <strong data-i18n="scenario.narrative.agent.title">AI 创作助手</strong>
-                                <p class="text-muted small mb-0" id="scenarioAgentContext" data-i18n="scenario.narrative.agent.context">仅发送当前剧本与选中节点</p>
-                            </div>
-                            <button type="button" class="btn-close" id="scenarioAgentClose" aria-label="关闭助手"></button>
-                        </header>
-                        <div class="scenario-agent-messages" id="scenarioAgentMessages">
-                            <p class="text-muted small mb-0" data-i18n="scenario.narrative.agent.empty">在世界树/图谱页签选中节点后，可以让助手补写正文、物件、结果或关键词。</p>
-                        </div>
-                        <form class="scenario-agent-form" id="scenarioAgentForm">
-                            <textarea class="form-control form-control-sm" id="scenarioAgentInput" rows="2" placeholder="例如：为当前节点补一个书架线索与成功/失败结果" aria-label="给 AI 创作助手的指令"></textarea>
-                            <button type="submit" class="btn btn-sm btn-primary" id="scenarioAgentSend">发送</button>
-                        </form>
-                        <p class="text-muted small mb-0 mt-2" data-i18n="scenario.narrative.agent.notice">助手只生成草稿改动，发布仍需你点击“保存并发布”。</p>
-                    </aside>
                     <div class="tab-content scenario-tab-content" id="scenarioTabContent">
                     <div class="tab-pane fade show active" id="scenarioTabBasic" role="tabpanel" aria-labelledby="scenarioTabBasicBtn">
                     <div class="scenario-basic-layout">
@@ -341,6 +323,10 @@
                                 <button type="button" class="btn btn-outline-success btn-sm" id="scenarioGenerateApply" disabled>
                                     <i class="fa fa-check" aria-hidden="true"></i>
                                     <span data-i18n="scenario.generate.apply">应用到草稿</span>
+                                </button>
+                                <button type="button" class="btn btn-outline-danger btn-sm" id="scenarioGenerateCancel" hidden>
+                                    <i class="fa fa-stop" aria-hidden="true"></i>
+                                    <span data-i18n="scenario.narrative.job.cancel">取消生成</span>
                                 </button>
                                 <span class="text-muted small" id="scenarioGenerateStatus"></span>
                             </div>
