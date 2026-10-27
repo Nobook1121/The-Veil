@@ -714,10 +714,10 @@ function findRoleForMessage(message: string): ChatRoleConfig | undefined {
 // 因此不会改变提示词注入的判定，也不会影响 KP 的正常输出。
 const CHAT_SANITIZE_CONFIG: Record<string, unknown> = {
     FORBID_TAGS: ["script", "style", "iframe", "object", "embed", "base", "meta", "link"],
-    ADD_ATTR: ["controls", "preload", "poster", "playsinline", "target", "rel", "loading", "download"],
+    ADD_ATTR: ["controls", "preload", "poster", "playsinline", "target", "rel", "loading", "download", ...LATEX_SANITIZE_ATTRS],
 };
 
-function renderMarkdown(content: string): string {
+function renderMarkdown(content: string, allowLatex = false): string {
     const parser = window.marked;
     const purifier = window.DOMPurify;
     if (!parser || !purifier) {
@@ -727,7 +727,9 @@ function renderMarkdown(content: string): string {
     }
     try {
         parser.setOptions({ breaks: true, gfm: true, headerIds: false, mangle: false });
-        return purifier.sanitize(parser.parse(content), CHAT_SANITIZE_CONFIG);
+        // 先占位再解析：Markdown 不会改写 formulas 里的 *、_、反斜杠与换行。
+        const prepared = allowLatex ? protectLatex(content) : content;
+        return purifier.sanitize(parser.parse(prepared), CHAT_SANITIZE_CONFIG);
     } catch (error) {
         console.error("Markdown 渲染失败:", error);
         return chatEscapeHtml(content);
@@ -1079,7 +1081,7 @@ function addMessage(
     if (message?.avatar) messageDiv.setAttribute("data-avatar", message.avatar);
 
     const displayTime = message?.time || message?.timestamp || new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const renderedContent = isThinking ? renderThinkingContent(content) : renderMarkdown(content);
+    const renderedContent = isThinking ? renderThinkingContent(content) : renderMarkdown(content, isLatexEnabledFor(type));
     const avatarSrc = getAvatarSrc(type, message, sender);
 
     messageDiv.innerHTML = window.TrpgTemplates.render("chat-message", {
@@ -1091,7 +1093,10 @@ function addMessage(
         knowledgeHtml: type === "kp" ? renderKnowledgeUsage(message?.metadata?.knowledgeUsage as KnowledgeUsage | undefined) : "",
     });
     const renderedContentElement = messageDiv.querySelector<HTMLElement>(".message-content");
-    if (renderedContentElement) enhanceMessageMedia(renderedContentElement);
+    if (renderedContentElement) {
+        decorateLatex(renderedContentElement);
+        enhanceMessageMedia(renderedContentElement);
+    }
     chatHistory.appendChild(messageDiv);
     chatHistory.scrollTop = chatHistory.scrollHeight;
     return resolvedMessageId;
@@ -1151,7 +1156,18 @@ function revealKpContent(container: HTMLElement): void {
     const pendingFrame = kpRevealFrames.get(container);
     if (pendingFrame !== undefined) window.cancelAnimationFrame(pendingFrame);
 
-    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    // 跳过代码区与已渲染的 KaTeX 子树（对元素 FILTER_REJECT 即跳过整棵子树），
+    // 避免逐字显现破坏公式排版；未渲染的 .md-latex 仍是普通文本，继续参与显现。
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+        acceptNode(node: Node): number {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+                const element = node as Element;
+                if (element.matches("code, pre, .katex")) return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_SKIP;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+        },
+    });
     const textNodes: Text[] = [];
     let totalLength = 0;
     while (walker.nextNode()) {
@@ -1218,8 +1234,9 @@ function replaceThinkingMessage(messageId: string | number, newContent: string, 
 
     const contentDiv = targetMessage.querySelector<HTMLElement>(".message-content");
     if (contentDiv) {
-        contentDiv.innerHTML = renderMarkdown(newContent);
+        contentDiv.innerHTML = renderMarkdown(newContent, isLatexEnabledFor("kp"));
         contentDiv.className = "message-content markdown-body";
+        decorateLatex(contentDiv);
         enhanceMessageMedia(contentDiv);
         revealKpContent(contentDiv);
     }

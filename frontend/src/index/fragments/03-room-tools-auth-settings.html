@@ -660,6 +660,52 @@
                                 </div>
                             </div>
                             <div class="mb-4">
+                                <h4>LaTeX 氛围排版</h4>
+                                <p class="text-muted">允许 KP 与玩家用 KaTeX 片段营造文字氛围。总控关闭后，KP 不会收到排版指导，聊天框对所有消息都不做公式渲染。</p>
+                                <div class="form-group">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="latexEnabled" checked>
+                                        <label class="form-check-label" for="latexEnabled">启用 LaTeX 氛围排版（总控）</label>
+                                    </div>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="latexKpEnabled" checked>
+                                        <label class="form-check-label" for="latexKpEnabled">KP 回复可渲染 LaTeX</label>
+                                    </div>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="latexPlayerEnabled" checked>
+                                        <label class="form-check-label" for="latexPlayerEnabled">玩家消息可渲染 LaTeX</label>
+                                    </div>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="latexIntensity">LaTeX 使用强度</label>
+                                    <select class="form-select" id="latexIntensity">
+                                        <option value="light">克制（极少使用）</option>
+                                        <option value="standard" selected>标准</option>
+                                        <option value="rich">丰富</option>
+                                    </select>
+                                    <small class="text-muted">强度只影响 KP 的判断倾向，单条回复的公式数与长度仍受下方上限约束。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="latexMaxFormulasPerMessage">单条消息公式片段上限</label>
+                                    <input type="number" class="form-control" id="latexMaxFormulasPerMessage" value="12" min="1" max="50">
+                                    <small class="text-muted">行内与独立公式块合计，超限片段按原文显示（1-50）。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="latexMaxFormulaChars">单块公式源码最大字符数</label>
+                                    <input type="number" class="form-control" id="latexMaxFormulaChars" value="300" min="50" max="2000">
+                                    <small class="text-muted">超过该长度的公式不会被渲染，历史清洗时替换为「公式」（50-2000）。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="latexMaxCleanMessageChars">发送给 AI 前的单条清洗字符上限</label>
+                                    <input type="number" class="form-control" id="latexMaxCleanMessageChars" value="2000" min="200" max="10000">
+                                    <small class="text-muted">限制单条历史清洗后的长度，防止超长消息撑爆上下文（200-10000）。</small>
+                                </div>
+                            </div>
+                            <div class="mb-4">
                                 <h4>KP 请求限制</h4>
                                 <p class="text-muted">达到限制时 KP 会自动收尾，并在聊天框与日志中给出说明，不会静默无响应。</p>
                                 <div class="form-group mt-2">

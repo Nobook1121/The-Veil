@@ -123,6 +123,7 @@
 | --- | --- |
 | `runtime.py` (554) | Agent 主循环：消息组装、工具调用、工具结果折叠、usage 记录 |
 | `prompt_builder.py` (158) | KP/NPC 提示词拼装 |
+| `latex.py` | LaTeX 氛围排版：站点开关解析、提示词片段、历史公式清洗（`flatten_latex` / `clean_history_for_model`）与缓存指纹 variant |
 | `profiles.py` (62) | AgentProfile 与默认 KP 工具集 |
 | `config.py` (~57) / `ai_request.py` (113) | `config.py` 仅保留兼容门面（`load_ai_runtime_config` / `write_ai_setting` / `AIRuntimeConfig`），实现已迁入 `trpg_server.config`；`ai_request.py` 为统一请求封装 |
 | `responses_transport.py` (187) / `http_retry.py` (102) | Responses/Chat Completions 传输、超时重试 |
@@ -264,7 +265,7 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 | 剧本导入/解析 | `scenario_import_pipeline.py`、`scenario_documents.py`、`scenario_import_jobs.py`、`routes/scenario_imports.py` |
 | 剧本 CRUD/版本/模块 | `scenario_store.py`、`routes/scenarios.py`、`frontend/src/app/views/*` |
 | 房间/邀请/成员/自动存档 | `routes/rooms.py`、`room_admin.py`、`data/runtime/rooms/` |
-| 聊天与 Socket 事件 | `routes/chat.py`、`routes/chat_helpers.py`、`socket_events.py`、`frontend/src/app/chat.ts` |
+| 聊天与 Socket 事件 | `routes/chat.py`、`routes/chat_helpers.py`、`socket_events.py`、`frontend/src/app/chat.ts`、`agents/latex.py`、`frontend/src/app/latex.ts`、`styles/01-foundation-chat.css`；LaTeX 开关位于 `general.toml [chat] latex_*` |
 | 角色卡/COC7 检定 | `routes/characters.py`、`character_ai.py`、`frontend/src/app/character-sheet.ts`、`agents/tools/dice.py` |
 | 骰子动画/玩家投掷/贴图 | `agents/dice_settings.py`、`agents/player_roll.py`、`routes/dice_rolls.py`、`routes/dice_textures.py`、`dice_textures.py`、`frontend/src/app/diceTable.ts`、`frontend/src/app/dice/*`、`frontend/src/dice3d/main.ts`、`styles/05-dice-animation.css` |
 | 权限/角色 | `permission_config.py`、`role_config.py`、`routes/users.py`、`routes/auth.py` |

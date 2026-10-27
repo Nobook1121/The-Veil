@@ -26,6 +26,13 @@ interface DomPurifySanitizer {
 
 declare const DOMPurify: DomPurifySanitizer;
 
+interface KatexRenderer {
+    render(expression: string, element: HTMLElement, options?: Record<string, unknown>): void;
+    renderToString(expression: string, options?: Record<string, unknown>): string;
+}
+
+declare const katex: KatexRenderer;
+
 interface SocketLike {
     connected: boolean;
     on(eventName: string, handler: (payload: unknown) => void): void;

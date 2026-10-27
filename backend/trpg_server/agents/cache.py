@@ -113,9 +113,11 @@ def build_exact_response_key(
     scene_id: Any,
     state: dict[str, Any] | None,
     user_input: str,
+    variant: str = "",
 ) -> str:
     state_hash = hashlib.sha256(
         json.dumps(state or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
     ).hexdigest()[:16]
     input_hash = hashlib.sha256(str(user_input or "").encode("utf-8")).hexdigest()[:16]
-    return f"scenario:{scenario_id}@{scenario_version}:scene:{scene_id}:state:{state_hash}:input:{input_hash}"
+    key = f"scenario:{scenario_id}@{scenario_version}:scene:{scene_id}:state:{state_hash}:input:{input_hash}"
+    return f"{key}:latex:{variant}" if variant else key

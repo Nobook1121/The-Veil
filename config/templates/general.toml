@@ -31,6 +31,20 @@ execute_role = "admin"
 show_timestamp = true
 message_font_size = 14
 max_history_messages = 1000
+# LaTeX 叙事排版总控；关闭后 KP 不注入 LaTeX 提示词，KP 与玩家消息都不渲染。
+latex_enabled = true
+# KP 输出是否使用 LaTeX；仅总控开启时生效。
+latex_kp_enabled = true
+# 玩家（含其他玩家）消息是否渲染 LaTeX；仅总控开启时生效。
+latex_player_enabled = true
+# 叙事排版强度：light（克制）/ standard（标准）/ rich（丰富）；仅总控与 KP 开关都开启时生效。
+latex_intensity = "standard"
+# 单条消息最多渲染/提示的公式片段数（行内与独立块合计）。
+latex_max_formulas_per_message = 12
+# 单块公式源码的最大字符数；超限片段不渲染（前端显示原文，AI 上下文替换为 [公式]）。
+latex_max_formula_chars = 300
+# 历史清洗后单条消息的最大字符数；超出截断，防止上下文膨胀。
+latex_max_clean_message_chars = 2000
 
 [ai]
 stream_output = true

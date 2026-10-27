@@ -25,6 +25,7 @@ from trpg_server.agents.token_accounting import attribute_prompt_segments
 from trpg_server.agents.cache import ExactResponseCache, ProviderPrefixCache, SemanticCache, build_exact_response_key, stable_state_for_cache
 from trpg_server.agents.http_retry import post_with_retry
 from trpg_server.agents.knowledge_base import KnowledgeBaseService
+from trpg_server.agents.latex import build_latex_prompt, clean_message_for_model, load_latex_settings
 from trpg_server.agents.ruleset_knowledge import RulesetKnowledgeStore, search_ruleset
 from trpg_server.agents.tools import default_tool_registry
 from trpg_server.agents.tools.room import get_room_snapshot
@@ -513,25 +514,28 @@ def chat():
             room_id=room_id,
             agent_id=agent_profile.id,
         )
+        latex_settings = load_latex_settings()
 
         if _is_compact_command(content):
             if history:
-                history = _compact_history_with_ai(requester, small_model, history)
+                history = _compact_history_with_ai(requester, small_model, history, latex_settings=latex_settings)
                 write_json_atomic(history_file, history)
                 response_text = "历史记录已压缩。"
             else:
                 response_text = "暂无可压缩的历史记录。"
             return success_response(message=None, content=response_text, token_count=None)
 
-        if _history_needs_compaction(history):
+        if _history_needs_compaction(history, latex_settings=latex_settings):
             try:
-                history = _compact_history_with_ai(requester, small_model, history)
+                history = _compact_history_with_ai(requester, small_model, history, latex_settings=latex_settings)
                 write_json_atomic(history_file, history)
             except Exception:
                 logger.exception("Failed to compact chat history automatically")
 
         speaker = None if scenario_start else (_speaker_for_user(agent_context.room_info(), user_id) if room_id else None)
-        user_content = _format_user_content(content, speaker)
+        # 当前轮玩家输入与历史共用同一套清洗：发给模型的是扁平化文本，
+        # 持久化与聊天框展示仍保留原始 LaTeX。
+        user_content = clean_message_for_model(_format_user_content(content, speaker), latex_settings)
         system_prompt = (
             _load_debug_kp_prompt()
             if runtime_config.debug_mode
@@ -559,6 +563,9 @@ def chat():
                     "禁止调用场景工具（如 room.activate_scenario_scene）与触发器工具（trigger.reveal_scenario_trigger）；"
                     "最多用一句话提醒房主或管理员点击“开启剧本”。"
                 )
+        latex_prompt = build_latex_prompt(latex_settings)
+        if latex_prompt:
+            system_prompt += "\n" + latex_prompt
         direct_import = False
         if room_id:
             system_prompt = (
@@ -591,7 +598,7 @@ def chat():
                     "未被检索覆盖的细节应先说明需要检索，不得编造或自行推进剧情。"
                 )
 
-        prompt_history = _history_for_request(history)
+        prompt_history = _history_for_request(history, latex_settings=latex_settings)
         scene_static = None
         if isinstance(room_snapshot, dict):
             scenario_data = room_snapshot.get("scenario")
@@ -677,7 +684,7 @@ def chat():
                     )
                     # 导入剧本只有知识块这一条剧情来源，多取几条降低"遗忘"概率；
                     # 检索 query 带上最近几轮对话，避免泛化输入每次都落到同一批兜底块。
-                    retrieval_query = _retrieval_query(history, content)
+                    retrieval_query = _retrieval_query(history, content, latex_settings=latex_settings)
                     retrieval_top_k = (
                         runtime_config.retrieval_top_k_direct
                         if direct_import
@@ -751,6 +758,7 @@ def chat():
             room_snapshot_message=room_snapshot_message,
             narrative_summary=narrative_summary,
             opening_pack=opening_prompt,
+            cache_variant=latex_settings.cache_variant,
         )
         _emit_thinking_stage(room_id, ai_request_id, "vector_search_done", "向量库检索完成")
         # 提示词分段估算：把本次输入 token 拆到静态前缀/知识库/历史/本轮输入等分段，
@@ -777,6 +785,7 @@ def chat():
             scenario_info_for_cache.get("active_scene_id") or "unknown",
             stable_state_for_cache(state_for_cache),
             content,
+            variant=latex_settings.cache_variant,
         )
         semantic_state = {
             "room_id": str(room_id or "home"),
@@ -785,6 +794,7 @@ def chat():
             "active_scene_id": scenario_info_for_cache.get("active_scene_id"),
             # 指纹剔除 event_log 的随机 id / 时间戳等每轮都变的字段，否则本地缓存几乎永不命中。
             "state": stable_state_for_cache(state_for_cache),
+            "latex": latex_settings.cache_variant,
         }
         # 只有「无副作用」的输入才允许走本地缓存：检定/手动触发/转场会推进剧情，
         # 复用旧回复会让 KP 忽略本次裁定与状态变化。这类输入一律直连上游。
@@ -1257,7 +1267,7 @@ def chat():
         _maybe_remember_important_action(content, agent_context)
         if compact_requested_by_ai:
             try:
-                history = _compact_history_with_ai(requester, small_model, history)
+                history = _compact_history_with_ai(requester, small_model, history, latex_settings=latex_settings)
                 write_json_atomic(history_file, history)
             except Exception:
                 logger.exception("Failed to compact chat history after AI request")

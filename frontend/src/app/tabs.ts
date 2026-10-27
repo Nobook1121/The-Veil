@@ -231,6 +231,13 @@ function initSettingsTabs(): void {
     bindGeneralNumberSetting("messageFontSize", "chat", "message_font_size", 10, 24);
     bindGeneralCheckboxSetting("enableAIResponseLock", "ai", "enable_ai_response_lock");
     bindGeneralNumberSetting("messageRateLimit", "chat", "message_rate_limit", 0, 60);
+    bindGeneralCheckboxSetting("latexEnabled", "chat", "latex_enabled");
+    bindGeneralCheckboxSetting("latexKpEnabled", "chat", "latex_kp_enabled");
+    bindGeneralCheckboxSetting("latexPlayerEnabled", "chat", "latex_player_enabled");
+    bindGeneralSelectSetting("latexIntensity", "chat", "latex_intensity");
+    bindGeneralNumberSetting("latexMaxFormulasPerMessage", "chat", "latex_max_formulas_per_message", 1, 50);
+    bindGeneralNumberSetting("latexMaxFormulaChars", "chat", "latex_max_formula_chars", 50, 2000);
+    bindGeneralNumberSetting("latexMaxCleanMessageChars", "chat", "latex_max_clean_message_chars", 200, 10000);
 
     bindGeneralCheckboxSetting("streamOutput", "ai", "stream_output");
     bindGeneralCheckboxSetting("scenarioImportStreamOutput", "scenario_import", "stream_output");

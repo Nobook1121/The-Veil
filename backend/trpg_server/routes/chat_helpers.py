@@ -16,6 +16,7 @@ from flask import current_app
 from trpg_server.ai_capabilities import responses_endpoint
 from trpg_server.ai_platform_config import load_platform_config, ordered_platform_paths
 from trpg_server.agents.profiles import AgentProfile
+from trpg_server.agents.latex import clean_history_for_model, clean_message_for_model, load_latex_settings
 from trpg_server.agents.prompt_builder import wrap_user_input
 from trpg_server.agents.responses_transport import ResponsesRequester
 from trpg_server.agents.memory import remember_room_fact
@@ -35,6 +36,11 @@ _HISTORY_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 HISTORY_COMPACT_CHAR_THRESHOLD = 12000
+
+
+def _resolve_latex_settings(latex_settings):
+    """一次请求只解析一次 LaTeX 配置；未显式传入时回退到带缓存的全局读取。"""
+    return latex_settings if latex_settings is not None else load_latex_settings()
 
 
 def _profile_for_request(profile, tool_state, enable_suggestions=True):
@@ -534,8 +540,10 @@ def _strip_compact_command(content):
     return "\n".join(kept).strip(), requested
 
 
-def _history_needs_compaction(history, threshold=HISTORY_COMPACT_CHAR_THRESHOLD):
-    return sum(len(str(item.get("content") or "")) for item in history) > threshold
+def _history_needs_compaction(history, threshold=HISTORY_COMPACT_CHAR_THRESHOLD, latex_settings=None):
+    # 按清洗后的字符数判断，避免 LaTeX 源码提前触发压缩请求。
+    cleaned = clean_history_for_model(history, _resolve_latex_settings(latex_settings))
+    return sum(len(str(item.get("content") or "")) for item in cleaned) > threshold
 
 
 def _request_allows_check(content):
@@ -632,7 +640,7 @@ def _compact_history_entries(payload):
     return [{"role": "system", "content": f"历史压缩摘要：\n{clean}", "compact": True}]
 
 
-def _compact_history_with_ai(requester, model, history):
+def _compact_history_with_ai(requester, model, history, latex_settings=None):
     if not history:
         return []
 
@@ -643,6 +651,8 @@ def _compact_history_with_ai(requester, model, history):
     dialogue = [item for item in history if isinstance(item, dict) and not item.get("compact")]
     if previous is None and not dialogue:
         return []
+    # 新增对话在进入压缩提示前先清洗 LaTeX，避免把公式源码写进滚动摘要。
+    dialogue = clean_history_for_model(dialogue, _resolve_latex_settings(latex_settings))
 
     sections = []
     if previous is not None:
@@ -825,21 +835,22 @@ def _room_snapshot_system_message(snapshot, room_state=None, runtime_config=None
     )
 
 
-def _build_messages(system_prompt, history, content, room_snapshot_message=None):
+def _build_messages(system_prompt, history, content, room_snapshot_message=None, latex_settings=None):
+    settings = _resolve_latex_settings(latex_settings)
     messages = [{"role": "system", "content": system_prompt}]
     if room_snapshot_message:
         messages.append({"role": "system", "content": room_snapshot_message})
-    for item in history:
+    for item in clean_history_for_model(history, settings):
         item_content = item["content"]
         if item.get("role") == "user":
             item_content = _format_user_content(item_content, item.get("speaker"))
             item_content = wrap_user_input(item_content)
         messages.append({"role": item["role"], "content": item_content})
-    messages.append({"role": "user", "content": wrap_user_input(content)})
+    messages.append({"role": "user", "content": wrap_user_input(clean_message_for_model(content, settings))})
     return messages
 
 
-def _history_for_request(history, max_chars=8000, recent_items=12):
+def _history_for_request(history, max_chars=8000, recent_items=12, latex_settings=None):
     """Keep prompt history bounded without an extra summarization request.
 
     Persisted history remains untouched; only the copy sent to the model is
@@ -849,7 +860,8 @@ def _history_for_request(history, max_chars=8000, recent_items=12):
         return []
     pinned = [item for item in history if isinstance(item, dict) and item.get("compact")]
     recent = [item for item in history if isinstance(item, dict) and not item.get("compact")][-recent_items:]
-    selected = pinned[-1:] + recent
+    # 先清洗再算字符预算，预算才反映真正发送给模型的体积。
+    selected = clean_history_for_model(pinned[-1:] + recent, _resolve_latex_settings(latex_settings))
     total = 0
     result = []
     for item in reversed(selected):
@@ -861,18 +873,20 @@ def _history_for_request(history, max_chars=8000, recent_items=12):
     return list(reversed(result))
 
 
-def _retrieval_query(history, content, turns: int = 3, part_chars: int = 500, max_chars: int = 1500) -> str:
+def _retrieval_query(history, content, turns: int = 3, part_chars: int = 500, max_chars: int = 1500, latex_settings=None) -> str:
     """拼接最近若干轮对话作为知识库检索 query。
 
     只用玩家当前一句话检索时，泛化输入（如「我调查一下周围」）与任何知识块都
     没有词法/向量交集，检索会一直落到同一批兜底块，看起来"召回固定不随剧情变化"。
     把最近几轮对话一并作为 query，命中的剧情上下文才会随剧情推进而改变。
     """
+    settings = _resolve_latex_settings(latex_settings)
     parts: list[str] = []
     if isinstance(history, list):
         recent = [item for item in history if isinstance(item, dict) and not item.get("compact")][-turns:]
+        recent = clean_history_for_model(recent, settings)
         parts.extend(str(item.get("content") or "").strip()[:part_chars] for item in recent)
-    parts.append(str(content or "").strip()[:part_chars])
+    parts.append(clean_message_for_model(str(content or ""), settings).strip()[:part_chars])
     return "\n".join(part for part in parts if part)[-max_chars:]
 
 

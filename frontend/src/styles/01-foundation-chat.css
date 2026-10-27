@@ -263,6 +263,32 @@ h1, h2, h3, h4, h5, h6 {
     color: var(--theme-text-primary);
 }
 
+/* LaTeX 氛围排版：占位、行内公式与独立公式块 */
+.markdown-body .md-latex {
+    display: inline-block;
+    max-width: 100%;
+}
+
+.markdown-body .katex {
+    font-size: 1.02em;
+}
+
+.markdown-body .katex-display {
+    margin: 0.4em 0;
+    padding: 0.15em 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+}
+
+.markdown-body .latex-fallback {
+    color: var(--theme-text-muted, #6b6b6b);
+    background: var(--theme-surface-alt, rgba(0, 0, 0, 0.04));
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
 /* 与同行「消耗 Token / 处理时间」保持同一套排版风格 */
 .knowledge-usage {
     color: var(--theme-text-muted);

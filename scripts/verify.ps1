@@ -72,6 +72,7 @@ try {
     "dist\public\js\cookie-consent.js",
     "dist\public\js\generated\templates.js",
     "dist\public\js\chat.js",
+    "dist\public\js\latex.js",
     "dist\public\js\auth\api.js",
     "dist\public\js\auth\state.js",
     "dist\public\js\auth\floating-field.js",

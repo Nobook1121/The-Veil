@@ -92,6 +92,7 @@ def build_prompt_layers(
     room_snapshot_message: str | None = None,
     narrative_summary: str | None = None,
     opening_pack: str | None = None,
+    cache_variant: str = "",
 ) -> PromptLayers:
     scenario_static = _scenario_static_content(scenario)
     scene_static = _scene_static_content(scene)
@@ -186,6 +187,7 @@ def build_prompt_layers(
         cache_key=(
             f"scenario:{scenario_id}@{scenario_version}:"
             f"scene:{scene_id}@{scene_version}:rules:{str(rules_version)}"
+            + (f":latex:{cache_variant}" if cache_variant else "")
         ),
         static_prefix=static_prefix,
         segments=tuple(static_segments + dynamic_segments),

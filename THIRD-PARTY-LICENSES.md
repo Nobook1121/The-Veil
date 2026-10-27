@@ -128,6 +128,16 @@ Node 包可在 `node_modules/<包名>/LICENSE` 查看）。
 | --- | --- | --- | --- |
 | qrcode-generator（裁剪版，仅保留核心编码器与 SVG 渲染器） | 1.4.4 | MIT | https://github.com/kazuhikoarase/qrcode-generator |
 
+## 前端 CDN 资源
+
+以下资源由浏览器从 jsDelivr 加载，不随构建产物打包；离线部署时对应能力会降级。
+
+| 组件 | 版本 | 许可证 | 用途 |
+| --- | --- | --- | --- |
+| KaTeX | 0.16.11 | MIT | 聊天消息内的 LaTeX 公式渲染 |
+| marked | 15.0.12 | MIT | Markdown 渲染 |
+| DOMPurify | 3.4.16 | Apache-2.0 OR MPL-2.0 | Markdown/HTML 净化 |
+
 ## 合规提示
 
 - **PyMuPDF（AGPL-3.0 或 Artifex 商业许可，双许可）**：AGPL-3.0 属强著佐权许可。若以 AGPL

@@ -47,6 +47,7 @@ interface Window {
     getTestRequestConfig(modelId: string): TestRequestConfig;
     marked?: MarkedParser;
     DOMPurify?: DomPurifySanitizer;
+    katex?: KatexRenderer;
     renderChatMessages?: (messages: ChatMessage[]) => void;
     getCurrentChatMessages?: () => ChatMessage[];
     persistLocalDiceMessage?: (content: string, metadata: Record<string, unknown>) => Promise<ChatMessage | null>;

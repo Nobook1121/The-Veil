@@ -68,6 +68,14 @@ class ConfigManager {
         configSetCheckboxValue("showTimestamp", this.get("general", "chat", "show_timestamp", true));
         configSetInputValue("messageFontSize", this.get("general", "chat", "message_font_size", 14));
         configSetInputValue("messageRateLimit", this.get("general", "chat", "message_rate_limit", 10));
+        // LaTeX 氛围排版：总控、KP/玩家开关、强度与三个上限
+        configSetCheckboxValue("latexEnabled", this.get("general", "chat", "latex_enabled", true));
+        configSetCheckboxValue("latexKpEnabled", this.get("general", "chat", "latex_kp_enabled", true));
+        configSetCheckboxValue("latexPlayerEnabled", this.get("general", "chat", "latex_player_enabled", true));
+        configSetSelectValue("latexIntensity", this.get("general", "chat", "latex_intensity", "standard"));
+        configSetInputValue("latexMaxFormulasPerMessage", this.get("general", "chat", "latex_max_formulas_per_message", 12));
+        configSetInputValue("latexMaxFormulaChars", this.get("general", "chat", "latex_max_formula_chars", 300));
+        configSetInputValue("latexMaxCleanMessageChars", this.get("general", "chat", "latex_max_clean_message_chars", 2000));
         configSetCheckboxValue("enableAIResponseLock", this.get("general", "ai", "enable_ai_response_lock", false));
         configSetCheckboxValue("streamOutput", this.get("general", "ai", "stream_output", false));
         configSetCheckboxValue("scenarioImportStreamOutput", this.get("general", "scenario_import", "stream_output", true));
