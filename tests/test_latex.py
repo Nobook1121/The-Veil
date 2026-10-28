@@ -129,11 +129,11 @@ def test_formula_limits_keep_overflow_raw():
     assert "$c_3$" in cleaned
 
 
-def test_long_formula_becomes_placeholder():
+def test_long_inline_formula_becomes_placeholder():
     settings = _settings(max_formula_chars=50)
-    text = "$" + "\\textcolor{red}{" + ("x" * 60) + "}" + "$"
+    text = "前面 $" + "\\textcolor{red}{" + ("x" * 60) + "}$ 后面"
 
-    assert flatten_latex(text, settings) == "[公式]"
+    assert flatten_latex(text, settings) == "前面 [公式] 后面"
 
 
 def test_clean_message_truncates_and_marks_ellipsis():
@@ -204,6 +204,35 @@ def test_history_compaction_uses_cleaned_size():
     assert _history_needs_compaction(history) is False
 
 
+def test_bare_multiline_latex_without_delimiters_is_flattened():
+    text = (
+        "意气骄满路，鞍马光照尘。\\\\借问何者为，人称是内臣。\\\\"
+        r"\rlap{\textcolor{red}{\hspace{0.1pt}\textit{\textbf{\large是\normalsize岁\small江"
+        r"\normalsize南\small旱，\normalsize衢\small州\large人\normalsize食\small人！？}}}"
+        r"\textcolor{blue}{\large是\normalsize岁\small江\normalsize南\small旱}"
+    )
+
+    cleaned = flatten_latex(text)
+
+    assert "意气骄满路，鞍马光照尘。" in cleaned
+    assert "是岁江南旱" in cleaned
+    for token in ("\\textcolor", "\\rlap", "\\hspace", "\\large", "\\normalsize", "\\small", "\\textbf", "\\\\"):
+        assert token not in cleaned
+
+
+def test_bare_block_keeps_escaped_dollar_and_currency_paragraphs():
+    assert "价 $3" in flatten_latex(r"\textcolor{red}{价 \$3}")
+    # 含未转义 $ 的段落交给公式逻辑，不整段扁平化（$5$ 是价格，保持原样）。
+    text = r"价格 $5$，并写了 \textcolor{red}{重点}"
+    assert flatten_latex(text) == text
+
+
+def test_bare_latex_in_code_region_is_untouched():
+    text = "```\n\\textcolor{red}{别回头}\n```"
+
+    assert flatten_latex(text) == text
+
+
 def test_flatten_large_input_is_fast():
     text = "普通文本 $a$ " * 10000
     started = time.perf_counter()
@@ -235,9 +264,64 @@ def test_frontend_settings_and_contract():
         assert element_id in config_source
         assert element_id in tabs_source
 
-    for name in ("getLatexSettings", "isLatexEnabledFor", "protectLatex", "decorateLatex"):
+    for name in (
+        "getLatexSettings",
+        "isLatexEnabledFor",
+        "protectLatex",
+        "decorateLatex",
+        "protectBareLatexBlock",
+        "protectWrappedLatexBlock",
+        "protectDelimitedBlock",
+        "balanceLatexBraces",
+    ):
         assert f"function {name}" in latex_source
-    assert 'const LATEX_RENDERED_SELECTOR = ".katex, .md-latex"' in latex_source
+    assert "const LATEX_BARE_SIGNAL_RE" in latex_source
+    assert "const LATEX_RENDERED_SELECTOR = \".katex, .md-latex\"" in latex_source
     assert 'const LATEX_SANITIZE_ATTRS = ["data-latex", "data-display"]' in latex_source
+    # 只输出 HTML 副本：MathML 副本在 CSS 缺失时会与 HTML 副本同时可见（文字重复）。
+    assert 'output: "html"' in latex_source
 
     assert "function renderMarkdown(content: string, allowLatex = false)" in chat_source
+
+
+def test_katex_assets_are_vendored_locally():
+    fragment = (ROOT / "frontend/src/index/fragments/05-platform-modals-and-scripts.html").read_text(encoding="utf-8")
+
+    assert 'href="/assets/vendor/katex/katex.min.css"' in fragment
+    assert 'src="/assets/vendor/katex/katex.min.js"' in fragment
+    assert "cdn.jsdelivr.net/npm/katex" not in fragment
+    for relative in ("katex.min.css", "katex.min.js", "fonts/KaTeX_Main-Regular.woff2"):
+        assert (ROOT / "data/assets/vendor/katex" / relative).is_file()
+
+
+def test_long_single_dollar_block_is_flattened():
+    poem = "意气骄满路，鞍马光照尘。" * 30
+    wrapped = f"${poem}\\textcolor{{red}}{{别回头}}$"
+
+    cleaned = flatten_latex(wrapped)
+
+    assert "[公式]" not in cleaned
+    assert "意气骄满路" in cleaned
+    assert "别回头" in cleaned
+    assert "\\textcolor" not in cleaned
+
+
+def test_explicit_latex_delimiters_are_stripped():
+    assert flatten_latex(r"\[\textcolor{red}{别回头}\]") == "别回头"
+    assert flatten_latex(r"\(a_1 + b_2\)") == "a_1 + b_2"
+
+
+def test_explicit_delimiters_in_sentence_are_untouched():
+    assert flatten_latex(r"见附录\[1\]") == r"见附录\[1\]"
+
+
+def test_long_display_block_is_flattened():
+    long_text = "是岁江南旱，衢州人食人。" * 40
+    text = f"$$\\textcolor{{red}}{{{long_text}}}$$"
+
+    cleaned = flatten_latex(text)
+
+    assert "[公式]" not in cleaned
+    assert "是岁江南旱" in cleaned
+    assert "\\textcolor" not in cleaned
+

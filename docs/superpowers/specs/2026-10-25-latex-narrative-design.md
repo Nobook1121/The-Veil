@@ -55,9 +55,9 @@ LaTeX（经 KaTeX 子集渲染）可以用纯文本表达上述效果，且天�
 | KP 回复替换 | `frontend/src/app/chat.ts:1219-1225` | `innerHTML = renderMarkdown(...)` → `enhanceMessageMedia` → `revealKpContent` |
 | 渐进显现 | `frontend/src/app/chat.ts:1149-1199` | `TreeWalker(SHOW_TEXT)` 收集**所有**文本节点，逐字写入 `nodeValue`；目前不过滤 `code`/`pre` |
 | 消息广播 | `backend/trpg_server/socket_events.py:130-142` | `send_message` → `socketio.emit("new_message", payload, room=…)`，内容原样转发 |
-| 第三方库 | `frontend/src/index/fragments/05-platform-modals-and-scripts.html:171-174` | marked 15、DOMPurify 3.4.16 走 jsDelivr CDN |
+| 第三方库 | `frontend/src/index/fragments/05-platform-modals-and-scripts.html:171-176` | marked 15、DOMPurify 3.4.16 走 jsDelivr CDN；KaTeX 0.16.11 本地随包（`data/assets/vendor/katex/`） |
 | 样式入口 | `frontend/src/styles/01-foundation-chat.css` | 聊天消息样式已集中在此 |
-| CSP | `backend/trpg_server/app_factory.py:41-53` | `script-src` 含 jsDelivr；`style-src`/`font-src` 允许 https，可加载 KaTeX |
+| CSP | `backend/trpg_server/app_factory.py:41-53` | `script-src` 含 jsDelivr；`style-src`/`font-src` 允许 https 与 `'self'`，本地 KaTeX 的 CSS/JS/字体同源加载 |
 
 关键约束：**渐进显现会改写文本节点的内容**。如果公式在显现前就被 KaTeX 替换成大量嵌套 `<span>`/MathML，逐字显现会把公式内部文字截断，出现乱码式闪烁。必须让显现逻辑跳过已渲染的公式子树。
 
@@ -430,16 +430,17 @@ def clean_history_for_model(history: list[dict], settings: LatexSettings) -> lis
 
 1. **保护代码区**：围栏代码块与行内代码原样保留，不识别其中的 `$`。
 2. **识别公式**：与前端使用同一套配对规则（`$$...$$` 优先、`$...$` 单行、开 `$` 后无空白、闭 `$` 前无空白、`\$` 不配对）。前后端共享同一组测试向量。
-3. **命令降级**（递归到叶子文本）：
+3. **无定界符整段**：空行分段内出现强特征命令（`\textcolor`、`\rlap`、`\large`、`\begin` 等）、不含未转义 `$` 且含成对花括号时，整段按公式源码扁平化；否则保持原文，避免误伤正常正文与价格写法。整段被一对 `$` 包裹、但内容超过单块上限或跨行时，按同样规则扁平化（玩家常把整段诗句塞进一对 `$`）；被 `\[...\]` / `\(...\)` 包裹时先剥掉定界符，避免 `\[` 残留在上下文里。
+4. **命令降级**（递归到叶子文本）：
    - 保留内容：`\text{}`、`\textbf{}`、`\textit{}`、`\texttt{}`、`\boxed{}`、`\fbox{}`、`\smash{}`、`\textcolor{色}{内容}`、`\colorbox{色}{内容}`、`\fcolorbox{框}{底}{内容}`、`\overset{a}{b}`（保留 b）、`\underset{a}{b}`（保留 b）。
    - 丢弃：字号命令（`\Huge` 等）、间距命令（`\hspace`、`\phantom`、`\kern`）、`\rule`（替换为单个 `▮`）。
    - 环境：`array`/`aligned`/`cases` 按行拆分，行间用空格连接。
    - 未知命令：去掉命令名，保留其后花括号内容（例如 `\foo{文本}` → `文本`）。
-4. **超长公式**：源码超过 `latex_max_formula_chars` 的整块替换为 `[公式]`，不保留源码。
-5. **色块折叠**：连续 3 个以上的方块字符（`█▓▒░`）折叠为 `[色块]`。
-6. **空白压缩**：连续空行压成单个换行，连续空格压成单个空格。
-7. **兜底**：清洗后内容为空或只有标点/空白时，替换为 `[氛围排版]`。
-8. **长度上限**：单条消息清洗后超过 `latex_max_clean_message_chars` 时截断并追加 `…`。
+5. **超长公式**：行内公式源码超过 `latex_max_formula_chars` 时替换为 `[公式]`；独立公式块（`$$...$$`、无定界符整段、整段单 `$` 包裹）是段落级输入，按消息级上限 `latex_max_clean_message_chars` 判断，超出同样替换为 `[公式]`。
+6. **色块折叠**：连续 3 个以上的方块字符（`█▓▒░`）折叠为 `[色块]`。
+7. **空白压缩**：连续空行压成单个换行，连续空格压成单个空格。
+8. **兜底**：清洗后内容为空或只有标点/空白时，替换为 `[氛围排版]`。
+9. **长度上限**：单条消息清洗后超过 `latex_max_clean_message_chars` 时截断并追加 `…`。
 
 示例：
 
@@ -551,9 +552,11 @@ export function isLatexEnabledFor(type: string): boolean {
 1. **先检查组件可用性**：`window.marked` / `window.DOMPurify` 缺失时不处理，直接返回原文（避免占位被转义后公式消失）。
 2. **切出代码区**：围栏代码块与行内代码内部不识别公式。
 3. **匹配顺序**：先 `$$...$$`（可跨行、非贪婪），再 `$...$`（单行、非贪婪）。
-4. **行内合法性**：开 `$` 后不得紧跟空白；闭 `$` 前不得是空白；内容非空且不含 `$`；`\$` 不配对。
-5. **上限**：单条消息最多 `maxFormulasPerMessage` 个片段、单块源码最多 `maxFormulaChars` 字符；超限片段保持原文。
-6. **占位形式**：
+4. **无定界符整段**：玩家常直接粘贴 `\textcolor{...}`、`\rlap{...}` 源码而不写 `$`，此时按空行分段整体识别——段落含强特征命令（与后端 `_BARE_SIGNAL_RE` 同一清单）、不含未转义 `$`、含成对花括号时，整段以 `data-display="1"` 占位。整段长度按 `maxCleanMessageChars` 判断，不受单块公式字符数限制；含 `$` 的段落仍走行内规则，避免误吞正文。整段被 `\[...\]` 或 `\(...\)` 包裹时先去壳（`\[...\]` 按独立块、`\(...\)` 按行内）——KaTeX 的 `renderToString` 不接受这两个定界符，直接传入会报 `Undefined control sequence: \[` 并回退成原文。
+5. **超长单块**：整段被一对 `$` 包裹、内部不含 `$`、含强特征命令与花括号，且内容超过 `maxFormulaChars` 或含换行时，同样以 `data-display="1"` 整段占位（`$...$` 的一次性长块与 `$$...$$` 等价）。短于上限且不跨行的 `$...$` 仍按行内公式处理。
+6. **行内合法性**：开 `$` 后不得紧跟空白；闭 `$` 前不得是空白；内容非空且不含 `$`；`\$` 不配对。
+7. **上限**：单条消息最多 `maxFormulasPerMessage` 个片段；行内公式源码最多 `maxFormulaChars` 字符，独立公式块（`$$...$$`、整段裸源码、整段单 `$`）按 `maxCleanMessageChars` 字符判断；超限片段保持原文。
+8. **占位形式**：
 
 ```html
 <span class="md-latex" data-latex="%E4%BD%A0%E5%A5%BD" data-display="0"></span>
@@ -581,12 +584,16 @@ window.katex.render(tex, host, {
     trust: false,
     maxExpand: 1000,
     maxSize: 20,
-    output: "htmlAndMathml",
+    // 只输出 HTML 副本：MathML 副本在 CSS 缺失时会与 HTML 副本同时可见（文字重复）。
+    output: "html",
 });
 ```
 
+`output: "html"` 是刻意的：默认的 `htmlAndMathml` 会在同一节点里放 MathML 与 HTML 两份副本，靠 `katex.min.css` 的 `.katex-mathml{clip:rect(1px,1px,1px,1px)}` 隐藏 MathML。CSS 一旦没加载，两份副本同时可见，气泡里就会显示成「别回头别回头」。只输出 HTML 副本后，重复在结构上不可能发生。
+
 5. 采用「先 `renderToString` 试渲染，成功再写入 DOM，失败则回退」的策略，避免 `throwOnError:false` 把红色错误文本留在气泡里。
-6. 安全：`trust:false` 拒绝 `\href`、`\url`、`\includegraphics`、`\htmlClass` 等；`maxExpand`/`maxSize` 限制宏展开与尺寸爆炸；公式源码永不进入 `innerHTML`。
+6. 语法错误重试：输出含 `.katex-error` 时，用 `balanceLatexBraces` 补齐漏写的 `}`（丢弃多余 `}`）再渲染一次，仍失败才回退原文。手写源码常因少一个右括号触发 `Expected '}', got 'EOF'`。
+7. 安全：`trust:false` 拒绝 `\href`、`\url`、`\includegraphics`、`\htmlClass` 等；`maxExpand`/`maxSize` 限制宏展开与尺寸爆炸；公式源码永不进入 `innerHTML`。
 
 ### 8.5 `chat.ts` 改造点
 
@@ -638,17 +645,18 @@ window.katex.render(tex, host, {
 
 ### 8.8 KaTeX 资源加载
 
-在 `frontend/src/index/fragments/05-platform-modals-and-scripts.html` 的 marked/DOMPurify 之前加入：
+KaTeX 资源随站点本地分发，文件放在 `data/assets/vendor/katex/`（`katex.min.css`、`katex.min.js`、`fonts/`、`LICENSE`），由既有 `/assets/vendor/<path>` 路由直出。在 `frontend/src/index/fragments/05-platform-modals-and-scripts.html` 的 marked/DOMPurify 之前引用：
 
 ```html
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<link rel="stylesheet" href="/assets/vendor/katex/katex.min.css">
+<script defer src="/assets/vendor/katex/katex.min.js"></script>
 ```
 
-- CSP 无需修改：`script-src` 已允许 `cdn.jsdelivr.net`，`style-src` 与 `font-src` 允许 https。
-- 资源体积：JS 约 280 KB（gzip 后更小），CSS 与其字体按页面实际用到的字符惰性加载。
-- 离线/被墙场景：`decorateLatex` 检测不到 `window.katex` 即回退原文，功能退化为「显示源码」，不影响聊天可用性。
-- 不把 KaTeX 打进 `dist/`：与现有 marked/DOMPurify 的 CDN 策略保持一致；若后续要求完全离线，可改为本地 vendor 资源，属独立变更。
+- 为什么不再用 jsDelivr：曾经只加载到 `katex.min.js`、没加载到 `katex.min.css` 的客户端会把公式渲染成「无样式叠字」——MathML/HTML 双副本同时可见、`\rlap` 不重叠、字号命令全部失效，与期望效果完全不符。本地分发让 CSS、JS、字体同源同版本，不受 CDN 可达性与缓存状态影响。
+- CSP 无需放宽：`style-src` / `script-src` 的 `'self'` 已覆盖本地资源，`font-src 'self'` 覆盖 `fonts/` 下的 woff2/woff/ttf。
+- 资源体积：JS 约 270 KB，CSS 约 23 KB，字体约 1 MB（浏览器按 CSS 中的 `@font-face` 惰性加载实际用到的字重）。
+- 升级 KaTeX 时同步替换 `data/assets/vendor/katex/` 下四个条目，并更新 `THIRD-PARTY-LICENSES.md` 的版本号。
+- 组件缺失（脚本被拦截/文件缺失）时 `decorateLatex` 仍回退为原文，功能退化为「显示源码」，不影响聊天可用性。
 
 ---
 
@@ -677,7 +685,7 @@ KaTeX 的价值体现在：
 
 ### 9.2 代价与边界
 
-- 增加约 280 KB 的外部 JS 依赖（CDN，可离线化）。
+- 增加约 300 KB 的随包 JS/CSS 与约 1 MB 字体（本地分发，无 CDN 依赖）。
 - 只支持数学模式子集，复杂图形（真正的绘图、渐变、任意定位）做不到；这是刻意接受的能力边界。
 - 需要处理与 Markdown、DOMPurify、渐进显现的衔接（见 §8），不是「引入库就完事」。
 - 公式源码会进入消息文本，必须配套历史清洗，否则长期对话 token 会膨胀（见 §6）。
@@ -751,7 +759,7 @@ KaTeX 的价值体现在：
 | --- | --- |
 | `frontend/src/app/latex.ts`（新增） | `getLatexSettings`、`isLatexEnabledFor`、`protectLatex`、`decorateLatex`、两个常量 |
 | `frontend/src/app/chat.ts` | `renderMarkdown(content, allowLatex)`；`addMessage` / `replaceThinkingMessage` 按类型判断并 `decorateLatex`；reveal 改为 `SHOW_ELEMENT` + `FILTER_REJECT` |
-| `frontend/src/index/fragments/05-platform-modals-and-scripts.html` | KaTeX CSS/JS CDN |
+| `frontend/src/index/fragments/05-platform-modals-and-scripts.html` | KaTeX CSS/JS 指向本地 `/assets/vendor/katex/` |
 | `frontend/src/index/fragments/03-room-tools-auth-settings.html` | 总控、KP、玩家三个复选框 + 强度下拉 + 三个数字输入 |
 | `frontend/src/app/config/ConfigManager.ts` | 回填七个设置 |
 | `frontend/src/app/tabs.ts` | 绑定七个设置 |
@@ -818,7 +826,7 @@ KaTeX 的价值体现在：
 11. 移动端/窄窗口：display 公式可横向滚动，不撑破气泡。
 12. 输入 `$100`、代码块、`\$`：不被误渲染。
 13. 构造 `\raisebox`、`\href`、超长公式、超量公式：回退原文，无控制台异常（除一次预期 warn）。
-14. 断网/拦截 jsDelivr：消息显示原始 LaTeX，聊天其他功能正常。
+14. 断网：KaTeX 是本地资源仍可渲染；jsDelivr 不可达时 marked/DOMPurify 缺失，消息按纯文本显示，聊天其他功能正常。
 15. 检查用量日志：含公式的对话在清洗后，历史压缩触发次数与输入 token 明显低于清洗前。
 16. 设置页搜索「LaTeX」「强度」「上限」可定位到对应控件。
 
@@ -835,7 +843,7 @@ KaTeX 的价值体现在：
 7. 前端接入：`renderMarkdown` 增加 `allowLatex`；`addMessage` / `replaceThinkingMessage` 按类型判断；reveal 改造。
 8. 设置页：七个控件、回填、绑定、搜索可见。
 9. 样式：追加到 `01-foundation-chat.css`。
-10. KaTeX CDN 资源与降级验证。
+10. KaTeX 本地资源（`data/assets/vendor/katex/`）与降级验证。
 11. 测试与手测清单逐项过。
 12. 文档/许可证/变更日志/项目地图同步。
 
@@ -845,7 +853,7 @@ KaTeX 的价值体现在：
 
 1. **不做插件化**：本文实现为普通单模块代码，不提供注册 API、动态加载或扩展钩子；未来若需要，另行重构。
 2. **总控是硬开关**：关闭后 KP 不接收 LaTeX 指导、聊天框不渲染；但历史清洗仍执行，避免旧消息里的公式继续消耗 token。若希望总控也关闭清洗，需要明确取舍（不建议）。
-3. **CDN 依赖**：与现有 marked/DOMPurify 策略一致，但离线部署下 LaTeX 会退化为源码显示。若目标部署环境常见离线，应改为内置 KaTeX 静态资源（发布包 + 许可证同步更新）。
+3. **资源分发**（已落地）：KaTeX 的 CSS/JS/字体随仓库本地分发（`data/assets/vendor/katex/`），不再依赖 CDN；marked/DOMPurify 仍走 CDN，缺失时降级为纯文本。
 4. **清洗激进度**：当前保留可读文本、丢弃排版；超长公式替换为 `[公式]`、`\rule` 转 `▮`、方块字符折叠为 `[色块]`。若评审希望更激进，会进一步省 token但丢失语义。
 5. **上限与强度并存**：上限是安全边界，强度是写作建议；冲突时取更小值并在提示词中写明。若希望上限自动收紧强度预算，需要额外联动，收益有限，建议不做。
 6. **玩家与 KP 共用上限**：当前不为玩家设置更严格的独立上限。若担心玩家刷公式，可后续增加玩家专用档位，但会增加配置项数量。

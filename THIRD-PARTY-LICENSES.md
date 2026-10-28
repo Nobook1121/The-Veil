@@ -134,9 +134,16 @@ Node 包可在 `node_modules/<包名>/LICENSE` 查看）。
 
 | 组件 | 版本 | 许可证 | 用途 |
 | --- | --- | --- | --- |
-| KaTeX | 0.16.11 | MIT | 聊天消息内的 LaTeX 公式渲染 |
 | marked | 15.0.12 | MIT | Markdown 渲染 |
 | DOMPurify | 3.4.16 | Apache-2.0 OR MPL-2.0 | Markdown/HTML 净化 |
+
+## 前端本地随包资源
+
+以下资源随仓库分发，由 `/assets/vendor/<path>` 路由直出，不依赖 CDN。
+
+| 组件 | 版本 | 许可证 | 位置 |
+| --- | --- | --- | --- |
+| KaTeX | 0.16.11 | MIT | `data/assets/vendor/katex/`（含 `LICENSE`、`katex.min.css`、`katex.min.js`、`fonts/`） |
 
 ## 合规提示
 

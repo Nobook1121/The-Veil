@@ -201,6 +201,15 @@ _FORMULA_RE = re.compile(
     re.DOTALL,
 )
 _PLAIN_NUMBER_RE = re.compile(r"^[\d\s.,]+$")
+# 无 $ 定界符的整段 LaTeX（玩家直接粘贴源码）：与前端 LATEX_BARE_SIGNAL_RE 一致。
+_BARE_SIGNAL_RE = re.compile(
+    r"\\(?:textcolor|colorbox|fcolorbox|color|rule|hspace|rlap|llap|clap|phantom|smash"
+    r"|overset|underset|textbf|textit|texttt|boxed|fbox|overbrace|underbrace|begin"
+    r"|tiny|scriptsize|footnotesize|small|normalsize|large|Large|LARGE|huge|Huge)"
+)
+_PARAGRAPH_SPLIT_RE = re.compile(r"(\n[ \t]*\n)")
+# LaTeX 的显式公式定界符：整段被 \[...\] 或 \(...\) 包裹时先去壳再扁平化。
+_WRAPPED_DELIMITER_RE = re.compile(r"^\\\[([\s\S]+)\\\]$|^\\\(([\s\S]+)\\\)$")
 _SQUARE_BLOCKS_RE = re.compile(r"[█▓▒░]{3,}")
 _WHITESPACE_RE = re.compile(r"[ \t\u00a0]+")
 _MULTI_NEWLINE_RE = re.compile(r"\n{3,}")
@@ -270,12 +279,75 @@ def _replace_formula(match: re.Match[str], settings: LatexSettings, counter: lis
     counter[0] += 1
     if counter[0] > settings.max_formulas_per_message:
         return match.group(0)
-    if len(source) > settings.max_formula_chars:
+    # 独立公式块是段落级输入，按消息级上限判断；行内公式仍受单块上限约束。
+    limit = settings.max_clean_message_chars if display is not None else settings.max_formula_chars
+    if len(source) > limit:
         return "[公式]"
     return _flatten_formula_source(source)
 
 
+def _bare_block_source(part: str, settings: LatexSettings) -> str | None:
+    """识别「整段 LaTeX」并返回其源码，非整段返回 None。
+
+    两类输入：没有 ``$`` 定界符的裸源码（含 ``\\[...\\]`` / ``\\(...\\)`` 定界符）；
+    以及整段被一对 ``$`` 包裹、但超过行内上限（或跨行）的单块。后者与 ``$$...$$``
+    等价，按独立公式块清洗。
+    """
+    source = part.strip()
+    if not source or len(source) > settings.max_clean_message_chars:
+        return None
+    delimited = _WRAPPED_DELIMITER_RE.match(source)
+    if delimited:
+        inner = (delimited.group(1) or delimited.group(2) or "").strip()
+        return inner or None
+    wrapped = (
+        len(source) >= 2
+        and source.startswith("$")
+        and source.endswith("$")
+        and not source.startswith("$$")
+        and not source.endswith("$$")
+    )
+    if wrapped:
+        inner = source[1:-1]
+        if (
+            inner
+            and "$" not in inner
+            and _BARE_SIGNAL_RE.search(inner)
+            and "{" in inner
+            and "}" in inner
+            and (len(inner) > settings.max_formula_chars or "\n" in inner)
+        ):
+            return inner
+        return None
+    if (
+        _BARE_SIGNAL_RE.search(source)
+        and not _UNESCAPED_DOLLAR_RE.search(source)
+        and "{" in source
+        and "}" in source
+    ):
+        return source
+    return None
+
+
+def _flatten_bare_blocks(chunk: str, settings: LatexSettings) -> str:
+    """扁平化没有 ``$`` 定界符的整段 LaTeX（空行分段内出现强特征命令）。
+
+    玩家经常直接粘贴 ``\\textcolor{...}`` 源码；这类内容不经过公式正则，若不清洗
+    会把命令原样带进上下文。含 ``$`` 的段落仍交给公式逻辑，避免误吞正文。
+    """
+    parts = _PARAGRAPH_SPLIT_RE.split(chunk)
+    result: list[str] = []
+    for index, part in enumerate(parts):
+        if index % 2 == 1:
+            result.append(part)
+            continue
+        source = _bare_block_source(part, settings)
+        result.append(_flatten_formula_source(source) if source else part)
+    return "".join(result)
+
+
 def _flatten_chunk(chunk: str, settings: LatexSettings, counter: list[int]) -> str:
+    chunk = _flatten_bare_blocks(chunk, settings)
     return _FORMULA_RE.sub(lambda match: _replace_formula(match, settings, counter), chunk)
 
 
