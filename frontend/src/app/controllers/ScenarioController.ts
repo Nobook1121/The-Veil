@@ -91,19 +91,41 @@ class ScenarioController {
 
     private async onImportScenarioDocumentV2(file: File): Promise<void> {
         const title = file.name.replace(/\.[^.]+$/, "") || "Imported scenario";
+        // Skill / 外部 AI 生成的剧本包是最终产物，跳过模式和 AI，直接校验后发布。
+        if (file.name.toLowerCase().endsWith(".json")) {
+            this.view.showConversionProgress(file.name);
+            this.view.updateConversionProgress(0, "active", "正在校验剧本包");
+            try {
+                const started = await this.model.importBundle(file);
+                const finished = await this.model.waitForImportJob(started.jobId, (progress) => this.view.updateImportJobProgress(progress));
+                const scenario = await this.model.publishImport(started.scriptId || finished.script_id, started.jobId);
+                this.view.updateConversionProgress(3, "complete", "剧本包已导入并发布");
+                this.view.closeConversionProgress();
+                this.renderScenarioList();
+                this.view.showMessage(`剧本包已导入并发布：${scenario.title}`);
+            } catch (error) {
+                this.view.updateConversionProgress(0, "error", scenarioErrorMessage(error));
+                await new Promise((resolve) => window.setTimeout(resolve, 500));
+                this.view.closeConversionProgress();
+                this.view.showMessage(`剧本包导入失败：${scenarioErrorMessage(error)}`, true);
+            }
+            return;
+        }
         const choice = await this.view.showImportChoice();
         if (choice === "cancel") return;
-        // 直接导入前先让用户确认剧本基础信息，取消则中止本次导入。
-        const metadata = choice === "direct"
+        // 直接导入 / AI 全链路导入前先让用户确认剧本基础信息，取消则中止本次导入。
+        const needsJobImport = choice === "direct" || choice === "ai";
+        const metadata = needsJobImport
             ? await this.view.showDirectImportMetadata({ title, creator: window.currentUser?.username || "" })
             : null;
-        if (choice === "direct" && !metadata) return;
+        if (needsJobImport && !metadata) return;
         this.view.showConversionProgress(file.name);
-        this.view.updateConversionProgress(0, "active", "正在上传文档");
+        this.view.updateConversionProgress(0, "active", choice === "ai" ? "正在通读剧本" : "正在上传文档");
         try {
-            if (choice === "direct" && metadata) {
+            if (needsJobImport && metadata) {
                 const form = new FormData();
                 form.append("file", file, file.name);
+                form.append("mode", choice);
                 form.append("title", metadata.title);
                 form.append("author", metadata.author);
                 form.append("creator", metadata.creator);
@@ -116,10 +138,10 @@ class ScenarioController {
                 const finished = await this.model.waitForImportJob(started.jobId, (progress) => this.view.updateImportJobProgress(progress));
                 const scenario = await this.model.publishImport(started.scriptId || finished.script_id, started.jobId);
                 sessionStorage.removeItem("ai-trpg:scenario-import-job");
-                this.view.updateConversionProgress(3, "complete", "知识库索引已就绪");
+                this.view.updateConversionProgress(3, "complete", "知识库与图谱已就绪");
                 this.view.closeConversionProgress();
                 this.renderScenarioList();
-                this.view.showMessage(`文档已直接导入并发布：${scenario.title}`);
+                this.view.showMessage(choice === "ai" ? `AI 已生成剧本与图谱并发布：${scenario.title}` : `文档已直接导入（含地点骨架图谱）并发布：${scenario.title}`);
                 return;
             }
 

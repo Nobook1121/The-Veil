@@ -214,6 +214,142 @@ def test_editing_basic_info_keeps_module_scenario_embeddings(tmp_path, monkeypat
     assert all(chunk.embedding for chunk in after)
 
 
+def _make_app(tmp_path):
+    return create_app(
+        {
+            "TESTING": True,
+            "USER_MANAGER": FakeManager(),
+            "CONFIG_DIR": tmp_path / "config",
+            "KNOWLEDGE_BASES_DIR": tmp_path / "kb",
+            "ROOMS_DIR": tmp_path / "rooms",
+            "SCENARIOS_DIR": tmp_path / "scenarios",
+            "SCENARIO_IMPORTS_DIR": tmp_path / "imports",
+            "VECTOR_BACKEND": "embedded",
+            "VECTOR_BACKEND_EXPLICIT": True,
+            "EMBEDDED_VECTOR_DB_PATH": tmp_path / "vectors",
+            "EMBEDDING_PROVIDER": FakeEmbedding(),
+        }
+    )
+
+
+def test_bundle_import_route_publishes_scenario_and_narrative(tmp_path):
+    """外部 Skill 生成的剧本包可以直接上传，发布后图谱与知识索引都要落盘。"""
+    from trpg_server.agents.narrative.store import has_narrative
+    from trpg_server.scenario_bundle import BUNDLE_FORMAT
+
+    app = _make_app(tmp_path)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session.update(user_id=1, username="tester", role="ADMIN", session_token="token", csrf_token="csrf")
+
+    bundle = {
+        "format": BUNDLE_FORMAT,
+        "format_version": 1,
+        "scenario": {"title": "Bundle Sample", "author": "Alice", "playerCount": 2},
+        "modules": [
+            {"id": "hall", "title": "大厅", "module_type": "scene", "content": "大厅里有一盏灯。"},
+            {"id": "finale", "title": "结局", "module_type": "ending", "content": "玩家离开。"},
+        ],
+        "narrative": {
+            "topology": "linear",
+            "start": {"location_id": "hall"},
+            "nodes": [
+                {"id": "hall", "kind": "location", "title": "大厅"},
+                {"id": "finale", "kind": "ending", "title": "结局"},
+                {"id": "lamp", "kind": "item", "title": "灯"},
+            ],
+            "edges": [
+                {"from": "hall", "to": "finale", "type": "leads_to"},
+                {"from": "hall", "to": "lamp", "type": "contains"},
+                {"from": "hall", "to": "missing", "type": "adjacent"},
+            ],
+        },
+        "exclusions": [{"prefix": "作者吐槽", "line_start": 3, "category": "author_note", "reason": "与剧情无关"}],
+    }
+    imported = client.post(
+        "/api/scripts/import/bundle",
+        json=bundle,
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert imported.status_code == 201, imported.get_json()
+    data = imported.get_json()["data"]
+    assert data["jobId"] and data["scriptId"]
+    preview = data["preview"]
+    assert preview["import_mode"] == "ai"
+    assert preview["import_exclusions"][0]["prefix"] == "作者吐槽"
+    assert preview["narrative_summary"]["nodes"] >= 3
+    # 端点不存在的边在归一化阶段就被丢弃，不会带进图谱。
+    assert preview["narrative_summary"]["edges"] >= 2
+
+    published = client.post(
+        f"/api/scripts/{data['scriptId']}/publish",
+        json={"jobId": data["jobId"]},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert published.status_code == 201, published.get_json()
+    published_scenario = published.get_json()["data"]
+    assert published_scenario["title"] == "Bundle Sample"
+    assert published_scenario["import_mode"] == "ai"
+    assert has_narrative(tmp_path / "scenarios" / f"scenario-{data['scriptId']}")
+
+
+def test_ai_import_mode_runs_full_chain(tmp_path, monkeypatch):
+    """metadata.mode=ai 时整条 AI 链路（剔除→分模块→世界书→图谱）必须产出可发布预览。"""
+    from trpg_server import scenario_import_ai
+
+    monkeypatch.setattr(scenario_import_ai, "build_ai_requester", lambda: _fake_ai_requester)
+
+    store = ImportJobStore(tmp_path / "jobs")
+    job = store.create(owner_id="1", filename="ai.md", metadata={"title": "AI Sample", "mode": "ai"})
+    source = Path(store.root) / job["id"] / "source" / "ai.md"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text(
+        "# 大厅\n大厅里有一盏灯。\n\n# 作者吐槽\n这个本真难写。\n\n# 结局\n玩家离开大厅。",
+        encoding="utf-8",
+    )
+
+    vector_store = EmbeddedVectorStore(tmp_path / "vectors")
+    result = ScenarioImportPipeline(
+        store,
+        {"OCR_ENABLED": False, "EMBEDDING_PROVIDER": FakeEmbedding(), "VECTOR_STORE": vector_store},
+    ).run(job["id"])
+
+    assert result["status"] == "done", result
+    assert result["preview"]["import_mode"] == "ai"
+    assert result["preview"]["import_exclusions"][0]["prefix"] == "作者吐槽"
+    assert result["preview"]["narrative_summary"]["nodes"] >= 3
+    assert result["preview"]["narrative_summary"]["error_count"] == 0
+    assert result["preview"]["conversion"]["ai"]["stages"]["scan"]
+    # 图谱与知识块都要作为中间产物保存，发布时不再重新调用 AI。
+    assert store.load_intermediate(job["id"], "narrative", {})
+    assert store.load_intermediate(job["id"], "knowledge", [])
+    assert vector_store.count({"scenario_id": str(job["script_id"])}) >= 1
+
+
+def _fake_ai_requester(prompt: str) -> str:
+    if "无关的文字" in prompt:
+        return '{"exclusions":[{"prefix":"作者吐槽","line_start":4,"line_end":5,"category":"author_note","reason":"作者自述"}]}'
+    if "划分成可独立检索的模块" in prompt:
+        return (
+            '{"modules":['
+            '{"title":"大厅","module_type":"scene","start_line":1,"end_line":3,"summary":"大厅有一盏灯。"},'
+            '{"title":"结局","module_type":"ending","start_line":4,"end_line":5,"summary":"玩家离开。"}]}'
+        )
+    if "世界书" in prompt:
+        return '{"modules":[{"id":"module_001","keywords":["大厅","灯"]},{"id":"module_002","keywords":["结局"]}]}'
+    if "生成世界树图谱" in prompt:
+        return (
+            '{"topology":"linear","start":"module_001",'
+            '"nodes":[{"id":"module_001","kind":"location","title":"大厅"},'
+            '{"id":"module_002","kind":"ending","title":"结局"},'
+            '{"id":"lamp","kind":"item","title":"灯"}],'
+            '"edges":[{"from":"module_001","to":"module_002","type":"leads_to"},'
+            '{"from":"module_001","to":"lamp","type":"contains"},'
+            '{"from":"module_001","to":"ghost","type":"adjacent"}]}'
+        )
+    return "{}"
+
+
 def test_direct_import_chunks_by_heading_without_scene_cards(tmp_path):
     store = ImportJobStore(tmp_path / "jobs")
     job = store.create(owner_id="1", filename="large.txt", metadata={"title": "Chunked"})

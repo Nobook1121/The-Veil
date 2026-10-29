@@ -437,7 +437,10 @@ function normalizeAIPlatformConfig(value: unknown): AIPlatformConfig | null {
 
 function normalizeAIModelConfig(value: unknown): AIModelConfig | null {
     if (!aiPlatformIsRecord(value) || typeof value.id !== "string" || !value.id) return null;
+    // 保留磁盘上的全部字段（单价、缓存价、峰谷倍率等），否则整份配置回写时
+    // 会静默丢掉这些管理员配置。已知字段再做兜底规范化。
     const model: AIModelConfig = {
+        ...(value as Record<string, unknown>),
         id: value.id,
         name: typeof value.name === "string" && value.name ? value.name : value.id,
         description: typeof value.description === "string" ? value.description : "",

@@ -7,6 +7,22 @@
     const N = window.TrpgNarrative!;
     const { api, state, runtime, byId, t, escapeHtml, editable, kindMeta, nodeById, parentOf, globalKeywordConflicts, visibilitySourceLabel, revealSummary, revealBlockMarkup, readReveal, revealToCondition, syncRevealType, splitTerms, keywordSourceLabel, VISIBILITY_LABEL } = N;
 
+    /** 父节点候选：排除自己与自己的后代，避免把隶属关系改成环。 */
+    function parentOptions(node: GraphNode): GraphNode[] {
+        const blocked = new Set<string>([node.id]);
+        const queue = [node.id];
+        while (queue.length) {
+            const current = queue.pop()!;
+            (state.bundle?.nodes || []).forEach((item) => {
+                if (item.parent === current && !blocked.has(item.id)) {
+                    blocked.add(item.id);
+                    queue.push(item.id);
+                }
+            });
+        }
+        return (state.bundle?.nodes || []).filter((item) => !blocked.has(item.id));
+    }
+
     function renderInspector(): void {
         const inspector = byId("scenarioNodeInspector");
         if (!inspector) return;
@@ -54,6 +70,13 @@
                     <span>${escapeHtml(t("scenario.tree.edit_visibility", "可见性"))}</span>
                     <select class="form-select form-select-sm" id="scenarioNodeVisibility">
                         ${(["public", "hidden", "kp_only"] as const).map((value) => `<option value="${value}"${visibility === value ? " selected" : ""}>${escapeHtml(VISIBILITY_LABEL[value])}</option>`).join("")}
+                    </select>
+                </label>
+                <label class="form-group">
+                    <span>${escapeHtml(t("scenario.tree.edit_parent", "父节点（隶属）"))}</span>
+                    <select class="form-select form-select-sm" id="scenarioNodeParent">
+                        <option value="">${escapeHtml(t("scenario.graph.no_parent", "无（顶层节点）"))}</option>
+                        ${parentOptions(node).map((item) => `<option value="${escapeHtml(item.id)}"${(node.parent || "") === item.id ? " selected" : ""}>${escapeHtml(kindMeta(item.kind).label)} · ${escapeHtml(item.title || item.id)}</option>`).join("")}
                     </select>
                 </label>
                 ${revealBlockMarkup("scenarioNode", node.reveal_when, visibility)}
@@ -114,10 +137,16 @@
                     <span>${escapeHtml(t("scenario.graph.lock_layout", "锁定布局"))}</span>
                     <input type="checkbox" id="scenarioNodeLayoutLocked" ${node.layout_locked ? "checked" : ""}>
                 </label>
-                <button type="button" class="btn btn-primary btn-sm" id="scenarioNodeSave">
-                    <i class="fa fa-save" aria-hidden="true"></i>
-                    <span>${escapeHtml(t("scenario.tree.save_node", "保存节点"))}</span>
-                </button>
+                <div class="scenario-inspector-actions">
+                    <button type="button" class="btn btn-primary btn-sm" id="scenarioNodeSave">
+                        <i class="fa fa-save" aria-hidden="true"></i>
+                        <span>${escapeHtml(t("scenario.tree.save_node", "保存节点"))}</span>
+                    </button>
+                    <button type="button" class="btn btn-outline-danger btn-sm" id="scenarioNodeDelete">
+                        <i class="fa fa-trash" aria-hidden="true"></i>
+                        <span>${escapeHtml(t("scenario.graph.delete_node", "删除节点"))}</span>
+                    </button>
+                </div>
             </div>` : "";
         inspector.innerHTML = `
             <h6 class="mb-2"><i class="fa ${meta.icon}" style="color:${meta.color}" aria-hidden="true"></i> ${escapeHtml(node.title || node.id)}</h6>
@@ -212,6 +241,7 @@
         if (!node || !state.scenarioId || !editable()) return;
         const title = byId<HTMLInputElement>("scenarioNodeTitle")?.value.trim() || "";
         const visibility = byId<HTMLSelectElement>("scenarioNodeVisibility")?.value || "public";
+        const parent = byId<HTMLSelectElement>("scenarioNodeParent")?.value || "";
         const kpNotes = byId<HTMLTextAreaElement>("scenarioNodeKpNotes")?.value.trim() || "";
         const body = byId<HTMLTextAreaElement>("scenarioNodeBody")?.value || "";
         const keywords = splitTerms(byId<HTMLInputElement>("scenarioNodeKeywords")?.value);
@@ -235,7 +265,7 @@
         try {
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ node: GraphNode; revision: number }>>(
                 `/api/scenarios/${state.scenarioId}/narrative/nodes/${encodeURIComponent(node.id)}`,
-                { method: "PATCH", body: { base_revision: state.revision, title, visibility, body, kp_notes: kpNotes, keywords, aliases, negative_keywords: negativeKeywords, scope, constant, keyword_weight: keywordWeight, keyword_match: keywordMatch, reveal_when: revealWhen, layout_locked: layoutLocked } },
+                { method: "PATCH", body: { base_revision: state.revision, title, visibility, parent: parent || null, body, kp_notes: kpNotes, keywords, aliases, negative_keywords: negativeKeywords, scope, constant, keyword_weight: keywordWeight, keyword_match: keywordMatch, reveal_when: revealWhen, layout_locked: layoutLocked } },
             );
             if (!response.ok || !data?.success || !data.data) {
                 if (response.status === 409) {
@@ -262,10 +292,202 @@
         }
     }
 
+    /** 图谱页签里的节点编辑器前缀：与世界树详情面板的控件 id 互不干扰。 */
+    const GRAPH_PREFIX = "scenarioGraphNode";
+
+    /**
+     * 图谱页签内的节点编辑面板：选中节点即可改内容、建连接、改/删既有连接、删节点。
+     * 与世界树详情面板共用同一套按节点 PATCH 的接口，只提交这里展示的字段，
+     * 关键词等高级设置仍保留在世界树页签里。
+     */
+    function renderGraphEditor(): void {
+        const host = byId("scenarioGraphNodeEditor");
+        if (!host) return;
+        const node = nodeById(state.selectedId);
+        if (!node) {
+            host.innerHTML = `<p class="text-muted small mb-0">${escapeHtml(t("scenario.graph.node_editor_hint", "点击图谱中的节点，可在这里编辑内容、添加或删除连接。"))}</p>`;
+            return;
+        }
+        const canEdit = editable();
+        const visibility = node.visibility || "public";
+        const edges = (state.bundle?.edges || []).filter((edge) => edge.from === node.id || edge.to === node.id);
+        const others = (state.bundle?.nodes || []).filter((item) => item.id !== node.id);
+        const kindOptions = Object.entries(N.KIND_META)
+            .sort((left, right) => left[1].order - right[1].order)
+            .map(([value, item]) => `<option value="${escapeHtml(value)}"${node.kind === value ? " selected" : ""}>${escapeHtml(item.label)}</option>`)
+            .join("");
+        const edgeRows = edges.map((edge) => {
+            const outgoing = edge.from === node.id;
+            const otherId = outgoing ? edge.to : edge.from;
+            const other = nodeById(otherId);
+            const typeLabel = N.edgeMeta(edge.type).label;
+            const actions = canEdit ? `<button type="button" class="btn btn-outline-secondary btn-sm" data-graph-edge-edit="${escapeHtml(edge.id)}">${escapeHtml(t("scenario.graph.edit_edge", "编辑"))}</button>
+                    <button type="button" class="btn btn-outline-danger btn-sm" data-graph-edge-delete="${escapeHtml(edge.id)}">${escapeHtml(t("scenario.common.delete", "删除"))}</button>` : "";
+            return `<li class="scenario-graph-node-edge">
+                    <span class="scenario-graph-node-edge-main"><code>${outgoing ? "→" : "←"}</code> ${escapeHtml(other?.title || otherId)} <span class="text-muted small">${escapeHtml(typeLabel)}</span>${edge.hard ? ` <span class="badge bg-danger">hard</span>` : ""}</span>
+                    <span class="scenario-graph-node-edge-actions">${actions}</span>
+                </li>`;
+        }).join("");
+        const editForm = canEdit ? `
+            <div class="scenario-graph-node-form">
+                <label class="form-group">
+                    <span>${escapeHtml(t("scenario.graph.node_kind", "类型"))}</span>
+                    <select class="form-select form-select-sm" id="${GRAPH_PREFIX}Kind">${kindOptions}</select>
+                </label>
+                <label class="form-group">
+                    <span>${escapeHtml(t("scenario.tree.edit_title", "标题"))}</span>
+                    <input type="text" class="form-control form-control-sm" id="${GRAPH_PREFIX}Title" value="${escapeHtml(node.title)}">
+                </label>
+                <label class="form-group">
+                    <span>${escapeHtml(t("scenario.tree.edit_visibility", "可见性"))}</span>
+                    <select class="form-select form-select-sm" id="${GRAPH_PREFIX}Visibility">
+                        ${(["public", "hidden", "kp_only"] as const).map((value) => `<option value="${value}"${visibility === value ? " selected" : ""}>${escapeHtml(VISIBILITY_LABEL[value])}</option>`).join("")}
+                    </select>
+                </label>
+                <label class="form-group">
+                    <span>${escapeHtml(t("scenario.tree.edit_parent", "父节点（隶属）"))}</span>
+                    <select class="form-select form-select-sm" id="${GRAPH_PREFIX}Parent">
+                        <option value="">${escapeHtml(t("scenario.graph.no_parent", "无（顶层节点）"))}</option>
+                        ${parentOptions(node).map((item) => `<option value="${escapeHtml(item.id)}"${(node.parent || "") === item.id ? " selected" : ""}>${escapeHtml(kindMeta(item.kind).label)} · ${escapeHtml(item.title || item.id)}</option>`).join("")}
+                    </select>
+                </label>
+                ${revealBlockMarkup(GRAPH_PREFIX, node.reveal_when, visibility)}
+                <label class="form-group">
+                    <span>${escapeHtml(t("scenario.tree.edit_body", "正文"))}</span>
+                    <textarea class="form-control form-control-sm" id="${GRAPH_PREFIX}Body" rows="4">${escapeHtml(node.body || "")}</textarea>
+                </label>
+                <label class="form-group">
+                    <span>${escapeHtml(t("scenario.tree.edit_kp_notes", "KP 备注"))}</span>
+                    <textarea class="form-control form-control-sm" id="${GRAPH_PREFIX}KpNotes" rows="2">${escapeHtml(node.kp_notes || "")}</textarea>
+                </label>
+                <label class="scenario-module-toggle">
+                    <span>${escapeHtml(t("scenario.graph.lock_layout", "锁定布局"))}</span>
+                    <input type="checkbox" id="${GRAPH_PREFIX}LayoutLocked" ${node.layout_locked ? "checked" : ""}>
+                </label>
+                <div class="scenario-inspector-actions">
+                    <button type="button" class="btn btn-primary btn-sm" id="${GRAPH_PREFIX}Save">
+                        <i class="fa fa-save" aria-hidden="true"></i>
+                        <span>${escapeHtml(t("scenario.tree.save_node", "保存节点"))}</span>
+                    </button>
+                    <button type="button" class="btn btn-outline-danger btn-sm" id="${GRAPH_PREFIX}Delete">
+                        <i class="fa fa-trash" aria-hidden="true"></i>
+                        <span>${escapeHtml(t("scenario.graph.delete_node", "删除节点"))}</span>
+                    </button>
+                </div>
+            </div>` : "";
+        const addEdgeForm = canEdit && others.length ? `
+            <div class="scenario-graph-node-add-edge">
+                <label class="form-group">
+                    <span>${escapeHtml(t("scenario.graph.edge_target", "连接到"))}</span>
+                    <select class="form-select form-select-sm" id="${GRAPH_PREFIX}LinkTarget">
+                        <option value="">${escapeHtml(t("scenario.graph.edge_target_placeholder", "选择目标节点…"))}</option>
+                        ${others.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(kindMeta(item.kind).label)} · ${escapeHtml(item.title || item.id)}</option>`).join("")}
+                    </select>
+                </label>
+                <label class="form-group">
+                    <span>${escapeHtml(t("scenario.graph.edge_type", "关系类型"))}</span>
+                    <select class="form-select form-select-sm" id="${GRAPH_PREFIX}LinkType">
+                        ${N.EDGE_TYPES.map(([value, label]) => `<option value="${escapeHtml(value)}"${value === "adjacent" ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+                    </select>
+                </label>
+                <label class="scenario-graph-hard-toggle">
+                    <input type="checkbox" id="${GRAPH_PREFIX}LinkHard">
+                    <span>hard</span>
+                </label>
+                <button type="button" class="btn btn-sm btn-outline-primary" data-graph-node-add-edge>
+                    <i class="fa fa-plus" aria-hidden="true"></i>
+                    <span>${escapeHtml(t("scenario.graph.add_edge", "添加连接"))}</span>
+                </button>
+            </div>` : "";
+        host.innerHTML = `
+            <div class="scenario-graph-node-editor-head">
+                <h6 class="mb-0"><i class="fa ${kindMeta(node.kind).icon}" style="color:${kindMeta(node.kind).color}" aria-hidden="true"></i> ${escapeHtml(t("scenario.graph.node_editor", "节点编辑"))} · ${escapeHtml(node.title || node.id)}</h6>
+                <code>${escapeHtml(node.id)}</code>
+            </div>
+            ${editForm}
+            <div class="scenario-graph-node-edges">
+                <h6>${escapeHtml(t("scenario.tree.edges", "连接"))}</h6>
+                ${edges.length ? `<ul class="list-unstyled small mb-2">${edgeRows}</ul>` : `<p class="text-muted small mb-2">${escapeHtml(t("scenario.tree.no_edges", "暂无连接。"))}</p>`}
+                ${addEdgeForm}
+            </div>`;
+        if (canEdit) {
+            syncRevealType(GRAPH_PREFIX);
+        }
+    }
+
+    async function saveGraphNode(): Promise<void> {
+        const node = nodeById(state.selectedId);
+        if (!node || !state.scenarioId || !editable()) return;
+        const title = byId<HTMLInputElement>(`${GRAPH_PREFIX}Title`)?.value.trim() || "";
+        if (!title) {
+            showNotification(t("scenario.tree.title_required", "节点标题不能为空。"), "warning");
+            return;
+        }
+        const kind = byId<HTMLSelectElement>(`${GRAPH_PREFIX}Kind`)?.value || node.kind;
+        const visibility = byId<HTMLSelectElement>(`${GRAPH_PREFIX}Visibility`)?.value || "public";
+        const parent = byId<HTMLSelectElement>(`${GRAPH_PREFIX}Parent`)?.value || "";
+        const body = byId<HTMLTextAreaElement>(`${GRAPH_PREFIX}Body`)?.value || "";
+        const kpNotes = byId<HTMLTextAreaElement>(`${GRAPH_PREFIX}KpNotes`)?.value.trim() || "";
+        const layoutLocked = byId<HTMLInputElement>(`${GRAPH_PREFIX}LayoutLocked`)?.checked === true;
+        const reveal = readReveal(GRAPH_PREFIX);
+        const revealWhen = visibility === "hidden" ? revealToCondition(reveal) : null;
+        const button = byId<HTMLButtonElement>(`${GRAPH_PREFIX}Save`);
+        if (button) button.disabled = true;
+        const history = api.pushHistory();
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ node: GraphNode; revision: number }>>(
+                `/api/scenarios/${state.scenarioId}/narrative/nodes/${encodeURIComponent(node.id)}`,
+                { method: "PATCH", body: { base_revision: state.revision, kind, title, visibility, parent: parent || null, body, kp_notes: kpNotes, reveal_when: revealWhen, layout_locked: layoutLocked } },
+            );
+            if (!response.ok || !data?.success || !data.data) {
+                if (response.status === 409) {
+                    api.discardHistory(history);
+                    await api.handleConflict();
+                    return;
+                }
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            N.applyRevision(data.data.revision);
+            const saved = data.data.node;
+            if (state.bundle) {
+                state.bundle.nodes = state.bundle.nodes.map((item) => (item.id === saved.id ? { ...item, ...saved } : item));
+            }
+            api.renderAll();
+            N.markDirty(false);
+            showNotification(t("scenario.tree.saved", "节点已保存。"), "success");
+        } catch (error) {
+            api.discardHistory(history);
+            const message = error instanceof Error ? error.message : String(error);
+            showNotification(message, "error");
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
+    async function addGraphEdge(): Promise<void> {
+        const node = nodeById(state.selectedId);
+        if (!node || !editable()) return;
+        const targetId = byId<HTMLSelectElement>(`${GRAPH_PREFIX}LinkTarget`)?.value || "";
+        if (!targetId) {
+            showNotification(t("scenario.graph.edge_target_required", "请先选择要连接的目标节点。"), "warning");
+            return;
+        }
+        const type = byId<HTMLSelectElement>(`${GRAPH_PREFIX}LinkType`)?.value || "adjacent";
+        const hard = byId<HTMLInputElement>(`${GRAPH_PREFIX}LinkHard`)?.checked === true;
+        await api.connectNodes(node.id, targetId, { type, hard });
+        // connectNodes 只保留新建边的选中，这里恢复节点选中，编辑器继续停留在当前节点。
+        state.selectedId = node.id;
+        api.renderInspector();
+        api.renderGraphEditor();
+    }
+
     Object.assign(api, {
         renderInspector,
+        renderGraphEditor,
         applyKeywordCandidate,
         extractNodeKeywords,
         saveNode,
+        saveGraphNode,
+        addGraphEdge,
     });
 })(window);

@@ -191,6 +191,10 @@
                                     <span data-i18n="scenario.graph.redo">重做</span>
                                 </button>
                             </div>
+                            <button type="button" class="btn btn-sm btn-outline-success" id="scenarioGraphAddNode" title="新增地点 / NPC / 物件 / 线索节点，可指定父节点">
+                                <i class="fa fa-plus-square" aria-hidden="true"></i>
+                                <span data-i18n="scenario.graph.add_node">新增节点</span>
+                            </button>
                             <select class="form-select form-select-sm scenario-graph-edge-type" id="scenarioGraphEdgeType" aria-label="连线类型">
                                 <option value="adjacent" selected>相邻</option>
                                 <option value="portal">通道</option>
@@ -198,8 +202,15 @@
                                 <option value="leads_to">通向</option>
                                 <option value="requires">需要</option>
                                 <option value="reveals">揭示</option>
+                                <option value="knows">知情</option>
+                                <option value="inhabits">居住</option>
+                                <option value="uses">使用</option>
+                                <option value="contains">包含</option>
                                 <option value="triggers">触发</option>
+                                <option value="conflicts">冲突</option>
                                 <option value="mentions">提及</option>
+                                <option value="alias">别名</option>
+                                <option value="relationship">人物关系</option>
                             </select>
                             <label class="scenario-graph-hard-toggle">
                                 <input type="checkbox" id="scenarioGraphEdgeHard">
@@ -227,8 +238,15 @@
                             </button>
                             <span class="text-muted small" id="scenarioGraphHint"></span>
                         </div>
+                        <details class="scenario-graph-guide" open>
+                            <summary data-i18n="scenario.graph.guide_toggle">图谱说明 / 图例</summary>
+                            <div class="scenario-graph-guide-body small" id="scenarioGraphGuideBody"></div>
+                        </details>
                         <div class="scenario-graph-edge-actions" id="scenarioGraphEdgeActions"></div>
                         <div class="scenario-graph-canvas" id="scenarioGraphCanvas"></div>
+                        <div class="scenario-graph-node-editor" id="scenarioGraphNodeEditor">
+                            <p class="text-muted small mb-0">点击图谱中的节点，可在这里编辑内容、添加或删除连接。</p>
+                        </div>
                     </div>
 
                     <div class="tab-pane fade" id="scenarioTabValidate" role="tabpanel" aria-labelledby="scenarioTabValidateBtn">
@@ -236,6 +254,14 @@
                             <button type="button" class="btn btn-outline-primary btn-sm" id="scenarioValidateRun">
                                 <i class="fa fa-stethoscope" aria-hidden="true"></i>
                                 <span data-i18n="scenario.validate.run">运行校验</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-success btn-sm" id="scenarioRepairRun" title="自动修复孤立/不可达节点、悬空 parent、无效边等结构问题；不修改剧情与可见性判定">
+                                <i class="fa fa-wrench" aria-hidden="true"></i>
+                                <span data-i18n="scenario.validate.repair">一键修复</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="scenarioRepairExplain" title="把当前校验问题整理成提示，交给网站 Agent 分析">
+                                <i class="fa fa-robot" aria-hidden="true"></i>
+                                <span data-i18n="scenario.validate.explain">AI 分析</span>
                             </button>
                             <label class="scenario-validate-order">
                                 <input type="checkbox" id="scenarioValidateAllOrders">
@@ -342,6 +368,48 @@
                     <button type="button" class="btn btn-outline-primary" id="replaceScenarioDocument">重新上传文档</button>
                     <button type="button" class="btn btn-outline-secondary" id="saveScenarioDraft">保存草稿</button>
                     <button type="button" class="btn btn-primary" id="saveScenario">保存并发布</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="scenarioNodeCreateModal" tabindex="-1" aria-labelledby="scenarioNodeCreateModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="scenarioNodeCreateModalLabel" data-i18n="scenario.graph.add_node">新增节点</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-group">
+                        <span data-i18n="scenario.graph.add_node_title">标题</span>
+                        <input type="text" class="form-control form-control-sm" id="scenarioNodeCreateTitle" placeholder="例：四号车厢、乘务员、黄铜钥匙">
+                    </label>
+                    <label class="form-group">
+                        <span data-i18n="scenario.graph.add_node_kind">类型</span>
+                        <select class="form-select form-select-sm" id="scenarioNodeCreateKind"></select>
+                    </label>
+                    <label class="form-group">
+                        <span data-i18n="scenario.graph.add_node_parent">父节点（隶属）</span>
+                        <select class="form-select form-select-sm" id="scenarioNodeCreateParent"></select>
+                    </label>
+                    <label class="form-group">
+                        <span data-i18n="scenario.graph.add_node_visibility">可见性</span>
+                        <select class="form-select form-select-sm" id="scenarioNodeCreateVisibility">
+                            <option value="public" data-i18n="scenario.visibility.public">公开</option>
+                            <option value="hidden" data-i18n="scenario.visibility.hidden">未揭示</option>
+                            <option value="kp_only" data-i18n="scenario.visibility.kp_only">仅 KP</option>
+                        </select>
+                    </label>
+                    <label class="form-group">
+                        <span data-i18n="scenario.graph.add_node_id">ID（可留空自动生成）</span>
+                        <input type="text" class="form-control form-control-sm" id="scenarioNodeCreateId" placeholder="例：carriage_4">
+                    </label>
+                    <p class="text-muted small mb-0" data-i18n="scenario.graph.add_node_hint">父节点决定隶属关系：例如把「乘务员」挂到「四号车厢」，把「钥匙」挂到「三号车厢」。建好后在图谱里点这条虚线关系，可继续补边描述与 KP 备注。</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="common.cancel">取消</button>
+                    <button type="button" class="btn btn-primary" id="scenarioNodeCreateSubmit" data-i18n="scenario.graph.add_node_submit">创建节点</button>
                 </div>
             </div>
         </div>

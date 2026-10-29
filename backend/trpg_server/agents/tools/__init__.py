@@ -1,5 +1,5 @@
 from trpg_server.agents.tools.base import AgentTool, ToolRegistry
-from trpg_server.agents.tools.dice import ROLL_COC_CHECK_TOOL, ROLL_ROOM_CHECK_TOOL, ROLL_DICE_TOOL, ROLL_DICE_FUNCTION_TOOL, ROLL_SANITY_CHECK_TOOL, ROLL_SANITY_CHECK_ALIAS_TOOL
+from trpg_server.agents.tools.dice import ROLL_COC_CHECK_TOOL, ROLL_ROOM_CHECK_TOOL, ROLL_DICE_TOOL, ROLL_DICE_FUNCTION_TOOL, ROLL_MADNESS_ALIAS_TOOL, ROLL_MADNESS_TOOL, ROLL_SANITY_CHECK_TOOL, ROLL_SANITY_CHECK_ALIAS_TOOL
 from trpg_server.agents.tools.room import (
     GET_CHARACTER_CARDS_TOOL,
     GET_MEMORY_TOOL,
@@ -33,6 +33,8 @@ def default_tool_registry() -> ToolRegistry:
             ROLL_ROOM_CHECK_TOOL,
             ROLL_SANITY_CHECK_TOOL,
             ROLL_SANITY_CHECK_ALIAS_TOOL,
+            ROLL_MADNESS_TOOL,
+            ROLL_MADNESS_ALIAS_TOOL,
             ROLL_DICE_TOOL,
             ROLL_DICE_FUNCTION_TOOL,
             REVEAL_SCENARIO_TRIGGER_TOOL,

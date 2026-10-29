@@ -99,6 +99,8 @@ export function AgentChat({ variant = "window" }: { variant?: "window" | "page" 
         sendMessage,
         stopSending,
         statusLoaded,
+        pendingPrompt,
+        consumePendingPrompt,
     } = useAgent();
     const [draft, setDraft] = useState("");
     const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -121,6 +123,15 @@ export function AgentChat({ variant = "window" }: { variant?: "window" | "page" 
         element.style.height = "auto";
         element.style.height = `${Math.min(element.scrollHeight, 140)}px`;
     }, [draft]);
+
+    // 外部（如剧本校验面板）带着提示打开 Agent 时，把提示预填进输入框，
+    // 让用户先确认 / 修改再发送，避免直接替用户发起请求。
+    useEffect(() => {
+        if (!pendingPrompt) return;
+        setDraft(pendingPrompt);
+        consumePendingPrompt();
+        requestAnimationFrame(() => inputRef.current?.focus());
+    }, [pendingPrompt, consumePendingPrompt]);
 
     const submit = (): void => {
         const text = draft.trim();

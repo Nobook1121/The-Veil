@@ -41,6 +41,44 @@ def register_socket_events(socketio):
     def _room_membership():
         return current_app.config.setdefault(USER_ROOM_MEMBERSHIP_KEY, {})
 
+    def _add_room_for_socket(user_key, sid, room_id):
+        """membership 按 socket 记录，避免多标签页互相覆盖。"""
+        membership = _room_membership()
+        entry = membership.get(user_key)
+        if not isinstance(entry, dict):
+            entry = {}
+            membership[user_key] = entry
+        entry.setdefault(sid, set()).add(room_id)
+
+    def _remove_room_for_socket(user_key, sid, room_id):
+        membership = _room_membership()
+        entry = membership.get(user_key)
+        if isinstance(entry, dict):
+            rooms = entry.get(sid)
+            if isinstance(rooms, set):
+                rooms.discard(room_id)
+                if not rooms:
+                    entry.pop(sid, None)
+            if not entry:
+                membership.pop(user_key, None)
+            return
+        # 兼容旧结构：按用户维护的房间集合。
+        if isinstance(entry, set):
+            entry.discard(room_id)
+            if not entry:
+                membership.pop(user_key, None)
+
+    def _drop_socket_rooms(user_key, sid, was_active):
+        membership = _room_membership()
+        entry = membership.get(user_key)
+        if isinstance(entry, dict):
+            rooms = entry.pop(sid, set())
+            if not entry:
+                membership.pop(user_key, None)
+            return set(rooms)
+        # 兼容旧结构：新连接已接管时，旧连接的断开不应把用户标记为离线。
+        return set(membership.pop(user_key, set())) if was_active else set()
+
     def _notify_room_members_changed(room_id):
         # 广播「成员列表已变化」：客户端据此重新拉取房间，刷新在线状态与角色配色。
         if room_id:
@@ -76,12 +114,14 @@ def register_socket_events(socketio):
     def handle_disconnect():
         if "user_id" in session:
             user_key = str(session["user_id"])
+            sid = cast(Any, request).sid
             active_sockets = current_app.config.setdefault("ACTIVE_SOCKET_SESSIONS", {})
-            if active_sockets.get(user_key) == cast(Any, request).sid:
+            was_active = active_sockets.get(user_key) == sid
+            if was_active:
                 active_sockets.pop(user_key, None)
-            # 断开后该用户变为离线，通知其所在房间刷新成员在线状态。
-            membership = _room_membership()
-            for room_id in membership.pop(user_key, set()):
+            # 只清理这个连接加入的房间；同一用户的其他标签页仍在线时，
+            # 用户依旧算在房间内，不会在右侧栏被误判为离线。
+            for room_id in _drop_socket_rooms(user_key, sid, was_active):
                 _notify_room_members_changed(room_id)
         logger.debug("WebSocket client disconnected")
 
@@ -96,8 +136,7 @@ def register_socket_events(socketio):
         if room_id:
             join_room(room_id)
             if "user_id" in session:
-                membership = _room_membership()
-                membership.setdefault(str(session["user_id"]), set()).add(room_id)
+                _add_room_for_socket(str(session["user_id"]), cast(Any, request).sid, room_id)
             log_room_event(
                 message=user_action_text(session.get("username"), "加入了房间"),
                 actor=session.get("username"),
@@ -115,8 +154,7 @@ def register_socket_events(socketio):
         if room_id:
             leave_room(room_id)
             if "user_id" in session:
-                membership = _room_membership()
-                membership.get(str(session["user_id"]), set()).discard(room_id)
+                _remove_room_for_socket(str(session["user_id"]), cast(Any, request).sid, room_id)
             log_room_event(
                 message=user_action_text(session.get("username"), "离开了房间"),
                 actor=session.get("username"),

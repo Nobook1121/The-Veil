@@ -228,6 +228,48 @@ def test_patch_edge_updates_type(tmp_path):
     assert response.get_json()["data"]["edge"]["hard"] is True
 
 
+def test_patch_edge_can_reverse_direction(tmp_path):
+    # 换向：只交换 from / to，id 保持不变，避免丢失已揭示/解锁状态。
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.patch(
+        "/api/scenarios/7/narrative/edges/edge_hall_room",
+        json={"base_revision": 2, "from": "room", "to": "hall"},
+        headers=CSRF,
+    )
+
+    assert response.status_code == 200
+    edge = response.get_json()["data"]["edge"]
+    assert edge["id"] == "edge_hall_room"
+    assert (edge["from"], edge["to"]) == ("room", "hall")
+    saved = json.loads((tmp_path / "scenarios" / "scenario-7" / "narrative.json").read_text(encoding="utf-8"))
+    assert saved["edges"][0]["from"] == "room"
+
+
+def test_patch_edge_rejects_self_loop_and_reverse_duplicate(tmp_path):
+    bundle = _bundle()
+    bundle["edges"].append({"id": "edge_room_hall", "from": "room", "to": "hall", "type": "adjacent"})
+    _write_scenario(tmp_path, bundle=bundle)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    self_loop = client.patch(
+        "/api/scenarios/7/narrative/edges/edge_hall_room",
+        json={"base_revision": 2, "from": "room", "to": "room"},
+        headers=CSRF,
+    )
+    duplicate = client.patch(
+        "/api/scenarios/7/narrative/edges/edge_hall_room",
+        json={"base_revision": 2, "from": "room", "to": "hall"},
+        headers=CSRF,
+    )
+
+    assert self_loop.status_code == 400
+    assert duplicate.status_code == 409
+
+
 def test_put_narrative_replaces_bundle(tmp_path):
     _write_scenario(tmp_path, bundle=_bundle())
     client = _app(tmp_path).test_client()
@@ -280,6 +322,52 @@ def test_validate_returns_report_and_order_simulation(tmp_path):
     assert data["order_simulation"]["ok"] is True
 
 
+def test_repair_endpoint_fixes_structure_and_bumps_revision(tmp_path):
+    bundle = _bundle()
+    bundle["nodes"].append({"id": "attic", "kind": "location", "title": "阁楼"})
+    bundle["edges"].append({"id": "bad", "from": "hall", "to": "ghost", "type": "adjacent"})
+    storage = _write_scenario(tmp_path, bundle=bundle)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.post(
+        "/api/scenarios/7/narrative/repair",
+        json={"base_revision": 2},
+        headers=CSRF,
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["applied_count"] >= 2
+    assert data["revision"] == 3
+    stored = json.loads((storage / "narrative.json").read_text(encoding="utf-8"))
+    assert all(edge.get("to") != "ghost" for edge in stored["edges"])
+    assert any(
+        "attic" in (edge.get("from"), edge.get("to")) for edge in stored["edges"]
+    )
+
+
+def test_repair_endpoint_dry_run_does_not_write(tmp_path):
+    bundle = _bundle()
+    bundle["edges"].append({"id": "bad", "from": "hall", "to": "ghost", "type": "adjacent"})
+    storage = _write_scenario(tmp_path, bundle=bundle)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.post(
+        "/api/scenarios/7/narrative/repair",
+        json={"base_revision": 2, "dry_run": True},
+        headers=CSRF,
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["applied_count"] >= 1
+    assert data["revision"] == 2
+    stored = json.loads((storage / "narrative.json").read_text(encoding="utf-8"))
+    assert any(edge.get("id") == "bad" for edge in stored["edges"])
+
+
 def test_topology_override_marks_author_source(tmp_path):
     _write_scenario(tmp_path, bundle=_bundle())
     client = _app(tmp_path).test_client()
@@ -329,6 +417,80 @@ def test_non_owner_cannot_edit(tmp_path):
     response = _patch_node(client, title="新")
 
     assert response.status_code == 403
+
+
+def _create_node(client, **body):
+    payload = {"base_revision": 2, "kind": "npc", "title": "乘务员"}
+    payload.update(body)
+    return client.post("/api/scenarios/7/narrative/nodes", json=payload, headers=CSRF)
+
+
+def test_create_node_appends_with_parent_and_bumps_revision(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _create_node(client, id="conductor", parent="room", visibility="kp_only")
+
+    assert response.status_code == 201
+    data = response.get_json()["data"]
+    assert data["revision"] == 3
+    assert data["node"]["id"] == "conductor"
+    assert data["node"]["parent"] == "room"
+    assert data["node"]["visibility"] == "kp_only"
+    assert data["node"]["visibility_source"] == "author"
+    saved = json.loads((tmp_path / "scenarios" / "scenario-7" / "narrative.json").read_text(encoding="utf-8"))
+    assert any(node["id"] == "conductor" for node in saved["nodes"])
+
+
+def test_create_node_rejects_duplicate_id_and_unknown_parent(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    duplicate = _create_node(client, id="room", title="重复")
+    missing_parent = _create_node(client, id="key", parent="ghost")
+
+    assert duplicate.status_code == 409
+    assert missing_parent.status_code == 400
+
+
+def test_delete_node_removes_edges_and_reparents_children(tmp_path):
+    bundle = _bundle()
+    bundle["nodes"].append({"id": "conductor", "kind": "npc", "title": "乘务员", "parent": "room"})
+    bundle["nodes"].append({"id": "key", "kind": "item", "title": "钥匙", "parent": "room"})
+    _write_scenario(tmp_path, bundle=bundle)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.delete(
+        "/api/scenarios/7/narrative/nodes/room",
+        json={"base_revision": 2},
+        headers=CSRF,
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["revision"] == 3
+    assert data["removed_edges"] == 1
+    assert data["reparented"] == 2
+    saved = json.loads((tmp_path / "scenarios" / "scenario-7" / "narrative.json").read_text(encoding="utf-8"))
+    assert [node["id"] for node in saved["nodes"]] == ["hall", "conductor", "key"]
+    assert saved["edges"] == []
+    assert all(node["parent"] is None for node in saved["nodes"])
+
+
+def test_delete_last_node_is_rejected(tmp_path):
+    bundle = _bundle()
+    bundle["nodes"] = [{"id": "hall", "kind": "location", "title": "大厅"}]
+    bundle["edges"] = []
+    _write_scenario(tmp_path, bundle=bundle)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.delete("/api/scenarios/7/narrative/nodes/hall", json={"base_revision": 2}, headers=CSRF)
+
+    assert response.status_code == 400
 
 
 def _create_edge(client, **body):

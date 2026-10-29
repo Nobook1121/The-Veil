@@ -5,6 +5,7 @@ from trpg_server.agents.tools.dice import (
     execute_roll_dice,
     execute_roll_room_check,
     roll_coc_check,
+    roll_madness,
     roll_room_check,
 )
 
@@ -802,3 +803,155 @@ def test_room_snapshot_returns_bound_scenario_and_character_cards(tmp_path):
     assert result["members"][0]["character_state"]["current_san"] == 50
     assert result["memory"]["items"][0]["content"] == "ADMIN 已经找到门厅暗格。"
     assert "skills" not in json.dumps(result, ensure_ascii=False)
+
+
+def test_room_check_accepts_character_card_name(tmp_path):
+    skill_name = "\u4fa6\u5bdf"
+    context = _context_with_check_member(
+        tmp_path,
+        {
+            "username": "migu",
+            "status": "active",
+            "character_card": {
+                "name": "咪西",
+                "skills": [{"name": skill_name, "value": 50}],
+            },
+        },
+    )
+
+    result = roll_room_check({"player_name": "咪西", "skill": skill_name}, context, rng=lambda sides: 25)
+
+    assert result["target"] == 50
+    assert result["success"] is True
+    assert result["name"] == skill_name
+
+
+def test_room_check_rejects_player_name_as_skill(tmp_path):
+    context = _context_with_check_member(
+        tmp_path,
+        {
+            "username": "migu",
+            "status": "active",
+            "character_card": {"name": "咪西", "skills": []},
+        },
+    )
+
+    result = roll_room_check({"player_name": "migu", "name": "咪西"}, context, rng=lambda sides: 1)
+
+    assert "error" in result
+    assert "\u73a9\u5bb6/\u89d2\u8272\u540d" in result["error"]
+
+
+def _madness_context(tmp_path, *, san=50, int_value=60, last_san_loss=6):
+    return _context_with_check_member(
+        tmp_path,
+        {
+            "user_id": "u1",
+            "username": "migu",
+            "status": "active",
+            "character_card": {
+                "name": "咪西",
+                "attributes": {"INT": int_value, "POW": 50},
+                "currentSan": san,
+            },
+            "character_state": {
+                "current_san": san,
+                "last_san_loss": last_san_loss,
+                "last_san_before": san + last_san_loss,
+            },
+        },
+    )
+
+
+def _write_madness_info(context, member_username="migu"):
+    info = json.loads((context.room_dir / "info.json").read_text(encoding="utf-8"))
+    return next(item for item in info["members"] if item["username"] == member_username)
+
+
+def test_madness_skips_small_sanity_loss(tmp_path):
+    context = _madness_context(tmp_path, last_san_loss=3)
+
+    result = roll_madness({"player_name": "migu"}, context, rng=lambda sides: 1)
+
+    assert result["skipped"] is True
+    assert "madness" not in result
+
+
+def test_madness_int_success_is_temporary_insanity(tmp_path):
+    context = _madness_context(tmp_path)
+    rolls = {"d100": 20, "d10": [7, 4, 2]}
+
+    def rng(sides):
+        if sides == 100:
+            return rolls["d100"]
+        return rolls["d10"].pop(0)
+
+    result = roll_madness({"player_name": "migu", "cause": "目睹恐怖"}, context, rng=rng)
+
+    assert result["insane"] is True
+    assert result["madness"]["type"] == "temporary"
+    assert result["madness"]["bout_roll"] == 7
+    assert result["duration_hours"] == 4
+
+    member = _write_madness_info(context)
+    card = member["character_card"]
+    assert card["temporary_insanity"] is True
+    assert card["madness"]["bout_roll"] == 7
+    assert card["mental_status"]["temporaryInsanity"] is True
+    assert member["character_state"]["last_san_loss"] == 0
+
+
+def test_madness_int_failure_suppresses_memory(tmp_path):
+    context = _madness_context(tmp_path)
+    rolls = {"d100": 90, "d10": [3, 2, 1]}
+
+    def rng(sides):
+        if sides == 100:
+            return rolls["d100"]
+        return rolls["d10"].pop(0)
+
+    result = roll_madness({"player_name": "migu"}, context, rng=rng)
+
+    assert result["insane"] is False
+    assert result["madness"] is None
+    assert result["int_success"] is False
+    assert "压抑" in result["summary"]
+
+    member = _write_madness_info(context)
+    assert "madness" not in member["character_card"]
+
+
+def test_madness_phobia_is_written_to_character_card(tmp_path):
+    context = _madness_context(tmp_path)
+    rolls = {"d100": 20, "d10": [9, 5, 5, 4]}
+
+    def rng(sides):
+        if sides == 100:
+            return rolls["d100"]
+        return rolls["d10"].pop(0)
+
+    result = roll_madness({"player_name": "migu"}, context, rng=rng)
+
+    assert result["bout_roll"] == 9
+    assert result["trait"]
+    member = _write_madness_info(context)
+    assert result["trait"] in member["character_card"]["background"]["phobiasManias"]
+
+
+def test_madness_indefinite_when_loss_reaches_one_fifth_of_sanity(tmp_path):
+    context = _madness_context(tmp_path, san=20, last_san_loss=6, int_value=10)
+
+    result = roll_madness({"player_name": "migu"}, context, rng=lambda sides: 1)
+
+    assert result["insane"] is True
+    assert result["indefinite"] is True
+    assert result["madness"]["type"] == "indefinite"
+
+
+def test_madness_permanent_when_sanity_reaches_zero(tmp_path):
+    context = _madness_context(tmp_path, san=0, last_san_loss=6)
+
+    result = roll_madness({"player_name": "migu"}, context, rng=lambda sides: 1)
+
+    assert result["permanent"] is True
+    assert result["madness"]["type"] == "permanent"

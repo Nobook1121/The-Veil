@@ -643,6 +643,13 @@ const DiceTable = (() => {
     }
 
     function showRerollControls(target: ActiveRoll): void {
+        // 重投/确定只能由触发这次投掷的玩家操作；其他房间成员只看到结果，
+        // 不显示对他们无效的按钮。
+        if (target.rollerUserId !== String(window.currentUser?.user_id ?? "")) {
+            target.overlay.showRerollControls(null, () => {}, () => {});
+            if (target.reroll?.enabled) target.overlay.setStatus("等待投掷者确认结果", "waiting");
+            return;
+        }
         target.overlay.showRerollControls(
             target.reroll,
             () => { void rerollRequest(target.requestId); },

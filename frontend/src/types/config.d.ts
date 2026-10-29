@@ -26,6 +26,12 @@ interface AIModelConfig {
     // 计费用单价（每百万 token），由管理员填写；未填写时只统计 token。
     input_price?: number;
     output_price?: number;
+    // 缓存命中时的输入单价（每百万 token）；未填写时按 input_price 计。
+    cache_hit_price?: number;
+    // 峰时/谷时价格倍率：peak_hours 为空表示不分峰谷。倍率作用于全部 token 费用。
+    peak_multiplier?: number;
+    offpeak_multiplier?: number;
+    peak_hours?: string;
 }
 
 interface AIPlatformConfig {

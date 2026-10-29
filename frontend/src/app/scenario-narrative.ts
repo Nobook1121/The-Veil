@@ -17,6 +17,7 @@
         api.renderTree();
         api.renderInspector();
         api.renderGraph();
+        api.renderGraphEditor();
     }
 
     async function load(scenarioId: number | string, options: { readonly?: boolean } = {}): Promise<void> {
@@ -197,6 +198,12 @@
         byId("scenarioValidateRun")?.addEventListener("click", () => {
             void api.runValidation();
         });
+        byId("scenarioRepairRun")?.addEventListener("click", () => {
+            void api.repairGraph();
+        });
+        byId("scenarioRepairExplain")?.addEventListener("click", () => {
+            api.explainWithAgent();
+        });
         byId("scenarioNodeInspector")?.addEventListener("click", (event) => {
             const target = event.target as HTMLElement;
             if (target.closest("#scenarioNodeSave")) {
@@ -205,6 +212,10 @@
             }
             if (target.closest("#scenarioNodeExtractKeywords")) {
                 void api.extractNodeKeywords();
+                return;
+            }
+            if (target.closest("#scenarioNodeDelete")) {
+                void api.deleteNode();
                 return;
             }
             const chip = target.closest<HTMLElement>("[data-keyword-index]");

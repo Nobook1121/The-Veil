@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import time
+
 from flask import Flask
 
 from trpg_server.agents.telemetry import record_ai_usage
 from trpg_server.json_store import write_json_atomic
-from trpg_server.room_usage import load_room_usage, record_room_usage
+from trpg_server.room_usage import _peak_multiplier, _platform_pricing, _request_cost, load_room_usage, record_room_usage
 
 
 def _write_platform(config_dir: Path, *, currency: str = "CNY", input_price: float = 0, output_price: float = 0) -> None:
@@ -130,3 +132,80 @@ class TestRoomUsage:
 
         data = load_room_usage(room_dir)
         assert data["total_tokens"] == 15
+
+
+class TestPricingDetails:
+    def test_cached_tokens_use_cache_price(self):
+        pricing = {"input_price": 2.0, "output_price": 0.0, "cache_hit_price": 0.5}
+
+        # 1M 输入中 500k 命中缓存：500k*2 + 500k*0.5 = 1 + 0.25。
+        assert _request_cost(pricing, 1_000_000, 0, 500_000) == 1.25
+
+    def test_cached_price_falls_back_to_input_price(self):
+        pricing = {"input_price": 2.0, "output_price": 0.0}
+
+        assert _request_cost(pricing, 1_000_000, 0, 500_000) == 2.0
+
+    def test_cached_tokens_cannot_exceed_prompt(self):
+        pricing = {"input_price": 1.0, "cache_hit_price": 0.0, "output_price": 0.0}
+
+        assert _request_cost(pricing, 100_000, 0, 500_000) == 0.0
+
+    def test_peak_multiplier_applies_to_peak_hours(self):
+        noon = time.struct_time((2026, 1, 1, 12, 0, 0, 0, 0, -1))
+        pricing = {
+            "input_price": 1.0,
+            "output_price": 0.0,
+            "peak_hours": "09:00-18:00",
+            "peak_multiplier": 1.5,
+            "offpeak_multiplier": 0.8,
+        }
+
+        assert _peak_multiplier(pricing, noon) == 1.5
+        assert _request_cost(pricing, 1_000_000, 0, 0, noon) == 1.5
+
+        night = time.struct_time((2026, 1, 1, 23, 0, 0, 0, 0, -1))
+        assert _peak_multiplier(pricing, night) == 0.8
+
+    def test_peak_hours_support_crossing_midnight(self):
+        pricing = {"peak_hours": "22:00-06:00", "peak_multiplier": 1.2, "offpeak_multiplier": 1.0}
+
+        assert _peak_multiplier(pricing, time.struct_time((2026, 1, 1, 23, 30, 0, 0, 0, -1))) == 1.2
+        assert _peak_multiplier(pricing, time.struct_time((2026, 1, 1, 3, 0, 0, 0, 0, -1))) == 1.2
+        assert _peak_multiplier(pricing, time.struct_time((2026, 1, 1, 12, 0, 0, 0, 0, -1))) == 1.0
+
+    def test_peak_hours_absent_means_single_price(self):
+        pricing = {"peak_hours": "", "peak_multiplier": 2.0, "offpeak_multiplier": 0.5}
+
+        assert _peak_multiplier(pricing) == 1.0
+
+    def test_platform_pricing_reads_cache_and_peak_fields(self, tmp_path: Path):
+        platform_dir = tmp_path / "aiplatform"
+        platform_dir.mkdir(parents=True)
+        write_json_atomic(
+            platform_dir / "deepseek.json",
+            {
+                "config": {"currency": "USD"},
+                "models": [
+                    {
+                        "id": "deepseek-chat",
+                        "input_price": 2,
+                        "output_price": 8,
+                        "cache_hit_price": 1,
+                        "peak_hours": "09:00-18:00",
+                        "peak_multiplier": 1.5,
+                        "offpeak_multiplier": 0.8,
+                    }
+                ],
+            },
+        )
+
+        pricing = _platform_pricing(tmp_path, "deepseek", "deepseek-chat")
+
+        assert pricing["currency"] == "USD"
+        assert pricing["input_price"] == 2.0
+        assert pricing["output_price"] == 8.0
+        assert pricing["cache_hit_price"] == 1.0
+        assert pricing["peak_hours"] == "09:00-18:00"
+        assert pricing["peak_multiplier"] == 1.5
+        assert pricing["offpeak_multiplier"] == 0.8

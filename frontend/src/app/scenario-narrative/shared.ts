@@ -37,7 +37,27 @@
         ["conflicts", "冲突"],
         ["mentions", "提及"],
         ["alias", "别名"],
+        ["relationship", "人物关系"],
     ];
+
+    /** 边的语义：图谱直接把这些含义画在连线上，避免「这条线什么意思」的困惑。 */
+    const EDGE_META: Record<string, { label: string; desc: string; movement: boolean; directed: boolean; color: string }> = {
+        adjacent: { label: "相邻", desc: "两个地点可以直接来回走；默认双向。", movement: true, directed: false, color: "#8a94a6" },
+        portal: { label: "通道", desc: "门、楼梯、暗道等物理连接；默认双向，可在边上改为单向。", movement: true, directed: true, color: "#15aabf" },
+        next: { label: "顺序", desc: "剧情推进到下一节点；默认单向，进入后不能回头。", movement: true, directed: true, color: "#2f9e44" },
+        leads_to: { label: "通向", desc: "有方向的路径；默认单向，只允许从起点走向终点。", movement: true, directed: true, color: "#2f9e44" },
+        requires: { label: "需要", desc: "做某事需要指定的线索、物件或条件。", movement: false, directed: true, color: "#b8860b" },
+        reveals: { label: "揭示", desc: "一个节点会揭示另一个节点的信息。", movement: false, directed: true, color: "#1c7ed6" },
+        knows: { label: "知情", desc: "NPC 知道某事；不代表玩家已经知道。", movement: false, directed: true, color: "#7048e8" },
+        inhabits: { label: "居住", desc: "NPC 常驻在某个地点。", movement: false, directed: true, color: "#7048e8" },
+        uses: { label: "使用", desc: "NPC 或物件使用另一个物件 / 设施。", movement: false, directed: true, color: "#b8860b" },
+        contains: { label: "包含", desc: "隶属或容纳：父节点包含子节点，图谱里画成「隶属」虚线。", movement: false, directed: false, color: "#7048e8" },
+        triggers: { label: "触发", desc: "满足条件时触发事件、机关或结局。", movement: false, directed: true, color: "#e8590c" },
+        conflicts: { label: "冲突", desc: "两个节点互斥，不能同时成立。", movement: false, directed: false, color: "#c0392b" },
+        mentions: { label: "提及", desc: "正文里提到另一个节点，只用于检索与提示。", movement: false, directed: true, color: "#868e96" },
+        alias: { label: "别名", desc: "两个节点指向同一个对象。", movement: false, directed: false, color: "#868e96" },
+        relationship: { label: "人物关系", desc: "NPC 与 NPC 的社会关系；标签写父子/敌对/雇佣等。", movement: false, directed: false, color: "#d6336c" },
+    };
 
     const VISIBILITY_LABEL: Record<string, string> = {
         public: "公开",
@@ -137,6 +157,26 @@
 
     function editable(): boolean {
         return state.canEdit && !state.readonly;
+    }
+
+    function edgeMeta(type: string | undefined): { label: string; desc: string; movement: boolean; directed: boolean; color: string } {
+        return EDGE_META[type || "adjacent"] || {
+            label: type || "关系",
+            desc: "未识别的关系类型。",
+            movement: false,
+            directed: true,
+            color: "#8a94a6",
+        };
+    }
+
+    /** 边上显示的文字：作者写的描述优先，否则用类型中文名；单向/条件作为后缀。 */
+    function edgeText(edge: GraphEdge): string {
+        const meta = edgeMeta(edge.type);
+        const base = (edge.label || "").trim() || meta.label;
+        const flags: string[] = [];
+        if (edge.bidirectional === false) flags.push(t("scenario.graph.one_way", "单向"));
+        if (edge.condition) flags.push(t("scenario.graph.conditional", "有条件"));
+        return flags.length ? `${base} · ${flags.join(" · ")}` : base;
     }
 
     function showTab(tab: "basic" | "modules" | "tree" | "graph" | "validate" | "generate"): void {
@@ -386,6 +426,7 @@
         api,
         KIND_META,
         EDGE_TYPES,
+        EDGE_META,
         VISIBILITY_LABEL,
         REVEAL_LABEL,
         byId,
@@ -393,6 +434,8 @@
         escapeHtml,
         isTypingTarget,
         kindMeta,
+        edgeMeta,
+        edgeText,
         editable,
         showTab,
         setStatus,

@@ -6,6 +6,9 @@ class ScenarioView {
     private isCreating = false;
     private conversionProgressModal: HTMLElement | null = null;
     private conversionProgressTimer: number | null = null;
+    /** 导入弹窗打开的时刻：用于显示「已等待 00:00」的本地计时。 */
+    private conversionStartedAt = 0;
+    private conversionElapsedTimer: number | null = null;
     private batchMode = false;
     private readonly selectedScenarioIds = new Set<number>();
     private currentScenarios: Scenario[] = [];
@@ -414,16 +417,16 @@ class ScenarioView {
         }
     }
 
-    showImportChoice(): Promise<"edit" | "direct" | "cancel"> {
+    showImportChoice(): Promise<"edit" | "direct" | "ai" | "cancel"> {
         return new Promise((resolve) => {
             const modal = document.createElement("div");
             modal.className = "modal fade";
-            modal.innerHTML = `<div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">选择导入模式</h5></div><div class="modal-body">请选择处理方式：直接导入会按标题和结构分块，逐块抽取字段并向量化；审核模式会生成草稿供检查，发现问题可重新上传文档。</div><div class="modal-footer"><button class="btn btn-secondary" data-import-choice="cancel">取消</button><button class="btn btn-outline-primary" data-import-choice="edit">生成审核草稿</button><button class="btn btn-primary" data-import-choice="direct">直接导入并发布</button></div></div></div>`;
+            modal.innerHTML = `<div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">选择导入模式</h5></div><div class="modal-body">请选择处理方式：<br><b>AI 全链路</b> 会通读全文、剔除作者吐槽等无关内容、按语义划分模块，并同时生成世界书与完整图谱；<br><b>直接导入</b> 只按标题分块并向量化，同时生成地点骨架图谱（不含 NPC/物品关系）；<br><b>审核草稿</b> 生成可编辑的场景卡草稿供检查。</div><div class="modal-footer"><button class="btn btn-secondary" data-import-choice="cancel">取消</button><button class="btn btn-outline-primary" data-import-choice="edit">生成审核草稿</button><button class="btn btn-outline-secondary" data-import-choice="direct">直接导入</button><button class="btn btn-primary" data-import-choice="ai">AI 全链路导入</button></div></div></div>`;
             document.body.appendChild(modal);
             const instance = new bootstrap.Modal(modal, { backdrop: "static" });
             let settled = false;
-            const finish = (choice: "edit" | "direct" | "cancel") => { if (settled) return; settled = true; instance.hide(); resolve(choice); };
-            modal.querySelectorAll<HTMLElement>("[data-import-choice]").forEach((button) => button.addEventListener("click", () => finish((button.dataset.importChoice || "cancel") as "edit" | "direct" | "cancel")));
+            const finish = (choice: "edit" | "direct" | "ai" | "cancel") => { if (settled) return; settled = true; instance.hide(); resolve(choice); };
+            modal.querySelectorAll<HTMLElement>("[data-import-choice]").forEach((button) => button.addEventListener("click", () => finish((button.dataset.importChoice || "cancel") as "edit" | "direct" | "ai" | "cancel")));
             modal.addEventListener("hidden.bs.modal", () => { modal.remove(); if (!settled) resolve("cancel"); });
             instance.show();
         });
@@ -601,10 +604,10 @@ class ScenarioView {
         modal.setAttribute("data-bs-backdrop", "static");
         modal.setAttribute("data-bs-keyboard", "false");
         const stages: Array<[string, string]> = [
-            ["读取文档并提取文本", "解析文件编码与段落"],
-            ["分析文档结构与章节", "识别场景、线索与结局"],
-            ["生成场景与结局模块", "整理为可编辑的剧本结构"],
-            ["校验并打开编辑器", "检查必填项并准备审核"],
+            ["读取文档并提取文本", "解析文件编码、段落与标题"],
+            ["AI 通读与语义分析", "识别干扰内容、划分模块与关键词"],
+            ["生成图谱并补全关系", "地点骨架、NPC、物品与线索归属"],
+            ["生成知识库并校验", "写入向量、校验图谱后进入审核"],
         ];
         modal.innerHTML = `
             <div class="modal-dialog modal-dialog-centered">
@@ -615,12 +618,19 @@ class ScenarioView {
                             <h5 class="modal-title">正在导入剧本</h5>
                             <p class="scenario-import-file" data-conversion-file></p>
                         </div>
-                        <span class="scenario-import-percent" data-conversion-percent role="status" aria-live="polite">0%</span>
+                        <div class="scenario-import-status">
+                            <span class="scenario-import-percent" data-conversion-percent role="status" aria-live="polite">0%</span>
+                            <span class="scenario-import-elapsed" data-conversion-elapsed>已等待 00:00</span>
+                        </div>
                     </div>
                     <div class="modal-body">
                         <div class="scenario-import-track" role="progressbar" aria-label="剧本导入进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-conversion-track>
                             <div class="scenario-import-track-fill" data-conversion-progress></div>
                         </div>
+                        <p class="scenario-import-activity" data-conversion-activity>
+                            <i class="fa fa-spinner fa-spin" aria-hidden="true"></i>
+                            <span data-conversion-activity-text>正在准备导入…</span>
+                        </p>
                         <ol class="scenario-import-steps" data-conversion-stages>
                             ${stages.map(([label, hint], index) => `
                             <li class="scenario-import-step" data-conversion-stage="${index}" data-state="pending">
@@ -631,13 +641,15 @@ class ScenarioView {
                                 </div>
                             </li>`).join("")}
                         </ol>
-                        <p class="scenario-import-hint"><i class="fa fa-info-circle" aria-hidden="true"></i> 导入过程中请勿关闭窗口，完成后会自动打开剧本编辑器。</p>
+                        <p class="scenario-import-hint"><i class="fa fa-info-circle" aria-hidden="true"></i> AI 分析可能需要数分钟；当前操作与已等待时间会实时更新，请勿关闭窗口。</p>
                     </div>
                 </div>
             </div>`;
         modal.querySelector<HTMLElement>("[data-conversion-file]")!.textContent = fileName;
         document.body.appendChild(modal);
         this.conversionProgressModal = modal;
+        this.conversionStartedAt = Date.now();
+        this.startConversionElapsedTimer();
         new bootstrap.Modal(modal, { backdrop: "static" }).show();
     }
 
@@ -655,6 +667,7 @@ class ScenarioView {
             const detailNode = item.querySelector<HTMLElement>("[data-conversion-stage-detail]");
             if (detailNode && detail) detailNode.textContent = detail;
         }
+        if (detail && (state === "active" || state === "error")) this.setConversionActivity(detail);
         modal.classList.toggle("is-error", state === "error");
         // 活跃阶段用稳定的中间值推进，长请求期间不会看起来卡在 37% 不动。
         const value = state === "complete" ? Math.min(100, (stage + 1) * 25) : state === "active" ? Math.min(96, stage * 25 + 20) : stage * 25;
@@ -693,13 +706,56 @@ class ScenarioView {
         modal.querySelector<HTMLElement>("[data-conversion-track]")?.setAttribute("aria-valuenow", String(Math.round(clamped)));
     }
 
+    private describeImportStage(stage: string): string {
+        const labels: Record<string, string> = {
+            pending: "正在准备导入",
+            parsing: "正在读取文档并提取文本",
+            reviewing: "正在通读剧本",
+            clean: "正在剔除作者吐槽等干扰内容",
+            scan: "正在通读剧本并识别干扰内容",
+            segment: "正在按语义划分模块",
+            worldbook: "正在生成世界书关键词",
+            chunking: "正在按标题切分知识块",
+            embedding: "正在生成知识库向量",
+            normalizing: "正在校验剧本结构",
+            graph: "正在生成地点骨架图谱",
+            graph_detail: "正在补全 NPC、物品与线索",
+            graphing: "正在校验并修复图谱关系",
+            extracting: "正在整理剧本内容",
+            carding: "正在生成场景卡",
+            summarizing: "正在整理剧本摘要",
+            done: "导入完成，请审核后发布",
+        };
+        return labels[stage] || "正在处理";
+    }
+
     updateImportJobProgress(job: ScenarioImportJob): void {
-        const stageIndex: Record<string, number> = { parsing: 0, chunking: 1, extracting: 2, carding: 2, summarizing: 2, embedding: 3, done: 3 };
+        // AI 阶段（scan/segment/worldbook/graph/graph_detail）都归到第 2 步，
+        // 具体正在做什么由 stage_meta.message 显示，避免用户只看到「8%」干等。
+        const stageIndex: Record<string, number> = {
+            pending: 0, parsing: 0,
+            reviewing: 1, clean: 1, scan: 1, segment: 1, worldbook: 1,
+            chunking: 1, extracting: 1, carding: 1,
+            normalizing: 2, summarizing: 2, graph: 2, graph_detail: 2, graphing: 2,
+            embedding: 3, done: 3,
+        };
         const index = stageIndex[job.current_stage] ?? 0;
+        const failed = job.status === "failed";
+        const finished = job.status === "done";
+        for (let step = 0; step < 4; step += 1) {
+            const state = failed
+                ? step === index ? "error" : step < index ? "complete" : "pending"
+                : finished ? "complete" : step < index ? "complete" : step === index ? "active" : "pending";
+            this.updateConversionProgress(step, state);
+        }
         const meta = job.stage_meta || {};
         const total = Number(meta.totalChunks || 0);
         const processed = Number(meta.processedChunks || 0);
-        this.updateConversionProgress(index, job.status === "failed" ? "error" : job.status === "done" ? "complete" : "active", total ? `${processed}/${total} 个分块` : "");
+        const chunks = total ? `（${processed}/${total} 个分块）` : "";
+        const message = String(meta.message || "").trim();
+        const detail = message || chunks || this.describeImportStage(String(job.current_stage || ""));
+        this.updateConversionProgress(index, failed ? "error" : finished ? "complete" : "active", detail);
+        this.setConversionActivity(failed ? `导入失败：${job.error || detail}` : detail);
         // 导入任务能拿到真实进度：停掉阶段内的缓慢爬升计时器，否则每次轮询都会
         // 先跳回阶段中点再被真实值覆盖，进度条会明显来回抖动。
         if (this.conversionProgressTimer !== null) {
@@ -709,10 +765,36 @@ class ScenarioView {
         this.setConversionProgressValue(Number(job.progress || 0));
     }
 
+    private startConversionElapsedTimer(): void {
+        if (this.conversionElapsedTimer !== null) window.clearInterval(this.conversionElapsedTimer);
+        this.updateConversionElapsed();
+        this.conversionElapsedTimer = window.setInterval(() => this.updateConversionElapsed(), 1000);
+    }
+
+    private updateConversionElapsed(): void {
+        const node = this.conversionProgressModal?.querySelector<HTMLElement>("[data-conversion-elapsed]");
+        if (!node) return;
+        const seconds = Math.floor(Math.max(0, Date.now() - this.conversionStartedAt) / 1000);
+        const pad = (value: number) => String(value).padStart(2, "0");
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        node.textContent = hours > 0
+            ? `已等待 ${hours}:${pad(minutes)}:${pad(seconds % 60)}`
+            : `已等待 ${pad(minutes)}:${pad(seconds % 60)}`;
+    }
+
+    private setConversionActivity(text: string): void {
+        const node = this.conversionProgressModal?.querySelector<HTMLElement>("[data-conversion-activity-text]");
+        if (node && text) node.textContent = text;
+    }
+
     closeConversionProgress(): void {
-        if (!this.conversionProgressModal) return;
         if (this.conversionProgressTimer !== null) window.clearInterval(this.conversionProgressTimer);
         this.conversionProgressTimer = null;
+        if (this.conversionElapsedTimer !== null) window.clearInterval(this.conversionElapsedTimer);
+        this.conversionElapsedTimer = null;
+        this.conversionStartedAt = 0;
+        if (!this.conversionProgressModal) return;
         bootstrap.Modal.getInstance(this.conversionProgressModal)?.hide();
         this.conversionProgressModal.remove();
         this.conversionProgressModal = null;

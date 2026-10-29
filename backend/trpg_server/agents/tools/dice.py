@@ -71,9 +71,34 @@ def _percentile_roll(roller: Callable[[int], int], bonus: int = 0, penalty: int 
     return (min(candidates) if bonus else max(candidates)), candidates
 def _active_members(context: Any) -> list[dict[str, Any]]:
     return [m for m in context.room_info().get("members", []) if isinstance(m, dict)]
+def _member_names(member: dict[str, Any]) -> set[str]:
+    """成员可被 KP 引用的名字：登录名、角色卡姓名、绑定角色名。"""
+    names: set[str] = set()
+    for key in ("username", "character_name", "display_name"):
+        value = str(member.get(key) or "").strip()
+        if value:
+            names.add(value.casefold())
+    card = member.get("character_card")
+    if isinstance(card, dict):
+        value = str(card.get("name") or "").strip()
+        if value:
+            names.add(value.casefold())
+    return names
+
+
 def _find_member(player_name: str, context: Any) -> dict[str, Any] | None:
-    expected = player_name.casefold()
-    return next((m for m in _active_members(context) if m.get("is_active", True) is not False and m.get("status", "active") != "removed" and str(m.get("username") or "").casefold() == expected), None)
+    expected = str(player_name or "").strip().casefold()
+    if not expected:
+        return None
+    return next(
+        (
+            m for m in _active_members(context)
+            if m.get("is_active", True) is not False
+            and m.get("status", "active") != "removed"
+            and expected in _member_names(m)
+        ),
+        None,
+    )
 # 常见的中文技能名变体 -> 技能目录中的正式名称（大小写/字形差异的兼容）。
 CHECK_NAME_ALIASES = {
     "侦查": "侦察", "观察": "侦察", "搜索": "侦察", "调查": "侦察",
@@ -141,6 +166,23 @@ def _is_known_check_name(check_name: str) -> bool:
         return True
     text = CHECK_NAME_ALIASES.get(text, text)
     return text.casefold() in _skill_catalog_names()
+
+
+def _resolve_check_name(arguments: dict[str, Any]) -> str:
+    """确定检定名。
+
+    ``name`` 是历史参数名，容易被模型误解成“玩家/角色名”。若同时提供了
+    ``skill`` 且它是合法检定名，则优先使用 ``skill``；否则再退回 ``name``。
+    """
+    skill = str(arguments.get("skill") or "").strip()
+    name = str(
+        arguments.get("name") or arguments.get("check") or arguments.get("check_name") or ""
+    ).strip()
+    if skill and _is_known_check_name(skill):
+        return skill
+    if name and _is_known_check_name(name):
+        return name
+    return skill or name
 
 
 def _lookup_check_value(card: dict[str, Any], check_name: str) -> int | None:
@@ -597,7 +639,7 @@ def _plan_percentile(*, check_name: str | None, difficulty: str | None, target: 
 
 def _room_check_plan(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip()
-    check_name = str(arguments.get("name") or arguments.get("skill") or "").strip()
+    check_name = _resolve_check_name(arguments)
     difficulty = _normalize_difficulty(arguments.get("difficulty")) or "regular"
     bonus = _dice_count(arguments, "bonus_dice", "bonus")
     penalty = _dice_count(arguments, "penalty_dice", "penalty")
@@ -865,7 +907,7 @@ def roll_room_check(
     faces: list[int] | tuple[int, ...] | None = None,
 ) -> dict[str, Any]:
     """房间成员检定。``faces`` 提供时使用物理骰面，不再调用随机数生成器。"""
-    player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip(); check_name = str(arguments.get("name") or arguments.get("skill") or "").strip()
+    player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip(); check_name = _resolve_check_name(arguments)
     if not player_name: return {"error": "player_name is required"}
     if not check_name: return {"error": "name is required"}
     difficulty = _normalize_difficulty(arguments.get("difficulty"))
@@ -877,6 +919,8 @@ def roll_room_check(
         if not isinstance(card, dict): return {"error": f"player {player_name} has no bound character card"}
         base_target = _lookup_check_value(card, check_name)
         if base_target is None or base_target < 0:
+            if check_name.casefold() in _member_names(member):
+                return {"error": f"“{check_name}”是玩家/角色名，不是技能名；name 参数应填写要检定的技能或属性（如 力量/敏捷/侦察/聆听/心理学/理智）。"}
             if not _is_known_check_name(check_name):
                 return {"error": f"“{check_name}”不是 COC7 标准属性或技能目录中的技能，已拒绝该检定；请改用标准检定名（如 侦察/聆听/心理学/力量/敏捷）或角色卡上已有的技能。"}
             return {"error": f"{check_name} was not found on player {player_name}'s character card"}
@@ -992,21 +1036,26 @@ def roll_sanity_check(
     loss = max(0, -delta)
     flags = state.setdefault("mental_status", {})
     if not isinstance(flags, dict): flags = {}; state["mental_status"] = flags
-    if loss >= 5: flags["temporaryInsanity"] = flags["temporary_insanity"] = True
+    # CoC7：一次损失 ≥5 点进入「临时疯狂」判定，但必须由 KP 再调用
+    # san.roll_madness 进行 INT 检定并抽取疯狂表现，不能在这里直接置位。
+    madness_check_required = loss >= 5
     if current > 0 and loss * 5 >= current and loss > 0: flags["indefiniteInsanity"] = flags["indefinite_insanity"] = True
     if new_san <= 0: flags["permanentInsanity"] = flags["permanent_insanity"] = True
     state["current_san"] = new_san; state["max_san"] = maximum
+    state["last_san_loss"] = loss; state["last_san_before"] = current
     card["currentSan"] = new_san; card["current_san"] = new_san; card["mental_status"] = flags; card["status"] = flags
     card["temporary_insanity"] = bool(flags.get("temporaryInsanity")); card["indefinite_insanity"] = bool(flags.get("indefiniteInsanity")); card["permanent_insanity"] = bool(flags.get("permanentInsanity"))
     if context.room_dir:
         room_info = context.room_info()
         for room_member in room_info.get("members", []) if isinstance(room_info.get("members"), list) else []:
-            if isinstance(room_member, dict) and str(room_member.get("username") or "").casefold() == player_name.casefold():
+            if isinstance(room_member, dict) and room_member.get("user_id") == member.get("user_id"):
                 room_member.clear(); room_member.update(member); break
         write_json_atomic(context.room_dir / "info.json", room_info)
     result_text = "成功" if success else "失败"
     summary = f"{player_name} 理智检定：1d100=[{roll}] / 当前 SAN {current}，{result_text}；理智变化 {selected_expr} = {delta:+d}，SAN {current}→{new_san}。"
-    result = {"player_name": player_name, "roll": roll, "san": current, "current_san": new_san, "max_san": maximum, "success": success, "change": delta, "change_expression": selected_expr, "change_rolls": detail_rolls, "san_change": change, "temporary_insanity": bool(flags.get("temporaryInsanity")), "indefinite_insanity": bool(flags.get("indefiniteInsanity")), "permanent_insanity": bool(flags.get("permanentInsanity")), "summary": summary}
+    if madness_check_required:
+        summary += " 一次损失≥5点：请继续调用 san.roll_madness 做智力检定并抽取疯狂表现。"
+    result = {"player_name": player_name, "roll": roll, "san": current, "current_san": new_san, "max_san": maximum, "success": success, "change": delta, "change_expression": selected_expr, "change_rolls": detail_rolls, "san_change": change, "madness_check_required": madness_check_required, "madness_note": "一次损失≥5点，请调用 san.roll_madness 进行智力检定并抽取疯狂表现" if madness_check_required else "", "temporary_insanity": bool(flags.get("temporaryInsanity")), "indefinite_insanity": bool(flags.get("indefiniteInsanity")), "permanent_insanity": bool(flags.get("permanentInsanity")), "summary": summary}
     result["visible_message"] = _result_message(
         summary,
         "san.roll_sanity_check",
@@ -1014,6 +1063,7 @@ def roll_sanity_check(
         player_name=player_name,
         current_san=new_san,
         max_san=maximum,
+        madness_check_required=madness_check_required,
         temporary_insanity=bool(flags.get("temporaryInsanity")),
         indefinite_insanity=bool(flags.get("indefiniteInsanity")),
         permanent_insanity=bool(flags.get("permanentInsanity")),
@@ -1055,6 +1105,216 @@ def execute_roll_sanity_check(arguments: dict[str, Any], context: Any) -> dict[s
         result = _finalize_dice_metadata(roll_sanity_check(arguments, context), context)
     _log_roll_result(result, context, tool_name="san.roll_sanity_check", actor=player_name)
     return result
+
+
+# CoC7 7th Edition「Bouts of Madness」表（1D10，Keeper 也可直接选择）。
+MADNESS_BOUTS: tuple[dict[str, Any], ...] = (
+    {"roll": 1, "name": "失忆", "description": "调查员不记得自上次处于安全地点以来发生的事，持续 1D10 轮。"},
+    {"roll": 2, "name": "心身障碍", "description": "调查员出现心身性失明、失聪或失去某肢体功能，持续 1D10 轮。"},
+    {"roll": 3, "name": "暴力", "description": "调查员陷入狂暴，对周围所有人无差别地施暴与破坏，持续 1D10 轮。"},
+    {"roll": 4, "name": "偏执", "description": "调查员陷入严重偏执，认为所有人都在害他、监视他、背叛他，持续 1D10 轮。"},
+    {"roll": 5, "name": "重要之人", "description": "调查员把场景中的某人误认为自己的重要之人，并按其关系行事，持续 1D10 轮。"},
+    {"roll": 6, "name": "昏厥", "description": "调查员昏倒，1D10 轮后恢复。"},
+    {"roll": 7, "name": "惊恐逃离", "description": "调查员不顾一切地逃离现场，甚至抢走唯一载具丢下同伴，持续 1D10 轮。"},
+    {"roll": 8, "name": "歇斯底里", "description": "调查员无法控制地大笑、哭泣或尖叫，持续 1D10 轮。"},
+    {"roll": 9, "name": "恐惧症", "description": "调查员获得新的恐惧症；即使源头不在场也会幻想它在附近，持续 1D10 轮，期间所有行动承受惩罚骰。"},
+    {"roll": 10, "name": "躁狂症", "description": "调查员获得新的躁狂症；在疯狂期间会沉溺于该冲动，持续 1D10 轮，期间所有行动承受惩罚骰。"},
+)
+SAMPLE_PHOBIAS = (
+    "幽闭恐惧（claustrophobia）", "恶魔恐惧（demonophobia）", "蟑螂恐惧（katsaridaphobia）",
+    "黑暗恐惧", "血液恐惧", "镜子恐惧", "蜘蛛恐惧", "高处恐惧", "电话恐惧", "陌生人恐惧",
+)
+SAMPLE_MANIAS = (
+    "洁癖（ablutomania）", "谎言癖（pseudomania）", "偷窃癖（kleptomania）", "疼痛迷恋（algomania）",
+    "纵火癖", "大笑狂（geliomania）", "呼喊狂（klazomania）", "藏书癖（bibliokleptomania）",
+    "正义狂（dikemania）", "病痛妄想（nosomania）",
+)
+
+
+def _madness_int_value(card: dict[str, Any]) -> int:
+    attrs = card.get("attributes") if isinstance(card.get("attributes"), dict) else {}
+    value = attrs.get("INT", card.get("int"))
+    return _as_int(value, 0)
+
+
+def roll_madness(
+    arguments: dict[str, Any],
+    context: Any,
+    rng: Callable[[int], int] | None = None,
+) -> dict[str, Any]:
+    """CoC7 临时/不定/永久疯狂结算。
+
+    规则要点（7 版）：
+    - 一次理智检定损失 ≥5 点：做 INT 检定；成功则完全理解恐怖，进入
+      1D10 小时的暂时性疯狂；失败则压抑记忆，暂时保持理智。
+    - 一天内损失 ≥ 当前理智的 1/5：不定性疯狂（持续到接受治疗）。
+    - SAN 归零：永久性疯狂。
+    - 进入疯狂后掷 1D10 抽取疯狂表现（Bouts of Madness）。
+    """
+    player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip()
+    if not player_name:
+        return {"error": "player_name is required"}
+    member = _find_member(player_name, context)
+    if not member:
+        return {"error": f"player {player_name} was not found in current room"}
+    card = member.get("character_card")
+    if not isinstance(card, dict):
+        return {"error": f"player {player_name} has no bound character card"}
+    state = member.setdefault("character_state", {})
+    if not isinstance(state, dict):
+        state = {}
+        member["character_state"] = state
+
+    loss = _nullable_int(arguments.get("loss"))
+    if loss is None:
+        loss = _nullable_int(state.get("last_san_loss"))
+    loss = max(0, _as_int(loss, 0))
+    current_san = _as_int(state.get("current_san", card.get("currentSan", card.get("current_san", 0))), 0)
+    force = bool(arguments.get("force"))
+    if loss < 5 and current_san > 0 and not force:
+        return {
+            "player_name": player_name,
+            "loss": loss,
+            "skipped": True,
+            "summary": f"{player_name} 本次理智损失 {loss} 点（<5），未触发 CoC7 临时疯狂判定。",
+        }
+
+    before = _as_int(state.get("last_san_before", current_san + loss), current_san + loss)
+    indefinite = (before > 0 and loss * 5 >= before) or bool(
+        (state.get("mental_status") or {}).get("indefiniteInsanity")
+        if isinstance(state.get("mental_status"), dict) else False
+    )
+    permanent = current_san <= 0
+
+    roller = rng or (lambda sides: random.randint(1, sides))
+    int_target = _madness_int_value(card)
+    int_roll = max(1, min(100, int(roller(100))))
+    int_success = int_target > 0 and int_roll <= int_target
+
+    insane = permanent or indefinite or (loss >= 5 and int_success)
+    bout_roll = max(1, min(10, int(roller(10))))
+    bout = dict(MADNESS_BOUTS[bout_roll - 1])
+    duration_hours = max(1, min(10, int(roller(10))))
+    duration_rounds = max(1, min(10, int(roller(10))))
+    trait = ""
+    if insane and bout_roll in (9, 10):
+        pool = SAMPLE_PHOBIAS if bout_roll == 9 else SAMPLE_MANIAS
+        trait = pool[max(1, min(10, int(roller(10)))) - 1]
+        bout["trait"] = trait
+
+    flags = state.setdefault("mental_status", {})
+    if not isinstance(flags, dict):
+        flags = {}
+        state["mental_status"] = flags
+    madness_record: dict[str, Any] | None = None
+    if insane:
+        madness_type = "permanent" if permanent else "indefinite" if indefinite else "temporary"
+        flags["temporaryInsanity"] = flags["temporary_insanity"] = madness_type == "temporary"
+        flags["indefiniteInsanity"] = flags["indefinite_insanity"] = madness_type == "indefinite"
+        flags["permanentInsanity"] = flags["permanent_insanity"] = madness_type == "permanent"
+        madness_record = {
+            "type": madness_type,
+            "loss": loss,
+            "cause": str(arguments.get("cause") or arguments.get("source") or "").strip(),
+            "int_roll": int_roll,
+            "int_target": int_target,
+            "int_success": int_success,
+            "bout_roll": bout_roll,
+            "bout_name": bout["name"],
+            "bout_description": bout["description"],
+            "duration_hours": duration_hours if madness_type == "temporary" else None,
+            "duration_rounds": duration_rounds,
+            "trait": trait,
+        }
+        card["madness"] = madness_record
+        if trait:
+            background = card.setdefault("background", {})
+            if not isinstance(background, dict):
+                background = {}
+                card["background"] = background
+            existing = str(background.get("phobiasManias") or "").strip()
+            background["phobiasManias"] = f"{existing}；{trait}".strip("；") if existing else trait
+        card["mental_status"] = flags
+        card["status"] = flags
+        card["temporary_insanity"] = madness_type == "temporary"
+        card["indefinite_insanity"] = madness_type == "indefinite"
+        card["permanent_insanity"] = madness_type == "permanent"
+    else:
+        # INT 检定失败：记忆被压抑，不进入疯狂，也不写入新的疯狂记录。
+        flags.setdefault("temporaryInsanity", flags.get("temporary_insanity", False))
+        flags.setdefault("temporary_insanity", flags.get("temporaryInsanity", False))
+        card["mental_status"] = flags
+        card["status"] = flags
+
+    state["last_san_loss"] = 0
+    if context.room_dir:
+        room_info = context.room_info()
+        for room_member in room_info.get("members", []) if isinstance(room_info.get("members"), list) else []:
+            if isinstance(room_member, dict) and room_member.get("user_id") == member.get("user_id"):
+                room_member.clear()
+                room_member.update(member)
+                break
+        write_json_atomic(context.room_dir / "info.json", room_info)
+
+    if insane:
+        if permanent:
+            summary = f"{player_name} 永久性疯狂：SAN 归零。"
+        elif indefinite:
+            summary = f"{player_name} 不定性疯狂：本日累计损失 {loss} 点（≥当前理智 1/5），需接受治疗才能恢复。"
+        else:
+            summary = f"{player_name} 触发临时性疯狂：智力检定 1d100={int_roll} ≤ INT {int_target}，持续 1d10={duration_hours} 小时。"
+        summary += f" 疯狂表现（1d10={bout_roll}）：{bout['name']}——{bout['description']}"
+        if trait:
+            summary += f" 新增：{trait}。"
+    else:
+        summary = (
+            f"{player_name} 一次损失 {loss} 点理智，但智力检定 1d100={int_roll} > INT {int_target}，"
+            "记忆被压抑，未进入临时性疯狂。"
+        )
+    result = {
+        "player_name": player_name,
+        "roll": int_roll,
+        "success": int_success,
+        "success_level": "success" if int_success else "failure",
+        "loss": loss,
+        "int_roll": int_roll,
+        "int_target": int_target,
+        "int_success": int_success,
+        "insane": insane,
+        "indefinite": indefinite and insane,
+        "permanent": permanent,
+        "bout_roll": bout_roll,
+        "bout": bout if insane else None,
+        "duration_hours": duration_hours if insane and not permanent and not indefinite else None,
+        "duration_rounds": duration_rounds if insane else None,
+        "trait": trait,
+        "madness": madness_record,
+        "summary": summary,
+    }
+    result["visible_message"] = _result_message(
+        summary,
+        "san.roll_madness",
+        check_type="sanity",
+        player_name=player_name,
+        insanity=madness_record,
+        extra_metadata={
+            "dice_roll": _dice_roll_metadata(
+                result,
+                mode="percentile",
+                check_name="疯狂表现",
+                target=int_target,
+                roller=player_name,
+            )
+        },
+    )
+    return result
+
+
+def execute_roll_madness(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip()
+    result = roll_madness(arguments, context)
+    _log_roll_result(result, context, tool_name="san.roll_madness", actor=player_name)
+    return _finalize_dice_metadata(result, context, show_table=False)
 
 def roll_dice(
     arguments: dict[str, Any],
@@ -1152,8 +1412,10 @@ def execute_roll_dice(arguments: dict[str, Any], context: Any) -> dict[str, Any]
     return result
 
 ROLL_COC_CHECK_TOOL = AgentTool(name="dice.roll_coc_check", description="Roll a real backend COC7 percentile check. The result reports whether it is a critical success or fumble. Uses the room's configured critical/fumble thresholds unless overridden by arguments.", parameters={"type": "object", "properties": {"character_name": {"type": "string"}, "skill": {"type": "string"}, "target": {"type": "integer", "minimum": 1, "maximum": 100}, "difficulty": {"type": "string"}, "adjustment": {"type": "string"}, "correction": {"type": "string"}, "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "critical_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "fumble_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "reason": {"type": "string"}, "trigger_id": {"type": ["integer", "string"], "description": "Optional. When this check gates a scenario trigger, pass the trigger id so the trigger content is revealed in the same round if the check succeeds. Do not pass it when the trigger condition is not tied to this check."}}, "required": ["skill", "target"]}, handler=execute_roll_coc_check)
-ROLL_ROOM_CHECK_TOOL = AgentTool(name="check.roll_room_check", description="Resolve a current-room player's character card and roll a COC check. The result reports whether it is a critical success or fumble. Uses the room's configured critical/fumble thresholds unless overridden by arguments.", parameters={"type": "object", "properties": {"player_name": {"type": "string"}, "name": {"type": "string"}, "difficulty": {"type": "string"}, "adjustment": {"type": "string"}, "correction": {"type": "string"}, "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "critical_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "fumble_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "trigger_id": {"type": ["integer", "string"], "description": "Optional. When this check gates a scenario trigger, pass the trigger id so the trigger content is revealed in the same round if the check succeeds. Do not pass it when the trigger condition is not tied to this check."}}, "required": ["player_name", "name"]}, handler=execute_roll_room_check)
+ROLL_ROOM_CHECK_TOOL = AgentTool(name="check.roll_room_check", description="Resolve a current-room player's character card and roll a COC7 check. player_name accepts the login name OR the character card name. For the check itself, pass skill (preferred) or name with the skill/attribute, e.g. 力量/敏捷/侦察/聆听/心理学/理智; never put a player or character name into the check name. The result reports whether it is a critical success or fumble. Uses the room's configured critical/fumble thresholds unless overridden by arguments.", parameters={"type": "object", "properties": {"player_name": {"type": "string", "description": "Room member's login username or character card name (not the skill name)."}, "skill": {"type": "string", "description": "Skill or attribute to test, e.g. 力量/敏捷/侦察/聆听/心理学. Prefer this field."}, "name": {"type": "string", "description": "Legacy alias of skill. Must be a skill or attribute name, never a player/character name."}, "difficulty": {"type": "string"}, "adjustment": {"type": "string"}, "correction": {"type": "string"}, "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "critical_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "fumble_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "trigger_id": {"type": ["integer", "string"], "description": "Optional. When this check gates a scenario trigger, pass the trigger id so the trigger content is revealed in the same round if the check succeeds. Do not pass it when the trigger condition is not tied to this check."}}, "required": ["player_name"]}, handler=execute_roll_room_check)
 ROLL_SANITY_CHECK_TOOL = AgentTool(name="san.roll_sanity_check", description="Roll a player's SAN check and apply success/failure sanity change directly to the room character state.", parameters={"type": "object", "properties": {"player_name": {"type": "string"}, "san_change": {"type": "string", "description": "Success/failure change, e.g. 1d4/1d6 or +1d4/-1d6"}}, "required": ["player_name", "san_change"]}, handler=execute_roll_sanity_check)
 ROLL_SANITY_CHECK_ALIAS_TOOL = AgentTool(name="sanity.roll_sanity_check", description=ROLL_SANITY_CHECK_TOOL.description, parameters=ROLL_SANITY_CHECK_TOOL.parameters, handler=execute_roll_sanity_check)
+ROLL_MADNESS_TOOL = AgentTool(name="san.roll_madness", description="CoC7 madness resolution. Call this immediately whenever a player loses 5 or more SAN from one sanity roll: it makes the INT check, decides temporary/indefinite/permanent insanity, rolls 1D10 on the Bouts of Madness table, and writes the result (including any new phobia/mania) into the player's character card. Pass loss (defaults to the last SAN loss recorded by san.roll_sanity_check) and an optional cause.", parameters={"type": "object", "properties": {"player_name": {"type": "string", "description": "Room member's login username or character card name."}, "loss": {"type": "integer", "minimum": 0, "description": "SAN points lost in this single incident. Omit to use the last SAN check's loss."}, "cause": {"type": "string", "description": "What caused the madness, used for the card's madness record."}, "force": {"type": "boolean", "description": "Set true to force a madness roll even if loss is below 5 (e.g. keeper decision)."}}, "required": ["player_name"]}, handler=execute_roll_madness)
+ROLL_MADNESS_ALIAS_TOOL = AgentTool(name="sanity.roll_madness", description=ROLL_MADNESS_TOOL.description, parameters=ROLL_MADNESS_TOOL.parameters, handler=execute_roll_madness)
 ROLL_DICE_TOOL = AgentTool(name="dice.roll", description="Roll generic dice such as 1d100. Set dark=true for a secret roll. Optional show_table summons the virtual dice table for this roll; player_roll lets the current player throw it (only when player-roll mode is enabled).", parameters={"type": "object", "properties": {"expression": {"type": "string"}, "dark": {"type": "boolean"}, "show_table": {"type": "boolean", "description": "Set true to summon the virtual dice table for this roll. Ignored in text-only animation mode."}, "player_roll": {"type": "boolean", "description": "Set true to let the current player throw the dice. Only honored when player-roll mode is enabled; otherwise the roll resolves immediately. Works in text, simple, and 3D animation modes."}}, "required": ["expression"]}, handler=execute_roll_dice)
 ROLL_DICE_FUNCTION_TOOL = AgentTool(name="dice.roll_dice", description="Roll generic dice such as 1d100. Set dark=true for a secret roll.", parameters=ROLL_DICE_TOOL.parameters, handler=execute_roll_dice)

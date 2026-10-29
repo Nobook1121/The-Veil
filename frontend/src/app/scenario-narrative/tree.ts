@@ -122,6 +122,7 @@
         api.renderTree();
         api.renderInspector();
         api.renderGraph();
+        api.renderGraphEditor();
         emitSelection(nodeById(nodeId));
     }
 

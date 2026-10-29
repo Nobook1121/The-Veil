@@ -104,6 +104,16 @@ def get_for_actor(actor: Any, scenario_id: Any) -> dict[str, Any]:
     return result
 
 
+def descriptor_path_for_actor(actor: Any, scenario_id: Any) -> Path:
+    """返回可编辑剧本的 ``scenario.json`` 路径（Agent 读取图谱等附属文件时用）。"""
+    path, scenario = _find(scenario_id)
+    if path is None or not scenario:
+        raise ScenarioServiceError("scenario_not_found", "剧本不存在", 404)
+    if not can_modify(actor, scenario):
+        raise ScenarioServiceError("permission_denied", "无权编辑该剧本", 403)
+    return path
+
+
 def _validate_version(value: Any) -> str | None:
     text = str(value or "").strip()
     if text and normalize_semver(text, default="") == "":

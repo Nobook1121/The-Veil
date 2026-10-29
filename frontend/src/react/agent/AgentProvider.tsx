@@ -29,6 +29,10 @@ interface AgentContextValue {
     toggleWindow: () => void;
     setBallVisible: (visible: boolean) => void;
     openPage: () => void;
+    /** 从页面其他位置带着一条待发送提示打开 Agent（如剧本校验的「AI 分析」）。 */
+    openWithPrompt: (prompt: string) => void;
+    pendingPrompt: string | null;
+    consumePendingPrompt: () => void;
     refreshStatus: () => Promise<void>;
     refreshConversations: () => Promise<void>;
     selectConversation: (conversationId: string) => Promise<void>;
@@ -101,6 +105,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     const [windowOpen, setWindowOpen] = useState(false);
     const [ballVisible, setBallVisibleState] = useState<boolean>(readBallPreference);
     const [unread, setUnread] = useState(false);
+    const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
     const abortRef = useRef<AbortController | null>(null);
     const lastUserIdRef = useRef<number | null>(null);
     // 会话详情请求可能乱序返回，记录最后一次选择的会话，避免旧响应覆盖新选择。
@@ -197,6 +202,29 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         const bridge = window as unknown as { switchMainTab?: (tabId: string) => void };
         bridge.switchMainTab?.("agent");
     }, []);
+
+    const consumePendingPrompt = useCallback(() => setPendingPrompt(null), []);
+
+    /** 供普通脚本（剧本编辑器校验面板）调用：打开 Agent 并把提示预填到输入框。 */
+    const openWithPrompt = useCallback(
+        (prompt: string) => {
+            if (!canUse) {
+                notify("网站 Agent 当前不可用", "warning");
+                return;
+            }
+            setPendingPrompt(prompt);
+            openWindow();
+        },
+        [canUse, openWindow],
+    );
+
+    useEffect(() => {
+        const bridge = window as unknown as { TrpgAgent?: { openWithPrompt: (prompt: string) => void } };
+        bridge.TrpgAgent = { openWithPrompt };
+        return () => {
+            if (bridge.TrpgAgent?.openWithPrompt === openWithPrompt) delete bridge.TrpgAgent;
+        };
+    }, [openWithPrompt]);
 
     const applyConversation = useCallback((conversation: AgentConversation) => {
         setActiveConversation(conversation);
@@ -410,6 +438,9 @@ export function AgentProvider({ children }: { children: ReactNode }) {
             toggleWindow,
             setBallVisible,
             openPage,
+            openWithPrompt,
+            pendingPrompt,
+            consumePendingPrompt,
             refreshStatus,
             refreshConversations,
             selectConversation,
@@ -447,6 +478,9 @@ export function AgentProvider({ children }: { children: ReactNode }) {
             toggleWindow,
             unread,
             windowOpen,
+            openWithPrompt,
+            pendingPrompt,
+            consumePendingPrompt,
         ],
     );
 

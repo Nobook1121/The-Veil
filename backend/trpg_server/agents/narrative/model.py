@@ -68,6 +68,7 @@ EDGE_TYPES = (
     "conflicts",
     "mentions",
     "alias",
+    "relationship",
 )
 BIDIRECTIONAL_DEFAULT = {"adjacent", "contains", "alias", "conflicts"}
 

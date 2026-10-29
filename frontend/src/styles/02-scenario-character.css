@@ -3086,6 +3086,38 @@ body.is-guest .guest-login-hint {
     color: var(--theme-danger);
 }
 
+.scenario-import-status {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+}
+
+.scenario-import-elapsed {
+    font-size: var(--theme-font-size-xs);
+    color: var(--theme-text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.scenario-import-activity {
+    display: flex;
+    align-items: center;
+    gap: var(--theme-space-xs);
+    min-height: 1.5em;
+    margin: var(--theme-space-md) 0 0;
+    font-size: var(--theme-font-size-sm);
+    font-weight: 600;
+    color: var(--theme-accent-primary);
+}
+
+.scenario-import-activity .fa-spinner {
+    font-size: var(--theme-font-size-xs);
+}
+
+.scenario-import-wizard.is-error .scenario-import-activity {
+    color: var(--theme-danger);
+}
+
 .scenario-import-hint {
     display: flex;
     align-items: center;
@@ -3183,6 +3215,87 @@ body.is-guest .guest-login-hint {
     user-select: none;
 }
 
+/* 正在拖动画布平移：光标变为抓紧状态，节点也跟随画布移动。 */
+.scenario-graph-canvas.is-panning,
+.scenario-graph-canvas.is-panning .scenario-graph-node {
+    cursor: grabbing;
+}
+
+/* 图谱页签里的节点编辑器：选中节点后直接改内容、增删连接。 */
+.scenario-graph-node-editor {
+    margin-top: 0.75rem;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.6rem;
+    background: var(--bs-body-bg, #ffffff);
+    max-height: 46vh;
+    overflow: auto;
+}
+
+.scenario-graph-node-editor-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.6rem;
+}
+
+.scenario-graph-node-editor-head code {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.78rem;
+}
+
+.scenario-graph-node-form,
+.scenario-graph-node-add-edge {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.scenario-graph-node-form .form-group > span,
+.scenario-graph-node-add-edge .form-group > span {
+    display: block;
+    margin-bottom: 0.2rem;
+    font-size: 0.8rem;
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.scenario-graph-node-edges {
+    margin-top: 0.9rem;
+    border-top: 1px dashed var(--bs-border-color, #dee2e6);
+    padding-top: 0.7rem;
+}
+
+.scenario-graph-node-edge {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--bs-border-color-translucent, rgba(0, 0, 0, 0.08));
+}
+
+.scenario-graph-node-edge-actions {
+    display: inline-flex;
+    gap: 0.3rem;
+    flex-shrink: 0;
+}
+
+.scenario-graph-node-edge-actions:empty {
+    display: none;
+}
+
+.scenario-graph-node-add-edge {
+    margin-top: 0.6rem;
+}
+
+.scenario-graph-hard-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+}
+
 .scenario-graph-node {
     cursor: grab;
 }
@@ -3193,6 +3306,112 @@ body.is-guest .guest-login-hint {
 
 .scenario-graph-edge {
     cursor: pointer;
+}
+
+/* 边上的关系文字：白描边压住连线，保证在地图网格上也看得清。 */
+.scenario-graph-edge-label,
+.scenario-graph-parent-label {
+    font-size: 10px;
+    cursor: pointer;
+    paint-order: stroke;
+    stroke: var(--bs-body-bg, #ffffff);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    user-select: none;
+}
+
+.scenario-graph-edge-label.active {
+    font-weight: 700;
+}
+
+.scenario-graph-parent {
+    pointer-events: none;
+}
+
+.scenario-edge-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.scenario-edge-field select,
+.scenario-edge-field input,
+.scenario-edge-field textarea {
+    min-width: 150px;
+}
+
+.scenario-edge-field-wide {
+    flex: 1 1 260px;
+}
+
+.scenario-edge-field-wide input,
+.scenario-edge-field-wide textarea {
+    width: 100%;
+}
+
+.scenario-edge-type-desc {
+    flex-basis: 100%;
+}
+
+.scenario-graph-guide {
+    margin-bottom: 0.5rem;
+    padding: 0.35rem 0.6rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.5rem;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.scenario-graph-guide summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.86rem;
+}
+
+.scenario-graph-guide-body {
+    margin-top: 0.4rem;
+}
+
+.scenario-graph-legend-kinds {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.8rem;
+    margin-bottom: 0.4rem;
+}
+
+.scenario-graph-legend-kind {
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.scenario-graph-legend-kind i {
+    margin-right: 0.2rem;
+}
+
+.scenario-graph-legend-line {
+    display: inline-block;
+    width: 16px;
+    height: 3px;
+    margin-right: 0.35rem;
+    border-radius: 2px;
+    vertical-align: middle;
+}
+
+.scenario-graph-legend-table {
+    margin-bottom: 0;
+}
+
+.scenario-graph-legend-table td {
+    font-size: 0.78rem;
+    vertical-align: middle;
+}
+
+.scenario-inspector-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
 .scenario-reveal-fields {

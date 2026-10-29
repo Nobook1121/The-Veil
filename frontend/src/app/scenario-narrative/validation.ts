@@ -105,10 +105,84 @@
         }
     }
 
+    /** 一键修复：只做结构性修复，剧情与可见性判定由作者/AI 处理。 */
+    async function repairGraph(): Promise<void> {
+        if (!state.scenarioId) {
+            showNotification(t("scenario.tree.save_first", "请先保存剧本，再查看世界树。"), "warning");
+            return;
+        }
+        const button = byId<HTMLButtonElement>("scenarioRepairRun");
+        if (button) button.disabled = true;
+        try {
+            const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<RepairPayload>>(
+                `/api/scenarios/${state.scenarioId}/narrative/repair`,
+                { method: "POST", body: { base_revision: state.revision } },
+            );
+            if (response.status === 409) {
+                await api.handleConflict();
+                return;
+            }
+            if (!response.ok || !data?.success || !data.data) {
+                throw new Error(data?.message || `HTTP ${response.status}`);
+            }
+            const result = data.data;
+            if (result.revision != null) state.revision = result.revision;
+            if (result.applied_count > 0) {
+                showNotification(
+                    t("scenario.repair.applied", "已自动修复 {count} 项结构问题。").replace("{count}", String(result.applied_count)),
+                    "success",
+                );
+                // 节点/边结构变了：整块重新加载，load 内部会刷新树、图谱并重跑校验。
+                await window.ScenarioNarrative?.load(state.scenarioId);
+                return;
+            }
+            showNotification(t("scenario.repair.nothing", "没有可自动修复的结构问题，请查看剩余问题，或点「AI 分析」。"), "info");
+            await runValidation();
+        } catch (error) {
+            showNotification(error instanceof Error ? error.message : String(error), "error");
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
+    /** 把当前校验结果整理成提示，交给网站 Agent 分析原因。 */
+    function explainWithAgent(): void {
+        const agent = (window as unknown as { TrpgAgent?: { openWithPrompt: (prompt: string) => void } }).TrpgAgent;
+        if (!agent) {
+            showNotification(t("scenario.repair.agent_unavailable", "网站 Agent 未就绪或当前账号不可用。"), "warning");
+            return;
+        }
+        const payload = state.validation;
+        if (!payload) {
+            agent.openWithPrompt(
+                t(
+                    "scenario.repair.prompt_unknown",
+                    "请先用 scenarios.validate 检查剧本 {id} 的图谱问题，再按「先结构、后剧情」的顺序告诉我每类问题的成因与修复步骤。",
+                ).replace("{id}", String(state.scenarioId)),
+            );
+            return;
+        }
+        const issues = (payload.issues || []).filter((issue) => issue.level !== "info").slice(0, 30);
+        const lines = issues.map((issue) => {
+            const target = issue.node_id ? ` @${issue.node_id}` : issue.edge_id ? ` @edge:${issue.edge_id}` : "";
+            const suggestion = issue.suggestion ? `｜建议：${issue.suggestion}` : "";
+            return `- [${issue.level}] ${issue.code}${target}: ${issue.message}${suggestion}`;
+        });
+        const head = t(
+            "scenario.repair.prompt_head",
+            "请帮我分析这个剧本图谱的校验问题：说明每类问题的成因、给出可执行的修复步骤；需要时先用 scenarios.get 读取剧本再回答。",
+        );
+        agent.openWithPrompt(
+            [head, `scenario_id=${state.scenarioId}`, lines.length ? lines.join("\n") : t("scenario.repair.prompt_clean", "（当前没有 error/warn 级问题）")].join("\n"),
+        );
+    }
+
     Object.assign(api, {
         updatePublishGuard,
         acceptReviewIssue,
         renderValidation,
         runValidation,
+        repairGraph,
+        explainWithAgent,
     });
 })(window);

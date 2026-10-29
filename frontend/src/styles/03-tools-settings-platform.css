@@ -908,6 +908,11 @@
     padding: 2px 6px;
 }
 
+.model-pricing .model-peak-hours-input {
+    width: 110px;
+    padding: 2px 6px;
+}
+
 .model-actions {
     display: flex;
     align-items: center;

@@ -117,6 +117,25 @@ def is_socket_user_online(user_id):
     return str(user_id) in active_sockets
 
 
+def user_room_ids(user_id, membership=None):
+    """返回用户当前加入的房间集合。
+
+    membership 按 socket（浏览器标签页）维护：``{user_id: {sid: {room_id}}}``。
+    同一用户可能同时开着多个标签页，只要任意一个仍在房间内就算「在房间」。
+    兼容旧结构 ``{user_id: set(room_id)}``。
+    """
+    if user_id is None:
+        return set()
+    if membership is None:
+        membership = current_app.config.get(USER_ROOM_MEMBERSHIP_KEY) or {}
+    entry = membership.get(str(user_id))
+    if isinstance(entry, dict):
+        return {str(room) for rooms in entry.values() if isinstance(rooms, (set, list, tuple)) for room in rooms if room}
+    if isinstance(entry, (set, list, tuple)):
+        return {str(room) for room in entry if room}
+    return set()
+
+
 def is_user_in_room(user_id, room_id):
     """用户当前是否「停留在该房间内」。
 
@@ -126,9 +145,7 @@ def is_user_in_room(user_id, room_id):
     """
     if room_id in (None, "") or user_id is None:
         return False
-    membership = current_app.config.get(USER_ROOM_MEMBERSHIP_KEY) or {}
-    rooms = membership.get(str(user_id))
-    return bool(rooms) and str(room_id) in rooms
+    return str(room_id) in user_room_ids(user_id)
 
 
 def _is_session_current(manager, user_id, token):

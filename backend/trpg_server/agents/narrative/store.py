@@ -39,6 +39,7 @@ _NON_MOVEMENT_EDGE_TYPES = {
     "conflicts",
     "mentions",
     "alias",
+    "relationship",
 }
 
 

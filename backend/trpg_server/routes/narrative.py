@@ -17,7 +17,15 @@ from trpg_server.agents.narrative.builder import rebuild_from_descriptor
 from trpg_server.agents.narrative.logger import log_event
 from trpg_server.agents.narrative.generate import GenerateOptions
 from trpg_server.agents.narrative.keywords import suggest_module_keywords, suggest_node_keywords
-from trpg_server.agents.narrative.model import NarrativeBundle, NarrativeEdge, TOPOLOGIES, normalize_start
+from trpg_server.agents.narrative.model import (
+    NODE_KINDS,
+    TOPOLOGIES,
+    NarrativeBundle,
+    NarrativeEdge,
+    NarrativeNode,
+    normalize_start,
+    slugify_id,
+)
 from trpg_server.agents.narrative.store import (
     build_index,
     bundle_summary,
@@ -28,6 +36,7 @@ from trpg_server.agents.narrative.store import (
 )
 from trpg_server.agents.narrative.triggers import normalize_asset, normalize_trigger_spec
 from trpg_server.agents.narrative.quality import compute_quality
+from trpg_server.agents.narrative.repair import repair_bundle
 from trpg_server.agents.narrative.validate import simulate_any_order, validate_bundle
 from trpg_server.agents.narrative.visibility import classify_visibility
 from trpg_server.json_store import read_json
@@ -341,6 +350,134 @@ def patch_node(scenario_id: int, node_id: str):
     return success_response({"node": updated.to_dict(), "revision": revision}, "Node updated")
 
 
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/nodes", methods=["POST"])
+@_scenario_locked
+def create_node(scenario_id: int):
+    """在图谱里新增一个节点（§8.1）：只写 `narrative.json`。
+
+    `parent` 表示隶属关系（例如 NPC 乘务员挂在 4 号车厢下），必须指向已存在
+    的节点，避免出现悬空父级；新节点还没有子节点，因此不需要成环检查。
+    """
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    denied = _require_edit(storage, descriptor)
+    if denied is not None:
+        return denied
+
+    payload = _payload()
+    conflict = _check_base_revision(bundle, payload)
+    if conflict is not None:
+        return conflict
+
+    kind = str(payload.get("kind") or "location").strip().lower()
+    if kind not in NODE_KINDS:
+        return error_response("Invalid node kind", 400, f"Supported: {', '.join(NODE_KINDS)}")
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        return error_response("Node title is required", 400, "Title is required")
+    node_id = slugify_id(payload.get("id") or title)
+    if bundle.node(node_id) is not None:
+        return error_response("Node already exists", 409, f"duplicate node {node_id}")
+
+    parent_id = str(payload.get("parent") or "").strip() or None
+    if parent_id:
+        if parent_id == node_id:
+            return error_response("Invalid parent", 400, "A node cannot be its own parent")
+        if bundle.node(parent_id) is None:
+            return error_response("Parent not found", 400, f"parent {parent_id} not found")
+
+    data = {key: value for key, value in payload.items() if key != "base_revision"}
+    data.update({"id": node_id, "kind": kind, "title": title, "parent": parent_id, "source": "author"})
+    node = NarrativeNode.from_dict(data)
+    if "visibility" in payload:
+        node.extra["visibility_source"] = "author"
+    if "order" not in payload:
+        siblings = [item for item in bundle.nodes if (item.parent or None) == parent_id]
+        node.order = max([int(item.order or 0) for item in siblings], default=0) + 1
+
+    bundle.nodes.append(node)
+    revision = _commit(storage, bundle, scenario_id=scenario_id)
+    log_event(
+        "narrative.node.create",
+        scenario_id=scenario_id,
+        user_id=session.get("user_id"),
+        node_id=node_id,
+        kind=kind,
+    )
+    return success_response({"node": node.to_dict(), "revision": revision}, "Node created", 201)
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/nodes/<node_id>", methods=["DELETE"])
+@_scenario_locked
+def delete_node(scenario_id: int, node_id: str):
+    """删除节点：一并删掉与它相连的边，子节点改挂到它的父级，清空指向它的开场。"""
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    denied = _require_edit(storage, descriptor)
+    if denied is not None:
+        return denied
+
+    payload = _payload()
+    if "base_revision" not in payload and request.args.get("base_revision") not in (None, ""):
+        payload["base_revision"] = request.args.get("base_revision")
+    conflict = _check_base_revision(bundle, payload)
+    if conflict is not None:
+        return conflict
+
+    node = bundle.node(node_id)
+    if node is None:
+        return error_response("Node not found", 404, "Node not found")
+    if len(bundle.nodes) <= 1:
+        return error_response("Cannot delete the last node", 400, "A narrative needs at least one node")
+
+    removed_edges = [item for item in bundle.edges if node_id in (item.from_id, item.to_id)]
+    removed_edge_ids = {item.id for item in removed_edges}
+    bundle.edges = [item for item in bundle.edges if item.id not in removed_edge_ids]
+    reparented = 0
+    for child in bundle.nodes:
+        if child.id != node_id and child.parent == node_id:
+            child.parent = node.parent
+            reparented += 1
+    bundle.nodes = [item for item in bundle.nodes if item.id != node_id]
+
+    if isinstance(bundle.start, Mapping):
+        start = dict(bundle.start)
+        if str(start.get("location_id") or "") == node_id:
+            start["location_id"] = None
+        if str(start.get("opening_module_id") or "") == node_id:
+            start["opening_module_id"] = None
+        bundle.start = start
+
+    revision = _commit(storage, bundle, scenario_id=scenario_id)
+    log_event(
+        "narrative.node.delete",
+        scenario_id=scenario_id,
+        user_id=session.get("user_id"),
+        node_id=node_id,
+        removed_edges=len(removed_edges),
+        reparented=reparented,
+    )
+    return success_response(
+        {
+            "revision": revision,
+            "node_id": node_id,
+            "removed_edges": len(removed_edges),
+            "reparented": reparented,
+        },
+        "Node deleted",
+    )
+
+
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/edges/<edge_id>", methods=["PATCH"])
 @_scenario_locked
 def patch_edge(scenario_id: int, edge_id: str):
@@ -369,6 +506,17 @@ def patch_edge(scenario_id: int, edge_id: str):
     updated = type(edge).from_dict(data)
     if updated is None or not bundle.node(updated.from_id) or not bundle.node(updated.to_id):
         return error_response("Invalid edge endpoints", 400, "Edge endpoints must exist")
+    if updated.from_id == updated.to_id:
+        return error_response("Invalid edge endpoints", 400, "Edge cannot link a node to itself")
+    duplicate = any(
+        item.id != edge.id
+        and item.from_id == updated.from_id
+        and item.to_id == updated.to_id
+        and item.type == updated.type
+        for item in bundle.edges
+    )
+    if duplicate:
+        return error_response("Edge already exists", 409, "duplicate edge after update")
     if "visibility" in payload:
         updated.extra["visibility_source"] = "author"
     bundle.edges = [updated if item.id == edge.id else item for item in bundle.edges]
@@ -654,6 +802,50 @@ def validate_narrative(scenario_id: int):
     data["quality"] = compute_quality(bundle, order_independent=order_ok).to_dict()
     data["revision"] = _revision(bundle)
     return success_response(data, "Validation finished")
+
+
+@bp.route("/api/scenarios/<int:scenario_id>/narrative/repair", methods=["POST"])
+@_scenario_locked
+def repair_narrative(scenario_id: int):
+    """一键修复：只做结构性修复（孤立/不可达节点、悬空 parent、无效边等）。
+
+    涉及剧情判断的问题（可见性复核、触发器绑定、结局条件）不自动修改，
+    随 ``remaining`` 返回，由作者或站点 Agent 继续处理。
+    """
+    if "user_id" not in session:
+        return error_response("Please login first", 401, "Not logged in")
+    if not _can_use_permission("scenarios.preview"):
+        return error_response("Permission denied", 403, "Permission denied")
+    storage, descriptor, bundle, failure = _open_bundle(scenario_id)
+    if failure is not None:
+        return failure
+    if bundle is None:
+        return error_response("Narrative not generated", 404, "Run narrative build first")
+    denied = _require_edit(storage, descriptor)
+    if denied is not None:
+        return denied
+
+    payload = _payload()
+    conflict = _check_base_revision(bundle, payload)
+    if conflict is not None:
+        return conflict
+
+    dry_run = bool(payload.get("dry_run"))
+    target = NarrativeBundle.from_dict(bundle.to_dict()) if dry_run else bundle
+    report = repair_bundle(target)
+    data = report.to_dict()
+    if not dry_run and report.applied:
+        data["revision"] = _commit(storage, bundle, scenario_id=scenario_id)
+        log_event(
+            "narrative.repair",
+            scenario_id=scenario_id,
+            user_id=session.get("user_id"),
+            applied=len(report.applied),
+            remaining=len(report.remaining),
+        )
+    else:
+        data["revision"] = _revision(bundle)
+    return success_response(data, "Repair finished")
 
 
 @bp.route("/api/scenarios/<int:scenario_id>/narrative/topology", methods=["GET"])

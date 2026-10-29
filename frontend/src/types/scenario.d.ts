@@ -188,6 +188,7 @@ interface ScenarioModel {
     convertScriptFile(file: File, title?: string): Promise<ScenarioInput>;
     getKnowledgeStats(id: number): Promise<{ scenario_id: number; version: string; vector_count: number; path: string; backend: string }>;
     createImportJob(formData: FormData, onProgress?: (value: number) => void): Promise<ScenarioImportStart>;
+    importBundle(file: File): Promise<ScenarioImportStart & { preview: ScenarioInput }>;
     getImportJob(id: string): Promise<ScenarioImportJob>;
     publishImport(scriptId: number, jobId: string): Promise<Scenario>;
     waitForImportJob(id: string, onProgress?: (job: ScenarioImportJob) => void): Promise<ScenarioImportJob>;
@@ -233,7 +234,7 @@ interface ScenarioView {
     showDraftPrompt(): Promise<"continue" | "discard" | "cancel">;
     closeModal(): void;
     previewScenario(scenario: Scenario, knowledge?: { vector_count?: number; path?: string; backend?: string }): void;
-    showImportChoice(): Promise<"edit" | "direct" | "cancel">;
+    showImportChoice(): Promise<"edit" | "direct" | "ai" | "cancel">;
     showDirectImportMetadata(defaults: { title: string; creator: string }): Promise<{ title: string; author: string; creator: string; playerCount: number; description: string } | null>;
     getFormData(): ScenarioInput;
     showMessage(message: string, isError?: boolean): void;
@@ -243,7 +244,7 @@ interface ScenarioView {
     closeConversionProgress(): void;
 }
 
-type ScenarioImportStatus = "pending" | "parsing" | "chunking" | "extracting" | "merging" | "carding" | "summarizing" | "embedding" | "done" | "failed" | "cancelled" | "published";
+type ScenarioImportStatus = "pending" | "parsing" | "reviewing" | "normalizing" | "graphing" | "chunking" | "extracting" | "merging" | "carding" | "summarizing" | "embedding" | "done" | "failed" | "cancelled" | "published";
 interface ScenarioImportJob { id: string; script_id: number; status: ScenarioImportStatus; progress: number; current_stage: string; stage_progress: number; stage_meta?: Record<string, unknown>; error?: string; preview?: ScenarioInput; }
 // POST /api/scripts/import 的返回：创建任务后用于轮询与发布。
 interface ScenarioImportStart { jobId: string; scriptId: number; }

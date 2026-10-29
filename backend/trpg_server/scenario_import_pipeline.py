@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,19 @@ from trpg_server.scenario_documents import chunk_parsed_document, parse_scenario
 from trpg_server.scenario_importer import _summary
 
 logger = logging.getLogger(__name__)
+
+# AI 全链路阶段 → 总进度区间（progress 8%~45%）。区间留白给 normalize/embed/graph，
+# 前端因此能持续看到「扫描第几段 / 补全第几批」而不是一直停在 8%。
+AI_STAGE_RANGES: dict[str, tuple[float, float]] = {
+    "scan": (8, 20),
+    "clean": (20, 22),
+    "segment": (22, 28),
+    "worldbook": (28, 34),
+    "graph": (34, 40),
+    "graph_detail": (40, 45),
+}
+# 整条 AI 链路的默认总预算（秒）。超过则明确失败，避免前端无限等待。
+DEFAULT_AI_BUDGET_SECONDS = 1800
 
 # 关键词派生：优先取引号包裹的专有名词，其次标题词、大写拉丁词、正文高频短名。
 # 「」《》【】“” 是中文剧本里包裹专名的常见引号，直接取内容；
@@ -212,8 +227,253 @@ class ScenarioImportPipeline:
             current_stage=stage,
             progress=round(start + span * ratio, 2),
             stage_progress=round(ratio * 100, 2),
-            stage_meta={"totalChunks": total, "processedChunks": index, **extra},
+            stage_meta={
+                "totalChunks": total,
+                "processedChunks": index,
+                "message": f"正在生成知识库向量（{index}/{total} 块）",
+                **extra,
+            },
         )
+
+    def _ai_progress(self, job_id: str, stage: str, done: int, total: int, message: str, started_at: float) -> None:
+        """把 AI 阶段回调映射成任务进度；done<0 表示只更新文案、不动进度条。"""
+        current = self.store.get(job_id) or {}
+        start, end = AI_STAGE_RANGES.get(stage, (8, 45))
+        if done >= 0 and total > 0:
+            ratio = max(0.0, min(1.0, done / total))
+            # 扫描窗口可能并发完成，确保任何一次回调都不会让进度条倒退。
+            progress = max(round(start + (end - start) * ratio, 2), float(current.get("progress") or 0))
+            stage_progress = round(ratio * 100, 2)
+        else:
+            progress = float(current.get("progress") or 8)
+            stage_progress = float(current.get("stage_progress") or 0)
+        self.store.update(
+            job_id,
+            status="reviewing",
+            current_stage=stage,
+            progress=progress,
+            stage_progress=stage_progress,
+            stage_meta={
+                "mode": "ai",
+                "message": message,
+                "ai_stage": stage,
+                "ai_done": done,
+                "ai_total": total,
+                "elapsed_s": round(time.monotonic() - started_at, 1),
+            },
+        )
+        logger.info(
+            "scenario_import.ai_progress job=%s stage=%s done=%s/%s message=%s",
+            job_id,
+            stage,
+            done,
+            total,
+            message,
+        )
+
+    def _start_ai_heartbeat(self, job_id: str, started_at: float) -> tuple[threading.Event, threading.Thread]:
+        """AI 请求可能连续几分钟没有结果；每 10 秒写一次心跳，前端据此判断「还在跑」。"""
+        stop = threading.Event()
+
+        def beat() -> None:
+            while not stop.wait(10):
+                job = self.store.get(job_id) or {}
+                if job.get("status") in {"done", "failed", "cancelled", "published"}:
+                    return
+                meta = dict(job.get("stage_meta") or {})
+                meta["elapsed_s"] = round(time.monotonic() - started_at, 1)
+                meta["heartbeat_at"] = time.time()
+                self.store.update(job_id, stage_meta=meta)
+
+        thread = threading.Thread(target=beat, daemon=True, name=f"import-heartbeat-{job_id}")
+        thread.start()
+        return stop, thread
+
+    def _run_ai(self, job_id: str, job: dict[str, Any], parsed):
+        """AI 全链路：通读剔除噪声 → 语义分模块 → 世界书 → 图谱 → 校验修复。"""
+        from trpg_server.agents.embedding_provider import HashedTokenEmbedding
+        from trpg_server.agents.knowledge_base import build_knowledge_chunks, index_knowledge_chunks
+        from trpg_server.scenario_bundle import BundleError, build_narrative, normalize_bundle
+        from trpg_server.scenario_import_ai import analyze_script, build_ai_requester
+
+        metadata = job.get("metadata") or {}
+        scenario_id = str(job.get("script_id"))
+        scenario_version = str(job.get("target_version") or "1.0.0")
+        title = str(metadata.get("title") or Path(job["source_filename"]).stem)
+
+        started_at = time.monotonic()
+        try:
+            budget = float(self.config.get("SCENARIO_IMPORT_AI_BUDGET_SECONDS", DEFAULT_AI_BUDGET_SECONDS))
+        except (TypeError, ValueError):
+            budget = float(DEFAULT_AI_BUDGET_SECONDS)
+        self.store.update(
+            job_id,
+            status="reviewing",
+            current_stage="scan",
+            progress=8,
+            stage_progress=0,
+            stage_meta={"mode": "ai", "message": "正在读取剧本，准备通读"},
+        )
+        request = build_ai_requester()
+        heartbeat_stop, heartbeat = self._start_ai_heartbeat(job_id, started_at)
+        try:
+            bundle = analyze_script(
+                parsed.markdown,
+                title=title,
+                request=request,
+                scenario_id=scenario_id,
+                scenario_version=scenario_version,
+                budget_seconds=budget,
+                progress=lambda stage, done, total, message: self._ai_progress(
+                    job_id, stage, done, total, message, started_at
+                ),
+            )
+        finally:
+            heartbeat_stop.set()
+            heartbeat.join(timeout=1)
+        if self._cancelled(job_id):
+            return self.store.update(job_id, status="cancelled", current_stage="scan", error="Import cancelled")
+        self.store.save_intermediate(job_id, "ai_bundle", bundle)
+        self.store.update(
+            job_id,
+            status="normalizing",
+            current_stage="normalizing",
+            progress=45,
+            stage_progress=100,
+            stage_meta={"mode": "ai", "message": "正在校验并修复剧本模块与图谱"},
+        )
+
+        result = normalize_bundle(
+            bundle,
+            fallback_title=title,
+            default_scenario_id=scenario_id,
+            default_version=scenario_version,
+        )
+        if result.errors:
+            raise BundleError(
+                "AI 生成的剧本包结构不完整：" + "；".join(str(item.get("message")) for item in result.errors[:5]),
+                result.errors,
+            )
+        scenario = result.data["scenario"]
+        try:
+            player_count = int(str(metadata.get("playerCount") or "").strip() or "1")
+        except ValueError:
+            player_count = 1
+        scenario.update(
+            {
+                "id": job.get("script_id"),
+                "scenario_version": scenario_version,
+                "title": scenario.get("title") or title,
+                "author": scenario.get("author") or metadata.get("author") or "Imported",
+                "creator_username": metadata.get("creator") or "",
+                "playerCount": max(1, player_count),
+                "notes": metadata.get("description") or scenario.get("notes") or "",
+                "import_mode": "ai",
+                "import_exclusions": result.data.get("exclusions") or [],
+                "conversion": {
+                    "version": 5,
+                    "source_preserved": True,
+                    "document_import": True,
+                    "ai": {
+                        "status": "ok",
+                        "stages": (result.data.get("analysis") or {}).get("stages") or {},
+                        "notes": (result.data.get("analysis") or {}).get("notes") or [],
+                        "ai_calls": (result.data.get("analysis") or {}).get("ai_calls") or 0,
+                    },
+                    "warnings": result.warnings,
+                    "stages": ["review", "segment", "worldbook", "graph", "normalize", "embed"],
+                },
+            }
+        )
+        self.store.update(
+            job_id,
+            status="embedding",
+            current_stage="embedding",
+            progress=55,
+            stage_progress=0,
+            stage_meta={"mode": "ai", "message": "正在生成知识库向量"},
+        )
+
+        # 知识库直接复用 AI 分好的模块与世界书字段，避免二次规则切分引入偏差。
+        chunks = build_knowledge_chunks(scenario)
+        provider = self.config.get("EMBEDDING_PROVIDER") or HashedTokenEmbedding()
+        chunks = index_knowledge_chunks(
+            chunks,
+            vector_store=self.config.get("VECTOR_STORE"),
+            embedding_provider=provider,
+        )
+        self.store.save_intermediate(job_id, "knowledge", [chunk.to_dict() for chunk in chunks])
+        self.store.update(
+            job_id,
+            status="graphing",
+            current_stage="graphing",
+            progress=82,
+            stage_progress=0,
+            stage_meta={"mode": "ai", "message": "正在校验并修复图谱关系"},
+        )
+
+        narrative, repair, validation = build_narrative(result)
+        if not narrative.nodes:
+            raise BundleError("AI 生成的图谱没有任何节点")
+        assets = [node for node in narrative.nodes if node.kind in {"npc", "item", "clue"}]
+        has_scene = any(
+            str(module.get("module_type")) in {"scene", "ending"}
+            for module in scenario.get("modules") or []
+        )
+        if not assets and has_scene:
+            raise BundleError("AI 图谱没有提取到任何 NPC/物品/线索，拒绝发布只含地点的骨架图；请重试或检查 AI 平台。")
+        logger.info(
+            "scenario_import.ai_done job=%s nodes=%s edges=%s assets=%s stages=%s",
+            job_id,
+            len(narrative.nodes),
+            len(narrative.edges),
+            len(assets),
+            (result.data.get("analysis") or {}).get("stages"),
+        )
+        narrative.scenario_id = str(job.get("script_id"))
+        narrative.scenario_version = scenario_version
+        narrative.meta = {
+            **dict(narrative.meta or {}),
+            "generator": "ai_import",
+            "source_document": parsed.filename,
+            "exclusions": result.data.get("exclusions") or [],
+            "repair": repair.to_dict(),
+            "validation": validation.to_dict(),
+        }
+        self.store.save_intermediate(job_id, "bundle", result.payload())
+        self.store.save_intermediate(job_id, "narrative", narrative.to_dict())
+        scenario["narrative_summary"] = {
+            "nodes": len(narrative.nodes),
+            "edges": len(narrative.edges),
+            "locations": len(narrative.location_nodes),
+            "endings": len(narrative.ending_nodes),
+            "assets": len(assets),
+            "ai_calls": (result.data.get("analysis") or {}).get("ai_calls") or 0,
+            "repair_count": len(repair.applied),
+            "error_count": validation.to_dict().get("error_count", 0),
+            "warning_count": validation.to_dict().get("warning_count", 0),
+        }
+        scenario["global_summary"] = scenario.get("global_summary") or " ".join(
+            str(item.get("summary") or "") for item in scenario.get("modules", [])[:6]
+        )[:1000]
+        self.store.update(
+            job_id,
+            status="done",
+            current_stage="done",
+            progress=100,
+            stage_progress=100,
+            stage_meta={"mode": "ai", "message": "导入完成，请审核后发布"},
+        )
+        self.store.save_intermediate(job_id, "preview", scenario)
+        logger.info(
+            "scenario_import.ai_complete job=%s modules=%d chunks=%d nodes=%d edges=%d",
+            job_id,
+            len(scenario.get("modules", [])),
+            len(chunks),
+            len(narrative.nodes),
+            len(narrative.edges),
+        )
+        return self.store.update(job_id, preview=scenario)
 
     def run(self, job_id: str, start_stage: str | None = None):
         job = self.store.get(job_id)
@@ -223,15 +483,32 @@ class ScenarioImportPipeline:
         try:
             raw = source.read_bytes()
             ocr = self.config.get("OCR_PROVIDER") if self.config.get("OCR_ENABLED") else None
-            self.store.update(job_id, status="parsing", current_stage="parsing", progress=5, stage_progress=0)
+            self.store.update(
+                job_id,
+                status="parsing",
+                current_stage="parsing",
+                progress=5,
+                stage_progress=0,
+                stage_meta={"message": "正在读取文档并提取文本"},
+            )
             parsed = parse_scenario_document(raw, job["source_filename"], ocr_provider=ocr)
             self.store.save_intermediate(job_id, "parsed", {"filename": parsed.filename, "markdown": parsed.markdown, "page_count": parsed.page_count})
+            mode = str((job.get("metadata") or {}).get("mode") or "direct").strip().lower()
+            if mode == "ai":
+                return self._run_ai(job_id, job, parsed)
 
             # 直接导入：按标题（Word/PDF 标题、Markdown #、第X章）切分为语义块，
             # 每个标题对应原文中的一个场景/章节，不再生成场景卡。
             sections = chunk_parsed_document(parsed, target_max=_chunk_child_max(self.config))
             total = len(sections)
-            self.store.update(job_id, status="chunking", current_stage="chunking", progress=15, stage_progress=100, stage_meta={"totalChunks": total, "processedChunks": total})
+            self.store.update(
+                job_id,
+                status="chunking",
+                current_stage="chunking",
+                progress=15,
+                stage_progress=100,
+                stage_meta={"totalChunks": total, "processedChunks": total, "message": f"已按标题切分为 {total} 个知识块"},
+            )
             self.store.save_intermediate(job_id, "chunks", [c.__dict__ for c in sections])
 
             from trpg_server.agents.embedding_provider import HashedTokenEmbedding
@@ -299,12 +576,72 @@ class ScenarioImportPipeline:
                 "import_mode": "direct",
                 "conversion": {"version": 4, "source_preserved": True, "document_import": True, "chunk_count": len(knowledge_chunks), "stages": ["parse", "chunk", "embed"]},
             }
-            self.store.update(job_id, status="summarizing", current_stage="summarizing", progress=95, stage_progress=100, stage_meta={"totalChunks": total, "processedChunks": total})
+            self.store.update(
+                job_id,
+                status="summarizing",
+                current_stage="summarizing",
+                progress=95,
+                stage_progress=100,
+                stage_meta={"totalChunks": total, "processedChunks": total, "message": "正在整理剧本摘要"},
+            )
             summary = " ".join(str(chunk.text) for chunk in knowledge_chunks)[:1000]
             scenario["global_summary"] = summary
+
+            # 直接导入也在导入过程中生成地点骨架图谱，用户不必再进图谱页手动点「自动建图」。
+            # 该骨架只含标题级地点/结局；NPC、物品与地点之间的关系由「AI 全链路导入」补齐。
+            self.store.update(
+                job_id,
+                status="graphing",
+                current_stage="graphing",
+                progress=96,
+                stage_progress=0,
+                stage_meta={"totalChunks": total, "processedChunks": total, "message": "正在生成地点骨架图谱"},
+            )
+            try:
+                from trpg_server.agents.narrative.builder import build_narrative as build_document_narrative
+                from trpg_server.agents.narrative.repair import repair_bundle
+
+                built = build_document_narrative(
+                    parsed,
+                    scenario=scenario,
+                    scenario_id=scenario_id,
+                    scenario_version=scenario_version,
+                )
+                narrative = built.bundle
+                repair_bundle(narrative)
+                narrative.scenario_id = scenario_id
+                narrative.scenario_version = scenario_version
+                narrative.meta = {
+                    **dict(narrative.meta or {}),
+                    "generator": "direct_import",
+                    "source_document": parsed.filename,
+                }
+                self.store.save_intermediate(job_id, "narrative", narrative.to_dict())
+                scenario["narrative_summary"] = {
+                    "nodes": len(narrative.nodes),
+                    "edges": len(narrative.edges),
+                    "locations": len(narrative.location_nodes),
+                    "endings": len(narrative.ending_nodes),
+                    "assets": len([node for node in narrative.nodes if node.kind in {"npc", "item", "clue"}]),
+                    "error_count": getattr(built.report, "error_count", 0),
+                    "warning_count": getattr(built.report, "warning_count", 0),
+                }
+                scenario["conversion"]["stages"].append("graph")
+            except Exception as exc:  # noqa: BLE001 - 图谱失败不应阻断知识库导入
+                logger.warning("scenario_import.direct_graph_failed job=%s error=%s", job_id, exc)
+                scenario["conversion"]["graph_error"] = str(exc)
+
             self.store.save_intermediate(job_id, "preview", scenario)
             logger.info("scenario_import.direct_complete job=%s chunks=%d vectors=%d", job_id, total, len(knowledge_chunks))
-            return self.store.update(job_id, status="done", current_stage="done", progress=100, stage_progress=100, stage_meta={"totalChunks": total, "processedChunks": total}, preview=scenario)
+            return self.store.update(
+                job_id,
+                status="done",
+                current_stage="done",
+                progress=100,
+                stage_progress=100,
+                stage_meta={"totalChunks": total, "processedChunks": total, "message": "导入完成，请审核后发布"},
+                preview=scenario,
+            )
         except Exception as exc:
             logger.exception("scenario_import.pipeline_failed job=%s", job_id)
             return self.store.update(job_id, status="failed", error=str(exc), failed_stage=(self.store.get(job_id) or {}).get("current_stage") or "parsing")

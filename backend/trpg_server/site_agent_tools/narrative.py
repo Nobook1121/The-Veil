@@ -33,6 +33,7 @@ _NODE_FIELDS = {
 _EDGE_TYPES = {
     "adjacent", "portal", "next", "leads_to", "requires", "reveals", "knows",
     "inhabits", "uses", "triggers", "conflicts", "mentions", "alias", "contains",
+    "relationship",
 }
 _OPERATIONS = {
     "add_node", "update_node", "delete_node", "add_edge", "update_edge", "delete_edge",

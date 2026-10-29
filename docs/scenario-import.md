@@ -36,3 +36,43 @@ python scripts/convert_scenario.py docs/样本/模组.docx -o scenario.json --ti
 启用 OCR：安装 `requirements-ocr.txt` 并设置 `AI_TRPG_OCR_ENABLED=1`。启用本地向量库：安装
 默认使用内置 SQLite 向量库，无需 Docker；如需 Qdrant，请安装 `requirements-vector-qdrant.txt`，设置 `AI_TRPG_VECTOR_BACKEND=qdrant`，并使用 `data/runtime/vector-db/qdrant/`。
 Embedding 仍按本地模型 → OpenAI-compatible 服务 → 本地哈希向量顺序回退；失败时保留 JSON 索引。
+
+## AI 全链路导入
+
+上传时在 `POST /api/scripts/import` 的表单里带 `mode=ai`（不传则为 `direct`）。该模式不按标题
+正则切块，也不再依赖场景卡推边，而是让模型依次完成四个阶段：
+
+1. **通读剔除**：按行窗口扫描，找出作者吐槽、游玩心得、目录/排版残留、广告等与游玩无关的内容，
+   返回 `prefix`（原文前几个字）、`line_start`/`line_end`、`category` 与 `reason`。程序只在原文中
+   能定位到该前缀时才删除，定位失败不误删。剔除结果保存在剧本的 `import_exclusions` 与图谱
+   `meta.exclusions`，导入后仍可审计。
+2. **语义分模块**：结合文档自带标题与完整上下文划分场景/结局/背景模块，输出绝对行号与摘要；
+   程序只做行号裁剪与防重叠。
+3. **世界书**：为每个模块生成触发词、次级关键词、常驻标记、核心/背景分层与分组。
+4. **图谱**：模型直接产出全量节点与关系边（地点连接、物品所属、NPC 常驻、NPC 与 NPC 关系等），
+   并复用模块 id 作为地点节点 id；无论篇幅长短，都会再按模块做一次「资产补全」，逐场景核对
+   NPC、物品、线索与归属边，避免只生成地点。程序只负责归一化、ID 去重、端点补全、非法边丢弃、
+   缺节点补齐、`repair_bundle` 结构修复与 `validate_bundle` 报告。若图谱阶段请求失败或整份剧本
+   没有产出任何 NPC/物品/线索，导入会直接失败并说明原因，不会静默发布只含地点的骨架图。
+
+直接导入（`direct`）不再要求用户另点「自动建图」：导入任务结束前会按文档标题生成地点/结局
+骨架图并随预览发布。它不含 NPC、物品及其关系，需要完整关系时请使用 AI 全链路或剧本包导入。
+
+图谱的目的不是画得好看，而是让 KP 能判断「A 地的物品能否拿到 B 地使用」：地点之间的
+`adjacent`/`portal`/`leads_to` 表达通行关系，`contains` 表达地点包含物品/子地点，`inhabits`
+表达 NPC 常驻地点，`relationship` 表达 NPC 与 NPC 的关系。所有关系边都要求端点必须真实存在，
+否则在归一化阶段被丢弃并在警告里说明。
+
+## 剧本包导入（Skill / 外部 AI）
+
+`POST /api/scripts/import/bundle` 接收 `the-veil-scenario-bundle` JSON（可直接上传文件或提交
+JSON body），不重新调用 AI，只做校验、修复与落盘。网页端在导入入口选择 `.json` 即可走这条路径。
+
+同一格式也由离线 Skill [`skills/scenario-import`](../skills/scenario-import/SKILL.md) 产出：
+Skill 让外部 AI 先剔除无关内容，再按语义分模块、生成世界书与图谱，最后用
+`scripts/validate_bundle.py` 自检并输出 `剧本名.veil-scenario.json`。字段定义见
+[`bundle-schema.md`](../skills/scenario-import/references/bundle-schema.md)。
+
+站内 Agent 不需要先产出文件再导入，可直接调用 `scenarios.import_script`：传 `content` 时执行
+完整 AI 链路，传 `bundle` 时只校验修复；两段式预览确认后才真正创建剧本并写入世界树。
+

@@ -36,6 +36,12 @@
     function applyView(): void {
         const viewport = byId("scenarioGraphViewport");
         if (!viewport) return;
+        // 画布尺寸会随页签显示/窗口变化，同步 viewBox，避免缩放与拖动出现比例偏差。
+        const svg = (viewport as unknown as SVGGElement).ownerSVGElement;
+        if (svg) {
+            const { width, height } = viewportSize();
+            svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        }
         viewport.setAttribute("transform", `translate(${state.view.x},${state.view.y}) scale(${state.view.k})`);
     }
 
@@ -68,7 +74,7 @@
         if (mode === "pan") {
             return t("scenario.graph.hint_pan", "平移：拖拽画布移动，滚轮缩放。");
         }
-        return t("scenario.graph.hint_select", "选择：点击节点查看详情，拖拽节点调整布局。");
+        return t("scenario.graph.hint_select", "选择：点击节点查看详情，拖拽节点调整布局；拖拽空白处或按住中键平移，滚轮缩放。");
     }
 
     function playerHint(): string {

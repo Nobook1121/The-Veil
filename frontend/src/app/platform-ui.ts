@@ -448,6 +448,7 @@ function renderPlatformModalBody(config: AIPlatformConfig, isNew: boolean): void
     bindTimeoutSlider(config.platform);
     bindResponsesApiDetect(config);
     bindRequestParamInputs();
+    bindModelPriceInputs(config);
     bindModelEvents(config, isNew);
     bindPlatformModalFooter(config, isNew);
 }
@@ -633,7 +634,30 @@ function buildModelList(config: AIPlatformConfig, isNew: boolean): string {
                                         data-model="${platformEscapeHtml(model.id)}" data-price-field="output_price"
                                         value="${numberOrEmpty(model.output_price)}" placeholder="0">
                                 </label>
+                                <label>${platformEscapeHtml(platformT("platform.model.cache_hit_price", "缓存命中单价"))}
+                                    <input class="form-control form-control-sm model-price-input" type="number" min="0" step="0.0001"
+                                        data-model="${platformEscapeHtml(model.id)}" data-price-field="cache_hit_price"
+                                        value="${numberOrEmpty(model.cache_hit_price)}" placeholder="${platformEscapeHtml(platformT("platform.model.cache_hit_price_placeholder", "同输入单价"))}">
+                                </label>
                                 <span>${platformEscapeHtml(config.config.currency || "CNY")} / 百万 token</span>
+                            </div>
+                            <div class="model-pricing">
+                                <label>${platformEscapeHtml(platformT("platform.model.peak_hours", "峰时时段"))}
+                                    <input class="form-control form-control-sm model-peak-hours-input" type="text"
+                                        data-model="${platformEscapeHtml(model.id)}"
+                                        value="${platformEscapeHtml(model.peak_hours || "")}" placeholder="08:00-22:00">
+                                </label>
+                                <label>${platformEscapeHtml(platformT("platform.model.peak_multiplier", "峰时倍率"))}
+                                    <input class="form-control form-control-sm model-price-input" type="number" min="0" step="0.01"
+                                        data-model="${platformEscapeHtml(model.id)}" data-price-field="peak_multiplier"
+                                        value="${numberOrEmpty(model.peak_multiplier)}" placeholder="1">
+                                </label>
+                                <label>${platformEscapeHtml(platformT("platform.model.offpeak_multiplier", "谷时倍率"))}
+                                    <input class="form-control form-control-sm model-price-input" type="number" min="0" step="0.01"
+                                        data-model="${platformEscapeHtml(model.id)}" data-price-field="offpeak_multiplier"
+                                        value="${numberOrEmpty(model.offpeak_multiplier)}" placeholder="1">
+                                </label>
+                                <span>${platformEscapeHtml(platformT("platform.model.peak_hint", "时段留空=不分峰谷，倍率作用于全部 token 费用"))}</span>
                             </div>
                         </div>
                         <div class="model-actions">
@@ -681,21 +705,62 @@ function syncPlatformFormToConfig(config: AIPlatformConfig): void {
     if (currency) config.config.currency = currency.value;
     syncRequestParamsToConfig(config);
     document.querySelectorAll<HTMLInputElement>(".model-price-input").forEach((input) => {
+        applyModelPriceInput(config, input);
+    });
+    document.querySelectorAll<HTMLInputElement>(".model-peak-hours-input").forEach((input) => {
         const model = config.models.find((item) => item.id === (input.dataset.model || ""));
         if (!model) return;
-        const field = input.dataset.priceField === "output_price" ? "output_price" : "input_price";
         const raw = input.value.trim();
-        if (!raw) {
-            delete model[field];
-            return;
-        }
-        const parsed = Number.parseFloat(raw);
-        model[field] = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+        if (raw) model.peak_hours = raw;
+        else delete model.peak_hours;
     });
     const timeout = document.getElementById(`modal-timeout-${id}`) as HTMLInputElement | null;
     if (timeout) config.config.timeout = Number.parseInt(timeout.value, 10) || 30;
     const usePrev = document.getElementById(`modal-use-previous-response-${id}`) as HTMLInputElement | null;
     if (usePrev) config.config.use_previous_response_id = config.config.responses_api_supported === true && usePrev.checked;
+}
+
+// 单个价格输入回写到对应模型；留空即删除该配置。
+const MODEL_PRICE_FIELDS = ["input_price", "output_price", "cache_hit_price", "peak_multiplier", "offpeak_multiplier"] as const;
+function applyModelPriceInput(config: AIPlatformConfig, input: HTMLInputElement): void {
+    const model = config.models.find((item) => item.id === (input.dataset.model || ""));
+    const field = input.dataset.priceField || "";
+    if (!model || !(MODEL_PRICE_FIELDS as readonly string[]).includes(field)) return;
+    const raw = input.value.trim();
+    if (!raw) {
+        delete (model as unknown as Record<string, unknown>)[field];
+        return;
+    }
+    const parsed = Number.parseFloat(raw);
+    (model as unknown as Record<string, unknown>)[field] = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+// 价格输入框没有单独的 change 绑定，重渲染前（增删模型等）也能即时回写 draft。
+function bindModelPriceInputs(config: AIPlatformConfig): void {
+    document.querySelectorAll<HTMLInputElement>(".model-price-input").forEach((input) => {
+        input.addEventListener("input", () => applyModelPriceInput(config, input));
+        input.addEventListener("change", () => applyModelPriceInput(config, input));
+    });
+    document.querySelectorAll<HTMLInputElement>(".model-peak-hours-input").forEach((input) => {
+        input.addEventListener("input", () => {
+            const model = config.models.find((item) => item.id === (input.dataset.model || ""));
+            if (!model) return;
+            if (input.value.trim()) model.peak_hours = input.value.trim();
+            else delete model.peak_hours;
+        });
+    });
+}
+
+// 把弹窗 draft 的价格/模型改动同步到 manager 的当前平台对象，供 addModel/removeModel 落盘时保留。
+function stagePlatformDraft(config: AIPlatformConfig): void {
+    if (!config.platform) return;
+    const stored = aiPlatformManager.getPlatform(config.platform);
+    if (!stored) return;
+    stored.name = config.name;
+    stored.description = config.description;
+    stored.icon = config.icon;
+    stored.config = { ...stored.config, ...config.config };
+    stored.models = config.models.map((model) => ({ ...model }));
 }
 
 // 读取「AI 请求设置」输入框：留空即删除该参数（回落到模板值），数字按输入范围裁剪。
@@ -1006,6 +1071,8 @@ function bindModelEvents(config: AIPlatformConfig, isNew: boolean): void {
                 renderPlatformModalBody(config, isNew);
                 return;
             }
+            syncPlatformFormToConfig(config);
+            stagePlatformDraft(config);
             if (await aiPlatformManager.removeModel(config.platform, modelId)) {
                 const refreshed = aiPlatformManager.getPlatform(config.platform);
                 if (refreshed && platformModalState) platformModalState.config = refreshed;
@@ -1095,6 +1162,10 @@ function bindAddModelEvents(): void {
 
         const platform = window.currentPlatform || "";
         if (!platform) return;
+        if (platformModalState && platformModalState.config.platform === platform) {
+            syncPlatformFormToConfig(platformModalState.config);
+            stagePlatformDraft(platformModalState.config);
+        }
         const success = await aiPlatformManager.addModel(platform, { id: modelId, name: modelName, description });
         if (success) {
             bootstrap.Modal.getInstance(document.getElementById("addModelModal"))?.hide();

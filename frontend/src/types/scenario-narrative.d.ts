@@ -46,6 +46,8 @@ interface GraphEdge {
     visibility?: string;
     visibility_source?: string;
     hard?: boolean;
+    bidirectional?: boolean;
+    kp_notes?: string;
     condition?: unknown;
     reveal_when?: unknown;
 }
@@ -99,6 +101,15 @@ interface ValidationPayload {
             detail: string;
         }[];
     };
+    revision: number;
+}
+
+interface RepairPayload {
+    ok: boolean;
+    applied: { code: string; action: string; target: string }[];
+    applied_count: number;
+    remaining_count: number;
+    remaining: ValidationIssue[];
     revision: number;
 }
 
@@ -248,11 +259,20 @@ interface NarrativeApi {
     renderTree: () => void;
     renderInspector: () => void;
     renderGraph: () => void;
+    renderGraphEditor: () => void;
     renderAll: () => void;
     renderEdgeActions: () => void;
+    renderGraphGuide: () => void;
+    updateEdgeGeometry: () => void;
+    openNodeCreate: () => void;
+    submitNodeCreate: () => Promise<void>;
+    deleteNode: () => Promise<void>;
     setMode: (mode: GraphMode) => void;
     setViewMode: (mode: "kp" | "player") => void;
-    connectNodes: (sourceId: string, targetId: string) => Promise<void>;
+    connectNodes: (sourceId: string, targetId: string, options?: { type?: string; hard?: boolean }) => Promise<void>;
+    selectEdge: (edgeId: string, scroll?: boolean) => void;
+    saveGraphNode: () => Promise<void>;
+    addGraphEdge: () => Promise<void>;
     setGraphHint: (text: string) => void;
     fitView: () => void;
     resetViewMode: () => void;
@@ -286,6 +306,8 @@ interface NarrativeApi {
     saveOpening: () => Promise<void>;
     previewOpening: () => void;
     runValidation: () => Promise<void>;
+    repairGraph: () => Promise<void>;
+    explainWithAgent: () => void;
     updatePublishGuard: (count: number) => void;
     acceptReviewIssue: (target: string) => Promise<void>;
     resetGeneratePanel: () => void;
@@ -303,6 +325,7 @@ interface NarrativeCore {
     api: NarrativeApi;
     KIND_META: Record<string, { label: string; icon: string; color: string; order: number }>;
     EDGE_TYPES: Array<[string, string]>;
+    EDGE_META: Record<string, { label: string; desc: string; movement: boolean; directed: boolean; color: string }>;
     VISIBILITY_LABEL: Record<string, string>;
     REVEAL_LABEL: Record<string, string>;
     byId<T extends HTMLElement = HTMLElement>(id: string): T | null;
@@ -310,6 +333,8 @@ interface NarrativeCore {
     escapeHtml(value: unknown): string;
     isTypingTarget(target: EventTarget | null): boolean;
     kindMeta(kind: string): { label: string; icon: string; color: string; order: number };
+    edgeMeta(type: string | undefined): { label: string; desc: string; movement: boolean; directed: boolean; color: string };
+    edgeText(edge: GraphEdge): string;
     editable(): boolean;
     showTab(tab: "basic" | "modules" | "tree" | "graph" | "validate" | "generate"): void;
     setStatus(text: string, variant?: "secondary" | "success" | "warning" | "danger"): void;

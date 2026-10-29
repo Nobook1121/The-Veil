@@ -8,6 +8,7 @@ from trpg_server.media_defaults import normalize_cover
 from trpg_server.responses import error_response, success_response
 from trpg_server.scenario_import_jobs import public_job_payload, submit_import_job
 from trpg_server.scenario_documents import validate_scenario_upload, ScenarioDocumentError
+from trpg_server.scenario_bundle import BundleError, build_narrative, normalize_bundle, scenario_from_result
 from trpg_server.scenario_store import generate_public_id, load_scenario_record, save_scenario_record, scenario_descriptor_paths
 from trpg_server.settings import SCENARIOS_DIR
 from trpg_server.agents.knowledge_base import (
@@ -86,10 +87,101 @@ def create_import():
     try: validate_scenario_upload(uploaded.filename or "script.txt", len(raw), current_app.config["SCENARIO_IMPORT_MAX_BYTES"])
     except ScenarioDocumentError as exc: return error_response(str(exc), 400, "Invalid script")
     filename = Path(uploaded.filename or "script.txt").name
-    job = _store().create(owner_id=str(session["user_id"]), filename=filename, metadata={k: request.form.get(k, "") for k in ("title", "author", "description", "public", "creator", "playerCount")})
+    mode = (request.form.get("mode") or "direct").strip().lower()
+    if mode not in {"direct", "ai"}:
+        mode = "direct"
+    metadata = {k: request.form.get(k, "") for k in ("title", "author", "description", "public", "creator", "playerCount")}
+    metadata["mode"] = mode
+    job = _store().create(owner_id=str(session["user_id"]), filename=filename, metadata=metadata)
     source = Path(_store().root) / job["id"] / "source" / filename; source.parent.mkdir(parents=True, exist_ok=True); source.write_bytes(raw)
     submit_import_job(current_app._get_current_object(), job["id"])
     return success_response({"jobId": job["id"], "scriptId": job["script_id"]}, "Import started", 202)
+
+@bp.post("/api/scripts/import/bundle")
+def import_bundle():
+    """导入 Skill / 外部 AI 生成的剧本包（JSON）。不重新调用 AI，只做校验与修复。"""
+    if (e := _login()): return e
+    uploaded = request.files.get("file")
+    payload = request.get_json(silent=True)
+    if uploaded:
+        raw = uploaded.read()
+        if len(raw) > int(current_app.config["SCENARIO_IMPORT_MAX_BYTES"]):
+            return error_response("剧本包过大", 413, "Bundle too large")
+        try:
+            payload = json.loads(raw.decode("utf-8-sig"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return error_response("剧本包不是合法 JSON", 400, "Invalid bundle")
+    if not isinstance(payload, dict):
+        return error_response("请提供剧本包 JSON", 400, "Missing bundle")
+    bundle = payload.get("bundle") if isinstance(payload.get("bundle"), dict) else payload
+    filename = Path(getattr(uploaded, "filename", "") or "scenario-bundle.json").name
+    title = str((bundle.get("scenario") or {}).get("title") or "").strip() if isinstance(bundle.get("scenario"), dict) else ""
+    result = normalize_bundle(
+        bundle,
+        fallback_title=Path(filename).stem,
+        default_scenario_id="",
+        default_version="1.0.0",
+    )
+    narrative, repair, validation = build_narrative(result) if result.ok else (None, None, None)
+    if result.errors:
+        return error_response(
+            "剧本包校验失败",
+            400,
+            "；".join(str(item.get("message")) for item in result.errors[:5]),
+        )
+    if narrative is None or not narrative.nodes:
+        return error_response("剧本包没有任何图谱节点", 400, "Empty nodes")
+    metadata = {
+        "title": title or result.data["scenario"].get("title") or Path(filename).stem,
+        "author": str(result.data["scenario"].get("author") or ""),
+        "creator": session.get("username", ""),
+        "playerCount": str(result.data["scenario"].get("playerCount") or 1),
+        "description": str(result.data["scenario"].get("notes") or ""),
+        "mode": "bundle",
+    }
+    job = _store().create(owner_id=str(session["user_id"]), filename=filename, metadata=metadata)
+    scenario = scenario_from_result(result)
+    scenario["id"] = job["script_id"]
+    scenario["scenario_version"] = "1.0.0"
+    scenario["import_mode"] = "ai"
+    scenario["import_exclusions"] = result.data.get("exclusions") or []
+    scenario["conversion"] = {
+        "version": 5,
+        "source_preserved": True,
+        "document_import": True,
+        "bundle_import": True,
+        "warnings": result.warnings,
+        "repair": repair.to_dict() if repair else {},
+        "stages": ["bundle", "normalize", "graph", "embed"],
+    }
+    scenario["narrative_summary"] = {
+        "nodes": len(narrative.nodes),
+        "edges": len(narrative.edges),
+        "locations": len(narrative.location_nodes),
+        "endings": len(narrative.ending_nodes),
+        "repair_count": len(repair.applied) if repair else 0,
+        "error_count": validation.to_dict().get("error_count", 0) if validation else 0,
+        "warning_count": validation.to_dict().get("warning_count", 0) if validation else 0,
+    }
+    narrative.scenario_id = str(job["script_id"])
+    narrative.meta = {
+        **dict(narrative.meta or {}),
+        "generator": "bundle_import",
+        "bundle_format": result.data.get("format"),
+        "exclusions": result.data.get("exclusions") or [],
+    }
+    _store().save_intermediate(job["id"], "bundle", result.payload())
+    _store().save_intermediate(job["id"], "narrative", narrative.to_dict())
+    _store().save_intermediate(job["id"], "preview", scenario)
+    _store().update(job["id"], status="done", current_stage="done", progress=100, stage_progress=100, preview=scenario, stage_meta={"mode": "bundle"})
+    log_user_action(
+        logger,
+        user_action_text(session.get("username"), "导入了剧本包"),
+        用户ID=session.get("user_id"),
+        剧本ID=job["script_id"],
+    )
+    return success_response({"jobId": job["id"], "scriptId": job["script_id"], "preview": scenario}, "Bundle imported", 201)
+
 
 @bp.get("/api/scripts/import/<job_id>")
 def get_import(job_id):
@@ -161,24 +253,49 @@ def publish_import(script_id):
     stored = load_scenario_record(descriptor, root)
     vector_store = current_app.extensions.get("vector_store")
     provider = current_app.extensions.get("embedding_provider")
-    if str(scenario.get("import_mode") or "") == "direct":
-        # 直接导入的剧本没有场景卡，知识块在管线中已按标题切分并嵌入；这里把
-        # 这些块同时写入 JSON 索引，保证离线重建与检索仍然可用。
-        raw_chunks = _store().load_intermediate(job["id"], "knowledge", []) or []
-        chunks = []
-        for item in raw_chunks:
-            if isinstance(item, dict):
-                try:
-                    chunks.append(KnowledgeChunk(**item))
-                except TypeError:
-                    continue
+    raw_chunks = _store().load_intermediate(job["id"], "knowledge", []) or []
+    chunks = []
+    for item in raw_chunks:
+        if isinstance(item, dict):
+            try:
+                chunks.append(KnowledgeChunk(**item))
+            except TypeError:
+                continue
+    if chunks:
         chunks = index_knowledge_chunks(chunks, vector_store=vector_store, embedding_provider=provider)
         write_knowledge_index(descriptor, stored.get("scenario_version") or scenario.get("scenario_version"), chunks)
     else:
         persist_knowledge_index(descriptor, stored, vector_store=vector_store, embedding_provider=provider)
+
+    # AI 全链路 / 直接导入 / 剧本包导入：图谱已在导入阶段生成，发布时直接落盘；
+    # 由程序再做一次结构修复，确保端点、parent、起点不会把错边带进运行时。
+    if str(scenario.get("import_mode") or "") in {"ai", "direct", "bundle"}:
+        from trpg_server.agents.narrative.model import NarrativeBundle
+        from trpg_server.agents.narrative.repair import repair_bundle
+        from trpg_server.agents.narrative.store import save_bundle
+
+        narrative_data = _store().load_intermediate(job["id"], "narrative", {}) or {}
+        if isinstance(narrative_data, dict) and narrative_data.get("nodes"):
+            narrative = NarrativeBundle.from_dict(narrative_data)
+            narrative.scenario_id = str(script_id)
+            narrative.scenario_version = stored.get("scenario_version") or scenario.get("scenario_version") or "1.0.0"
+            repair = repair_bundle(narrative)
+            narrative.meta = {
+                **dict(narrative.meta or {}),
+                "scenario_id": str(script_id),
+                "published_from": "import",
+                "repair": repair.to_dict(),
+            }
+            save_bundle(descriptor.parent, narrative)
+            log_user_action(
+                logger,
+                user_action_text(session.get("username"), "发布了导入剧本图谱"),
+                用户ID=session.get("user_id"),
+                剧本ID=script_id,
+                节点数=len(narrative.nodes),
+                边数=len(narrative.edges),
+            )
     _store().update(job["id"], status="published", progress=100)
-    # 世界树不再在导入发布时自动构建：作者打开图谱页签后点「自动建图」，
-    # 或运行 narrative build 才会生成，避免未检查的图谱被静默写入。
     log_user_action(
         logger,
         user_action_text(session.get("username"), "发布了导入任务"),

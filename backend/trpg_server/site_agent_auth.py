@@ -17,6 +17,7 @@ from trpg_server.security import (
     SESSION_TOKEN_KEY,
     USER_ROOM_MEMBERSHIP_KEY,
     get_user_manager,
+    user_room_ids,
 )
 from trpg_server.settings import CONFIG_DIR
 
@@ -108,7 +109,7 @@ def build_actor() -> Actor:
     # 角色以数据库当前值为准，而不是 session 中可能已经过期的旧值。
     role = str(user.get("role") or session.get("role") or "USER").upper()
     membership = current_app.config.get(USER_ROOM_MEMBERSHIP_KEY, {}) or {}
-    room_ids = {str(item) for item in membership.get(str(user_id), set()) if item}
+    room_ids = user_room_ids(user_id, membership)
     return Actor(
         user_id=int(user_id),
         username=str(user.get("username") or session.get("username") or ""),
