@@ -279,21 +279,6 @@ def _write_action(action: dict[str, Any]) -> None:
         write_json_atomic(path, action)
 
 
-def expire_pending_actions() -> int:
-    """把已过期的待确认操作批量落为 expired，供定时任务/测试调用。"""
-    directory = _actions_dir()
-    if not directory.exists():
-        return 0
-    changed = 0
-    for path in directory.glob("a_*.json"):
-        action = read_json(path, default=None)
-        if isinstance(action, dict) and action.get("status") == "pending":
-            refreshed = load_action(path.stem)
-            if isinstance(refreshed, dict) and refreshed.get("status") == "expired":
-                changed += 1
-    return changed
-
-
 # ---------------------------------------------------------------- audit
 
 

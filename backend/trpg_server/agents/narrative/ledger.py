@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 from uuid import uuid4
 
+from trpg_server.agents.narrative.coerce import as_str_list as _str_list
 from trpg_server.agents.narrative.logger import log_event
 from trpg_server.agents.narrative.model import NarrativeBundle
 from trpg_server.agents.narrative.visibility import assert_no_kp_only
@@ -55,17 +56,6 @@ def _as_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
-
-
-def _str_list(value: Any) -> list[str]:
-    if not isinstance(value, (list, tuple, set)):
-        return []
-    result: list[str] = []
-    for item in value:
-        text = str(item or "").strip()
-        if text and text not in result:
-            result.append(text)
-    return result
 
 
 def _now_text() -> str:

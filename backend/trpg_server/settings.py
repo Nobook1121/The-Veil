@@ -89,3 +89,9 @@ def _load_secret_key() -> str:
 
 SECRET_KEY = _load_secret_key()
 SESSION_COOKIE_SECURE = os.environ.get("AI_TRPG_SESSION_COOKIE_SECURE", "0").strip().lower() in {"1", "true", "yes"}
+# 跨域白名单：默认空表示仅同源；显式部署到独立域名时用逗号分隔配置。
+CORS_ALLOWED_ORIGINS = tuple(
+    origin.strip()
+    for origin in os.environ.get("AI_TRPG_CORS_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+)

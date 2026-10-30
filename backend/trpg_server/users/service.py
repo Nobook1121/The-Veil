@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import hashlib
+import logging
+import math
 import re
 import secrets
 import sqlite3
 import string
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -23,11 +27,23 @@ from trpg_server.users.passwords import (
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+# 登录失败按账号做指数退避（不区分 IP）：连续失败达到阈值后，每次重试都要等待，
+# 延迟从 1 秒翻倍到 60 秒封顶；成功登录立即清零。阈值内不影响正常用户。
+LOGIN_FAILURE_LIMIT = 5
+LOGIN_BACKOFF_BASE_SECONDS = 1.0
+LOGIN_BACKOFF_MAX_SECONDS = 60.0
+# 记录条数上限，避免用随机用户名刷爆内存（超限时先清理已过退避期的记录）。
+LOGIN_FAILURE_TRACK_LIMIT = 5000
+
+logger = logging.getLogger(__name__)
+
 
 class UserService:
     def __init__(self, db: UserDatabase, ip_config_dir: str | Path | None = None) -> None:
         self.db = db
         self.ip_config_dir = Path(ip_config_dir) if ip_config_dir is not None else USERS_DIR / "ip_configs"
+        self._login_failure_lock = threading.Lock()
+        self._login_failures: dict[str, dict[str, float]] = {}
 
     def register(
         self,
@@ -138,6 +154,15 @@ class UserService:
         user_agent: str | None = None,
     ) -> tuple[bool, str, dict[str, Any] | None, str | None]:
         identifier_normalized = identifier.strip().lower()
+        retry_after = self._login_retry_after(identifier_normalized)
+        if retry_after > 0:
+            logger.warning(
+                "登录失败次数过多，按账号退避 identifier=%s retry_after=%.1fs",
+                identifier_normalized,
+                retry_after,
+            )
+            return False, f"Too many failed attempts. Try again in {math.ceil(retry_after)} seconds", None, None
+
         with self.db.connect() as connection:
             row = connection.execute(
                 """
@@ -160,10 +185,12 @@ class UserService:
             ).fetchone()
 
             if row is None:
+                self._record_login_failure(identifier_normalized)
                 return False, "Invalid username/email or password", None, None
 
             user_id = int(row["id"])
             if not verify_password(password, row["password_hash"]):
+                self._record_login_failure(identifier_normalized)
                 _write_audit_log(
                     connection,
                     user_id,
@@ -176,6 +203,7 @@ class UserService:
             if row["status"] != "active":
                 return False, f"User is {row['status']}", None, None
 
+            self._clear_login_failures(identifier_normalized)
             now = _utc_now()
             now_iso = _to_iso(now)
             token = secrets.token_urlsafe(32)
@@ -244,6 +272,41 @@ class UserService:
             ).fetchone()
 
         return True, "Login successful", dict(user_row), token
+
+    def _login_retry_after(self, identifier: str) -> float:
+        """返回还需等待的秒数；未达到阈值或已过退避期时返回 0。"""
+        with self._login_failure_lock:
+            record = self._login_failures.get(identifier)
+            if not record:
+                return 0.0
+            count = int(record["count"])
+            if count < LOGIN_FAILURE_LIMIT:
+                return 0.0
+            delay = min(
+                LOGIN_BACKOFF_MAX_SECONDS,
+                LOGIN_BACKOFF_BASE_SECONDS * (2 ** (count - LOGIN_FAILURE_LIMIT)),
+            )
+            return max(0.0, delay - (time.monotonic() - float(record["at"])))
+
+    def _record_login_failure(self, identifier: str) -> None:
+        now = time.monotonic()
+        with self._login_failure_lock:
+            if len(self._login_failures) >= LOGIN_FAILURE_TRACK_LIMIT:
+                stale_before = now - LOGIN_BACKOFF_MAX_SECONDS
+                self._login_failures = {
+                    key: value
+                    for key, value in self._login_failures.items()
+                    if float(value["at"]) >= stale_before
+                }
+                if len(self._login_failures) >= LOGIN_FAILURE_TRACK_LIMIT:
+                    self._login_failures.clear()
+            record = self._login_failures.get(identifier)
+            count = int(record["count"]) + 1 if record else 1
+            self._login_failures[identifier] = {"count": float(count), "at": now}
+
+    def _clear_login_failures(self, identifier: str) -> None:
+        with self._login_failure_lock:
+            self._login_failures.pop(identifier, None)
 
     def is_session_current(self, user_id: int, token: str | None) -> bool:
         if not token:

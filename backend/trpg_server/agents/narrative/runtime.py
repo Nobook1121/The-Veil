@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
 
+from trpg_server.agents.narrative.coerce import as_bool as _as_bool, as_str_list as _str_list
 from trpg_server.agents.narrative.conditions import ConditionResult, evaluate_condition
 from trpg_server.agents.narrative.ledger import append_ledger_event, read_ledger_events
 from trpg_server.agents.narrative.logger import log_event, log_warning
@@ -57,22 +58,6 @@ def _as_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
-
-
-def _as_bool(value: Any, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _str_list(value: Any) -> list[str]:
-    if not isinstance(value, (list, tuple, set)):
-        return []
-    return list(dict.fromkeys(str(item).strip() for item in value if str(item or "").strip()))
 
 
 def _is_movement(edge: NarrativeEdge) -> bool:

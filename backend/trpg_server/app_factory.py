@@ -16,7 +16,7 @@ from trpg_server.config.paths import resolve_config_dir
 from trpg_server.logging_config import configure_logging
 from trpg_server.security import register_session_guard
 from trpg_server.socket_events import register_socket_events
-from trpg_server.settings import LOGS_DIR, SECRET_KEY, SESSION_COOKIE_SECURE, USERS_DIR, WEAPONS_DIR, ROOM_ARCHIVES_DIR
+from trpg_server.settings import CORS_ALLOWED_ORIGINS, LOGS_DIR, SECRET_KEY, SESSION_COOKIE_SECURE, USERS_DIR, WEAPONS_DIR, ROOM_ARCHIVES_DIR
 from trpg_server.settings import SCENARIO_IMPORTS_DIR, SCENARIO_IMPORT_MAX_BYTES, SCENARIO_IMPORT_WORKERS, SETUP_EMBEDDING_UPLOAD_MAX_BYTES
 from trpg_server.settings import NARRATIVE_JOBS_DIR, NARRATIVE_GENERATE_WORKERS
 from trpg_server.settings import VECTOR_DB_URL, VECTOR_DB_PATH, VECTOR_DB_API_KEY, VECTOR_BACKEND, VECTOR_BACKEND_EXPLICIT, EMBEDDED_VECTOR_DB_PATH, SCENARIOS_DIR, EMBEDDING_BASE_URL, EMBEDDING_API_KEY, EMBEDDING_MODEL, EMBEDDING_DIMENSIONS, OCR_ENABLED, OCR_LANG, LOCAL_EMBEDDING_MODEL_PATH, PADDLEOCR_HOME, AI_PLATFORM_SECRET_DIR, CONFIG_DIR
@@ -33,7 +33,7 @@ from trpg_server.users.database import UserDatabase
 from trpg_server.users.migrations import migrate_json_users
 from trpg_server.users.service import UserService
 
-socketio = SocketIO(cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(async_mode="threading")
 logger = logging.getLogger(__name__)
 
 # 安全响应头。CSP 的白名单与前端实际引用的资源保持一致：
@@ -96,8 +96,12 @@ def create_app(config=None):
     if "USER_MANAGER" not in app.config:
         _configure_user_service(app)
     _clear_legacy_default_scenario_covers(app)
-    CORS(app)
-    socketio.init_app(app)
+    # 默认同源（origins 为空列表即不下发 CORS 头）；需要独立前端域名时显式配置
+    # AI_TRPG_CORS_ALLOWED_ORIGINS。Socket.IO 使用同一份白名单。
+    app.config.setdefault("CORS_ALLOWED_ORIGINS", list(CORS_ALLOWED_ORIGINS))
+    allowed_origins = list(app.config.get("CORS_ALLOWED_ORIGINS") or [])
+    CORS(app, origins=allowed_origins or [])
+    socketio.init_app(app, cors_allowed_origins=allowed_origins or None)
     app.extensions["socketio"] = socketio
     register_session_guard(app)
     register_blueprints(app)

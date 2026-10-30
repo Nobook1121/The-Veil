@@ -868,28 +868,5 @@ def cancel_roll(room_id: str, request_id: str, operator: str = "") -> tuple[dict
     return pending.result, ""
 
 
-def cleanup_room(room_id: str, reason: str = "room_closed") -> int:
-    """房间归档/删除时解除所有等待，返回清理数量。"""
-    with _LOCK:
-        items = [item for item in _PENDING.values() if item.room_id == room_id]
-    for pending in items:
-        with pending.lock:
-            if pending.state in ACTIVE_STATES:
-                pending.state = "cancelled"
-                pending.result = {"cancelled": True, "summary": "房间已关闭，投掷取消", "request_id": pending.request_id}
-        _emit("player_dice_cancelled", {"room_id": room_id, "request_id": pending.request_id, "reason": reason, "operator": ""})
-        pending.event.set()
-        _remove(pending.request_id)
-    return len(items)
-
-
-def reroll_result(room_id: str, request_id: str) -> dict[str, Any] | None:
-    """重连恢复用：已投掷但尚未完成时返回结果快照。"""
-    pending = _find(room_id, request_id)
-    if pending is None or pending.result is None:
-        return None
-    return _result_snapshot(pending.result)
-
-
 # 供 REST 路由使用的公开别名。
 result_snapshot = _result_snapshot

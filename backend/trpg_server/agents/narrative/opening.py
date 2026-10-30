@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from trpg_server.agents.narrative.coerce import as_str_list as _str_list
 from trpg_server.agents.narrative.guards import forbidden_entries
 from trpg_server.agents.narrative.logger import log_event, log_warning
 from trpg_server.agents.narrative.model import (
@@ -53,12 +54,6 @@ def _as_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
-
-
-def _str_list(value: Any) -> list[str]:
-    if not isinstance(value, (list, tuple, set)):
-        return []
-    return list(dict.fromkeys(_text(item) for item in value if _text(item)))
 
 
 def _module_type(module: Mapping[str, Any]) -> str:

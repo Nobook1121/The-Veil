@@ -14,6 +14,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
+from trpg_server.agents.narrative.coerce import as_bool as _as_bool, as_str_list as _str_list
+
 SCHEMA_VERSION = 1
 
 VISIBILITY_PUBLIC = "public"
@@ -90,16 +92,6 @@ def slugify_id(value: Any, prefix: str = "node") -> str:
     return text or prefix
 
 
-def _as_bool(value: Any, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _as_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
@@ -112,17 +104,6 @@ def _as_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
-
-
-def _str_list(value: Any) -> list[str]:
-    if not isinstance(value, (list, tuple, set)):
-        return []
-    result: list[str] = []
-    for item in value:
-        text = str(item or "").strip()
-        if text and text not in result:
-            result.append(text)
-    return result
 
 
 def _dict_list(value: Any) -> list[dict[str, Any]]:
@@ -530,33 +511,6 @@ def content_fingerprint(bundle: NarrativeBundle) -> str:
 
 def utc_now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
-def collect_worldbook_entries(bundle: NarrativeBundle) -> list[dict[str, Any]]:
-    """把节点上的关键词/可见性整理为世界书条目（供知识库与导出使用）。"""
-    entries: list[dict[str, Any]] = []
-    for node in bundle.nodes:
-        if not (node.keywords or node.aliases or node.body or node.summary):
-            continue
-        entries.append(
-            {
-                "node_id": node.id,
-                "title": node.title or node.id,
-                "keywords": list(node.keywords),
-                "aliases": list(node.aliases),
-                "negative_keywords": list(node.negative_keywords),
-                "scope": node.scope,
-                "constant": node.constant,
-                "keyword_weight": node.keyword_weight,
-                "keyword_match": node.keyword_match,
-                "visibility": node.visibility,
-                "kp_notes": node.kp_notes,
-                "reveal_when": node.reveal_when,
-                "spoiler_level": node.spoiler_level,
-                "kind": node.kind,
-            }
-        )
-    return entries
 
 
 def iter_node_ids(nodes: Iterable[NarrativeNode]) -> list[str]:

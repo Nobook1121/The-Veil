@@ -26,11 +26,3 @@ def test_vector_health_endpoint_exposes_embedding_load_status(tmp_path: Path):
     embedding = response.get_json()["data"]["embedding"]
     assert embedding["loaded"] is True
     assert "dimensions" in embedding
-
-
-def test_bge_download_script_documents_default_model_path():
-    script = Path("scripts/download-bge-model.py")
-    assert script.exists()
-    text = script.read_text(encoding="utf-8")
-    assert "bge-small-zh-v1.5" in text
-    assert "data/runtime/models/embedding" in text

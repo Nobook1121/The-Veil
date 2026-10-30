@@ -4,12 +4,13 @@ from typing import Any, cast
 from flask import current_app, request, session
 from flask_socketio import disconnect, emit, join_room, leave_room
 
-from trpg_server.logging_config import log_user_action, user_action_text
+from trpg_server.logging_config import user_action_text
+from trpg_server.room_access import can_access, find_room
 from trpg_server.room_log import log_room_event, set_room_log_broadcaster
 from trpg_server.security import (
-    ACTIVE_SESSION_REGISTRY_KEY,
-    SESSION_TOKEN_KEY,
     USER_ROOM_MEMBERSHIP_KEY,
+    is_user_in_room,
+    session_is_current,
 )
 
 logger = logging.getLogger(__name__)
@@ -19,9 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 def register_socket_events(socketio):
-    if getattr(socketio, "_trpg_events_registered", False):
-        return
-
+    # 每次 create_app 都会通过 init_app 重建底层 server，因此事件必须重新绑定；
+    # 已注册标记会让第二个 app（测试/多实例）丢失全部 Socket 处理器。
     # 房间日志实时广播：新增条目推送给房间内在线用户，驱动内嵌 Web 控制台。
     set_room_log_broadcaster(
         lambda room_id, entry: socketio.emit(
@@ -85,11 +85,7 @@ def register_socket_events(socketio):
             socketio.emit("room_members_changed", {"room_id": room_id}, room=room_id)
 
     def _session_is_current():
-        if "user_id" not in session:
-            return False
-        active_sessions = current_app.config.setdefault(ACTIVE_SESSION_REGISTRY_KEY, {})
-        active_token = active_sessions.get(str(session["user_id"]))
-        return not active_token or session.get(SESSION_TOKEN_KEY) == active_token
+        return session_is_current()
 
     def _replace_active_socket():
         active_sockets = current_app.config.setdefault("ACTIVE_SOCKET_SESSIONS", {})
@@ -132,25 +128,33 @@ def register_socket_events(socketio):
             disconnect()
             return
 
-        room_id = (data or {}).get("room_id")
-        if room_id:
-            join_room(room_id)
-            if "user_id" in session:
-                _add_room_for_socket(str(session["user_id"]), cast(Any, request).sid, room_id)
-            log_room_event(
-                message=user_action_text(session.get("username"), "加入了房间"),
-                actor=session.get("username"),
-                room_id=room_id,
-                rooms_dir=current_app.config.get("ROOMS_DIR"),
-                logger_=logger,
-                用户ID=session.get("user_id"),
-            )
-            # 用户刚上线/进入房间，通知房间内其他人刷新成员列表。
-            _notify_room_members_changed(room_id)
+        room_id = str((data or {}).get("room_id") or "").strip()
+        if not room_id:
+            emit("room_error", {"code": "room_required", "message": "缺少房间 ID"})
+            return
+
+        room_dir, info = find_room(room_id)
+        if room_dir is None or not can_access(info, session.get("user_id"), session.get("role", "USER")):
+            # 不暴露房间是否存在，统一拒绝；避免任意登录用户进入他人的实时通道。
+            emit("room_error", {"code": "room_access_denied", "message": "无法进入该房间"})
+            return
+
+        join_room(room_id)
+        _add_room_for_socket(str(session["user_id"]), cast(Any, request).sid, room_id)
+        log_room_event(
+            message=user_action_text(session.get("username"), "加入了房间"),
+            actor=session.get("username"),
+            room_id=room_id,
+            rooms_dir=current_app.config.get("ROOMS_DIR"),
+            logger_=logger,
+            用户ID=session.get("user_id"),
+        )
+        # 用户刚上线/进入房间，通知房间内其他人刷新成员列表。
+        _notify_room_members_changed(room_id)
 
     @socketio.on("leave_room")
     def handle_leave_room(data):
-        room_id = (data or {}).get("room_id")
+        room_id = str((data or {}).get("room_id") or "").strip()
         if room_id:
             leave_room(room_id)
             if "user_id" in session:
@@ -173,11 +177,10 @@ def register_socket_events(socketio):
             return
 
         payload = data or {}
-        room_id = payload.get("room_id")
-        if room_id:
+        room_id = str(payload.get("room_id") or "").strip()
+        # 只允许在当前已加入的房间内发言；缺省不再广播到所有在线用户。
+        if room_id and is_user_in_room(session.get("user_id"), room_id):
             socketio.emit("new_message", payload, room=room_id, include_self=False)
-        else:
-            socketio.emit("new_message", payload, broadcast=True, include_self=False)
 
     @socketio.on("typing")
     def handle_typing(data):
@@ -186,10 +189,6 @@ def register_socket_events(socketio):
             disconnect()
             return
 
-        room_id = (data or {}).get("room_id")
-        if room_id:
+        room_id = str((data or {}).get("room_id") or "").strip()
+        if room_id and is_user_in_room(session.get("user_id"), room_id):
             socketio.emit("user_typing", data, room=room_id, include_self=False)
-        else:
-            socketio.emit("user_typing", data, broadcast=True, include_self=False)
-
-    socketio._trpg_events_registered = True

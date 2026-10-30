@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from trpg_server.agents.tools.base import AgentTool, ToolRegistry
+from trpg_server.agents.tools.base import AgentTool
 
 Risk = Literal["read", "write", "danger"]
 Scope = Literal["site", "room"]
@@ -167,16 +167,6 @@ def sanitize_arguments(spec: ToolSpec, arguments: dict[str, Any] | None) -> dict
             if max_items and len(value) > max_items:
                 raise ToolArgumentError(f"参数 {key} 数量超过上限")
     return cleaned
-
-
-def build_registry(
-    specs: list[ToolSpec],
-    wrapper_factory: Callable[[ToolSpec], Callable[[dict[str, Any], ToolContext], dict[str, Any]]],
-) -> ToolRegistry:
-    registry = ToolRegistry()
-    for spec in specs:
-        registry.register(spec.build_agent_tool(wrapper_factory(spec)))
-    return registry
 
 
 def schema(

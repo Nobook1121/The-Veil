@@ -12,8 +12,8 @@ from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.media_defaults import normalize_avatar
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
 from trpg_server.room_log import ARCHIVE_LOG_LIMIT, load_room_log, log_room_event
-from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, success_response
+from trpg_server.room_access import can_access, find_room, is_elevated
 from trpg_server.room_usage import load_room_usage
 from trpg_server.role_config import load_roles
 from trpg_server.security import get_user_manager, is_socket_user_online, is_user_in_room, safe_join
@@ -111,9 +111,7 @@ def _require_login():
 
 
 def _is_elevated():
-    config_dir = current_app.config.get("CONFIG_DIR")
-    config_path = current_app.config.get("PERMISSION_CONFIG_FILE") or permission_config_path(config_dir)
-    return is_role_allowed(session.get("role", "USER"), "rooms.manage_members", config_path)
+    return is_elevated()
 
 
 def _denied(room_ref=None):
@@ -232,11 +230,7 @@ def _room_dir(room_id):
 
 
 def _find_room(room_id):
-    room_dir = _room_dir(room_id)
-    info_file = room_dir / "info.json"
-    if not info_file.exists():
-        return None, None
-    return room_dir, read_json(info_file, default={})
+    return find_room(room_id)
 
 
 def _find_room_by_code(room_code):
@@ -297,10 +291,7 @@ def _room_name_exists(room_name):
 
 
 def _can_access(info):
-    if _is_elevated():
-        return True
-    user_id = session.get("user_id")
-    return _find_member(info, user_id=user_id, active_only=True) is not None
+    return can_access(info, session.get("user_id"), session.get("role", "USER"))
 
 
 def _can_manage(info):

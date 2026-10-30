@@ -472,14 +472,6 @@ def _kp_notes(text: str) -> str | None:
     return None
 
 
-def _section_module_type(section: Section) -> str:
-    if section.kind == "ending":
-        return "ending"
-    if section.kind == "background":
-        return "background"
-    return ""
-
-
 def _module_sections(modules: list[dict[str, Any]], used_titles: set[str]) -> list[Section]:
     sections: list[Section] = []
     order = 10000

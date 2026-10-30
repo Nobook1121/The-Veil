@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
 from trpg_server.agents.narrative.model import (
     ASSET_KINDS,
@@ -616,40 +616,6 @@ def build_narrative(result: BundleResult, *, repair: bool = True) -> tuple[Narra
     if report.applied:
         logger.info("scenario_bundle.repaired count=%d", len(report.applied))
     return bundle, report, validation
-
-
-def bundle_payload_for_export(
-    scenario: Mapping[str, Any],
-    narrative: NarrativeBundle | Mapping[str, Any] | None = None,
-    *,
-    exclusions: Iterable[Mapping[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """把站内剧本与图谱导出成剧本包，供 Skill/外部编辑后再导入。"""
-    narrative_data: dict[str, Any] = {}
-    if isinstance(narrative, NarrativeBundle):
-        narrative_data = narrative.to_dict()
-    elif isinstance(narrative, Mapping):
-        narrative_data = dict(narrative)
-    return {
-        "format": BUNDLE_FORMAT,
-        "format_version": BUNDLE_VERSION,
-        "scenario": {
-            key: scenario.get(key)
-            for key in (
-                "title",
-                "author",
-                "creator_username",
-                "playerCount",
-                "notes",
-                "global_summary",
-                "scenario_version",
-            )
-            if scenario.get(key) not in (None, "")
-        },
-        "modules": list(scenario.get("modules") or []),
-        "narrative": narrative_data,
-        "exclusions": [dict(item) for item in (exclusions or []) if isinstance(item, Mapping)],
-    }
 
 
 def document_hash(markdown: str) -> str:

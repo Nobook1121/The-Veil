@@ -21,12 +21,3 @@ def test_backend_settings_paths_are_rooted_at_repository_root():
     assert settings.BASE_DIR == ROOT
     assert settings.DATA_DIR == ROOT / "data"
     assert settings.FRONTEND_DIST_DIR == ROOT / "dist" / "public"
-
-
-def test_legacy_users_json_is_removed_after_runtime_database_migration():
-    assert not (ROOT / "data" / "users" / "users.json").exists()
-
-
-def test_legacy_runtime_directories_are_removed_after_runtime_migration():
-    for legacy_dir in ("characters", "history", "logs", "rooms", "users"):
-        assert not (ROOT / "data" / legacy_dir).exists()

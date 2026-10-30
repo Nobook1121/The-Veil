@@ -24,8 +24,13 @@ import requests
 
 from trpg_server.ai_platform_config import load_platform_config
 from trpg_server.security import safe_join
+from trpg_server.settings import SETUP_EMBEDDING_UPLOAD_MAX_BYTES
 
 logger = logging.getLogger(__name__)
+
+# 压缩包解压后的总体积上限（按上传大小的 4 倍估算，足够覆盖正常模型仓库，
+# 同时拦住 zip bomb 把磁盘写满）。
+EXTRACT_MAX_BYTES = SETUP_EMBEDDING_UPLOAD_MAX_BYTES * 4
 
 EMBEDDING_REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}/[A-Za-z0-9_.-]{1,96}$")
 # 优先官方站点，失败时回落到国内镜像，避免部分网络环境无法直连 HuggingFace。
@@ -241,11 +246,14 @@ def _extract_zip(stream: Any, dest: Path) -> int:
     members = [member for member in archive.infolist() if not member.is_dir()]
     if not members:
         raise EmbeddingSetupError("压缩包里没有文件。")
+    if sum(max(0, member.file_size) for member in members) > EXTRACT_MAX_BYTES:
+        raise EmbeddingSetupError("压缩包解压后体积超过上限。")
 
     normalized = {member.filename: _safe_parts(member.filename) for member in members}
     top = _common_top_folder([name for name in normalized if "/" in name])
 
     written = 0
+    extracted_bytes = 0
     for member in members:
         parts = normalized[member.filename]
         if not parts:
@@ -260,7 +268,17 @@ def _extract_zip(stream: Any, dest: Path) -> int:
             raise EmbeddingSetupError("压缩包里包含非法路径。") from exc
         target.parent.mkdir(parents=True, exist_ok=True)
         with archive.open(member) as source, open(target, "wb") as out:
-            shutil.copyfileobj(source, out)
+            while True:
+                chunk = source.read(1024 * 1024)
+                if not chunk:
+                    break
+                extracted_bytes += len(chunk)
+                # 声明大小可以伪造，按实际写入字节数再兜底一次。
+                if extracted_bytes > EXTRACT_MAX_BYTES:
+                    out.close()
+                    target.unlink(missing_ok=True)
+                    raise EmbeddingSetupError("压缩包解压后体积超过上限。")
+                out.write(chunk)
         written += 1
     return written
 

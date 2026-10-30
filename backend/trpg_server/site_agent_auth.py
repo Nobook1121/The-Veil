@@ -13,10 +13,9 @@ from flask import current_app, session
 
 from trpg_server.permission_config import is_role_allowed, permission_config_path, permission_node_ids
 from trpg_server.security import (
-    ACTIVE_SESSION_REGISTRY_KEY,
-    SESSION_TOKEN_KEY,
     USER_ROOM_MEMBERSHIP_KEY,
     get_user_manager,
+    session_is_current,
     user_room_ids,
 )
 from trpg_server.settings import CONFIG_DIR
@@ -92,11 +91,8 @@ def permission_set_for_role(role: str) -> frozenset[str]:
 
 
 def is_session_current() -> bool:
-    if "user_id" not in session:
-        return False
-    registry = current_app.config.setdefault(ACTIVE_SESSION_REGISTRY_KEY, {})
-    active_token = registry.get(str(session["user_id"]))
-    return not active_token or session.get(SESSION_TOKEN_KEY) == active_token
+    # 与 HTTP 守卫、Socket.IO 共用同一套判定，避免三处逻辑漂移。
+    return session_is_current()
 
 
 def build_actor() -> Actor:

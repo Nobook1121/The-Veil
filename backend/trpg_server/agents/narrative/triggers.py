@@ -10,6 +10,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any, Mapping
 
+from trpg_server.agents.narrative.coerce import as_str_list_or_scalar as _str_list
 from trpg_server.json_store import read_json
 
 BINDING_KINDS = {
@@ -45,15 +46,6 @@ def _int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
-
-
-def _str_list(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, (list, tuple, set)):
-        return [str(item).strip() for item in value if str(item or "").strip()]
-    text = _text(value)
-    return [text] if text else []
 
 
 def _stable_id(prefix: str, value: str) -> str:

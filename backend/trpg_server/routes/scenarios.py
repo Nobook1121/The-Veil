@@ -117,14 +117,6 @@ def _index_scenario_knowledge(descriptor_path, scenario):
         return {"success": False, "vector_count": 0, "error": str(exc)}
 
 
-def _scenario_knowledge_stats(descriptor_path, scenario):
-    """只读统计现有知识块，用于「仅修改基础信息」时避免重新嵌入。"""
-    from trpg_server.agents.knowledge_base import knowledge_index_path, load_knowledge_index
-    version = str(scenario.get("scenario_version") or scenario.get("version") or "1")
-    chunks = load_knowledge_index(descriptor_path, version)
-    return {"success": True, "vector_count": len(chunks), "path": str(knowledge_index_path(descriptor_path, version)), "version": version}
-
-
 @bp.route("/api/scenarios/draft", methods=["GET"])
 def get_scenario_draft():
     login_error = _require_login()

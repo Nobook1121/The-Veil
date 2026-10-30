@@ -469,9 +469,14 @@ def test_socket_broadcast_does_not_log_persisted_room_message(monkeypatch, caplo
     monkeypatch.setattr(socket_events, "emit", lambda *args, **kwargs: None)
     caplog.set_level("INFO", logger="trpg_server.socket_events")
 
+    class FakeManager:
+        def is_session_current(self, user_id, token):
+            return True
+
     app = Flask(__name__)
     app.secret_key = "test"
     app.config["ACTIVE_SESSIONS"] = {}
+    app.config["USER_MANAGER"] = FakeManager()
     with app.test_request_context("/socket.io/"):
         session["user_id"] = 1
         session["username"] = "alice"

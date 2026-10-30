@@ -613,20 +613,6 @@ def _skill_key_from_name(name, fallback=""):
     return _as_text(lookup.get(str(name)), fallback)
 
 
-def _owned_character_count(excluded_character_id=None):
-    current_ids = _current_player_ids()
-    count = 0
-    for path in _iter_character_files():
-        character = _character_from_storage(read_json(path, default=None), _character_id_from_path(path))
-        if not character:
-            continue
-        if excluded_character_id and str(character.get("id")) == str(excluded_character_id):
-            continue
-        if str(character.get("playerId") or "") in current_ids:
-            count += 1
-    return count
-
-
 def _character_filename(character_id):
     return normalize_filename(f"{character_id or f'investigator-{int(time.time() * 1000)}'}.json")
 

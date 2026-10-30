@@ -1,4 +1,5 @@
 import secrets
+import time
 from functools import wraps
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
@@ -15,6 +16,8 @@ USER_ROOM_MEMBERSHIP_KEY = "USER_ROOM_MEMBERSHIP"
 SESSION_TOKEN_KEY = "session_token"
 CSRF_SESSION_KEY = "csrf_token"
 IMPERSONATION_SESSION_PREFIX = "impersonation:"
+# 模拟登录与普通会话同寿命（7 天）；令牌内嵌过期时间，避免被无限期复用。
+IMPERSONATION_TTL_SECONDS = 7 * 24 * 60 * 60
 CSRF_EXEMPT_PATHS = {
     "/api/auth/login",
     "/api/auth/register",
@@ -148,17 +151,60 @@ def is_user_in_room(user_id, room_id):
     return str(room_id) in user_room_ids(user_id)
 
 
+def build_impersonation_token(initiator_id, target_id):
+    """模拟登录令牌：内嵌发起者、目标用户与过期时间，供会话判定做绑定校验。"""
+    expires_at = int(time.time()) + IMPERSONATION_TTL_SECONDS
+    return f"{IMPERSONATION_SESSION_PREFIX}{int(initiator_id)}:{int(target_id)}:{expires_at}:{uuid4().hex}"
+
+
+def impersonation_token_is_valid(token, *, initiator_id=None, target_id=None):
+    if not isinstance(token, str) or not token.startswith(IMPERSONATION_SESSION_PREFIX):
+        return False
+    parts = token[len(IMPERSONATION_SESSION_PREFIX):].split(":")
+    if len(parts) != 4:
+        return False
+    raw_initiator, raw_target, raw_expires, nonce = parts
+    if not nonce:
+        return False
+    try:
+        expires_at = int(raw_expires)
+    except (TypeError, ValueError):
+        return False
+    if expires_at <= int(time.time()):
+        return False
+    if initiator_id is not None and not secrets.compare_digest(raw_initiator, str(initiator_id)):
+        return False
+    if target_id is not None and not secrets.compare_digest(raw_target, str(target_id)):
+        return False
+    return True
+
+
+def _impersonation_session_is_current(token):
+    return bool(session.get("impersonation_mode")) and impersonation_token_is_valid(
+        token,
+        initiator_id=session.get("impersonation_original_user_id"),
+        target_id=session.get("user_id"),
+    )
+
+
 def _is_session_current(manager, user_id, token):
-    # 模拟登录使用独立 token 前缀，此时只要求当前会话处于 impersonation 模式，
-    # 不走真实用户的单会话约束，避免管理员模拟时踢掉被模拟用户的登录态。
+    # 模拟登录使用独立 token 前缀，此时只要求当前会话处于 impersonation 模式且
+    # 令牌与发起者/目标绑定，不走真实用户的单会话约束，避免管理员模拟时踢掉被模拟用户的登录态。
     if token and str(token).startswith(IMPERSONATION_SESSION_PREFIX):
-        return bool(session.get("impersonation_mode"))
+        return _impersonation_session_is_current(token)
     if hasattr(manager, "is_session_current"):
         return manager.is_session_current(user_id, token)
 
     active_sessions = current_app.config.setdefault(ACTIVE_SESSION_REGISTRY_KEY, {})
     active_token = active_sessions.get(str(user_id))
     return not (active_token and token != active_token)
+
+
+def session_is_current():
+    """统一的会话有效性判定（HTTP 守卫、网站 Agent、Socket.IO 共用）。"""
+    if "user_id" not in session:
+        return False
+    return _is_session_current(get_user_manager(), session["user_id"], session.get(SESSION_TOKEN_KEY))
 
 
 def register_session_guard(app):

@@ -12,6 +12,7 @@ from trpg_server.responses import error_response, server_error, success_response
 from trpg_server.security import (
     CSRF_SESSION_KEY,
     SESSION_TOKEN_KEY,
+    build_impersonation_token,
     build_public_asset_url,
     clear_session_token,
     is_allowed_upload,
@@ -303,7 +304,7 @@ def start_impersonation():
         session["user_id"] = target_user["id"]
         session["username"] = target_user["username"]
         session["role"] = target_user["role"]
-        session[SESSION_TOKEN_KEY] = f"impersonation:{uuid.uuid4().hex}"
+        session[SESSION_TOKEN_KEY] = build_impersonation_token(original_user["user_id"], target_user["id"])
         session[CSRF_SESSION_KEY] = secrets.token_urlsafe(32)
         session.permanent = True
         current_app.permanent_session_lifetime = timedelta(days=7)

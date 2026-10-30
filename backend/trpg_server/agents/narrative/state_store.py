@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 from typing import Any, Mapping
 
+from trpg_server.agents.narrative.coerce import as_bool as _as_bool, as_str_list as _str_list
 from trpg_server.agents.narrative.logger import log_event, log_warning
 from trpg_server.agents.room_state import load_room_state, save_room_state
 from trpg_server.json_store import read_json, write_json_atomic
@@ -41,16 +42,6 @@ _CLOCK_DEFAULTS = {"turn": 0, "in_game_time": "", "scene_enter_turn": 0}
 _NODE_STATUSES = {"unvisited", "visited", "active", "completed"}
 
 
-def _as_bool(value: Any, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _as_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
@@ -63,17 +54,6 @@ def _as_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
-
-
-def _str_list(value: Any) -> list[str]:
-    if not isinstance(value, (list, tuple, set)):
-        return []
-    result: list[str] = []
-    for item in value:
-        text = str(item or "").strip()
-        if text and text not in result:
-            result.append(text)
-    return result
 
 
 def _dict_list(value: Any) -> list[dict[str, Any]]:

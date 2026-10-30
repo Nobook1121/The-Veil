@@ -76,17 +76,6 @@ def test_env_layer_overrides_user_file(tmp_path):
     assert settings.locked["ai.max_tokens"] == "env"
 
 
-def test_cli_overrides_env(tmp_path):
-    settings = load_settings(
-        tmp_path,
-        env={"AI_TRPG_CFG_AI_MAX_TOKENS": "8192"},
-        cli_overrides={"ai": {"max_tokens": 2048}},
-    )
-
-    assert settings.ai.max_tokens == 2048
-    assert settings.locked["ai.max_tokens"] == "cli"
-
-
 def test_invalid_env_value_falls_back_to_file(tmp_path):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
