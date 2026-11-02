@@ -12,10 +12,17 @@
                                     <input type="text" class="form-control" id="saveName" placeholder="请输入房间名称" required>
                                 </div>
                                 <div class="form-group mt-3">
-                                    <label for="roomScenarioSelect">房间剧本 *</label>
-                                    <select class="form-select" id="roomScenarioSelect" required>
-                                        <option value="">请选择剧本</option>
-                                    </select>
+                                    <label data-i18n="room.field.scenario">房间剧本 *</label>
+                                    <div class="room-scenario-picker">
+                                        <div class="room-scenario-combobox">
+                                            <input type="search" class="form-control form-control-sm" id="roomScenarioSearch" placeholder="点击搜索剧本名、作者或简介（star: 只看收藏）" autocomplete="off" aria-expanded="false" aria-controls="roomScenarioDropdown">
+                                            <div class="room-scenario-dropdown" id="roomScenarioDropdown" hidden>
+                                                <div class="room-scenario-list" id="roomScenarioList" role="listbox" aria-label="剧本列表"></div>
+                                                <p class="room-scenario-empty" id="roomScenarioEmpty" hidden>没有匹配的剧本</p>
+                                            </div>
+                                        </div>
+                                        <p class="room-scenario-selected" id="roomScenarioSelected" hidden></p>
+                                    </div>
                                 </div>
                                 <div class="form-group mt-3">
                                     <label for="roomVisibilitySelect">房间可见性</label>
@@ -97,6 +104,18 @@
                                     <input type="number" class="form-control" id="houseRuleDiceRerollLimit" min="1" max="20" placeholder="留空继承默认值">
                                 </div>
                                 <p class="form-text mt-2" id="houseRuleDiceAnimationHint"></p>
+                                <hr class="my-3">
+                                <h6 data-i18n="room.house_rules.world_override">世界意志直执行</h6>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleWorldOverrideEnabled">
+                                    <label class="form-check-label" for="houseRuleWorldOverrideEnabled" data-i18n="room.house_rules.world_override_enabled">启用「世界意志」直执行（可跳过剧本保护与战斗判定）</label>
+                                </div>
+                                <p class="form-text mt-2" data-i18n="room.house_rules.world_override_hint">站点管理员始终可用，不受此开关限制；房主与房间管理员默认可用。</p>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleWorldOverrideUsers" data-i18n="room.house_rules.world_override_users">额外允许使用的成员（可多选）</label>
+                                    <select class="form-select" id="houseRuleWorldOverrideUsers" multiple size="5"></select>
+                                    <p class="form-text" data-i18n="room.house_rules.world_override_users_hint">白名单只对普通成员生效；房主、房管与站点管理员始终可用。</p>
+                                </div>
                                 <hr class="my-3">
                                 <h6 data-i18n="room.house_rules.skill_bases">技能基础值</h6>
                                 <p class="form-text" data-i18n="room.house_rules.skill_bases_hint">房间规则优先级最高，进入房间后覆盖用户个性化与管理员默认值。</p>
@@ -421,6 +440,7 @@
                                             <option value="light" data-i18n="profile.theme.light">浅色</option>
                                             <option value="dark" data-i18n="profile.theme.dark">深色</option>
                                             <option value="pattern_cyber_2" data-i18n="profile.theme.cyber">赛博档案</option>
+                                            <option value="pattern_coc" data-i18n="profile.theme.coc">克苏鲁档案</option>
                                             <option value="pattern_tome" data-i18n="profile.theme.tome">秘典·羊皮纸</option>
                                             <option value="system" data-i18n="profile.theme.system">跟随系统</option>
                                         </select>
@@ -439,6 +459,70 @@
                                             <button type="button" class="btn btn-secondary" id="cancelProfilePendingChanges" data-i18n="common.cancel">取消</button>
                                             <button type="button" class="btn btn-primary" id="saveProfilePendingChanges" data-i18n="common.save">保存</button>
                                         </div>
+                                    </div>
+                                    <div class="profile-fx-settings" id="abyssFxSettings">
+                                        <p class="profile-section-hint" data-i18n="profile.abyss.hint">以下特效仅作用于「深渊帷幕」主题，设置即时生效并保存在当前浏览器。</p>
+                                        <label class="profile-setting-row profile-range-field" for="abyssChatTransparency">
+                                            <span data-i18n="profile.abyss.chat_transparency">聊天面板不透明度：</span>
+                                            <span class="profile-range-controls">
+                                                <input type="range" class="form-range" id="abyssChatTransparency" min="30" max="100" step="1" value="60">
+                                                <output class="profile-range-value" id="abyssChatTransparencyValue">60%</output>
+                                            </span>
+                                        </label>
+                                        <label class="profile-setting-row profile-range-field" for="abyssSidebarTransparency">
+                                            <span data-i18n="profile.abyss.sidebar_transparency">左侧栏不透明度：</span>
+                                            <span class="profile-range-controls">
+                                                <input type="range" class="form-range" id="abyssSidebarTransparency" min="30" max="100" step="1" value="50">
+                                                <output class="profile-range-value" id="abyssSidebarTransparencyValue">50%</output>
+                                            </span>
+                                        </label>
+                                        <label class="profile-setting-row profile-range-field" for="abyssRailTransparency">
+                                            <span data-i18n="profile.abyss.rail_transparency">右侧栏不透明度：</span>
+                                            <span class="profile-range-controls">
+                                                <input type="range" class="form-range" id="abyssRailTransparency" min="30" max="100" step="1" value="70">
+                                                <output class="profile-range-value" id="abyssRailTransparencyValue">70%</output>
+                                            </span>
+                                        </label>
+                                        <label class="profile-setting-row profile-range-field" for="abyssTrailStrength">
+                                            <span data-i18n="profile.abyss.trail_strength">鼠标拖尾强度：</span>
+                                            <span class="profile-range-controls">
+                                                <input type="range" class="form-range" id="abyssTrailStrength" min="15" max="100" step="1" value="55">
+                                                <output class="profile-range-value" id="abyssTrailStrengthValue">55%</output>
+                                            </span>
+                                        </label>
+                                        <label class="profile-setting-row profile-toggle-field" for="abyssTrailEnabled">
+                                            <span data-i18n="profile.abyss.trail">鼠标符文拖尾（移动与点击）</span>
+                                            <input type="checkbox" class="form-check-input" id="abyssTrailEnabled" checked>
+                                        </label>
+                                        <label class="profile-setting-row profile-toggle-field" for="abyssDriftRunes">
+                                            <span data-i18n="profile.abyss.drift_runes">背景符文飘动</span>
+                                            <input type="checkbox" class="form-check-input" id="abyssDriftRunes" checked>
+                                        </label>
+                                    </div>
+                                    <div class="profile-fx-settings" id="cyberFxSettings">
+                                        <p class="profile-section-hint" data-i18n="profile.cyber.hint">以下特效仅作用于「赛博档案」主题，设置即时生效并保存在当前浏览器。</p>
+                                        <label class="profile-setting-row profile-toggle-field" for="cyberFxEnabled">
+                                            <span data-i18n="profile.cyber.enabled">沉浸特效总开关（关闭后完全停用动画）</span>
+                                            <input type="checkbox" class="form-check-input" id="cyberFxEnabled" checked>
+                                        </label>
+                                        <label class="profile-setting-row profile-range-field" for="cyberFxIntensity">
+                                            <span data-i18n="profile.cyber.intensity">氛围强度：</span>
+                                            <span class="profile-range-controls">
+                                                <input type="range" class="form-range" id="cyberFxIntensity" min="20" max="100" step="1" value="68">
+                                                <output class="profile-range-value" id="cyberFxIntensityValue">68%</output>
+                                            </span>
+                                        </label>
+                                        <label class="profile-setting-row profile-range-field" for="cyberRainDensity">
+                                            <span data-i18n="profile.cyber.rain_density">数据雨密度：</span>
+                                            <span class="profile-range-controls">
+                                                <input type="range" class="form-range" id="cyberRainDensity" min="30" max="100" step="1" value="80">
+                                                <output class="profile-range-value" id="cyberRainDensityValue">80%</output>
+                                            </span>
+                                        </label>
+                                        <label class="profile-setting-row profile-toggle-field" for="cyberReticleEnabled">
+                                            <span data-i18n="profile.cyber.reticle">指针锁定框与数据拖尾</span>
+                                            <input type="checkbox" class="form-check-input" id="cyberReticleEnabled" checked>
+                                        </label>
                                     </div>
                                 </section>
                                 <section class="profile-panel-section" id="profile-skill-bases">
@@ -475,6 +559,7 @@
                             <button class="settings-tab" data-settings="users" data-admin-only="true" data-i18n="settings.tab.users">用户管理</button>
                             <button class="settings-tab" data-settings="permissions" data-i18n="settings.tab.permissions">权限配置</button>
                             <button class="settings-tab" data-settings="knowledge" data-admin-only="true">知识库管理</button>
+                            <button class="settings-tab" data-settings="bgm" data-admin-only="true" data-i18n="settings.tab.bgm">音乐库</button>
                             <button class="settings-tab" data-settings="about" data-i18n="settings.tab.about">关于应用</button>
                         </div>
                         <!-- 设置搜索：匹配设置名称与说明文字，支持模糊匹配并跳转定位 -->
@@ -508,6 +593,7 @@
                                         <option value="light" data-i18n="profile.theme.light">浅色</option>
                                         <option value="dark" data-i18n="profile.theme.dark">深色</option>
                                         <option value="pattern_cyber_2" data-i18n="profile.theme.cyber">赛博档案</option>
+                                        <option value="pattern_coc" data-i18n="profile.theme.coc">克苏鲁档案</option>
                                         <option value="pattern_tome" data-i18n="profile.theme.tome">秘典·羊皮纸</option>
                                         <option value="system" data-i18n="profile.theme.system">跟随系统</option>
                                     </select>
@@ -1168,6 +1254,26 @@
                             </section>
                         </div>
                         
+                        <!-- 音乐库内容（管理员） -->
+                        <div id="bgm-settings-content" class="settings-content" data-admin-only="true">
+                            <section class="permission-settings-panel">
+                                <div class="mb-3">
+                                    <h4 data-i18n="settings.bgm.title">背景音乐库</h4>
+                                    <p class="text-muted" data-i18n="settings.bgm.hint">上传的音乐保存在服务端本地，房间可直接选用；内置音乐随程序分发，不存在外链版权风险。</p>
+                                </div>
+                                <div class="d-flex flex-wrap gap-2 align-items-end mb-2">
+                                    <div class="form-group mb-0">
+                                        <label for="bgmUploadInput" data-i18n="settings.bgm.upload_label">选择音频文件</label>
+                                        <input type="file" class="form-control" id="bgmUploadInput" accept="audio/*,.mp3,.m4a,.aac,.ogg,.wav,.flac,.webm,.opus">
+                                    </div>
+                                    <button type="button" class="btn btn-primary" id="bgmUploadButton" data-i18n="settings.bgm.upload">上传音乐</button>
+                                </div>
+                                <p class="text-muted small" data-i18n="settings.bgm.supported">支持 mp3 / m4a / aac / ogg / wav / flac / webm / opus，单个文件不超过 30MB。</p>
+                                <div class="bgm-library-list" id="bgmLibraryList"></div>
+                                <div class="settings-message" id="bgmLibraryMessage" aria-live="polite"></div>
+                            </section>
+                        </div>
+
                         <!-- 关于应用内容 -->
                         <div id="about-settings-content" class="settings-content">
                             <div class="mb-4">

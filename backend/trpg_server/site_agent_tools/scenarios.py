@@ -10,10 +10,18 @@ from trpg_server.agents.narrative.model import NarrativeBundle
 from trpg_server.agents.narrative.repair import repair_bundle
 from trpg_server.agents.narrative.store import has_narrative, load_bundle, save_bundle
 from trpg_server.agents.narrative.validate import validate_bundle
+from trpg_server.config.paths import BASE_DIR
 from trpg_server.scenario_bundle import BundleError, build_narrative, normalize_bundle
 from trpg_server.site_agent_tools.base import ToolContext, ToolResult, ToolSpec, schema
 
 _MAX_SCENARIO_JSON = 200000
+_CREATE_SKILL_DIR = BASE_DIR / "skills" / "scenario-create"
+_CREATE_GUIDE_FILES = {
+    "skill": "SKILL.md",
+    "coc7": "references/coc7-authoring.md",
+    "bundle": "references/bundle-schema.md",
+    "prompts": "references/prompts.md",
+}
 
 
 def _payload(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -211,6 +219,34 @@ def apply_import_script(actor: Any, arguments: dict[str, Any], context: ToolCont
     )
 
 
+def creation_guide(actor: Any, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+    """读取剧本创作 Skill，让站内 Agent 与外部 Skill 使用同一套创作规范。"""
+    section = str(arguments.get("section") or "skill").strip().lower()
+    filename = _CREATE_GUIDE_FILES.get(section, _CREATE_GUIDE_FILES["skill"])
+    path = _CREATE_SKILL_DIR / filename
+    if not path.exists():
+        return ToolResult.failure("服务器没有安装剧本创作 Skill（skills/scenario-create），请让管理员检查部署目录")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return ToolResult.failure(f"读取创作规范失败：{exc}")
+    references = sorted(
+        str(item.relative_to(_CREATE_SKILL_DIR).as_posix())
+        for item in _CREATE_SKILL_DIR.rglob("*")
+        if item.is_file() and item.suffix in {".md", ".py", ".json"}
+    )
+    return ToolResult.success(
+        {
+            "section": section,
+            "path": str(path),
+            "guide": text[:40000],
+            "references": references,
+            "test_scenario": str((BASE_DIR / "docs" / "样本" / "COC7-测试剧本-裂隙回廊.veil-scenario.json").relative_to(BASE_DIR)),
+        },
+        summary=f"已读取剧本创作规范：{filename}",
+    )
+
+
 def _check_import_script(actor: Any, arguments: dict[str, Any]) -> str | None:
     if not str(arguments.get("content") or "").strip() and not isinstance(arguments.get("bundle"), dict):
         return "请提供剧本原文（content）或剧本包（bundle）"
@@ -287,6 +323,18 @@ SCENARIO_TOOLS = [
         risk="read",
         required_permission="scenarios.preview",
         handler=validate_scenario,
+    ),
+    ToolSpec(
+        name="scenarios.create_guide",
+        description=(
+            "读取《帷幕》COC 7e 剧本创作 Skill：协作流程、调查结构、线索设计、NPC 与战斗数值、"
+            "触发器与结局写法、剧本包字段。用户想和你一起创作全新剧本时，先调用它再开始提问与写作。"
+            "section=skill 读总流程，coc7 读 COC7 创作规范，bundle 读剧本包字段，prompts 读分阶段提示词。"
+        ),
+        parameters=schema({"section": {"type": "string", "maxLength": 20}}),
+        risk="read",
+        required_permission="scenarios.preview",
+        handler=creation_guide,
     ),
     ToolSpec(
         name="scenarios.save",

@@ -172,6 +172,16 @@ def test_old_module_titles_are_migrated_to_type_numbered_titles():
     assert [module["title"] for module in normalized["modules"]] == ["场景1", "场景2", "结局1", "自定义模块1"]
 
 
+def test_legacy_scenario_without_author_or_player_count_is_normalized():
+    """历史半成品（只有 title 与空 modules）补齐基础字段，否则广场会把它过滤掉。"""
+    normalized = normalize_scenario_payload({"id": 1, "title": "T", "modules": [], "import_mode": "direct"})
+
+    assert normalized["title"] == "T"
+    assert normalized["author"] == "未知作者"
+    assert normalized["playerCount"] == 1
+    assert normalized["modules"] == []
+
+
 def test_conditional_trigger_requires_a_verified_check_and_matching_decision(tmp_path):
     scenarios_dir = tmp_path / "scenarios"
     scenarios_dir.mkdir()

@@ -1,0 +1,370 @@
+/* ==========================================================================
+   「深渊帷幕」主题 — 渊红抄本
+   设计方向：1920 年代深海调查档案 × 沉没的仪式厅 × 苍白深海生物
+   配色：深靛墨黑 + 旧羊皮纸 + 氧化黄铜 + 干涸血红 + 瘀伤紫
+   说明：刻意避开「青绿霓虹」这一常见赛博配色，改用更接近旧书、黄铜器与
+   深海生物的颜色，让主题与「赛博档案」一眼可分。
+   本文件只负责设计 token、背景氛围层与全局排版基调；
+   组件级视觉在 08-theme-abyss-components.css 中。
+   ========================================================================== */
+
+body.theme-coc {
+    color-scheme: dark;
+
+    /* 让 body 构成层叠上下文：负层级背景层才会绘制在 body 背景之上、
+       正文内容之下，不会被不透明的主题背景整层遮住。 */
+    isolation: isolate;
+
+    --theme-bg-page: #07060c;
+    --theme-bg-page-layer: #0b0912;
+    --theme-bg-panel: rgba(18, 15, 23, 0.84);
+    --theme-bg-panel-muted: rgba(25, 21, 30, 0.8);
+    --theme-bg-elevated: rgba(22, 18, 27, 0.94);
+    --theme-bg-overlay: rgba(4, 3, 7, 0.9);
+
+    --theme-text-primary: #e9e1cf;
+    --theme-text-secondary: #c0b6a0;
+    --theme-text-muted: #8c8373;
+    --theme-text-inverse: #0c0810;
+    --theme-text-link: #dcbb7a;
+
+    --theme-border-subtle: rgba(199, 162, 92, 0.16);
+    --theme-border-strong: rgba(224, 192, 130, 0.4);
+    --theme-focus-ring: rgba(199, 162, 92, 0.32);
+
+    --theme-accent-primary: #c7a25c;
+    --theme-accent-primary-hover: #e6cc8d;
+    --theme-accent-secondary: #b4534a;
+    --theme-accent-soft: rgba(199, 162, 92, 0.12);
+    --theme-danger: #d86a5f;
+    --theme-danger-soft: rgba(216, 106, 95, 0.14);
+    --theme-success: #8fae7e;
+    --theme-success-soft: rgba(143, 174, 126, 0.14);
+    --theme-warning: #d9b06a;
+    --theme-warning-soft: rgba(217, 176, 106, 0.14);
+
+    --theme-dice-table: #0b0810;
+    --theme-dice-accent: #dcb877;
+    --theme-dice-table-text: #f3ead2;
+
+    /* 聊天面板不透明度：由「个人设置 → 网站设置」调节，默认值保证底部触手 / 法阵仍能透出来。 */
+    --theme-chat-alpha: 0.6;
+    --theme-chat-panel-alpha: 0.75;
+    /* 左右侧栏不透明度：同样在个人设置里单独调节；左侧默认更透，让左侧的触手能透出来。 */
+    --theme-sidebar-alpha: 0.5;
+    --theme-rail-alpha: 0.7;
+    --theme-chat-other-bg: rgba(20, 17, 25, var(--theme-chat-alpha));
+    --theme-chat-other-text: var(--theme-text-primary);
+    --theme-chat-player-bg: rgba(90, 43, 44, calc(var(--theme-chat-alpha) + 0.1));
+    --theme-chat-player-text: #f4e8d9;
+    --theme-chat-kp-bg: rgba(31, 25, 43, calc(var(--theme-chat-alpha) + 0.06));
+    --theme-chat-kp-text: #e9e1cf;
+    --theme-chat-dice-bg: rgba(58, 44, 22, calc(var(--theme-chat-alpha) + 0.04));
+    --theme-chat-dice-text: #f3e4c0;
+    --theme-chat-shadow:
+        0 1px 2px rgba(0, 0, 0, 0.5),
+        0 10px 26px -16px rgba(0, 0, 0, 0.92),
+        0 0 18px rgba(199, 162, 92, 0.05);
+
+    --theme-sidebar-bg: #07060b;
+    --theme-sidebar-surface: #0b0910;
+    --theme-sidebar-text: #948a78;
+    --theme-sidebar-text-active: #f5eedd;
+    --theme-sidebar-hover-bg: rgba(199, 162, 92, 0.08);
+    --theme-sidebar-active-bg: rgba(199, 162, 92, 0.14);
+
+    --theme-markdown-border: rgba(199, 162, 92, 0.18);
+    --theme-markdown-muted: #8c8373;
+    --theme-markdown-code-bg: rgba(199, 162, 92, 0.1);
+    --theme-markdown-pre-bg: rgba(6, 4, 9, 0.6);
+    --theme-markdown-table-alt-bg: rgba(199, 162, 92, 0.05);
+
+    --theme-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45), 0 2px 12px rgba(0, 0, 0, 0.6);
+    --theme-shadow-md: 0 18px 44px -24px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(199, 162, 92, 0.05);
+    --theme-shadow-lg: 0 28px 70px -28px rgba(0, 0, 0, 0.98), 0 0 48px rgba(120, 88, 52, 0.1);
+
+    --theme-scrollbar-track: #06050a;
+    --theme-scrollbar-thumb: rgba(199, 162, 92, 0.36);
+    --theme-scrollbar-thumb-hover: rgba(224, 192, 130, 0.6);
+
+    --theme-input-bg: rgba(12, 10, 16, 0.9);
+    --theme-input-text: var(--theme-text-primary);
+    --theme-input-border: rgba(199, 162, 92, 0.2);
+    --theme-input-placeholder: rgba(140, 131, 115, 0.66);
+
+    /* 字体：Cinzel 提供石刻式大写拉丁标题，EB Garamond 负责正文，
+       Noto Serif SC 负责中文标题与正文的衬线骨架。 */
+    --theme-font-family-base: "EB Garamond", "Noto Serif SC", "Songti SC", "STSong", "SimSun", Georgia, "Times New Roman", serif;
+    --theme-font-family-prose: "EB Garamond", "Noto Serif SC", "Songti SC", "STSong", "SimSun", Georgia, serif;
+    --theme-font-family-display: "Cinzel", "EB Garamond", "Noto Serif SC", "Songti SC", "STSong", "SimSun", Georgia, serif;
+    --theme-font-family-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+    --theme-font-size-sm: 0.82rem;
+    --theme-font-size-md: 0.96rem;
+    --theme-line-height-base: 1.7;
+    --theme-line-height-tight: 1.26;
+
+    --theme-radius-xs: 4px;
+    --theme-radius-sm: 8px;
+    --theme-radius-md: 14px;
+    --theme-radius-pill: 999px;
+    --theme-radius-round: 50%;
+
+    /* 深渊主题专属材质与强调色（仅供 07/08 两个样式表使用） */
+    --abyss-brass: #c7a25c;
+    --abyss-brass-light: #e0c082;
+    --abyss-brass-soft: rgba(199, 162, 92, 0.16);
+    --abyss-oxblood: #b4534a;
+    --abyss-oxblood-soft: rgba(176, 74, 66, 0.16);
+    --abyss-plum: #7c609e;
+    --abyss-plum-soft: rgba(124, 96, 158, 0.14);
+    --abyss-bone: #e9e1cf;
+    --abyss-bone-soft: rgba(233, 225, 207, 0.14);
+
+    /* 深海噪声颗粒：分辨率无关的无缝 SVG 噪声，避免大面积纯色发闷 */
+    --theme-abyss-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch' seed='9'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.32'/%3E%3C/svg%3E");
+    /* 全屏颗粒专用：极低不透明度。颗粒层叠在透明的暗角层上时，混合模式对
+       透明底退化为普通叠加，若沿用面板用的高不透明度噪声，会把整屏提亮成灰雾。 */
+    --theme-abyss-grain-fine: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch' seed='17'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.12'/%3E%3C/svg%3E");
+
+    /* 旧别名同步：确保使用 --color-* 的既有组件自动继承新配色 */
+    --color-bg: var(--theme-bg-page);
+    --color-panel: var(--theme-bg-panel);
+    --color-panel-muted: var(--theme-bg-panel-muted);
+    --color-surface-alt: var(--theme-bg-panel-muted);
+    --color-text: var(--theme-text-primary);
+    --color-muted: var(--theme-text-muted);
+    --color-primary: var(--theme-accent-primary);
+    --color-primary-hover: var(--theme-accent-primary-hover);
+    --color-danger: var(--theme-danger);
+    --color-success: var(--theme-success);
+    --color-warning-bg: var(--theme-warning-soft);
+    --color-accent: var(--theme-accent-primary);
+    --border-subtle: var(--theme-border-subtle);
+    --shadow-sm: var(--theme-shadow-sm);
+    --shadow-md: var(--theme-shadow-md);
+    --radius-sm: var(--theme-radius-sm);
+    --radius-md: var(--theme-radius-md);
+    --space-xs: var(--theme-space-xs);
+    --space-sm: var(--theme-space-sm);
+    --space-md: var(--theme-space-md);
+    --space-lg: var(--theme-space-lg);
+
+    background-color: #050409;
+    background-image:
+        radial-gradient(ellipse 92% 66% at 50% -12%, rgba(96, 54, 46, 0.16), transparent 62%),
+        radial-gradient(ellipse 58% 44% at 90% 16%, rgba(82, 62, 112, 0.16), transparent 66%),
+        radial-gradient(ellipse 68% 56% at 4% 88%, rgba(74, 54, 36, 0.14), transparent 70%),
+        linear-gradient(180deg, #07060c 0%, #0b0913 46%, #040308 100%);
+    background-attachment: fixed;
+    background-size: cover;
+}
+
+/* —— 背景层 1：暗角 + 深海颗粒 —— */
+body.theme-coc::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -3;
+    pointer-events: none;
+    background-image:
+        radial-gradient(ellipse 72% 60% at 50% 42%, transparent 34%, rgba(0, 0, 0, 0.62) 100%),
+        var(--theme-abyss-grain-fine);
+    background-size: cover, 240px 240px;
+    background-repeat: no-repeat, repeat;
+    background-blend-mode: normal, overlay;
+}
+
+/* —— 背景层 2：缓慢漂移的水下焦散光斑 —— */
+body.theme-coc::after {
+    content: "";
+    position: fixed;
+    inset: -12%;
+    z-index: -2;
+    pointer-events: none;
+    background-image:
+        radial-gradient(ellipse 36% 28% at 28% 22%, rgba(214, 176, 108, 0.045), transparent 70%),
+        radial-gradient(ellipse 30% 24% at 74% 62%, rgba(124, 96, 158, 0.05), transparent 72%),
+        radial-gradient(ellipse 40% 30% at 18% 78%, rgba(176, 74, 66, 0.04), transparent 74%);
+    animation: abyssCaustics 42s ease-in-out infinite alternate;
+    will-change: transform, opacity;
+}
+
+@keyframes abyssCaustics {
+    from {
+        transform: translate3d(-2.5%, -1.5%, 0) scale(1.02);
+        opacity: 0.72;
+    }
+    to {
+        transform: translate3d(2.5%, 1.8%, 0) scale(1.08);
+        opacity: 1;
+    }
+}
+
+/* —— WebGL 体积氛围层：体积雾 / 光柱 / 焦散 / 暗角 / 颗粒 ——
+   由 js/themes/abyss/atmosphere.js 绘制（低分辨率 + CSS 拉伸），
+   位于 2D 画布之下，只提供“水”的质感。 */
+.theme-abyss-atmosphere {
+    position: fixed;
+    inset: 0;
+    z-index: -4;
+    display: none;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    image-rendering: auto;
+}
+
+body.theme-coc .theme-abyss-atmosphere {
+    display: block;
+    animation: abyssCanvasIn 2s ease-out both;
+}
+
+/* —— Canvas 动画层：建筑 / 触手 / 法阵 / 浮游光尘 / 深渊之眼 ——
+   由 js/themes/abyss/main.js 逐帧绘制；只作背景装饰，不接收指针事件。 */
+.theme-abyss-canvas {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    display: none;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+body.theme-coc .theme-abyss-canvas {
+    display: block;
+    animation: abyssCanvasIn 1.4s ease-out both;
+}
+
+@keyframes abyssCanvasIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* —— 主内容区透出深渊背景，让触手与光尘可见 —— */
+body.theme-coc .chat-history,
+body.theme-coc .character-workspace {
+    background: transparent;
+}
+
+/* —— 文本选中与链接 —— */
+body.theme-coc ::selection {
+    color: #140d07;
+    background: rgba(224, 192, 130, 0.42);
+    text-shadow: none;
+}
+
+body.theme-coc ::-moz-selection {
+    color: #140d07;
+    background: rgba(224, 192, 130, 0.42);
+}
+
+body.theme-coc a {
+    color: var(--theme-text-link);
+    transition: color 0.18s ease, text-shadow 0.18s ease;
+}
+
+body.theme-coc a:hover {
+    color: #f0dcae;
+    text-shadow: 0 0 10px rgba(199, 162, 92, 0.5), 0 0 22px rgba(199, 162, 92, 0.2);
+}
+
+body.theme-coc hr {
+    height: 1px;
+    border: 0;
+    background: linear-gradient(90deg, transparent, rgba(199, 162, 92, 0.45), rgba(176, 74, 66, 0.32), transparent);
+}
+
+/* —— 页面标题：羊皮纸 → 黄铜 → 一点干涸血红的鎏光 —— */
+body.theme-coc .page-command-header h2,
+body.theme-coc .character-command-header h2,
+body.theme-coc .sidebar-title {
+    color: #ecd9a8;
+    background-image: linear-gradient(100deg, #f7efdc 0%, #e3c384 30%, #c97a6e 62%, #f7efdc 100%);
+    background-size: 220% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: abyssHeadingShimmer 13s linear infinite;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+}
+
+@keyframes abyssHeadingShimmer {
+    from {
+        background-position: 0% center;
+    }
+    to {
+        background-position: 220% center;
+    }
+}
+
+body.theme-coc .page-command-header h2::after,
+body.theme-coc .character-command-header h2::after {
+    content: "";
+    display: block;
+    width: 220px;
+    max-width: 48vw;
+    height: 1px;
+    margin-top: 12px;
+    background: linear-gradient(90deg, rgba(224, 192, 130, 0.9), rgba(176, 74, 66, 0.5) 38%, transparent 100%);
+    box-shadow: 0 0 12px rgba(199, 162, 92, 0.26);
+}
+
+body.theme-coc .page-kicker,
+body.theme-coc .character-kicker {
+    color: #dcbb7a;
+    font-family: "Cinzel", "EB Garamond", "Noto Serif SC", serif;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    text-shadow: 0 0 12px rgba(199, 162, 92, 0.32);
+}
+
+body.theme-coc .page-subtitle,
+body.theme-coc .character-subtitle {
+    color: var(--theme-text-muted);
+}
+
+/* —— 滚动条：黄铜到干涸血红的渐变滑块 —— */
+body.theme-coc {
+    scrollbar-color: rgba(199, 162, 92, 0.4) rgba(6, 5, 10, 0.9);
+}
+
+body.theme-coc ::-webkit-scrollbar-track {
+    background: rgba(6, 5, 10, 0.9);
+}
+
+body.theme-coc ::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(224, 192, 130, 0.6), rgba(176, 74, 66, 0.28));
+    border-radius: 999px;
+}
+
+body.theme-coc ::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, rgba(240, 214, 160, 0.8), rgba(176, 74, 66, 0.42));
+}
+
+/* —— 减少动态效果：停用背景漂移、鎏光、WebGL 与 Canvas —— */
+@media (prefers-reduced-motion: reduce) {
+    body.theme-coc::after {
+        animation: none;
+        transform: none;
+    }
+
+    body.theme-coc .page-command-header h2,
+    body.theme-coc .character-command-header h2,
+    body.theme-coc .sidebar-title {
+        animation: none;
+        background-position: 30% center;
+    }
+
+    .theme-abyss-canvas,
+    .theme-abyss-atmosphere {
+        display: none !important;
+    }
+}

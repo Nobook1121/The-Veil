@@ -179,23 +179,22 @@ interface ScenarioModel {
     loadScenarios(): Promise<Scenario[]>;
     createScenario(scenarioData: ScenarioInput): Promise<Scenario>;
     updateScenario(id: number, scenarioData: ScenarioInput): Promise<Scenario>;
-    deleteScenario(id: number): Promise<boolean>;
+    deleteScenario(id: number): Promise<{ deleted: boolean; archived: boolean; activeRooms: number }>;
     getScenario(id: number): Scenario | undefined;
     getScenarios(): Scenario[];
     saveScenarios(): void;
-    importScenario(scenarioData: unknown): Promise<Scenario>;
     convertScript(text: string, title?: string): Promise<ScenarioInput>;
     convertScriptFile(file: File, title?: string): Promise<ScenarioInput>;
     getKnowledgeStats(id: number): Promise<{ scenario_id: number; version: string; vector_count: number; path: string; backend: string }>;
     createImportJob(formData: FormData, onProgress?: (value: number) => void): Promise<ScenarioImportStart>;
     importBundle(file: File): Promise<ScenarioImportStart & { preview: ScenarioInput }>;
     getImportJob(id: string): Promise<ScenarioImportJob>;
+    abandonImportJob(id: string): Promise<void>;
     publishImport(scriptId: number, jobId: string): Promise<Scenario>;
     waitForImportJob(id: string, onProgress?: (job: ScenarioImportJob) => void): Promise<ScenarioImportJob>;
     loadDraft(): Promise<ScenarioInput | null>;
     saveDraft(scenarioData: ScenarioInput): Promise<ScenarioInput>;
     discardDraft(): Promise<void>;
-    validateScenarioData(data: unknown): data is ScenarioInput;
     listTriggerAssets(id: number): Promise<ResourceRef[]>;
     uploadTriggerAssets(id: number, files: File[], alt: string[]): Promise<ResourceRef[]>;
     updateTriggerAsset(id: number, assetId: string, patch: Partial<ResourceRef>): Promise<ResourceRef>;
@@ -205,8 +204,10 @@ interface ScenarioModel {
 
 interface ScenarioViewHandlers {
     onCreateScenarioClick(): void;
+    onImportScenarioEntryClick(): Promise<void>;
     onImportScenarioDocumentClick(): Promise<void>;
     onImportScenarioDocument(file: File): Promise<void>;
+    onImportScenarioBundle(file: File): Promise<void>;
     onSaveScenario(): Promise<void>;
     onSaveDraft(): Promise<void>;
     onDiscardDraft(): Promise<void>;
@@ -215,7 +216,18 @@ interface ScenarioViewHandlers {
     onPlayScenario(id: number): void;
     onDeleteScenario(id: number): Promise<void>;
     onBatchDeleteScenarios(ids: number[]): Promise<void>;
-    onImportScenario(files: FileList | null): Promise<void>;
+    /** 后台导入任务卡片：查看进度 / 审核发布 / 重试。 */
+    onImportJobOpen?(job: ScenarioImportJob): Promise<void>;
+    onImportJobRetry?(job: ScenarioImportJob): Promise<void>;
+    /** 放弃失败/已取消的任务：清理任务目录、已写入的向量与知识索引。 */
+    onImportJobAbandon?(job: ScenarioImportJob): Promise<void>;
+}
+
+interface ScenarioImportProgressHandlers {
+    /** 把当前前台导入转入后台（关闭进度弹窗，任务继续在服务端跑）。 */
+    onBackground?(): void;
+    /** 取消当前导入；服务端会在下一个阶段/窗口边界退出。 */
+    onCancel?(): Promise<void> | void;
 }
 
 interface ScenarioViewConstructor {
@@ -227,6 +239,7 @@ interface ScenarioView {
     saveScenarioHandler: () => Promise<void>;
     setEventHandlers(handlers: ScenarioViewHandlers): void;
     renderScenarioList(scenarios: Scenario[]): void;
+    renderImportJobs(jobs: ScenarioImportJob[]): void;
     openCreateModal(): Promise<void>;
     openEditModal(scenario: Scenario): void;
     fillDraftData(draft: ScenarioInput): void;
@@ -234,18 +247,36 @@ interface ScenarioView {
     showDraftPrompt(): Promise<"continue" | "discard" | "cancel">;
     closeModal(): void;
     previewScenario(scenario: Scenario, knowledge?: { vector_count?: number; path?: string; backend?: string }): void;
+    showImportEntryChoice(): Promise<"document" | "bundle" | "cancel">;
     showImportChoice(): Promise<"edit" | "direct" | "ai" | "cancel">;
-    showDirectImportMetadata(defaults: { title: string; creator: string }): Promise<{ title: string; author: string; creator: string; playerCount: number; description: string } | null>;
+    showDirectImportMetadata(defaults: { title: string; creator: string }): Promise<{ title: string; author: string; creator: string; playerCount: number; description: string; autoPublish: boolean } | null>;
+    showImportReview(preview: ScenarioInput, job: ScenarioImportJob): Promise<{ title: string; author: string; playerCount: number; notes: string } | null>;
     getFormData(): ScenarioInput;
     showMessage(message: string, isError?: boolean): void;
-    showConversionProgress(fileName: string): void;
+    showConversionProgress(fileName: string, allowBackground?: boolean): void;
+    setImportProgressHandlers(handlers: ScenarioImportProgressHandlers | null): void;
     updateConversionProgress(stage: number, state: "pending" | "active" | "complete" | "error", detail?: string): void;
     updateImportJobProgress(job: ScenarioImportJob): void;
     closeConversionProgress(): void;
 }
 
 type ScenarioImportStatus = "pending" | "parsing" | "reviewing" | "normalizing" | "graphing" | "chunking" | "extracting" | "merging" | "carding" | "summarizing" | "embedding" | "done" | "failed" | "cancelled" | "published";
-interface ScenarioImportJob { id: string; script_id: number; status: ScenarioImportStatus; progress: number; current_stage: string; stage_progress: number; stage_meta?: Record<string, unknown>; error?: string; preview?: ScenarioInput; }
+interface ScenarioImportJob {
+    id: string;
+    script_id: number;
+    status: ScenarioImportStatus;
+    progress: number;
+    current_stage: string;
+    stage_progress: number;
+    stage_meta?: Record<string, unknown>;
+    error?: string;
+    preview?: ScenarioInput;
+    source_filename?: string;
+    metadata?: Record<string, string>;
+    retry_count?: number;
+    created_at?: number;
+    updated_at?: number;
+}
 // POST /api/scripts/import 的返回：创建任务后用于轮询与发布。
 interface ScenarioImportStart { jobId: string; scriptId: number; }
 

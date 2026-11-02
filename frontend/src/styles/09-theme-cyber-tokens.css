@@ -1,0 +1,261 @@
+/* ==========================================================================
+   「赛博档案」主题 · 氛围层与全局基调
+   设计方向：深空数据档案库 × 冷光调查终端 × 归档印章
+   配色：近黑蓝绿底 + 磷光青 + 冷光冰蓝 + 档案琥珀
+   与「深渊帷幕」的旧书黄铜色、「秘典」的羊皮纸色明确区分。
+   本文件负责背景层、画布层、全局排版与动效基调；
+   组件级视觉在 10-theme-cyber-components.css 中。
+   ========================================================================== */
+
+body.theme-cyber-2 {
+    --cyber-phosphor: #5ef0c8;
+    --cyber-ice: #6ea8ff;
+    --cyber-amber: #f2b447;
+    --cyber-alert: #ff6b7f;
+    --cyber-ink: #03080c;
+    --cyber-hairline: rgba(120, 232, 206, 0.22);
+    /* 由 fx.ts 实时改写：扫描线浓度与整体光晕强度跟随个人设置。 */
+    --theme-cyber-scanline-alpha: 0.21;
+    --theme-cyber-glow-alpha: 0.41;
+
+    background-color: var(--cyber-ink);
+    background-image:
+        var(--theme-bg-page);
+    background-attachment: fixed;
+    background-size: cover;
+
+    font-kerning: normal;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+/* —— 背景层 1：透视数据网格 + 四角暗角 + 细颗粒 ——
+   画布与画布雨都叠在它之上，因此这一层只负责“空间底子”。 */
+body.theme-cyber-2::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    pointer-events: none;
+    background-image:
+        /* 细网格：只在画面上下两侧更明显，中央渐隐，避免穿透面板干扰阅读 */
+        linear-gradient(rgba(110, 232, 206, 0.055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(110, 232, 206, 0.055) 1px, transparent 1px),
+        /* 顶部冷光与底部冰蓝补光 */
+        radial-gradient(ellipse 80% 42% at 50% -8%, rgba(64, 210, 190, 0.16), transparent 68%),
+        radial-gradient(ellipse 60% 40% at 12% 108%, rgba(58, 112, 224, 0.12), transparent 72%),
+        /* 暗角：四周并入深色 */
+        radial-gradient(ellipse 76% 64% at 50% 46%, transparent 40%, rgba(0, 0, 0, 0.46) 100%);
+    background-size: 26px 26px, 26px 26px, cover, cover, cover;
+    background-repeat: repeat, repeat, no-repeat, no-repeat, no-repeat;
+    mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.9), transparent 34%, transparent 66%, rgba(0, 0, 0, 0.7));
+}
+
+/* —— 背景层 2：CRT 扫描线 + 极轻的色差边缘 ——
+   画在最上层但透明度极低，只作为“老式监视器玻璃”的质感。 */
+body.theme-cyber-2::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+    background-image:
+        repeating-linear-gradient(
+            to bottom,
+            rgba(0, 0, 0, var(--theme-cyber-scanline-alpha)) 0,
+            rgba(0, 0, 0, var(--theme-cyber-scanline-alpha)) 1px,
+            transparent 1px,
+            transparent 3px
+        ),
+        radial-gradient(ellipse 120% 90% at 50% 50%, transparent 62%, rgba(0, 0, 0, 0.2) 100%),
+        linear-gradient(90deg, rgba(255, 70, 110, 0.03), transparent 12%, transparent 88%, rgba(60, 130, 255, 0.03));
+    mix-blend-mode: normal;
+}
+
+/* —— WebGL 体积氛围层：雾、数据导管、扫描带、指针冷光 —— */
+.theme-cyber-atmosphere {
+    position: fixed;
+    inset: 0;
+    z-index: -4;
+    display: none;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+body.theme-cyber-2 .theme-cyber-atmosphere {
+    display: block;
+    animation: cyberLayerIn 2.2s ease-out both;
+}
+
+/* —— 2D Canvas：分层数据雨 + HUD + 指针特效 —— */
+.theme-cyber-canvas {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    display: none;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+body.theme-cyber-2 .theme-cyber-canvas {
+    display: block;
+    animation: cyberLayerIn 1.5s ease-out both;
+}
+
+@keyframes cyberLayerIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* —— 屏幕四角的取景框：终端 HUD 的边角料 —— */
+.theme-cyber-frame {
+    position: fixed;
+    inset: 10px;
+    z-index: 4;
+    display: none;
+    pointer-events: none;
+    opacity: var(--theme-cyber-glow-alpha, 0.55);
+}
+
+body.theme-cyber-2 .theme-cyber-frame {
+    display: block;
+    animation: cyberLayerIn 1.8s ease-out both;
+}
+
+.cyber-frame-corner {
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    border: 1px solid rgba(94, 240, 200, 0.46);
+    box-shadow: 0 0 10px rgba(94, 240, 200, 0.16);
+}
+
+.cyber-frame-corner.tl {
+    top: 0;
+    left: 0;
+    border-right: 0;
+    border-bottom: 0;
+}
+
+.cyber-frame-corner.tr {
+    top: 0;
+    right: 0;
+    border-left: 0;
+    border-bottom: 0;
+}
+
+.cyber-frame-corner.bl {
+    bottom: 0;
+    left: 0;
+    border-right: 0;
+    border-top: 0;
+}
+
+.cyber-frame-corner.br {
+    bottom: 0;
+    right: 0;
+    border-left: 0;
+    border-top: 0;
+}
+
+.cyber-frame-corner::after {
+    content: "";
+    position: absolute;
+    width: 5px;
+    height: 5px;
+    background: var(--cyber-amber);
+    opacity: 0.5;
+}
+
+.cyber-frame-corner.tl::after {
+    top: 3px;
+    left: 3px;
+}
+
+.cyber-frame-corner.tr::after {
+    top: 3px;
+    right: 3px;
+}
+
+.cyber-frame-corner.bl::after {
+    bottom: 3px;
+    left: 3px;
+}
+
+.cyber-frame-corner.br::after {
+    bottom: 3px;
+    right: 3px;
+}
+
+/* —— 主内容区透出背景，使数据雨与 HUD 在面板之间可见 —— */
+body.theme-cyber-2 .chat-history,
+body.theme-cyber-2 .character-workspace,
+body.theme-cyber-2 .tab-content {
+    background-color: transparent;
+}
+
+body.theme-cyber-2 .col-10 {
+    position: relative;
+    z-index: 1;
+}
+
+/* —— 文本选中：磷光青高亮 —— */
+body.theme-cyber-2 ::selection {
+    color: #03110d;
+    background: rgba(94, 240, 200, 0.5);
+    text-shadow: none;
+}
+
+/* —— 标题与编号字体 —— */
+body.theme-cyber-2 .page-command-header h2,
+body.theme-cyber-2 .character-command-header h2,
+body.theme-cyber-2 .sidebar-title,
+body.theme-cyber-2 .modal-title {
+    font-family: var(--theme-font-family-display);
+    font-weight: 600;
+    letter-spacing: 0.035em;
+}
+
+body.theme-cyber-2 .page-kicker,
+body.theme-cyber-2 .character-kicker,
+body.theme-cyber-2 .sidebar-title::after {
+    font-family: var(--theme-font-family-mono);
+}
+
+/* —— 降低动态效果 / 关闭沉浸特效时的降级 —— */
+body.cyber-fx-off .theme-cyber-canvas,
+body.cyber-fx-off .theme-cyber-atmosphere,
+body.cyber-fx-off .theme-cyber-frame,
+body.cyber-fx-off .theme-cyber-reticle {
+    display: none !important;
+}
+
+body.cyber-fx-off::after {
+    opacity: 0.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .theme-cyber-canvas,
+    .theme-cyber-atmosphere,
+    .theme-cyber-reticle {
+        display: none !important;
+    }
+
+    .theme-cyber-frame {
+        animation: none;
+    }
+
+    body.theme-cyber-2 *,
+    body.theme-cyber-2 *::before,
+    body.theme-cyber-2 *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}

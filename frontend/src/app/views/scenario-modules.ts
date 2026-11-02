@@ -44,7 +44,7 @@ function createModule(type: ScenarioModuleType, index: number, existing?: Scenar
         module.attributes = normalizeAttributeMap(patch.attributes);
         module.battle = normalizeBattleMap(patch.battle);
         module.weapons = normalizeWeaponRows(patch.weapons);
-        module.skills = type === "npc" ? normalizeSkillRows(patch.skills) : [];
+        module.skills = normalizeSkillRows(patch.skills);
     } else if (type === "custom") {
         module.inputs = normalizeInputRows(patch.inputs);
     } else if (type === "timeline") {
@@ -67,10 +67,18 @@ function ensureModuleDefaults(module: ScenarioModule, index: number, titleIndex 
         base.ending_id = Number.isFinite(Number(base.ending_id)) && Number(base.ending_id) > 0 ? Number(base.ending_id) : index;
     } else if (base.module_type === "monster" || base.module_type === "npc") {
         base.code = base.code || generateModuleCode(base.module_type, [base]);
+        // 兼容旧数据把技能/武器嵌在 battle 里的写法，打开即保存时不能丢数值。
+        const nestedBattle = (base.battle || {}) as unknown as Record<string, unknown>;
+        if (!(base.skills || []).some((skill) => skill.name) && Array.isArray(nestedBattle.skills)) {
+            base.skills = nestedBattle.skills as ScenarioModuleSkillRow[];
+        }
+        if (!(base.weapons || []).some((weapon) => weapon.name) && Array.isArray(nestedBattle.weapons)) {
+            base.weapons = nestedBattle.weapons as ScenarioModuleWeaponRow[];
+        }
         base.attributes = normalizeAttributeMap(base.attributes);
         base.battle = normalizeBattleMap(base.battle);
         base.weapons = normalizeWeaponRows(base.weapons);
-        base.skills = base.module_type === "npc" ? normalizeSkillRows(base.skills) : [];
+        base.skills = normalizeSkillRows(base.skills);
     } else if (base.module_type === "timeline") {
         base.timeline_entries = normalizeTimelineEntries(base.timeline_entries);
     } else if (base.module_type === "custom") {
@@ -196,26 +204,48 @@ function generateModuleCode(type: "monster" | "npc", existing: ScenarioModule[] 
     return `${prefix}-${Date.now().toString(36).slice(-6).padStart(6, "0")}`;
 }
 
+function normalizeCardValue(value: unknown): string {
+    if (value === null || value === undefined) return "N/A";
+    const text = String(value).trim();
+    return text || "N/A";
+}
+
+function readCardField(source: Record<string, string> | undefined, key: string): unknown {
+    if (!source) return undefined;
+    const record = source as unknown as Record<string, unknown>;
+    for (const candidate of new Set([key, key.toUpperCase(), key.toLowerCase()])) {
+        const value = record[candidate];
+        if (value !== undefined && value !== null && value !== "") return value;
+    }
+    return undefined;
+}
+
 function normalizeAttributeMap(attributes?: Record<string, string>): Record<string, string> {
     const keys = ["STR", "DEX", "CON", "APP", "POW", "SIZ", "EDU", "INT", "LUC"];
     return keys.reduce((acc, key) => {
-        acc[key] = attributes?.[key] || "N/A";
+        acc[key] = normalizeCardValue(readCardField(attributes, key));
         return acc;
     }, {} as Record<string, string>);
 }
 
 function normalizeBattleMap(battle?: Record<string, string>): Record<string, string> {
-    return {
-        db: battle?.db || "N/A",
-        build: battle?.build || "N/A",
-        mov: battle?.mov || "N/A",
-        armor: battle?.armor || "N/A",
-    };
+    const keys = ["hp", "max_hp", "dex", "str", "siz", "con", "db", "build", "mov", "armor"];
+    return keys.reduce((acc, key) => {
+        acc[key] = normalizeCardValue(readCardField(battle, key));
+        return acc;
+    }, {} as Record<string, string>);
 }
 
 function normalizeSkillRows(skills?: ScenarioModuleSkillRow[]): ScenarioModuleSkillRow[] {
     if (!Array.isArray(skills) || skills.length === 0) return [{ name: "", base: "" }];
-    return skills.map((skill) => ({ name: skill.name || "", base: skill.base || "" }));
+    return skills.map((skill) => {
+        const source = skill as unknown as Record<string, unknown>;
+        const raw = skill.base ?? source.value;
+        return {
+            name: String(skill.name || "").trim(),
+            base: raw === null || raw === undefined || raw === "N/A" ? "" : String(raw).trim(),
+        };
+    });
 }
 
 function normalizeWeaponRows(weapons?: ScenarioModuleWeaponRow[]): ScenarioModuleWeaponRow[] {
@@ -405,11 +435,9 @@ function renderModuleEditor(module: ScenarioModule, index: number, typeIndex: nu
                 <div class="scenario-module-battle-grid">
                     ${renderBattleInputs(module.battle || {})}
                 </div>
-                ${module.module_type === "npc" ? `
                 <div class="scenario-module-section-title">${scenarioT("scenario.module.skills", "技能")}</div>
                 <div class="scenario-module-list" data-skill-list>${renderSkillRows(module.skills || [])}</div>
                 <button type="button" class="btn btn-sm btn-secondary mt-2" data-add-skill>${scenarioT("scenario.module.add_skill", "添加技能")}</button>
-                ` : ""}
                 <div class="scenario-module-section-title">${scenarioT("scenario.module.weapons", "武器")}</div>
                 <div class="scenario-module-list" data-weapon-list>${renderWeaponRows(module.weapons || [])}</div>
                 <button type="button" class="btn btn-sm btn-secondary mt-2" data-add-weapon>${scenarioT("scenario.module.add_weapon", "添加武器")}</button>
@@ -425,6 +453,31 @@ function renderModuleEditor(module: ScenarioModule, index: number, typeIndex: nu
             </div>
         </section>
     `;
+}
+
+function renderEntityPreview(module: ScenarioModule): string {
+    const attributes = module.attributes || {};
+    const battle = module.battle || {};
+    const attrLine = ["STR", "DEX", "CON", "APP", "POW", "SIZ", "EDU", "INT", "LUC"]
+        .map((key) => {
+            const value = attributes[key];
+            return value && value !== "N/A" ? `${key} ${scenarioEscapeHtml(value)}` : "";
+        })
+        .filter(Boolean)
+        .join(" / ");
+    const battleLine = [["hp", "HP"], ["max_hp", "Max HP"], ["armor", scenarioT("scenario.module.battle.armor", "护甲")]]
+        .map(([key, label]) => {
+            const value = battle[key || ""];
+            return value && value !== "N/A" ? `${label} ${scenarioEscapeHtml(value)}` : "";
+        })
+        .filter(Boolean)
+        .join(" / ");
+    const skills = (module.skills || []).filter((skill) => skill.name);
+    return [
+        attrLine ? `<p data-user-content="true"><strong>${scenarioT("scenario.module.attributes", "属性")}：</strong>${attrLine}</p>` : "",
+        battleLine ? `<p data-user-content="true"><strong>${scenarioT("scenario.module.combat", "战斗")}：</strong>${battleLine}</p>` : "",
+        skills.length ? `<p data-user-content="true"><strong>${scenarioT("scenario.preview.skills", "技能")}：</strong>${skills.map((skill) => `${scenarioEscapeHtml(skill.name)} ${scenarioEscapeHtml(skill.base)}`).join(" / ")}</p>` : "",
+    ].join("");
 }
 
 function renderPreviewModules(modules: ScenarioModule[]): string {
@@ -444,7 +497,7 @@ function renderPreviewModules(modules: ScenarioModule[]): string {
                     : `<p class="scenario-trigger-preview"><a href="${scenarioEscapeHtml(url)}" target="_blank" rel="noopener">${label}</a></p>`;
             }).join("")}</div>` : ""}
              ${module.module_type === "timeline" && module.timeline_entries?.length ? `<div class="scenario-preview-timeline" data-user-content="true">${module.timeline_entries.map((entry) => `<p><strong>${scenarioEscapeHtml(entry.time_point)}</strong> ${scenarioEscapeHtml(entry.event)}</p>`).join("")}</div>` : ""}
-            ${module.module_type === "npc" && module.skills?.length ? `<p><strong>${scenarioT("scenario.preview.skills", "技能")}：</strong>${(module.skills || []).map((skill) => `${scenarioEscapeHtml(skill.name)} ${scenarioEscapeHtml(skill.base)}`).join(" / ")}</p>` : ""}
+            ${(module.module_type === "npc" || module.module_type === "monster") ? renderEntityPreview(module) : ""}
              ${module.content ? `<p data-user-content="true">${scenarioEscapeHtml(module.content)}</p>` : ""}
         </div>
     `).join("");
@@ -593,6 +646,12 @@ function renderAttributeInputs(attributes: Record<string, string>): string {
 
 function renderBattleInputs(battle: Record<string, string>): string {
     const fields: Array<[string, string]> = [
+        ["hp", "HP"],
+        ["max_hp", "Max HP"],
+        ["dex", "DEX"],
+        ["str", "STR"],
+        ["siz", "SIZ"],
+        ["con", "CON"],
         ["db", "DB"],
         ["build", "Build"],
         ["mov", "Move"],
@@ -693,7 +752,7 @@ function collectScenarioModules(): ScenarioModule[] {
             module.attributes = collectAttributeMap(card);
             module.battle = collectBattleMap(card);
             module.weapons = collectWeapons(card);
-            module.skills = type === "npc" ? collectSkills(card) : [];
+            module.skills = collectSkills(card);
         } else if (type === "timeline") {
             module.timeline_entries = collectTimelineEntries(card);
             module.content = module.timeline_entries.map((entry) => `${entry.time_point} ${entry.event}`.trim()).filter(Boolean).join("\n");

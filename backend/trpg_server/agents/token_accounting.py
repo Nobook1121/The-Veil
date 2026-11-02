@@ -21,6 +21,7 @@ SEGMENT_LABELS: dict[str, str] = {
     "scene_static": "场景静态卡",
     "knowledge": "知识库检索",
     "room_state": "房间动态状态",
+    "system_directive": "安全/授权约束",
     "history": "历史对话",
     "user_input": "本轮输入",
     "unknown": "未分类",

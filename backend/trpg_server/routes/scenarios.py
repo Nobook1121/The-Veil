@@ -219,6 +219,10 @@ def _rooms_using_scenario(scenario_id):
         if not room_dir.is_dir():
             continue
         info = read_json(room_dir / "info.json", default={})
+        # 已归档房间的 AI 已关闭，历史记录也另有快照；它们不再需要剧本，
+        # 因此不应继续阻止删除剧本（否则剧本会被永久归档、知识库永远清不掉）。
+        if isinstance(info, dict) and info.get("archived"):
+            continue
         if str(info.get("scenario_id")) == str(scenario_id):
             result.append((room_dir, info))
     return result

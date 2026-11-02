@@ -242,6 +242,76 @@ def test_put_clamps_out_of_range_dice_threshold(tmp_path):
     assert response.get_json()["data"]["dice_thresholds"]["critical"] == 100
 
 
+def test_put_house_rules_bgm_urls_reads_back_and_rejects_invalid(tmp_path):
+    _write_room(tmp_path)
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client)
+
+    response = client.put(
+        "/api/rooms/r-1/house-rules",
+        json={"house_rules": {"bgm_urls": ["https://example.com/bgm.mp3", "/assets/bgm/builtin/01-静谧之海.wav"], "bgm_mode": "shuffle"}},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+
+    assert response.status_code == 200
+    rules = response.get_json()["data"]["house_rules"]
+    assert rules["bgm_urls"] == ["https://example.com/bgm.mp3", "/assets/bgm/builtin/01-静谧之海.wav"]
+    assert rules["bgm_mode"] == "shuffle"
+    assert _read_room_info(tmp_path)["house_rules"]["bgm_urls"][0] == "https://example.com/bgm.mp3"
+
+    invalid = client.put(
+        "/api/rooms/r-1/house-rules",
+        json={"house_rules": {"bgm_urls": ["javascript:alert(1)"]}},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert invalid.status_code == 400
+    assert _read_room_info(tmp_path)["house_rules"]["bgm_urls"][0] == "https://example.com/bgm.mp3"
+
+    invalid_mode = client.put(
+        "/api/rooms/r-1/house-rules",
+        json={"house_rules": {"bgm_mode": "random"}},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert invalid_mode.status_code == 400
+
+
+def test_put_house_rules_accepts_local_music_library_path(tmp_path):
+    _write_room(tmp_path)
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client)
+
+    response = client.put(
+        "/api/rooms/r-1/house-rules",
+        json={"house_rules": {"bgm_urls": ["/assets/bgm/library/abc__night.wav"]}},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+
+    assert response.status_code == 200
+    assert _read_room_info(tmp_path)["house_rules"]["bgm_urls"] == ["/assets/bgm/library/abc__night.wav"]
+
+    invalid = client.put(
+        "/api/rooms/r-1/house-rules",
+        json={"house_rules": {"bgm_urls": ["/assets/bgm/library/../secret.wav"]}},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert invalid.status_code == 400
+    assert _read_room_info(tmp_path)["house_rules"]["bgm_urls"] == ["/assets/bgm/library/abc__night.wav"]
+
+
+def test_room_house_rules_migrates_legacy_bgm_url(tmp_path):
+    _write_room(tmp_path, house_rules={"bgm_url": "https://example.com/legacy.mp3"})
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client)
+
+    data = client.get("/api/rooms/r-1/house-rules", headers={"X-CSRF-Token": "csrf"}).get_json()["data"]
+
+    assert data["house_rules"]["bgm_urls"] == ["https://example.com/legacy.mp3"]
+    assert data["house_rules"]["bgm_mode"] == "list"
+
+
 def test_house_rules_skill_bases_default_to_empty_object(tmp_path):
     _write_room(tmp_path)
     app = _app(tmp_path)

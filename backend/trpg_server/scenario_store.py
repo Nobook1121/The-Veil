@@ -598,6 +598,15 @@ def normalize_scenario_payload(scenario: dict[str, Any], storage_dir: Path | Non
         return None
 
     normalized = dict(scenario)
+    # 历史记录可能缺少基础信息（例如只写入 title 的半成品），补默认值，避免前端
+    # 校验因字段缺失把剧本从广场过滤掉，而创建房间的下拉框仍能选到它。
+    normalized["title"] = str(scenario.get("title") or "").strip() or "未命名剧本"
+    normalized["author"] = str(scenario.get("author") or "").strip() or "未知作者"
+    try:
+        player_count = int(scenario.get("playerCount") or 1)
+    except (TypeError, ValueError):
+        player_count = 1
+    normalized["playerCount"] = max(1, player_count)
     # 默认封面图已废弃：历史默认路径一律归一化为「无封面」，由前端渲染剧本名文字封面。
     normalized["cover"] = normalize_cover(scenario.get("cover"))
     from trpg_server.agents.versioning import normalize_semver

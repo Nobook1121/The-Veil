@@ -220,6 +220,145 @@ def custom_weapon_id(name: str, index: int = 0) -> str:
     return f"custom-{slug or index}-{index}" if not slug else f"custom-{slug}"
 
 
+# ---------------------------------------------------------------------------
+# 战斗轮使用的武器字段解析
+# 规则书表 XVII 的伤害/射程/每轮/装弹量/故障值都是自由文本，这里统一解析成
+# 战斗工具可直接使用的结构。解析失败时返回安全默认值，绝不抛异常。
+# ---------------------------------------------------------------------------
+_DICE_TERM_PATTERN = re.compile(r"(\d+)[dD](\d+)")
+_RANGE_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*(码|米|英尺|尺|yd|yard|yards|m|ft)?", re.IGNORECASE)
+_RANGE_UNIT_YARDS = {"码": 1.0, "yd": 1.0, "yard": 1.0, "yards": 1.0, "米": 1.0936, "m": 1.0936, "英尺": 1 / 3, "尺": 1 / 3, "ft": 1 / 3}
+
+
+def parse_damage(value: Any) -> dict[str, Any]:
+    """解析伤害文本，例如 ``1D6``、``1D6+DB``、``4D6/2D6/1D6``。
+
+    返回 ``segments``（霰弹枪按距离分段的伤害）、``db``/``half_db``（是否叠加
+    伤害加值）以及 ``impale`` 之外的纯骰点信息。
+    """
+    raw = _as_text(value, "1D3") or "1D3"
+    half_db = bool(re.search(r"(1/2|0\.5|一半|半)\s*(DB|伤害加值)", raw, re.IGNORECASE))
+    db = bool(re.search(r"\bDB\b", raw, re.IGNORECASE)) or "伤害加值" in raw
+    # 霰弹枪用 ``4D6/2D6/1D6`` 表示按距离分段；``1/2DB`` 中的斜杠不是分段。
+    parts = re.split(r"[/／]", raw)
+    chunks = parts if len(parts) > 1 and all(_DICE_TERM_PATTERN.search(part) for part in parts) else [raw]
+    segments = []
+    for chunk in chunks:
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        terms = [(int(count), int(sides)) for count, sides in _DICE_TERM_PATTERN.findall(chunk)]
+        cleaned = re.sub(r"(1/2|0\.5|一半|半)?\s*(DB|伤害加值)", "", chunk, flags=re.IGNORECASE)
+        cleaned = _DICE_TERM_PATTERN.sub("", cleaned)
+        fixed = 0
+        fixed_match = re.search(r"[+＋]\s*(\d+)", cleaned)
+        if fixed_match:
+            fixed = int(fixed_match.group(1))
+        negative_match = re.search(r"[－-]\s*(\d+)", cleaned)
+        if negative_match:
+            fixed -= int(negative_match.group(1))
+        if not terms and fixed == 0 and not db:
+            continue
+        segments.append({"terms": terms, "fixed": fixed})
+    if not segments:
+        segments = [{"terms": [(1, 3)], "fixed": 0}]
+    return {"raw": raw, "segments": segments, "db": db, "half_db": half_db}
+
+
+def parse_range_yards(value: Any) -> float | None:
+    """把 ``15码``/``30米``/``接触`` 解析为码数；无法解析时返回 ``None``。"""
+    text = _as_text(value)
+    if not text:
+        return None
+    lowered = text.lower()
+    if "接触" in text or "近战" in text:
+        return 0.0
+    if lowered in {"n/a", "na", "-", "—", "无"}:
+        return None
+    match = _RANGE_PATTERN.search(lowered)
+    if not match:
+        return None
+    number = float(match.group(1))
+    unit = (match.group(2) or "码").lower()
+    return round(number * _RANGE_UNIT_YARDS.get(unit, 1.0), 3)
+
+
+def parse_malfunction(value: Any) -> int | None:
+    """把故障值解析成整数（``N/A`` 返回 ``None``）。"""
+    text = _as_text(value).upper()
+    if not text or text in {"N/A", "NA", "-", "—", "NONE"}:
+        return None
+    match = re.search(r"\d+", text)
+    return int(match.group(0)) if match else None
+
+
+def parse_attacks(value: Any) -> dict[str, Any]:
+    """解析每轮攻击次数，``1(3)`` 表示每轮 1 次攻击、可 3 发点射。"""
+    text = _as_text(value, "1") or "1"
+    if text.upper() in {"N/A", "NA", "-"}:
+        return {"raw": text, "count": 1, "burst": None}
+    count_match = re.match(r"(\d+)", text)
+    burst_match = re.search(r"[（(]\s*(\d+)\s*[)）]", text)
+    return {
+        "raw": text,
+        "count": max(1, int(count_match.group(1))) if count_match else 1,
+        "burst": int(burst_match.group(1)) if burst_match else None,
+    }
+
+
+def parse_ammo(value: Any) -> int | None:
+    """解析装弹量；``N/A`` 或无法解析时返回 ``None``。"""
+    text = _as_text(value).upper()
+    if not text or text in {"N/A", "NA", "-", "—"}:
+        return None
+    match = re.search(r"\d+", text)
+    return int(match.group(0)) if match else None
+
+
+def weapon_rules(weapon: Any) -> dict[str, Any]:
+    """汇总一把武器在战斗轮中需要的全部解析字段。"""
+    row = weapon if isinstance(weapon, dict) else {}
+    damage = parse_damage(row.get("damage"))
+    return {
+        "damage": damage,
+        "rangeYards": parse_range_yards(row.get("range")),
+        "malfunction": parse_malfunction(row.get("malfunction")),
+        "attacks": parse_attacks(row.get("attacks")),
+        "ammoCapacity": parse_ammo(row.get("ammo")),
+        "impale": _as_bool(row.get("impale")),
+    }
+
+
+def sanitize_character_weapons(value: Any, *, limit: int = 60) -> list[dict[str, Any]]:
+    """裁剪写入房间快照的角色卡武器行，保留战斗工具需要的字段。"""
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for entry in value[:limit]:
+        if not isinstance(entry, dict):
+            continue
+        name = _as_text(entry.get("name"))[:60]
+        if not name:
+            continue
+        result.append(
+            {
+                "name": name,
+                "skill": _as_text(entry.get("skill"))[:40],
+                "skillKey": _as_text(entry.get("skillKey"))[:40],
+                "specialtyKey": _as_text(entry.get("specialtyKey"))[:40],
+                "damage": _as_text(entry.get("damage"), "1D3")[:40] or "1D3",
+                "range": _as_text(entry.get("range"))[:40],
+                "impale": _as_bool(entry.get("impale")),
+                "attacks": _as_text(entry.get("attacks"))[:20],
+                "ammo": _as_text(entry.get("ammo"))[:20],
+                "malfunction": _as_text(entry.get("malfunction"))[:20],
+                "weight": _as_text(entry.get("weight"))[:20],
+                "note": _as_text(entry.get("note"))[:200],
+            }
+        )
+    return result
+
+
 def upsert_custom_weapons(existing: list[dict[str, Any]], additions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """按 id 或名称合并自定义武器，返回完整库。"""
     merged = [dict(item) for item in existing]

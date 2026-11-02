@@ -1,0 +1,986 @@
+/* ==========================================================================
+   「赛博档案」组件视觉层
+   依赖 09-theme-cyber-tokens.css 的 token；全部规则限定在 body.theme-cyber-2 下。
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   侧栏：档案终端机架
+   -------------------------------------------------------------------------- */
+body.theme-cyber-2 #sidebar {
+    background-color: transparent;
+    background-image:
+        radial-gradient(120% 30% at 50% 0%, rgba(94, 240, 200, 0.08), transparent 72%),
+        linear-gradient(180deg, rgba(3, 12, 15, 0.94), rgba(3, 9, 12, 0.98));
+    border-right: 1px solid rgba(120, 232, 206, 0.18);
+    box-shadow:
+        inset -1px 0 0 rgba(94, 240, 200, 0.06),
+        18px 0 46px -26px rgba(0, 0, 0, 0.95);
+    backdrop-filter: blur(10px);
+}
+
+/* 右缘的垂直数据脊柱：极淡的编号与文字，提示这是“档案终端”。 */
+body.theme-cyber-2 #sidebar::before {
+    content: "VEIL ARCHIVE // NODE 07 // LINK STABLE // ACCESS GRANTED";
+    position: absolute;
+    top: 18px;
+    right: 4px;
+    bottom: 18px;
+    writing-mode: vertical-rl;
+    font-family: var(--theme-font-family-mono);
+    font-size: 8px;
+    letter-spacing: 0.28em;
+    color: rgba(94, 240, 200, 0.22);
+    white-space: nowrap;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+/* 顶部一道极细的冷光，像机架通电时的指示灯带。 */
+body.theme-cyber-2 #sidebar::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(94, 240, 200, 0.55), transparent);
+    box-shadow: 0 0 12px rgba(94, 240, 200, 0.35);
+    pointer-events: none;
+}
+
+body.theme-cyber-2 .sidebar-header {
+    position: relative;
+}
+
+body.theme-cyber-2 .sidebar-title {
+    color: #e2f6ef;
+    letter-spacing: 0.14em;
+    text-shadow:
+        0 0 16px rgba(94, 240, 200, 0.28),
+        0 0 2px rgba(94, 240, 200, 0.5);
+}
+
+/* 标题下方的一行终端状态：只做气质点缀，不参与交互。 */
+body.theme-cyber-2 .sidebar-title::after {
+    content: "ARCHIVE TERMINAL // ONLINE";
+    display: block;
+    margin-top: 7px;
+    font-size: 8px;
+    font-weight: 400;
+    letter-spacing: 0.24em;
+    color: rgba(242, 180, 71, 0.62);
+}
+
+body.theme-cyber-2 #sidebar .nav-link,
+body.theme-cyber-2 #sidebar .dropdown-btn {
+    position: relative;
+    overflow: hidden;
+    margin: 2px 7px;
+    padding-left: 16px;
+    border-left: 0 solid transparent;
+    border-radius: 3px;
+    font-size: 0.92rem;
+    letter-spacing: 0.02em;
+    transition: color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+/* 悬停时从左侧扫入的一道冷光。 */
+body.theme-cyber-2 #sidebar .nav-link::before,
+body.theme-cyber-2 #sidebar .dropdown-btn::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(94, 240, 200, 0.16), transparent 62%);
+    opacity: 0;
+    transform: translateX(-30%);
+    transition: opacity 0.2s ease, transform 0.24s ease;
+    pointer-events: none;
+}
+
+body.theme-cyber-2 #sidebar .nav-link:hover::before,
+body.theme-cyber-2 #sidebar .dropdown-btn:hover::before {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+body.theme-cyber-2 #sidebar .nav-link:hover,
+body.theme-cyber-2 #sidebar .dropdown-btn:hover {
+    color: var(--theme-sidebar-text-active);
+    background-color: var(--theme-sidebar-hover-bg);
+}
+
+body.theme-cyber-2 #sidebar .nav-link.active,
+body.theme-cyber-2 #sidebar .dropdown-btn.active {
+    border-left: 0 solid transparent;
+    color: var(--theme-sidebar-text-active);
+    background-color: var(--theme-sidebar-active-bg);
+    background-image: linear-gradient(90deg, rgba(94, 240, 200, 0.16), rgba(94, 240, 200, 0.03) 66%, transparent);
+    box-shadow:
+        inset 0 0 0 1px rgba(94, 240, 200, 0.16),
+        0 0 20px rgba(94, 240, 200, 0.1);
+}
+
+/* 选中项：左缘一根发光竖线 + 右侧一个“当前节点”标记。 */
+body.theme-cyber-2 #sidebar .nav-link.active::after,
+body.theme-cyber-2 #sidebar .dropdown-btn.active::after {
+    content: "";
+    position: absolute;
+    top: 16%;
+    bottom: 16%;
+    left: 0;
+    width: 2px;
+    background: linear-gradient(180deg, transparent, var(--cyber-phosphor), transparent);
+    box-shadow: 0 0 10px rgba(94, 240, 200, 0.85);
+}
+
+body.theme-cyber-2 #sidebar .nav-link.active span:last-child::after {
+    content: " ▸";
+    color: var(--cyber-amber);
+    opacity: 0.7;
+}
+
+/* 用户信息区：头像圆环 + 终端读数。 */
+body.theme-cyber-2 .user-avatar img {
+    border: 1px solid rgba(94, 240, 200, 0.5);
+    box-shadow:
+        0 0 0 3px rgba(94, 240, 200, 0.06),
+        0 0 16px rgba(94, 240, 200, 0.18);
+}
+
+body.theme-cyber-2 .user-name {
+    color: #dcf4ea;
+    font-family: var(--theme-font-family-mono);
+    font-size: 0.86rem;
+    letter-spacing: 0.04em;
+}
+
+/* --------------------------------------------------------------------------
+   页面标题：档案标题 + 编号装饰
+   -------------------------------------------------------------------------- */
+body.theme-cyber-2 .page-command-header h2,
+body.theme-cyber-2 .character-command-header h2 {
+    position: relative;
+    color: #e4f8f1;
+    letter-spacing: 0.045em;
+    text-shadow: 0 0 22px rgba(94, 240, 200, 0.12);
+}
+
+body.theme-cyber-2 .page-command-header h2::after,
+body.theme-cyber-2 .character-command-header h2::after {
+    content: "";
+    display: block;
+    width: 118px;
+    height: 2px;
+    margin-top: 10px;
+    background:
+        linear-gradient(90deg, var(--cyber-phosphor), rgba(94, 240, 200, 0.05) 82%, transparent),
+        linear-gradient(90deg, var(--cyber-amber), var(--cyber-amber));
+    background-repeat: no-repeat;
+    background-size: 100% 2px, 16px 2px;
+    background-position: 0 0, 102px 0;
+    opacity: 0.72;
+}
+
+body.theme-cyber-2 .page-kicker,
+body.theme-cyber-2 .character-kicker {
+    margin-bottom: 8px;
+    color: var(--cyber-amber);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+/* kicker 末尾的闪烁方块，像终端的输入光标。 */
+body.theme-cyber-2 .page-kicker::after,
+body.theme-cyber-2 .character-kicker::after {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 11px;
+    margin-left: 6px;
+    background: var(--cyber-phosphor);
+    opacity: 0.7;
+    animation: cyberCursorBlink 1.6s steps(1, end) infinite;
+}
+
+@keyframes cyberCursorBlink {
+    0%, 48% {
+        opacity: 0.7;
+    }
+    49%, 100% {
+        opacity: 0.08;
+    }
+}
+
+body.theme-cyber-2 .page-subtitle,
+body.theme-cyber-2 .character-subtitle {
+    color: var(--theme-text-muted);
+    letter-spacing: 0.01em;
+}
+
+/* --------------------------------------------------------------------------
+   面板 / 卡片：冷光玻璃 + 细发丝边
+   -------------------------------------------------------------------------- */
+body.theme-cyber-2 .card,
+body.theme-cyber-2 .modal-content,
+body.theme-cyber-2 .tool-panel,
+body.theme-cyber-2 .character-inspector,
+body.theme-cyber-2 .character-detail-band,
+body.theme-cyber-2 .home-room-members,
+body.theme-cyber-2 .scenario-resource-row,
+body.theme-cyber-2 .scenario-knowledge-item,
+body.theme-cyber-2 .dropdown-menu,
+body.theme-cyber-2 .toast,
+body.theme-cyber-2 .popover,
+body.theme-cyber-2 .auth-modal-content,
+body.theme-cyber-2 .user-card-popover,
+body.theme-cyber-2 .profile-panel-section,
+body.theme-cyber-2 .profile-settings-sidebar {
+    color: var(--theme-text-primary);
+    background-color: var(--theme-bg-panel);
+    background-image:
+        linear-gradient(152deg, rgba(94, 240, 200, 0.055), transparent 42%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.022), transparent 34%);
+    border: 1px solid var(--cyber-hairline);
+    border-radius: var(--theme-radius-md);
+    box-shadow:
+        inset 0 1px 0 rgba(190, 255, 237, 0.06),
+        0 18px 40px -26px rgba(0, 0, 0, 0.9),
+        0 0 22px rgba(94, 240, 200, 0.045);
+    backdrop-filter: blur(9px);
+    transition:
+        border-color 0.22s ease,
+        box-shadow 0.22s ease,
+        background-color 0.22s ease,
+        transform 0.22s ease;
+}
+
+body.theme-cyber-2 .list-group-item,
+body.theme-cyber-2 .table {
+    color: var(--theme-text-primary);
+    background-color: var(--theme-bg-panel);
+    border-color: var(--theme-border-subtle);
+}
+
+body.theme-cyber-2 .list-group-item:hover {
+    background-color: var(--theme-bg-panel-muted);
+    border-color: var(--theme-border-strong);
+}
+
+/* 面板悬停：只提亮发丝边，不改变尺寸，避免列表抖动。 */
+body.theme-cyber-2 .tool-panel:hover,
+body.theme-cyber-2 .scenario-knowledge-item:hover,
+body.theme-cyber-2 .scenario-resource-row:hover {
+    border-color: var(--theme-border-strong);
+    box-shadow:
+        inset 0 1px 0 rgba(190, 255, 237, 0.08),
+        0 20px 46px -26px rgba(0, 0, 0, 0.92),
+        0 0 26px rgba(94, 240, 200, 0.1);
+}
+
+/* 剧本卡片：档案卡 + 角标 + 悬停扫描光。 */
+body.theme-cyber-2 .scenario-card {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--theme-bg-panel);
+    border: 1px solid var(--cyber-hairline);
+    border-radius: 6px;
+    box-shadow:
+        inset 0 1px 0 rgba(190, 255, 237, 0.05),
+        0 14px 32px -22px rgba(0, 0, 0, 0.9);
+    transition: transform 0.22s ease, box-shadow 0.24s ease, border-color 0.24s ease;
+}
+
+/* 左上角取景角标：档案被“框选”的感觉。 */
+body.theme-cyber-2 .scenario-card::before {
+    content: "";
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 16px;
+    height: 16px;
+    border-top: 1px solid rgba(94, 240, 200, 0.7);
+    border-left: 1px solid rgba(94, 240, 200, 0.7);
+    filter: drop-shadow(0 0 5px rgba(94, 240, 200, 0.45));
+    pointer-events: none;
+    z-index: 3;
+    transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+/* 悬停时的斜向扫描光。 */
+body.theme-cyber-2 .scenario-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    background: linear-gradient(112deg, transparent 34%, rgba(94, 240, 200, 0.11) 47%, transparent 61%);
+    transform: translateX(-118%);
+    transition: transform 0.55s cubic-bezier(0.22, 0.61, 0.36, 1);
+    pointer-events: none;
+}
+
+body.theme-cyber-2 .scenario-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(94, 240, 200, 0.5);
+    box-shadow:
+        inset 0 1px 0 rgba(190, 255, 237, 0.08),
+        0 22px 44px -24px rgba(0, 0, 0, 0.94),
+        0 0 30px rgba(94, 240, 200, 0.14);
+}
+
+body.theme-cyber-2 .scenario-card:hover::after {
+    transform: translateX(0);
+}
+
+body.theme-cyber-2 .scenario-card:hover::before {
+    transform: translate(2px, 2px);
+}
+
+body.theme-cyber-2 .scenario-card img {
+    filter: saturate(0.82) contrast(1.06) brightness(0.9);
+    transition: filter 0.3s ease;
+}
+
+body.theme-cyber-2 .scenario-card:hover img {
+    filter: saturate(1) contrast(1.08) brightness(0.98);
+}
+
+body.theme-cyber-2 .scenario-card-title {
+    color: #e4f8f1;
+    letter-spacing: 0.02em;
+}
+
+/* ID 编号：琥珀色归档标签，像贴在档案袋上的贴纸。 */
+body.theme-cyber-2 .scenario-id-chip {
+    padding: 1px 6px;
+    border: 1px solid rgba(242, 180, 71, 0.32);
+    border-radius: 2px;
+    background: rgba(242, 180, 71, 0.08);
+    color: rgba(242, 180, 71, 0.86);
+    font-family: var(--theme-font-family-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   按钮：终端指令键
+   -------------------------------------------------------------------------- */
+body.theme-cyber-2 .btn {
+    position: relative;
+    overflow: hidden;
+    border-radius: 3px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    transition:
+        transform 0.16s ease,
+        box-shadow 0.2s ease,
+        border-color 0.2s ease,
+        background-color 0.2s ease,
+        color 0.2s ease;
+}
+
+body.theme-cyber-2 .btn::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -60%;
+    width: 42%;
+    background: linear-gradient(90deg, transparent, rgba(220, 255, 245, 0.16), transparent);
+    transform: skewX(-18deg);
+    transition: left 0.5s ease;
+    pointer-events: none;
+}
+
+body.theme-cyber-2 .btn:not(:disabled):hover::after {
+    left: 120%;
+}
+
+body.theme-cyber-2 .btn:not(:disabled):hover {
+    transform: translateY(-1px);
+}
+
+body.theme-cyber-2 .btn:not(:disabled):active {
+    transform: translateY(0) scale(0.985);
+}
+
+body.theme-cyber-2 .btn-primary {
+    color: #03130f;
+    border-color: rgba(94, 240, 200, 0.72);
+    background-color: var(--cyber-phosphor);
+    background-image: linear-gradient(180deg, #93ffe8, #5ef0c8 46%, #22cfa6);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.45),
+        inset 0 -2px 6px rgba(0, 70, 54, 0.28),
+        0 6px 18px -8px rgba(94, 240, 200, 0.55);
+    text-shadow: none;
+}
+
+body.theme-cyber-2 .btn-primary:hover,
+body.theme-cyber-2 .btn-primary:focus {
+    color: #02110d;
+    border-color: rgba(140, 255, 228, 0.9);
+    background-image: linear-gradient(180deg, #b3fff0, #7ff3d7 46%, #35dfb6);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.55),
+        0 10px 26px -10px rgba(94, 240, 200, 0.65),
+        0 0 22px rgba(94, 240, 200, 0.26);
+}
+
+body.theme-cyber-2 .btn-secondary {
+    color: var(--theme-text-secondary);
+    border-color: rgba(120, 232, 206, 0.24);
+    background-color: rgba(10, 30, 36, 0.72);
+    background-image: linear-gradient(180deg, rgba(22, 52, 58, 0.6), rgba(8, 24, 30, 0.72));
+    box-shadow: inset 0 1px 0 rgba(190, 255, 237, 0.07);
+}
+
+body.theme-cyber-2 .btn-secondary:hover,
+body.theme-cyber-2 .btn-secondary:focus {
+    color: #e4f8f1;
+    border-color: rgba(120, 232, 206, 0.5);
+    background-color: rgba(15, 42, 48, 0.86);
+}
+
+body.theme-cyber-2 .btn-outline-primary {
+    color: var(--cyber-phosphor);
+    border-color: rgba(94, 240, 200, 0.44);
+    background-color: rgba(94, 240, 200, 0.04);
+}
+
+body.theme-cyber-2 .btn-outline-primary:hover,
+body.theme-cyber-2 .btn-outline-primary:focus {
+    color: #03130f;
+    border-color: rgba(94, 240, 200, 0.8);
+    background-color: var(--cyber-phosphor);
+}
+
+body.theme-cyber-2 .btn-outline-secondary {
+    color: var(--theme-text-secondary);
+    border-color: rgba(120, 232, 206, 0.26);
+}
+
+body.theme-cyber-2 .btn-outline-secondary:hover,
+body.theme-cyber-2 .btn-outline-secondary:focus {
+    color: #e4f8f1;
+    background-color: rgba(120, 232, 206, 0.12);
+    border-color: rgba(120, 232, 206, 0.5);
+}
+
+body.theme-cyber-2 .btn-outline-danger {
+    color: var(--cyber-alert);
+    border-color: rgba(255, 107, 127, 0.4);
+}
+
+body.theme-cyber-2 .btn-outline-danger:hover {
+    color: #180307;
+    background-color: var(--cyber-alert);
+    border-color: var(--cyber-alert);
+}
+
+body.theme-cyber-2 .btn-link {
+    color: var(--theme-text-link);
+}
+
+/* 小尺寸命令按钮：剧本卡片里的操作键，保持紧凑但可读。 */
+body.theme-cyber-2 .scenario-card-actions .btn {
+    border-radius: 2px;
+    font-size: 0.78rem;
+}
+
+body.theme-cyber-2 .scenario-favorite-btn {
+    color: rgba(199, 216, 209, 0.5);
+}
+
+body.theme-cyber-2 .scenario-favorite-btn:hover,
+body.theme-cyber-2 .scenario-favorite-btn.favorited {
+    color: var(--cyber-amber);
+    text-shadow: 0 0 10px rgba(242, 180, 71, 0.55);
+}
+
+/* --------------------------------------------------------------------------
+   表单：终端输入框
+   -------------------------------------------------------------------------- */
+body.theme-cyber-2 .form-control,
+body.theme-cyber-2 .form-select,
+body.theme-cyber-2 textarea,
+body.theme-cyber-2 input,
+body.theme-cyber-2 select {
+    border-radius: 3px;
+    border-color: var(--theme-input-border);
+    background-color: var(--theme-input-bg);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.36);
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+body.theme-cyber-2 .form-control:focus,
+body.theme-cyber-2 .form-select:focus,
+body.theme-cyber-2 textarea:focus,
+body.theme-cyber-2 input:focus,
+body.theme-cyber-2 select:focus {
+    border-color: var(--cyber-phosphor);
+    box-shadow:
+        inset 0 1px 3px rgba(0, 0, 0, 0.36),
+        0 0 0 2px rgba(94, 240, 200, 0.12),
+        0 0 18px rgba(94, 240, 200, 0.16);
+}
+
+body.theme-cyber-2 .form-range {
+    accent-color: var(--cyber-phosphor);
+}
+
+body.theme-cyber-2 .input-group-text {
+    color: var(--cyber-amber);
+    font-family: var(--theme-font-family-mono);
+    border-color: var(--theme-input-border);
+    background-color: rgba(12, 34, 40, 0.86);
+}
+
+/* --------------------------------------------------------------------------
+   聊天：数据报文流
+   -------------------------------------------------------------------------- */
+body.theme-cyber-2 .chat-history {
+    border-bottom: 1px solid rgba(120, 232, 206, 0.14);
+    background-image:
+        linear-gradient(180deg, rgba(4, 12, 16, 0.22), transparent 16%, transparent 84%, rgba(4, 12, 16, 0.32));
+}
+
+body.theme-cyber-2 .message-content {
+    position: relative;
+    border-radius: 6px;
+    box-shadow:
+        inset 0 1px 0 rgba(210, 255, 244, 0.06),
+        0 8px 20px -14px rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(6px);
+}
+
+body.theme-cyber-2 .message.other-message .message-content {
+    border: 1px solid rgba(120, 232, 206, 0.18);
+    border-left: 2px solid rgba(110, 168, 255, 0.6);
+}
+
+body.theme-cyber-2 .message.kp-message .message-content {
+    border: 1px solid rgba(120, 232, 206, 0.24);
+    border-left: 2px solid var(--cyber-phosphor);
+    box-shadow:
+        inset 0 1px 0 rgba(210, 255, 244, 0.07),
+        0 0 22px rgba(94, 240, 200, 0.08);
+}
+
+body.theme-cyber-2 .message.player-message .message-content {
+    color: var(--theme-chat-player-text);
+    background-image: linear-gradient(135deg, #35dcb6, #12b994 52%, #0aa383);
+    border: 1px solid rgba(150, 255, 232, 0.45);
+    border-right: 2px solid rgba(220, 255, 246, 0.8);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.32),
+        0 8px 22px -12px rgba(14, 201, 162, 0.6);
+}
+
+body.theme-cyber-2 .message.dice-message .message-content {
+    border: 1px solid rgba(242, 180, 71, 0.4);
+    border-left: 2px solid var(--cyber-amber);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 230, 170, 0.08),
+        0 0 20px rgba(242, 180, 71, 0.1);
+}
+
+body.theme-cyber-2 .message-sender {
+    color: var(--theme-text-secondary);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+body.theme-cyber-2 .kp-message .message-sender {
+    color: var(--cyber-amber);
+    font-family: var(--theme-font-family-mono);
+    letter-spacing: 0.08em;
+}
+
+body.theme-cyber-2 .message-time {
+    font-family: var(--theme-font-family-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    opacity: 0.74;
+}
+
+body.theme-cyber-2 .message-avatar {
+    border-radius: 6px;
+    box-shadow:
+        0 0 0 1px rgba(120, 232, 206, 0.24),
+        0 0 14px rgba(94, 240, 200, 0.1);
+    transition: box-shadow 0.2s ease;
+}
+
+body.theme-cyber-2 .message-avatar:hover {
+    box-shadow:
+        0 0 0 1px rgba(94, 240, 200, 0.6),
+        0 0 20px rgba(94, 240, 200, 0.22);
+}
+
+/* 聊天输入区：底部终端命令行。 */
+body.theme-cyber-2 .chat-input {
+    background-color: rgba(4, 14, 18, 0.8);
+    background-image:
+        linear-gradient(180deg, rgba(94, 240, 200, 0.045), transparent 40%);
+    border-top: 1px solid rgba(120, 232, 206, 0.16);
+    backdrop-filter: blur(10px);
+}
+
+body.theme-cyber-2 .chat-typing-indicator {
+    color: var(--cyber-amber);
+    font-family: var(--theme-font-family-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+}
+
+body.theme-cyber-2 .chat-suggestion-btn {
+    border: 1px solid rgba(120, 232, 206, 0.26);
+    border-radius: 2px;
+    background: rgba(8, 26, 32, 0.7);
+    color: var(--theme-text-secondary);
+    font-size: 0.78rem;
+    transition: border-color 0.18s ease, color 0.18s ease, background-color 0.18s ease;
+}
+
+body.theme-cyber-2 .chat-suggestion-btn:hover {
+    border-color: rgba(94, 240, 200, 0.55);
+    background: rgba(94, 240, 200, 0.08);
+    color: #e4f8f1;
+}
+
+/* --------------------------------------------------------------------------
+   右侧成员栏：在线信号台
+   -------------------------------------------------------------------------- */
+body.theme-cyber-2 .home-room-members {
+    border-left: 1px solid rgba(120, 232, 206, 0.16);
+}
+
+body.theme-cyber-2 .home-room-members-header {
+    border-bottom: 1px solid rgba(120, 232, 206, 0.14);
+}
+
+body.theme-cyber-2 .home-room-members-title {
+    color: #dcf4ea;
+    font-family: var(--theme-font-family-mono);
+    font-size: 0.76rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+body.theme-cyber-2 .home-room-online {
+    color: var(--cyber-amber);
+    font-family: var(--theme-font-family-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+}
+
+body.theme-cyber-2 .home-room-member {
+    border-radius: 3px;
+    transition: background-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+body.theme-cyber-2 .home-room-member:hover {
+    background-color: rgba(94, 240, 200, 0.06);
+    box-shadow: inset 2px 0 0 rgba(94, 240, 200, 0.5);
+}
+
+body.theme-cyber-2 .home-room-member-presence.is-online {
+    background-color: var(--cyber-phosphor);
+    box-shadow: 0 0 8px rgba(94, 240, 200, 0.8);
+    animation: cyberPresence 2.4s ease-in-out infinite;
+}
+
+@keyframes cyberPresence {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.45;
+    }
+}
+
+body.theme-cyber-2 .home-room-member-group-title {
+    color: rgba(242, 180, 71, 0.68);
+    font-family: var(--theme-font-family-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+/* --------------------------------------------------------------------------
+   弹窗 / 下拉 / 提示：终端浮层
+   -------------------------------------------------------------------------- */
+body.theme-cyber-2 .modal-content {
+    position: relative;
+    overflow: hidden;
+}
+
+/* 弹窗顶部一条持续横移的扫描线。 */
+body.theme-cyber-2 .modal-content::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 34%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(94, 240, 200, 0.9), transparent);
+    box-shadow: 0 0 12px rgba(94, 240, 200, 0.6);
+    animation: cyberModalScan 3.6s linear infinite;
+    pointer-events: none;
+}
+
+@keyframes cyberModalScan {
+    from {
+        transform: translateX(-110%);
+    }
+    to {
+        transform: translateX(320%);
+    }
+}
+
+body.theme-cyber-2 .modal-header,
+body.theme-cyber-2 .modal-footer {
+    border-color: rgba(120, 232, 206, 0.16);
+    background: linear-gradient(180deg, rgba(94, 240, 200, 0.04), transparent);
+}
+
+body.theme-cyber-2 .modal-title {
+    color: #e4f8f1;
+    letter-spacing: 0.04em;
+}
+
+body.theme-cyber-2 .dropdown-item {
+    border-radius: 2px;
+    transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+body.theme-cyber-2 .dropdown-item:hover,
+body.theme-cyber-2 .dropdown-item:focus {
+    color: #e4f8f1;
+    background-color: rgba(94, 240, 200, 0.1);
+}
+
+body.theme-cyber-2 .dropdown-divider {
+    border-color: rgba(120, 232, 206, 0.14);
+}
+
+body.theme-cyber-2 .toast {
+    border-left: 2px solid var(--cyber-phosphor);
+}
+
+body.theme-cyber-2 .notification {
+    border: 1px solid rgba(120, 232, 206, 0.3);
+    border-left: 3px solid var(--cyber-phosphor);
+    border-radius: 3px;
+    background-color: rgba(5, 18, 22, 0.94);
+    font-family: var(--theme-font-family-mono);
+    font-size: 0.82rem;
+    letter-spacing: 0.02em;
+    box-shadow:
+        0 18px 40px -22px rgba(0, 0, 0, 0.95),
+        0 0 22px rgba(94, 240, 200, 0.12);
+    backdrop-filter: blur(10px);
+}
+
+body.theme-cyber-2 .notification-success {
+    border-left-color: var(--cyber-phosphor);
+}
+
+body.theme-cyber-2 .notification-error {
+    border-left-color: var(--cyber-alert);
+}
+
+body.theme-cyber-2 .notification-warning {
+    border-left-color: var(--cyber-amber);
+}
+
+/* --------------------------------------------------------------------------
+   表格 / 列表 / 设置页
+   -------------------------------------------------------------------------- */
+body.theme-cyber-2 .table th {
+    color: rgba(242, 180, 71, 0.8);
+    font-family: var(--theme-font-family-mono);
+    font-size: 0.74rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+body.theme-cyber-2 .table-striped > tbody > tr:nth-of-type(odd) > * {
+    background-color: rgba(94, 240, 200, 0.03);
+}
+
+body.theme-cyber-2 .settings-tab,
+body.theme-cyber-2 .tool-tab {
+    border-radius: 2px;
+    letter-spacing: 0.04em;
+}
+
+/* 设置侧栏分组标题：编号式排版。 */
+body.theme-cyber-2 .profile-settings-sidebar {
+    border-right: 1px solid rgba(120, 232, 206, 0.16);
+}
+
+/* --------------------------------------------------------------------------
+   指针锁定框：跟随鼠标的取景器
+   -------------------------------------------------------------------------- */
+.theme-cyber-reticle {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 5;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.35s ease;
+    will-change: transform;
+}
+
+.theme-cyber-reticle.is-visible {
+    opacity: 0.72;
+}
+
+.theme-cyber-reticle.is-idle {
+    opacity: 0.28;
+}
+
+.cyber-reticle-corner {
+    position: absolute;
+    width: 9px;
+    height: 9px;
+    border: 1px solid rgba(94, 240, 200, 0.85);
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.cyber-reticle-corner.tl {
+    top: -15px;
+    left: -15px;
+    border-right: 0;
+    border-bottom: 0;
+}
+
+.cyber-reticle-corner.tr {
+    top: -15px;
+    right: -15px;
+    border-left: 0;
+    border-bottom: 0;
+}
+
+.cyber-reticle-corner.bl {
+    bottom: -15px;
+    left: -15px;
+    border-right: 0;
+    border-top: 0;
+}
+
+.cyber-reticle-corner.br {
+    bottom: -15px;
+    right: -15px;
+    border-left: 0;
+    border-top: 0;
+}
+
+.cyber-reticle-dot {
+    position: absolute;
+    top: -1.5px;
+    left: -1.5px;
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: var(--cyber-amber);
+    box-shadow: 0 0 8px rgba(242, 180, 71, 0.9);
+}
+
+.cyber-reticle-label {
+    position: absolute;
+    top: 12px;
+    left: 14px;
+    font-family: var(--theme-font-family-mono);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    color: rgba(242, 180, 71, 0.72);
+    white-space: nowrap;
+    text-shadow: 0 0 8px rgba(0, 0, 0, 0.9);
+}
+
+.theme-cyber-reticle.is-locking .cyber-reticle-corner.tl {
+    transform: translate(3px, 3px);
+}
+
+.theme-cyber-reticle.is-locking .cyber-reticle-corner.tr {
+    transform: translate(-3px, 3px);
+}
+
+.theme-cyber-reticle.is-locking .cyber-reticle-corner.bl {
+    transform: translate(3px, -3px);
+}
+
+.theme-cyber-reticle.is-locking .cyber-reticle-corner.br {
+    transform: translate(-3px, -3px);
+}
+
+.theme-cyber-reticle.is-locking .cyber-reticle-label {
+    color: var(--cyber-phosphor);
+}
+
+/* --------------------------------------------------------------------------
+   入场动画：页面切换时内容轻轻上浮
+   -------------------------------------------------------------------------- */
+body.theme-cyber-2 #mainContent > .tab-content.active > * {
+    animation: cyberBootIn 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes cyberBootIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   小屏与无障碍降级
+   -------------------------------------------------------------------------- */
+@media (max-width: 900px) {
+    .theme-cyber-frame {
+        inset: 6px;
+    }
+
+    .cyber-frame-corner {
+        width: 14px;
+        height: 14px;
+    }
+
+    body.theme-cyber-2 #sidebar::before {
+        display: none;
+    }
+
+    .theme-cyber-reticle {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.theme-cyber-2 #mainContent > .tab-content.active > * {
+        animation: none;
+    }
+
+    body.theme-cyber-2 .page-kicker::after,
+    body.theme-cyber-2 .character-kicker::after,
+    body.theme-cyber-2 .modal-content::before,
+    body.theme-cyber-2 .home-room-member-presence.is-online {
+        animation: none;
+    }
+
+    body.theme-cyber-2 .btn::after,
+    body.theme-cyber-2 .scenario-card::after {
+        display: none;
+    }
+}

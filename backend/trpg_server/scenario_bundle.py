@@ -48,6 +48,8 @@ _MODULE_TYPES = {
     "lore": "background",
     "setting": "background",
     "npc": "npc",
+    "monster": "monster",
+    "enemy": "monster",
     "item": "item",
     "clue": "clue",
     "handout": "handout",
@@ -218,7 +220,7 @@ def _normalize_module(raw: Mapping[str, Any], index: int, used_ids: set[str], er
     tier = _text(raw.get("tier")).lower()
     if tier not in _TIERS:
         tier = "background"
-    return {
+    module = {
         "id": module_id,
         "scene_id": module_id,
         "title": title or f"模块 {index}",
@@ -239,6 +241,21 @@ def _normalize_module(raw: Mapping[str, Any], index: int, used_ids: set[str], er
         "source_ref": dict(raw.get("source_ref")) if isinstance(raw.get("source_ref"), Mapping) else {},
         "metadata": dict(raw.get("metadata")) if isinstance(raw.get("metadata"), Mapping) else {},
     }
+    # 创作 Skill 会在模块里直接写触发器、战斗数据与开放结局；这些字段不属于
+    # 索引/图谱契约，但必须原样带到 scenario.json，否则导入后编辑器里会丢。
+    for key in ("triggers", "skills", "weapons", "inputs", "timeline_entries"):
+        value = raw.get(key)
+        if isinstance(value, list):
+            module[key] = [dict(item) if isinstance(item, Mapping) else item for item in value]
+    for key in ("battle", "attributes"):
+        value = raw.get(key)
+        if isinstance(value, Mapping):
+            module[key] = dict(value)
+    if raw.get("notes"):
+        module["notes"] = _text(raw["notes"])
+    if raw.get("open_ending") is not None:
+        module["open_ending"] = _bool(raw.get("open_ending"))
+    return module
 
 
 def _normalize_edge_type(raw_type: Any, *, from_id: str, to_id: str, node_kinds: Mapping[str, str]) -> tuple[str, str, str] | None:
@@ -352,24 +369,34 @@ def normalize_bundle(
         if raw_id and raw_id not in id_map:
             id_map[raw_id] = node_id
         node_kinds[node_id] = kind
-        nodes.append(
-            {
-                "id": node_id,
-                "kind": kind,
-                "title": title_text,
-                "parent": _text(item.get("parent")) or None,
-                "summary": _text(item.get("summary") or item.get("description")),
-                "body": _text(item.get("body") or item.get("content")),
-                "visibility": normalize_visibility(item.get("visibility")),
-                "keywords": _text_list(item.get("keywords")),
-                "aliases": _text_list(item.get("aliases")),
-                "scene_role": _text(item.get("scene_role")) or None,
-                "access": _text(item.get("access")) or "free",
-                "repeatable": _bool(item.get("repeatable"), True),
-                "spoiler_level": max(0, _int(item.get("spoiler_level"), 0)),
-                "source": _text(item.get("source")) or "ai_import",
-            }
-        )
+        node = {
+            "id": node_id,
+            "kind": kind,
+            "title": title_text,
+            "parent": _text(item.get("parent")) or None,
+            "summary": _text(item.get("summary") or item.get("description")),
+            "body": _text(item.get("body") or item.get("content")),
+            "visibility": normalize_visibility(item.get("visibility")),
+            "keywords": _text_list(item.get("keywords")),
+            "aliases": _text_list(item.get("aliases")),
+            "scene_role": _text(item.get("scene_role")) or None,
+            "access": _text(item.get("access")) or "free",
+            "repeatable": _bool(item.get("repeatable"), True),
+            "spoiler_level": max(0, _int(item.get("spoiler_level"), 0)),
+            "source": _text(item.get("source")) or "ai_import",
+        }
+        # 创作 Skill 会在节点上直接写物件互动、进入效果、结局条件与揭示条件；
+        # 这些是运行时字段，不是图谱推导产物，必须原样保留，由 validate_bundle
+        # 检查引用是否真实存在。
+        for key in ("objects", "on_enter", "on_reenter", "beats"):
+            value = item.get(key)
+            if isinstance(value, (list, tuple)):
+                node[key] = [dict(entry) if isinstance(entry, Mapping) else entry for entry in value]
+        for key in ("completion", "reveal_when", "body_ref", "layout", "kp_notes"):
+            value = item.get(key)
+            if value is not None:
+                node[key] = dict(value) if isinstance(value, Mapping) else value
+        nodes.append(node)
 
     # 场景/结局模块必须在地图上存在；AI 漏节点时按模块补齐，避免「缺少节点」。
     module_node_ids: set[str] = set()
@@ -570,6 +597,12 @@ def normalize_bundle(
     }
     if isinstance(narrative_raw.get("meta"), Mapping):
         narrative["meta"].update(dict(narrative_raw["meta"]))
+    # 创作 Skill 直接写结构化触发器、素材、旗标与时钟；它们属于运行时数据，
+    # 不做图谱推导，只做类型过滤后原样保留，交给 validate_bundle 检查引用。
+    for key in ("triggers", "assets", "flags", "clocks"):
+        value = narrative_raw.get(key)
+        if isinstance(value, list):
+            narrative[key] = [dict(item) for item in value if isinstance(item, Mapping)]
 
     scenario = {
         "id": narrative["scenario_id"],

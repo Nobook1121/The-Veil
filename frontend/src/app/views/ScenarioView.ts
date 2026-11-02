@@ -20,6 +20,8 @@ class ScenarioView {
     private closeAllowed = false;
     /** 打开编辑器时的表单快照；与当前值比较即可判断「是否有未保存改动」。 */
     private formBaseline: string | null = null;
+    /** 进度弹窗底栏按钮：转入后台 / 取消导入。 */
+    private importProgressHandlers: ScenarioImportProgressHandlers | null = null;
 
     constructor() {
         const scenarioList = document.getElementById("scenarioList");
@@ -33,6 +35,7 @@ class ScenarioView {
         this.initEventListeners();
         this.bindScenarioActions();
         this.bindBatchActions();
+        this.bindImportJobActions();
     }
 
     setEventHandlers(handlers: ScenarioViewHandlers): void {
@@ -73,6 +76,7 @@ class ScenarioView {
                 publicId: scenario.public_id || String(scenario.id),
                 scenarioVersion: scenario.scenario_version || "1.0.0",
                 actionButtons: this.batchMode ? "" : this.renderScenarioActionButtons(scenario),
+                favoriteButton: this.renderScenarioFavoriteButton(scenario),
             });
             if (selectable) {
                 const check = document.createElement("span");
@@ -417,6 +421,25 @@ class ScenarioView {
         }
     }
 
+    /** 剧本页唯一的导入入口：先让用户选择是原始文档，还是已整理好的剧本包。 */
+    showImportEntryChoice(): Promise<"document" | "bundle" | "cancel"> {
+        return new Promise((resolve) => {
+            const modal = document.createElement("div");
+            modal.className = "modal fade";
+            modal.innerHTML = `<div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">选择导入方式</h5></div><div class="modal-body">
+                <p class="mb-2"><b>导入剧本文档</b>：支持 .doc / .docx / .pdf / .txt / .md。上传后可选择直接导入、AI 全链路导入或生成审核草稿。</p>
+                <p class="mb-0"><b>导入剧本包</b>：选择已按《帷幕》格式整理好的 .veil-scenario.json（例如用剧本创作 Skill 生成的文件）。不再调用 AI 转换，校验与修复后直接发布。</p>
+            </div><div class="modal-footer"><button class="btn btn-secondary" data-import-entry="cancel">取消</button><button class="btn btn-outline-primary" data-import-entry="document">导入剧本文档</button><button class="btn btn-primary" data-import-entry="bundle">导入剧本包</button></div></div></div>`;
+            document.body.appendChild(modal);
+            const instance = new bootstrap.Modal(modal, { backdrop: "static" });
+            let settled = false;
+            const finish = (choice: "document" | "bundle" | "cancel") => { if (settled) return; settled = true; instance.hide(); resolve(choice); };
+            modal.querySelectorAll<HTMLElement>("[data-import-entry]").forEach((button) => button.addEventListener("click", () => finish((button.dataset.importEntry || "cancel") as "document" | "bundle" | "cancel")));
+            modal.addEventListener("hidden.bs.modal", () => { modal.remove(); if (!settled) resolve("cancel"); });
+            instance.show();
+        });
+    }
+
     showImportChoice(): Promise<"edit" | "direct" | "ai" | "cancel"> {
         return new Promise((resolve) => {
             const modal = document.createElement("div");
@@ -433,7 +456,7 @@ class ScenarioView {
     }
 
     /** 直接导入前收集剧本基础信息；取消时返回 null。 */
-    showDirectImportMetadata(defaults: { title: string; creator: string }): Promise<{ title: string; author: string; creator: string; playerCount: number; description: string } | null> {
+    showDirectImportMetadata(defaults: { title: string; creator: string }): Promise<{ title: string; author: string; creator: string; playerCount: number; description: string; autoPublish: boolean } | null> {
         return new Promise((resolve) => {
             const modal = document.createElement("div");
             modal.className = "modal fade";
@@ -443,6 +466,8 @@ class ScenarioView {
                 <div class="mb-3"><label class="form-label">${scenarioT("scenario.import.meta.creator", "创建者")}</label><input class="form-control" data-import-field="creator" value="${scenarioEscapeHtml(defaults.creator)}"></div>
                 <div class="mb-3"><label class="form-label">${scenarioT("scenario.import.meta.players", "推荐人数")}</label><input type="number" min="1" class="form-control" data-import-field="playerCount" value="1"></div>
                 <div class="mb-3"><label class="form-label">${scenarioT("scenario.import.meta.description", "简介")}</label><textarea class="form-control" rows="3" data-import-field="description"></textarea></div>
+                <div class="form-check"><input class="form-check-input" type="checkbox" data-import-field="autoPublish" id="scenarioImportAutoPublish"><label class="form-check-label" for="scenarioImportAutoPublish">导入完成后自动发布（不勾选则先进入人工审核）</label></div>
+                <p class="scenario-import-meta-hint">大型剧本可在导入过程中「转入后台」，你可以继续使用其它页面；完成后会在剧本页提示你。</p>
                 <div class="text-danger" data-import-error hidden></div></div>
                 <div class="modal-footer"><button class="btn btn-secondary" data-import-meta-action="cancel">${scenarioT("scenario.import.meta.cancel", "取消")}</button><button class="btn btn-primary" data-import-meta-action="confirm">${scenarioT("scenario.import.meta.confirm", "开始导入")}</button></div></div></div>`;
             document.body.appendChild(modal);
@@ -450,7 +475,8 @@ class ScenarioView {
             let settled = false;
             const errorEl = modal.querySelector<HTMLElement>("[data-import-error]");
             const fieldValue = (name: string) => (modal.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-import-field="${name}"]`)?.value || "").trim();
-            const finish = (value: { title: string; author: string; creator: string; playerCount: number; description: string } | null) => { if (settled) return; settled = true; instance.hide(); resolve(value); };
+            const checked = (name: string) => Boolean(modal.querySelector<HTMLInputElement>(`[data-import-field="${name}"]`)?.checked);
+            const finish = (value: { title: string; author: string; creator: string; playerCount: number; description: string; autoPublish: boolean } | null) => { if (settled) return; settled = true; instance.hide(); resolve(value); };
             modal.querySelector<HTMLElement>('[data-import-meta-action="confirm"]')?.addEventListener("click", () => {
                 const title = fieldValue("title");
                 const playerCount = Number.parseInt(fieldValue("playerCount") || "1", 10);
@@ -458,12 +484,114 @@ class ScenarioView {
                     if (errorEl) { errorEl.hidden = false; errorEl.textContent = scenarioT("scenario.import.meta.required", "请填写剧本名与有效的推荐人数"); }
                     return;
                 }
-                finish({ title, author: fieldValue("author"), creator: fieldValue("creator"), playerCount, description: fieldValue("description") });
+                finish({ title, author: fieldValue("author"), creator: fieldValue("creator"), playerCount, description: fieldValue("description"), autoPublish: checked("autoPublish") });
             });
             modal.querySelector<HTMLElement>('[data-import-meta-action="cancel"]')?.addEventListener("click", () => finish(null));
             modal.addEventListener("hidden.bs.modal", () => { modal.remove(); if (!settled) resolve(null); });
             instance.show();
         });
+    }
+
+    /** 后台导入完成后的审核弹窗：确认基础信息后发布，取消则先留在后台任务列表。 */
+    showImportReview(preview: ScenarioInput, job: ScenarioImportJob): Promise<{ title: string; author: string; playerCount: number; notes: string } | null> {
+        return new Promise((resolve) => {
+            const modules = Array.isArray(preview.modules) ? preview.modules : [];
+            const summary = (preview as ScenarioInput & { narrative_summary?: Record<string, number> }).narrative_summary || {};
+            const nodes = Number(summary.nodes || 0);
+            const edges = Number(summary.edges || 0);
+            const modal = document.createElement("div");
+            modal.className = "modal fade";
+            modal.innerHTML = `<div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><div><p class="scenario-import-kicker">IMPORT REVIEW</p><h5 class="modal-title">审核导入结果</h5></div></div><div class="modal-body">
+                <p class="scenario-import-meta-hint">${scenarioEscapeHtml(job.source_filename || preview.title || "剧本文档")} 已完成分析：${modules.length} 个模块、${nodes} 个图谱节点、${edges} 条关系。确认基础信息后即可发布。</p>
+                <div class="mb-3"><label class="form-label">剧本名</label><input class="form-control" data-review-field="title" value="${scenarioEscapeHtml(preview.title || "")}"></div>
+                <div class="mb-3"><label class="form-label">作者</label><input class="form-control" data-review-field="author" value="${scenarioEscapeHtml(preview.author || "")}"></div>
+                <div class="mb-3"><label class="form-label">推荐人数</label><input type="number" min="1" class="form-control" data-review-field="playerCount" value="${Number(preview.playerCount || 1)}"></div>
+                <div class="mb-3"><label class="form-label">简介</label><textarea class="form-control" rows="3" data-review-field="notes">${scenarioEscapeHtml(preview.notes || "")}</textarea></div>
+                <div class="text-danger" data-review-error hidden></div></div>
+                <div class="modal-footer"><button class="btn btn-secondary" data-review-action="cancel">稍后处理</button><button class="btn btn-primary" data-review-action="publish">发布剧本</button></div></div></div>`;
+            document.body.appendChild(modal);
+            const instance = new bootstrap.Modal(modal, { backdrop: "static" });
+            let settled = false;
+            const errorEl = modal.querySelector<HTMLElement>("[data-review-error]");
+            const value = (name: string) => (modal.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-review-field="${name}"]`)?.value || "").trim();
+            const finish = (result: { title: string; author: string; playerCount: number; notes: string } | null) => { if (settled) return; settled = true; instance.hide(); resolve(result); };
+            modal.querySelector<HTMLElement>('[data-review-action="publish"]')?.addEventListener("click", () => {
+                const title = value("title");
+                const playerCount = Number.parseInt(value("playerCount") || "1", 10);
+                if (!title || !Number.isFinite(playerCount) || playerCount < 1) {
+                    if (errorEl) { errorEl.hidden = false; errorEl.textContent = "请填写剧本名与有效的推荐人数"; }
+                    return;
+                }
+                finish({ title, author: value("author"), playerCount, notes: value("notes") });
+            });
+            modal.querySelector<HTMLElement>('[data-review-action="cancel"]')?.addEventListener("click", () => finish(null));
+            modal.addEventListener("hidden.bs.modal", () => { modal.remove(); if (!settled) resolve(null); });
+            instance.show();
+        });
+    }
+
+    private currentImportJobs: ScenarioImportJob[] = [];
+
+    /** 剧本页顶部的后台导入任务徽标；没有任务时整块隐藏。 */
+    renderImportJobs(jobs: ScenarioImportJob[]): void {
+        this.currentImportJobs = jobs;
+        const container = document.getElementById("scenarioImportJobs");
+        if (!container) return;
+        const visible = jobs.filter((job) => job.status !== "published").slice(0, 5);
+        if (visible.length === 0) {
+            container.hidden = true;
+            container.innerHTML = "";
+            return;
+        }
+        container.hidden = false;
+        container.innerHTML = visible.map((job) => {
+            const name = scenarioEscapeHtml(job.source_filename || job.metadata?.title || "剧本文档");
+            const running = !["done", "failed", "cancelled"].includes(job.status);
+            const percent = Math.max(0, Math.min(100, Math.round(Number(job.progress || 0))));
+            const message = String((job.stage_meta?.message as string) || this.describeImportStage(job.current_stage) || "");
+            const stateText = job.status === "done"
+                ? "导入完成，待审核发布"
+                : job.status === "failed"
+                    ? `导入失败：${job.error || message}`
+                    : job.status === "cancelled"
+                        ? "已取消（可重试，已完成的阶段会复用）"
+                        : `${message}（${percent}%）`;
+            const actions = job.status === "done"
+                ? `<button type="button" class="btn btn-sm btn-primary" data-import-job-action="open">审核并发布</button>`
+                : running
+                    ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-import-job-action="open">查看进度</button>`
+                    : `<button type="button" class="btn btn-sm btn-outline-secondary" data-import-job-action="retry">重试</button>
+                       <button type="button" class="btn btn-sm btn-outline-danger" data-import-job-action="abandon">放弃</button>`;
+            return `<div class="scenario-import-job" data-import-job-id="${scenarioEscapeHtml(job.id)}" data-status="${scenarioEscapeHtml(job.status)}">
+                <div class="scenario-import-job-main">
+                    <strong class="scenario-import-job-title">${name}</strong>
+                    <span class="scenario-import-job-state">${scenarioEscapeHtml(stateText)}</span>
+                    ${running ? `<div class="scenario-import-job-bar"><span style="width:${percent}%"></span></div>` : ""}
+                </div>
+                <div class="scenario-import-job-actions">${actions}</div>
+            </div>`;
+        }).join("");
+    }
+
+    private bindImportJobActions(): void {
+        document.getElementById("scenarioImportJobs")?.addEventListener("click", (event) => {
+            const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-import-job-action]");
+            if (!button) return;
+            const id = button.closest<HTMLElement>("[data-import-job-id]")?.dataset.importJobId;
+            const job = this.currentImportJobs.find((item) => item.id === id);
+            if (!job) return;
+            if (button.dataset.importJobAction === "retry") {
+                void this.handlers?.onImportJobRetry?.(job);
+            } else if (button.dataset.importJobAction === "abandon") {
+                void this.handlers?.onImportJobAbandon?.(job);
+            } else {
+                void this.handlers?.onImportJobOpen?.(job);
+            }
+        });
+    }
+
+    setImportProgressHandlers(handlers: ScenarioImportProgressHandlers | null): void {
+        this.importProgressHandlers = handlers;
     }
 
     getFormData(): ScenarioInput {
@@ -523,9 +651,9 @@ class ScenarioView {
             this.handlers?.onCreateScenarioClick();
         });
 
-        document.getElementById("importScenarioDocument")?.addEventListener("click", () => {
-            if (!this.requireLogin("导入剧本文档")) return;
-            void this.handlers?.onImportScenarioDocumentClick();
+        document.getElementById("importScenarioEntry")?.addEventListener("click", () => {
+            if (!this.requireLogin("导入剧本")) return;
+            void this.handlers?.onImportScenarioEntryClick();
         });
 
         input("importScenarioDocumentFile").addEventListener("change", async (event) => {
@@ -535,15 +663,11 @@ class ScenarioView {
             if (file) await this.handlers?.onImportScenarioDocument?.(file);
         });
 
-        document.getElementById("importScenario")?.addEventListener("click", () => {
-            if (!this.requireLogin("导入剧本")) return;
-            input("importScenarioFile").click();
-        });
-
         input("importScenarioFile").addEventListener("change", async (event) => {
             const target = event.target as HTMLInputElement;
-            await this.handlers?.onImportScenario(target.files);
+            const file = target.files?.[0];
             target.value = "";
+            if (file) await this.handlers?.onImportScenarioBundle?.(file);
         });
 
         document.getElementById("saveScenario")?.addEventListener("click", this.saveScenarioHandler);
@@ -595,7 +719,7 @@ class ScenarioView {
         });
     }
 
-    showConversionProgress(fileName: string): void {
+    showConversionProgress(fileName: string, allowBackground = true): void {
         this.closeConversionProgress();
         const modal = document.createElement("div");
         modal.className = "modal fade scenario-import-wizard";
@@ -641,11 +765,17 @@ class ScenarioView {
                                 </div>
                             </li>`).join("")}
                         </ol>
-                        <p class="scenario-import-hint"><i class="fa fa-info-circle" aria-hidden="true"></i> AI 分析可能需要数分钟；当前操作与已等待时间会实时更新，请勿关闭窗口。</p>
+                        <p class="scenario-import-hint"><i class="fa fa-info-circle" aria-hidden="true"></i> AI 分析可能需要数分钟到几十分钟；可随时转入后台继续使用其它页面，完成后会在剧本页提示你。</p>
                     </div>
+                    ${allowBackground ? `<div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-import-progress-action="background">转入后台</button>
+                        <button type="button" class="btn btn-outline-danger" data-import-progress-action="cancel">取消导入</button>
+                    </div>` : ""}
                 </div>
             </div>`;
         modal.querySelector<HTMLElement>("[data-conversion-file]")!.textContent = fileName;
+        modal.querySelector<HTMLElement>('[data-import-progress-action="background"]')?.addEventListener("click", () => this.importProgressHandlers?.onBackground?.());
+        modal.querySelector<HTMLElement>('[data-import-progress-action="cancel"]')?.addEventListener("click", () => { void this.importProgressHandlers?.onCancel?.(); });
         document.body.appendChild(modal);
         this.conversionProgressModal = modal;
         this.conversionStartedAt = Date.now();
@@ -820,6 +950,11 @@ class ScenarioView {
                 await this.openKnowledgeEditor(id);
             } else if (button.classList.contains("play-scenario")) {
                 this.handlers?.onPlayScenario(id);
+            } else if (button.classList.contains("favorite-scenario")) {
+                if (!this.requireLogin("收藏剧本")) return;
+                const favorited = ScenarioFavorites.toggle(id);
+                this.renderScenarioList(this.currentScenarios);
+                this.showMessage(favorited ? "已收藏剧本，可在个人主页「我收藏的剧本」查看" : "已取消收藏");
             } else if (button.classList.contains("delete-scenario")) {
                 await this.handlers?.onDeleteScenario(id);
             }
@@ -845,11 +980,19 @@ class ScenarioView {
         const canEdit = canUseScenarioPermission("scenarios.edit") && canModifyScenario(scenario);
         const canDelete = canUseScenarioPermission("scenarios.delete") && canModifyScenario(scenario);
         return [
-            canPreview ? `<button class="btn btn-sm btn-primary preview-scenario" data-id="${id}">${scenarioT("scenario.list.preview", "预览")}</button>` : "",
-            canEdit ? `<button class="btn btn-sm btn-secondary edit-scenario" data-id="${id}">${scenarioT("scenario.list.edit", "编辑")}</button>` : "",
-            canEdit ? `<button class="btn btn-sm btn-outline-secondary knowledge-scenario" data-id="${id}">${scenarioT("scenario.list.knowledge", "世界书")}</button>` : "",
-            canDelete ? `<button class="btn btn-sm btn-danger delete-scenario" data-id="${id}">${scenarioT("scenario.list.delete", "删除")}</button>` : "",
+            canPreview ? `<button class="btn btn-sm btn-outline-primary preview-scenario" data-id="${id}"><i class="fa fa-eye" aria-hidden="true"></i> ${scenarioT("scenario.list.preview", "预览")}</button>` : "",
+            canEdit ? `<button class="btn btn-sm btn-outline-secondary edit-scenario" data-id="${id}"><i class="fa fa-pencil" aria-hidden="true"></i> ${scenarioT("scenario.list.edit", "编辑")}</button>` : "",
+            canEdit ? `<button class="btn btn-sm btn-outline-secondary knowledge-scenario" data-id="${id}"><i class="fa fa-book" aria-hidden="true"></i> ${scenarioT("scenario.list.knowledge", "世界书")}</button>` : "",
+            canDelete ? `<button class="btn btn-sm btn-outline-danger delete-scenario" data-id="${id}"><i class="fa fa-trash" aria-hidden="true"></i> ${scenarioT("scenario.list.delete", "删除")}</button>` : "",
         ].join("");
+    }
+
+    /** 卡片左下角只保留一颗五角星：空心=未收藏，实心=已收藏。 */
+    private renderScenarioFavoriteButton(scenario: Scenario): string {
+        const id = scenarioEscapeHtml(scenario.id);
+        const favorited = ScenarioFavorites.has(scenario.id);
+        const label = favorited ? "取消收藏" : "收藏剧本";
+        return `<button type="button" class="scenario-favorite-btn${favorited ? " favorited" : ""} favorite-scenario" data-id="${id}" title="${label}" aria-label="${label}" aria-pressed="${favorited}"><i class="fa ${favorited ? "fa-star" : "fa-star-o"}" aria-hidden="true"></i></button>`;
     }
 
     private resetScenarioForm(): void {

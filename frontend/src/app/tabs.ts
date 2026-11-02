@@ -125,6 +125,10 @@ function updateNavigationState(activeLink: HTMLAnchorElement | null, navLinks: H
 }
 
 function refreshMainTabData(tabId: string): void {
+    if (tabId === "personal-home") {
+        void AuthModule.renderProfileFavorites();
+        void window.TrpgBgm?.renderPersonalSettings();
+    }
     if (tabId === "save") {
         void window.loadRoomsList?.();
     }
@@ -189,6 +193,9 @@ function switchSettingsTab(tabName: string): void {
         void loadRulesetKnowledge();
         void loadScenarioKnowledge();
         void loadEmbeddingHealth();
+    }
+    if (tabName === "bgm") {
+        void window.TrpgBgm?.loadLibraryPanel();
     }
     // 骰子贴图库按需初始化，避免非管理员页面加载时发出多余请求。
     window.TrpgAdminDiceTextures?.init();
@@ -331,7 +338,16 @@ async function loadScenarioKnowledge(): Promise<void> {
     try {
         const response = await TrpgApi.get<ApiResponse<Array<Record<string, unknown>>>>(`/api/knowledge-bases/scenarios?search=${encodeURIComponent(search)}`);
         if (!response.success || !response.data) throw new Error(response.message || "剧本知识库加载失败");
-        list.innerHTML = response.data.length ? response.data.map((item) => `<div class="list-group-item d-flex justify-content-between align-items-center"><div><strong>${settingsEscapeHtml(item.title)}</strong><div class="small text-muted">向量 ${Number(item.vector_count || 0)} · ${settingsEscapeHtml(item.backend)}<br>${settingsEscapeHtml(item.path)}</div></div><button class="btn btn-sm btn-outline-danger" data-delete-scenario-kb="${String(item.scenario_id)}">删除知识库</button></div>`).join("") : '<div class="list-group-item text-muted">没有匹配的剧本知识库</div>';
+        list.innerHTML = response.data.length ? response.data.map((item) => {
+            const archived = item.archived === true;
+            const archivedNote = archived
+                ? '<div class="small text-warning mt-1"><i class="fa fa-archive"></i> 剧本已归档（已从剧本列表隐藏），知识库暂时保留以支持仍在进行的房间。可点「彻底删除剧本」连同剧本记录一起清理。</div>'
+                : "";
+            const purgeButton = archived
+                ? `<button class="btn btn-sm btn-outline-danger ms-2" data-purge-scenario-kb="${String(item.scenario_id)}">彻底删除剧本</button>`
+                : "";
+            return `<div class="list-group-item d-flex justify-content-between align-items-center"><div><strong>${settingsEscapeHtml(item.title)}</strong>${archived ? '<span class="badge bg-secondary ms-2">已归档</span>' : ""}<div class="small text-muted">向量 ${Number(item.vector_count || 0)} · ${settingsEscapeHtml(item.backend)}<br>${settingsEscapeHtml(item.path)}</div>${archivedNote}</div><div class="d-flex align-items-center"><button class="btn btn-sm btn-outline-danger" data-delete-scenario-kb="${String(item.scenario_id)}">删除知识库</button>${purgeButton}</div></div>`;
+        }).join("") : '<div class="list-group-item text-muted">没有匹配的剧本知识库</div>';
         list.querySelectorAll<HTMLButtonElement>("[data-delete-scenario-kb]").forEach((button) => button.addEventListener("click", async () => {
             const confirmed = await window.TrpgDialog?.confirm({
                 title: "删除知识库",
@@ -342,6 +358,18 @@ async function loadScenarioKnowledge(): Promise<void> {
             if (!confirmed) return;
             const result = await TrpgApi.del<ApiResponse<unknown>>(`/api/knowledge-bases/scenarios/${encodeURIComponent(button.dataset.deleteScenarioKb || "")}`);
             if (!result.success) throw new Error(result.message || "删除失败");
+            await loadScenarioKnowledge();
+        }));
+        list.querySelectorAll<HTMLButtonElement>("[data-purge-scenario-kb]").forEach((button) => button.addEventListener("click", async () => {
+            const confirmed = await window.TrpgDialog?.confirm({
+                title: "彻底删除归档剧本",
+                message: "将删除该剧本记录、知识库向量与索引、封面，且无法恢复。若仍有房间引用它，这些房间会失去剧本内容。确定继续吗？",
+                confirmText: "彻底删除",
+                danger: true,
+            });
+            if (!confirmed) return;
+            const result = await TrpgApi.del<ApiResponse<unknown>>(`/api/knowledge-bases/scenarios/${encodeURIComponent(button.dataset.purgeScenarioKb || "")}?purge=1`);
+            if (!result.success) throw new Error(result.message || "彻底删除失败");
             await loadScenarioKnowledge();
         }));
     } catch (error) { list.textContent = settingsErrorMessage(error); }

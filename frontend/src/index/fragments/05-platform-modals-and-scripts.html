@@ -220,6 +220,9 @@
     <script src="js/diceTable.js"></script>
     <script src="js/latex.js"></script>
     <script src="js/chat.js"></script>
+    <script src="js/bgm.js"></script>
+    <script src="js/combat.js"></script>
+    <script src="js/worldOverride.js"></script>
     <script src="js/auth/api.js"></script>
     <script src="js/auth/state.js"></script>
     <script src="js/auth/floating-field.js"></script>
@@ -227,9 +230,11 @@
     <script src="js/auth/register-view.js"></script>
     <script src="js/auth/profile-dialog.js"></script>
     <script src="js/auth/user-card.js"></script>
+    <script src="js/auth/profile-favorites.js"></script>
     <script src="js/auth/index.js"></script>
     <script src="js/network.js"></script>
     <script src="js/dialog.js"></script>
+    <script src="js/scenario-favorites.js"></script>
     <script src="js/vendor/qrcode.js"></script>
     <script src="js/qr.js"></script>
     <script src="js/room-console.js"></script>
@@ -237,7 +242,23 @@
     <script src="js/rooms.js"></script>
     <script src="js/scenario.js"></script>
     <script src="js/character-sheet.js"></script>
-    <script src="js/themes/matrix-rain.js"></script>
+    <!-- 「赛博档案」主题引擎：按依赖顺序加载（core 提供工具，fx 负责设置与指针，main 为入口） -->
+    <script src="js/themes/cyber/core.js"></script>
+    <script src="js/themes/cyber/fx.js"></script>
+    <script src="js/themes/cyber/atmosphere.js"></script>
+    <script src="js/themes/cyber/rain.js"></script>
+    <script src="js/themes/cyber/hud.js"></script>
+    <script src="js/themes/cyber/main.js"></script>
+    <!-- 「深渊帷幕」主题 Canvas 引擎：按依赖顺序加载（core 提供工具，main 为入口） -->
+    <script src="js/themes/abyss/core.js"></script>
+    <script src="js/themes/abyss/environment.js"></script>
+    <script src="js/themes/abyss/atmosphere.js"></script>
+    <script src="js/themes/abyss/tentacles.js"></script>
+    <script src="js/themes/abyss/sigils.js"></script>
+    <script src="js/themes/abyss/spores.js"></script>
+    <script src="js/themes/abyss/eye.js"></script>
+    <script src="js/themes/abyss/fx.js"></script>
+    <script src="js/themes/abyss/main.js"></script>
     <script src="js/react/main.js"></script>
     <script src="js/main.js"></script>
 </body>

@@ -1,7 +1,7 @@
 <template id="scenario-card">
 {{{ coverHtml }}}
 <div class="scenario-card-body">
-    <div class="scenario-card-title" data-user-content="true">{{ title }}</div>
+    <div class="scenario-card-title" data-user-content="true" title="{{ title }}">{{ title }}</div>
     <div class="scenario-card-meta">
         <p><span data-i18n="scenario.card.author">作者</span>：<span data-user-content="true">{{ author }}</span></p>
         <p><span data-i18n="scenario.card.creator">创建者</span>：<span data-user-content="true">{{ createdBy }}</span></p>
@@ -9,12 +9,15 @@
         <p><span data-i18n="scenario.card.version">Version</span>：<span data-user-content="true">{{ scenarioVersion }}</span></p>
     </div>
     <div class="scenario-card-actions">
-        <button class="btn btn-sm btn-success play-scenario" data-id="{{ id }}">
-            <span data-i18n="scenario.list.play">游玩</span>
+        <button class="btn btn-sm btn-success play-scenario scenario-play-btn" data-id="{{ id }}">
+            <i class="fa fa-play" aria-hidden="true"></i> <span data-i18n="scenario.list.play">游玩</span>
         </button>
         {{{ actionButtons }}}
     </div>
-    <div class="scenario-id-chip"><span data-i18n="scenario.card.id">ID</span> <span data-user-content="true">{{ publicId }}</span></div>
+    <div class="scenario-card-footer">
+        {{{ favoriteButton }}}
+        <div class="scenario-id-chip"><span data-user-content="true">{{ publicId }}</span></div>
+    </div>
 </div>
 </template>
 

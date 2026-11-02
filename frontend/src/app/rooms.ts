@@ -35,6 +35,9 @@ let roomEntrySelectionRoomId: string | null = null;
 // 目标房间的房规技能基础值上限（进入房间选择角色卡时用于校验）。
 let roomEntrySkillBases: Record<string, number> = {};
 const roomActionLocks = new Set<string>();
+// 创建房间弹窗的剧本选择器状态（点击后展开下拉搜索，避免结果撑高弹窗）。
+let roomScenarioPickerScenarios: Scenario[] = [];
+let roomScenarioPickerSelected: { id: number; title: string } | null = null;
 
 function initRoomManagement(): void {
     window.currentRoom = currentRoom;
@@ -46,6 +49,31 @@ function initRoomManagement(): void {
 
     document.getElementById("createSave")?.addEventListener("click", () => {
         void openCreateRoomModal();
+    });
+    const roomScenarioSearch = document.getElementById("roomScenarioSearch") as HTMLInputElement | null;
+    roomScenarioSearch?.addEventListener("focus", openRoomScenarioPicker);
+    roomScenarioSearch?.addEventListener("click", openRoomScenarioPicker);
+    roomScenarioSearch?.addEventListener("input", () => {
+        openRoomScenarioPicker();
+    });
+    roomScenarioSearch?.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            closeRoomScenarioPicker();
+            return;
+        }
+        if (event.key !== "Enter") return;
+        const first = document.getElementById("roomScenarioList")?.querySelector<HTMLElement>(".room-scenario-option");
+        if (!first) return;
+        event.preventDefault();
+        selectRoomScenarioOption(first);
+    });
+    document.getElementById("roomScenarioList")?.addEventListener("click", (event) => {
+        const option = (event.target as HTMLElement).closest<HTMLElement>(".room-scenario-option");
+        if (option) selectRoomScenarioOption(option);
+    });
+    document.addEventListener("click", (event) => {
+        const target = event.target as HTMLElement | null;
+        if (!target?.closest(".room-scenario-combobox")) closeRoomScenarioPicker();
     });
     document.getElementById("confirmCreateSave")?.addEventListener("click", () => {
         void createRoom();
@@ -317,26 +345,164 @@ function syncRoomCharacterSelection(roomId: string, characterCard: Partial<COC7C
     TrpgCookies.set(storageKey, characterId);
 }
 
-async function openCreateRoomModal(): Promise<void> {
-    populateCharacterSelectors();
-    const scenarioSelect = document.getElementById("roomScenarioSelect") as HTMLSelectElement | null;
-    if (scenarioSelect) {
-        scenarioSelect.innerHTML = window.TrpgTemplates.render("select-placeholder-option", { label: "请选择剧本" });
-        try {
-            const data = await TrpgApi.get<ApiResponse<Scenario[]>>("/api/scenarios");
-            if (data.success && data.data) {
-                data.data.forEach((scenario) => {
-                    const option = document.createElement("option");
-                    option.value = String(scenario.id);
-                    option.textContent = scenario.title;
-                    option.dataset.title = scenario.title;
-                    scenarioSelect.appendChild(option);
-                });
-            }
-        } catch (error) {
-            console.error("加载剧本列表失败:", error);
+function scenarioSearchText(scenario: Scenario): string {
+    return [
+        scenario.title,
+        scenario.author,
+        scenario.creator_username,
+        scenario.notes,
+        scenario.public_id,
+        String(scenario.id),
+    ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+}
+
+interface RoomScenarioFilter {
+    favoritesOnly: boolean;
+    matches: (scenario: Scenario) => boolean;
+}
+
+/** 解析搜索框的筛选语法：star: 只看收藏，title:/author:/desc:/id: 限定字段。 */
+function buildRoomScenarioFilter(raw: string): RoomScenarioFilter {
+    const terms = raw.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    let favoritesOnly = false;
+    const tests: Array<(scenario: Scenario) => boolean> = [];
+    const includes = (value: string | undefined, needle: string): boolean =>
+        (value || "").toLowerCase().includes(needle);
+
+    for (const term of terms) {
+        const separator = term.indexOf(":");
+        const prefix = separator > 0 ? term.slice(0, separator) : "";
+        const value = separator > 0 ? term.slice(separator + 1) : term;
+        switch (prefix) {
+            case "star":
+                favoritesOnly = true;
+                if (value) tests.push((scenario) => scenarioSearchText(scenario).includes(value));
+                break;
+            case "title":
+                tests.push((scenario) => includes(scenario.title, value));
+                break;
+            case "author":
+                tests.push((scenario) => includes(scenario.author || scenario.creator_username, value));
+                break;
+            case "desc":
+            case "notes":
+                tests.push((scenario) => includes(scenario.notes, value));
+                break;
+            case "id":
+                tests.push((scenario) => includes(scenario.public_id || String(scenario.id), value));
+                break;
+            default:
+                tests.push((scenario) => scenarioSearchText(scenario).includes(term));
         }
     }
+    return {
+        favoritesOnly,
+        matches: (scenario) => tests.every((test) => test(scenario)),
+    };
+}
+
+function openRoomScenarioPicker(): void {
+    const dropdown = document.getElementById("roomScenarioDropdown");
+    const input = document.getElementById("roomScenarioSearch") as HTMLInputElement | null;
+    if (!dropdown) return;
+    dropdown.hidden = false;
+    input?.setAttribute("aria-expanded", "true");
+    renderRoomScenarioPicker();
+}
+
+function closeRoomScenarioPicker(): void {
+    const dropdown = document.getElementById("roomScenarioDropdown");
+    const input = document.getElementById("roomScenarioSearch") as HTMLInputElement | null;
+    if (dropdown) dropdown.hidden = true;
+    input?.setAttribute("aria-expanded", "false");
+}
+
+function selectRoomScenarioOption(option: HTMLElement): void {
+    const id = Number.parseInt(option.dataset.scenarioId || "", 10);
+    if (!Number.isFinite(id)) return;
+    roomScenarioPickerSelected = { id, title: option.dataset.title || "" };
+    renderRoomScenarioPicker();
+    closeRoomScenarioPicker();
+}
+
+function renderRoomScenarioPicker(): void {
+    const list = document.getElementById("roomScenarioList");
+    const empty = document.getElementById("roomScenarioEmpty");
+    const selectedLabel = document.getElementById("roomScenarioSelected");
+    if (!list) return;
+
+    const input = document.getElementById("roomScenarioSearch") as HTMLInputElement | null;
+    const filter = buildRoomScenarioFilter(input?.value || "");
+    const favoriteIds = new Set(ScenarioFavorites.list());
+    const scenarios = roomScenarioPickerScenarios
+        .filter((scenario) => !filter.favoritesOnly || favoriteIds.has(scenario.id))
+        .filter(filter.matches)
+        .sort((left, right) => {
+            const leftFavorite = favoriteIds.has(left.id) ? 0 : 1;
+            const rightFavorite = favoriteIds.has(right.id) ? 0 : 1;
+            return leftFavorite - rightFavorite || left.title.localeCompare(right.title, "zh-Hans-CN");
+        });
+
+    list.innerHTML = "";
+    scenarios.forEach((scenario) => {
+        const selected = roomScenarioPickerSelected?.id === scenario.id;
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = `room-scenario-option${selected ? " selected" : ""}`;
+        option.dataset.scenarioId = String(scenario.id);
+        option.dataset.title = scenario.title;
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", String(selected));
+
+        const title = document.createElement("span");
+        title.className = "room-scenario-option-title";
+        title.textContent = scenario.title;
+        const meta = document.createElement("span");
+        meta.className = "room-scenario-option-meta";
+        meta.textContent = `${scenario.author || "未知作者"} · ${scenario.playerCount} 人`;
+        if (favoriteIds.has(scenario.id)) {
+            const star = document.createElement("i");
+            star.className = "fa fa-star room-scenario-option-star";
+            star.setAttribute("aria-hidden", "true");
+            option.append(star);
+        }
+        option.append(title, meta);
+        list.appendChild(option);
+    });
+
+    if (empty) empty.hidden = scenarios.length > 0;
+    if (selectedLabel) {
+        selectedLabel.hidden = !roomScenarioPickerSelected;
+        selectedLabel.textContent = roomScenarioPickerSelected ? `已选择：${roomScenarioPickerSelected.title}` : "";
+    }
+}
+
+async function loadRoomScenarioPicker(scenarioId?: number): Promise<void> {
+    const list = document.getElementById("roomScenarioList");
+    if (list) list.innerHTML = `<p class="room-scenario-loading">正在加载剧本…</p>`;
+    try {
+        const data = await TrpgApi.get<ApiResponse<Scenario[]>>("/api/scenarios");
+        roomScenarioPickerScenarios = data.success && data.data ? data.data : [];
+        if (scenarioId) {
+            const match = roomScenarioPickerScenarios.find((scenario) => scenario.id === scenarioId);
+            if (match) roomScenarioPickerSelected = { id: match.id, title: match.title };
+        }
+    } catch (error) {
+        console.error("加载剧本列表失败:", error);
+        roomScenarioPickerScenarios = [];
+    }
+    renderRoomScenarioPicker();
+}
+
+async function openCreateRoomModal(scenarioId?: number): Promise<void> {
+    populateCharacterSelectors();
+    roomScenarioPickerSelected = null;
+    closeRoomScenarioPicker();
+    const searchInput = document.getElementById("roomScenarioSearch") as HTMLInputElement | null;
+    if (searchInput) searchInput.value = "";
 
     const roomNameInput = document.getElementById("saveName") as HTMLInputElement | null;
     if (roomNameInput) roomNameInput.value = "";
@@ -345,6 +511,8 @@ async function openCreateRoomModal(): Promise<void> {
     if (visibilitySelect) visibilitySelect.value = "private";
     const modalElement = document.getElementById("createSaveModal");
     if (modalElement) new bootstrap.Modal(modalElement).show();
+
+    await loadRoomScenarioPicker(scenarioId);
 }
 
 async function createRoom(): Promise<void> {
@@ -355,10 +523,8 @@ async function createRoom(): Promise<void> {
 
 async function createRoomUnlocked(): Promise<void> {
     const roomName = (document.getElementById("saveName") as HTMLInputElement | null)?.value.trim() || "";
-    const scenarioSelect = document.getElementById("roomScenarioSelect") as HTMLSelectElement | null;
-    const scenarioId = scenarioSelect?.value || "";
-    const selectedOption = scenarioSelect?.options[scenarioSelect.selectedIndex];
-    const scenarioTitle = selectedOption?.dataset.title || "";
+    const scenarioId = roomScenarioPickerSelected?.id;
+    const scenarioTitle = roomScenarioPickerSelected?.title || "";
 
     if (!roomName) {
         showNotification("请输入房间名称", "error");
@@ -376,7 +542,7 @@ async function createRoomUnlocked(): Promise<void> {
     try {
         const data = await TrpgApi.post<ApiResponse<Room>>("/api/rooms", {
             name: roomName,
-            scenario_id: Number.parseInt(scenarioId, 10),
+            scenario_id: scenarioId,
             scenario_title: scenarioTitle,
             visibility: (document.getElementById("roomVisibilitySelect") as HTMLSelectElement | null)?.value || "private",
             character_card: roomEntrySelection.characterCard,
@@ -572,6 +738,8 @@ async function enterRoom(room: Room): Promise<void> {
 
     currentRoom = room;
     window.currentRoom = currentRoom;
+    // 只有进入房间后才会启用该房间的背景音乐（离开房间时清空）。
+    window.TrpgBgm?.setRoom(room);
     // 房间规则优先级最高：切换房间后重建技能基础值，使新房规即时生效。
     void window.COC7CharacterSheet?.reloadSkillBases?.();
     window.restoreThinkingState?.();
@@ -601,6 +769,8 @@ async function enterRoom(room: Room): Promise<void> {
         return;
     }
     void window.RoomNarrative?.load(room.id);
+    window.TrpgWorldOverride?.refresh(room);
+    void window.TrpgCombat?.refresh();
     await enforceSelfCardSkillBaseLimit(room);
     window.joinSocketRoom?.(room.id);
     await loadRoomNodes();
@@ -693,6 +863,8 @@ function updateRoomDetail(room: Room): void {
         archived: Boolean(room.archived),
         invisibleView: room.invisible_view === true,
     });
+    // 房间背景音乐面板：房主/房间管理员可编辑，其他成员只读。
+    void window.TrpgBgm?.renderRoomPlaylist(room, { editable: canManageRoom(room) && !room.archived });
     renderRoomUsage(room.usage);
 }
 
@@ -1042,6 +1214,24 @@ function readHouseRuleDiceThreshold(elementId: string): number | null {
     return Math.max(0, Math.min(100, value));
 }
 
+/** 房规弹窗里的世界意志白名单：列出房间内所有成员，按 user_id 预选。 */
+function renderHouseRuleWorldOverrideMembers(selectedIds: string[]): void {
+    const select = document.getElementById("houseRuleWorldOverrideUsers") as HTMLSelectElement | null;
+    if (!select || !currentRoom) return;
+    const seen = new Set<string>();
+    const rows: string[] = [];
+    for (const member of activeRoomMembers(currentRoom)) {
+        const userId = String(member.user_id || "").trim();
+        if (!userId || seen.has(userId)) continue;
+        seen.add(userId);
+        const character = member.character_card?.name;
+        const label = character ? `${member.username || userId}（${character}）` : (member.username || userId);
+        const selected = selectedIds.includes(userId) ? " selected" : "";
+        rows.push(`<option value="${escapeRoomHtml(userId)}"${selected}>${escapeRoomHtml(label)}</option>`);
+    }
+    select.innerHTML = rows.join("");
+}
+
 async function openHouseRulesModal(): Promise<void> {
     if (!currentRoom?.id) return;
     const modalElement = document.getElementById("roomHouseRulesModal");
@@ -1097,6 +1287,15 @@ async function openHouseRulesModal(): Promise<void> {
             rerollLimitInput.placeholder = defaultsReroll ? `留空继承默认值（${defaultsReroll.reroll_limit}）` : "留空继承默认值";
         }
         syncHouseRuleDiceRerollLimit();
+        const worldOverrideEnabled = document.getElementById("houseRuleWorldOverrideEnabled") as HTMLInputElement | null;
+        if (worldOverrideEnabled) {
+            worldOverrideEnabled.checked = response.data.house_rules?.world_override_enabled !== false;
+        }
+        renderHouseRuleWorldOverrideMembers(
+            Array.isArray(response.data.house_rules?.world_override_user_ids)
+                ? response.data.house_rules.world_override_user_ids.map((item) => String(item))
+                : [],
+        );
         if (animationHint) {
             const defaultsAnim = response.data.dice_animation_defaults;
             const effective = response.data.dice_animation;
@@ -1123,8 +1322,13 @@ async function saveHouseRules(): Promise<void> {
     const animationSelect = document.getElementById("houseRuleDiceAnimationLevel") as HTMLSelectElement | null;
     const playerRollSelect = document.getElementById("houseRulePlayerDiceRoll") as HTMLSelectElement | null;
     const rerollModeSelect = document.getElementById("houseRuleDiceRerollMode") as HTMLSelectElement | null;
+    const worldOverrideEnabled = document.getElementById("houseRuleWorldOverrideEnabled") as HTMLInputElement | null;
+    const worldOverrideUsers = document.getElementById("houseRuleWorldOverrideUsers") as HTMLSelectElement | null;
     const playerRuleValue = playerRollSelect?.value || "";
     const rerollModeValue = rerollModeSelect?.value || "";
+    const worldOverrideUserIds = Array.from(worldOverrideUsers?.selectedOptions || [])
+        .map((option) => option.value)
+        .filter((value) => value);
     try {
         const response = await TrpgApi.put<ApiResponse<RoomHouseRulesPayload>>(`/api/rooms/${encodeURIComponent(currentRoom.id)}/house-rules`, {
             house_rules: {
@@ -1136,6 +1340,9 @@ async function saveHouseRules(): Promise<void> {
                 dice_reroll_mode: rerollModeValue || null,
                 // 非「指定次数」时不写入次数，避免留下与模式无关的覆盖值。
                 dice_reroll_limit: rerollModeValue === "limited" ? readHouseRuleDiceRerollLimit() : null,
+                // 世界意志直执行：房间开关 + 额外允许使用的成员白名单。
+                world_override_enabled: worldOverrideEnabled ? worldOverrideEnabled.checked : true,
+                world_override_user_ids: worldOverrideUserIds,
             },
             visibility: visibilitySelect?.value || "private",
         });
@@ -1147,6 +1354,7 @@ async function saveHouseRules(): Promise<void> {
         if (response.data.visibility) currentRoom.visibility = response.data.visibility;
         if (response.data.dice_thresholds) currentRoom.dice_thresholds = response.data.dice_thresholds;
         if (response.data.dice_animation) currentRoom.dice_animation = response.data.dice_animation;
+        window.TrpgBgm?.setRoom(currentRoom);
         updateRoomDetail(currentRoom);
         void window.COC7CharacterSheet?.reloadSkillBases?.();
         bootstrap.Modal.getInstance(document.getElementById("roomHouseRulesModal"))?.hide();
@@ -1421,6 +1629,9 @@ async function deleteCurrentRoom(): Promise<void> {
         window.leaveSocketRoom?.(deletingRoomId);
         currentRoom = null;
         window.currentRoom = null;
+        window.TrpgBgm?.setRoom(null);
+        window.TrpgCombat?.onRoomChanged();
+        window.TrpgWorldOverride?.refresh(null);
         TrpgCookies.remove(getLastRoomStorageKey());
         window.clearChatMessages?.();
         showRoomListView();
@@ -1572,7 +1783,10 @@ function clearCurrentRoom(): void {
     if (currentRoom?.id) window.leaveSocketRoom?.(currentRoom.id);
     currentRoom = null;
     window.currentRoom = null;
+    window.TrpgBgm?.setRoom(null);
     window.TrpgDiceTable?.onRoomChanged();
+    window.TrpgCombat?.onRoomChanged();
+    window.TrpgWorldOverride?.refresh(null);
     window.setChatReadOnly?.(false);
     applyInvisibleRoomView(false);
     window.closeRoomConsole?.();
@@ -1891,6 +2105,10 @@ async function tryJoinRoomFromInvite(): Promise<boolean> {
 }
 
 window.initRoomManagement = initRoomManagement;
+window.openCreateRoomWithScenario = async (scenarioId: number): Promise<void> => {
+    window.switchMainTab?.("save");
+    await openCreateRoomModal(scenarioId);
+};
 window.autoLoadLastRoom = autoLoadLastRoom;
 window.clearCurrentRoom = clearCurrentRoom;
 window.recordCharacterChange = recordCharacterChange;

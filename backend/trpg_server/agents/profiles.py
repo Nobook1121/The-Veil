@@ -42,6 +42,14 @@ DEFAULT_KP_TOOLS = [
     "trigger.reveal_scenario_trigger",
     "knowledge.search_ruleset",
     "room.suggest_actions",
+    "combat.start",
+    "combat.state",
+    "combat.next",
+    "combat.attack",
+    "combat.shoot",
+    "combat.damage",
+    "combat.treat",
+    "combat.end",
 ]
 
 

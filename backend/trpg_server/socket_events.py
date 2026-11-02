@@ -38,6 +38,13 @@ def register_socket_events(socketio):
         lambda event, payload: socketio.emit(event, payload, room=payload.get("room_id"))
     )
 
+    # 战斗轮面板：战斗状态每次落盘后广播给房间内所有客户端。
+    from trpg_server.agents.tools import combat
+
+    combat.register_broadcaster(
+        lambda event, payload: socketio.emit(event, payload, room=payload.get("room_id"))
+    )
+
     def _room_membership():
         return current_app.config.setdefault(USER_ROOM_MEMBERSHIP_KEY, {})
 

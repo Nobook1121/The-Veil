@@ -17,6 +17,7 @@ from trpg_server.agents.tools.narrative_triggers import (
 )
 from trpg_server.agents.tools.knowledge import SEARCH_RULESET_KNOWLEDGE_TOOL
 from trpg_server.agents.tools.suggest import SUGGEST_ACTIONS_TOOL
+from trpg_server.agents.tools.combat import COMBAT_TOOLS, COMBAT_TOOL_NAMES
 
 
 def default_tool_registry() -> ToolRegistry:
@@ -40,6 +41,7 @@ def default_tool_registry() -> ToolRegistry:
             REVEAL_SCENARIO_TRIGGER_TOOL,
             SEARCH_RULESET_KNOWLEDGE_TOOL,
             SUGGEST_ACTIONS_TOOL,
+            *COMBAT_TOOLS,
             *NARRATIVE_TOOLS,
             *TRIGGER_RUNTIME_TOOLS,
         ]
@@ -47,6 +49,8 @@ def default_tool_registry() -> ToolRegistry:
 
 
 __all__ = [
+    "COMBAT_TOOLS",
+    "COMBAT_TOOL_NAMES",
     "NARRATIVE_TOOLS",
     "NARRATIVE_TOOL_NAMES",
     "TRIGGER_RUNTIME_TOOL_NAMES",

@@ -65,6 +65,8 @@ const TrpgAvatar = (() => {
     const COVER_FONT_SIZES = [40, 34, 28, 24, 20, 17, 14, 12];
     // 全部字号都放不下时的兜底字号（与 COVER_FONT_SIZES 的最小值一致）。
     const COVER_MIN_FONT_SIZE = 12;
+    // 封面最多显示 3 行，超出部分在最后一行用省略号截断，避免长标题挤满封面。
+    const COVER_MAX_LINES = 3;
 
     // 估算单字宽度：中日韩等全角字符约等于字号，其余按 0.55 字号估算。
     function charWidth(character: string, fontSize: number): number {
@@ -100,6 +102,21 @@ const TrpgAvatar = (() => {
         return lines.length ? lines : [text];
     }
 
+    // 把最后一行截断到可用宽度内并补上省略号，保证不会溢出封面。
+    function truncateCoverLine(text: string, fontSize: number): string {
+        const maxWidth = COVER_WIDTH - COVER_PADDING_X * 2;
+        const suffix = "…";
+        let width = charWidth(suffix, fontSize);
+        let result = "";
+        for (const character of Array.from(text)) {
+            const nextWidth = charWidth(character, fontSize);
+            if (width + nextWidth > maxWidth) break;
+            result += character;
+            width += nextWidth;
+        }
+        return `${result}${suffix}`;
+    }
+
     // 剧本名文字封面：自动换行并挑选能放进安全区的最大字号。
     function scenarioCoverTextDataUri(title: string): string {
         const text = (title || "").trim() || "未命名剧本";
@@ -107,11 +124,18 @@ const TrpgAvatar = (() => {
         let lines = wrapCoverTitle(text, fontSize);
         for (const candidateSize of COVER_FONT_SIZES) {
             const candidateLines = wrapCoverTitle(text, candidateSize);
-            if (candidateLines.length * candidateSize * 1.3 <= COVER_TEXT_HEIGHT) {
+            if (
+                candidateLines.length <= COVER_MAX_LINES
+                && candidateLines.length * candidateSize * 1.3 <= COVER_TEXT_HEIGHT
+            ) {
                 fontSize = candidateSize;
                 lines = candidateLines;
                 break;
             }
+        }
+        if (lines.length > COVER_MAX_LINES) {
+            lines = lines.slice(0, COVER_MAX_LINES);
+            lines[COVER_MAX_LINES - 1] = truncateCoverLine(lines[COVER_MAX_LINES - 1] || "", fontSize);
         }
 
         const lineHeight = fontSize * 1.3;

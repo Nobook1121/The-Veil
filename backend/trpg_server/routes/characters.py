@@ -722,17 +722,26 @@ def _bounded_int(value, minimum, maximum, fallback):
 
 def _sanitize_room_character_card(character):
     attributes = character.get("attributes") if isinstance(character.get("attributes"), dict) else {}
+    max_hp = _bounded_int(character.get("maxHp", character.get("max_hp")), 1, 999, 1)
+    max_san = _bounded_int(character.get("maxSan", character.get("max_san")), 0, 999, 0)
     return {
         "id": str(character.get("id", ""))[:80],
         "name": str(character.get("name", ""))[:80],
         "occupationId": str(character.get("occupationId", character.get("occupation_id", "")))[:80],
         "attributes": attributes,
-        "maxHp": _bounded_int(character.get("maxHp", character.get("max_hp")), 1, 999, 1),
-        "maxSan": _bounded_int(character.get("maxSan", character.get("max_san")), 0, 999, 0),
+        "maxHp": max_hp,
+        "currentHp": _bounded_int(character.get("currentHp", character.get("current_hp")), 0, max_hp, max_hp),
+        "maxSan": max_san,
+        "currentSan": _bounded_int(character.get("currentSan", character.get("current_san")), 0, max_san, max_san),
         "mov": _bounded_int(character.get("mov"), 0, 99, 0),
+        "build": _bounded_int(character.get("build"), -2, 99, 0),
+        "damageBonus": str(character.get("damageBonus") or "")[:20],
         "skills": character.get("skills", []) if isinstance(character.get("skills", []), list) else [],
+        "weapons": weapon_catalog.sanitize_character_weapons(character.get("weapons")),
+        "customWeapons": weapon_catalog.sanitize_character_weapons(character.get("customWeapons")),
         "equipment": character.get("equipment", []) if isinstance(character.get("equipment", []), list) else [],
         "background": character.get("background", {}) if isinstance(character.get("background", {}), dict) else {},
+        "status": character.get("status") if isinstance(character.get("status"), dict) else {},
     }
 
 

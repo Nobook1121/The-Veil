@@ -48,6 +48,11 @@ def _scenario_knowledge_items(search: str = "") -> list[dict]:
             # so count all of its vectors regardless of the historical version.
             vector_filter = {"scenario_id": str(scenario_id)}
             count = int(vector_store.count(vector_filter)) if vector_store else 0
+            index_exists = index_path.exists()
+            # 知识已通过「删除知识库」清理过（无索引且无向量）的剧本不再出现在列表里，
+            # 否则用户点完删除后仍会看到一条「向量 0」的空记录，误以为没删掉。
+            if not index_exists and count <= 0:
+                continue
             health = vector_store.health() if vector_store else {"backend": "none"}
             items.append({
                 "scenario_id": scenario_id,
@@ -58,7 +63,10 @@ def _scenario_knowledge_items(search: str = "") -> list[dict]:
                 "descriptor_path": str(descriptor),
                 "vector_db_path": str(getattr(vector_store, "db_path", current_app.config.get("EMBEDDED_VECTOR_DB_PATH", EMBEDDED_VECTOR_DB_PATH))),
                 "backend": health.get("backend", "unknown"),
-                "index_exists": index_path.exists(),
+                "index_exists": index_exists,
+                # 归档剧本已从剧本列表隐藏（用户视角等同删除），但可能仍被进行中的
+                # 房间引用；列表里标记出来，避免误以为知识库是删除残留。
+                "archived": bool(scenario.get("archived")),
             })
         except (OSError, ValueError, TypeError):
             continue
@@ -80,6 +88,31 @@ def delete_scenario_knowledge(scenario_id: int):
                        if str(load_scenario_record(path, root).get("id")) == str(scenario_id)), None)
     if descriptor is None:
         return error_response("Scenario not found", 404, "Scenario not found")
+    record = load_scenario_record(descriptor, Path(configured_dir))
+    purge = str(request.args.get("purge") or "").strip().lower() in {"1", "true", "yes"}
+    if purge:
+        # 归档剧本已从剧本页隐藏，网页端没有入口再次删除；知识库管理页提供「彻底删除」
+        # 作为清理入口（会连同剧本记录、知识索引、向量与封面一起移除）。
+        if not record.get("archived"):
+            return error_response("仅可彻底删除已归档剧本；正常剧本请到剧本页删除", 400, "Scenario not archived")
+        role = str(session.get("role") or "").upper()
+        if role not in {"ADMIN", "OWNER"} and str(record.get("owner_id")) != str(session.get("user_id")):
+            return error_response("Permission denied", 403, "Permission denied")
+        from trpg_server.scenario_admin import delete_scenario as force_delete_scenario
+        result = force_delete_scenario(
+            configured_dir,
+            current_app.config.get("ROOMS_DIR", ROOMS_DIR),
+            scenario_id,
+            current_app.extensions.get("vector_store"),
+            force=True,
+        )
+        log_user_action(
+            logger,
+            user_action_text(session.get("username"), "彻底删除了归档剧本"),
+            用户ID=session.get("user_id"),
+            剧本ID=scenario_id,
+        )
+        return success_response(data=result, message="Scenario purged")
     vector_store = current_app.extensions.get("vector_store")
     deleted_vectors = int(vector_store.delete_by_filter({"scenario_id": str(scenario_id)})) if vector_store else 0
     index_dir = descriptor.parent / "knowledge-index"

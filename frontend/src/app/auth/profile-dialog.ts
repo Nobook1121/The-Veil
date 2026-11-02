@@ -9,6 +9,8 @@ namespace AuthModule {
     let initialAdminNameTo = DEFAULT_ADMIN_NAME_TO;
 
     export function openUserSettings(): void {
+        // 关闭左下角的用户卡片浮层，避免它盖住资料弹窗的左侧分区导航。
+        closeUserCard();
         window.switchMainTab?.("user-settings", { clearNav: true });
         switchProfileSection("profile-account-info", false);
         resetProfileThemeSetting();

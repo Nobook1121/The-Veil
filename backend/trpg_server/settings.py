@@ -19,6 +19,10 @@ AVATARS_DIR = DATA_DIR / "assets" / "avatars"
 AI_PLATFORM_ASSETS_DIR = DATA_DIR / "assets" / "aiplatform"
 VENDOR_ASSETS_DIR = DATA_DIR / "assets" / "vendor"
 THEME_ASSETS_DIR = DATA_DIR / "assets" / "theme"
+# 内置背景音乐随程序分发（只读、可随版本更新）；管理员上传的音乐保存在运行时目录，
+# 便于备份与清理，也不进入版本库。
+BUILTIN_BGM_DIR = DATA_DIR / "assets" / "bgm"
+BGM_LIBRARY_DIR = RUNTIME_DIR / "bgm"
 TOOLS_DIR = FRONTEND_DIST_DIR / "data" / "tools"
 ROOMS_DIR = RUNTIME_DIR / "rooms"
 ROOM_ARCHIVES_DIR = RUNTIME_DIR / "room_archives"

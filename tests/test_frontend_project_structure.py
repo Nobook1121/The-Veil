@@ -47,7 +47,7 @@ def test_frontend_theme_selector_exposes_cyber_theme():
 def test_frontend_theme_manager_uses_canonical_body_theme_classes():
     config_manager = (ROOT / "frontend/src/app/config/ConfigManager.ts").read_text(encoding="utf-8")
 
-    assert 'themeClassNames = ["theme-light", "theme-dark", "theme-cyber-2", "theme-tome", "light-theme", "dark-theme"]' in config_manager
+    assert 'themeClassNames = ["theme-light", "theme-dark", "theme-cyber-2", "theme-tome", "theme-coc", "light-theme", "dark-theme"]' in config_manager
     assert 'body.classList.add("theme-cyber-2")' in config_manager
     assert 'body.classList.add("theme-tome")' in config_manager
 

@@ -1,0 +1,630 @@
+/* 战斗轮独立面板：把先攻、HP、当前行动者与战斗日志收进一块 UI，
+   让聊天流专心承载叙事，动作用按钮提交并由玩家自己掷骰。 */
+
+.combat-panel {
+    flex: 0 0 auto;
+    margin: 0 16px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md, 12px);
+    background:
+        linear-gradient(158deg, rgba(224, 82, 82, 0.14), transparent 58%),
+        var(--color-panel);
+    box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.28));
+    overflow: hidden;
+}
+
+.combat-panel[hidden] {
+    display: none;
+}
+
+.combat-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.combat-panel-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.combat-panel-brand > i {
+    color: var(--color-danger);
+}
+
+.combat-panel-kicker {
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    color: var(--color-danger);
+}
+
+.combat-panel-brand strong {
+    font-size: 0.95rem;
+    color: var(--color-text);
+}
+
+.combat-panel-round {
+    padding: 1px 9px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-danger);
+    background: rgba(224, 82, 82, 0.14);
+}
+
+.combat-panel-toggle {
+    flex: none;
+    padding: 4px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--color-muted);
+    cursor: pointer;
+}
+
+.combat-panel-toggle:hover {
+    background: var(--color-panel-muted);
+    color: var(--color-text);
+}
+
+.combat-panel-body {
+    display: grid;
+    grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px 14px;
+    max-height: 336px;
+}
+
+.combat-panel-body[hidden] {
+    display: none;
+}
+
+.combat-order {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.combat-order-row {
+    padding: 8px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    background: var(--color-panel-muted);
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.combat-order-row.is-current {
+    border-color: var(--color-primary);
+    box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+.combat-order-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+.combat-order-name {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--color-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.combat-order-row.is-player .combat-order-name {
+    color: var(--color-primary);
+}
+
+.combat-order-row.is-enemy .combat-order-name {
+    color: var(--color-danger);
+}
+
+.combat-order-turn {
+    flex: none;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 0.66rem;
+    color: var(--color-primary);
+    background: rgba(102, 226, 173, 0.14);
+}
+
+.combat-order-hp {
+    height: 5px;
+    margin: 6px 0 5px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.24);
+    overflow: hidden;
+}
+
+.combat-order-hp > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #4ade80, #22c55e);
+    transition: width 0.35s ease;
+}
+
+.combat-order-row.is-enemy .combat-order-hp > span {
+    background: linear-gradient(90deg, #f97373, #dc4c4c);
+}
+
+.combat-order-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    font-size: 0.7rem;
+    color: var(--color-muted);
+}
+
+.combat-order-number {
+    font-variant-numeric: tabular-nums;
+}
+
+.combat-tag {
+    padding: 0 5px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    font-size: 0.64rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+}
+
+.combat-tag.is-wound,
+.combat-tag.is-status {
+    border-color: rgba(224, 82, 82, 0.4);
+    color: var(--color-danger);
+}
+
+.combat-main {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.combat-current {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.combat-current-round {
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    color: var(--color-muted);
+}
+
+.combat-current-actor {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 0.84rem;
+    color: var(--color-muted);
+}
+
+.combat-current-actor strong {
+    color: var(--color-text);
+}
+
+.combat-current-note {
+    font-size: 0.76rem;
+    color: var(--color-danger);
+}
+
+.combat-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.combat-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--color-panel-muted);
+    color: var(--color-text);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease;
+}
+
+.combat-action-btn:hover:not(:disabled) {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+}
+
+.combat-action-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.combat-action-btn.is-ghost {
+    color: var(--color-muted);
+}
+
+.combat-action-btn.is-danger {
+    color: var(--color-danger);
+    border-color: rgba(224, 82, 82, 0.42);
+}
+
+.combat-waiting {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82rem;
+    color: var(--color-muted);
+}
+
+.combat-form {
+    padding: 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    background: var(--color-panel-muted);
+}
+
+.combat-form[hidden] {
+    display: none;
+}
+
+.combat-form-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.combat-form-cancel {
+    border: 0;
+    background: none;
+    color: var(--color-muted);
+    cursor: pointer;
+}
+
+.combat-form-cancel:hover {
+    color: var(--color-text);
+}
+
+.combat-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    gap: 8px;
+}
+
+.combat-form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    font-size: 0.76rem;
+    color: var(--color-muted);
+}
+
+.combat-form-dice {
+    display: flex;
+    gap: 8px;
+}
+
+.combat-form-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+}
+
+.combat-form-empty {
+    margin: 8px 0 0;
+    font-size: 0.76rem;
+    color: var(--color-danger);
+}
+
+.combat-log {
+    flex: 1 1 auto;
+    min-height: 76px;
+    max-height: 152px;
+    margin: 0;
+    padding: 8px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.16);
+    overflow-y: auto;
+    font-size: 0.8rem;
+}
+
+.combat-log-entry {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px dashed var(--border-subtle);
+}
+
+.combat-log-entry:last-child {
+    border-bottom: 0;
+}
+
+.combat-log-time {
+    color: var(--color-muted);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.7rem;
+}
+
+.combat-log-text {
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+}
+
+.combat-log-empty {
+    margin: 0;
+    color: var(--color-muted);
+    font-size: 0.78rem;
+}
+
+/* 世界意志：输入框旁的入口与一句话执行弹窗 */
+#worldOverrideButton {
+    border-color: rgba(224, 82, 82, 0.5);
+    color: var(--color-danger);
+}
+
+#worldOverrideButton:hover {
+    border-color: var(--color-danger);
+    background: rgba(224, 82, 82, 0.12);
+    color: var(--color-danger);
+}
+
+.world-override-modal {
+    border: 1px solid rgba(224, 82, 82, 0.45);
+}
+
+.world-override-modal .modal-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--color-danger);
+}
+
+.world-override-hint {
+    margin-bottom: 10px;
+    color: var(--color-muted);
+}
+
+.world-override-message {
+    min-height: 1.3em;
+    margin: 8px 0 0;
+    color: var(--color-muted);
+}
+
+.world-override-message.is-error {
+    color: var(--color-danger);
+}
+
+/* --------------------------------------------------------------------------
+   世界意志 · 法阵层
+   遮罩只负责压暗背景，法阵把这一刻读成一次仪式。
+   层级夹在遮罩（1049）与弹窗（1050）之间，且不接收鼠标事件。
+   -------------------------------------------------------------------------- */
+.world-override-veil {
+    position: fixed;
+    inset: 0;
+    z-index: 1049;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.45s ease;
+}
+
+.world-override-veil.is-visible {
+    opacity: 1;
+}
+
+/* 弹窗周围的暖金薄雾 + 底部青绿的深渊反光，让整片遮罩不再是死黑。 */
+.world-override-veil-glow {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(circle at 50% 50%, rgba(199, 162, 92, 0.1), transparent 34%),
+        radial-gradient(ellipse 74% 42% at 50% 104%, rgba(58, 148, 138, 0.2), transparent 72%);
+}
+
+/* 法阵中心的光核：缓慢呼吸，让窗口看起来悬浮在一枚发光的印章上。 */
+.world-override-veil-core {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(
+        circle at 50% 50%,
+        rgba(224, 192, 130, 0.16),
+        rgba(120, 230, 214, 0.08) 24%,
+        transparent 44%
+    );
+    animation: worldOverrideCorePulse 5.6s ease-in-out infinite;
+}
+
+/* 一圈缓慢扫过的光带：让法阵像在“运转”，而不是一张静止的图。 */
+.world-override-veil::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 78vmin;
+    height: 78vmin;
+    margin: -39vmin 0 0 -39vmin;
+    border-radius: 50%;
+    background: conic-gradient(
+        from 0deg,
+        transparent 0deg,
+        rgba(199, 162, 92, 0.05) 8deg,
+        rgba(224, 192, 130, 0.24) 22deg,
+        rgba(120, 230, 214, 0.16) 34deg,
+        transparent 52deg,
+        transparent 360deg
+    );
+    -webkit-mask: radial-gradient(circle, transparent 56%, #000 58%, #000 98%, transparent 100%);
+    mask: radial-gradient(circle, transparent 56%, #000 58%, #000 98%, transparent 100%);
+    mix-blend-mode: screen;
+    animation: worldOverrideSpin 26s linear infinite;
+}
+
+/* 最外圈：一道极淡的虚线，把整块遮罩也圈进仪式里。 */
+.world-override-veil::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 118vmin;
+    height: 118vmin;
+    margin: -59vmin 0 0 -59vmin;
+    border: 1px dashed rgba(199, 162, 92, 0.16);
+    border-radius: 50%;
+    animation: worldOverrideSpin 320s linear infinite;
+}
+
+/* 三层同心法阵以视口中心为圆心，正好套在世界意志窗口外围。 */
+.world-override-sigil {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: min(96vmin, 900px);
+    height: min(96vmin, 900px);
+    transform: translate(-50%, -50%);
+    /* 叠加发光：金/青的线条与暗背景做 screen 混合，看起来像自发光而不是描边。 */
+    mix-blend-mode: screen;
+    animation: worldOverrideSigilBreathe 9s ease-in-out infinite;
+}
+
+.world-override-sigil-halo,
+.world-override-sigil-layer {
+    position: absolute;
+    inset: 0;
+}
+
+/* 柔光层只模糊、不旋转：模糊结果会被缓存，逐帧只做一次合成。 */
+.world-override-sigil-halo {
+    filter: blur(7px);
+    opacity: 0.5;
+    animation: worldOverrideHaloPulse 4.6s ease-in-out infinite;
+}
+
+.world-override-sigil-layer {
+    transform-origin: 50% 50%;
+    will-change: transform;
+}
+
+/* 外环刻点：随转动依次亮起，让法阵有“能量在流动”的感觉。 */
+.world-override-node {
+    animation: worldOverrideNodePulse 3.6s ease-in-out infinite;
+}
+
+.world-override-sigil-halo svg,
+.world-override-sigil-layer svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* 三层不同速度、不同方向：外层符文环最慢，中层星盘反向，内层细环稍快。 */
+.world-override-sigil-layer--outer {
+    animation: worldOverrideSpin 260s linear infinite;
+}
+
+.world-override-sigil-layer--mid {
+    animation: worldOverrideSpin 190s linear infinite reverse;
+}
+
+.world-override-sigil-layer--inner {
+    animation: worldOverrideSpin 120s linear infinite;
+}
+
+@keyframes worldOverrideSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes worldOverrideSigilBreathe {
+    0%,
+    100% {
+        transform: translate(-50%, -50%) scale(1);
+    }
+
+    50% {
+        transform: translate(-50%, -50%) scale(1.012);
+    }
+}
+
+@keyframes worldOverrideHaloPulse {
+    0%,
+    100% {
+        opacity: 0.4;
+    }
+
+    50% {
+        opacity: 0.68;
+    }
+}
+
+@keyframes worldOverrideNodePulse {
+    0%,
+    100% {
+        opacity: 0.24;
+    }
+
+    50% {
+        opacity: 0.95;
+    }
+}
+
+@keyframes worldOverrideCorePulse {
+    0%,
+    100% {
+        opacity: 0.65;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .world-override-veil::before,
+    .world-override-veil::after,
+    .world-override-sigil,
+    .world-override-sigil-halo,
+    .world-override-sigil-layer,
+    .world-override-node {
+        animation: none;
+    }
+}
+
+@media (max-width: 860px) {
+    .combat-panel-body {
+        grid-template-columns: 1fr;
+        max-height: 420px;
+    }
+
+    .combat-order {
+        flex-direction: row;
+        overflow-x: auto;
+        overflow-y: hidden;
+    }
+
+    .combat-order-row {
+        min-width: 152px;
+    }
+}

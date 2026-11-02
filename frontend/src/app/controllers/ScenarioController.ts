@@ -1,6 +1,12 @@
 class ScenarioController {
     private readonly model: ScenarioModel;
     private readonly view: ScenarioView;
+    /** 后台导入任务徽标的轮询计时器。 */
+    private importRefreshTimer: number | null = null;
+    /** 已提示过的任务状态，避免每次轮询重复弹 Toast。 */
+    private readonly importJobStates = new Map<string, string>();
+    /** 正在打开审核弹窗的任务，防止前台轮询与后台轮询重复弹窗。 */
+    private readonly reviewingJobs = new Set<string>();
 
     constructor() {
         this.model = new ScenarioModel();
@@ -14,19 +20,61 @@ class ScenarioController {
             await this.model.init();
             this.renderScenarioList();
             await this.restoreImportJob();
+            this.startImportJobsPolling();
         } catch (error) {
             console.error("初始化剧本控制器时出错:", error);
             this.view.showMessage(`初始化失败: ${scenarioErrorMessage(error)}`, true);
         }
     }
 
-    private async restoreImportJob(): Promise<void> { const id = sessionStorage.getItem("ai-trpg:scenario-import-job"); if (!id) return; try { const job = await this.model.getImportJob(id); if (job.status === "done") this.view.showMessage("文档导入完成，请审核后发布"); } catch { sessionStorage.removeItem("ai-trpg:scenario-import-job"); } }
+    private async restoreImportJob(): Promise<void> {
+        sessionStorage.removeItem("ai-trpg:scenario-import-job");
+        await this.refreshImportJobs();
+    }
+
+    private startImportJobsPolling(): void {
+        if (this.importRefreshTimer !== null) window.clearInterval(this.importRefreshTimer);
+        this.importRefreshTimer = window.setInterval(() => { void this.refreshImportJobs(); }, 4000);
+    }
+
+    /** 轮询服务端任务列表，渲染剧本页顶部的后台导入徽标并提示状态变化。 */
+    private async refreshImportJobs(): Promise<void> {
+        if (!this.model.isAuthenticated) return;
+        try {
+            const jobs = await this.model.listImportJobs();
+            this.view.renderImportJobs(jobs);
+            this.notifyImportJobChanges(jobs);
+        } catch {
+            // 轮询失败多半是网络抖动或未登录，不应打断当前操作。
+        }
+    }
+
+    private notifyImportJobChanges(jobs: ScenarioImportJob[]): void {
+        for (const job of jobs) {
+            const previous = this.importJobStates.get(job.id);
+            this.importJobStates.set(job.id, job.status);
+            if (previous === undefined || previous === job.status) continue;
+            const name = job.source_filename || job.metadata?.title || "剧本文档";
+            if (job.status === "done") {
+                this.view.showMessage(`后台导入完成：${name}，可在剧本页顶部审核并发布`);
+            } else if (job.status === "published") {
+                this.view.showMessage(`后台导入已自动发布：${name}`);
+                void this.model.loadScenarios().then(() => this.renderScenarioList()).catch(() => undefined);
+            } else if (job.status === "failed") {
+                this.view.showMessage(`后台导入失败：${job.error || name}`, true);
+            } else if (job.status === "cancelled") {
+                this.view.showMessage(`后台导入已取消：${name}`);
+            }
+        }
+    }
 
     private bindEventHandlers(): void {
         this.view.setEventHandlers({
             onCreateScenarioClick: () => this.onCreateScenarioClick(),
+            onImportScenarioEntryClick: () => this.onImportScenarioEntryClick(),
             onImportScenarioDocumentClick: () => this.onImportScenarioDocumentClick(),
             onImportScenarioDocument: (file) => this.onImportScenarioDocumentV2(file),
+            onImportScenarioBundle: (file) => this.onImportScenarioBundle(file),
             onSaveScenario: () => this.onSaveScenario(),
             onSaveDraft: () => this.onSaveDraft(),
             onDiscardDraft: () => this.onDiscardDraft(),
@@ -35,7 +83,9 @@ class ScenarioController {
             onPlayScenario: (id) => this.onPlayScenario(id),
             onDeleteScenario: (id) => this.onDeleteScenario(id),
             onBatchDeleteScenarios: (ids) => this.onBatchDeleteScenarios(ids),
-            onImportScenario: (files) => this.onImportScenario(files),
+            onImportJobOpen: (job) => this.onImportJobOpen(job),
+            onImportJobRetry: (job) => this.onImportJobRetry(job),
+            onImportJobAbandon: (job) => this.onImportJobAbandon(job),
         });
     }
 
@@ -68,6 +118,17 @@ class ScenarioController {
         this.view.openCreateModal();
     }
 
+    /** 统一导入入口：先选原始文档还是整理好的剧本包，再打开对应文件选择框。 */
+    private async onImportScenarioEntryClick(): Promise<void> {
+        const choice = await this.view.showImportEntryChoice();
+        if (choice === "cancel") return;
+        if (choice === "document") {
+            await this.onImportScenarioDocumentClick();
+            return;
+        }
+        inputElement("importScenarioFile")?.click();
+    }
+
     private async onImportScenarioDocumentClick(): Promise<void> {
         window.setCurrentEditingScenarioId?.(null);
         try {
@@ -89,26 +150,31 @@ class ScenarioController {
         inputElement("importScenarioDocumentFile")?.click();
     }
 
+    /** 导入 Skill / 外部 AI 生成的剧本包：不调用 AI，校验与修复后直接发布。 */
+    private async onImportScenarioBundle(file: File): Promise<void> {
+        this.view.showConversionProgress(file.name, false);
+        this.view.setImportProgressHandlers(null);
+        this.view.updateConversionProgress(0, "active", "正在校验剧本包");
+        try {
+            const started = await this.model.importBundle(file);
+            const finished = await this.model.waitForImportJob(started.jobId, (progress) => this.view.updateImportJobProgress(progress));
+            const scenario = await this.model.publishImport(started.scriptId || finished.script_id, started.jobId);
+            this.view.updateConversionProgress(3, "complete", "剧本包已导入并发布");
+            this.view.closeConversionProgress();
+            this.renderScenarioList();
+            this.view.showMessage(`剧本包已导入并发布：${scenario.title}`);
+        } catch (error) {
+            this.view.updateConversionProgress(0, "error", scenarioErrorMessage(error));
+            await new Promise((resolve) => window.setTimeout(resolve, 500));
+            this.view.closeConversionProgress();
+            this.view.showMessage(`剧本包导入失败：${scenarioErrorMessage(error)}`, true);
+        }
+    }
+
     private async onImportScenarioDocumentV2(file: File): Promise<void> {
         const title = file.name.replace(/\.[^.]+$/, "") || "Imported scenario";
-        // Skill / 外部 AI 生成的剧本包是最终产物，跳过模式和 AI，直接校验后发布。
         if (file.name.toLowerCase().endsWith(".json")) {
-            this.view.showConversionProgress(file.name);
-            this.view.updateConversionProgress(0, "active", "正在校验剧本包");
-            try {
-                const started = await this.model.importBundle(file);
-                const finished = await this.model.waitForImportJob(started.jobId, (progress) => this.view.updateImportJobProgress(progress));
-                const scenario = await this.model.publishImport(started.scriptId || finished.script_id, started.jobId);
-                this.view.updateConversionProgress(3, "complete", "剧本包已导入并发布");
-                this.view.closeConversionProgress();
-                this.renderScenarioList();
-                this.view.showMessage(`剧本包已导入并发布：${scenario.title}`);
-            } catch (error) {
-                this.view.updateConversionProgress(0, "error", scenarioErrorMessage(error));
-                await new Promise((resolve) => window.setTimeout(resolve, 500));
-                this.view.closeConversionProgress();
-                this.view.showMessage(`剧本包导入失败：${scenarioErrorMessage(error)}`, true);
-            }
+            await this.onImportScenarioBundle(file);
             return;
         }
         const choice = await this.view.showImportChoice();
@@ -119,8 +185,29 @@ class ScenarioController {
             ? await this.view.showDirectImportMetadata({ title, creator: window.currentUser?.username || "" })
             : null;
         if (needsJobImport && !metadata) return;
-        this.view.showConversionProgress(file.name);
+        this.view.showConversionProgress(file.name, needsJobImport);
         this.view.updateConversionProgress(0, "active", choice === "ai" ? "正在通读剧本" : "正在上传文档");
+        const foreground = { active: true };
+        let jobId = "";
+        this.view.setImportProgressHandlers({
+            onBackground: () => {
+                foreground.active = false;
+                this.view.closeConversionProgress();
+                this.view.showMessage("导入已转入后台，可继续使用其它页面；完成后会在剧本页提示你");
+                void this.refreshImportJobs();
+            },
+            onCancel: async () => {
+                foreground.active = false;
+                try {
+                    if (jobId) await this.model.cancelImportJob(jobId);
+                } catch (error) {
+                    this.view.showMessage(`取消导入失败：${scenarioErrorMessage(error)}`, true);
+                }
+                this.view.closeConversionProgress();
+                this.view.showMessage("已请求取消导入；已完成的阶段会保留，重试时可复用");
+                void this.refreshImportJobs();
+            },
+        });
         try {
             if (needsJobImport && metadata) {
                 const form = new FormData();
@@ -131,17 +218,31 @@ class ScenarioController {
                 form.append("creator", metadata.creator);
                 form.append("playerCount", String(metadata.playerCount));
                 form.append("description", metadata.description);
+                form.append("autoPublish", metadata.autoPublish ? "1" : "");
                 const started = await this.model.createImportJob(form, (value) => {
-                    this.view.updateConversionProgress(0, "active", `已上传 ${Math.round(value)}%`);
+                    if (foreground.active) this.view.updateConversionProgress(0, "active", `已上传 ${Math.round(value)}%`);
                 });
-                sessionStorage.setItem("ai-trpg:scenario-import-job", started.jobId);
-                const finished = await this.model.waitForImportJob(started.jobId, (progress) => this.view.updateImportJobProgress(progress));
-                const scenario = await this.model.publishImport(started.scriptId || finished.script_id, started.jobId);
-                sessionStorage.removeItem("ai-trpg:scenario-import-job");
-                this.view.updateConversionProgress(3, "complete", "知识库与图谱已就绪");
-                this.view.closeConversionProgress();
-                this.renderScenarioList();
-                this.view.showMessage(choice === "ai" ? `AI 已生成剧本与图谱并发布：${scenario.title}` : `文档已直接导入（含地点骨架图谱）并发布：${scenario.title}`);
+                jobId = started.jobId;
+                const finished = await this.model.waitForImportJob(started.jobId, (progress) => {
+                    this.importJobStates.set(progress.id, progress.status);
+                    if (foreground.active) this.view.updateImportJobProgress(progress);
+                });
+                this.view.setImportProgressHandlers(null);
+                if (foreground.active) {
+                    this.view.updateConversionProgress(3, "complete", "知识库与图谱已就绪");
+                    this.view.closeConversionProgress();
+                }
+                await this.refreshImportJobs();
+                if (finished.status === "published") {
+                    // 勾选了「完成后自动发布」：后台已经落盘，这里只需刷新列表。
+                    await this.model.loadScenarios();
+                    this.renderScenarioList();
+                    this.view.showMessage(`剧本已导入并自动发布：${finished.metadata?.title || metadata.title}`);
+                } else if (foreground.active) {
+                    await this.reviewImportJob(finished);
+                } else {
+                    this.view.showMessage(`后台导入完成：${finished.metadata?.title || metadata.title}，可在剧本页顶部审核并发布`);
+                }
                 return;
             }
 
@@ -160,10 +261,107 @@ class ScenarioController {
             this.view.setImportReviewReadOnly(true);
             this.view.showMessage("已进入审核模式：可重新上传文档替换草稿，或检查后发布。");
         } catch (error) {
+            this.view.setImportProgressHandlers(null);
+            foreground.active = false;
             this.view.updateConversionProgress(1, "error", scenarioErrorMessage(error));
             await new Promise((resolve) => window.setTimeout(resolve, 500));
             this.view.closeConversionProgress();
             this.view.showMessage(`剧本导入失败：${scenarioErrorMessage(error)}`, true);
+            void this.refreshImportJobs();
+        }
+    }
+
+    /** 后台任务卡片「查看进度 / 审核并发布」。 */
+    private async onImportJobOpen(job: ScenarioImportJob): Promise<void> {
+        if (job.status === "done") {
+            await this.reviewImportJob(job);
+            return;
+        }
+        if (job.status === "failed" || job.status === "cancelled") {
+            this.view.showMessage(job.error || "该导入任务已结束，可点击「重试」继续（已完成的阶段会复用）", true);
+            return;
+        }
+        // 仍在后台跑：重新贴回进度弹窗，并继续轮询直到结束。
+        this.view.showConversionProgress(job.source_filename || "剧本文档");
+        this.view.updateImportJobProgress(job);
+        this.view.setImportProgressHandlers({
+            onBackground: () => { this.view.closeConversionProgress(); this.view.setImportProgressHandlers(null); },
+            onCancel: async () => {
+                try { await this.model.cancelImportJob(job.id); } catch (error) { this.view.showMessage(scenarioErrorMessage(error), true); }
+                this.view.closeConversionProgress();
+                this.view.setImportProgressHandlers(null);
+                void this.refreshImportJobs();
+            },
+        });
+        try {
+            const finished = await this.model.waitForImportJob(job.id, (progress) => this.view.updateImportJobProgress(progress));
+            this.view.closeConversionProgress();
+            this.view.setImportProgressHandlers(null);
+            await this.refreshImportJobs();
+            if (finished.status === "done") await this.reviewImportJob(finished);
+        } catch (error) {
+            this.view.closeConversionProgress();
+            this.view.setImportProgressHandlers(null);
+            this.view.showMessage(`后台导入任务结束：${scenarioErrorMessage(error)}`, true);
+            void this.refreshImportJobs();
+        }
+    }
+
+    private async onImportJobRetry(job: ScenarioImportJob): Promise<void> {
+        try {
+            await this.model.retryImportJob(job.id, job.current_stage !== "pending" ? job.current_stage : undefined);
+            this.view.showMessage("已重新开始导入，已完成的阶段会直接复用");
+            await this.refreshImportJobs();
+        } catch (error) {
+            this.view.showMessage(`重试失败：${scenarioErrorMessage(error)}`, true);
+        }
+    }
+
+    /** 放弃失败/已取消的导入：删除任务目录以及已经写入的向量、知识索引和半成品剧本。 */
+    private async onImportJobAbandon(job: ScenarioImportJob): Promise<void> {
+        const confirmed = await window.TrpgDialog?.confirm({
+            title: "放弃这次导入",
+            message: "将删除这次导入的临时文件、已生成的向量与知识索引，之后无法恢复。确定放弃吗？",
+            confirmText: "放弃",
+            danger: true,
+        });
+        if (!confirmed) return;
+        try {
+            await this.model.abandonImportJob(job.id);
+            this.importJobStates.delete(job.id);
+            await this.refreshImportJobs();
+            this.view.showMessage("已放弃本次导入，已导入的临时内容与向量已清理");
+        } catch (error) {
+            this.view.showMessage(`放弃导入失败：${scenarioErrorMessage(error)}`, true);
+        }
+    }
+
+    /** 后台导入完成后的审核与发布：用户可修改基础信息，确认后落盘。 */
+    private async reviewImportJob(job: ScenarioImportJob): Promise<void> {
+        if (this.reviewingJobs.has(job.id)) return;
+        let current = job;
+        if (!current.preview) {
+            try { current = await this.model.getImportJob(job.id); } catch { /* 下面统一提示 */ }
+        }
+        if (!current.preview) {
+            this.view.showMessage("导入已完成，但预览数据缺失；请在任务卡片上点击「重试」重新生成", true);
+            return;
+        }
+        const preview = current.preview;
+        this.reviewingJobs.add(job.id);
+        try {
+            const edited = await this.view.showImportReview(preview, current);
+            if (!edited) return;
+            await this.model.saveImportPreview(current.id, { ...preview, ...edited });
+            const scenario = await this.model.publishImport(current.script_id, current.id);
+            await this.model.loadScenarios();
+            this.renderScenarioList();
+            await this.refreshImportJobs();
+            this.view.showMessage(`剧本已发布：${scenario.title}`);
+        } catch (error) {
+            this.view.showMessage(`发布失败：${scenarioErrorMessage(error)}`, true);
+        } finally {
+            this.reviewingJobs.delete(job.id);
         }
     }
 
@@ -360,9 +558,13 @@ class ScenarioController {
         if (!confirmed) return;
 
         try {
-            await this.model.deleteScenario(id);
+            const result = await this.model.deleteScenario(id);
             this.renderScenarioList();
-            this.view.showMessage("剧本删除成功");
+            if (result.archived) {
+                this.view.showMessage(`该剧本仍被 ${result.activeRooms} 个进行中的房间使用，已归档并从列表隐藏；归档/删除这些房间后再删除，才会彻底清理知识库`);
+            } else {
+                this.view.showMessage("剧本删除成功，知识库向量与索引已一并清理");
+            }
         } catch (error) {
             console.error("删除剧本时出错:", error);
             this.view.showMessage(`删除剧本失败: ${scenarioErrorMessage(error)}`, true);
@@ -371,11 +573,13 @@ class ScenarioController {
 
     private async onBatchDeleteScenarios(ids: number[]): Promise<void> {
         let deleted = 0;
+        let archived = 0;
         const failures: string[] = [];
         for (const id of ids) {
             try {
-                await this.model.deleteScenario(id);
-                deleted += 1;
+                const result = await this.model.deleteScenario(id);
+                if (result.archived) archived += 1;
+                else deleted += 1;
             } catch (error) {
                 failures.push(scenarioErrorMessage(error));
                 console.error(`批量删除剧本 ${id} 失败:`, error);
@@ -383,49 +587,11 @@ class ScenarioController {
         }
         this.renderScenarioList();
         if (failures.length === 0) {
-            this.view.showMessage(`已删除 ${deleted} 个剧本`);
+            const archivedHint = archived > 0 ? `，${archived} 个仍被房间使用已归档（知识库保留）` : "";
+            this.view.showMessage(`已删除 ${deleted} 个剧本${archivedHint}`);
         } else {
             this.view.showMessage(`已删除 ${deleted} 个剧本，${failures.length} 个失败。\n\n失败详情:\n${failures.join("\n")}`, true);
         }
-    }
-
-    private async onImportScenario(files: FileList | null): Promise<void> {
-        if (!files || files.length === 0) return;
-
-        let successCount = 0;
-        let errorCount = 0;
-        const errors: string[] = [];
-
-        for (const file of Array.from(files)) {
-            try {
-                const content = await this.readFile(file);
-                await this.model.importScenario(JSON.parse(content) as unknown);
-                successCount += 1;
-            } catch (error) {
-                errorCount += 1;
-                errors.push(`"${file.name}": ${scenarioErrorMessage(error)}`);
-                console.error(`导入文件 "${file.name}" 失败:`, error);
-            }
-        }
-
-        this.renderScenarioList();
-
-        if (successCount > 0 && errorCount === 0) {
-            this.view.showMessage(`成功导入 ${successCount} 个剧本`);
-        } else if (successCount > 0) {
-            this.view.showMessage(`成功导入 ${successCount} 个剧本，${errorCount} 个失败。\n\n失败详情:\n${errors.join("\n")}`);
-        } else {
-            this.view.showMessage(`导入失败：\n\n错误详情:\n${errors.join("\n")}`, true);
-        }
-    }
-
-    private readFile(file: File): Promise<string> {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result || ""));
-            reader.onerror = () => reject(new Error("文件读取失败"));
-            reader.readAsText(file);
-        });
     }
 
     async renameScenarioCover<T extends Pick<Scenario, "id" | "cover"> & Partial<Pick<Scenario, "title">>>(

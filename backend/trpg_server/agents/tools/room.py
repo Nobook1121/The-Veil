@@ -105,6 +105,18 @@ def _global_manifest(scenario: dict[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
+def _has_combat_stats(module: dict[str, Any]) -> bool:
+    for key in ("battle", "attributes"):
+        value = module.get(key)
+        if isinstance(value, dict) and value:
+            return True
+    for key in ("skills", "weapons"):
+        value = module.get(key)
+        if isinstance(value, list) and value:
+            return True
+    return False
+
+
 def _entity_manifest(scenario: dict[str, Any]) -> list[dict[str, Any]]:
     result = []
     for module in _scenario_modules(scenario):
@@ -117,7 +129,9 @@ def _entity_manifest(scenario: dict[str, Any]) -> list[dict[str, Any]]:
         result.append({
             "id": str(identifier),
             "type": str(module.get("card_type") or module_type),
+            "title": str(module.get("title") or ""),
             "scene_id": str(module.get("scene_id") or "") or None,
+            "has_stats": _has_combat_stats(module),
         })
     return result
 
@@ -311,7 +325,7 @@ def _summarize_character_card(character_card: Any) -> dict[str, Any] | None:
         return None
 
     summary = {}
-    for key in ("id", "name", "occupation", "age", "gender", "sex"):
+    for key in ("id", "name", "occupation", "age", "gender", "sex", "build", "damageBonus"):
         value = character_card.get(key)
         if value not in (None, ""):
             summary[key] = value
@@ -323,9 +337,9 @@ def _summarize_character_state(character_state: Any) -> dict[str, Any] | None:
         return None
 
     summary = {}
-    for key in ("max_hp", "current_hp", "max_san", "current_san"):
+    for key in ("max_hp", "current_hp", "max_san", "current_san", "major_wound", "unconscious", "dying", "dead", "armor"):
         value = character_state.get(key)
-        if value is not None:
+        if value not in (None, ""):
             summary[key] = value
     return summary or None
 
@@ -348,6 +362,17 @@ def _summarize_members(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return summarized
 
 
+def _active_combat_snapshot(context: Any) -> dict[str, Any] | None:
+    """当前战斗轮摘要；没有战斗时返回 None，避免快照体积无谓增大。"""
+    try:
+        from trpg_server.agents.tools.combat import _combat_summary_state, _load_combat
+
+        combat = _load_combat(context)
+        return _combat_summary_state(combat) if combat else None
+    except Exception:  # 战斗模块缺失或状态损坏时不影响快照
+        return None
+
+
 def get_room_snapshot(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     info = context.room_info()
     scenario = _find_scenario(context.scenarios_dir, info.get("scenario_id"), info.get("scenario_version"))
@@ -367,6 +392,7 @@ def get_room_snapshot(arguments: dict[str, Any], context: Any) -> dict[str, Any]
         },
         "scenario": _summarize_scenario(scenario, info),
         "members": _summarize_members(characters["members"]),
+        "combat": _active_combat_snapshot(context),
         "memory": read_room_memory({"limit": int(arguments.get("memory_limit") or 20)}, context),
         # Trigger metadata is loaded only when the model asks for scenario context.
         # Keeping it out of every snapshot reduces prompt size and prevents unrelated

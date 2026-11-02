@@ -28,6 +28,7 @@ def _default_state() -> dict[str, Any]:
         "triggerHistory": [],
         "completed": False,
         "ending_reached": False,
+        "combat": None,
     }
 
 
@@ -40,6 +41,8 @@ def _normalize_state(value: Any) -> dict[str, Any]:
             state[key] = []
     if not isinstance(state.get("npc_attitudes"), dict):
         state["npc_attitudes"] = {}
+    if not isinstance(state.get("combat"), dict):
+        state["combat"] = None
     state["rolling_summary"] = str(state.get("rolling_summary") or "")[:MAX_SUMMARY_LENGTH]
     state["event_log"] = [item for item in state["event_log"] if isinstance(item, dict)][-MAX_EVENT_LOG:]
     return state

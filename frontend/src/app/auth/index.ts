@@ -1,6 +1,7 @@
 namespace AuthModule {
     export async function initAuth(): Promise<boolean> {
         bindAuthEvents();
+        bindProfileFavorites();
         prefillRememberedUsername();
         bindFloatingFields();
         return checkAuthStatus();

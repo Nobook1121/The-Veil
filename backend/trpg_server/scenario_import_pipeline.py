@@ -32,6 +32,8 @@ AI_STAGE_RANGES: dict[str, tuple[float, float]] = {
 }
 # 整条 AI 链路的默认总预算（秒）。超过则明确失败，避免前端无限等待。
 DEFAULT_AI_BUDGET_SECONDS = 1800
+# 超长剧本按篇幅扩展后的预算上限；后台任务可长期运行，但不能无限占住线程。
+DEFAULT_AI_BUDGET_MAX_SECONDS = 5400
 
 # 关键词派生：优先取引号包裹的专有名词，其次标题词、大写拉丁词、正文高频短名。
 # 「」《》【】“” 是中文剧本里包裹专名的常见引号，直接取内容；
@@ -294,7 +296,7 @@ class ScenarioImportPipeline:
         from trpg_server.agents.embedding_provider import HashedTokenEmbedding
         from trpg_server.agents.knowledge_base import build_knowledge_chunks, index_knowledge_chunks
         from trpg_server.scenario_bundle import BundleError, build_narrative, normalize_bundle
-        from trpg_server.scenario_import_ai import analyze_script, build_ai_requester
+        from trpg_server.scenario_import_ai import AICancelled, Checkpoint, analyze_script, build_ai_requester
 
         metadata = job.get("metadata") or {}
         scenario_id = str(job.get("script_id"))
@@ -306,14 +308,29 @@ class ScenarioImportPipeline:
             budget = float(self.config.get("SCENARIO_IMPORT_AI_BUDGET_SECONDS", DEFAULT_AI_BUDGET_SECONDS))
         except (TypeError, ValueError):
             budget = float(DEFAULT_AI_BUDGET_SECONDS)
+        # 超长剧本的请求数天然更多；预算按清洗前的文档篇幅适度扩展，避免「脚本还没
+        # 分析完就撞上总时限」。上限可用配置覆盖，防止单个任务无限占住后台线程。
+        try:
+            budget_max = float(self.config.get("SCENARIO_IMPORT_AI_BUDGET_MAX_SECONDS", DEFAULT_AI_BUDGET_MAX_SECONDS))
+        except (TypeError, ValueError):
+            budget_max = float(DEFAULT_AI_BUDGET_MAX_SECONDS)
+        char_count = len(str(parsed.markdown or ""))
+        budget = max(budget, min(budget_max, budget + max(0, char_count - 30000) / 40))
         self.store.update(
             job_id,
             status="reviewing",
             current_stage="scan",
             progress=8,
             stage_progress=0,
-            stage_meta={"mode": "ai", "message": "正在读取剧本，准备通读"},
+            stage_meta={"mode": "ai", "message": "正在读取剧本，准备通读", "budget_s": round(budget, 1)},
         )
+
+        def checkpoint_load(key: str) -> Any:
+            return self.store.load_intermediate(job_id, f"ai_checkpoint/{key}", None)
+
+        def checkpoint_save(key: str, value: Any) -> None:
+            self.store.save_intermediate(job_id, f"ai_checkpoint/{key}", value)
+
         request = build_ai_requester()
         heartbeat_stop, heartbeat = self._start_ai_heartbeat(job_id, started_at)
         try:
@@ -324,10 +341,14 @@ class ScenarioImportPipeline:
                 scenario_id=scenario_id,
                 scenario_version=scenario_version,
                 budget_seconds=budget,
+                checkpoint=Checkpoint(checkpoint_load, checkpoint_save),
+                cancelled=lambda: self._cancelled(job_id),
                 progress=lambda stage, done, total, message: self._ai_progress(
                     job_id, stage, done, total, message, started_at
                 ),
             )
+        except AICancelled:
+            return self.store.update(job_id, status="cancelled", current_stage="scan", error="Import cancelled")
         finally:
             heartbeat_stop.set()
             heartbeat.join(timeout=1)

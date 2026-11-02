@@ -177,6 +177,7 @@ interface TrpgDiceTableApi {
     handleConfirmed(payload: DiceRolledPayload): void;
     handleCancelled(payload: DiceRolledPayload): void;
     handleForced(payload: DiceRolledPayload): void;
+    showExternalRoll(meta: DiceRollMeta): void;
     handleRollCommand(mode: "roll" | "force" | "confirm"): Promise<boolean>;
     handleDiceTableCommand(expression: string): Promise<boolean>;
     restorePending(): Promise<void>;

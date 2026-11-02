@@ -56,6 +56,10 @@ body.is-guest .guest-login-hint {
 .scenario-card-title {
     font-weight: bold;
     margin-bottom: 10px;
+    /* 标题过长时省略，避免把卡片横向撑长或折成两行。 */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .scenario-card-meta {
@@ -69,15 +73,73 @@ body.is-guest .guest-login-hint {
     margin: 0;
 }
 
+/* 按钮布局：游玩独占一行，其余四个按钮一行两个（2 × 2）。 */
 .scenario-card-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
     margin-top: 10px;
 }
 
-.scenario-id-chip {
+.scenario-card-actions .scenario-play-btn {
+    grid-column: 1 / -1;
+}
+
+.scenario-card-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 0;
+    padding: 4px 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    font-size: 0.8rem;
+}
+
+.scenario-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     margin-top: 10px;
+}
+
+/* 收藏只保留星星图标：去掉浏览器默认按钮的边框与底色。 */
+.scenario-favorite-btn {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-text-muted);
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: color 0.18s ease, transform 0.18s ease, text-shadow 0.18s ease;
+}
+
+.scenario-favorite-btn:hover {
+    color: #d9b06a;
+    text-shadow: 0 0 10px rgba(217, 176, 106, 0.5);
+}
+
+.scenario-favorite-btn.favorited {
+    color: #d9b06a;
+}
+
+.scenario-favorite-btn.favorited:hover {
+    transform: scale(1.08);
+}
+
+.scenario-id-chip {
+    margin-top: 0;
+    margin-left: auto;
     color: var(--color-text-muted);
     font-size: 0.78rem;
     text-align: right;

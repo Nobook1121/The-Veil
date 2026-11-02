@@ -142,14 +142,16 @@ class ConfigManager {
 
     applyTheme(): void {
         const theme = this.getEffectiveTheme();
-        const themeClassNames = ["theme-light", "theme-dark", "theme-cyber-2", "theme-tome", "light-theme", "dark-theme"];
+        const themeClassNames = ["theme-light", "theme-dark", "theme-cyber-2", "theme-tome", "theme-coc", "light-theme", "dark-theme"];
         const body = document.body;
         body.classList.remove(...themeClassNames);
 
         // 仅在运行时切换主题时启用过渡，避免首屏加载出现闪烁
         if (this.themeInitialized) this.startThemeTransition();
 
-        if (theme === "pattern_cyber_2") {
+        if (theme === "pattern_coc") {
+            body.classList.add("theme-coc");
+        } else if (theme === "pattern_cyber_2") {
             body.classList.add("theme-cyber-2");
         } else if (theme === "pattern_tome") {
             body.classList.add("theme-tome");

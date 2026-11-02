@@ -29,6 +29,12 @@ interface CharacterRuntimeState {
     injury_records?: CharacterRuntimeRecord[];
     sanity_records?: CharacterRuntimeRecord[];
     records?: CharacterRuntimeRecord[];
+    // 战斗轮写入的伤势状态（COC7 重伤/昏迷/濒死/死亡）。
+    major_wound?: boolean;
+    unconscious?: boolean;
+    dying?: boolean;
+    dead?: boolean;
+    first_aid_used?: boolean;
 }
 
 interface RoomUsage {
@@ -96,8 +102,15 @@ interface RoomHouseRules {
     // 重投模式与次数：null 表示跟随管理员默认；次数仅在 limited 时生效。
     dice_reroll_mode?: "off" | "limited" | "unlimited" | null;
     dice_reroll_limit?: number | null;
+    // 房间背景音乐播放列表（0~20 首，可为音乐库站内地址或 http(s) 外链）。
+    bgm_urls?: string[];
+    // 播放模式：列表循环 / 单曲循环 / 随机播放。
+    bgm_mode?: "list" | "single" | "shuffle";
     // 房间级技能基础值覆盖（键为 skillKey 或 skillKey.specialtyKey）。
     skill_bases?: Record<string, number>;
+    // 世界意志直执行：房间开关与额外允许使用的成员白名单（站点管理员不受开关影响）。
+    world_override_enabled?: boolean;
+    world_override_user_ids?: string[];
 }
 
 interface RoomConsoleEntry {

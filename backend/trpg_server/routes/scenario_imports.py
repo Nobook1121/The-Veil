@@ -1,26 +1,27 @@
 from __future__ import annotations
-import json, time
+import json
 import logging
 from pathlib import Path
 from flask import Blueprint, Response, current_app, request, session
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
-from trpg_server.media_defaults import normalize_cover
 from trpg_server.responses import error_response, success_response
 from trpg_server.scenario_import_jobs import public_job_payload, submit_import_job
 from trpg_server.scenario_documents import validate_scenario_upload, ScenarioDocumentError
 from trpg_server.scenario_bundle import BundleError, build_narrative, normalize_bundle, scenario_from_result
-from trpg_server.scenario_store import generate_public_id, load_scenario_record, save_scenario_record, scenario_descriptor_paths
+from trpg_server.scenario_import_publish import publish_import_job
+from trpg_server.scenario_store import (
+    delete_scenario_record,
+    find_scenario_descriptor_by_id,
+    load_scenario_record,
+    scenario_descriptor_paths,
+)
 from trpg_server.settings import SCENARIOS_DIR
 from trpg_server.agents.knowledge_base import (
     KnowledgeBaseService,
-    KnowledgeChunk,
     build_knowledge_chunks,
-    index_knowledge_chunks,
     list_knowledge_sections,
     load_knowledge_index,
-    persist_knowledge_index,
     update_knowledge_section,
-    write_knowledge_index,
 )
 
 bp = Blueprint("scenario_imports", __name__)
@@ -37,24 +38,6 @@ def _login():
 
 def _scenarios_root() -> Path:
     return Path(current_app.config.get("SCENARIOS_DIR", SCENARIOS_DIR))
-
-def _current_timestamp() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S") + ".000Z"
-
-def _existing_public_ids(root: Path, *, exclude_id: object = None) -> set[str]:
-    """收集已落盘的剧本编号，供导入发布时生成不重复的 6 位 public_id。"""
-    values: set[str] = set()
-    for path in scenario_descriptor_paths(root):
-        try:
-            record = load_scenario_record(path, root)
-        except Exception:
-            continue
-        if exclude_id is not None and str(record.get("id")) == str(exclude_id):
-            continue
-        public_id = str(record.get("public_id") or "")
-        if public_id:
-            values.add(public_id)
-    return values
 
 def _script_descriptor(script_id):
     """按剧本 ID 定位描述符与记录，供知识块读写复用。"""
@@ -81,6 +64,18 @@ def _script_chunks(descriptor, record):
 @bp.post("/api/scripts/import")
 def create_import():
     if (e := _login()): return e
+    # 每个玩家同时只允许一个导入任务：AI/向量化都在后台线程里跑，并发多个大剧本
+    # 既会互相抢平台额度，也会让「后台队列」状态变得难以预测。
+    active = _store().active_for_owner(str(session["user_id"]))
+    if active:
+        return error_response(
+            "已有剧本正在后台导入，请等待完成或取消后再开始新的导入",
+            409,
+            "Import already running",
+            jobId=active.get("id"),
+            scriptId=active.get("script_id"),
+            sourceFilename=active.get("source_filename"),
+        )
     uploaded = request.files.get("file")
     if not uploaded: return error_response("Please provide a file", 400, "No file")
     raw = uploaded.read()
@@ -92,10 +87,25 @@ def create_import():
         mode = "direct"
     metadata = {k: request.form.get(k, "") for k in ("title", "author", "description", "public", "creator", "playerCount")}
     metadata["mode"] = mode
+    metadata["autoPublish"] = request.form.get("autoPublish", "")
     job = _store().create(owner_id=str(session["user_id"]), filename=filename, metadata=metadata)
     source = Path(_store().root) / job["id"] / "source" / filename; source.parent.mkdir(parents=True, exist_ok=True); source.write_bytes(raw)
     submit_import_job(current_app._get_current_object(), job["id"])
     return success_response({"jobId": job["id"], "scriptId": job["script_id"]}, "Import started", 202)
+
+@bp.get("/api/scripts/import/jobs")
+def list_imports():
+    """当前用户的导入任务列表（含一次都没打开过的后台任务）。
+
+    列表每 4 秒被前端轮询一次，因此不带 ``preview``：审核时再按需拉取完整任务。
+    """
+    if (e := _login()): return e
+    jobs = []
+    for job in _store().list_by_owner(str(session["user_id"])):
+        payload = public_job_payload(job)
+        payload.pop("preview", None)
+        jobs.append(payload)
+    return success_response(jobs)
 
 @bp.post("/api/scripts/import/bundle")
 def import_bundle():
@@ -211,13 +221,64 @@ def cancel_import(job_id):
     if not _job(job_id): return error_response("Import job not found", 404, "Not found")
     return success_response(public_job_payload(_store().request_cancel(job_id)), "Cancellation requested")
 
+@bp.delete("/api/scripts/import/<job_id>")
+def abandon_import(job_id):
+    """放弃一次失败/已取消的导入：删除任务目录、已写入的向量与知识索引、半成品剧本。
+
+    直接导入会在向量化阶段边算边写，失败后向量条目会留在全局向量库中；单纯删除
+    任务文件不足以清理，必须按 scenario_id 显式删除。
+    """
+    if (e := _login()): return e
+    job = _job(job_id)
+    if not job: return error_response("Import job not found", 404, "Not found")
+    if job.get("status") not in {"failed", "cancelled"}:
+        return error_response("只能放弃失败或已取消的导入；进行中的任务请先取消", 409, "Import still running")
+    script_id = job.get("script_id")
+    root = _scenarios_root()
+    deleted_vectors = 0
+    try:
+        from trpg_server.scenario_admin import remove_knowledge
+        removed = remove_knowledge(root, script_id, current_app.extensions.get("vector_store"))
+        deleted_vectors = int(removed.get("deleted_vectors", 0))
+    except Exception:  # noqa: BLE001 - 清理失败不应阻止任务目录删除
+        logger.exception("scenario_import.abandon_knowledge_failed job=%s", job_id)
+    # 正常流程只有发布时才写剧本记录；这里兜底清理「发布中途失败」留下的半成品。
+    descriptor = find_scenario_descriptor_by_id(root, script_id)
+    if descriptor is not None:
+        try:
+            delete_scenario_record(descriptor)
+        except Exception:  # noqa: BLE001
+            logger.exception("scenario_import.abandon_record_failed job=%s", job_id)
+    _store().discard(job_id)
+    log_user_action(
+        logger,
+        user_action_text(session.get("username"), "放弃了一次剧本导入"),
+        用户ID=session.get("user_id"),
+        剧本ID=script_id,
+        清理向量=deleted_vectors,
+    )
+    return success_response(
+        {"jobId": job_id, "scriptId": script_id, "deletedVectors": deleted_vectors},
+        "Import abandoned",
+    )
+
 @bp.post("/api/scripts/import/<job_id>/retry")
 def retry_import(job_id):
     if (e := _login()): return e
     job = _job(job_id)
     if not job: return error_response("Import job not found", 404, "Not found")
+    active = _store().active_for_owner(str(session["user_id"]))
+    if active and str(active.get("id")) != str(job_id):
+        return error_response("已有剧本正在后台导入，请等待完成或取消后再重试", 409, "Import already running", jobId=active.get("id"))
     stage = (request.get_json(silent=True) or {}).get("stage") or job.get("failed_stage") or "parsing"
-    _store().update(job_id, status="pending", retry_count=int(job.get("retry_count", 0)) + 1, error=None)
+    # 允许同一用户重试：守卫只拦「新建导入」，重试会复用已完成检查点继续跑。
+    _store().update(
+        job_id,
+        status="pending",
+        retry_count=int(job.get("retry_count", 0)) + 1,
+        error=None,
+        cancel_requested=False,
+    )
     submit_import_job(current_app._get_current_object(), job_id, start_stage=stage)
     return success_response(public_job_payload(_store().get(job_id)), "Retry started")
 
@@ -233,76 +294,15 @@ def publish_import(script_id):
     if (e := _login()): return e
     payload = request.get_json(silent=True) or {}; job = _job(str(payload.get("jobId", "")))
     if not job or int(job.get("script_id", 0)) != script_id: return error_response("Import job not found", 404, "Not found")
-    scenario = job.get("preview") or _store().load_intermediate(job["id"], "preview", {})
-    scenario["id"] = script_id; scenario["scenario_version"] = str(job.get("target_version") or "1.0.0"); scenario["owner_id"] = session["user_id"]
-    # 直接导入的剧本要和正常创建的剧本一样拥有 6 位 public_id；否则前端卡片/预览
-    # 会回退显示毫秒时间戳，看起来像「一串数字」。
-    # 编号查重与落盘必须用同一个根目录，否则会往 A 目录查重、往 B 目录写入。
-    root = _scenarios_root()
-    existing_public_ids = _existing_public_ids(root, exclude_id=script_id)
-    public_id = str(scenario.get("public_id") or "")
-    if len(public_id) != 6 or not public_id.isalnum() or public_id in existing_public_ids:
-        scenario["public_id"] = generate_public_id(existing_public_ids)
-    if not scenario.get("creator_username"):
-        scenario["creator_username"] = session.get("username", "")
-    timestamp = _current_timestamp()
-    scenario.setdefault("createdAt", timestamp)
-    scenario["updatedAt"] = timestamp
-    scenario["cover"] = normalize_cover(scenario.get("cover"))
-    descriptor = save_scenario_record(root, scenario)
-    stored = load_scenario_record(descriptor, root)
-    vector_store = current_app.extensions.get("vector_store")
-    provider = current_app.extensions.get("embedding_provider")
-    raw_chunks = _store().load_intermediate(job["id"], "knowledge", []) or []
-    chunks = []
-    for item in raw_chunks:
-        if isinstance(item, dict):
-            try:
-                chunks.append(KnowledgeChunk(**item))
-            except TypeError:
-                continue
-    if chunks:
-        chunks = index_knowledge_chunks(chunks, vector_store=vector_store, embedding_provider=provider)
-        write_knowledge_index(descriptor, stored.get("scenario_version") or scenario.get("scenario_version"), chunks)
-    else:
-        persist_knowledge_index(descriptor, stored, vector_store=vector_store, embedding_provider=provider)
-
-    # AI 全链路 / 直接导入 / 剧本包导入：图谱已在导入阶段生成，发布时直接落盘；
-    # 由程序再做一次结构修复，确保端点、parent、起点不会把错边带进运行时。
-    if str(scenario.get("import_mode") or "") in {"ai", "direct", "bundle"}:
-        from trpg_server.agents.narrative.model import NarrativeBundle
-        from trpg_server.agents.narrative.repair import repair_bundle
-        from trpg_server.agents.narrative.store import save_bundle
-
-        narrative_data = _store().load_intermediate(job["id"], "narrative", {}) or {}
-        if isinstance(narrative_data, dict) and narrative_data.get("nodes"):
-            narrative = NarrativeBundle.from_dict(narrative_data)
-            narrative.scenario_id = str(script_id)
-            narrative.scenario_version = stored.get("scenario_version") or scenario.get("scenario_version") or "1.0.0"
-            repair = repair_bundle(narrative)
-            narrative.meta = {
-                **dict(narrative.meta or {}),
-                "scenario_id": str(script_id),
-                "published_from": "import",
-                "repair": repair.to_dict(),
-            }
-            save_bundle(descriptor.parent, narrative)
-            log_user_action(
-                logger,
-                user_action_text(session.get("username"), "发布了导入剧本图谱"),
-                用户ID=session.get("user_id"),
-                剧本ID=script_id,
-                节点数=len(narrative.nodes),
-                边数=len(narrative.edges),
-            )
-    _store().update(job["id"], status="published", progress=100)
-    log_user_action(
-        logger,
-        user_action_text(session.get("username"), "发布了导入任务"),
-        用户ID=session.get("user_id"),
-        剧本ID=script_id,
+    stored = publish_import_job(
+        _store(),
+        current_app.config,
+        job,
+        root=_scenarios_root(),
+        username=session.get("username", ""),
+        user_id=session.get("user_id"),
     )
-    return success_response(load_scenario_record(descriptor, root), "Published", 201)
+    return success_response(stored, "Published", 201)
 
 @bp.get("/api/scripts/<int:script_id>/versions")
 def versions(script_id):

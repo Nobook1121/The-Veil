@@ -1,4 +1,5 @@
 import { useRef, type ChangeEvent } from "react";
+import { createPortal } from "react-dom";
 
 // 主页聊天框附件桥接：只暴露运行时用到的全局字段，避免依赖主脚本类型声明。
 interface HomeChatBridge {
@@ -114,6 +115,36 @@ export function HomeChat() {
                         </div>
                     </header>
 
+                    <section className="combat-panel" id="combatPanel" hidden aria-live="polite">
+                        <header className="combat-panel-head">
+                            <div className="combat-panel-brand">
+                                <i className="fa fa-shield" aria-hidden="true" />
+                                <span className="combat-panel-kicker">COMBAT</span>
+                                <strong data-i18n="combat.title">战斗轮</strong>
+                                <span className="combat-panel-round" id="combatRound">第 1 轮</span>
+                            </div>
+                            <button
+                                className="combat-panel-toggle"
+                                id="combatPanelToggle"
+                                type="button"
+                                title="收起 / 展开战斗面板"
+                                aria-expanded="true"
+                                aria-controls="combatPanelBody"
+                            >
+                                <i className="fa fa-chevron-up" aria-hidden="true" />
+                            </button>
+                        </header>
+                        <div className="combat-panel-body" id="combatPanelBody">
+                            <div className="combat-order" id="combatOrder" />
+                            <div className="combat-main">
+                                <div className="combat-current" id="combatCurrent" />
+                                <div className="combat-actions" id="combatActions" />
+                                <div className="combat-form" id="combatForm" hidden />
+                                <div className="combat-log" id="combatLog" aria-label="战斗日志" />
+                            </div>
+                        </div>
+                    </section>
+
                     <div className="chat-history" id="chatHistory">
                         <div className="welcome-text" data-i18n="home.welcome">欢迎来到帷幕，请选择一个剧本开始游戏。</div>
                     </div>
@@ -154,6 +185,16 @@ export function HomeChat() {
                                 <i className="fa fa-hand-pointer-o" aria-hidden="true" />{" "}
                                 <span data-i18n="chat.action.roll">投掷</span>
                             </button>
+                            <button
+                                className="btn btn-outline-warning"
+                                id="worldOverrideButton"
+                                type="button"
+                                title="世界意志：直接改写结果"
+                                aria-label="世界意志：直接改写结果"
+                                hidden
+                            >
+                                <i className="fa fa-bolt" aria-hidden="true" />
+                            </button>
                             <button className="btn btn-primary" id="sendButton" type="button">
                                 <i className="fa fa-paper-plane" aria-hidden="true" />{" "}
                                 <span data-i18n="chat.action.send">发送</span>
@@ -180,6 +221,61 @@ export function HomeChat() {
                     </div>
                 </aside>
             </div>
+
+            {/*
+                挂到 body：模态必须留在页面最外层。
+                主页标签页带 pageViewEnter 动画（animation-fill-mode: both），
+                动画结束后元素仍构成层叠上下文，位于其中的 .modal 就算 z-index
+                高于遮罩，也会被 body 上的 .modal-backdrop 整片盖住——
+                表现就是点开世界意志后全屏变黑、弹窗却看不见。
+            */}
+            {createPortal(
+            <div
+                className="modal fade"
+                id="worldOverrideModal"
+                tabIndex={-1}
+                aria-labelledby="worldOverrideModalLabel"
+                aria-hidden="true"
+            >
+                <div className="modal-dialog modal-dialog-centered">
+                    <div className="modal-content world-override-modal">
+                        <div className="modal-header world-override-header">
+                            <div className="world-override-heading">
+                                <span className="world-override-kicker">DIRECT OVERRIDE</span>
+                                <h5 className="modal-title" id="worldOverrideModalLabel">
+                                    <i className="fa fa-bolt" aria-hidden="true" />
+                                    <span data-i18n="world_override.title">世界意志</span>
+                                </h5>
+                            </div>
+                            <button type="button" className="btn-close" data-bs-dismiss="modal" aria-label="Close" />
+                        </div>
+                        <div className="modal-body">
+                            <p className="world-override-hint" data-i18n="world_override.hint">
+                                写下结果，世界照做。
+                            </p>
+                            <textarea
+                                className="form-control world-override-input"
+                                id="worldOverrideInput"
+                                rows={3}
+                                placeholder="例如：门自行打开；我出现在地下室。"
+                                data-i18n-placeholder="world_override.placeholder"
+                            />
+                            <p className="form-text world-override-message" id="worldOverrideMessage" aria-live="polite" />
+                        </div>
+                        <div className="modal-footer">
+                            <button type="button" className="btn btn-secondary" data-bs-dismiss="modal" data-i18n="common.cancel">
+                                取消
+                            </button>
+                            <button type="button" className="btn btn-danger" id="worldOverrideConfirm">
+                                <i className="fa fa-bolt" aria-hidden="true" />{" "}
+                                <span data-i18n="world_override.execute">执行</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>,
+            document.body,
+            )}
         </>
     );
 }

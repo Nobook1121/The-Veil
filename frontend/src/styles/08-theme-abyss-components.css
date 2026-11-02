@@ -1,0 +1,957 @@
+/* ==========================================================================
+   「深渊帷幕」组件视觉层
+   依赖 07-theme-abyss-tokens.css 中的 token；所有规则限定在 body.theme-coc 下，
+   不影响其它主题。
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   侧栏：深渊仪表舱
+   -------------------------------------------------------------------------- */
+body.theme-coc #sidebar {
+    /* 底色改用可调不透明度：默认只有一半，左侧探进来的触手能直接从侧栏后透出。 */
+    background-color: transparent;
+    background-image:
+        radial-gradient(120% 34% at 50% 0%, rgba(199, 162, 92, 0.12), transparent 72%),
+        linear-gradient(180deg, rgba(224, 192, 130, 0.08), transparent 24%),
+        linear-gradient(
+            90deg,
+            rgba(4, 10, 15, var(--theme-sidebar-alpha)) 0%,
+            rgba(2, 6, 9, var(--theme-sidebar-alpha)) 100%
+        );
+    border-right: 1px solid rgba(224, 192, 130, 0.2);
+    box-shadow:
+        inset -1px 0 0 rgba(199, 162, 92, 0.06),
+        16px 0 44px -24px rgba(0, 0, 0, 0.95);
+    scrollbar-color: rgba(199, 162, 92, 0.32) transparent;
+}
+
+/* 侧栏右缘的“符文脊柱”：竖向排列的古老符文，极低透明度缓慢呼吸 */
+body.theme-coc #sidebar::before {
+    content: "ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛏᛒᛖᛗᛚᛜᛞᛟ";
+    position: absolute;
+    top: 16px;
+    right: 5px;
+    bottom: 16px;
+    writing-mode: vertical-rl;
+    font-family: var(--theme-font-family-display);
+    font-size: 10px;
+    line-height: 1.9;
+    letter-spacing: 0.34em;
+    color: rgba(224, 192, 130, 0.2);
+    text-shadow: 0 0 10px rgba(199, 162, 92, 0.18);
+    white-space: nowrap;
+    overflow: hidden;
+    pointer-events: none;
+    animation: abyssRuneSpine 10s ease-in-out infinite;
+}
+
+@keyframes abyssRuneSpine {
+    0%, 100% {
+        opacity: 0.55;
+        transform: translateY(-4px);
+    }
+    50% {
+        opacity: 1;
+        transform: translateY(4px);
+    }
+}
+
+body.theme-coc .sidebar-title {
+    filter: drop-shadow(0 0 12px rgba(199, 162, 92, 0.2));
+    letter-spacing: 0.16em;
+}
+
+body.theme-coc #sidebar .nav-link,
+body.theme-coc #sidebar .dropdown-btn {
+    position: relative;
+    overflow: hidden;
+    margin: 2px 6px;
+    border-left: 0 solid transparent;
+    border-radius: var(--theme-radius-sm);
+    transition:
+        color 0.2s ease,
+        background-color 0.2s ease,
+        box-shadow 0.2s ease;
+}
+
+body.theme-coc #sidebar .nav-link:hover,
+body.theme-coc #sidebar .dropdown-btn:hover {
+    color: var(--theme-sidebar-text-active);
+    background-color: var(--theme-sidebar-hover-bg);
+    box-shadow: inset 0 0 0 1px rgba(199, 162, 92, 0.1);
+}
+
+body.theme-coc #sidebar .nav-link.active,
+body.theme-coc #sidebar .dropdown-btn.active {
+    border-left: 0 solid transparent;
+    color: var(--theme-sidebar-text-active);
+    background-color: var(--theme-sidebar-active-bg);
+    background-image: linear-gradient(90deg, rgba(199, 162, 92, 0.2), rgba(199, 162, 92, 0.03) 64%, transparent);
+    box-shadow:
+        inset 0 0 0 1px rgba(199, 162, 92, 0.18),
+        0 0 22px rgba(199, 162, 92, 0.12);
+}
+
+/* 选中项左缘的古金竖线 + 右侧符文标记 */
+body.theme-coc #sidebar .nav-link.active::before,
+body.theme-coc #sidebar .dropdown-btn.active::before {
+    content: "";
+    position: absolute;
+    top: 18%;
+    bottom: 18%;
+    left: 0;
+    width: 2px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, transparent, var(--abyss-brass-light), transparent);
+    box-shadow: 0 0 12px rgba(224, 192, 130, 0.85);
+}
+
+body.theme-coc #sidebar .nav-link.active::after {
+    content: "ᛝ";
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 11px;
+    color: rgba(224, 192, 130, 0.7);
+    text-shadow: 0 0 10px rgba(224, 192, 130, 0.5);
+    pointer-events: none;
+}
+
+/* 头像光晕只画在圆形图片上，容器本身不描边，否则会多出一圈方框。 */
+body.theme-coc .user-avatar img {
+    border-color: rgba(224, 192, 130, 0.62);
+    box-shadow:
+        0 0 0 1px rgba(199, 162, 92, 0.12),
+        0 0 18px rgba(199, 162, 92, 0.2);
+}
+
+body.theme-coc .user-name {
+    color: var(--theme-sidebar-text-active);
+    letter-spacing: 0.03em;
+}
+
+/* --------------------------------------------------------------------------
+   面板 / 卡牌：半透明深渊玻璃 + 细金边
+   -------------------------------------------------------------------------- */
+body.theme-coc .card,
+body.theme-coc .modal-content,
+body.theme-coc .tool-panel,
+body.theme-coc .character-inspector,
+body.theme-coc .character-detail-band,
+body.theme-coc .home-room-members,
+body.theme-coc .scenario-resource-row,
+body.theme-coc .scenario-knowledge-item,
+body.theme-coc .list-group-item,
+body.theme-coc .dropdown-menu,
+body.theme-coc .toast,
+body.theme-coc .popover,
+body.theme-coc .table,
+body.theme-coc .auth-modal-content,
+body.theme-coc .user-card-popover,
+body.theme-coc .profile-panel-section,
+body.theme-coc .profile-settings-sidebar {
+    color: var(--theme-text-primary);
+    background-color: var(--theme-bg-panel);
+    background-image:
+        linear-gradient(150deg, rgba(199, 162, 92, 0.05), transparent 38%),
+        var(--theme-abyss-grain);
+    background-size: 100% 100%, 260px 260px;
+    background-repeat: no-repeat, repeat;
+    background-blend-mode: normal, soft-light;
+    border-color: var(--theme-border-subtle);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.045),
+        inset 0 0 46px rgba(110, 82, 48, 0.045),
+        0 18px 44px -26px rgba(0, 0, 0, 0.95);
+}
+
+body.theme-coc .card-header,
+body.theme-coc .card-footer,
+body.theme-coc .modal-header,
+body.theme-coc .modal-footer,
+body.theme-coc .tool-panel-header,
+body.theme-coc .dropdown-divider {
+    border-color: var(--theme-border-subtle);
+}
+
+/* 右侧栏（房间成员）：不透明度单独可调，右侧探进来的触手不会被整块挡死。 */
+body.theme-coc .home-room-members {
+    background-color: rgba(18, 15, 23, var(--theme-rail-alpha));
+}
+
+body.theme-coc .card-header,
+body.theme-coc .card-footer {
+    background-color: var(--theme-bg-panel-muted);
+    color: var(--theme-text-primary);
+}
+
+/* 卡牌悬停：上浮 + 金边 + 荧光青外辉 */
+body.theme-coc .scenario-card,
+body.theme-coc .character-card,
+body.theme-coc .save-card,
+body.theme-coc .tool-panel {
+    transition:
+        transform 0.22s ease,
+        border-color 0.22s ease,
+        box-shadow 0.22s ease;
+}
+
+body.theme-coc .scenario-card:hover,
+body.theme-coc .character-card:hover,
+body.theme-coc .save-card:hover,
+body.theme-coc .tool-panel:hover {
+    border-color: rgba(224, 192, 130, 0.42);
+    box-shadow:
+        0 24px 54px -26px rgba(0, 0, 0, 0.96),
+        0 0 28px rgba(199, 162, 92, 0.13);
+}
+
+body.theme-coc .scenario-card:hover img,
+body.theme-coc .character-card:hover .character-card-avatar {
+    filter: saturate(1.08) brightness(1.04);
+}
+
+body.theme-coc .character-card.active {
+    border-color: rgba(199, 162, 92, 0.55);
+    box-shadow:
+        inset 0 0 0 1px rgba(199, 162, 92, 0.18),
+        0 0 30px rgba(199, 162, 92, 0.16);
+}
+
+body.theme-coc .character-detail-band,
+body.theme-coc .character-form-section {
+    border-radius: var(--theme-radius-md);
+}
+
+body.theme-coc .scenario-id-chip {
+    color: var(--abyss-brass-light);
+    letter-spacing: 0.06em;
+}
+
+body.theme-coc .guest-login-hint {
+    background-color: rgba(199, 162, 92, 0.07);
+    border: 1px solid rgba(199, 162, 92, 0.22);
+    color: var(--theme-text-secondary);
+}
+
+body.theme-coc .room-usage-meter {
+    background-color: rgba(199, 162, 92, 0.08);
+    border: 1px solid rgba(199, 162, 92, 0.18);
+    color: var(--theme-text-secondary);
+    box-shadow: 0 0 16px rgba(199, 162, 92, 0.08);
+}
+
+/* --------------------------------------------------------------------------
+   按钮：荧光青的“仪式按钮” + 悬停扫光
+   -------------------------------------------------------------------------- */
+body.theme-coc .btn {
+    border-radius: 10px;
+    letter-spacing: 0.04em;
+}
+
+body.theme-coc .btn-primary {
+    position: relative;
+    overflow: hidden;
+    color: #140d07;
+    border-color: rgba(240, 214, 160, 0.7);
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.32);
+    background-color: #c7a25c;
+    background-image: linear-gradient(135deg, #e6cc8d 0%, #c7a25c 48%, #8a6633 100%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.45),
+        0 8px 24px -10px rgba(199, 162, 92, 0.7),
+        0 0 0 1px rgba(199, 162, 92, 0.2);
+}
+
+body.theme-coc .btn-primary::after {
+    content: "";
+    position: absolute;
+    inset: -40% -60%;
+    background: linear-gradient(115deg, transparent 34%, rgba(255, 255, 255, 0.42) 48%, transparent 62%);
+    transform: translateX(-120%) rotate(6deg);
+    transition: transform 0.6s ease;
+    pointer-events: none;
+}
+
+body.theme-coc .btn-primary:hover,
+body.theme-coc .btn-primary:focus {
+    color: #140d07;
+    background-color: #d8b975;
+    background-image: linear-gradient(135deg, #f0dda4 0%, #cdab66 48%, #9a743c 100%);
+    border-color: rgba(168, 247, 230, 0.85);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.55),
+        0 10px 30px -10px rgba(199, 162, 92, 0.85),
+        0 0 22px rgba(199, 162, 92, 0.28);
+}
+
+body.theme-coc .btn-primary:hover::after,
+body.theme-coc .btn-primary:focus-visible::after {
+    transform: translateX(120%) rotate(6deg);
+}
+
+body.theme-coc .btn-primary:active {
+    background-image: linear-gradient(135deg, #b08c4a, #7c5a2b);
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+body.theme-coc .btn-secondary {
+    color: var(--theme-text-primary);
+    border-color: rgba(224, 192, 130, 0.28);
+    background-color: rgba(13, 27, 33, 0.86);
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+body.theme-coc .btn-secondary:hover,
+body.theme-coc .btn-secondary:focus {
+    color: #f5eeda;
+    border-color: rgba(224, 192, 130, 0.5);
+    background-color: rgba(20, 38, 44, 0.94);
+    box-shadow: 0 0 20px rgba(224, 192, 130, 0.12);
+}
+
+body.theme-coc .btn-outline-primary {
+    color: var(--theme-accent-primary);
+    border-color: rgba(199, 162, 92, 0.45);
+    background-color: rgba(199, 162, 92, 0.05);
+}
+
+body.theme-coc .btn-outline-primary:hover,
+body.theme-coc .btn-outline-primary:focus {
+    color: #f0e6bd;
+    border-color: rgba(240, 214, 160, 0.7);
+    background-color: rgba(199, 162, 92, 0.13);
+    box-shadow: 0 0 22px rgba(199, 162, 92, 0.18);
+}
+
+body.theme-coc .btn-outline-secondary {
+    color: var(--theme-text-secondary);
+    border-color: rgba(224, 192, 130, 0.3);
+    background-color: rgba(224, 192, 130, 0.04);
+}
+
+body.theme-coc .btn-outline-secondary:hover,
+body.theme-coc .btn-outline-secondary:focus {
+    color: #f0dcae;
+    border-color: rgba(224, 192, 130, 0.55);
+    background-color: rgba(224, 192, 130, 0.12);
+}
+
+body.theme-coc .btn-outline-warning {
+    color: var(--theme-warning);
+    border-color: rgba(232, 187, 106, 0.45);
+}
+
+body.theme-coc .btn-outline-warning:hover,
+body.theme-coc .btn-outline-warning:focus {
+    color: #ffe2a1;
+    background-color: rgba(232, 187, 106, 0.14);
+    border-color: rgba(232, 187, 106, 0.7);
+}
+
+body.theme-coc .btn-outline-danger {
+    color: var(--theme-danger);
+    border-color: rgba(224, 106, 106, 0.45);
+}
+
+body.theme-coc .btn-outline-danger:hover,
+body.theme-coc .btn-outline-danger:focus {
+    color: #ffb3b3;
+    background-color: rgba(224, 106, 106, 0.14);
+    border-color: rgba(224, 106, 106, 0.7);
+}
+
+body.theme-coc .btn-danger {
+    color: #1a0505;
+    border-color: rgba(255, 150, 150, 0.5);
+    background-image: linear-gradient(135deg, #f08a8a, #d95454 55%, #a83b3b);
+    box-shadow: 0 8px 22px -12px rgba(224, 106, 106, 0.8);
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* --------------------------------------------------------------------------
+   表单：深渊玻璃输入口 + 聚焦时的荧光脉冲
+   -------------------------------------------------------------------------- */
+body.theme-coc .form-control,
+body.theme-coc .form-select,
+body.theme-coc .form-check-input,
+body.theme-coc .input-group-text,
+body.theme-coc textarea,
+body.theme-coc input,
+body.theme-coc select {
+    border-color: var(--theme-input-border);
+    background-color: var(--theme-input-bg);
+    color: var(--theme-input-text);
+}
+
+body.theme-coc .form-control:focus,
+body.theme-coc .form-select:focus,
+body.theme-coc textarea:focus,
+body.theme-coc input:focus,
+body.theme-coc select:focus {
+    border-color: rgba(199, 162, 92, 0.62);
+    box-shadow:
+        0 0 0 1px rgba(199, 162, 92, 0.32),
+        0 0 22px rgba(199, 162, 92, 0.16);
+    animation: abyssFocusPulse 3s ease-in-out infinite;
+}
+
+@keyframes abyssFocusPulse {
+    0%, 100% {
+        box-shadow:
+            0 0 0 1px rgba(199, 162, 92, 0.28),
+            0 0 16px rgba(199, 162, 92, 0.12);
+    }
+    50% {
+        box-shadow:
+            0 0 0 1px rgba(199, 162, 92, 0.46),
+            0 0 26px rgba(199, 162, 92, 0.26);
+    }
+}
+
+body.theme-coc .input-group-text {
+    color: var(--theme-text-secondary);
+    background-color: var(--theme-bg-panel-muted);
+}
+
+/* --------------------------------------------------------------------------
+   聊天：深海气泡
+   -------------------------------------------------------------------------- */
+body.theme-coc .chat-input {
+    background-color: transparent;
+    /* 底部特效要能透上来，因此输入栏使用可调面板透明度，而不是近乎不透明。 */
+    background-image: linear-gradient(
+        180deg,
+        rgba(5, 13, 18, calc(var(--theme-chat-panel-alpha) * 0.78)),
+        rgba(2, 7, 10, var(--theme-chat-panel-alpha))
+    );
+    border-top: 1px solid rgba(224, 192, 130, 0.2);
+    box-shadow: 0 -24px 46px -38px rgba(199, 162, 92, 0.45);
+}
+
+body.theme-coc .chat-suggestions {
+    background-color: rgba(3, 8, 12, calc(var(--theme-chat-panel-alpha) * 0.82));
+}
+
+body.theme-coc .other-message .message-content {
+    color: var(--theme-chat-other-text);
+    background-color: var(--theme-chat-other-bg);
+    background-image: linear-gradient(150deg, rgba(199, 162, 92, 0.07), transparent 55%);
+    border: 1px solid rgba(199, 162, 92, 0.18);
+    box-shadow:
+        var(--theme-chat-shadow),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+body.theme-coc .player-message .message-content {
+    color: var(--theme-chat-player-text);
+    background-color: var(--theme-chat-player-bg);
+    background-image: linear-gradient(
+        135deg,
+        rgba(90, 43, 44, calc(var(--theme-chat-alpha) + 0.1)) 0%,
+        rgba(74, 34, 36, calc(var(--theme-chat-alpha) + 0.1)) 48%,
+        rgba(53, 25, 29, calc(var(--theme-chat-alpha) + 0.04)) 100%
+    );
+    border: 1px solid rgba(240, 214, 160, 0.42);
+    box-shadow:
+        0 2px 4px rgba(0, 0, 0, 0.4),
+        0 12px 30px -18px rgba(0, 0, 0, 0.9),
+        0 0 20px rgba(199, 162, 92, 0.16);
+}
+
+body.theme-coc .kp-message .message-content {
+    color: var(--theme-chat-kp-text);
+    background-color: var(--theme-chat-kp-bg);
+    background-image:
+        linear-gradient(135deg, rgba(124, 96, 158, 0.1), transparent 55%),
+        linear-gradient(
+            180deg,
+            rgba(24, 20, 42, calc(var(--theme-chat-alpha) + 0.06)),
+            rgba(10, 17, 24, calc(var(--theme-chat-alpha) + 0.06))
+        );
+    border: 1px solid rgba(124, 96, 158, 0.22);
+    border-left: 2px solid rgba(224, 192, 130, 0.65);
+    box-shadow:
+        var(--theme-chat-shadow),
+        0 0 24px rgba(124, 96, 158, 0.1);
+}
+
+body.theme-coc .dice-message .message-content {
+    color: var(--theme-chat-dice-text);
+    background-color: var(--theme-chat-dice-bg);
+    background-image: linear-gradient(140deg, rgba(232, 187, 106, 0.14), transparent 62%);
+    border: 1px solid rgba(224, 192, 130, 0.3);
+    border-left: 2px solid rgba(224, 192, 130, 0.75);
+    box-shadow:
+        var(--theme-chat-shadow),
+        0 0 22px rgba(224, 192, 130, 0.1);
+}
+
+body.theme-coc .message-avatar {
+    box-shadow:
+        0 0 0 1px rgba(224, 192, 130, 0.32),
+        0 0 18px rgba(199, 162, 92, 0.12);
+}
+
+body.theme-coc .message-sender {
+    color: var(--theme-text-secondary);
+    letter-spacing: 0.03em;
+}
+
+body.theme-coc .welcome-text {
+    color: var(--theme-text-muted);
+    font-family: var(--theme-font-family-display);
+    letter-spacing: 0.1em;
+    text-shadow: 0 0 26px rgba(199, 162, 92, 0.16);
+}
+
+body.theme-coc .chat-suggestion-btn {
+    color: var(--theme-text-secondary);
+    border: 1px solid rgba(199, 162, 92, 0.2);
+    background-color: rgba(199, 162, 92, 0.05);
+}
+
+body.theme-coc .chat-suggestion-btn:hover {
+    color: var(--theme-text-primary);
+    border-color: rgba(199, 162, 92, 0.42);
+    background-color: rgba(199, 162, 92, 0.11);
+    box-shadow: 0 0 18px rgba(199, 162, 92, 0.12);
+}
+
+body.theme-coc .chat-typing-indicator {
+    color: var(--theme-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   页签：荧光青下划线与古金过渡
+   -------------------------------------------------------------------------- */
+body.theme-coc .settings-tabs,
+body.theme-coc .tool-tabs {
+    border-bottom-color: rgba(224, 192, 130, 0.3);
+}
+
+body.theme-coc .settings-tab,
+body.theme-coc .tool-tab {
+    position: relative;
+    color: var(--theme-text-secondary);
+    transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+body.theme-coc .settings-tab:hover,
+body.theme-coc .tool-tab:hover {
+    color: var(--theme-accent-primary);
+    background-color: rgba(199, 162, 92, 0.05);
+}
+
+body.theme-coc .settings-tab.active,
+body.theme-coc .tool-tab.active {
+    color: #ecdfb4;
+    border-bottom-color: transparent;
+    font-weight: 600;
+}
+
+body.theme-coc .settings-tab.active::after,
+body.theme-coc .tool-tab.active::after {
+    content: "";
+    position: absolute;
+    left: 12%;
+    right: 12%;
+    bottom: 0;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, transparent, var(--abyss-brass-light), var(--abyss-brass), transparent);
+    box-shadow: 0 0 14px rgba(199, 162, 92, 0.6);
+}
+
+body.theme-coc .nav-tabs {
+    border-bottom-color: rgba(224, 192, 130, 0.26);
+}
+
+body.theme-coc .nav-tabs .nav-link {
+    color: var(--theme-text-secondary);
+}
+
+body.theme-coc .nav-tabs .nav-link:hover {
+    color: var(--theme-accent-primary);
+    border-color: transparent;
+}
+
+body.theme-coc .nav-tabs .nav-link.active {
+    color: #ecdfb4;
+    background-color: transparent;
+    border-color: transparent transparent var(--theme-accent-primary);
+}
+
+/* --------------------------------------------------------------------------
+   模态框 / 下拉 / 表格
+   -------------------------------------------------------------------------- */
+body.theme-coc .modal-backdrop {
+    background: radial-gradient(ellipse at 50% 45%, rgba(8, 26, 30, 0.72), rgba(1, 3, 5, 0.94));
+    backdrop-filter: blur(7px);
+    opacity: 1;
+}
+
+body.theme-coc .modal.show .modal-content {
+    animation: abyssModalIn 0.42s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+    border: 1px solid rgba(224, 192, 130, 0.34);
+    box-shadow:
+        0 30px 80px -30px rgba(0, 0, 0, 0.98),
+        0 0 60px rgba(120, 88, 52, 0.14),
+        inset 0 0 60px rgba(110, 82, 48, 0.05);
+}
+
+@keyframes abyssModalIn {
+    from {
+        opacity: 0;
+        transform: translateY(18px) scale(0.96);
+        filter: blur(6px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+        filter: none;
+    }
+}
+
+body.theme-coc .modal-header {
+    background-image: linear-gradient(90deg, rgba(224, 192, 130, 0.1), transparent 70%);
+    border-bottom: 1px solid rgba(224, 192, 130, 0.26);
+}
+
+body.theme-coc .modal-title {
+    color: var(--abyss-brass-light);
+    letter-spacing: 0.04em;
+}
+
+body.theme-coc .btn-close {
+    filter: invert(1) drop-shadow(0 0 6px rgba(199, 162, 92, 0.3));
+    opacity: 0.62;
+}
+
+body.theme-coc .btn-close:hover {
+    opacity: 0.95;
+}
+
+body.theme-coc .dropdown-item {
+    color: var(--theme-text-primary);
+}
+
+body.theme-coc .dropdown-item:hover,
+body.theme-coc .dropdown-item:focus {
+    color: #f2e9d6;
+    background-color: rgba(199, 162, 92, 0.12);
+}
+
+body.theme-coc .table {
+    --bs-table-bg: transparent;
+    --bs-table-color: var(--theme-text-primary);
+    --bs-table-border-color: var(--theme-border-subtle);
+    --bs-table-striped-bg: rgba(199, 162, 92, 0.045);
+    --bs-table-hover-bg: rgba(199, 162, 92, 0.09);
+}
+
+body.theme-coc .table th {
+    color: var(--abyss-brass-light);
+    background-color: rgba(224, 192, 130, 0.08);
+    letter-spacing: 0.04em;
+}
+
+body.theme-coc .list-group-item:hover {
+    background-color: rgba(199, 162, 92, 0.06);
+}
+
+/* --------------------------------------------------------------------------
+   通知 / 甜甜圈提示
+   -------------------------------------------------------------------------- */
+body.theme-coc .notification {
+    border-radius: 10px;
+    box-shadow:
+        0 18px 40px -20px rgba(0, 0, 0, 0.9),
+        0 0 24px rgba(199, 162, 92, 0.16);
+}
+
+body.theme-coc .notification-success {
+    color: #0d1108;
+    background-image: linear-gradient(135deg, #c2d6a8, #8fae7e);
+    border-left-color: #5f7a50;
+}
+
+body.theme-coc .notification-warning {
+    color: #1d1404;
+    background-image: linear-gradient(135deg, #f6d99a, #e8bb6a);
+}
+
+/* --------------------------------------------------------------------------
+   骰桌 / 检定结果
+   -------------------------------------------------------------------------- */
+body.theme-coc .dice-table-card {
+    border: 1px solid rgba(224, 192, 130, 0.32);
+    box-shadow:
+        0 20px 50px -26px rgba(0, 0, 0, 0.95),
+        0 0 34px rgba(199, 162, 92, 0.1);
+}
+
+body.theme-coc .dice-total {
+    animation: abyssDicePulse 2.2s ease-in-out infinite;
+}
+
+@keyframes abyssDicePulse {
+    0%, 100% {
+        text-shadow: 0 0 8px rgba(224, 192, 130, 0.32);
+    }
+    50% {
+        text-shadow:
+            0 0 18px rgba(224, 192, 130, 0.7),
+            0 0 30px rgba(199, 162, 92, 0.22);
+    }
+}
+
+body.theme-coc .dice-verdict.success {
+    text-shadow: 0 0 12px rgba(143, 174, 126, 0.5);
+}
+
+body.theme-coc .dice-verdict.failure {
+    text-shadow: 0 0 12px rgba(224, 106, 106, 0.5);
+}
+
+/* --------------------------------------------------------------------------
+   战斗面板 / 世界覆盖
+   -------------------------------------------------------------------------- */
+body.theme-coc .combat-panel {
+    border-color: rgba(224, 192, 130, 0.28);
+    background-image:
+        linear-gradient(150deg, rgba(124, 96, 158, 0.08), transparent 46%),
+        var(--theme-abyss-grain);
+    box-shadow: 0 0 26px rgba(124, 96, 158, 0.1);
+}
+
+body.theme-coc .combat-panel-kicker {
+    color: var(--abyss-plum);
+    text-shadow: 0 0 12px rgba(124, 96, 158, 0.4);
+}
+
+body.theme-coc .world-override-modal {
+    border-color: rgba(224, 106, 106, 0.36);
+}
+
+/* --------------------------------------------------------------------------
+   认证 / 个人资料
+   -------------------------------------------------------------------------- */
+body.theme-coc .auth-modal-content,
+body.theme-coc .profile-settings-sidebar {
+    border: 1px solid rgba(224, 192, 130, 0.3);
+}
+
+body.theme-coc .auth-modal-header,
+body.theme-coc .profile-hero {
+    background-image:
+        radial-gradient(120% 80% at 20% 0%, rgba(199, 162, 92, 0.14), transparent 62%),
+        linear-gradient(150deg, rgba(224, 192, 130, 0.08), transparent 55%);
+}
+
+body.theme-coc .profile-section-tab.active,
+body.theme-coc .profile-subnav .active {
+    color: #ecdfb4;
+    border-color: rgba(199, 162, 92, 0.5);
+    background-color: rgba(199, 162, 92, 0.08);
+}
+
+body.theme-coc .profile-hero-heading {
+    color: var(--abyss-brass-light);
+    letter-spacing: 0.05em;
+}
+
+body.theme-coc .profile-role-chip {
+    color: var(--abyss-brass);
+    border-color: rgba(199, 162, 92, 0.35);
+    background-color: rgba(199, 162, 92, 0.08);
+}
+
+/* --------------------------------------------------------------------------
+   世界意志：法阵遮罩 + 仪式感的改写窗口
+   普通 .modal-backdrop 只是一层压黑；这里把遮罩换成深渊青绿与暖金的薄雾，
+   再叠加 .world-override-veil 里的法阵，让「改写世界」读起来是一场仪式。
+   -------------------------------------------------------------------------- */
+body.theme-coc .modal-backdrop.world-override-backdrop {
+    /* 比默认遮罩更透一点：幕后的触手与符文仍然隐约可见，不至于全屏死黑。 */
+    background-color: rgba(2, 6, 9, 0.56) !important;
+    background-image:
+        radial-gradient(ellipse 76% 46% at 50% 104%, rgba(46, 132, 124, 0.34), transparent 68%),
+        radial-gradient(ellipse 56% 44% at 50% 60%, rgba(199, 162, 92, 0.16), transparent 72%),
+        linear-gradient(180deg, rgba(3, 9, 12, 0.72), rgba(1, 3, 5, 0.86));
+    backdrop-filter: blur(5px) saturate(1.05) !important;
+}
+
+/* 比默认弹窗略宽一点，让「改写世界」这句话有足够的呼吸空间。 */
+body.theme-coc #worldOverrideModal .modal-dialog {
+    max-width: 560px;
+}
+
+body.theme-coc .world-override-modal {
+    position: relative;
+    overflow: hidden;
+    color: #ece3d2;
+    border: 1px solid rgba(224, 192, 130, 0.42);
+    background-color: rgba(8, 7, 12, 0.95);
+    background-image:
+        radial-gradient(130% 88% at 50% -12%, rgba(199, 162, 92, 0.18), transparent 58%),
+        radial-gradient(96% 72% at 50% 120%, rgba(104, 24, 34, 0.32), transparent 64%),
+        var(--theme-abyss-grain);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 0 60px rgba(110, 82, 48, 0.06),
+        0 44px 130px -42px rgba(0, 0, 0, 0.96),
+        0 0 100px -18px rgba(199, 162, 92, 0.28);
+}
+
+/* 顶端一线金光：像法阵边缘被点亮的刻痕。 */
+body.theme-coc .world-override-modal::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 12%;
+    right: 12%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(224, 192, 130, 0.8), transparent);
+    box-shadow: 0 0 20px 1px rgba(199, 162, 92, 0.42);
+    pointer-events: none;
+}
+
+/* 四角刻线：窗口像一块被符文固定的石板，指令写在法阵的正中。 */
+body.theme-coc .world-override-modal::after {
+    content: "";
+    position: absolute;
+    inset: 7px;
+    pointer-events: none;
+    opacity: 0.55;
+    background:
+        linear-gradient(90deg, rgba(224, 192, 130, 0.72), rgba(224, 192, 130, 0)) left top / 22px 1px no-repeat,
+        linear-gradient(180deg, rgba(224, 192, 130, 0.72), rgba(224, 192, 130, 0)) left top / 1px 22px no-repeat,
+        linear-gradient(270deg, rgba(224, 192, 130, 0.72), rgba(224, 192, 130, 0)) right top / 22px 1px no-repeat,
+        linear-gradient(180deg, rgba(224, 192, 130, 0.72), rgba(224, 192, 130, 0)) right top / 1px 22px no-repeat,
+        linear-gradient(90deg, rgba(224, 192, 130, 0.72), rgba(224, 192, 130, 0)) left bottom / 22px 1px no-repeat,
+        linear-gradient(0deg, rgba(224, 192, 130, 0.72), rgba(224, 192, 130, 0)) left bottom / 1px 22px no-repeat,
+        linear-gradient(270deg, rgba(224, 192, 130, 0.72), rgba(224, 192, 130, 0)) right bottom / 22px 1px no-repeat,
+        linear-gradient(0deg, rgba(224, 192, 130, 0.72), rgba(224, 192, 130, 0)) right bottom / 1px 22px no-repeat;
+}
+
+body.theme-coc .world-override-header {
+    align-items: flex-start;
+    background-color: transparent;
+    border-bottom-color: rgba(199, 162, 92, 0.16);
+}
+
+body.theme-coc .world-override-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+}
+
+body.theme-coc .world-override-kicker {
+    font-family: var(--theme-font-family-display);
+    font-size: 9px;
+    line-height: 1;
+    letter-spacing: 0.44em;
+    text-transform: uppercase;
+    color: rgba(199, 162, 92, 0.58);
+}
+
+body.theme-coc .world-override-modal .modal-title {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-family: var(--theme-font-family-display);
+    letter-spacing: 0.14em;
+    color: var(--abyss-brass-light);
+    text-shadow: 0 0 24px rgba(199, 162, 92, 0.42);
+}
+
+body.theme-coc .world-override-modal .modal-title i {
+    color: var(--theme-accent-secondary);
+    text-shadow: 0 0 18px rgba(180, 83, 74, 0.6);
+}
+
+body.theme-coc .world-override-hint {
+    margin-bottom: 12px;
+    font-size: 0.86rem;
+    letter-spacing: 0.06em;
+    color: rgba(224, 192, 130, 0.74);
+}
+
+body.theme-coc .world-override-input {
+    color: #f1e8d6;
+    border: 1px solid rgba(199, 162, 92, 0.26);
+    background-color: rgba(3, 7, 10, 0.78);
+    box-shadow: inset 0 0 26px rgba(0, 0, 0, 0.62);
+    font-family: var(--theme-font-family-prose);
+}
+
+body.theme-coc .world-override-input::placeholder {
+    color: rgba(199, 162, 92, 0.4);
+}
+
+body.theme-coc .world-override-input:focus {
+    color: #f8f0df;
+    border-color: rgba(224, 192, 130, 0.62);
+    background-color: rgba(5, 10, 13, 0.9);
+    box-shadow:
+        inset 0 0 26px rgba(0, 0, 0, 0.62),
+        0 0 28px rgba(199, 162, 92, 0.18);
+}
+
+body.theme-coc .world-override-modal .modal-footer {
+    background-color: transparent;
+    border-top-color: rgba(199, 162, 92, 0.16);
+}
+
+body.theme-coc .world-override-message {
+    color: rgba(224, 192, 130, 0.62);
+}
+
+body.theme-coc .world-override-message.is-error {
+    color: var(--theme-danger);
+}
+
+/* 执行按钮：暗红晶体，悬停时才完全点亮。 */
+body.theme-coc #worldOverrideConfirm {
+    color: #f6e9cf;
+    border-color: rgba(224, 192, 130, 0.52);
+    background-color: rgba(96, 26, 34, 0.9);
+    background-image: linear-gradient(135deg, rgba(160, 54, 58, 0.92), rgba(64, 16, 24, 0.96));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.18),
+        0 10px 28px -12px rgba(0, 0, 0, 0.9);
+}
+
+body.theme-coc #worldOverrideConfirm:hover,
+body.theme-coc #worldOverrideConfirm:focus {
+    color: #fff4dd;
+    border-color: rgba(240, 214, 160, 0.78);
+    background-image: linear-gradient(135deg, rgba(190, 72, 74, 0.96), rgba(84, 20, 30, 0.98));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.24),
+        0 0 26px rgba(199, 162, 92, 0.2);
+}
+
+/* --------------------------------------------------------------------------
+   减少动态效果
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+    body.theme-coc #sidebar::before,
+    body.theme-coc .form-control:focus,
+    body.theme-coc .form-select:focus,
+    body.theme-coc textarea:focus,
+    body.theme-coc input:focus,
+    body.theme-coc select:focus,
+    body.theme-coc .dice-total,
+    body.theme-coc .modal.show .modal-content {
+        animation: none;
+    }
+
+    body.theme-coc .btn-primary::after {
+        display: none;
+    }
+}

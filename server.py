@@ -81,14 +81,38 @@ def _internal_shutdown():
     _shutdown_requested.set()
     logger.info("Graceful shutdown accepted from local console")
     # ``BaseServer.shutdown()`` must not be called from the request thread that
-    # is currently serving, so hand it off to a short-lived helper thread.
+    # is currently serving, so hand it off to a short-lived helper thread. The
+    # thread first snapshots every active room, so a conversation that has not
+    # reached the next scheduled autosave tick is still written to disk.
     with _http_server_lock:
         http_server = _http_server
     if http_server is not None:
-        threading.Thread(target=http_server.shutdown, name="trpg-server-shutdown", daemon=True).start()
+        threading.Thread(
+            target=_shutdown_http_server,
+            args=(http_server,),
+            name="trpg-server-shutdown",
+            daemon=True,
+        ).start()
     else:
         logger.warning("Shutdown requested before the HTTP server was ready")
     return {"ok": True}
+
+
+def _save_room_snapshots_before_shutdown() -> None:
+    """为每个房间写一个自动存档节点，避免关闭时丢失正在进行的对话。"""
+
+    try:
+        with app.app_context():
+            from trpg_server.routes.rooms import save_all_rooms_on_shutdown
+
+            save_all_rooms_on_shutdown()
+    except Exception:  # noqa: BLE001 - 存档失败不能阻断关闭流程
+        logger.warning("Shutdown autosave failed", exc_info=True)
+
+
+def _shutdown_http_server(http_server) -> None:
+    _save_room_snapshots_before_shutdown()
+    http_server.shutdown()
 
 
 def _serve_http(port: int) -> None:

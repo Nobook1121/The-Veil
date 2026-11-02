@@ -66,7 +66,9 @@ Embedding 仍按本地模型 → OpenAI-compatible 服务 → 本地哈希向量
 ## 剧本包导入（Skill / 外部 AI）
 
 `POST /api/scripts/import/bundle` 接收 `the-veil-scenario-bundle` JSON（可直接上传文件或提交
-JSON body），不重新调用 AI，只做校验、修复与落盘。网页端在导入入口选择 `.json` 即可走这条路径。
+JSON body），不重新调用 AI，只做校验、修复与落盘。网页端点页面右上角的「导入剧本」，在弹出的
+「选择导入方式」里选「导入剧本包」，再选择 `.veil-scenario.json` 即可走这条路径；同一入口也可以
+选「导入剧本文档」上传 `.doc/.docx/.pdf/.txt/.md` 走下面的文档导入流程。
 
 同一格式也由离线 Skill [`skills/scenario-import`](../skills/scenario-import/SKILL.md) 产出：
 Skill 让外部 AI 先剔除无关内容，再按语义分模块、生成世界书与图谱，最后用
@@ -75,4 +77,45 @@ Skill 让外部 AI 先剔除无关内容，再按语义分模块、生成世界�
 
 站内 Agent 不需要先产出文件再导入，可直接调用 `scenarios.import_script`：传 `content` 时执行
 完整 AI 链路，传 `bundle` 时只校验修复；两段式预览确认后才真正创建剧本并写入世界树。
+
+### 下载与安装
+
+两个 Skill 都以普通目录随仓库发布，直接复制即可使用：
+
+- GitHub 浏览：[scenario-import](https://github.com/Nobook1121/The-Veil/tree/main/skills/scenario-import)
+- 本地目录：`skills/scenario-import/`，其中 `SKILL.md` 是入口，`references/` 是字段与提示词，`scripts/validate_bundle.py` 是自检脚本。
+- 站内 Agent 无需下载：`scenarios.import_script` 已内置同一套导入链路；如果 Agent 需要完整字段说明，可读取 `skills/scenario-import/references/bundle-schema.md`。
+
+## 剧本创作 Skill（与玩家协作写全新剧本）
+
+[`skills/scenario-create`](../skills/scenario-create/SKILL.md) 面向「从零创作」，而不是把已有文档转成剧本包。
+它会在开头明确告诉 Agent：**你正在和玩家一起创作 CoC 7e（克苏鲁的呼唤第七版）剧本，不是 DND**，
+并按阶段推进：创作简报 → 一页大纲 → 房间与线索 → NPC 与战斗 → 触发器 → 结局 → 组装与自检。
+
+- Skill 入口：[SKILL.md](../skills/scenario-create/SKILL.md)
+- CoC 7e 创作规范：[coc7-authoring.md](../skills/scenario-create/references/coc7-authoring.md)
+- 剧本包字段与触发器/战斗/结局写法：[bundle-schema.md](../skills/scenario-create/references/bundle-schema.md)
+- 分阶段协作提示词：[prompts.md](../skills/scenario-create/references/prompts.md)
+- 自检脚本：[validate_bundle.py](../skills/scenario-create/scripts/validate_bundle.py)
+
+### 站内 Agent 使用方式
+
+站内 Agent 的工具 `scenarios.create_guide` 会读取同一份 Skill（`section` 可选 `skill / coc7 / bundle / prompts`），
+系统提示会在检测到该工具时注入「剧本创作模式」：先读规范、再与用户确认设定、先大纲后正文、最后用
+`scenarios.import_script` 生成待确认预览。也就是说，站内与站外 Agent 遵循同一套创作规范，不会出现两套写法。
+
+### 下载与安装
+
+- GitHub 浏览：[scenario-create](https://github.com/Nobook1121/The-Veil/tree/main/skills/scenario-create)
+- 本地目录：`skills/scenario-create/`；整个目录复制到你的 AI 助手 Skill 目录即可。
+- 外部 AI 使用时，先读 `SKILL.md`，再按需读 `references/coc7-authoring.md`、`references/bundle-schema.md` 与 `references/prompts.md`；交付前运行 `python scripts/validate_bundle.py <剧本>.veil-scenario.json --fix -o <剧本>.fixed.json`。
+
+### 测试剧本
+
+仓库内置一份用于验证图谱、战斗轮、触发器与结局的测试用例：
+[`docs/样本/COC7-测试剧本-裂隙回廊.veil-scenario.json`](https://github.com/Nobook1121/The-Veil/tree/main/docs/样本)。
+
+它包含 4 个房间（门厅、图书馆、地窖、祭坛室）、3 件物品、4 条线索、3 名 NPC、2 条 NPC 关系边、
+1 条需要黄铜钥匙的硬门控、7 个触发器（其中 4 个带 Markdown 富文本）与 3 个结局（封印 / 逃脱 / 厄运）。
+可以直接在网页「导入剧本」→「导入剧本包」选择该 `.json`，也可以作为创作 Skill 的参考样例。
 

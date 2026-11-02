@@ -96,10 +96,6 @@
     --theme-input-border: var(--theme-border-subtle);
     --theme-input-placeholder: color-mix(in srgb, var(--theme-text-muted) 76%, transparent);
 
-    --theme-cyber-grid-display: none;
-    --theme-cyber-grid-opacity: 0;
-    --theme-cyber-rain-display: none;
-    --theme-cyber-rain-opacity: 0;
 }
 
 body.theme-dark,
@@ -177,86 +173,97 @@ body.dark-theme {
 body.theme-cyber-2 {
     color-scheme: dark;
 
-    /* 让 body 成为层叠上下文。网格与字母雨都是 z-index:-1 的负层级背景层，
-       只有当 body 自身构成层叠上下文时，它们才会绘制在 body 背景之上、正文内容之下；
-       否则按 CSS 绘制顺序会被 body 不透明的主题背景整层遮住（字母雨“看不见”的根因）。 */
+    /* 让 body 成为层叠上下文。网格与画布都是 z-index 负层级的背景层，
+       只有当 body 自身构成层叠上下文时，它们才会绘制在 body 背景之上、正文内容之下。 */
     isolation: isolate;
 
+    /* 深空档案库：近黑底 + 右上方磷光青冷光 + 左下方冰蓝补光，避免整屏纯黑的沉闷。 */
     --theme-bg-page:
-        linear-gradient(135deg, rgba(8, 19, 25, 0.96), rgba(11, 35, 38, 0.94)),
-        radial-gradient(circle at 85% 8%, rgba(37, 170, 121, 0.22), transparent 30%),
-        radial-gradient(circle at 12% 88%, rgba(47, 111, 237, 0.18), transparent 34%);
-    --theme-bg-page-layer: rgba(6, 17, 22, 0.86);
-    --theme-bg-panel: rgba(7, 18, 24, 0.78);
-    --theme-bg-panel-muted: rgba(14, 37, 43, 0.82);
-    --theme-bg-elevated: rgba(9, 28, 34, 0.92);
-    --theme-bg-overlay: rgba(2, 8, 10, 0.72);
+        linear-gradient(158deg, rgba(4, 10, 14, 0.97), rgba(5, 17, 21, 0.95) 52%, rgba(3, 8, 12, 0.98)),
+        radial-gradient(circle at 84% 4%, rgba(38, 176, 158, 0.20), transparent 34%),
+        radial-gradient(circle at 8% 92%, rgba(44, 96, 208, 0.17), transparent 38%);
+    --theme-bg-page-layer: rgba(4, 13, 17, 0.88);
+    --theme-bg-panel: rgba(7, 18, 23, 0.74);
+    --theme-bg-panel-muted: rgba(12, 32, 38, 0.8);
+    --theme-bg-elevated: rgba(8, 24, 30, 0.94);
+    --theme-bg-overlay: rgba(1, 5, 7, 0.78);
 
     --theme-text-primary: #c7d8d1;
     --theme-text-secondary: #aebfb8;
-    --theme-text-muted: rgba(199, 216, 209, 0.64);
-    --theme-text-inverse: #061714;
-    --theme-text-link: #72a7ff;
+    --theme-text-muted: rgba(199, 216, 209, 0.7);
+    --theme-text-inverse: #041210;
+    --theme-text-link: #7db4ff;
 
-    --theme-border-subtle: rgba(126, 232, 190, 0.22);
-    --theme-border-strong: rgba(126, 232, 190, 0.42);
-    --theme-focus-ring: rgba(102, 226, 173, 0.28);
+    --theme-border-subtle: rgba(120, 232, 206, 0.2);
+    --theme-border-strong: rgba(120, 240, 210, 0.44);
+    --theme-focus-ring: rgba(94, 240, 200, 0.3);
 
-    --theme-accent-primary: #66e2ad;
-    --theme-accent-primary-hover: #8ff0c6;
-    --theme-accent-secondary: #72a7ff;
-    --theme-accent-soft: rgba(102, 226, 173, 0.14);
-    --theme-danger: #ff7d90;
-    --theme-danger-soft: rgba(255, 125, 144, 0.14);
-    --theme-success: #66e2ad;
-    --theme-success-soft: rgba(102, 226, 173, 0.14);
-    --theme-warning: #f0c36a;
-    --theme-warning-soft: rgba(240, 195, 106, 0.16);
+    --theme-accent-primary: #5ef0c8;
+    --theme-accent-primary-hover: #8dffe4;
+    --theme-accent-secondary: #6ea8ff;
+    --theme-accent-soft: rgba(94, 240, 200, 0.12);
+    --theme-danger: #ff6b7f;
+    --theme-danger-soft: rgba(255, 107, 127, 0.14);
+    --theme-success: #5ef0c8;
+    --theme-success-soft: rgba(94, 240, 200, 0.12);
+    --theme-warning: #f2b447;
+    --theme-warning-soft: rgba(242, 180, 71, 0.16);
 
-    --theme-dice-table: #0a2024;
-    --theme-dice-accent: #66e2ad;
+    --theme-dice-table: #06161c;
+    --theme-dice-accent: #5ef0c8;
     --theme-dice-table-text: #d7e8e1;
 
-    --theme-chat-other-bg: rgba(7, 18, 24, 0.82);
+    --theme-chat-other-bg: rgba(7, 18, 23, 0.8);
     --theme-chat-other-text: var(--theme-text-primary);
-    --theme-chat-player-bg: #66e2ad;
-    --theme-chat-player-text: #061714;
-    --theme-chat-kp-bg: rgba(19, 59, 63, 0.88);
+    --theme-chat-player-bg: #14c9a2;
+    --theme-chat-player-text: #03130f;
+    --theme-chat-kp-bg: rgba(16, 48, 54, 0.86);
     --theme-chat-kp-text: var(--theme-text-primary);
-    --theme-chat-dice-bg: rgba(77, 61, 29, 0.9);
+    --theme-chat-dice-bg: rgba(66, 48, 18, 0.9);
     --theme-chat-dice-text: var(--theme-text-primary);
-    --theme-chat-shadow: 0 0 18px rgba(102, 226, 173, 0.16);
+    --theme-chat-shadow: 0 0 18px rgba(94, 240, 200, 0.14);
 
-    --theme-sidebar-bg: rgba(5, 14, 18, 0.96);
-    --theme-sidebar-surface: rgba(9, 28, 34, 0.92);
-    --theme-sidebar-text: rgba(199, 216, 209, 0.68);
-    --theme-sidebar-text-active: #d8e6e0;
-    --theme-sidebar-hover-bg: rgba(102, 226, 173, 0.1);
-    --theme-sidebar-active-bg: rgba(102, 226, 173, 0.18);
+    --theme-sidebar-bg: rgba(3, 10, 13, 0.95);
+    --theme-sidebar-surface: rgba(6, 20, 24, 0.92);
+    --theme-sidebar-text: rgba(190, 214, 205, 0.66);
+    --theme-sidebar-text-active: #dcf4ea;
+    --theme-sidebar-hover-bg: rgba(94, 240, 200, 0.08);
+    --theme-sidebar-active-bg: rgba(94, 240, 200, 0.14);
 
-    --theme-markdown-border: rgba(126, 232, 190, 0.24);
-    --theme-markdown-muted: rgba(199, 216, 209, 0.64);
-    --theme-markdown-code-bg: rgba(102, 226, 173, 0.12);
-    --theme-markdown-pre-bg: rgba(3, 12, 15, 0.72);
-    --theme-markdown-table-alt-bg: rgba(102, 226, 173, 0.07);
+    --theme-markdown-border: rgba(120, 232, 206, 0.22);
+    --theme-markdown-muted: rgba(199, 216, 209, 0.7);
+    --theme-markdown-code-bg: rgba(94, 240, 200, 0.1);
+    --theme-markdown-pre-bg: rgba(3, 12, 15, 0.76);
+    --theme-markdown-table-alt-bg: rgba(94, 240, 200, 0.06);
 
-    --theme-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
-    --theme-shadow-md: 0 12px 32px rgba(0, 0, 0, 0.32);
-    --theme-shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.38);
+    --theme-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.36), 0 0 12px rgba(94, 240, 200, 0.04);
+    --theme-shadow-md: 0 14px 34px rgba(0, 0, 0, 0.42), 0 0 24px rgba(94, 240, 200, 0.06);
+    --theme-shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.5), 0 0 48px rgba(94, 240, 200, 0.08);
 
-    --theme-scrollbar-track: rgba(7, 18, 24, 0.9);
-    --theme-scrollbar-thumb: rgba(102, 226, 173, 0.46);
-    --theme-scrollbar-thumb-hover: rgba(102, 226, 173, 0.72);
+    --theme-scrollbar-track: rgba(4, 12, 16, 0.92);
+    --theme-scrollbar-thumb: rgba(94, 240, 200, 0.4);
+    --theme-scrollbar-thumb-hover: rgba(94, 240, 200, 0.7);
 
-    --theme-input-bg: rgba(9, 28, 34, 0.88);
+    --theme-input-bg: rgba(6, 20, 26, 0.9);
     --theme-input-text: var(--theme-text-primary);
-    --theme-input-border: rgba(126, 232, 190, 0.28);
+    --theme-input-border: rgba(120, 232, 206, 0.26);
 
-    --theme-cyber-grid-display: block;
-    --theme-cyber-grid-opacity: 0.22;
-    --theme-cyber-rain-display: block;
-    /* 低密度字母雨：保持克制，只作为背景氛围，不干扰正文阅读 */
-    --theme-cyber-rain-opacity: 0.62;
+    /* 终端字体：Rajdhani 负责展示标题，Share Tech Mono 负责编号与数据标签；
+       正文继续使用无衬线，保证中文长文阅读不累。 */
+    --theme-font-family-base: "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    --theme-font-family-prose: "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    --theme-font-family-display: "Rajdhani", "Bahnschrift", "Segoe UI", "PingFang SC", sans-serif;
+    --theme-font-family-mono: "Share Tech Mono", "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+    --theme-font-size-sm: 0.8rem;
+    --theme-font-size-md: 0.94rem;
+    --theme-line-height-base: 1.68;
+    --theme-line-height-tight: 1.28;
+
+    --theme-radius-xs: 2px;
+    --theme-radius-sm: 4px;
+    --theme-radius-md: 8px;
+    --theme-radius-pill: 999px;
+    --theme-radius-round: 50%;
 }
 
 :root,
@@ -292,40 +299,8 @@ body {
     background: var(--theme-bg-page);
 }
 
-body.theme-cyber-2::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    z-index: -1;
-    display: var(--theme-cyber-grid-display);
-    pointer-events: none;
-    opacity: var(--theme-cyber-grid-opacity);
-    background-image:
-        linear-gradient(rgba(101, 255, 190, 0.13) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(101, 255, 190, 0.13) 1px, transparent 1px);
-    background-size: 28px 28px;
-    mask-image: linear-gradient(to bottom, black, transparent 92%);
-}
-
-/* 赛博档案主题：背景层“矩阵字母雨”（由 js/themes/matrix-rain.js 逐帧绘制）
-   纯装饰层，位于 body 背景之上、正文内容之下，不接收指针事件，也不参与任何交互。
-   依赖 body.theme-cyber-2 的 isolation:isolate 才能出现在 body 背景之上。 */
-.theme-matrix-rain {
-    position: fixed;
-    inset: 0;
-    z-index: -1;
-    display: var(--theme-cyber-rain-display);
-    width: 100%;
-    height: 100%;
-    opacity: var(--theme-cyber-rain-opacity);
-    pointer-events: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .theme-matrix-rain {
-        display: none;
-    }
-}
+/* 「赛博档案」主题的完整视觉定义位于 styles/09-theme-cyber-tokens.css 与
+   styles/10-theme-cyber-components.css，本文件只保留配色 token。 */
 
 /* ==========================================================================
    「秘典·羊皮纸」主题 — 暖调古籍风格
@@ -676,6 +651,9 @@ body.theme-tome .chat-history,
 body.theme-tome .character-workspace {
     background-color: transparent;
 }
+
+/* 「克苏鲁档案」主题的完整视觉定义位于 styles/07-theme-abyss-tokens.css 与
+   styles/08-theme-abyss-components.css，本文件只保留其它主题的通用 token。 */
 
 .card,
 .list-group-item,

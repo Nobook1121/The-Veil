@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from flask import Blueprint, current_app, request, session
 
+from trpg_server import weapon_catalog
 from trpg_server.config import load_settings
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.media_defaults import normalize_avatar
@@ -53,6 +54,11 @@ HOUSE_RULE_DEFINITIONS = {
     # 玩家投掷的重投配置（留空表示继承管理员默认值）。
     "dice_reroll_mode": {"type": "nullable_enum", "default": None, "values": list(DICE_REROLL_MODES), "ai_prompt": False},
     "dice_reroll_limit": {"type": "nullable_integer", "default": None, "min": 1, "max": 20, "ai_prompt": False},
+    # 房间背景音乐播放列表（空列表表示该房间不播放背景音乐）。
+    # 每首可以是音乐库站内地址或 http(s) 外链，最多 20 首。
+    "bgm_urls": {"type": "url_list", "default": [], "max_items": 20, "ai_prompt": False},
+    # 播放模式：列表循环 / 单曲循环 / 随机播放。
+    "bgm_mode": {"type": "enum", "default": "list", "values": ["list", "single", "shuffle"], "ai_prompt": False},
     # 技能基础值覆盖表：键为技能键（带专精时为 `skillKey.specialtyKey`），值为 0-99 整数。
     # 留空表示沿用下一优先级（用户个性化 > 管理员设置 > 技能目录默认值）。
     "skill_bases": {"type": "skill_bases", "default": {}, "ai_prompt": False},
@@ -61,6 +67,10 @@ HOUSE_RULE_DEFINITIONS = {
     "narrative_enabled": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
     "narrative_profile": {"type": "nullable_enum", "default": None, "values": ["graph", "degraded"], "ai_prompt": False},
     "narrative_guard": {"type": "nullable_enum", "default": None, "values": ["off", "shadow", "enforce"], "ai_prompt": False},
+    # 世界意志直执行：跳过剧本拓扑/战斗等判定。站点管理员永远可用（开关无效），
+    # 房主与房管默认可用；user_ids 里的普通成员额外获得权限。
+    "world_override_enabled": {"type": "boolean", "default": True, "ai_prompt": False},
+    "world_override_user_ids": {"type": "user_ids", "default": [], "max_items": 50, "ai_prompt": False},
 }
 DEFAULT_ROOM_HOUSE_RULES = {key: spec["default"] for key, spec in HOUSE_RULE_DEFINITIONS.items()}
 
@@ -153,6 +163,8 @@ def _room_house_rules(info):
     """
     stored = info.get("house_rules") if isinstance(info, dict) else None
     stored = stored if isinstance(stored, dict) else {}
+    # 旧版房间只存了单曲 bgm_url：升级后迁移为列表，避免背景音乐丢失。
+    legacy_bgm_url = _normalize_bgm_url(stored.get("bgm_url", ""))
     normalized = {}
     for key, spec in HOUSE_RULE_DEFINITIONS.items():
         value = stored.get(key, spec["default"])
@@ -165,10 +177,108 @@ def _room_house_rules(info):
             value = candidate if candidate in spec.get("values", []) else None
         elif spec["type"] == "nullable_integer":
             value = _normalize_nullable_int(value, spec.get("min", 0), spec.get("max", 100))
+        elif spec["type"] == "enum":
+            candidate = str(value).strip().lower() if value is not None else ""
+            value = candidate if candidate in spec.get("values", []) else spec["default"]
+        elif spec["type"] == "url":
+            value = _normalize_bgm_url(value)
+        elif spec["type"] == "url_list":
+            value = _normalize_bgm_url_list(value, spec.get("max_items", 20))
+            if not value and key == "bgm_urls" and legacy_bgm_url:
+                value = [legacy_bgm_url]
         elif spec["type"] == "skill_bases":
             value = _normalize_skill_bases(value)
+        elif spec["type"] == "user_ids":
+            value = _normalize_user_ids(value, spec.get("max_items", 50))
         normalized[key] = value
     return normalized
+
+
+def _normalize_user_ids(value, max_items=50):
+    """房规白名单：只保留非空字符串用户 ID，去重并限制数量。"""
+    if not isinstance(value, list):
+        return []
+    seen = []
+    for item in value:
+        text = str(item).strip()
+        if text and text not in seen:
+            seen.append(text)
+        if len(seen) >= max_items:
+            break
+    return seen
+
+
+def world_override_allowed(info, user_id=None, role=None):
+    """世界意志直执行权限：站点管理员恒可用，房主/房管按房规开关，白名单成员额外放行。"""
+    role_value = str(role or session.get("role") or "USER").upper()
+    if role_value in {"ADMIN", "OWNER"} or _is_elevated():
+        return True
+    rules = _room_house_rules(info)
+    if not rules.get("world_override_enabled", True):
+        return False
+    uid = str(user_id if user_id is not None else session.get("user_id") or "")
+    if not uid:
+        return False
+    if uid in set(rules.get("world_override_user_ids") or []):
+        return True
+    member = _find_member(info, user_id=uid, active_only=True)
+    return _room_permission(member, info) in {ROOM_ROLE_OWNER, ROOM_ROLE_ADMIN}
+
+
+_BGM_LOCAL_PREFIXES = ("/assets/bgm/builtin/", "/assets/bgm/library/")
+_BGM_AUDIO_SUFFIXES = {".mp3", ".m4a", ".aac", ".ogg", ".oga", ".wav", ".flac", ".webm", ".opus"}
+
+
+def _is_local_bgm_path(url):
+    """判断是否为音乐库内的站内相对地址（内置音乐或管理员上传）。"""
+
+    lowered = url.lower()
+    prefix = next((item for item in _BGM_LOCAL_PREFIXES if lowered.startswith(item)), None)
+    if not prefix:
+        return False
+    filename = url[len(prefix):]
+    if not filename or "/" in filename or "\\" in filename or filename.startswith("."):
+        return False
+    return Path(filename).suffix.lower() in _BGM_AUDIO_SUFFIXES
+
+
+def _normalize_bgm_url(value):
+    """接受 http/https 外链或音乐库内的站内地址；非法值统一回落为空字符串。"""
+
+    if not isinstance(value, str):
+        return ""
+    url = value.strip()
+    if not url or len(url) > 2048:
+        return ""
+    if _is_local_bgm_path(url):
+        return url
+    lowered = url.lower()
+    if not lowered.startswith(("http://", "https://")):
+        return ""
+    return url
+
+
+def _normalize_bgm_url_list(value, limit=20):
+    """把背景音乐列表规范化为去重后的地址数组。
+
+    读取旧数据时宽松处理：非字符串或非法地址直接跳过，重复地址只保留一次。
+    """
+
+    if not isinstance(value, list):
+        return []
+    urls = []
+    seen = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        url = _normalize_bgm_url(item)
+        if not url or url in seen:
+            continue
+        urls.append(url)
+        seen.add(url)
+        if len(urls) >= limit:
+            break
+    return urls
 
 
 def _normalize_skill_bases(value):
@@ -374,17 +484,27 @@ def _sanitize_character_card(character_card):
         return None
 
     attributes = character_card.get("attributes") if isinstance(character_card.get("attributes"), dict) else {}
+    max_hp = _bounded_int(character_card.get("maxHp", character_card.get("max_hp")), 1, 999, 1)
+    max_san = _bounded_int(character_card.get("maxSan", character_card.get("max_san")), 0, 999, 0)
+    status = character_card.get("status") if isinstance(character_card.get("status"), dict) else {}
     sanitized = {
         "id": card_id[:80],
         "name": name[:80],
         "occupationId": str(character_card.get("occupationId", character_card.get("occupation_id", "")))[:80],
         "attributes": attributes,
-        "maxHp": _bounded_int(character_card.get("maxHp", character_card.get("max_hp")), 1, 999, 1),
-        "maxSan": _bounded_int(character_card.get("maxSan", character_card.get("max_san")), 0, 999, 0),
+        "maxHp": max_hp,
+        "currentHp": _bounded_int(character_card.get("currentHp", character_card.get("current_hp")), 0, max_hp, max_hp),
+        "maxSan": max_san,
+        "currentSan": _bounded_int(character_card.get("currentSan", character_card.get("current_san")), 0, max_san, max_san),
         "mov": _bounded_int(character_card.get("mov"), 0, 99, 0),
+        "build": _bounded_int(character_card.get("build"), -2, 99, 0),
+        "damageBonus": str(character_card.get("damageBonus") or "")[:20],
         "skills": character_card.get("skills", []) if isinstance(character_card.get("skills", []), list) else [],
+        "weapons": weapon_catalog.sanitize_character_weapons(character_card.get("weapons")),
+        "customWeapons": weapon_catalog.sanitize_character_weapons(character_card.get("customWeapons")),
         "equipment": character_card.get("equipment", []) if isinstance(character_card.get("equipment", []), list) else [],
         "background": character_card.get("background", {}) if isinstance(character_card.get("background", {}), dict) else {},
+        "status": status,
     }
     return sanitized
 
@@ -409,6 +529,11 @@ def _initial_character_state(character_card):
         "sanity_records": [],
         "skill_changes": [],
         "item_changes": [],
+        "major_wound": False,
+        "unconscious": False,
+        "dying": False,
+        "dead": False,
+        "first_aid_used": False,
     }
 
 
@@ -420,6 +545,11 @@ def _ensure_character_state(member):
     state.setdefault("sanity_records", [])
     state.setdefault("skill_changes", [])
     state.setdefault("item_changes", [])
+    state.setdefault("major_wound", False)
+    state.setdefault("unconscious", False)
+    state.setdefault("dying", False)
+    state.setdefault("dead", False)
+    state.setdefault("first_aid_used", False)
     state["max_hp"] = _bounded_int(state.get("max_hp"), 1, 999, 1)
     state["current_hp"] = _bounded_int(state.get("current_hp"), 0, state["max_hp"], state["max_hp"])
     state["max_san"] = _bounded_int(state.get("max_san"), 0, 999, 0)
@@ -1363,6 +1493,42 @@ def archive_room(room_id):
     return success_response({"id": archive["id"], "name": archive["name"], "archived_at": archive["archived_at"]}, "Room archived successfully")
 
 
+@bp.route("/api/rooms/<room_id>/world-override", methods=["GET"])
+def get_world_override_status(room_id):
+    """世界意志直执行：当前用户是否有权使用，以及房管可配置的成员白名单。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    _path, info = _find_room(room_id)
+    if not info:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_access(info):
+        return _denied(room_id)
+    rules = _room_house_rules(info)
+    members = []
+    for member in info.get("members") or []:
+        if not isinstance(member, dict) or not _is_active_member(member):
+            continue
+        card = member.get("character_card") if isinstance(member.get("character_card"), dict) else {}
+        members.append(
+            {
+                "user_id": str(member.get("user_id") or ""),
+                "username": str(member.get("username") or ""),
+                "character_name": str(card.get("name") or ""),
+            }
+        )
+    return success_response(
+        {
+            "allowed": world_override_allowed(info),
+            "enabled": bool(rules.get("world_override_enabled", True)),
+            "user_ids": rules.get("world_override_user_ids") or [],
+            "can_configure": _can_manage(info),
+            "members": members,
+        },
+        "World override status loaded successfully",
+    )
+
+
 @bp.route("/api/rooms/<room_id>/house-rules", methods=["GET"])
 def get_room_house_rules(room_id):
     login_error = _require_login()
@@ -1437,10 +1603,58 @@ def update_room_house_rules(room_id):
                 except (TypeError, ValueError):
                     return error_response(f"House rule {key} must be an integer", 400, "Invalid house rule type")
             current[key] = _normalize_nullable_int(value, spec.get("min", 0), spec.get("max", 100))
+        elif spec["type"] == "url":
+            if value is None:
+                current[key] = ""
+                continue
+            if not isinstance(value, str):
+                return error_response(f"House rule {key} must be a URL string", 400, "Invalid house rule type")
+            normalized = _normalize_bgm_url(value)
+            if value.strip() and not normalized:
+                return error_response(
+                    f"House rule {key} must be an http(s) URL or a local music library path",
+                    400,
+                    "Invalid house rule type",
+                )
+            current[key] = normalized
+        elif spec["type"] == "enum":
+            candidate = str(value).strip().lower() if value is not None else ""
+            if candidate not in spec.get("values", []):
+                return error_response(
+                    f"House rule {key} must be one of {spec.get('values')}",
+                    400,
+                    "Invalid house rule type",
+                )
+            current[key] = candidate
+        elif spec["type"] == "url_list":
+            if value is None:
+                current[key] = []
+                continue
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                return error_response(
+                    f"House rule {key} must be a list of URL strings",
+                    400,
+                    "Invalid house rule type",
+                )
+            raw_urls = [item.strip() for item in value if item.strip()]
+            if any(not _normalize_bgm_url(item) for item in raw_urls):
+                return error_response(
+                    f"House rule {key} must contain only http(s) URLs or local music library paths",
+                    400,
+                    "Invalid house rule type",
+                )
+            current[key] = _normalize_bgm_url_list(raw_urls, spec.get("max_items", 20))
         elif spec["type"] == "skill_bases":
             if not isinstance(value, dict):
                 return error_response(f"House rule {key} must be an object", 400, "Invalid house rule type")
             current[key] = _normalize_skill_bases(value)
+        elif spec["type"] == "user_ids":
+            if value is None:
+                current[key] = []
+                continue
+            if not isinstance(value, list) or any(not isinstance(item, (str, int)) for item in value):
+                return error_response(f"House rule {key} must be a list of user IDs", 400, "Invalid house rule type")
+            current[key] = _normalize_user_ids(value, spec.get("max_items", 50))
         else:
             current[key] = value
 
@@ -1722,9 +1936,40 @@ def _create_character_record_for_room(room_dir, info):
     }
 
     if record_type == "damage":
-        state["current_hp"] = max(0, state["current_hp"] - value)
+        max_hp = max(1, _bounded_int(state.get("max_hp"), 1, 999, 1))
+        before = _bounded_int(state.get("current_hp"), 0, max_hp, max_hp)
+        major_wound = value >= max_hp / 2
+        if value > max_hp:
+            state["current_hp"] = 0
+            state["dead"] = True
+            state["dying"] = False
+            state["unconscious"] = True
+        else:
+            state["current_hp"] = max(0, before - value)
+        if major_wound:
+            state["major_wound"] = True
+        if state["current_hp"] <= 0 and not state.get("dead"):
+            if state.get("major_wound"):
+                state["dying"] = True
+            else:
+                state["unconscious"] = True
+        if state.get("dead") or state.get("dying"):
+            state["unconscious"] = True
+        record["hp_before"] = before
         record["hp_after"] = state["current_hp"]
+        record["major_wound"] = bool(state.get("major_wound"))
+        record["dying"] = bool(state.get("dying"))
+        record["dead"] = bool(state.get("dead"))
         state["injury_records"].insert(0, record)
+        card = target.get("character_card")
+        if isinstance(card, dict):
+            card["currentHp"] = state["current_hp"]
+            card["current_hp"] = state["current_hp"]
+            status = card.get("status") if isinstance(card.get("status"), dict) else {}
+            status["majorWound"] = bool(state.get("major_wound"))
+            status["unconscious"] = bool(state.get("unconscious"))
+            status["dead"] = bool(state.get("dead"))
+            card["status"] = status
     elif record_type == "san":
         state["current_san"] = max(0, state["current_san"] - value)
         if isinstance(target.get("character_card"), dict):
@@ -2041,6 +2286,36 @@ def run_scheduled_autosaves():
             _write_room_autosave(room_dir, room_id, messages)
         except OSError:
             logger.debug("Scheduled autosave failed for room %s", room_id, exc_info=True)
+
+
+def save_all_rooms_on_shutdown():
+    """服务正常关闭（stop/exit 等）前为每个房间写一个自动存档节点。
+
+    与后台调度不同：忽略 ``[autosave] enabled`` 与间隔限制，确保退出前最后
+    一段对话一定落盘；内容与最近一次自动存档完全相同的房间跳过，避免产生
+    无意义的重复节点。需要处于 Flask 应用上下文中。
+    """
+
+    saved = 0
+    for room_dir in _iter_room_dirs():
+        info = _read_room(room_dir)
+        if not info or info.get("archived"):
+            continue
+        messages = _read_messages(room_dir)
+        if not messages:
+            continue
+        existing = read_json(room_dir / "autosave.json", default={})
+        if isinstance(existing, dict) and existing.get("messages") == messages:
+            continue
+        room_id = info.get("id") or room_dir.name
+        try:
+            _write_room_autosave(room_dir, room_id, messages)
+            saved += 1
+        except Exception:  # noqa: BLE001 - 单个房间失败不能阻断关闭流程
+            logger.warning("Shutdown autosave failed for room %s", room_id, exc_info=True)
+    if saved:
+        logger.info("Saved shutdown autosaves for %d room(s)", saved)
+    return saved
 
 
 @bp.route("/api/rooms/<room_id>/autosave", methods=["POST"])

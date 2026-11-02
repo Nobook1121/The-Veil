@@ -12,14 +12,37 @@ logger = logging.getLogger(__name__)
 # os.replace 会抛 WinError 5/32。用递增间隔重试，避免一次瞬时占用就返回 500。
 _REPLACE_RETRY_DELAYS = (0.0, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5, 0.8)
 
+# 读取侧同样存在瞬时冲突：另一个线程正在 os.replace 该文件时，open() 会短暂
+# 拿到 ERROR_ACCESS_DENIED（表现为 PermissionError: [Errno 13]，日志里没有
+# winerror）。房间 info.json 会被聊天线程频繁读写，读侧重试可避免 500。
+_READ_RETRY_DELAYS = (0.0, 0.01, 0.02, 0.05, 0.1, 0.2)
+
+
+def _is_transient_access_error(error):
+    """是否为 Windows 上文件正被替换/占用导致的瞬时拒绝访问。"""
+    return getattr(error, "winerror", None) in (5, 32) or error.errno in (13, 32)
+
 
 def read_json(path, default=None):
     json_path = Path(path)
-    if not json_path.exists():
-        return default
-
-    with json_path.open("r", encoding="utf-8") as file:
-        return json.load(file)
+    last_error = None
+    for delay in _READ_RETRY_DELAYS:
+        if delay:
+            time.sleep(delay)
+        try:
+            with json_path.open("r", encoding="utf-8") as file:
+                return json.load(file)
+        except FileNotFoundError:
+            # 文件确实不存在时立即返回默认值；若只是替换窗口内瞬时消失则继续重试。
+            if not json_path.exists():
+                return default
+        except OSError as error:
+            if not _is_transient_access_error(error):
+                raise
+            last_error = error
+    if last_error is not None:
+        raise last_error
+    return default
 
 
 def _clear_readonly(path):

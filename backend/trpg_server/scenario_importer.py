@@ -182,7 +182,8 @@ def build_ai_conversion_prompt(text: str, sections: list[tuple[str, str]] | None
 5. scene：玩家可以抵达、调查或行动的具体地点/空间/阶段。一个地点一个模块：每个车厢、房间必须独立；站台、驾驶室、大厅、血池、其他区域也都必须独立。标题变化或地点变化就是边界。地点内的描述、可调查物、检定成功/失败文本、NPC、战斗、线索全部留在该地点 scene 中，不要拆成 background。
 6. ending：明确标记为 True End、Bad End、Crazy End、死亡结局、逃生结局、其他结局的分支；每一种结局必须独立模块，不能合并。
 7. npc / monster：只有原文提供了独立角色卡、数值、能力或战斗数据时才使用；角色在某个地点的对白和行为仍留在该 scene，同时可在该模块建立引用。
-8. triggers：只用于“满足某条件后才揭示”的线索。把检定条件写入 condition，把玩家看到的原文写入 content；不要把普通段落变成 trigger。
+8. npc / monster 模块必须填写角色卡字段：attributes（STR/DEX/CON/SIZ/POW/EDU/INT/APP/LUC 整数）、battle（dex/str/siz/con/hp/max_hp/armor 整数）、skills（[{{"name":"斗殴","base":45}}]）、weapons（[{{"name":"手杖","damage":"1D6","skill":"斗殴"}}]）。原文没有的字段直接省略，不要编造；其它类型模块这几项留空。
+9. triggers：只用于“满足某条件后才揭示”的线索。把检定条件写入 condition，把玩家看到的原文写入 content；不要把普通段落变成 trigger。
 
 【按样本《常暗之厢》执行的判定示例】
 - “概要/导入/游戏准备”是背景、准备或公开信息，按标题分别保留，不能把它们和场景正文合成一个背景。
@@ -199,7 +200,7 @@ def build_ai_conversion_prompt(text: str, sections: list[tuple[str, str]] | None
 - 只输出合法 JSON，不要 Markdown、解释、前后缀文本。
 
 【输出 JSON】
-{{"title":"剧本标题","author":"作者（未知则 Imported）","playerCount":1,"notes":"仅根据原文填写","modules":[{{"source_order":1,"module_type":"scene","title":"原文标题","summary":"该段内容摘要","visibility":"public","triggers":[{{"display_name":"线索显示名","keyword":"内部关键词","condition":"原文条件","content_mode":"text"}}],"attributes":{{}},"battle":{{}},"skills":[],"weapons":[],"inputs":[],"timeline_entries":[]}}]}}
+{{"title":"剧本标题","author":"作者（未知则 Imported）","playerCount":1,"notes":"仅根据原文填写","modules":[{{"source_order":1,"module_type":"scene","title":"原文标题","summary":"该段内容摘要","visibility":"public","triggers":[{{"display_name":"线索显示名","keyword":"内部关键词","condition":"原文条件","content_mode":"text"}}],"attributes":{{}},"battle":{{}},"skills":[],"weapons":[],"inputs":[],"timeline_entries":[]}},{{"source_order":2,"module_type":"npc","title":"管家","summary":"旧宅管家，态度傲慢","visibility":"kp","attributes":{{"STR":60,"DEX":55,"CON":50}},"battle":{{"dex":55,"str":60,"siz":65,"con":50,"hp":10,"max_hp":10,"armor":0}},"skills":[{{"name":"斗殴","base":45}}],"weapons":[{{"name":"手杖","damage":"1D6","skill":"斗殴"}}]}}]}}
 
 【原始文档分段】
 {blocks}

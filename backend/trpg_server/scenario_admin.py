@@ -123,6 +123,9 @@ def rooms_using_scenario(rooms_dir: Path | None, scenario_id: Any) -> list[str]:
         if not room_dir.is_dir():
             continue
         info = read_json(room_dir / "info.json", default={})
+        # 与网页删除一致：已归档房间的 AI 已关闭，不再阻止剧本删除。
+        if isinstance(info, dict) and info.get("archived"):
+            continue
         if isinstance(info, dict) and str(info.get("scenario_id")) == str(scenario_id):
             result.append(room_dir.name)
     return result

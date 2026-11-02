@@ -92,6 +92,7 @@ def build_prompt_layers(
     room_snapshot_message: str | None = None,
     narrative_summary: str | None = None,
     opening_pack: str | None = None,
+    system_directive: str | None = None,
     cache_variant: str = "",
 ) -> PromptLayers:
     scenario_static = _scenario_static_content(scenario)
@@ -166,6 +167,11 @@ def build_prompt_layers(
     if room_snapshot_message:
         dynamic_messages.append({"role": "system", "content": str(room_snapshot_message)})
         dynamic_segments.append("room_state")
+    # 安全/授权约束模块：同一槽位按模式热切换（普通防伪 / 直执行授权），
+    # 位于易变内容之后，静态前缀与剧本卡不受影响；未启用时不产生任何注入。
+    if system_directive:
+        dynamic_messages.append({"role": "system", "content": str(system_directive)})
+        dynamic_segments.append("system_directive")
     for item in history or []:
         if not isinstance(item, dict):
             continue

@@ -265,6 +265,20 @@ def _active_pending(room_id: str) -> PendingRoll | None:
         )
 
 
+def active_pending_info(room_id: str) -> dict[str, Any] | None:
+    """房间当前待投掷的轻量摘要；供战斗面板判断「是否还在等骰子」。"""
+    pending = _active_pending(room_id)
+    if pending is None:
+        return None
+    return {
+        "request_id": pending.request_id,
+        "roller_name": pending.roller_name,
+        "roller_user_id": pending.roller_user_id,
+        "tool_name": pending.tool_name,
+        "state": pending.state,
+    }
+
+
 def wait_for_player_roll(
     context: Any,
     plan: dict[str, Any],
@@ -361,6 +375,60 @@ def wait_for_player_roll(
     return result
 
 
+def create_roll_request(
+    context: Any,
+    plan: dict[str, Any],
+    resolver: Callable[[], dict[str, Any]],
+    *,
+    roller_user_id: Any = None,
+    roller_name: str = "",
+    tool_name: str = "",
+    face_resolver: Callable[[list[int]], dict[str, Any]] | None = None,
+    auto_roll: bool = False,
+) -> tuple[str | None, str]:
+    """创建待投掷请求但不阻塞调用线程；返回 ``(request_id, error)``。
+
+    供战斗面板等非工具线程使用：广播 ``player_dice_request`` 后由玩家掷骰，
+    结算走 :func:`resolve_roll` / :func:`submit_faces`。超时后自动结算并清理。
+    """
+    room_id = str(getattr(context, "room_id", "") or "")
+    if not room_id or _BROADCASTER is None:
+        # 无 Socket 环境（测试/脚本）无法驱动前端，直接结算。
+        resolver()
+        return None, ""
+    existing = _active_pending(room_id)
+    if existing is not None:
+        return None, "pending"
+    request_id = f"roll-{uuid.uuid4().hex}"
+    now = time.time()
+    timeout = wait_timeout_seconds(context)
+    mode, limit = reroll_config_for_context(context)
+    pending = PendingRoll(
+        request_id=request_id,
+        room_id=room_id,
+        room_dir=getattr(context, "room_dir", None),
+        roller_user_id=str(roller_user_id if roller_user_id is not None else getattr(context, "user_id", "") or ""),
+        roller_name=roller_name,
+        tool_name=tool_name,
+        plan=plan,
+        resolver=resolver,
+        created_at=now,
+        expires_at=now + timeout,
+        reroll_mode=mode,
+        reroll_limit=limit,
+        face_resolver=face_resolver,
+        auto_roll=bool(auto_roll) and face_resolver is not None,
+    )
+    with _LOCK:
+        _PENDING[request_id] = pending
+    _emit("player_dice_request", _plan_payload(pending))
+    logger.info("Roll request %s created for room %s without blocking", request_id, room_id)
+    timer = threading.Timer(timeout, _expire, args=(request_id,))
+    timer.daemon = True
+    timer.start()
+    return request_id, ""
+
+
 def _expire(request_id: str) -> None:
     """等待超时：未投掷则自动投掷，已投掷则自动确认最后一次结果。"""
     pending = None
@@ -409,6 +477,8 @@ def _expire(request_id: str) -> None:
         )
         _log(pending.room_dir, "等待玩家确认超时，自动确认最后一次结果", actor=pending.roller_name, room_id=pending.room_id, 请求ID=request_id)
     pending.event.set()
+    # 非阻塞创建的请求没有等待线程来做收尾，这里统一清理。
+    _remove(request_id)
 
 
 def _remove(request_id: str) -> None:

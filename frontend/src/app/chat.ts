@@ -10,6 +10,8 @@ interface PendingAIMessage {
     content: string;
     role: ChatRoleConfig;
     time: string;
+    /** 该条消息是否为「世界意志」直执行，请求时携带 world_override 标记。 */
+    worldOverride?: boolean;
 }
 
 interface KnowledgeUsage {
@@ -31,6 +33,7 @@ interface KnowledgeUsage {
 
 interface SendAIOptions {
     scenarioStart?: boolean;
+    worldOverride?: boolean;
 }
 
 interface CommandDefinition {
@@ -285,6 +288,13 @@ function isRateLimited(rateLimit: number): boolean {
     return false;
 }
 
+/** 战斗轮工具消息（检定/伤害）由战斗面板承载，聊天流只保留叙事。 */
+function isCombatPanelMessage(message: ChatMessage): boolean {
+    const metadata = message.metadata as Record<string, unknown> | undefined;
+    const checkType = typeof metadata?.check_type === "string" ? metadata.check_type : "";
+    return checkType.startsWith("combat");
+}
+
 async function sendToAI(chatInput: HTMLInputElement, sendButton: HTMLButtonElement, options: SendAIOptions = {}): Promise<void> {
     if (pendingMessages.length === 0) return;
     const requestMessages = pendingMessages.slice();
@@ -312,6 +322,8 @@ async function sendToAI(chatInput: HTMLInputElement, sendButton: HTMLButtonEleme
                 room_id: getCurrentRoom()?.id || null,
                 ai_request_id: aiRequestId,
                 scenario_start: options.scenarioStart === true,
+                // 世界意志：跳过剧本保护与战斗判定的直执行请求（后端会再次校验权限）。
+                world_override: options.worldOverride === true || requestMessages.some((message) => message.worldOverride === true),
             },
         });
         if (!response.ok) {
@@ -326,7 +338,9 @@ async function sendToAI(chatInput: HTMLInputElement, sendButton: HTMLButtonEleme
         const toolMessages = data.tool_messages || [];
         const directMessages = data.direct_messages
             || (data.direct_message ? [data.direct_message] : []);
+        // 战斗轮的检定与伤害明细只进战斗面板与战斗日志，不再作为聊天消息刷屏。
         for (const toolMessage of toolMessages) {
+            if (isCombatPanelMessage(toolMessage)) continue;
             const visibleMessage = await persistDirectRoomMessage(toolMessage);
             if (visibleMessage) {
                 renderRoomMessage(visibleMessage);
@@ -408,6 +422,58 @@ async function sendToAI(chatInput: HTMLInputElement, sendButton: HTMLButtonEleme
             void sendToAI(chatInput, sendButton);
         }
     }
+}
+
+/**
+ * 世界意志直执行：把一句话作为玩家消息发出，并让本次 AI 请求携带 world_override 标记。
+ * 后端会再次校验权限，然后跳过剧本开场门控与输出护栏，并要求 KP 用世界观叙事圆场。
+ */
+async function sendWorldOverrideMessage(text: string): Promise<void> {
+    const chatInput = document.getElementById("chatInput") as HTMLInputElement | null;
+    const sendButton = document.getElementById("sendButton") as HTMLButtonElement | null;
+    if (!chatInput || !sendButton) return;
+    const message = text.trim();
+    if (!message) {
+        showNotification("请先用一句话描述要直接达成的结果", "error");
+        return;
+    }
+    if (chatReadOnly) {
+        showNotification("隐身查看时不能发送消息", "error");
+        return;
+    }
+    if (!window.currentUser) {
+        showNotification("请先登录后再使用世界意志", "error");
+        showAuthModal?.();
+        return;
+    }
+    const room = getCurrentRoom();
+    if (!room) {
+        showNotification("请先加入房间后再使用世界意志", "error");
+        return;
+    }
+    if (room.archived) {
+        showNotification("该房间已归档，无法使用世界意志", "info");
+        return;
+    }
+    const lockInput = document.getElementById("enableAIResponseLock") as HTMLInputElement | null;
+    if (isAIThinking && lockInput?.checked) {
+        showNotification("请等待 AI 回复完成后再使用世界意志", "error");
+        return;
+    }
+    const role = aiRoles.find((item) => item.id === "kp") || aiRoles[0] || { id: "kp", name: "KP" };
+    await sendVisibleMessage("player", message);
+    pendingMessages.push({
+        sender: getCurrentUsername(),
+        content: message,
+        role,
+        time: new Date().toLocaleTimeString(),
+        worldOverride: true,
+    });
+    if (isAIThinking) {
+        showNotification("世界意志指令已加入队列，请等待 AI 回复完成后发送", "info");
+        return;
+    }
+    await sendToAI(chatInput, sendButton, { worldOverride: true });
 }
 
 async function startScenario(): Promise<void> {
@@ -1498,11 +1564,30 @@ function initWebSocket(): void {
         socket.on("player_dice_request", (data) => { window.TrpgDiceTable?.handleRequest(data as DiceRequestPayload); });
         // 物理结果：所有客户端按同一 seed 同步播放投掷动画。
         socket.on("player_dice_rolling", (data) => { window.TrpgDiceTable?.handleRolling(data as DiceRequestPayload); });
-        socket.on("player_dice_rolled", (data) => { void window.TrpgDiceTable?.handleRolled(data as DiceRolledPayload); });
+        socket.on("player_dice_rolled", (data) => {
+            void window.TrpgDiceTable?.handleRolled(data as DiceRolledPayload);
+            window.TrpgCombat?.onDiceResolved?.();
+        });
         socket.on("player_dice_rerolled", (data) => { void window.TrpgDiceTable?.handleRerolled(data as DiceRolledPayload); });
-        socket.on("player_dice_confirmed", (data) => { window.TrpgDiceTable?.handleConfirmed(data as DiceRolledPayload); });
-        socket.on("player_dice_cancelled", (data) => { window.TrpgDiceTable?.handleCancelled(data as DiceRolledPayload); });
-        socket.on("player_dice_forced", (data) => { void window.TrpgDiceTable?.handleForced(data as DiceRolledPayload); });
+        socket.on("player_dice_confirmed", (data) => {
+            window.TrpgDiceTable?.handleConfirmed(data as DiceRolledPayload);
+            window.TrpgCombat?.onDiceResolved?.();
+        });
+        socket.on("player_dice_cancelled", (data) => {
+            window.TrpgDiceTable?.handleCancelled(data as DiceRolledPayload);
+            window.TrpgCombat?.onDiceResolved?.();
+        });
+        socket.on("player_dice_forced", (data) => {
+            void window.TrpgDiceTable?.handleForced(data as DiceRolledPayload);
+            window.TrpgCombat?.onDiceResolved?.();
+        });
+        // 服务端（NPC/KP）掷骰：与玩家骰子一样按房间设置播放动画。
+        socket.on("combat_dice", (data) => {
+            const meta = (data as { meta?: DiceRollMeta } | null)?.meta;
+            if (meta) void window.TrpgDiceTable?.showExternalRoll(meta);
+        });
+        // 战斗轮：任何一次战斗状态写入都会广播，战斗面板据此实时刷新。
+        socket.on("combat_updated", (data) => { window.TrpgCombat?.onUpdated(data as CombatStatePayload); });
         // 平台自动切换等仅面向管理员的提示：服务端只推给在线管理员，前端以通知条展示（不用 alert）。
         socket.on("admin_notification", (payload: unknown) => {
             const data = (payload || {}) as { message?: unknown; level?: unknown };
@@ -1799,3 +1884,4 @@ window.loadAIRoles = loadAIRoles;
 window.restoreThinkingState = restoreThinkingState;
 window.startScenario = startScenario;
 window.resumePendingAIRequest = resumePendingAIRequest;
+window.sendWorldOverride = sendWorldOverrideMessage;

@@ -102,7 +102,7 @@ class ScenarioModel {
         return data.data;
     }
 
-    async deleteScenario(id: number): Promise<boolean> {
+    async deleteScenario(id: number): Promise<{ deleted: boolean; archived: boolean; activeRooms: number }> {
         if (!this.isAuthenticated) {
             const authenticated = await this.checkAuthStatus();
             if (!authenticated) throw new Error("请先登录");
@@ -123,7 +123,10 @@ class ScenarioModel {
         if (index === -1) throw new Error("剧本不存在");
         this.scenarios.splice(index, 1);
         this.saveScenarios();
-        return true;
+        // 仍有房间占用时后端只归档（剧本仍存在于磁盘，知识库需保留给房间使用），
+        // 调用方据此给出准确提示，而不是让用户误以为知识库没删干净。
+        const payload = (data.data || {}) as { archived?: boolean; active_rooms?: number };
+        return { deleted: payload.archived !== true, archived: payload.archived === true, activeRooms: Number(payload.active_rooms || 0) };
     }
 
     getScenario(id: number): Scenario | undefined {
@@ -136,16 +139,6 @@ class ScenarioModel {
 
     saveScenarios(): void {
         localStorage.setItem("trpg_scenarios", JSON.stringify(this.scenarios));
-    }
-
-    async importScenario(scenarioData: unknown): Promise<Scenario> {
-        if (!this.validateScenarioData(scenarioData)) {
-            throw new Error("剧本数据格式不正确");
-        }
-
-        const { id: _ignoredId, ...input } = scenarioData;
-        void _ignoredId;
-        return this.createScenario(input);
     }
 
     /** Convert source text on the server without creating a scenario. */
@@ -207,7 +200,18 @@ class ScenarioModel {
         return data.data;
     }
     async getImportJob(id: string): Promise<ScenarioImportJob> { const { data } = await TrpgApi.requestWithResponse<ApiResponse<ScenarioImportJob>>(`/api/scripts/import/${encodeURIComponent(id)}`); if (!data.success || !data.data) throw new Error(data.message || "任务不存在"); return data.data; }
+    async listImportJobs(): Promise<ScenarioImportJob[]> {
+        const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<ScenarioImportJob[]>>("/api/scripts/import/jobs");
+        if (!response.ok || !data.success || !data.data) throw new Error(data.message || data.error || "无法读取导入任务");
+        return data.data;
+    }
+    async saveImportPreview(jobId: string, payload: ScenarioInput): Promise<ScenarioInput> {
+        const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<ScenarioInput>>(`/api/scripts/import/${encodeURIComponent(jobId)}/preview`, { method: "PUT", body: payload });
+        if (!response.ok || !data.success) throw new Error(data.message || data.error || "保存审核结果失败");
+        return data.data || payload;
+    }
     async retryImportJob(id: string, stage?: string): Promise<ScenarioImportJob> { const { data } = await TrpgApi.requestWithResponse<ApiResponse<ScenarioImportJob>>(`/api/scripts/import/${encodeURIComponent(id)}/retry`, { method: "POST", body: stage ? { stage } : {} }); if (!data.success || !data.data) throw new Error(data.message || "重试失败"); return data.data; }
+    async abandonImportJob(id: string): Promise<void> { const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{ jobId: string }>>(`/api/scripts/import/${encodeURIComponent(id)}`, { method: "DELETE" }); if (!response.ok || !data.success) throw new Error(data.message || data.error || "放弃导入失败"); }
     async cancelImportJob(id: string): Promise<ScenarioImportJob> { const { data } = await TrpgApi.requestWithResponse<ApiResponse<ScenarioImportJob>>(`/api/scripts/import/${encodeURIComponent(id)}/cancel`, { method: "POST" }); if (!data.success || !data.data) throw new Error(data.message || "取消失败"); return data.data; }
 
     async publishImport(scriptId: number, jobId: string): Promise<Scenario> {
@@ -220,16 +224,17 @@ class ScenarioModel {
     }
 
     // 轮询导入任务直到进入终态（done/failed/cancelled/published）；
-    // 仅 done 视为成功，其余终态抛出任务自身错误。
+    // done 与 published（后台已自动发布）都视为成功，其余终态抛出任务自身错误。
+    // 间隔 1.2 秒：超长剧本可能跑十几分钟，350ms 轮询会累积上千次请求。
     async waitForImportJob(id: string, onProgress?: (job: ScenarioImportJob) => void): Promise<ScenarioImportJob> {
         for (;;) {
             const job = await this.getImportJob(id);
             onProgress?.(job);
-            if (["done", "failed", "cancelled", "published"].includes(job.status)) {
-                if (job.status !== "done") throw new Error(job.error || "Import job failed");
+            if (["done", "published", "failed", "cancelled"].includes(job.status)) {
+                if (job.status !== "done" && job.status !== "published") throw new Error(job.error || "Import job failed");
                 return job;
             }
-            await new Promise((resolve) => window.setTimeout(resolve, 350));
+            await new Promise((resolve) => window.setTimeout(resolve, 1200));
         }
     }
 
@@ -248,10 +253,6 @@ class ScenarioModel {
     async discardDraft(): Promise<void> {
         const { response, data } = await TrpgApi.requestWithResponse<ApiResponse>(`${this.apiBaseUrl}/scenarios/draft`, { method: "DELETE" });
         if (!response.ok || !data.success) throw new Error(data.message || data.error || "舍弃草稿失败");
-    }
-
-    validateScenarioData(data: unknown): data is ScenarioInput {
-        return isScenarioInput(data);
     }
 
     async listTriggerAssets(id: number): Promise<ResourceRef[]> {

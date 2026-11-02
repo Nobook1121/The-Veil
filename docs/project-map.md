@@ -172,12 +172,13 @@ Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送�
 | `app/auth/` | 登录/注册/资料/用户卡片/认证状态 |
 | `app/dice/` | 简易动画、3D 适配器、降级记忆、骰子外观、管理员贴图库、`diceOverlay.ts`（覆盖层）、`diceTypes.ts`（共享类型） |
 | `app/diceTable.ts` (~1400) | 虚拟投掷桌：物理骰面结果生成、本地骰桌结算、3D → 简易 → 纯文本逐层降级并上报 |
+| `app/themes/` | 主题视觉引擎（namespace + 独立脚本）：`abyss/`（深渊帷幕：WebGL 氛围、法阵、触手、符文）、`cyber/`（赛博档案：WebGL 氛围、三层数据雨、HUD、指针锁定框） |
 | `dice3d/main.ts` (~1100) | Three.js + cannon-es 3D 骰子舞台（物理骰面结算），独立打包为 `js/dice/dice3d.js` |
 | `app/generated/templates.ts` | 构建时由 `templates/*.html` 生成（勿手改） |
 | `templates/*.html` | `<template id="...">` 模板源 |
 | `react/` | React 19 局部挂载：`main.tsx`、`shell/Sidebar.tsx`、`home/HomeChat.tsx`，esbuild 打包 |
 | `react/agent/` | 网站 Agent：`AgentProvider`（共享状态）、`AgentBall`（悬浮球）、`AgentWindow`（可拖拽悬浮窗）、`AgentPage`（全屏页）、`AgentChat` / `AgentActionCard`（Markdown 消息与待确认卡片）、`agent-api.ts` / `agent-types.ts` / `agent.css` |
-| `styles/` | 分层 CSS：`00-theme-tokens` → `01-foundation-chat` → `02-scenario-character` → `03-tools-settings-platform` → `04-auth-profile-overrides` → `05-dice-animation` |
+| `styles/` | 分层 CSS：`00-theme-tokens` → `01-foundation-chat` → `02-scenario-character` → `03-tools-settings-platform` → `04-auth-profile-overrides` → `05-dice-animation` → `06-combat-world-override` → `07/08-theme-abyss-*` → `09/10-theme-cyber-*`（由 `react/app.css` 统一 `@import`） |
 | `locales/zh_cn.json` / `en_us.json` | 中英文案（运行时 `i18n.ts`） |
 | `tools/` | 骰子/检定/工具管理（编译到 `dist/public/data/tools/`） |
 | `types/*.d.ts` | 手写全局类型声明 |

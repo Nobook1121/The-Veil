@@ -306,6 +306,35 @@ function Test-VenvUsable {
     }
 }
 
+# 虚拟环境里是否带 pip。用 uv 或 --without-pip 创建的 .venv 只有 Python 本体，
+# 直接跑 `python -m pip` 会报 "No module named pip"。
+function Test-VenvPip {
+    if (-not (Test-Path $VenvPython)) { return $false }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $VenvPython -m pip --version 2>$null | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
+# 缺 pip 时用标准库自带的 ensurepip 就地补齐，避免为一个缺失的模块重建整个环境。
+function Repair-VenvPip {
+    if (Test-VenvPip) { return $true }
+    if (-not (Test-Path $VenvPython)) { return $false }
+    Write-Warn '虚拟环境缺少 pip，正在用 ensurepip 补齐 ...'
+    Invoke-Quiet $VenvPython @('-m', 'ensurepip', '--upgrade')
+    if (Test-VenvPip) {
+        Write-Ok 'pip 已补齐'
+        return $true
+    }
+    return $false
+}
+
 function Remove-BrokenVenv {
     # 先改名保留现场（体积可能很大，脚本会打印位置，确认无用后可手动删除）；
     # 改名失败（文件被占用）时退回直接删除。
@@ -325,9 +354,15 @@ function Remove-BrokenVenv {
 function Ensure-Venv($python) {
     if (Test-VenvUsable) {
         Write-Ok '已有独立虚拟环境 .venv'
-        return
-    }
-    if (Test-Path $VenvDir) {
+        if (Test-VenvPip) { return }
+        if ($DryRun) {
+            Write-Warn '（DryRun）检测到 .venv 缺少 pip，正式运行时会先尝试用 ensurepip 补齐'
+            return
+        }
+        if (Repair-VenvPip) { return }
+        Write-Warn '虚拟环境缺少 pip 且 ensurepip 无法补齐，正在重建 ...'
+        Remove-BrokenVenv
+    } elseif (Test-Path $VenvDir) {
         if ($DryRun) {
             Write-Warn '（DryRun）检测到 .venv 不可用，正式运行时会重建它'
             return
@@ -351,6 +386,9 @@ function Ensure-Venv($python) {
     if (-not (Test-VenvUsable)) {
         Fail "虚拟环境已创建但无法运行（$VenvPython）。请手动删除 .venv 后重试，或重新安装 Python 3.11+。"
     }
+    if (-not (Repair-VenvPip)) {
+        Fail "虚拟环境已创建但缺少 pip，ensurepip 也无法补齐。请确认 Python 安装完整（需包含 ensurepip）后删除 .venv 重试。"
+    }
     Write-Ok '虚拟环境创建完成'
 }
 
@@ -358,6 +396,15 @@ function Ensure-Dependencies {
     if (-not (Test-Path $VenvPython)) {
         Write-Note '（跳过依赖安装：虚拟环境尚未就绪）'
         return
+    }
+
+    # 兜底：这里再确认一次 pip，避免后续 pip 命令报 "No module named pip"。
+    if ($DryRun) {
+        if (-not (Test-VenvPip)) {
+            Write-Warn '（DryRun）虚拟环境缺少 pip，正式运行时会用 ensurepip 补齐'
+        }
+    } elseif (-not (Repair-VenvPip)) {
+        Fail "虚拟环境缺少 pip，且 ensurepip 无法补齐。请删除 .venv 后重试，或手动执行：$VenvPython -m ensurepip --upgrade"
     }
 
     $hash = (Get-FileHash -Path $Requirements -Algorithm SHA256).Hash

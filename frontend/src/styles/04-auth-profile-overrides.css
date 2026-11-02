@@ -598,6 +598,40 @@
     color: var(--color-muted);
 }
 
+/* 特效设置：滑杆与开关行。开关行改为左右两端对齐，避免复选框掉到下一行。 */
+.profile-fx-settings {
+    display: grid;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.profile-range-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.profile-range-controls .form-range {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.profile-range-value {
+    flex: 0 0 44px;
+    color: var(--color-muted);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.profile-toggle-field {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+}
+
+.profile-toggle-field .form-check-input {
+    margin: 0;
+}
+
 .profile-pending-save-bar {
     position: sticky;
     bottom: 12px;
@@ -641,6 +675,199 @@
     margin: 0;
     color: var(--color-text-muted);
     font-size: 0.88rem;
+}
+
+/* —— 背景音乐面板：标题折叠栏 / 添加区 / 曲目列表 ——
+   这些类此前完全没有样式，按钮与下拉框因此按浏览器默认外观排版，
+   折叠后主体也没有被隐藏，看起来就是“按钮出错”。 */
+.profile-bgm-panel {
+    margin-bottom: 16px;
+    padding: 16px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--color-panel);
+    box-shadow: var(--theme-shadow-sm);
+}
+
+.profile-bgm-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 4px 2px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text);
+    text-align: left;
+    cursor: pointer;
+    transition: color 0.18s ease;
+}
+
+.profile-bgm-head:hover {
+    color: var(--color-primary);
+}
+
+.profile-bgm-heading {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+}
+
+.profile-bgm-heading h4 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.profile-bgm-heading > i {
+    color: var(--color-primary);
+}
+
+.profile-bgm-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    background: var(--color-panel-muted);
+    color: var(--color-text-muted);
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.profile-bgm-chevron {
+    flex: none;
+    color: var(--color-text-muted);
+    transition: transform 0.2s ease;
+}
+
+/* 折叠态：隐藏主体，箭头翻转指向下方内容的展开方向。 */
+.profile-bgm-panel.is-collapsed .profile-bgm-body {
+    display: none;
+}
+
+.profile-bgm-panel.is-collapsed .profile-bgm-chevron {
+    transform: rotate(180deg);
+}
+
+.profile-bgm-body {
+    display: grid;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.bgm-panel-add {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr) auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.bgm-panel-add .btn {
+    white-space: nowrap;
+}
+
+.bgm-panel-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.bgm-panel-controls .profile-setting-row {
+    margin-bottom: 0;
+}
+
+.bgm-track-list {
+    display: grid;
+    gap: 6px;
+    min-height: 40px;
+}
+
+.bgm-track-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--color-panel-muted);
+}
+
+.bgm-track-order {
+    flex: none;
+    min-width: 22px;
+    color: var(--color-text-muted);
+    font-size: 0.78rem;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.bgm-track-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.bgm-track-remove {
+    flex: none;
+    margin-left: auto;
+}
+
+.bgm-panel-message {
+    min-height: 20px;
+    font-size: 0.88rem;
+    color: var(--color-text-muted);
+}
+
+/* 管理员音乐库列表：名称与大小左右对齐，删除按钮固定右侧。 */
+.bgm-library-list {
+    display: grid;
+    gap: 6px;
+}
+
+.bgm-library-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--color-panel-muted);
+}
+
+.bgm-library-meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.bgm-library-name {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.bgm-library-size {
+    flex: none;
+    color: var(--color-text-muted);
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+    .bgm-panel-add,
+    .bgm-panel-controls {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 
 .profile-inline-action {

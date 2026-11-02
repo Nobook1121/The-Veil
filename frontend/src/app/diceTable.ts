@@ -942,6 +942,30 @@ const DiceTable = (() => {
         finishActive(true, target.snapshot || undefined);
     }
 
+    let externalRollSeq = 0;
+
+    /**
+     * 服务端（NPC/KP）掷出的骰子：按房间档位播放动画，不占用玩家投掷流程
+     * （不写入 active/pending，玩家自己的骰桌不受影响）。
+     */
+    async function showExternalRoll(meta: DiceRollMeta): Promise<void> {
+        if (!meta || meta.show_table === false) return;
+        if (!Array.isArray(meta.groups) || !meta.groups.length) return;
+        if (!Array.isArray(meta.faces) || !meta.faces.length) return;
+        const name = rollerLabel(meta.roller) || "系统";
+        if (effectiveLevel() === "text") {
+            showNotification(`${name} 投掷：${meta.roll ?? meta.total ?? ""}`, "info");
+            return;
+        }
+        const requestId = String(meta.request_id || `server-${++externalRollSeq}-${Date.now()}`);
+        if (findPanel(requestId)) return;
+        const target = createActive(requestId, planFromMeta(meta));
+        target.state = "rolled";
+        await playSnapshot(target, snapshotFromMeta(meta), true);
+        target.overlay.setStatus(`${name} 投掷`, "auto");
+        target.overlay.freeze();
+    }
+
     function renderForMessage(messageElement: HTMLElement, message: ChatMessage, animate: boolean): void {
         const metadata = (message.metadata || {}) as Record<string, unknown>;
         const meta = metadata.dice_roll as DiceRollMeta | undefined;
@@ -1372,6 +1396,7 @@ const DiceTable = (() => {
         handleForced,
         handleRollCommand,
         handleDiceTableCommand,
+        showExternalRoll,
         restorePending,
         rollRequest,
         rerollRequest,

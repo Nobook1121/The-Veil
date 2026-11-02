@@ -16,12 +16,11 @@
                             </div>
                             <div class="d-flex gap-2">
                                 <button class="btn btn-primary" id="createScenario" data-i18n="scenario.action.create">创建剧本</button>
-                                <button class="btn btn-outline-primary" id="importScenarioDocument" data-i18n="scenario.action.import_document">导入剧本文档</button>
-                                <button class="btn btn-secondary" id="importScenario" data-i18n="scenario.action.import">导入剧本</button>
+                                <button class="btn btn-outline-primary" id="importScenarioEntry" data-i18n="scenario.action.import_entry">导入剧本</button>
                                 <button class="btn btn-outline-secondary" id="scenarioBatchToggle" type="button" data-i18n="common.batch.manage">批量管理</button>
                             </div>
-                            <input type="file" id="importScenarioFile" accept=".json" style="display: none;" multiple>
-                            <input type="file" id="importScenarioDocumentFile" accept=".doc,.docx,.pdf,.txt,.md,.markdown,.text,.json,.veil-scenario.json" style="display: none;">
+                            <input type="file" id="importScenarioFile" accept=".json,.veil-scenario.json" style="display: none;">
+                            <input type="file" id="importScenarioDocumentFile" accept=".doc,.docx,.pdf,.txt,.md,.markdown,.text" style="display: none;">
                         </header>
                         <div class="guest-login-hint" role="status">
                             <i class="fa fa-lock" aria-hidden="true"></i>
@@ -36,6 +35,7 @@
                                 <button class="btn btn-sm btn-secondary" id="scenarioBatchExit" type="button" data-i18n="common.batch.exit">退出批量管理</button>
                             </div>
                         </div>
+                        <div class="scenario-import-jobs" id="scenarioImportJobs" hidden></div>
                         <div class="scenario-list" id="scenarioList">
                             <!-- 剧本卡片将在这里动态生成 -->
                         </div>
@@ -193,8 +193,8 @@
                         <section class="profile-quick-links">
                             <h4 data-i18n="profile.home.quick_links">快捷入口</h4>
                             <div class="profile-quick-link-grid">
-                                <button type="button" class="profile-quick-link" data-target-tab="scenario">
-                                    <i class="fa fa-book" aria-hidden="true"></i><span data-i18n="profile.home.quick.scenario">剧本管理</span>
+                                <button type="button" class="profile-quick-link" id="profileFavoritesLink">
+                                    <i class="fa fa-star" aria-hidden="true"></i><span data-i18n="profile.home.quick.favorites">我收藏的剧本</span>
                                 </button>
                                 <button type="button" class="profile-quick-link" data-target-tab="character">
                                     <i class="fa fa-id-badge" aria-hidden="true"></i><span data-i18n="profile.home.quick.character">我的角色卡</span>
@@ -206,6 +206,51 @@
                                     <i class="fa fa-server" aria-hidden="true"></i><span data-i18n="profile.home.quick.rooms">房间管理</span>
                                 </button>
                             </div>
+                        </section>
+                        <section class="profile-bgm-panel is-collapsed" id="personalBgmSection">
+                            <button type="button" class="profile-bgm-head" id="personalBgmToggle" aria-expanded="false" aria-controls="personalBgmBody">
+                                <span class="profile-bgm-heading">
+                                    <i class="fa fa-music" aria-hidden="true"></i>
+                                    <h4 data-i18n="profile.bgm.title">我的背景音乐</h4>
+                                    <span class="profile-bgm-badge" data-i18n="profile.bgm.local_badge">仅保存在当前浏览器</span>
+                                </span>
+                                <i class="fa fa-chevron-down profile-bgm-chevron" aria-hidden="true"></i>
+                            </button>
+                            <div class="profile-bgm-body" id="personalBgmBody">
+                                <p class="profile-section-hint" data-i18n="profile.bgm.hint">可添加多首音乐，播放器悬浮在页面右下角，可随时暂停。进入房间后按下面的播放优先级自动播放。</p>
+                                <div class="bgm-panel-add">
+                                    <select class="form-select" id="personalBgmLibrarySelect" aria-label="音乐库"></select>
+                                    <input type="url" class="form-control" id="personalBgmCustomUrl" placeholder="或粘贴 http(s) 外链" data-i18n-placeholder="profile.bgm.custom_placeholder" maxlength="2048" autocomplete="off">
+                                    <button type="button" class="btn btn-outline-primary" id="personalBgmAdd" data-i18n="profile.bgm.add">添加</button>
+                                </div>
+                                <div class="bgm-track-list" id="personalBgmList" aria-live="polite"></div>
+                                <div class="bgm-panel-controls">
+                                    <label class="profile-setting-row" for="personalBgmMode">
+                                        <span data-i18n="profile.bgm.mode_label">播放模式</span>
+                                        <select class="form-select" id="personalBgmMode">
+                                            <option value="list" data-i18n="profile.bgm.mode_list">列表循环</option>
+                                            <option value="single" data-i18n="profile.bgm.mode_single">单曲循环</option>
+                                            <option value="shuffle" data-i18n="profile.bgm.mode_shuffle">随机播放</option>
+                                        </select>
+                                    </label>
+                                    <label class="profile-setting-row" for="personalBgmPriority">
+                                        <span data-i18n="profile.bgm.priority_label">播放优先级</span>
+                                        <select class="form-select" id="personalBgmPriority">
+                                            <option value="room" data-i18n="profile.bgm.priority_room">优先播放房间 BGM（默认）</option>
+                                            <option value="personal" data-i18n="profile.bgm.priority_personal">优先播放个人 BGM</option>
+                                        </select>
+                                    </label>
+                                </div>
+                                <div class="bgm-panel-message" id="personalBgmMessage" aria-live="polite"></div>
+                            </div>
+                        </section>
+                        <section class="profile-favorites" id="profileFavoriteSection">
+                            <div class="profile-favorites-head">
+                                <h4 data-i18n="profile.favorites.title">我收藏的剧本</h4>
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="profileFavoritesBrowse" data-i18n="profile.favorites.browse">去剧本广场</button>
+                            </div>
+                            <div id="profileFavoriteList" class="profile-favorite-grid"></div>
+                            <p id="profileFavoriteEmpty" class="profile-favorite-empty" data-i18n="profile.favorites.empty">还没有收藏的剧本。去剧本广场点 ☆ 收藏喜欢的剧本。</p>
                         </section>
                     </div>
                 </div>
@@ -311,6 +356,31 @@
                                 <div class="card-body">
                                     <h5 class="card-title" data-i18n="room.detail.bindings">角色绑定</h5>
                                     <div id="roomCharacterBindings" class="room-character-bindings" aria-live="polite"></div>
+                                </div>
+                            </div>
+                            <!-- 房间背景音乐：仅房主/房间管理员可编辑，成员只读 -->
+                            <div class="card mb-4" id="roomBgmPanelCard" data-room-sensitive>
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h5 class="card-title mb-0" data-i18n="room.bgm.title">房间背景音乐</h5>
+                                        <span class="profile-bgm-badge" data-i18n="room.bgm.room_badge">进入房间后播放</span>
+                                    </div>
+                                    <p class="form-text" data-i18n="room.bgm.hint">可添加多首音乐（音乐库曲目或 http(s) 外链），并选择列表循环、单曲循环或随机播放。玩家进入房间后才会播放。</p>
+                                    <div class="bgm-panel-add">
+                                        <select class="form-select" id="roomBgmLibrarySelect" aria-label="音乐库"></select>
+                                        <input type="url" class="form-control" id="roomBgmCustomUrl" placeholder="或粘贴 http(s) 外链" data-i18n-placeholder="profile.bgm.custom_placeholder" maxlength="2048" autocomplete="off">
+                                        <button type="button" class="btn btn-outline-primary" id="roomBgmAdd" data-i18n="profile.bgm.add">添加</button>
+                                    </div>
+                                    <div class="bgm-track-list" id="roomBgmList" aria-live="polite"></div>
+                                    <label class="profile-setting-row mt-3" for="roomBgmMode">
+                                        <span data-i18n="profile.bgm.mode_label">播放模式</span>
+                                        <select class="form-select" id="roomBgmMode">
+                                            <option value="list" data-i18n="profile.bgm.mode_list">列表循环</option>
+                                            <option value="single" data-i18n="profile.bgm.mode_single">单曲循环</option>
+                                            <option value="shuffle" data-i18n="profile.bgm.mode_shuffle">随机播放</option>
+                                        </select>
+                                    </label>
+                                    <div class="bgm-panel-message" id="roomBgmMessage" aria-live="polite"></div>
                                 </div>
                             </div>
                             <!-- 回档节点列表 -->
