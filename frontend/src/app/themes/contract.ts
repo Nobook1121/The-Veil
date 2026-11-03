@@ -463,6 +463,7 @@ namespace ThemeRegistry {
                 sliderField("trailDensity", 0.55, 0.2, 1.5, 0.05),
                 toggleField("driftRunes", true),
                 sliderField("tentacleDensity", 1, 0.4, 1.4, 0.05),
+                sliderField("tentacleSize", 1, 0.7, 1.3, 0.05),
                 sliderField("tentacleHeight", 1, 0.6, 1.4, 0.05),
                 sliderField("tentacleHeightVariance", 0.2, 0, 0.5, 0.05),
                 sliderField("swaySpeed", 1, 0.4, 1.6, 0.05),

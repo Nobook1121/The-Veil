@@ -902,6 +902,7 @@
     "theme.field.trailDensity": "Trail density",
     "theme.field.driftRunes": "Drifting background runes",
     "theme.field.tentacleDensity": "Tentacle density",
+    "theme.field.tentacleSize": "Tentacle size",
     "theme.field.tentacleHeight": "Tentacle height",
     "theme.field.tentacleHeightVariance": "Height variance",
     "theme.field.swaySpeed": "Sway speed",

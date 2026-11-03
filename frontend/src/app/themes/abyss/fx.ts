@@ -30,6 +30,8 @@ namespace AbyssTheme {
         veilBlur: number;
         /** 触手密度（0.4 → 1.4），以底部主触手数量为基准缩放。 */
         tentacleDensity: number;
+        /** 触手大小（0.7 → 1.3），只缩放整根触手的粗细/体量，不影响高度。 */
+        tentacleSize: number;
         /** 触手高度（0.6 → 1.4），统一缩放触手长度。 */
         tentacleHeight: number;
         /** 触手高度随机性（0 → 0.5），越大相邻触手高差越明显。 */
@@ -86,6 +88,7 @@ namespace AbyssTheme {
         veilAlpha: 0.55,
         veilBlur: 10,
         tentacleDensity: 1,
+        tentacleSize: 1,
         tentacleHeight: 1,
         tentacleHeightVariance: 0.2,
         swaySpeed: 1,
@@ -161,6 +164,8 @@ namespace AbyssTheme {
             veilAlpha: clampSetting(parsed.veilAlpha, 0.25, 0.95, DEFAULT_SETTINGS.veilAlpha),
             veilBlur: clampSetting(parsed.veilBlur, 0, 24, DEFAULT_SETTINGS.veilBlur),
             tentacleDensity: clampSetting(parsed.tentacleDensity, 0.4, 1.4, DEFAULT_SETTINGS.tentacleDensity),
+            // 旧配置没有这个键时回落到 1，保证升级后观感不变。
+            tentacleSize: clampSetting(parsed.tentacleSize, 0.7, 1.3, DEFAULT_SETTINGS.tentacleSize),
             tentacleHeight: clampSetting(parsed.tentacleHeight, 0.6, 1.4, DEFAULT_SETTINGS.tentacleHeight),
             tentacleHeightVariance: clampSetting(
                 parsed.tentacleHeightVariance,

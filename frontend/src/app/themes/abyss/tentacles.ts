@@ -58,6 +58,37 @@ namespace AbyssTheme {
     const TAU = Math.PI * 2;
     const WIDE_BREAKPOINT = 900;
 
+    /**
+     * 触手大小的渲染保护区间。
+     *
+     * 「触手大小」只缩放根部半宽（widthRatio），不改长度、摆动与密度。
+     * 参数本身限制在 0.7 → 1.3，这里再对最终比例做一次钳制：
+     * - 下限 0.048 ≈ 短边 1080px 时根部直径约 52px，细但不会细到看不见；
+     * - 上限 0.175 ≈ 短边 1080px 时根部直径约 189px，配合最多 9 根底部触手
+     *   仍能把画面中央的法阵与聊天区留出来，不会糊成一团。
+     */
+    const MIN_WIDTH_RATIO = 0.048;
+    const MAX_WIDTH_RATIO = 0.175;
+
+    /**
+     * 高度基准（相对视口短边）。
+     *
+     * 方差为 0 时，同位置类型的触手严格取同一个基准高度，因此底部一排
+     * 会读作平齐；随机性只通过 tentacleHeightVariance 叠加在高度方向上，
+     * 不再由其他字段（宽度、摆动相位、seed 分支）间接扰动高度。
+     */
+    const BASE_HEIGHT = {
+        bottomInner: 0.57,
+        bottomOuter: 0.62,
+        sideTall: 0.76,
+        sideShort: 0.51,
+        sideMidShort: 0.49,
+        sideMidTall: 0.78,
+        topTall: 0.32,
+        topMid: 0.30,
+        topShort: 0.28,
+    };
+
     /** 面板改参数时通过事件刷新缓存，避免每根触手、每帧都重建设置对象。 */
     let cachedFx: AbyssTheme.FxSettings | null = null;
     function fxSettings(): AbyssTheme.FxSettings {
@@ -222,13 +253,17 @@ namespace AbyssTheme {
         ): Tentacle => {
             const t = makeTentacle(side, anchor, Math.floor(rand(0, 997)), rand);
             const fx = fxSettings();
-            t.widthRatio = width;
-            // 高度随机性：在统一高度上再叠一层随机差，值越大相邻触手高差越明显。
-            t.lengthRatio = clamp(
-                length * fx.tentacleHeight * (1 + rand(-1, 1) * fx.tentacleHeightVariance),
-                0.14,
-                0.98,
+            // 「触手大小」只作用于粗细/体量；widthRatio 是根部半宽比例，长度不受影响。
+            t.widthRatio = clamp(
+                width * clamp(fx.tentacleSize, 0.7, 1.3),
+                MIN_WIDTH_RATIO,
+                MAX_WIDTH_RATIO,
             );
+            // 高度随机性：基准高度 + 固定种子驱动的高度扰动。
+            // 每次都消耗一次随机数，保证切换方差时其他维度的随机序列不被打乱；
+            // 方差为 0 时扰动严格为 0，同类触手完全平齐。
+            const heightNoise = rand(-1, 1) * clamp(fx.tentacleHeightVariance, 0, 0.5);
+            t.lengthRatio = clamp(length * fx.tentacleHeight * (1 + heightNoise), 0.14, 0.98);
             t.depth = depth;
             t.lean = lean + rand(-0.07, 0.07);
             t.curl = curl + rand(-0.09, 0.09);
@@ -256,7 +291,7 @@ namespace AbyssTheme {
                 "bottom",
                 anchor,
                 inner ? rand(0.068, 0.096) : rand(0.076, 0.132),
-                inner ? rand(0.5, 0.64) : rand(0.44, 0.8),
+                inner ? BASE_HEIGHT.bottomInner : BASE_HEIGHT.bottomOuter,
                 inner ? rand(0.32, 0.5) : rand(0.4, 1),
                 inner ? outward * rand(0.12, 0.2) : outward * rand(0.04, 0.14),
                 curl,
@@ -267,15 +302,15 @@ namespace AbyssTheme {
         if (wide && density >= 0.6) {
             // 侧肢左右各两根：像从画面外侧「探」进来，方向带一点朝上的坡，
             // 让它们在法阵外围浅浅交叉，而不是从圆心上方横切过去。
-            list.push(arm("left", 0.44, 0.088, rand(0.7, 0.82), rand(0.78, 1), -0.1, 0.2));
-            list.push(arm("left", 0.68, 0.06, rand(0.46, 0.56), rand(0.45, 0.7), 0.12, -0.16));
-            list.push(arm("right", 0.34, 0.058, rand(0.44, 0.54), rand(0.4, 0.62), -0.14, 0.18));
-            list.push(arm("right", 0.58, 0.084, rand(0.72, 0.84), rand(0.82, 1), 0.1, -0.2));
+            list.push(arm("left", 0.44, 0.088, BASE_HEIGHT.sideTall, rand(0.78, 1), -0.1, 0.2));
+            list.push(arm("left", 0.68, 0.06, BASE_HEIGHT.sideShort, rand(0.45, 0.7), 0.12, -0.16));
+            list.push(arm("right", 0.34, 0.058, BASE_HEIGHT.sideMidShort, rand(0.4, 0.62), -0.14, 0.18));
+            list.push(arm("right", 0.58, 0.084, BASE_HEIGHT.sideMidTall, rand(0.82, 1), 0.1, -0.2));
             // 顶部三根：垂下的长短不一、位置不对齐。它们必须有足够的宽度与钩曲，
             // 否则从暗处垂下来只会是一根尖刺——现在根部会先露出一段厚实的腕体。
-            list.push(arm("top", 0.16, 0.072, rand(0.28, 0.36), 0.72, -0.08, 0.3));
-            list.push(arm("top", 0.5, rand(0.058, 0.07), rand(0.26, 0.34), 0.8, 0.12, -0.34));
-            list.push(arm("top", 0.82, 0.062, rand(0.24, 0.32), 0.66, -0.07, 0.26));
+            list.push(arm("top", 0.16, 0.072, BASE_HEIGHT.topTall, 0.72, -0.08, 0.3));
+            list.push(arm("top", 0.5, rand(0.058, 0.07), BASE_HEIGHT.topMid, 0.8, 0.12, -0.34));
+            list.push(arm("top", 0.82, 0.062, BASE_HEIGHT.topShort, 0.66, -0.07, 0.26));
         }
         // 视差小的先画：远的更暗、近的更亮，纵深由绘制顺序自然形成。
         list.sort((a, b) => a.depth - b.depth);

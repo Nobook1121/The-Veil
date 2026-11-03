@@ -902,6 +902,7 @@
     "theme.field.trailDensity": "拖尾密度",
     "theme.field.driftRunes": "背景符文飘动",
     "theme.field.tentacleDensity": "触手密度",
+    "theme.field.tentacleSize": "触手大小",
     "theme.field.tentacleHeight": "触手高度",
     "theme.field.tentacleHeightVariance": "高度随机性",
     "theme.field.swaySpeed": "摆动速度",

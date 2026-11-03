@@ -185,6 +185,7 @@ def test_abyss_theme_exposes_tentacle_trail_and_veil_controls():
     block = _definition_blocks()["pattern_coc"]
     for key in (
         "tentacleDensity",
+        "tentacleSize",
         "tentacleHeight",
         "tentacleHeightVariance",
         "swaySpeed",
@@ -197,6 +198,63 @@ def test_abyss_theme_exposes_tentacle_trail_and_veil_controls():
         "chatAlpha",
     ):
         assert re.search(rf'"{key}"', block), f"深渊主题缺少可调项 {key}"
+
+
+def _abyss_fields() -> list[str]:
+    block = _definition_blocks()["pattern_coc"]
+    return re.findall(r'(?:sliderField|colorField|selectField|toggleField)\(\s*"(\w+)"', block)
+
+
+def test_abyss_setting_count_matches_schema():
+    """深渊可调项数量变化时同步这里的断言。
+
+    全量 15 项 = 3 个面板不透明度（chat/sidebar/rail）+ 12 个画面参数；
+    用户口径的「深渊可调项 12 项」指后者，两者都锁定，避免后续增删静默漂移。
+    """
+    fields = _abyss_fields()
+    assert len(fields) == 15, f"深渊全量可调项应为 15，实际 {fields}"
+    canvas_fields = [
+        key for key in fields if key not in {"chatAlpha", "sidebarAlpha", "railAlpha"}
+    ]
+    assert len(canvas_fields) == 12, f"深渊画面参数应为 12，实际 {canvas_fields}"
+    assert "tentacleSize" in canvas_fields
+
+
+def test_abyss_tentacle_size_is_independent_from_height_and_clamped():
+    source = (
+        ROOT / "frontend" / "src" / "app" / "themes" / "abyss" / "tentacles.ts"
+    ).read_text(encoding="utf-8")
+    # 大小只乘 widthRatio，不参与 lengthRatio 计算。
+    assert re.search(
+        r"width\s*\*\s*clamp\(fx\.tentacleSize", source,
+    ), "触手大小应只缩放根部宽度"
+    assert re.search(
+        r"t\.lengthRatio\s*=\s*clamp\(length\s*\*\s*fx\.tentacleHeight", source,
+    ), "触手长度不应受 tentacleSize 影响"
+    assert "MIN_WIDTH_RATIO" in source and "MAX_WIDTH_RATIO" in source, "缺少渲染端宽度的上下限钳制"
+
+
+def test_abyss_height_variance_only_affects_height():
+    source = (
+        ROOT / "frontend" / "src" / "app" / "themes" / "abyss" / "tentacles.ts"
+    ).read_text(encoding="utf-8")
+    # 固定基准高度：方差为 0 时不再有第二处随机高度来源。
+    for base in (
+        "BASE_HEIGHT.bottomInner",
+        "BASE_HEIGHT.bottomOuter",
+        "BASE_HEIGHT.sideTall",
+        "BASE_HEIGHT.sideShort",
+        "BASE_HEIGHT.topTall",
+    ):
+        assert base in source, f"缺少固定高度基准 {base}"
+    # 高度扰动只叠加在 lengthRatio，并且随机数无条件消耗，切换方差不会打乱其他维度。
+    assert re.search(
+        r"const heightNoise\s*=\s*rand\(-1,\s*1\)\s*\*\s*clamp\(fx\.tentacleHeightVariance", source,
+    ), "高度随机性必须只读 tentacleHeightVariance"
+    assert re.search(
+        r"t\.lengthRatio\s*=\s*clamp\(length\s*\*\s*fx\.tentacleHeight\s*\*\s*\(1\s*\+\s*heightNoise\)",
+        source,
+    ), "高度扰动应只作用在 lengthRatio"
 
 
 def test_palette_themes_offer_token_level_colors():
