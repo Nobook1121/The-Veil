@@ -55,7 +55,16 @@ class ConfigManager {
         }
 
         configSetSelectValue("themeSelect", this.get("general", "appearance", "theme", "light"));
+        const enabledThemes = this.get<string | string[]>("general", "appearance", "enabled_themes", "");
+        const themeOverrides = this.get<string>("general", "appearance", "theme_overrides", "{}");
+        configSetInputValue(
+            "enabledThemesInput",
+            Array.isArray(enabledThemes) ? enabledThemes.join(",") : enabledThemes,
+        );
+        configSetInputValue("themeOverridesInput", themeOverrides);
+        ThemeRegistry.setSiteConfig(enabledThemes, themeOverrides);
         this.applyTheme();
+        (window as any).TrpgThemeSettings?.syncAdminFromInputs?.();
         const language = this.get("general", "language", "language", "zh-CN");
         configSetSelectValue("languageSelect", language);
         void window.TrpgI18n?.setLocale(language);
@@ -129,19 +138,86 @@ class ConfigManager {
         configSetInputValue("siteAgentMaxHistoryMessages", this.get("general", "site_agent", "max_history_messages", 40));
         configSetInputValue("siteAgentMaxToolResultChars", this.get("general", "site_agent", "max_tool_result_chars", 4000));
         configSetInputValue("siteAgentActionTtlSeconds", this.get("general", "site_agent", "action_ttl_seconds", 300));
+        // 实时沉浸：站点级开关、配乐默认档位与配图预算。API Key 不走这里回填（独立密文接口只回掩码）。
+        configSetCheckboxValue("immersiveEnabled", this.get("general", "immersive", "enabled", true));
+        configSetCheckboxValue("immersiveMusicEnabled", this.get("general", "immersive", "music_enabled", true));
+        configSetCheckboxValue("immersiveMusicAutoSwitch", this.get("general", "immersive", "music_auto_switch", true));
+        configSetCheckboxValue("immersiveMusicDuckBgm", this.get("general", "immersive", "music_duck_bgm", true));
+        configSetSelectValue("immersiveMusicDefaultProfile", this.get("general", "immersive", "music_default_profile", "daily"));
+        configSetSelectValue("immersiveMusicDefaultIntensity", this.get("general", "immersive", "music_default_intensity", "medium"));
+        configSetInputValue("immersiveMusicVolume", this.get("general", "immersive", "music_volume", 35));
+        configSetInputValue("immersiveMusicCrossfade", this.get("general", "immersive", "music_crossfade_ms", 3000));
+        configSetInputValue("immersiveMusicHysteresis", this.get("general", "immersive", "music_hysteresis_turns", 2));
+        configSetInputValue("immersiveMusicSeed", this.get("general", "immersive", "music_seed", ""));
+        // AI 音乐导演（LLM 只做后台精修；平台/模型留空即用默认）
+        configSetCheckboxValue("immersiveDirectorEnabled", this.get("general", "immersive", "music_director_enabled", false));
+        configSetInputValue("immersiveDirectorPlatform", this.get("general", "immersive", "music_director_platform", ""));
+        configSetInputValue("immersiveDirectorModel", this.get("general", "immersive", "music_director_model", ""));
+        configSetInputValue("immersiveDirectorInterval", this.get("general", "immersive", "music_director_interval_turns", 2));
+        configSetInputValue("immersiveDirectorBudget", this.get("general", "immersive", "music_director_daily_budget", 0));
+        configSetInputValue("immersiveDirectorTimeout", this.get("general", "immersive", "music_director_timeout", 45));
+        configSetInputValue("immersiveDirectorCacheTtl", this.get("general", "immersive", "music_director_cache_ttl", 3600));
+        configSetInputValue("immersiveDirectorMinConfidence", this.get("general", "immersive", "music_director_min_confidence", 55));
+        configSetSelectValue("immersiveDirectorFallback", this.get("general", "immersive", "music_director_fallback", "rule"));
+        configSetInputValue("immersiveDirectorMaxContext", this.get("general", "immersive", "music_director_max_context_chars", 1200));
+        configSetCheckboxValue("immersiveIllustrationEnabled", this.get("general", "immersive", "illustration_enabled", false));
+        configSetCheckboxValue("immersiveIllustrationAuto", this.get("general", "immersive", "illustration_auto", true));
+        configSetSelectValue("immersiveIllustrationProvider", this.get("general", "immersive", "illustration_provider", "procedural"));
+        configSetInputValue("immersiveIllustrationTimeout", this.get("general", "immersive", "illustration_timeout", 120));
+        configSetInputValue("immersiveIllustrationConcurrency", this.get("general", "immersive", "illustration_concurrency", 2));
+        configSetInputValue("immersiveIllustrationDailyBudget", this.get("general", "immersive", "illustration_daily_budget", 0));
+        configSetInputValue("immersiveIllustrationRoomHourlyCap", this.get("general", "immersive", "illustration_room_hourly_cap", 12));
+        configSetInputValue("immersiveIllustrationMinTurns", this.get("general", "immersive", "illustration_min_turns", 4));
+        configSetCheckboxValue("immersiveScenarioRecord", this.get("general", "immersive", "illustration_scenario_record", false));
+        configSetCheckboxValue("immersiveScenarioPrefer", this.get("general", "immersive", "illustration_scenario_prefer", true));
+        configSetInputValue("immersiveScenarioQuotaMb", this.get("general", "immersive", "illustration_scenario_quota_mb", 256));
+        configSetInputValue("immersiveScenarioMaxImageMb", this.get("general", "immersive", "illustration_scenario_max_image_mb", 8));
+        configSetSelectValue("immersiveScenarioOverflow", this.get("general", "immersive", "illustration_scenario_overflow", "lru"));
 
         // UI 回填完成后记录「已保存基线」，让设置页的保存条据此判断未保存改动。
         window.refreshGeneralSettingsBaseline?.();
         console.log("常规设置已应用到 UI");
     }
 
+    /** 管理员配置的全局可用主题；配置缺失或为空时返回全部主题。 */
+    getEnabledThemes(): string[] {
+        const raw = this.get<string | string[]>("general", "appearance", "enabled_themes", "");
+        const parsed = (Array.isArray(raw) ? raw.join(",") : raw)
+            .split(",")
+            .map((item) => item.trim())
+            .filter((item) => item !== "" && ThemeRegistry.getDefinition(item) !== null);
+        return parsed.length > 0
+            ? parsed
+            : ThemeRegistry.definitions().map((definition) => definition.id);
+    }
+
+    getSiteTheme(): string {
+        return this.get<string>("general", "appearance", "theme", "light");
+    }
+
     getEffectiveTheme(): string {
-        const personalTheme = getPersonalThemeCookie();
-        return personalTheme || this.get<string>("general", "appearance", "theme", "light");
+        const enabled = this.getEnabledThemes();
+        const resolve = (theme: string): string => (enabled.includes(theme) ? theme : "");
+        return resolve(getPersonalThemeCookie()) || resolve(this.getSiteTheme()) || enabled[0] || "light";
+    }
+
+    /** 纯预览：只改 body class，不写入任何配置。 */
+    previewTheme(theme: string): void {
+        this.applyThemeClasses(theme);
     }
 
     applyTheme(): void {
         const theme = this.getEffectiveTheme();
+        const enabledThemes = this.getEnabledThemes();
+        const themeOverrides = this.get<string>("general", "appearance", "theme_overrides", "{}");
+        ThemeRegistry.setSiteConfig(enabledThemes, themeOverrides);
+        this.applyThemeClasses(theme);
+        ThemeRegistry.activate(theme);
+        this.themeInitialized = true;
+        console.log(`主题已应用: ${theme}`);
+    }
+
+    private applyThemeClasses(theme: string): void {
         const themeClassNames = ["theme-light", "theme-dark", "theme-cyber-2", "theme-tome", "theme-coc", "light-theme", "dark-theme"];
         const body = document.body;
         body.classList.remove(...themeClassNames);
@@ -162,9 +238,6 @@ class ConfigManager {
         } else {
             body.classList.add("theme-light", "light-theme");
         }
-
-        this.themeInitialized = true;
-        console.log(`主题已应用: ${theme}`);
     }
 
     private startThemeTransition(): void {
@@ -183,8 +256,7 @@ class ConfigManager {
         this.applyAdminNameGradient();
         const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
         mediaQuery.addEventListener("change", () => {
-            const theme = this.get<string>("general", "appearance", "theme", "light");
-            if (theme === "system") {
+            if (this.getEffectiveTheme() === "system") {
                 this.applyTheme();
             }
         });

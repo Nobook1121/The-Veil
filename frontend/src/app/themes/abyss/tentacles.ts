@@ -58,6 +58,20 @@ namespace AbyssTheme {
     const TAU = Math.PI * 2;
     const WIDE_BREAKPOINT = 900;
 
+    /** 面板改参数时通过事件刷新缓存，避免每根触手、每帧都重建设置对象。 */
+    let cachedFx: AbyssTheme.FxSettings | null = null;
+    function fxSettings(): AbyssTheme.FxSettings {
+        if (cachedFx === null) {
+            cachedFx = AbyssFx.settings();
+        }
+        return cachedFx;
+    }
+    function syncFxSettings(): void {
+        cachedFx = AbyssFx.settings();
+    }
+    window.addEventListener("theme-settings-change", syncFxSettings);
+    window.addEventListener("abyss-fx-settings", syncFxSettings);
+
     /** 统一光照方向（左上方），与法阵、光柱、眼睛同源。 */
     const LIGHT_X = -0.55;
     const LIGHT_Y = -0.84;
@@ -207,8 +221,14 @@ namespace AbyssTheme {
             curl: number,
         ): Tentacle => {
             const t = makeTentacle(side, anchor, Math.floor(rand(0, 997)), rand);
+            const fx = fxSettings();
             t.widthRatio = width;
-            t.lengthRatio = length;
+            // 高度随机性：在统一高度上再叠一层随机差，值越大相邻触手高差越明显。
+            t.lengthRatio = clamp(
+                length * fx.tentacleHeight * (1 + rand(-1, 1) * fx.tentacleHeightVariance),
+                0.14,
+                0.98,
+            );
             t.depth = depth;
             t.lean = lean + rand(-0.07, 0.07);
             t.curl = curl + rand(-0.09, 0.09);
@@ -217,9 +237,15 @@ namespace AbyssTheme {
             return t;
         };
 
-        // 底部六根（窄屏三根）：锚点带抖动，粗细与朝向各不相同。
-        // 不再做左右镜像——真实的巢穴里没有两腕是同宽的。
-        const bottomAnchors = wide ? [0.09, 0.24, 0.38, 0.62, 0.76, 0.9] : [0.2, 0.5, 0.8];
+        // 底部触手数量由密度决定：默认 6 根（窄屏 3 根），密度越高越密。
+        // 不再是固定数组——真实巢穴里也不会每次都伸出同样数量的腕足。
+        const density = fxSettings().tentacleDensity;
+        const baseCount = wide ? 6 : 3;
+        const bottomCount = clamp(Math.round(baseCount * density), wide ? 3 : 2, wide ? 9 : 5);
+        const bottomAnchors = Array.from(
+            { length: bottomCount },
+            (_value, index) => 0.08 + (0.84 * index) / Math.max(1, bottomCount - 1),
+        );
         for (const base of bottomAnchors) {
             const anchor = clamp(base + rand(-0.025, 0.025), 0.04, 0.96);
             const inner = Math.abs(anchor - 0.5) < 0.16;
@@ -238,7 +264,7 @@ namespace AbyssTheme {
             list.push(t);
         }
 
-        if (wide) {
+        if (wide && density >= 0.6) {
             // 侧肢左右各两根：像从画面外侧「探」进来，方向带一点朝上的坡，
             // 让它们在法阵外围浅浅交叉，而不是从圆心上方横切过去。
             list.push(arm("left", 0.44, 0.088, rand(0.7, 0.82), rand(0.78, 1), -0.1, 0.2));
@@ -261,7 +287,7 @@ namespace AbyssTheme {
         const min = Math.min(viewWidth, viewHeight);
         const length = t.lengthRatio * min * tide(scene.time);
         const amp = t.amplitude * length;
-        const clock = scene.time * t.speed + t.phase;
+        const clock = scene.time * t.speed * fxSettings().swaySpeed + t.phase;
         const parX = scene.pointer.x * 13 * t.depth;
         const parY = scene.pointer.y * 8 * t.depth;
 

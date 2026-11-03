@@ -11,7 +11,7 @@
  * 但不建议把拖尾强度调到最高——那会让长文阅读变得很吵。
  */
 namespace AbyssTheme {
-    interface FxSettings {
+    export interface FxSettings {
         /** 聊天面板基础不透明度（0.3 → 1）。 */
         chatAlpha: number;
         /** 左侧栏不透明度（0.3 → 1），默认偏低，让左侧的触手能透出来。 */
@@ -24,6 +24,22 @@ namespace AbyssTheme {
         trailStrength: number;
         /** 是否启用背景符文飘动。 */
         driftRunes: boolean;
+        /** 世界意志遮罩不透明度（0.25 → 0.95），越大背景越暗。 */
+        veilAlpha: number;
+        /** 世界意志遮罩的背景模糊半径（0 → 24px），0 表示不模糊。 */
+        veilBlur: number;
+        /** 触手密度（0.4 → 1.4），以底部主触手数量为基准缩放。 */
+        tentacleDensity: number;
+        /** 触手高度（0.6 → 1.4），统一缩放触手长度。 */
+        tentacleHeight: number;
+        /** 触手高度随机性（0 → 0.5），越大相邻触手高差越明显。 */
+        tentacleHeightVariance: number;
+        /** 触手摆动速度（0.4 → 1.6）。 */
+        swaySpeed: number;
+        /** 法阵大小（0.7 → 1.3）。 */
+        sigilScale: number;
+        /** 鼠标拖尾密度（0.2 → 1.5），控制拖尾粒子生成频率。 */
+        trailDensity: number;
     }
 
     interface DriftRune {
@@ -65,6 +81,16 @@ namespace AbyssTheme {
         trail: true,
         trailStrength: 0.55,
         driftRunes: true,
+        // 世界意志遮罩：半透明 + 模糊，让背后的深渊场景隐约可见，
+        // 同时 alpha 0.55 足够压住背景、保证弹窗文字对比度。
+        veilAlpha: 0.55,
+        veilBlur: 10,
+        tentacleDensity: 1,
+        tentacleHeight: 1,
+        tentacleHeightVariance: 0.2,
+        swaySpeed: 1,
+        sigilScale: 1,
+        trailDensity: 0.55,
     };
     const MAX_PARTICLES = 90;
 
@@ -122,30 +148,30 @@ namespace AbyssTheme {
     }
 
     function loadSettings(): void {
-        let raw: string | null = null;
-        try {
-            raw = window.localStorage.getItem(SETTINGS_KEY);
-        } catch {
-            raw = null;
-        }
-        if (raw === null) {
-            settings = { ...DEFAULT_SETTINGS };
-            return;
-        }
-        try {
-            const parsed = JSON.parse(raw) as Partial<Record<keyof FxSettings, unknown>>;
-            settings = {
-                chatAlpha: clampSetting(parsed.chatAlpha, 0.3, 1, DEFAULT_SETTINGS.chatAlpha),
-                sidebarAlpha: clampSetting(parsed.sidebarAlpha, 0.3, 1, DEFAULT_SETTINGS.sidebarAlpha),
-                railAlpha: clampSetting(parsed.railAlpha, 0.3, 1, DEFAULT_SETTINGS.railAlpha),
-                trail: typeof parsed.trail === "boolean" ? parsed.trail : DEFAULT_SETTINGS.trail,
-                trailStrength: clampSetting(parsed.trailStrength, 0.15, 1, DEFAULT_SETTINGS.trailStrength),
-                driftRunes:
-                    typeof parsed.driftRunes === "boolean" ? parsed.driftRunes : DEFAULT_SETTINGS.driftRunes,
-            };
-        } catch {
-            settings = { ...DEFAULT_SETTINGS };
-        }
+        // 统一从主题契约读取：站点默认 < 个人覆盖已在 ThemeRegistry.getValues 中合并。
+        const parsed = ThemeRegistry.getValues("pattern_coc") as Partial<Record<keyof FxSettings, unknown>>;
+        settings = {
+            chatAlpha: clampSetting(parsed.chatAlpha, 0.3, 1, DEFAULT_SETTINGS.chatAlpha),
+            sidebarAlpha: clampSetting(parsed.sidebarAlpha, 0.3, 1, DEFAULT_SETTINGS.sidebarAlpha),
+            railAlpha: clampSetting(parsed.railAlpha, 0.3, 1, DEFAULT_SETTINGS.railAlpha),
+            trail: typeof parsed.trail === "boolean" ? parsed.trail : DEFAULT_SETTINGS.trail,
+            trailStrength: clampSetting(parsed.trailStrength, 0.15, 1, DEFAULT_SETTINGS.trailStrength),
+            driftRunes:
+                typeof parsed.driftRunes === "boolean" ? parsed.driftRunes : DEFAULT_SETTINGS.driftRunes,
+            veilAlpha: clampSetting(parsed.veilAlpha, 0.25, 0.95, DEFAULT_SETTINGS.veilAlpha),
+            veilBlur: clampSetting(parsed.veilBlur, 0, 24, DEFAULT_SETTINGS.veilBlur),
+            tentacleDensity: clampSetting(parsed.tentacleDensity, 0.4, 1.4, DEFAULT_SETTINGS.tentacleDensity),
+            tentacleHeight: clampSetting(parsed.tentacleHeight, 0.6, 1.4, DEFAULT_SETTINGS.tentacleHeight),
+            tentacleHeightVariance: clampSetting(
+                parsed.tentacleHeightVariance,
+                0,
+                0.5,
+                DEFAULT_SETTINGS.tentacleHeightVariance,
+            ),
+            swaySpeed: clampSetting(parsed.swaySpeed, 0.4, 1.6, DEFAULT_SETTINGS.swaySpeed),
+            sigilScale: clampSetting(parsed.sigilScale, 0.7, 1.3, DEFAULT_SETTINGS.sigilScale),
+            trailDensity: clampSetting(parsed.trailDensity, 0.2, 1.5, DEFAULT_SETTINGS.trailDensity),
+        };
     }
 
     function saveSettings(): void {
@@ -171,6 +197,9 @@ namespace AbyssTheme {
         // 左右侧栏各自独立：左侧默认更透，触手可以从中透出；右侧以可读性优先。
         root.style.setProperty("--theme-sidebar-alpha", settings.sidebarAlpha.toFixed(3));
         root.style.setProperty("--theme-rail-alpha", settings.railAlpha.toFixed(3));
+        // 世界意志遮罩（见 08-theme-abyss-components.css）：不透明度与模糊半径。
+        root.style.setProperty("--theme-veil-alpha", settings.veilAlpha.toFixed(3));
+        root.style.setProperty("--theme-veil-blur", `${Math.round(settings.veilBlur)}px`);
     }
 
     function randomRune(): string {
@@ -189,6 +218,10 @@ namespace AbyssTheme {
         const sidebarValue = document.getElementById("abyssSidebarTransparencyValue");
         const rail = document.getElementById("abyssRailTransparency") as HTMLInputElement | null;
         const railValue = document.getElementById("abyssRailTransparencyValue");
+        const veilOpacity = document.getElementById("abyssVeilOpacity") as HTMLInputElement | null;
+        const veilOpacityValue = document.getElementById("abyssVeilOpacityValue");
+        const veilBlur = document.getElementById("abyssVeilBlur") as HTMLInputElement | null;
+        const veilBlurValue = document.getElementById("abyssVeilBlurValue");
         const trail = document.getElementById("abyssTrailEnabled") as HTMLInputElement | null;
         const strength = document.getElementById("abyssTrailStrength") as HTMLInputElement | null;
         const strengthValue = document.getElementById("abyssTrailStrengthValue");
@@ -220,6 +253,26 @@ namespace AbyssTheme {
             rail.addEventListener("input", () => {
                 settings.railAlpha = clampSetting(Number(rail.value) / 100, 0.3, 1, DEFAULT_SETTINGS.railAlpha);
                 if (railValue) railValue.textContent = `${Math.round(settings.railAlpha * 100)}%`;
+                applySettings();
+                saveSettings();
+            });
+        }
+        if (veilOpacity) {
+            veilOpacity.value = String(Math.round(settings.veilAlpha * 100));
+            if (veilOpacityValue) veilOpacityValue.textContent = `${Math.round(settings.veilAlpha * 100)}%`;
+            veilOpacity.addEventListener("input", () => {
+                settings.veilAlpha = clampSetting(Number(veilOpacity.value) / 100, 0.25, 0.95, DEFAULT_SETTINGS.veilAlpha);
+                if (veilOpacityValue) veilOpacityValue.textContent = `${Math.round(settings.veilAlpha * 100)}%`;
+                applySettings();
+                saveSettings();
+            });
+        }
+        if (veilBlur) {
+            veilBlur.value = String(Math.round(settings.veilBlur));
+            if (veilBlurValue) veilBlurValue.textContent = `${Math.round(settings.veilBlur)}px`;
+            veilBlur.addEventListener("input", () => {
+                settings.veilBlur = clampSetting(Number(veilBlur.value), 0, 24, DEFAULT_SETTINGS.veilBlur);
+                if (veilBlurValue) veilBlurValue.textContent = `${Math.round(settings.veilBlur)}px`;
                 applySettings();
                 saveSettings();
             });
@@ -356,14 +409,17 @@ namespace AbyssTheme {
         const dx = x - lastTrailX;
         const dy = y - lastTrailY;
         const distance = Math.hypot(dx, dy);
-        if (distance < (pressed ? 10 : 16)) {
+        // 密度越高，触发阈值越小、生成概率越高；上限仍受 MAX_PARTICLES 约束。
+        const density = settings.trailDensity;
+        if (distance < (pressed ? 10 : 16) / Math.max(0.4, density)) {
             return;
         }
         lastTrailX = x;
         lastTrailY = y;
         const count = pressed ? 2 : 1;
+        const probability = clamp(0.35 + settings.trailStrength * 0.4 + (density - 0.55) * 0.35, 0, 1);
         for (let i = 0; i < count; i += 1) {
-            if (Math.random() < 0.35 + settings.trailStrength * 0.4) {
+            if (Math.random() < probability) {
                 spawnParticle(x, y, false);
             }
         }
@@ -374,7 +430,7 @@ namespace AbyssTheme {
         if (!settings.trail) {
             return;
         }
-        const count = 6 + Math.round(settings.trailStrength * 10);
+        const count = Math.round((6 + settings.trailStrength * 10) * Math.min(1.5, settings.trailDensity + 0.45));
         for (let i = 0; i < count; i += 1) {
             spawnParticle(x, y, true);
         }
@@ -422,10 +478,21 @@ namespace AbyssTheme {
         ctx.restore();
     }
 
+    function refreshFromRegistry(): void {
+        loadSettings();
+        applySettings();
+        window.dispatchEvent(new CustomEvent("abyss-fx-settings", { detail: { ...settings } }));
+    }
+
     function init(): void {
         loadSettings();
         applySettings();
-        bindSettingsControls();
+        window.addEventListener("theme-settings-change", refreshFromRegistry);
+        window.addEventListener("storage", (event: StorageEvent) => {
+            if (event.key === "trpg_theme_settings_v1") {
+                refreshFromRegistry();
+            }
+        });
     }
 
     // 设置界面由 React 之外的静态页面提供，脚本加载完成时节点已经存在；
@@ -442,5 +509,7 @@ namespace AbyssTheme {
         drawPointer,
         onTrailMove,
         onPointerDown,
+        settings: (): FxSettings => ({ ...settings }),
+        refresh: refreshFromRegistry,
     };
 }

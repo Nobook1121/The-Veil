@@ -298,6 +298,8 @@ namespace AbyssTheme {
         }
 
         window.addEventListener("resize", handleResize);
+        // 主题设置面板改密度 / 高度 / 法阵大小后，重建烘焙图层。
+        window.addEventListener("theme-settings-change", handleResize);
         window.addEventListener("pointermove", handlePointer, { passive: true });
         window.addEventListener("pointerdown", handlePointerDown, { passive: true });
         window.addEventListener("pointerleave", resetPointer, { passive: true });

@@ -173,6 +173,10 @@ SMALL_MODEL_TASK_KEYS = tuple(AIRuntimeConfig().small_model_tasks.keys())
 GENERAL_SPECS: tuple[FieldSpec, ...] = (
     # [appearance]
     FieldSpec("theme", "appearance", ("theme",), as_text, "light"),
+    # 管理员可用的主题白名单（空 = 全部可用）
+    FieldSpec("enabled_themes", "appearance", ("enabled_themes",), as_str_list, []),
+    # 站点默认的主题参数与锁定项（JSON 字符串，见 frontend/src/app/themes/contract.ts）
+    FieldSpec("theme_overrides", "appearance", ("theme_overrides",), as_text, "{}"),
     # [language]
     FieldSpec("language", "language", ("language",), as_text, "zh-CN"),
     # [notification]
@@ -261,6 +265,87 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec("action_ttl_seconds", "site_agent", ("action_ttl_seconds",), clamped_int(minimum=30, maximum=3600), 300),
     FieldSpec("max_conversations_per_user", "site_agent", ("max_conversations_per_user",), clamped_int(minimum=1, maximum=200), 30),
     FieldSpec("max_messages_per_conversation", "site_agent", ("max_messages_per_conversation",), clamped_int(minimum=10, maximum=2000), 200),
+    # [immersive]（实时配乐与实时配图；房间可覆盖开关，站点级预算仅管理员可改）
+    FieldSpec("enabled", "immersive", ("enabled",), as_bool, True),
+    FieldSpec("music_enabled", "immersive", ("music_enabled",), as_bool, True),
+    FieldSpec("music_auto_switch", "immersive", ("music_auto_switch",), as_bool, True),
+    FieldSpec(
+        "music_default_profile",
+        "immersive",
+        ("music_default_profile",),
+        as_enum(
+            "music_default_profile",
+            frozenset({"daily", "suspense", "unease", "horror", "urgency", "sorrow", "awe", "aftermath"}),
+        ),
+        "daily",
+    ),
+    FieldSpec(
+        "music_default_intensity",
+        "immersive",
+        ("music_default_intensity",),
+        as_enum("music_default_intensity", frozenset({"low", "medium", "high"})),
+        "medium",
+    ),
+    FieldSpec("music_volume", "immersive", ("music_volume",), clamped_int(minimum=0, maximum=100), 35),
+    FieldSpec("music_crossfade_ms", "immersive", ("music_crossfade_ms",), clamped_int(minimum=500, maximum=10000), 3000),
+    FieldSpec("music_hysteresis_turns", "immersive", ("music_hysteresis_turns",), clamped_int(minimum=0, maximum=10), 2),
+    FieldSpec("music_seed", "immersive", ("music_seed",), as_text, ""),
+    FieldSpec("music_duck_bgm", "immersive", ("music_duck_bgm",), as_bool, True),
+    FieldSpec("illustration_enabled", "immersive", ("illustration_enabled",), as_bool, False),
+    FieldSpec(
+        "illustration_provider",
+        "immersive",
+        ("illustration_provider",),
+        as_enum("illustration_provider", frozenset({"procedural", "platform", "openai_compatible"})),
+        "procedural",
+    ),
+    # 默认生图平台 ID（见 immersive.image_platforms）；provider=platform 时唯一真相。
+    FieldSpec("illustration_platform_id", "immersive", ("illustration_platform_id",), as_text, ""),
+    FieldSpec("illustration_auto", "immersive", ("illustration_auto",), as_bool, True),
+    # 旧单条配置：仅用于一次性迁移到生图平台表，运行期不再读取。
+    FieldSpec("illustration_base_url", "immersive", ("illustration_base_url",), as_text, ""),
+    FieldSpec("illustration_model", "immersive", ("illustration_model",), as_text, "dall-e-3"),
+    FieldSpec("illustration_size", "immersive", ("illustration_size",), as_text, "1024x1024"),
+    # 旧生图接口密钥：仅用于一次性迁移；新流程按平台条目分开存储。
+    FieldSpec("api_key", "immersive", ("api_key",), as_text, ""),
+    FieldSpec("illustration_timeout", "immersive", ("illustration_timeout",), clamped_int(minimum=20, maximum=600), 120),
+    FieldSpec("illustration_concurrency", "immersive", ("illustration_concurrency",), clamped_int(minimum=1, maximum=4), 2),
+    FieldSpec("illustration_daily_budget", "immersive", ("illustration_daily_budget",), clamped_int(minimum=0, maximum=100000), 0),
+    FieldSpec("illustration_room_hourly_cap", "immersive", ("illustration_room_hourly_cap",), clamped_int(minimum=0, maximum=500), 12),
+    FieldSpec("illustration_min_turns", "immersive", ("illustration_min_turns",), clamped_int(minimum=1, maximum=50), 4),
+    # 剧本配图缓存：默认只复用、不写入作者剧本目录，避免无声修改与磁盘膨胀。
+    FieldSpec("illustration_scenario_record", "immersive", ("illustration_scenario_record",), as_bool, False),
+    FieldSpec("illustration_scenario_prefer", "immersive", ("illustration_scenario_prefer",), as_bool, True),
+    FieldSpec("illustration_scenario_quota_mb", "immersive", ("illustration_scenario_quota_mb",), clamped_int(minimum=0, maximum=102400), 256),
+    FieldSpec("illustration_scenario_max_image_mb", "immersive", ("illustration_scenario_max_image_mb",), clamped_int(minimum=1, maximum=64), 8),
+    FieldSpec(
+        "illustration_scenario_overflow",
+        "immersive",
+        ("illustration_scenario_overflow",),
+        as_enum("illustration_scenario_overflow", frozenset({"lru", "reject"})),
+        "lru",
+    ),
+    # [immersive] LLM 音乐导演：规则分析器先行，LLM 只在后台精修乐谱，失败一律回退。
+    FieldSpec("music_director_enabled", "immersive", ("music_director_enabled",), as_bool, False),
+    # 导演使用的 AI 平台 ID（留空取默认平台）；模型留空取平台默认模型。
+    FieldSpec("music_director_platform", "immersive", ("music_director_platform",), as_text, ""),
+    FieldSpec("music_director_model", "immersive", ("music_director_model",), as_text, ""),
+    # 触发频率：每 N 个叙事回合尝试一次（阶段/情绪事件会额外提前触发）。
+    FieldSpec("music_director_interval_turns", "immersive", ("music_director_interval_turns",), clamped_int(minimum=1, maximum=20), 2),
+    # 站点级每日导演调用预算（次，0 表示不限制；房间只能收紧）。
+    FieldSpec("music_director_daily_budget", "immersive", ("music_director_daily_budget",), clamped_int(minimum=0, maximum=100000), 0),
+    FieldSpec("music_director_timeout", "immersive", ("music_director_timeout",), clamped_int(minimum=20, maximum=300), 45),
+    # 乐谱缓存 TTL（秒，0 表示不复用缓存）。
+    FieldSpec("music_director_cache_ttl", "immersive", ("music_director_cache_ttl",), clamped_int(minimum=0, maximum=86400), 3600),
+    FieldSpec("music_director_min_confidence", "immersive", ("music_director_min_confidence",), clamped_int(minimum=0, maximum=100), 55),
+    FieldSpec(
+        "music_director_fallback",
+        "immersive",
+        ("music_director_fallback",),
+        as_enum("music_director_fallback", frozenset({"rule", "hold"})),
+        "rule",
+    ),
+    FieldSpec("music_director_max_context_chars", "immersive", ("music_director_max_context_chars",), clamped_int(minimum=200, maximum=4000), 1200),
     # [site]（整合自原 site.json；setup.py 读写）
     FieldSpec("name", "site", ("name",), as_text, ""),
     FieldSpec("domain", "site", ("domain",), as_text, ""),

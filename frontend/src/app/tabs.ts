@@ -197,6 +197,9 @@ function switchSettingsTab(tabName: string): void {
     if (tabName === "bgm") {
         void window.TrpgBgm?.loadLibraryPanel();
     }
+    if (tabName === "immersive") {
+        window.TrpgImmersive?.renderSettings?.();
+    }
     // 骰子贴图库按需初始化，避免非管理员页面加载时发出多余请求。
     window.TrpgAdminDiceTextures?.init();
 }
@@ -229,6 +232,9 @@ function initSettingsTabs(): void {
     document.getElementById("cancelGeneralSettingsChanges")?.addEventListener("click", cancelGeneralSettingsChanges);
 
     bindGeneralSelectSetting("themeSelect", "appearance", "theme");
+    bindGeneralTextSetting("enabledThemesInput", "appearance", "enabled_themes");
+    bindGeneralTextSetting("themeOverridesInput", "appearance", "theme_overrides");
+    (window as any).TrpgThemeSettings?.initAdmin?.();
     bindGeneralSelectSetting("languageSelect", "language", "language");
 
     bindGeneralCheckboxSetting("enableSound", "notification", "enable_sound");
@@ -295,6 +301,40 @@ function initSettingsTabs(): void {
     bindGeneralNumberSetting("siteAgentMaxHistoryMessages", "site_agent", "max_history_messages", 4, 200);
     bindGeneralNumberSetting("siteAgentMaxToolResultChars", "site_agent", "max_tool_result_chars", 200, 20000);
     bindGeneralNumberSetting("siteAgentActionTtlSeconds", "site_agent", "action_ttl_seconds", 30, 3600);
+    // 实时沉浸：配乐/配图的站点级开关、默认档位与预算限额（管理员的密钥与连通性测试走独立接口）。
+    bindGeneralCheckboxSetting("immersiveEnabled", "immersive", "enabled");
+    bindGeneralCheckboxSetting("immersiveMusicEnabled", "immersive", "music_enabled");
+    bindGeneralCheckboxSetting("immersiveMusicAutoSwitch", "immersive", "music_auto_switch");
+    bindGeneralCheckboxSetting("immersiveMusicDuckBgm", "immersive", "music_duck_bgm");
+    bindGeneralSelectSetting("immersiveMusicDefaultProfile", "immersive", "music_default_profile");
+    bindGeneralSelectSetting("immersiveMusicDefaultIntensity", "immersive", "music_default_intensity");
+    bindGeneralNumberSetting("immersiveMusicVolume", "immersive", "music_volume", 0, 100);
+    bindGeneralNumberSetting("immersiveMusicCrossfade", "immersive", "music_crossfade_ms", 500, 10000);
+    bindGeneralNumberSetting("immersiveMusicHysteresis", "immersive", "music_hysteresis_turns", 0, 10);
+    bindGeneralTextSetting("immersiveMusicSeed", "immersive", "music_seed");
+    bindGeneralCheckboxSetting("immersiveDirectorEnabled", "immersive", "music_director_enabled");
+    bindGeneralTextSetting("immersiveDirectorPlatform", "immersive", "music_director_platform");
+    bindGeneralTextSetting("immersiveDirectorModel", "immersive", "music_director_model");
+    bindGeneralNumberSetting("immersiveDirectorInterval", "immersive", "music_director_interval_turns", 1, 20);
+    bindGeneralNumberSetting("immersiveDirectorBudget", "immersive", "music_director_daily_budget", 0, 100000);
+    bindGeneralNumberSetting("immersiveDirectorTimeout", "immersive", "music_director_timeout", 20, 300);
+    bindGeneralNumberSetting("immersiveDirectorCacheTtl", "immersive", "music_director_cache_ttl", 0, 86400);
+    bindGeneralNumberSetting("immersiveDirectorMinConfidence", "immersive", "music_director_min_confidence", 0, 100);
+    bindGeneralSelectSetting("immersiveDirectorFallback", "immersive", "music_director_fallback");
+    bindGeneralNumberSetting("immersiveDirectorMaxContext", "immersive", "music_director_max_context_chars", 200, 4000);
+    bindGeneralCheckboxSetting("immersiveIllustrationEnabled", "immersive", "illustration_enabled");
+    bindGeneralCheckboxSetting("immersiveIllustrationAuto", "immersive", "illustration_auto");
+    bindGeneralSelectSetting("immersiveIllustrationProvider", "immersive", "illustration_provider");
+    bindGeneralNumberSetting("immersiveIllustrationTimeout", "immersive", "illustration_timeout", 20, 600);
+    bindGeneralNumberSetting("immersiveIllustrationConcurrency", "immersive", "illustration_concurrency", 1, 4);
+    bindGeneralNumberSetting("immersiveIllustrationDailyBudget", "immersive", "illustration_daily_budget", 0, 100000);
+    bindGeneralNumberSetting("immersiveIllustrationRoomHourlyCap", "immersive", "illustration_room_hourly_cap", 0, 500);
+    bindGeneralNumberSetting("immersiveIllustrationMinTurns", "immersive", "illustration_min_turns", 1, 50);
+    bindGeneralCheckboxSetting("immersiveScenarioRecord", "immersive", "illustration_scenario_record");
+    bindGeneralCheckboxSetting("immersiveScenarioPrefer", "immersive", "illustration_scenario_prefer");
+    bindGeneralNumberSetting("immersiveScenarioQuotaMb", "immersive", "illustration_scenario_quota_mb", 0, 102400);
+    bindGeneralNumberSetting("immersiveScenarioMaxImageMb", "immersive", "illustration_scenario_max_image_mb", 1, 64);
+    bindGeneralSelectSetting("immersiveScenarioOverflow", "immersive", "illustration_scenario_overflow");
     document.getElementById("savePermissionConfig")?.addEventListener("click", () => {
         void savePermissionConfig();
     });
@@ -452,7 +492,7 @@ function renderPromptSegmentSummary(segments: Record<string, number>): string {
 
 // 常规设置项：所有改动只更新「草稿」，统一由保存条询问是否保存，
 // 点「保存」后才写回配置并生效，点「取消」则回退到上次已保存的值。
-type GeneralSettingKind = "checkbox" | "number" | "select";
+type GeneralSettingKind = "checkbox" | "number" | "select" | "text";
 
 interface GeneralSettingControl {
     element: HTMLInputElement | HTMLSelectElement;
@@ -501,6 +541,13 @@ function bindGeneralSelectSetting(elementId: string, sectionName: string, key: s
     const select = document.getElementById(elementId) as HTMLSelectElement | null;
     if (!select) return;
     registerGeneralSetting({ element: select, kind: "select", section: sectionName, key, savedValue: select.value });
+}
+
+/** 纯文本设置（种子、模型名、尺寸等）：不做数值裁剪，按原样保存。 */
+function bindGeneralTextSetting(elementId: string, sectionName: string, key: string): void {
+    const input = document.getElementById(elementId) as HTMLInputElement | null;
+    if (!input) return;
+    registerGeneralSetting({ element: input, kind: "text", section: sectionName, key, savedValue: input.value });
 }
 
 /** 玩家投掷关闭时，等待超时输入仅置灰，仍保留已保存值。 */
@@ -615,6 +662,7 @@ async function saveGeneralSettingsChanges(): Promise<void> {
     });
     configManager.applyTheme();
     syncGeneralSettingsLocale();
+    syncThemeAdminPanel();
     updateGeneralPendingState();
 }
 
@@ -628,7 +676,12 @@ function cancelGeneralSettingsChanges(): void {
     });
     configManager.applyTheme();
     syncGeneralSettingsLocale();
+    syncThemeAdminPanel();
     updateGeneralPendingState();
+}
+
+function syncThemeAdminPanel(): void {
+    (window as any).TrpgThemeSettings?.syncAdminFromInputs?.();
 }
 
 /** 语言选项改动后同步界面语言（保存与取消都需要回放最终选择）。 */

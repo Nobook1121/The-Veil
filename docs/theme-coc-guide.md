@@ -135,6 +135,37 @@ theme = "pattern_coc"
 
 ---
 
+## 世界意志界面（v0.5.7b）
+
+「世界意志」是玩家直接改写叙事结果的入口，弹窗由 `createPortal` 挂到 `document.body`。深渊主题在这里叠加一层仪式化法阵：
+
+- **法阵层次**：外层符文环（22px 符文 + 细深色描边保证可读）、436 刻度环、中层 {7/3} 七芒星、内层符文环；外扩 `world-override-sigil-aura`（blur 20px）与 `world-override-sigil-halo`（blur 8px）负责环带自发光，二者都是静态模糊、只栅格化一次。
+- **层级**：遮罩 `z-index: 1040`（`08-theme-abyss-components.css`）→ 法阵层 1049（`06-combat-world-override.css`）→ Bootstrap 弹窗 1050+。法阵 `pointer-events: none`，永远不会挡住弹窗内容与输入框。
+- **遮罩**：半透明 + `backdrop-filter: blur()`，让背后的深渊场景隐约可见；不支持 `backdrop-filter` 时通过 `@supports` 回退到更实的暗色遮罩。
+- **可配置项**：世界意志遮罩不透明度（25%–95%，默认 55%）与世界意志背景模糊（0–24px，默认 10px）。值写入 `--theme-veil-alpha` / `--theme-veil-blur`。自 v0.5.11b 起，这两项已并入统一的「主题」设置面板（管理员与个人共用），旧键 `trpg_abyss_fx_settings` 会在首次加载时迁移到 `trpg_theme_settings_v1` 并保留备份。
+- **性能**：法阵只出现在 `body.theme-coc`；其它主题不创建法阵层。遮罩出现时背景 Canvas 的 `overlayCovered()` 会跳过整帧绘制；三层刻线只做 transform 旋转，柔光层静态缓存；模态关闭后立即移除法阵 DOM。
+
+## 主题设置（v0.5.11b）
+
+深渊帷幕的所有可调项现在都由统一主题契约（`frontend/src/app/themes/contract.ts`）的 schema 生成，设置入口在「主题」标签卡（管理员）与个人设置「主题」分区，不再有独立的「深渊特效」面板。
+
+- **聊天 / 侧栏**：聊天面板不透明度（`chatAlpha`）、左侧栏不透明度（`sidebarAlpha`）、右侧栏不透明度（`railAlpha`）。
+- **世界意志**：遮罩不透明度（`veilAlpha`）、背景模糊（`veilBlur`）。
+- **拖尾**：拖尾开关（`trail`）、拖尾强度（`trailStrength`）、拖尾密度（`trailDensity`，0.2–1.5）。
+- **触手**：密度（`tentacleDensity`，0.4–1.4）、高度（`tentacleHeight`，0.6–1.4）、高度随机性（`tentacleHeightVariance`，0–0.5，值越大相邻触手高差越大）、摆动速度（`swaySpeed`，0.4–1.6）。
+- **法阵**：大小（`sigilScale`，0.7–1.3）。
+- **飘浮符文**：开关（`driftRunes`）。
+
+优先级：字段默认值 < 站点默认（管理员）< 个人覆盖；管理员可用 `__locked` 锁定任一项，个人面板会显示「管理员锁定」且控件禁用。所有滑杆都有默认值、范围与步进，越界值由 `coerceValue` 钳制；拖动预览用 `requestAnimationFrame` 节流。
+
+## 兼容与迁移（v0.5.11b）
+
+- 新存储键：`localStorage["trpg_theme_settings_v1"]`，结构为 `{ version, theme, values: { [themeId]: {...} } }`。
+- 首次加载时读取 `trpg_abyss_fx_settings` 与 `trpg_cyber_fx_settings`，只迁移当前 schema 认识的显式键，写入新键；原值备份到 `localStorage["trpg_theme_settings_legacy_backup"]` 后再删除旧键。
+- 回退策略：如需恢复旧面板数据，可从备份键读回并手动写回旧键；新键损坏时删除即可回落到字段默认值与站点默认。
+
+---
+
 ## 后续增强方向
 
 1. **可选元素**

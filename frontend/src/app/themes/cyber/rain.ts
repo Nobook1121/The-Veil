@@ -27,6 +27,17 @@ namespace CyberTheme {
         { pool: "檔案數據終端協議監控權限存取解密歸檔索引節點", weight: 0.22 },
     ];
 
+    /** 下落字符集预设：单选后整屏数据雨都只使用对应字符。 */
+    const CHARSET_POOLS: Record<string, Array<{ pool: string; weight: number }>> = {
+        katakana: [{ pool: "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ", weight: 1 }],
+        symbols: [{ pool: "#@%&*!?:;<>[]{}/\\|+=-_~^", weight: 1 }],
+        hex: [{ pool: "0123456789ABCDEF", weight: 1 }],
+        binary: [{ pool: "01", weight: 1 }],
+        mixed: GLYPH_POOLS,
+    };
+
+    let activeCharset = "mixed";
+
     /** 三层景深参数：远层小而暗、近层大而亮。 */
     const LAYERS = [
         { spacing: 62, size: 10, alpha: 0.30, speed: 0.62, trailMin: 10, trailMax: 20 },
@@ -43,8 +54,9 @@ namespace CyberTheme {
     let viewHeight = 0;
 
     function pickGlyph(): string {
+        const pools = CHARSET_POOLS[activeCharset] || GLYPH_POOLS;
         let roll = Math.random();
-        for (const entry of GLYPH_POOLS) {
+        for (const entry of pools) {
             if (roll < entry.weight) {
                 return entry.pool.charAt(Math.floor(Math.random() * entry.pool.length));
             }
@@ -92,7 +104,7 @@ namespace CyberTheme {
         return {
             x,
             y,
-            speed: layer.speed * randomBetween(34, 78),
+            speed: layer.speed * randomBetween(34, 78) * clamp(Fx.settings().rainSpeed, 0.5, 2),
             trail,
             glyphs,
             lastGlyphY: y,
@@ -106,6 +118,12 @@ namespace CyberTheme {
         viewWidth = viewport.width;
         viewHeight = viewport.height;
         const density = clamp(Fx.settings().rainDensity, 0.3, 1);
+        const nextCharset = Fx.settings().charset || "mixed";
+        if (activeCharset !== nextCharset) {
+            activeCharset = nextCharset;
+            // 字符集变了才丢精灵缓存；普通 resize 不必重新烘焙。
+            spriteCache.clear();
+        }
         const seeded = createSessionRandom(0xc1be);
         drops = [];
 

@@ -221,6 +221,11 @@
     <script src="js/latex.js"></script>
     <script src="js/chat.js"></script>
     <script src="js/bgm.js"></script>
+    <!-- 实时沉浸系统：配乐引擎 → 场景面板 → 设置 → 入口（依赖 bgm 的 ducking API） -->
+    <script src="js/immersive/music-engine.js"></script>
+    <script src="js/immersive/illustration.js"></script>
+    <script src="js/immersive/settings.js"></script>
+    <script src="js/immersive/index.js"></script>
     <script src="js/combat.js"></script>
     <script src="js/worldOverride.js"></script>
     <script src="js/auth/api.js"></script>
@@ -242,6 +247,9 @@
     <script src="js/rooms.js"></script>
     <script src="js/scenario.js"></script>
     <script src="js/character-sheet.js"></script>
+    <!-- 主题能力契约与 schema 设置面板：必须先于各主题引擎加载 -->
+    <script src="js/themes/contract.js"></script>
+    <script src="js/themes/settings-ui.js"></script>
     <!-- 「赛博档案」主题引擎：按依赖顺序加载（core 提供工具，fx 负责设置与指针，main 为入口） -->
     <script src="js/themes/cyber/core.js"></script>
     <script src="js/themes/cyber/fx.js"></script>

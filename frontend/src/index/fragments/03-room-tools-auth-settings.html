@@ -105,6 +105,58 @@
                                 </div>
                                 <p class="form-text mt-2" id="houseRuleDiceAnimationHint"></p>
                                 <hr class="my-3">
+                                <h6>实时沉浸（配乐 / 配图）</h6>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleImmersiveMusic">实时配乐</label>
+                                    <select class="form-select" id="houseRuleImmersiveMusic">
+                                        <option value="">跟随管理员设置</option>
+                                        <option value="on">开启</option>
+                                        <option value="off">关闭</option>
+                                    </select>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleImmersiveMusicAuto">随剧情自动切歌</label>
+                                    <select class="form-select" id="houseRuleImmersiveMusicAuto">
+                                        <option value="">跟随管理员设置</option>
+                                        <option value="on">开启</option>
+                                        <option value="off">关闭</option>
+                                    </select>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleImmersiveIllustration">实时配图</label>
+                                    <select class="form-select" id="houseRuleImmersiveIllustration">
+                                        <option value="">跟随管理员设置</option>
+                                        <option value="on">开启</option>
+                                        <option value="off">关闭</option>
+                                    </select>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleImmersiveIllustrationAuto">随剧情自动配图</label>
+                                    <select class="form-select" id="houseRuleImmersiveIllustrationAuto">
+                                        <option value="">跟随管理员设置</option>
+                                        <option value="on">开启</option>
+                                        <option value="off">关闭</option>
+                                    </select>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleImmersiveScenarioRecord">配图记录到剧本</label>
+                                    <select class="form-select" id="houseRuleImmersiveScenarioRecord">
+                                        <option value="">跟随管理员设置</option>
+                                        <option value="on">开启</option>
+                                        <option value="off">关闭</option>
+                                    </select>
+                                    <small class="form-text text-muted">房间只能收紧：管理员关闭时，选择「开启」也不会生效。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleImmersiveScenarioPrefer">优先复用剧本配图</label>
+                                    <select class="form-select" id="houseRuleImmersiveScenarioPrefer">
+                                        <option value="">跟随管理员设置</option>
+                                        <option value="on">开启</option>
+                                        <option value="off">关闭</option>
+                                    </select>
+                                </div>
+                                <p class="form-text mt-2">房间级开关只能收紧：站点总开关关闭时，这里选择「开启」也不会生效。手动配乐/配图仅房主与房间管理员可用。</p>
+                                <hr class="my-3">
                                 <h6 data-i18n="room.house_rules.world_override">世界意志直执行</h6>
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="houseRuleWorldOverrideEnabled">
@@ -358,6 +410,7 @@
                                     <summary><span><i class="fa fa-cog" aria-hidden="true"></i><span data-i18n="profile.section.website_settings">网站设置</span></span><i class="fa fa-chevron-down" aria-hidden="true"></i></summary>
                                     <div class="profile-subnav">
                                         <button type="button" class="profile-section-tab" data-profile-target="profile-website-theme" data-i18n="profile.section.website_theme">外观偏好</button>
+                                        <button type="button" class="profile-section-tab" data-profile-target="profile-theme" data-i18n="profile.section.theme">主题</button>
                                         <button type="button" class="profile-section-tab" data-profile-target="profile-dice-appearance" data-i18n="profile.section.dice_appearance">骰子外观</button>
                                         <button type="button" class="profile-section-tab" data-profile-target="profile-skill-bases" data-i18n="profile.section.skill_bases">技能基础值</button>
                                     </div>
@@ -433,18 +486,7 @@
                                 <section class="profile-panel-section" id="profile-website-theme">
                                     <h4 data-i18n="profile.section.website_settings">网站设置</h4>
                                     <p class="profile-section-hint" data-i18n="profile.note.website_theme">外观偏好保存在当前浏览器，可随时调整。</p>
-                                    <label class="profile-setting-row" id="profileThemeSetting" for="profileThemeSelect">
-                                        <span data-i18n="profile.theme.label">网站主题切换：</span>
-                                        <select class="form-select" id="profileThemeSelect">
-                                            <option value="" data-i18n="profile.theme.follow_default">跟随默认主题</option>
-                                            <option value="light" data-i18n="profile.theme.light">浅色</option>
-                                            <option value="dark" data-i18n="profile.theme.dark">深色</option>
-                                            <option value="pattern_cyber_2" data-i18n="profile.theme.cyber">赛博档案</option>
-                                            <option value="pattern_coc" data-i18n="profile.theme.coc">克苏鲁档案</option>
-                                            <option value="pattern_tome" data-i18n="profile.theme.tome">秘典·羊皮纸</option>
-                                            <option value="system" data-i18n="profile.theme.system">跟随系统</option>
-                                        </select>
-                                    </label>
+
                                     <label class="profile-setting-row" id="profileAdminGradientSetting" for="profileAdminNameFrom">
                                         <span data-i18n="profile.admin_gradient.label">管理员名字渐变色：</span>
                                         <span class="profile-color-fields">
@@ -460,69 +502,29 @@
                                             <button type="button" class="btn btn-primary" id="saveProfilePendingChanges" data-i18n="common.save">保存</button>
                                         </div>
                                     </div>
-                                    <div class="profile-fx-settings" id="abyssFxSettings">
-                                        <p class="profile-section-hint" data-i18n="profile.abyss.hint">以下特效仅作用于「深渊帷幕」主题，设置即时生效并保存在当前浏览器。</p>
-                                        <label class="profile-setting-row profile-range-field" for="abyssChatTransparency">
-                                            <span data-i18n="profile.abyss.chat_transparency">聊天面板不透明度：</span>
-                                            <span class="profile-range-controls">
-                                                <input type="range" class="form-range" id="abyssChatTransparency" min="30" max="100" step="1" value="60">
-                                                <output class="profile-range-value" id="abyssChatTransparencyValue">60%</output>
-                                            </span>
-                                        </label>
-                                        <label class="profile-setting-row profile-range-field" for="abyssSidebarTransparency">
-                                            <span data-i18n="profile.abyss.sidebar_transparency">左侧栏不透明度：</span>
-                                            <span class="profile-range-controls">
-                                                <input type="range" class="form-range" id="abyssSidebarTransparency" min="30" max="100" step="1" value="50">
-                                                <output class="profile-range-value" id="abyssSidebarTransparencyValue">50%</output>
-                                            </span>
-                                        </label>
-                                        <label class="profile-setting-row profile-range-field" for="abyssRailTransparency">
-                                            <span data-i18n="profile.abyss.rail_transparency">右侧栏不透明度：</span>
-                                            <span class="profile-range-controls">
-                                                <input type="range" class="form-range" id="abyssRailTransparency" min="30" max="100" step="1" value="70">
-                                                <output class="profile-range-value" id="abyssRailTransparencyValue">70%</output>
-                                            </span>
-                                        </label>
-                                        <label class="profile-setting-row profile-range-field" for="abyssTrailStrength">
-                                            <span data-i18n="profile.abyss.trail_strength">鼠标拖尾强度：</span>
-                                            <span class="profile-range-controls">
-                                                <input type="range" class="form-range" id="abyssTrailStrength" min="15" max="100" step="1" value="55">
-                                                <output class="profile-range-value" id="abyssTrailStrengthValue">55%</output>
-                                            </span>
-                                        </label>
-                                        <label class="profile-setting-row profile-toggle-field" for="abyssTrailEnabled">
-                                            <span data-i18n="profile.abyss.trail">鼠标符文拖尾（移动与点击）</span>
-                                            <input type="checkbox" class="form-check-input" id="abyssTrailEnabled" checked>
-                                        </label>
-                                        <label class="profile-setting-row profile-toggle-field" for="abyssDriftRunes">
-                                            <span data-i18n="profile.abyss.drift_runes">背景符文飘动</span>
-                                            <input type="checkbox" class="form-check-input" id="abyssDriftRunes" checked>
-                                        </label>
-                                    </div>
-                                    <div class="profile-fx-settings" id="cyberFxSettings">
-                                        <p class="profile-section-hint" data-i18n="profile.cyber.hint">以下特效仅作用于「赛博档案」主题，设置即时生效并保存在当前浏览器。</p>
-                                        <label class="profile-setting-row profile-toggle-field" for="cyberFxEnabled">
-                                            <span data-i18n="profile.cyber.enabled">沉浸特效总开关（关闭后完全停用动画）</span>
-                                            <input type="checkbox" class="form-check-input" id="cyberFxEnabled" checked>
-                                        </label>
-                                        <label class="profile-setting-row profile-range-field" for="cyberFxIntensity">
-                                            <span data-i18n="profile.cyber.intensity">氛围强度：</span>
-                                            <span class="profile-range-controls">
-                                                <input type="range" class="form-range" id="cyberFxIntensity" min="20" max="100" step="1" value="68">
-                                                <output class="profile-range-value" id="cyberFxIntensityValue">68%</output>
-                                            </span>
-                                        </label>
-                                        <label class="profile-setting-row profile-range-field" for="cyberRainDensity">
-                                            <span data-i18n="profile.cyber.rain_density">数据雨密度：</span>
-                                            <span class="profile-range-controls">
-                                                <input type="range" class="form-range" id="cyberRainDensity" min="30" max="100" step="1" value="80">
-                                                <output class="profile-range-value" id="cyberRainDensityValue">80%</output>
-                                            </span>
-                                        </label>
-                                        <label class="profile-setting-row profile-toggle-field" for="cyberReticleEnabled">
-                                            <span data-i18n="profile.cyber.reticle">指针锁定框与数据拖尾</span>
-                                            <input type="checkbox" class="form-check-input" id="cyberReticleEnabled" checked>
-                                        </label>
+                                </section>
+                                <section class="profile-panel-section" id="profile-theme">
+                                    <h4 data-i18n="profile.section.theme">主题</h4>
+                                    <p class="profile-section-hint" data-i18n="profile.note.theme">主题设置仅保存在当前浏览器。选中主题会立即预览，点击下方保存后才写入个人配置。</p>
+                                    <label class="profile-setting-row" id="profileThemeSetting" for="profileThemeSelect">
+                                        <span data-i18n="profile.theme.label">网站主题切换：</span>
+                                        <select class="form-select theme-native-select" id="profileThemeSelect">
+                                            <option value="" data-i18n="profile.theme.follow_default">跟随默认主题</option>
+                                            <option value="light" data-i18n="profile.theme.light">浅色</option>
+                                            <option value="dark" data-i18n="profile.theme.dark">深色</option>
+                                            <option value="pattern_cyber_2" data-i18n="profile.theme.cyber">赛博档案</option>
+                                            <option value="pattern_coc" data-i18n="profile.theme.coc">克苏鲁档案</option>
+                                            <option value="pattern_tome" data-i18n="profile.theme.tome">秘典·羊皮纸</option>
+                                            <option value="system" data-i18n="profile.theme.system">跟随系统</option>
+                                        </select>
+                                    </label>
+                                    <div class="theme-picker-grid" id="profileThemePicker"></div>
+                                    <div class="theme-detail-panel" id="profileThemeDetail"></div>
+                                    <div class="profile-pending-save-bar" id="profileThemePendingSaveBar" hidden>
+                                        <span data-i18n="profile.pending.changes">有未保存的修改</span>
+                                        <span class="badge bg-warning text-dark" id="profileThemePendingChangeCount">0</span>
+                                        <button type="button" class="btn btn-secondary" id="cancelProfileThemeChanges" data-i18n="common.cancel">取消</button>
+                                        <button type="button" class="btn btn-primary" id="saveProfileThemeChanges" data-i18n="common.save">保存</button>
                                     </div>
                                 </section>
                                 <section class="profile-panel-section" id="profile-skill-bases">
@@ -553,6 +555,7 @@
                         <!-- 设置子标签页 -->
                         <div class="settings-tabs mb-4">
                             <button class="settings-tab active" data-settings="general" data-i18n="settings.tab.general">常规设置</button>
+                            <button class="settings-tab" data-settings="theme" data-admin-only="true" data-i18n="settings.tab.theme">主题</button>
                             <button class="settings-tab" data-settings="model" data-i18n="settings.tab.model">模型设置</button>
                             <button class="settings-tab" data-settings="network" data-i18n="settings.tab.network">网络配置</button>
                             <button class="settings-tab" data-settings="character" data-i18n="settings.tab.character">角色卡规则</button>
@@ -560,6 +563,7 @@
                             <button class="settings-tab" data-settings="permissions" data-i18n="settings.tab.permissions">权限配置</button>
                             <button class="settings-tab" data-settings="knowledge" data-admin-only="true">知识库管理</button>
                             <button class="settings-tab" data-settings="bgm" data-admin-only="true" data-i18n="settings.tab.bgm">音乐库</button>
+                            <button class="settings-tab" data-settings="immersive" data-admin-only="true">实时沉浸</button>
                             <button class="settings-tab" data-settings="about" data-i18n="settings.tab.about">关于应用</button>
                         </div>
                         <!-- 设置搜索：匹配设置名称与说明文字，支持模糊匹配并跳转定位 -->
@@ -587,17 +591,6 @@
                         <div id="general-settings-content" class="settings-content active">
                             <div class="mb-4">
                                 <h4 data-i18n="settings.section.interface">界面设置</h4>
-                                <div class="form-group">
-                                    <label data-i18n="settings.field.default_theme">默认主题</label>
-                                    <select class="form-select" id="themeSelect">
-                                        <option value="light" data-i18n="profile.theme.light">浅色</option>
-                                        <option value="dark" data-i18n="profile.theme.dark">深色</option>
-                                        <option value="pattern_cyber_2" data-i18n="profile.theme.cyber">赛博档案</option>
-                                        <option value="pattern_coc" data-i18n="profile.theme.coc">克苏鲁档案</option>
-                                        <option value="pattern_tome" data-i18n="profile.theme.tome">秘典·羊皮纸</option>
-                                        <option value="system" data-i18n="profile.theme.system">跟随系统</option>
-                                    </select>
-                                </div>
                                 <div class="form-group mt-2">
                                     <label data-i18n="Language">语言</label>
                                     <select class="form-select" id="languageSelect">
@@ -979,7 +972,32 @@
                                 </div>
                             </div>
                         </div>
-                        
+
+                        <!-- 主题设置内容（仅管理员） -->
+                        <div id="theme-settings-content" class="settings-content">
+                            <div class="theme-admin-shell">
+                                <section class="theme-admin-picker">
+                                    <h4 data-i18n="settings.theme.title">主题管理</h4>
+                                    <p class="text-muted small" data-i18n="settings.theme.admin_hint">设置站点默认主题与全局可用范围。下方参数作为站点默认值，个人覆盖值优先于站点默认；被锁定的参数个人不可修改。</p>
+                                    <div class="form-group mt-3">
+                                        <label for="themeSelect" data-i18n="settings.field.default_theme">默认主题</label>
+                                        <select class="form-select theme-native-select" id="themeSelect">
+                                            <option value="light" data-i18n="profile.theme.light">浅色</option>
+                                            <option value="dark" data-i18n="profile.theme.dark">深色</option>
+                                            <option value="pattern_cyber_2" data-i18n="profile.theme.cyber">赛博档案</option>
+                                            <option value="pattern_coc" data-i18n="profile.theme.coc">克苏鲁档案</option>
+                                            <option value="pattern_tome" data-i18n="profile.theme.tome">秘典·羊皮纸</option>
+                                            <option value="system" data-i18n="profile.theme.system">跟随系统</option>
+                                        </select>
+                                    </div>
+                                    <input type="hidden" id="enabledThemesInput" value="">
+                                    <input type="hidden" id="themeOverridesInput" value="{}">
+                                    <div class="theme-picker-grid" id="themeAdminPicker"></div>
+                                </section>
+                                <section class="theme-detail-panel" id="themeAdminDetail"></section>
+                            </div>
+                        </div>
+
                         <!-- 模型设置内容 -->
                         <div id="model-settings-content" class="settings-content">
                             <section class="tool-panel mb-4" id="aiDebugSettings">
@@ -1271,6 +1289,291 @@
                                 <p class="text-muted small" data-i18n="settings.bgm.supported">支持 mp3 / m4a / aac / ogg / wav / flac / webm / opus，单个文件不超过 30MB。</p>
                                 <div class="bgm-library-list" id="bgmLibraryList"></div>
                                 <div class="settings-message" id="bgmLibraryMessage" aria-live="polite"></div>
+                            </section>
+                        </div>
+
+                        <!-- 实时沉浸系统（管理员） -->
+                        <div id="immersive-settings-content" class="settings-content" data-admin-only="true">
+                            <section class="permission-settings-panel">
+                                <div class="mb-3">
+                                    <h4>实时沉浸系统</h4>
+                                    <p class="text-muted">根据叙事氛围实时生成程序化配乐与场景配图。普通玩家只读；房间内开关由房主/房间管理员控制，站点级开关、预算与生图密钥仅管理员可改。</p>
+                                </div>
+                                <div class="form-group mb-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="immersiveEnabled">
+                                        <label class="form-check-label" for="immersiveEnabled">启用实时沉浸系统（总开关）</label>
+                                    </div>
+                                    <small class="form-text text-muted">关闭后配乐与配图都不再随叙事触发；房间 BGM 播放器不受影响。</small>
+                                </div>
+                                <h5 class="mt-4">实时配乐</h5>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="immersiveMusicEnabled">
+                                        <label class="form-check-label" for="immersiveMusicEnabled">启用程序化实时配乐</label>
+                                    </div>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="immersiveMusicAutoSwitch">
+                                        <label class="form-check-label" for="immersiveMusicAutoSwitch">随剧情氛围自动切歌 / 换段</label>
+                                    </div>
+                                    <small class="form-text text-muted">关闭后只在进入房间时按默认档位播放，不随叙事变化。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveMusicDefaultProfile">默认氛围档位</label>
+                                    <select class="form-select" id="immersiveMusicDefaultProfile">
+                                        <option value="daily">日常</option>
+                                        <option value="suspense">悬疑</option>
+                                        <option value="unease">不安</option>
+                                        <option value="horror">恐怖</option>
+                                        <option value="urgency">紧迫</option>
+                                        <option value="sorrow">悲怆</option>
+                                        <option value="awe">敬畏</option>
+                                        <option value="aftermath">余波</option>
+                                    </select>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveMusicDefaultIntensity">默认强度</label>
+                                    <select class="form-select" id="immersiveMusicDefaultIntensity">
+                                        <option value="low">低（稀疏、留白多）</option>
+                                        <option value="medium">中（均衡）</option>
+                                        <option value="high">高（密集、压迫感强）</option>
+                                    </select>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveMusicVolume">配乐音量（0-100）</label>
+                                    <input type="number" class="form-control" id="immersiveMusicVolume" min="0" max="100">
+                                    <small class="form-text text-muted">与房间 BGM 播放器音量相互独立。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveMusicCrossfade">换段交叉淡入淡出（毫秒）</label>
+                                    <input type="number" class="form-control" id="immersiveMusicCrossfade" min="500" max="10000">
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveMusicHysteresis">氛围切换滞回回合数（0-10）</label>
+                                    <input type="number" class="form-control" id="immersiveMusicHysteresis" min="0" max="10">
+                                    <small class="form-text text-muted">连续若干回合都指向新氛围才真正切换，避免来回抖动；紧张度跨两级时会更快切换。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveMusicSeed">随机种子（留空按房间派生）</label>
+                                    <input type="text" class="form-control" id="immersiveMusicSeed" maxlength="64" placeholder="调试时可固定种子复现同一套乐句">
+                                </div>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="immersiveMusicDuckBgm">
+                                        <label class="form-check-label" for="immersiveMusicDuckBgm">配乐播放时压低房间 BGM</label>
+                                    </div>
+                                </div>
+
+                                <h5 class="mt-4">AI 音乐导演（LLM 按谱精修）</h5>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="immersiveDirectorEnabled">
+                                        <label class="form-check-label" for="immersiveDirectorEnabled">启用 AI 音乐导演</label>
+                                    </div>
+                                    <small class="form-text text-muted">规则分析器始终先生效并立即播放；导演只在后台按叙事上下文精修乐谱，非法或低置信输出自动回退，绝不阻塞叙事。</small>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group col-md-6 mt-2">
+                                        <label for="immersiveDirectorPlatform">使用的 AI 平台（留空 = 默认平台）</label>
+                                        <input type="text" class="form-control" id="immersiveDirectorPlatform" maxlength="64" placeholder="AI 平台 ID，例如 openai-main">
+                                    </div>
+                                    <div class="form-group col-md-6 mt-2">
+                                        <label for="immersiveDirectorModel">模型（留空 = 平台默认）</label>
+                                        <input type="text" class="form-control" id="immersiveDirectorModel" maxlength="120" placeholder="例如 gpt-4.1-mini">
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveDirectorInterval">触发间隔（每 N 回合）</label>
+                                        <input type="number" class="form-control" id="immersiveDirectorInterval" min="1" max="20">
+                                    </div>
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveDirectorBudget">每日调用预算（0 不限制）</label>
+                                        <input type="number" class="form-control" id="immersiveDirectorBudget" min="0" max="100000">
+                                    </div>
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveDirectorTimeout">单次超时（秒，20-300）</label>
+                                        <input type="number" class="form-control" id="immersiveDirectorTimeout" min="20" max="300">
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveDirectorCacheTtl">乐谱缓存 TTL（秒，0 不复用）</label>
+                                        <input type="number" class="form-control" id="immersiveDirectorCacheTtl" min="0" max="86400">
+                                    </div>
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveDirectorMinConfidence">最低置信度（0-100）</label>
+                                        <input type="number" class="form-control" id="immersiveDirectorMinConfidence" min="0" max="100">
+                                    </div>
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveDirectorFallback">失败回退策略</label>
+                                        <select class="form-select" id="immersiveDirectorFallback">
+                                            <option value="rule">回退规则分析器（推荐）</option>
+                                            <option value="hold">保持当前乐谱，等待下次触发</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveDirectorMaxContext">读取的叙事上下文上限（字符）</label>
+                                    <input type="number" class="form-control" id="immersiveDirectorMaxContext" min="200" max="4000">
+                                    <small class="form-text text-muted">上下文指纹由文本 + 场景/档位 + 当前音频状态生成；同指纹命中缓存时直接复用，不再调用模型。</small>
+                                </div>
+                                <div class="d-flex flex-wrap gap-2 mt-2">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" id="immersiveDirectorRefresh">查看导演状态</button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm" id="immersiveDirectorClearCache">清理乐谱缓存</button>
+                                </div>
+                                <p class="text-muted small mt-2" id="immersiveDirectorStatus">导演用量与缓存尚未加载。</p>
+
+                                <h5 class="mt-4">实时配图</h5>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="immersiveIllustrationEnabled">
+                                        <label class="form-check-label" for="immersiveIllustrationEnabled">启用实时配图</label>
+                                    </div>
+                                    <small class="form-text text-muted">默认关闭。开启后优先使用「程序化场景图」，无需任何外部服务与密钥。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="immersiveIllustrationAuto">
+                                        <label class="form-check-label" for="immersiveIllustrationAuto">随剧情自动触发配图</label>
+                                    </div>
+                                </div>
+                                <h6 class="mt-4">剧本配图缓存</h6>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="immersiveScenarioRecord">
+                                        <label class="form-check-label" for="immersiveScenarioRecord">把新生成的配图记录到剧本目录</label>
+                                    </div>
+                                    <small class="form-text text-muted">默认关闭：避免游玩时无声修改作者剧本、跨房间内容混入与磁盘增长。开启后写入 &lt;剧本目录&gt;/immersive，并保存生成时间/平台/模型/尺寸/场景指纹。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="immersiveScenarioPrefer">
+                                        <label class="form-check-label" for="immersiveScenarioPrefer">游玩时优先复用剧本里的同 key 配图</label>
+                                    </div>
+                                    <small class="form-text text-muted">默认开启：命中后直接复用、不重复调用生图接口、不计预算；只读取已有图片，不会因此写入剧本。</small>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveScenarioQuotaMb">单剧本容量上限（MB）</label>
+                                        <input type="number" class="form-control" id="immersiveScenarioQuotaMb" min="0" max="102400" step="1">
+                                        <small class="form-text text-muted">0 表示不限制；按单剧本统计图片与索引体积。</small>
+                                    </div>
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveScenarioMaxImageMb">单图大小上限（MB）</label>
+                                        <input type="number" class="form-control" id="immersiveScenarioMaxImageMb" min="1" max="64" step="1">
+                                    </div>
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveScenarioOverflow">容量超出策略</label>
+                                        <select class="form-select" id="immersiveScenarioOverflow">
+                                            <option value="lru">LRU：驱逐最旧配图后写入</option>
+                                            <option value="reject">拒绝写入，保留原图</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <small class="form-text text-muted">房间级只能在房规里收紧这两项，不能越过站点开关重新放开。清理命令见 immersive scenario stats|clear|prune。</small>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveIllustrationProvider">配图来源</label>
+                                    <select class="form-select" id="immersiveIllustrationProvider">
+                                        <option value="procedural">程序化 SVG（离线、无版权风险）</option>
+                                        <option value="platform">外部生图平台（使用下方平台表中的默认平台）</option>
+                                    </select>
+                                    <small class="form-text text-muted">旧的单条 base url / model / key 配置已弃用；首次打开本页会自动迁移为一条「旧配置迁移」平台，运行期只认平台表。</small>
+                                </div>
+                                <div id="immersivePlatformPanel" class="immersive-platform-panel">
+                                    <div class="d-flex flex-wrap gap-2 align-items-end mt-2">
+                                        <div class="flex-grow-1">
+                                            <label for="immersivePlatformPreset">快速预设</label>
+                                            <select class="form-select" id="immersivePlatformPreset">
+                                                <option value="">选择预设以填充表单…</option>
+                                            </select>
+                                        </div>
+                                        <button type="button" class="btn btn-outline-primary btn-sm" id="immersivePlatformNew">新增平台</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="immersivePlatformRefresh">刷新平台表</button>
+                                    </div>
+                                    <div class="immersive-platform-list mt-2" id="immersivePlatformList"></div>
+                                    <div class="immersive-platform-editor mt-3" id="immersivePlatformEditor">
+                                        <h6 id="immersivePlatformEditorTitle">新增平台</h6>
+                                        <input type="hidden" id="immersivePlatformId">
+                                        <div class="form-row">
+                                            <div class="form-group col-md-6">
+                                                <label for="immersivePlatformName">名称</label>
+                                                <input type="text" class="form-control" id="immersivePlatformName" maxlength="80" placeholder="例如 OpenAI 主账号">
+                                            </div>
+                                            <div class="form-group col-md-6">
+                                                <label for="immersivePlatformProtocol">协议类型</label>
+                                                <select class="form-select" id="immersivePlatformProtocol"></select>
+                                            </div>
+                                        </div>
+                                        <div class="form-group mt-2">
+                                            <label for="immersivePlatformBaseUrl">Base URL</label>
+                                            <input type="url" class="form-control" id="immersivePlatformBaseUrl" placeholder="例如 https://api.openai.com（可含 /v1）">
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group col-md-4 mt-2">
+                                                <label for="immersivePlatformModel">模型名</label>
+                                                <input type="text" class="form-control" id="immersivePlatformModel" maxlength="120" placeholder="例如 gpt-image-1">
+                                            </div>
+                                            <div class="form-group col-md-4 mt-2">
+                                                <label for="immersivePlatformSize">尺寸</label>
+                                                <input type="text" class="form-control" id="immersivePlatformSize" maxlength="32" placeholder="1024x1024 / auto">
+                                            </div>
+                                            <div class="form-group col-md-4 mt-2">
+                                                <label for="immersivePlatformTimeout">超时（秒，20-600）</label>
+                                                <input type="number" class="form-control" id="immersivePlatformTimeout" min="20" max="600">
+                                            </div>
+                                        </div>
+                                        <div class="form-group mt-2">
+                                            <label for="immersivePlatformKey">API Key（仅写入运行时目录，只回掩码）</label>
+                                            <input type="password" class="form-control" id="immersivePlatformKey" autocomplete="off" placeholder="留空表示不修改；单独保存以轮换密钥">
+                                            <small class="form-text" id="immersivePlatformKeyStatus">未配置密钥</small>
+                                        </div>
+                                        <div class="form-check mt-2">
+                                            <input class="form-check-input" type="checkbox" id="immersivePlatformEnabled">
+                                            <label class="form-check-label" for="immersivePlatformEnabled">启用该平台</label>
+                                        </div>
+                                        <div class="d-flex flex-wrap gap-2 mt-3">
+                                            <button type="button" class="btn btn-primary btn-sm" id="immersivePlatformSave">保存平台</button>
+                                            <button type="button" class="btn btn-outline-primary btn-sm" id="immersivePlatformSaveKey">保存密钥</button>
+                                            <button type="button" class="btn btn-outline-danger btn-sm" id="immersivePlatformClearKey">清除密钥</button>
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" id="immersivePlatformTest">连接测试</button>
+                                            <button type="button" class="btn btn-outline-success btn-sm" id="immersivePlatformDefault">设为默认</button>
+                                            <button type="button" class="btn btn-outline-danger btn-sm" id="immersivePlatformDelete">删除平台</button>
+                                        </div>
+                                        <small class="form-text text-muted mt-2">连接测试优先调用 <code>/v1/models</code>；网关不支持时退回一次最小生图探测（会产生一次费用）。</small>
+                                    </div>
+                                    <div class="settings-message immersive-settings-note mt-2" id="immersivePlatformMessage" aria-live="polite"></div>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveIllustrationTimeout">单次生图超时（秒）</label>
+                                    <input type="number" class="form-control" id="immersiveIllustrationTimeout" min="20" max="600">
+                                    <small class="form-text text-muted">默认继承所选平台的超时；这里作为站点上限兜底。网关约 20s 空闲会静默断流，失败则回落程序化图。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveIllustrationConcurrency">并发生图上限（1-4）</label>
+                                    <input type="number" class="form-control" id="immersiveIllustrationConcurrency" min="1" max="4">
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveIllustrationDailyBudget">站点每日生图预算（张，0 不限制）</label>
+                                    <input type="number" class="form-control" id="immersiveIllustrationDailyBudget" min="0" max="100000">
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveIllustrationRoomHourlyCap">单房间每小时上限（张，0 不限制）</label>
+                                    <input type="number" class="form-control" id="immersiveIllustrationRoomHourlyCap" min="0" max="500">
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveIllustrationMinTurns">自动配图最小间隔（叙事回合）</label>
+                                    <input type="number" class="form-control" id="immersiveIllustrationMinTurns" min="1" max="50">
+                                    <small class="form-text text-muted">普通玩家的手动入口默认不可用；房主/房间管理员仍受该间隔与配额限制。</small>
+                                </div>
+                                <div class="d-flex flex-wrap gap-2 mt-3">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" id="immersiveTestProvider">检查默认平台</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" id="immersiveRefreshUsage">刷新用量</button>
+                                </div>
+                                <div class="settings-message immersive-settings-note mt-2" id="immersiveSettingsMessage" aria-live="polite"></div>
+                                <p class="text-muted small mt-2" id="immersiveUsageOutput">今日外部生图用量尚未加载。</p>
                             </section>
                         </div>
 

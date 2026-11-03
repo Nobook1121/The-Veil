@@ -10,4 +10,6 @@
 @import "../styles/08-theme-abyss-components.css";
 @import "../styles/09-theme-cyber-tokens.css";
 @import "../styles/10-theme-cyber-components.css";
+@import "../styles/11-immersive.css";
+@import "../styles/12-theme-settings.css";
 @import "./agent/agent.css";

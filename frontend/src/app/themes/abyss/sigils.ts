@@ -85,7 +85,7 @@ namespace AbyssTheme {
     function rebuild(viewport: Viewport): void {
         const min = Math.min(viewport.width, viewport.height);
         // 窄屏收小法阵，避免符文环压到页头与右侧成员栏。
-        baseRadius = Math.max(120, min * (viewport.width < 1000 ? 0.27 : 0.35));
+        baseRadius = Math.max(120, min * (viewport.width < 1000 ? 0.27 : 0.35)) * AbyssFx.settings().sigilScale;
         centerX = viewport.width * 0.5;
         centerY = viewport.height * 0.46;
         const dpr = Math.min(viewport.dpr, 2);

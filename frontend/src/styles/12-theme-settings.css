@@ -1,0 +1,336 @@
+/* ==========================================================================
+   主题设置面板（schema 驱动）
+   —— 管理员「主题」标签卡与个人设置「主题」区块共用同一套视觉。
+   注意：本文件不给浮层祖先添加 transform / filter / backdrop-filter / z-index，
+   以免再制造「浮层被困在层叠上下文里」的问题。
+   ========================================================================== */
+
+/* —— 主题卡片网格 —— */
+
+.theme-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+    gap: 10px;
+    margin: 12px 0 16px;
+}
+
+.theme-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--theme-border-subtle);
+    border-radius: 10px;
+    background: var(--theme-bg-panel-muted, var(--theme-bg-panel));
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.theme-card:hover {
+    border-color: var(--theme-accent-primary);
+}
+
+.theme-card.is-current {
+    border-color: var(--theme-accent-primary);
+    box-shadow: 0 0 0 2px var(--theme-accent-soft, rgba(47, 111, 237, 0.18));
+}
+
+.theme-card.is-disabled {
+    opacity: 0.62;
+}
+
+.theme-card-select {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--theme-text-primary);
+    text-align: left;
+    cursor: pointer;
+}
+
+.theme-card-select:disabled {
+    cursor: not-allowed;
+}
+
+.theme-card-select:focus-visible {
+    outline: 2px solid var(--theme-focus-ring, var(--theme-accent-primary));
+    outline-offset: 3px;
+    border-radius: 8px;
+}
+
+.theme-card-swatch {
+    position: relative;
+    display: block;
+    height: 58px;
+    border: 1px solid var(--swatch-border);
+    border-radius: 8px;
+    background: var(--swatch-bg);
+    overflow: hidden;
+}
+
+.theme-card-swatch-panel {
+    position: absolute;
+    inset: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--swatch-border);
+    border-radius: 5px;
+    background: var(--swatch-panel);
+}
+
+.theme-card-swatch-bar {
+    display: block;
+    height: 5px;
+    width: 72%;
+    border-radius: 3px;
+    background: var(--swatch-text);
+    opacity: 0.75;
+}
+
+.theme-card-swatch-dot {
+    display: block;
+    height: 9px;
+    width: 9px;
+    border-radius: 50%;
+    background: var(--swatch-accent);
+}
+
+.theme-card-name {
+    display: block;
+    font-weight: 600;
+    font-size: 0.92rem;
+    color: var(--theme-text-primary);
+}
+
+.theme-card-desc {
+    display: block;
+    font-size: 0.76rem;
+    line-height: 1.45;
+    color: var(--theme-text-secondary);
+}
+
+.theme-card-badge {
+    align-self: flex-start;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
+}
+
+.theme-card-badge-current {
+    background: var(--theme-accent-soft, rgba(47, 111, 237, 0.16));
+    color: var(--theme-accent-primary);
+    border: 1px solid var(--theme-accent-primary);
+}
+
+.theme-card-badge-locked {
+    background: var(--theme-warning-soft, rgba(217, 164, 65, 0.16));
+    color: var(--theme-warning, #b57b1f);
+    border: 1px solid var(--theme-warning, #b57b1f);
+}
+
+.theme-card-availability {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--theme-border-subtle);
+    font-size: 0.76rem;
+    color: var(--theme-text-secondary);
+    cursor: pointer;
+}
+
+/* —— 详情面板 —— */
+
+.theme-detail-panel {
+    padding: 14px;
+    border: 1px solid var(--theme-border-subtle);
+    border-radius: 10px;
+    background: var(--theme-bg-panel-muted, var(--theme-bg-panel));
+}
+
+.theme-detail-header h5 {
+    margin: 0 0 4px;
+    font-size: 1rem;
+    color: var(--theme-text-primary);
+}
+
+.theme-detail-hint,
+.theme-detail-warning {
+    margin: 0 0 10px;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--theme-text-secondary);
+}
+
+.theme-detail-warning {
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--theme-warning-soft, rgba(217, 164, 65, 0.16));
+    color: var(--theme-warning, #b57b1f);
+}
+
+.theme-field-list {
+    display: grid;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.theme-field {
+    padding: 10px;
+    border: 1px solid var(--theme-border-subtle);
+    border-radius: 8px;
+    background: var(--theme-bg-elevated, var(--theme-bg-panel));
+}
+
+.theme-field-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.theme-field-label {
+    flex: 1 1 auto;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--theme-text-primary);
+}
+
+.theme-field-locked {
+    padding: 1px 7px;
+    border: 1px solid var(--theme-warning, #b57b1f);
+    border-radius: 999px;
+    font-size: 0.7rem;
+    color: var(--theme-warning, #b57b1f);
+}
+
+.theme-field-lock,
+.theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.74rem;
+    color: var(--theme-text-secondary);
+    cursor: pointer;
+}
+
+.theme-field-reset {
+    padding: 2px 8px;
+    border: 1px solid var(--theme-border-subtle);
+    border-radius: 6px;
+    background: transparent;
+    font-size: 0.72rem;
+    color: var(--theme-text-secondary);
+    cursor: pointer;
+}
+
+.theme-field-reset:hover {
+    border-color: var(--theme-accent-primary);
+    color: var(--theme-accent-primary);
+}
+
+.theme-field-control {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.theme-range {
+    flex: 1 1 180px;
+    accent-color: var(--theme-accent-primary);
+}
+
+.theme-range:disabled {
+    opacity: 0.55;
+}
+
+.theme-range-output {
+    min-width: 52px;
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    color: var(--theme-text-secondary);
+}
+
+.theme-color {
+    width: 42px;
+    height: 30px;
+    padding: 2px;
+    border: 1px solid var(--theme-border-subtle);
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+}
+
+.theme-color-hex {
+    width: 110px;
+    font-family: "Share Tech Mono", "Cascadia Mono", monospace;
+    text-transform: lowercase;
+}
+
+.theme-field-error {
+    flex-basis: 100%;
+    font-size: 0.72rem;
+    color: var(--theme-danger, #d9534f);
+}
+
+.theme-select {
+    max-width: 220px;
+}
+
+.theme-contrast {
+    margin: 12px 0 4px;
+    font-size: 0.78rem;
+    color: var(--theme-text-secondary);
+}
+
+.theme-contrast.is-warning {
+    color: var(--theme-warning, #b57b1f);
+    font-weight: 600;
+}
+
+.theme-reset-all {
+    margin-top: 12px;
+}
+
+/* —— 管理员布局 —— */
+
+.theme-admin-shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+}
+
+@media (max-width: 992px) {
+    .theme-admin-shell {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.theme-admin-picker {
+    min-width: 0;
+}
+
+.theme-native-select {
+    max-width: 280px;
+}
+
+.profile-panel-section .theme-picker-grid {
+    margin-top: 10px;
+}
+
+@media (max-width: 720px) {
+    .theme-picker-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    }
+}

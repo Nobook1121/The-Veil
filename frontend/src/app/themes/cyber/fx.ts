@@ -9,6 +9,8 @@
  * 所有特效只在 body.theme-cyber-2 下出现，随主题切换自动启停。
  */
 namespace CyberTheme {
+    export type RainCharset = "katakana" | "symbols" | "hex" | "binary" | "mixed";
+
     export interface FxSettings {
         /** 沉浸特效总开关：关闭后整页动画与数据雨停摆，只保留静态底色。 */
         enabled: boolean;
@@ -16,6 +18,10 @@ namespace CyberTheme {
         intensity: number;
         /** 数据雨密度（0.3 → 1）。 */
         rainDensity: number;
+        /** 数据雨下落速度（0.5 → 2）。 */
+        rainSpeed: number;
+        /** 数据雨字符集预设。 */
+        charset: RainCharset;
         /** 是否显示指针锁定框与数据拖尾。 */
         reticle: boolean;
     }
@@ -39,11 +45,14 @@ namespace CyberTheme {
         glyphs: Array<{ angle: number; distance: number; glyph: string }>;
     }
 
-    const SETTINGS_KEY = "trpg_cyber_fx_settings";
+    /** 旧版存储键仅用于迁移说明；读写统一走 ThemeRegistry。 */
+    const LEGACY_SETTINGS_KEY = "trpg_cyber_fx_settings";
     const DEFAULT_SETTINGS: FxSettings = {
         enabled: true,
         intensity: 0.68,
         rainDensity: 0.8,
+        rainSpeed: 1,
+        charset: "mixed",
         reticle: true,
     };
     const MAX_PARTICLES = 60;
@@ -73,38 +82,26 @@ namespace CyberTheme {
         return clamp(parsed, min, max);
     }
 
+    const CHARSETS: RainCharset[] = ["katakana", "symbols", "hex", "binary", "mixed"];
+
     function loadSettings(): void {
-        let raw: string | null = null;
-        try {
-            raw = window.localStorage.getItem(SETTINGS_KEY);
-        } catch {
-            raw = null;
-        }
-        if (raw === null) {
-            settings = { ...DEFAULT_SETTINGS };
-            applySettings();
-            return;
-        }
-        try {
-            const parsed = JSON.parse(raw) as Partial<Record<keyof FxSettings, unknown>>;
-            settings = {
-                enabled: typeof parsed.enabled === "boolean" ? parsed.enabled : DEFAULT_SETTINGS.enabled,
-                intensity: clampSetting(parsed.intensity, 0.2, 1, DEFAULT_SETTINGS.intensity),
-                rainDensity: clampSetting(parsed.rainDensity, 0.3, 1, DEFAULT_SETTINGS.rainDensity),
-                reticle: typeof parsed.reticle === "boolean" ? parsed.reticle : DEFAULT_SETTINGS.reticle,
-            };
-        } catch {
-            settings = { ...DEFAULT_SETTINGS };
-        }
+        const parsed = ThemeRegistry.getValues("pattern_cyber_2") as Partial<Record<keyof FxSettings, unknown>>;
+        const charset = typeof parsed.charset === "string" && CHARSETS.includes(parsed.charset as RainCharset)
+            ? (parsed.charset as RainCharset)
+            : DEFAULT_SETTINGS.charset;
+        settings = {
+            enabled: typeof parsed.enabled === "boolean" ? parsed.enabled : DEFAULT_SETTINGS.enabled,
+            intensity: clampSetting(parsed.intensity, 0.2, 1, DEFAULT_SETTINGS.intensity),
+            rainDensity: clampSetting(parsed.rainDensity, 0.3, 1, DEFAULT_SETTINGS.rainDensity),
+            rainSpeed: clampSetting(parsed.rainSpeed, 0.5, 2, DEFAULT_SETTINGS.rainSpeed),
+            charset,
+            reticle: typeof parsed.reticle === "boolean" ? parsed.reticle : DEFAULT_SETTINGS.reticle,
+        };
         applySettings();
     }
 
     function saveSettings(): void {
-        try {
-            window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-        } catch {
-            // 隐私模式下写入失败，只影响下次打开页面时的记忆。
-        }
+        // 设置面板统一由 ThemeRegistry 持久化；保留空实现避免旧调用点报错。
     }
 
     /** 把运行时设置落到 CSS 变量上；CSS 只读这些变量，不再感知 JS 状态。 */
@@ -434,7 +431,12 @@ namespace CyberTheme {
             loadSettings();
             buildFrame();
             buildReticle();
-            bindSettingsControls();
+            window.addEventListener("theme-settings-change", loadSettings);
+            window.addEventListener("storage", (event: StorageEvent) => {
+                if (event.key === "trpg_theme_settings_v1") {
+                    loadSettings();
+                }
+            });
         },
         settings: getSettings,
         isEnabled,

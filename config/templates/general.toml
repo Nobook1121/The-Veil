@@ -7,6 +7,10 @@
 
 [appearance]
 theme = "pattern_cyber_2"
+# 允许个人选择的主题（空数组 = 全部可用）；仅管理员可写。
+enabled_themes = []
+# 站点默认主题参数与锁定项（JSON 字符串）；个人覆盖值优先，__locked 中的键个人不可改。
+theme_overrides = "{}"
 
 [language]
 language = "zh-CN"
@@ -148,6 +152,86 @@ conversation_retention_days = 30
 action_ttl_seconds = 300
 max_conversations_per_user = 30
 max_messages_per_conversation = 200
+
+[immersive]
+# 沉浸系统总开关：关闭后配乐与配图都不再随叙事触发（前端仍可手动播放房间 BGM）。
+enabled = true
+# 实时程序化配乐：由服务端分析叙事氛围，前端 Web Audio 现场合成，无版权风险。
+music_enabled = true
+# 叙事氛围变化时自动切歌/换段；关闭后仅首次进入房间按默认档位播放。
+music_auto_switch = true
+# 默认氛围档位（daily/suspense/unease/horror/urgency/sorrow/awe/aftermath）。
+music_default_profile = "daily"
+# 默认强度（low/medium/high），影响配器厚度、节奏密度与不协和程度。
+music_default_intensity = "medium"
+# 程序化配乐音量（0-100），与房间 BGM 播放器音量相互独立。
+music_volume = 35
+# 换段交叉淡入淡出时长（毫秒，500-10000）。
+music_crossfade_ms = 3000
+# 氛围切换的滞回回合数：连续若干回合都指向新氛围才真正切换，避免来回抖动。
+music_hysteresis_turns = 2
+# 配乐随机种子（留空按房间 ID 派生）。同一房间 + 同一种子可复现同一套乐句走向。
+music_seed = ""
+# 程序化配乐播放时自动压低房间 BGM 音量（避免两路声音互相干扰）。
+music_duck_bgm = true
+# 实时配图总开关（默认关闭；开启后按叙事触发场景图）。
+illustration_enabled = false
+# 配图来源：procedural（确定性程序化 SVG，离线可用）/ platform（从「生图模型平台表」取默认平台）。
+# 旧值 openai_compatible 仍可识别，但会一次性迁移到平台表，运行期不再读取下面的单条配置。
+illustration_provider = "procedural"
+# 默认生图平台 ID（procedural 时忽略；留空取平台表里的默认条目）。
+illustration_platform_id = ""
+# 是否随叙事自动触发配图；关闭后只能从房间控制台手动触发。
+illustration_auto = true
+# 【已弃用】旧单条生图配置：仅用于一次性迁移到生图平台表，迁移后会被清空。
+# 新配置请使用管理员的「生图模型平台配置」入口（多平台、可设默认、独立密钥）。
+illustration_base_url = ""
+# 【已弃用】旧单条生图模型名。
+illustration_model = "dall-e-3"
+# 【已弃用】旧单条生图尺寸。
+illustration_size = "1024x1024"
+# 【已弃用】旧生图接口密钥；新流程按平台条目分别存储，只回掩码。
+api_key = ""
+# 单次生图请求超时（秒，20-600）；网关约 20s 空闲断流时会在总预算内重试。
+illustration_timeout = 120
+# 并发生图请求上限（1-4），避免同时打满上游。
+illustration_concurrency = 2
+# 站点级每日生图预算（张，0 表示不限制；仅管理员可改）。
+illustration_daily_budget = 0
+# 单房间每小时生图上限（张，0 表示不限制；房主/管理员也可在房规内收紧）。
+illustration_room_hourly_cap = 12
+# 自动配图的最小间隔回合数（同房间），避免连续刷图。
+illustration_min_turns = 4
+# 剧本配图缓存：是否把新生成的配图写入剧本目录（默认关闭，避免无声修改剧本与磁盘增长）。
+illustration_scenario_record = false
+# 游玩时是否优先复用剧本目录里的同 key 配图（默认开启，可省去重复生图与预算）。
+illustration_scenario_prefer = true
+# 单剧本配图缓存容量上限（MB，0 表示不限制）；超限按下方策略处理。
+illustration_scenario_quota_mb = 256
+# 单张配图写入剧本的体积上限（MB）。
+illustration_scenario_max_image_mb = 8
+# 超限策略：lru = 驱逐最旧条目；reject = 拒绝写入（保留原图）。
+illustration_scenario_overflow = "lru"
+# LLM 音乐导演：读取最近叙事上下文输出结构化乐谱；关闭时仅用规则分析器。
+music_director_enabled = false
+# 导演使用的 AI 平台 ID（留空取默认平台）。
+music_director_platform = ""
+# 导演模型（留空取平台默认模型）。
+music_director_model = ""
+# 触发频率：每 N 个叙事回合尝试一次（阶段/情绪事件会额外提前触发）。
+music_director_interval_turns = 2
+# 站点级每日导演调用预算（次，0 表示不限制；房间只能收紧）。
+music_director_daily_budget = 0
+# 单次导演请求超时（秒，20-300）。
+music_director_timeout = 45
+# 乐谱缓存 TTL（秒，0 表示不复用缓存）。
+music_director_cache_ttl = 3600
+# 最低置信度（0-100）：低于该值的乐谱视为低置信，回退到规则分析器。
+music_director_min_confidence = 55
+# 失败回退策略：rule（回退规则分析器）/ hold（保持当前档位不切换）。
+music_director_fallback = "rule"
+# 送给导演的最近上下文最大字符数（200-4000）。
+music_director_max_context_chars = 1200
 
 [site]
 # 站点名称：显示在浏览器标题与页面品牌处（留空使用默认品牌）。

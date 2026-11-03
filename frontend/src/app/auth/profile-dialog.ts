@@ -149,7 +149,10 @@ namespace AuthModule {
         document.getElementById("profileAdminNameTo")?.addEventListener("input", updateProfilePendingState);
         document.getElementById("saveProfilePendingChanges")?.addEventListener("click", saveProfilePendingChanges);
         document.getElementById("cancelProfilePendingChanges")?.addEventListener("click", cancelProfilePendingChanges);
+        document.getElementById("saveProfileThemeChanges")?.addEventListener("click", saveProfilePendingChanges);
+        document.getElementById("cancelProfileThemeChanges")?.addEventListener("click", cancelProfilePendingChanges);
         resetProfileThemeSetting();
+        (window as any).TrpgThemeSettings?.initPersonal?.(updateProfilePendingState);
     }
 
     function resetProfileThemeSetting(): void {
@@ -165,6 +168,7 @@ namespace AuthModule {
         const toInput = document.getElementById("profileAdminNameTo") as HTMLInputElement | null;
         if (fromInput) fromInput.value = initialAdminNameFrom;
         if (toInput) toInput.value = initialAdminNameTo;
+        (window as any).TrpgThemeSettings?.resetPersonalDraft?.();
         updateProfilePendingState();
     }
 
@@ -179,11 +183,17 @@ namespace AuthModule {
         const themeDirty = themeSelect.value !== initialProfileTheme;
         const gradientDirty = readColorInput("profileAdminNameFrom", initialAdminNameFrom) !== initialAdminNameFrom
             || readColorInput("profileAdminNameTo", initialAdminNameTo) !== initialAdminNameTo;
-        const pendingCount = (themeDirty ? 1 : 0) + (gradientDirty ? 1 : 0);
+        const settingsDirty = (window as any).TrpgThemeSettings?.personalDirtyCount?.() ?? 0;
+        const pendingCount = (themeDirty ? 1 : 0) + (gradientDirty ? 1 : 0) + settingsDirty;
         pendingBar.hidden = pendingCount === 0;
         count.textContent = String(pendingCount);
         themeSetting?.classList.toggle("profile-setting-dirty", themeDirty);
         gradientSetting?.classList.toggle("profile-setting-dirty", gradientDirty);
+
+        const themeBar = document.getElementById("profileThemePendingSaveBar");
+        const themeCount = document.getElementById("profileThemePendingChangeCount");
+        if (themeBar) themeBar.hidden = pendingCount === 0;
+        if (themeCount) themeCount.textContent = String(pendingCount);
     }
 
     function readColorInput(id: string, fallback: string): string {
@@ -197,6 +207,7 @@ namespace AuthModule {
         if (!themeSelect) return;
         setUserThemePreference(themeSelect.value);
         initialProfileTheme = themeSelect.value;
+        (window as any).TrpgThemeSettings?.commitPersonal?.(themeSelect.value);
 
         const from = readColorInput("profileAdminNameFrom", DEFAULT_ADMIN_NAME_FROM);
         const to = readColorInput("profileAdminNameTo", DEFAULT_ADMIN_NAME_TO);
@@ -211,6 +222,7 @@ namespace AuthModule {
 
     function cancelProfilePendingChanges(): void {
         resetProfileThemeSetting();
+        window.configManager?.applyTheme();
     }
 
     function getUserThemePreference(): string {
