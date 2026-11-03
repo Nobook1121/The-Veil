@@ -44,10 +44,16 @@ ROOM_COMMAND_WHITELIST: dict[str, set[str]] = {
         "trigger", "media", "opening", "trace", "summary", "reset", "unlock",
         "guard", "profile", "rebuild-state",
     },
+    "immersive": {"status", "music", "illustration", "history", "director"},
 }
 
 # 不带子命令时默认执行的子命令（例如 `members` 等价于 `members list`）。
-DEFAULT_SUBS: dict[str, str] = {"members": "list", "dice": "status", "narrative": "status"}
+DEFAULT_SUBS: dict[str, str] = {
+    "members": "list",
+    "dice": "status",
+    "narrative": "status",
+    "immersive": "status",
+}
 
 
 @dataclass
@@ -110,6 +116,21 @@ def room_command_help_text() -> str:
             "  dice pending                （列出本房间等待玩家投掷的请求）",
             "  dice cancel [request_id] [--yes]（取消本房间待投掷请求，缺省取消最早的一条）",
             *ROOM_NARRATIVE_HELP().splitlines(),
+            "  immersive                    （本房间配乐/配图状态与开关）",
+            "  immersive music show         （查看本房间配乐档位、强度、段落与种子）",
+            "  immersive music set <profile> <intensity> [--yes]（手动指定配乐，档位见站点设置）",
+            "  immersive music auto <on|off> [--yes]（本房间自动切歌开关）",
+            "  immersive music <on|off> [--yes]（本房间配乐总开关）",
+            "  immersive illustration show  （查看本房间配图开关与最近历史）",
+            "  immersive illustration <on|off> [--yes]（本房间配图总开关）",
+            "  immersive illustration auto <on|off> [--yes]（本房间自动配图开关）",
+            "  immersive illustration now [场景描述] [--yes]（立即生成一张图，可能产生费用）",
+            "  immersive cache show|stats      （查看本剧本配图缓存文件数与体积）",
+            "  immersive cache record|prefer <on|off|inherit> （房间级收紧剧本缓存；无法越过站点开关）",
+            "  immersive cache prune [--yes]   （按站点配额 LRU 清理本剧本缓存，默认预演）",
+            "  immersive cache clear [--yes]   （删除本剧本全部配图缓存，默认预演）",
+            "  immersive history            （查看本房间配乐/配图历史）",
+            "  immersive director           （只读查看 AI 音乐导演最近采用的乐谱与段落；站点配置不可在房间内修改）",
             "  说明：破坏性命令缺省为「预演」，加 --yes 或在交互确认时输入 y 才会真正执行。",
             "  说明：成员命令只调整房间内角色（房主/管理员/成员），不会授予网站级权限。",
         ]
@@ -206,6 +227,8 @@ def execute_room_command(
         if sub == "cancel":
             return _dice_cancel_command(room_id, rest, flags, confirm)
         return _dice_status_command(room_dir, room_id)
+    if domain == "immersive":
+        return _immersive_command(room_dir, room_id, sub, rest, flags, confirm)
     if domain == "narrative":
         ok, message = handle_room_narrative_command(
             parts[1:],
@@ -427,6 +450,331 @@ def _log_tail_command(room_dir: Path, rest: list[str]) -> RoomCommandResult:
         return RoomCommandResult(True, "本房间暂无日志")
     lines = [f"本房间最近 {len(entries)} 条日志:"]
     lines.extend(f"  {_format_log_line(entry)}" for entry in entries)
+    return RoomCommandResult(True, "\n".join(lines))
+
+
+def _immersive_command(
+    room_dir: Path,
+    room_id: Any,
+    sub: str,
+    rest: list[str],
+    flags: set[str],
+    confirm: Callable[[str], bool] | None,
+) -> RoomCommandResult:
+    """房间内沉浸命令；严格限定在 ``room_dir`` 作用域，绝不触碰站点配置。"""
+    from trpg_server.immersive.config import INTENSITIES, PROFILES, load_immersive_settings, resolve_room_switches
+    from trpg_server.immersive.illustration import history_for_room
+    from trpg_server.immersive.music import load_state as load_music_state
+    from trpg_server.immersive.service import generate_illustration_now, set_music_directive
+
+    settings = load_immersive_settings(None)
+    info = _load_room_info(room_dir)
+    rules = info.get("house_rules") if isinstance(info.get("house_rules"), dict) else {}
+    switches = resolve_room_switches(settings, rules)
+    music_state = load_music_state(room_dir)
+
+    if sub == "status":
+        return _immersive_status_text(room_id, switches, music_state, room_dir)
+
+    if sub == "music":
+        action = rest[0].lower() if rest else "show"
+        if action == "show":
+            return _immersive_status_text(room_id, switches, music_state, room_dir)
+        if action in {"on", "off"}:
+            target = action == "on"
+
+            def _apply_music_toggle() -> RoomCommandResult:
+                return _set_house_rule(
+                    room_dir, "immersive_music_enabled", target, room_id,
+                    f"房间沉浸配乐已{'开启' if target else '关闭'}",
+                )
+
+            return _confirm_action(
+                preview=f"将把本房间沉浸配乐设为『{'开' if target else '关'}』（无法越过站点总开关）。",
+                apply=_apply_music_toggle,
+                assume_yes=_assume_yes(flags),
+                confirm=confirm,
+                prompt="确认修改本房间配乐开关?",
+            )
+        if action == "auto" and len(rest) > 1:
+            target = rest[1].lower() in {"on", "enable", "true", "1", "开", "开启"}
+            return _confirm_action(
+                preview=f"将把本房间自动配乐切换设为『{'开' if target else '关'}』。",
+                apply=lambda: _set_house_rule(
+                    room_dir, "immersive_music_auto_switch", target, room_id,
+                    f"房间自动配乐切换已{'开启' if target else '关闭'}",
+                ),
+                assume_yes=_assume_yes(flags),
+                confirm=confirm,
+                prompt="确认修改自动配乐?",
+            )
+        if action == "set":
+            profile = rest[1].lower() if len(rest) > 1 else ""
+            intensity = rest[2].lower() if len(rest) > 2 else ""
+            if profile not in PROFILES or intensity not in INTENSITIES:
+                return RoomCommandResult(
+                    False,
+                    f"Usage: immersive music set <profile> <intensity>\n档位: {', '.join(PROFILES)}\n强度: {', '.join(INTENSITIES)}",
+                )
+
+            def _apply_directive() -> RoomCommandResult:
+                plan = set_music_directive(
+                    room_id=str(room_id),
+                    room_dir=room_dir,
+                    settings=settings,
+                    profile=profile,
+                    intensity=intensity,
+                    scene="房间控制台",
+                    scenario_id=str(info.get("scenario_id") or ""),
+                )
+                return RoomCommandResult(True, f"已切换本房间配乐为 {plan['profile']} / {plan['intensity']}（第 {plan['section']} 段）")
+
+            return _confirm_action(
+                preview=f"将把本房间配乐切到 {profile} / {intensity}。",
+                apply=_apply_directive,
+                assume_yes=_assume_yes(flags),
+                confirm=confirm,
+                prompt="确认切换本房间配乐?",
+            )
+        return RoomCommandResult(False, "Usage: immersive music show|on|off|auto <on|off>|set <profile> <intensity>")
+
+    if sub == "illustration":
+        action = rest[0].lower() if rest else "show"
+        if action == "show":
+            return _immersive_status_text(room_id, switches, music_state, room_dir)
+        if action in {"on", "off"}:
+            target = action == "on"
+            return _confirm_action(
+                preview=f"将把本房间沉浸配图设为『{'开' if target else '关'}』（无法越过站点总开关）。",
+                apply=lambda: _set_house_rule(
+                    room_dir, "immersive_illustration_enabled", target, room_id,
+                    f"房间沉浸配图已{'开启' if target else '关闭'}",
+                ),
+                assume_yes=_assume_yes(flags),
+                confirm=confirm,
+                prompt="确认修改本房间配图开关?",
+            )
+        if action == "auto" and len(rest) > 1:
+            target = rest[1].lower() in {"on", "enable", "true", "1", "开", "开启"}
+            return _confirm_action(
+                preview=f"将把本房间自动配图设为『{'开' if target else '关'}』。",
+                apply=lambda: _set_house_rule(
+                    room_dir, "immersive_illustration_auto", target, room_id,
+                    f"房间自动配图已{'开启' if target else '关闭'}",
+                ),
+                assume_yes=_assume_yes(flags),
+                confirm=confirm,
+                prompt="确认修改自动配图?",
+            )
+        if action == "now":
+            if not switches["illustration"]:
+                return RoomCommandResult(False, "本房间配图未开启（或站点总开关关闭），请先开启后再生成")
+            scene = " ".join(rest[1:]).strip()[:120] or "房间控制台手动场景"
+            profile = music_state.get("profile") if music_state.get("profile") in PROFILES else settings.get("music_default_profile")
+            intensity = music_state.get("intensity") if music_state.get("intensity") in INTENSITIES else settings.get("music_default_intensity")
+
+            def _apply_now() -> RoomCommandResult:
+                payload = generate_illustration_now(
+                    room_id=str(room_id),
+                    room_dir=room_dir,
+                    settings=settings,
+                    scene=scene,
+                    profile=profile or "daily",
+                    intensity=intensity or "medium",
+                    turn_index=int(music_state.get("turns") or 0),
+                    force=True,
+                    scenario_id=str(info.get("scenario_id") or ""),
+                    house_rules=rules,
+                )
+                return RoomCommandResult(
+                    True,
+                    f"配图完成：{payload.get('scene')}（{payload.get('provider')}）"
+                    + ("· 已降级" if payload.get("degraded") else "")
+                    + f"\n  url={payload.get('url')}",
+                )
+
+            return _confirm_action(
+                preview=f"将立即为本房间生成配图：{scene}（外部服务可能产生费用）。",
+                apply=_apply_now,
+                assume_yes=_assume_yes(flags),
+                confirm=confirm,
+                prompt="确认立即生成本房间配图?",
+            )
+        return RoomCommandResult(False, "Usage: immersive illustration show|on|off|auto <on|off>|now [场景]")
+
+    if sub == "cache":
+        from trpg_server.immersive import scenario_cache
+        from trpg_server.settings import SCENARIOS_DIR
+
+        scenario_id = str(info.get("scenario_id") or "")
+        action = rest[0].lower() if rest else "show"
+        if action in {"show", "stats"}:
+            if not scenario_id:
+                return RoomCommandResult(False, "本房间未关联剧本，无法统计剧本配图缓存")
+            data = scenario_cache.stats(scenario_id, scenarios_dir=SCENARIOS_DIR)
+            rows = data.get("scenarios") or []
+            if not rows:
+                return RoomCommandResult(True, f"剧本 {scenario_id} 暂无配图缓存。")
+            row = rows[0]
+            return RoomCommandResult(
+                True,
+                f"剧本配图缓存（{scenario_id}）：\n"
+                f"  文件 {row.get('files')} 个 / {_human_bytes(int(row.get('bytes') or 0))}"
+                f"（索引内 {row.get('tracked_files')}，未登记 {row.get('untracked_files')}）\n"
+                f"  目录: {row.get('directory')}\n"
+                f"  站点配置: 记录新图 {'开' if switches.get('scenario_record') else '关'} · "
+                f"优先复用 {'开' if switches.get('scenario_prefer') else '关'}",
+            )
+        if action == "clear":
+            if not scenario_id:
+                return RoomCommandResult(False, "本房间未关联剧本，无法清理剧本配图缓存")
+
+            def _apply_room_clear() -> RoomCommandResult:
+                files, size = scenario_cache.clear(scenario_id, scenarios_dir=SCENARIOS_DIR)
+                return RoomCommandResult(True, f"已清理剧本 {scenario_id} 的配图缓存：{files} 个文件 / {_human_bytes(size)}")
+
+            return _confirm_action(
+                preview=f"将删除剧本 {scenario_id} 的全部配图缓存（不可恢复，相关房间历史链接可能失效）。",
+                apply=_apply_room_clear,
+                assume_yes=_assume_yes(flags),
+                confirm=confirm,
+                prompt="确认清理本剧本配图缓存?",
+            )
+        if action == "prune":
+            if not scenario_id:
+                return RoomCommandResult(False, "本房间未关联剧本，无法清理剧本配图缓存")
+
+            def _apply_room_prune() -> RoomCommandResult:
+                files, size = scenario_cache.prune(
+                    scenario_id=scenario_id, settings=settings, scenarios_dir=SCENARIOS_DIR
+                )
+                return RoomCommandResult(True, f"已按配额清理剧本 {scenario_id}：{files} 个文件 / {_human_bytes(size)}")
+
+            return _confirm_action(
+                preview=f"将按站点配额对剧本 {scenario_id} 做 LRU 清理（删除最旧配图，默认预演）。",
+                apply=_apply_room_prune,
+                assume_yes=_assume_yes(flags),
+                confirm=confirm,
+                prompt="确认执行剧本缓存 LRU 清理?",
+            )
+        if action in {"record", "prefer"} and len(rest) > 1:
+            raw = rest[1].lower()
+            if raw in {"inherit", "follow", "跟随", "默认"}:
+                target = None
+            elif raw in {"on", "enable", "true", "1", "开", "开启"}:
+                target = True
+            elif raw in {"off", "disable", "false", "0", "关", "关闭"}:
+                target = False
+            else:
+                return RoomCommandResult(False, "Usage: immersive cache record|prefer <on|off|inherit>")
+            rule_key = "immersive_scenario_record" if action == "record" else "immersive_scenario_prefer"
+            return _confirm_action(
+                preview=f"将把本房间「{'记录到剧本' if action == 'record' else '优先复用剧本图'}」设为『{raw}』（无法越过站点开关）。",
+                apply=lambda: _set_house_rule(
+                    room_dir, rule_key, target, room_id,
+                    f"房间剧本配图{'记录' if action == 'record' else '复用'}设置已更新为 {raw}",
+                ),
+                assume_yes=_assume_yes(flags),
+                confirm=confirm,
+                prompt="确认修改房间剧本配图缓存房规?",
+            )
+        return RoomCommandResult(
+            False,
+            "Usage: immersive cache show|stats|clear|prune|record <on|off|inherit>|prefer <on|off|inherit>",
+        )
+
+    if sub == "director":
+        # 只读：站点级导演配置与预算只能在站点控制台/设置页修改，房间侧不可越权。
+        return _immersive_director_text(settings, music_state)
+
+    if sub == "history":
+        return _immersive_history_text(room_dir, music_state, history_for_room(room_dir))
+
+    return RoomCommandResult(False, "Usage: immersive status|music|illustration|history|director|cache")
+
+
+def _human_bytes(value: int) -> str:
+    number = float(max(0, value))
+    for unit in ("B", "KB", "MB", "GB"):
+        if number < 1024 or unit == "GB":
+            return f"{number:.1f}{unit}" if unit != "B" else f"{int(number)}B"
+        number /= 1024
+    return f"{number:.1f}GB"
+
+
+def _immersive_director_text(settings: dict[str, Any], music_state: dict[str, Any]) -> RoomCommandResult:
+    director_state = music_state.get("director") if isinstance(music_state.get("director"), dict) else {}
+    score = director_state.get("score") if isinstance(director_state.get("score"), dict) else {}
+    if not settings.get("music_director_enabled"):
+        return RoomCommandResult(True, "AI 音乐导演未启用（站点设置可开启）；当前使用规则分析器。")
+    if not director_state:
+        return RoomCommandResult(True, "AI 音乐导演已启用，但本房间尚未产出乐谱；当前使用规则分析器。")
+    sections = score.get("sections") if isinstance(score.get("sections"), list) else []
+    section_index = int(director_state.get("section_index") or 0)
+    current = sections[section_index] if 0 <= section_index < len(sections) else {}
+    return RoomCommandResult(
+        True,
+        "房间 AI 音乐导演（只读）：\n"
+        f"  来源: {director_state.get('platform') or '-'} / {director_state.get('model') or '-'}"
+        f" · 置信 {director_state.get('confidence') or 0} · {'缓存命中' if director_state.get('cached') else '实时生成'}\n"
+        f"  指纹: {director_state.get('fingerprint') or '-'} · 更新于 {director_state.get('at') or '-'}\n"
+        f"  场景: {score.get('scene') or '-'} · 情绪 {score.get('mood') or '-'} · 调式 {score.get('mode') or '-'}"
+        f" · 速度 {score.get('tempo') or '-'} BPM\n"
+        f"  段落: {section_index + 1}/{max(1, len(sections))}"
+        + (f" · {current.get('label') or '-'} · 动态 {current.get('dynamic') or '-'} · {current.get('bars') or '-'} 小节"
+           if current else "")
+        + "\n  提示：站点级开关/预算/缓存请在站点控制台 `immersive director` 操作。",
+    )
+
+
+def _immersive_status_text(
+    room_id: Any,
+    switches: dict[str, bool],
+    music_state: dict[str, Any],
+    room_dir: Path,
+) -> RoomCommandResult:
+    from trpg_server.immersive.illustration import history_for_room
+
+    history = history_for_room(room_dir, limit=3)
+    lines = [
+        f"房间 {room_id} 沉浸状态：",
+        f"  配乐: {'开' if switches.get('music') else '关'} · "
+        f"{music_state.get('profile') or '-'} / {music_state.get('intensity') or '-'} · 第 {music_state.get('section') or 0} 段 · "
+        f"回合 {music_state.get('turns') or 0}",
+        f"  配图: {'开' if switches.get('illustration') else '关'} · 自动 {'开' if switches.get('illustration_auto') else '关'} · "
+        f"历史 {len(history)} 条（显示最近 3 条）",
+    ]
+    for item in history:
+        lines.append(
+            f"    {item.get('created_at') or '-'} · {item.get('scene') or '-'} · "
+            f"{item.get('provider') or '-'} · degraded={bool(item.get('degraded'))}"
+        )
+    return RoomCommandResult(True, "\n".join(lines))
+
+
+def _immersive_history_text(
+    room_dir: Path,
+    music_state: dict[str, Any],
+    illustration_history: list[dict[str, Any]],
+) -> RoomCommandResult:
+    lines = ["本房间配乐历史："]
+    music_history = music_state.get("history") if isinstance(music_state.get("history"), list) else []
+    if not music_history:
+        lines.append("  （暂无记录）")
+    for item in music_history[-8:]:
+        if isinstance(item, dict):
+            lines.append(
+                f"  {item.get('at') or '-'} · {item.get('profile') or '-'} / {item.get('intensity') or '-'} "
+                f"· 第 {item.get('section') or 0} 段 · {item.get('reason') or '-'}"
+            )
+    lines.append("本房间配图历史：")
+    if not illustration_history:
+        lines.append("  （暂无记录）")
+    for item in illustration_history[-8:]:
+        lines.append(
+            f"  {item.get('created_at') or '-'} · {item.get('scene') or '-'} · "
+            f"{item.get('provider') or '-'} · turn={item.get('turn')} · degraded={bool(item.get('degraded'))}"
+        )
     return RoomCommandResult(True, "\n".join(lines))
 
 

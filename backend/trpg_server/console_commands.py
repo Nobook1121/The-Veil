@@ -29,6 +29,7 @@ from trpg_server.character_ai import (
     run_character_generation,
     scenario_context_from_record,
 )
+from trpg_server.immersive_admin import handle_immersive_command
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.narrative_admin import handle_narrative_command
 from trpg_server.scenario_admin import (
@@ -229,6 +230,15 @@ def execute_console_command(
         )
         return _log_result(ConsoleCommandResult(ok, text))
 
+    if domain == "immersive":
+        ok, text = handle_immersive_command(
+            parts[1:],
+            confirm=confirm,
+            rooms_dir=rooms_dir,
+            config_dir=(app.config.get("CONFIG_DIR") if app is not None else None),
+        )
+        return _log_result(ConsoleCommandResult(ok, text))
+
     if domain == "vector" and subcommand:
         if subcommand == "health":
             return _log_result(_vector_health_command(vector_store, embedding_provider, ocr_provider))
@@ -373,6 +383,20 @@ def command_help_text() -> str:
             "  dice pending [room_id]                           （列出等待玩家投掷的请求）",
             "  dice textures                                    （贴图资产、桌面皮肤与骰子皮肤概览）",
             "  dice skin delete <skin_id> [--yes]               （删除骰子皮肤；--yes 跳过确认）",
+            "  immersive status [json]                          （实时配乐/配图/导演开关、平台、预算与用量）",
+            "  immersive on|off / music on|off / illustration on|off [--yes]",
+            "                                                   （站点级沉浸总开关与子开关）",
+            "  immersive illustration provider <procedural|platform> [--yes]",
+            "  immersive illustration budget/cap/min-turns/concurrency/timeout <n> [--yes]",
+            "  immersive platform [list|show|use|enable|disable|delete|key|test|migrate]",
+            "                                                   （生图模型平台表：默认平台、密钥、探测）",
+            "  immersive director [on|off|platform|model|interval|budget|ttl|min-confidence|fallback|cache]",
+            "                                                   （AI 音乐导演：开关、模型、预算、缓存）",
+            "  immersive key set <api_key>|clear [--yes]        （写入默认平台密钥；缺省预演，不回显）",
+            "  immersive test [--yes]                           （探测默认生图平台，可能产生费用）",
+            "  immersive scenario [record|prefer|quota|max-image|overflow|stats|clear|prune]",
+            "                                                   （剧本配图缓存：开关、配额、统计与清理；破坏性命令默认预演）",
+            "  immersive cache clear [--yes] / immersive room reset <room_id> [--yes]",
             "  network status / network test                    （网络状态 / 连通性测试）",
             "  config show [--section <name>]                   （查看生效配置与部署锁定来源）",
             "  config migrate [--yes]                           （遗留 JSON 并入 general.toml，原文件改名 .legacy）",

@@ -53,6 +53,10 @@ body.theme-coc {
     /* 左右侧栏不透明度：同样在个人设置里单独调节；左侧默认更透，让左侧的触手能透出来。 */
     --theme-sidebar-alpha: 0.5;
     --theme-rail-alpha: 0.7;
+    /* 世界意志遮罩：半透明 + 背景模糊。由「个人设置 → 网站设置」调节，
+       默认值让背后的深渊场景隐约可见，同时保证弹窗文字对比度。 */
+    --theme-veil-alpha: 0.55;
+    --theme-veil-blur: 10px;
     --theme-chat-other-bg: rgba(20, 17, 25, var(--theme-chat-alpha));
     --theme-chat-other-text: var(--theme-text-primary);
     --theme-chat-player-bg: rgba(90, 43, 44, calc(var(--theme-chat-alpha) + 0.1));

@@ -30,6 +30,8 @@ interface BgmRoomPlaylistOptions {
 interface TrpgBgmApi {
     init: () => void;
     setRoom: (room: Room | null) => void;
+    /** 沉浸配乐播放时压低 BGM；传入 false 恢复原音量。 */
+    setDuck: (ducked: boolean) => void;
     refresh: () => void;
     getPersonalSettings: () => BgmPersonalSettings;
     savePersonalSettings: (settings: Partial<BgmPersonalSettings>) => BgmPersonalSettings;

@@ -39,6 +39,7 @@ from trpg_server.agents.narrative.prompt_v2 import render_state_summary
 from trpg_server.agents.narrative.prejudge import prepare_turn, render_contract, retrieval_candidates
 from trpg_server.agents.narrative.runtime import NarrativeRuntime, NarrativeRuntimeError, narrative_available
 from trpg_server.agents.narrative.runtime_settings import log_bypass_once, resolve_narrative_settings
+from trpg_server.immersive.service import on_narrative_turn
 from trpg_server.agents.narrative.state_store import narrative_from_room_state
 from trpg_server.agents.narrative.store import NarrativeStoreError, load_bundle
 from trpg_server.agents.narrative.trace import append_trace
@@ -1318,6 +1319,30 @@ def chat():
         if scenario_start and agent_context.room_dir and not scenario_started_at:
             scenario_started_at = _mark_scenario_started(agent_context.room_dir, session.get("user_id"))
             logger.info("scenario_started room_id=%s user_id=%s", room_id, session.get("user_id"))
+
+        # 沉浸系统：把本次叙事交给配乐导演与配图队列。该调用永不抛错、不阻塞响应；
+        # 关闭开关或未配置时直接跳过，不影响既有叙事链路。
+        if room_id and agent_context.room_dir:
+            try:
+                on_narrative_turn(
+                    room_id=str(room_id),
+                    room_dir=agent_context.room_dir,
+                    house_rules=house_rules,
+                    text=ai_response,
+                    structured=(
+                        {
+                            "next_scene": structured.next_scene,
+                            "triggered_files": structured.triggered_files,
+                        }
+                        if structured
+                        else None
+                    ),
+                    state=projected_state,
+                    scenario_id=str((agent_context.room_info() or {}).get("scenario_id") or ""),
+                    config_dir=current_app.config.get("CONFIG_DIR"),
+                )
+            except Exception:  # noqa: BLE001 - 沉浸增强不能影响主流程
+                logger.exception("immersive turn hook failed room=%s", room_id)
 
         return success_response(
             message=None,

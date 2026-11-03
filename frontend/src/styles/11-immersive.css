@@ -1,0 +1,574 @@
+/* 实时沉浸系统：场景画面面板、配乐开关、历史缩略图与大图查看 */
+#immersiveStage {
+    --immersive-radius: 14px;
+    position: relative;
+    margin: 0 0 14px;
+    border-radius: var(--immersive-radius);
+    overflow: hidden;
+    background: radial-gradient(circle at 30% 20%, rgba(38, 46, 62, 0.92), rgba(9, 12, 18, 0.96));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 10px 28px rgba(4, 6, 10, 0.35);
+    color: #eef2f8;
+}
+
+#immersiveStage[hidden] {
+    display: none !important;
+}
+
+#immersiveStage .immersive-stage-head {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(12, 17, 26, 0.72);
+}
+
+#immersiveStage .immersive-stage-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+}
+
+#immersiveStage .immersive-stage-kicker {
+    font-size: 0.62rem;
+    letter-spacing: 0.16em;
+    color: rgba(150, 178, 214, 0.75);
+}
+
+#immersiveStage .immersive-stage-heading strong {
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+#immersiveStage .immersive-stage-heading-music {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.74rem;
+    color: rgba(206, 220, 240, 0.66);
+}
+
+#immersiveStage .immersive-stage-frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    max-height: min(34vh, 320px);
+    min-height: 150px;
+    overflow: hidden;
+    background: #0a0d13;
+}
+
+#immersiveStage .immersive-stage-image {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 420ms ease;
+    cursor: zoom-in;
+    outline: none;
+}
+
+#immersiveStage .immersive-stage-image.is-visible {
+    opacity: 1;
+}
+
+#immersiveStage .immersive-stage-image:focus-visible {
+    box-shadow: inset 0 0 0 3px rgba(120, 180, 255, 0.7);
+}
+
+#immersiveStage .immersive-stage-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 16px;
+    text-align: center;
+    background:
+        radial-gradient(circle at 50% 40%, rgba(72, 96, 132, 0.28), transparent 62%),
+        linear-gradient(160deg, rgba(22, 28, 40, 0.9), rgba(8, 10, 16, 0.96));
+    color: rgba(226, 234, 246, 0.72);
+    font-size: 0.92rem;
+}
+
+#immersiveStage .immersive-stage-placeholder[hidden] {
+    display: none;
+}
+
+#immersiveStage .immersive-stage-placeholder.is-loading::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.08) 50%, transparent 80%);
+    transform: translateX(-100%);
+    animation: immersive-shimmer 1.8s ease-in-out infinite;
+}
+
+#immersiveStage .immersive-stage-placeholder.is-error {
+    color: rgba(255, 196, 186, 0.9);
+}
+
+@keyframes immersive-shimmer {
+    to { transform: translateX(100%); }
+}
+
+#immersiveStage .immersive-stage-overlay {
+    position: absolute;
+    inset: auto 0 0 0;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 34px 12px 10px;
+    background: linear-gradient(to top, rgba(4, 6, 10, 0.88), rgba(4, 6, 10, 0.28) 55%, transparent);
+    pointer-events: none;
+}
+
+#immersiveStage .immersive-stage-scene {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.86rem;
+    letter-spacing: 0.02em;
+    color: rgba(236, 242, 250, 0.92);
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+#immersiveStage .immersive-stage-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
+    pointer-events: auto;
+}
+
+#immersiveStage .immersive-stage-actions button {
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 999px;
+    padding: 4px 11px;
+    font-size: 0.76rem;
+    line-height: 1.4;
+    color: rgba(240, 246, 255, 0.9);
+    background: rgba(12, 16, 24, 0.72);
+    backdrop-filter: blur(8px);
+    cursor: pointer;
+    transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+#immersiveStage .immersive-stage-actions button:hover {
+    background: rgba(52, 74, 108, 0.82);
+    border-color: rgba(140, 184, 255, 0.55);
+    color: #fff;
+}
+
+#immersiveStage .immersive-stage-actions button[data-muted="true"] {
+    color: rgba(255, 214, 150, 0.92);
+    border-color: rgba(255, 196, 96, 0.5);
+}
+
+#immersiveStage .immersive-stage-actions button:disabled {
+    opacity: 0.6;
+    cursor: progress;
+}
+
+#immersiveStage .immersive-stage-status {
+    position: absolute;
+    top: 10px;
+    left: 12px;
+    max-width: min(72%, 520px);
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    color: rgba(228, 236, 248, 0.9);
+    background: rgba(10, 14, 22, 0.7);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+#immersiveStage .immersive-stage-status[hidden] {
+    display: none;
+}
+
+#immersiveStage .immersive-stage-status[data-level="pending"] {
+    color: rgba(170, 210, 255, 0.95);
+}
+
+#immersiveStage .immersive-stage-status[data-level="warning"] {
+    color: rgba(255, 212, 138, 0.95);
+    border-color: rgba(255, 196, 96, 0.35);
+}
+
+#immersiveStage .immersive-stage-status[data-level="error"] {
+    color: rgba(255, 188, 180, 0.95);
+    border-color: rgba(255, 140, 130, 0.35);
+}
+
+#immersiveStage .immersive-stage-caption {
+    padding: 8px 12px 2px;
+    font-size: 0.78rem;
+    color: rgba(214, 224, 238, 0.72);
+    min-height: 0;
+}
+
+#immersiveStage .immersive-stage-caption:empty {
+    display: none;
+}
+
+#immersiveStage .immersive-history {
+    display: flex;
+    gap: 8px;
+    padding: 8px 12px 10px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+
+#immersiveStage .immersive-history[hidden] {
+    display: none;
+}
+
+#immersiveStage .immersive-history-thumb {
+    flex: 0 0 auto;
+    width: 88px;
+    height: 50px;
+    padding: 0;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(10, 14, 20, 0.8);
+    cursor: zoom-in;
+    transition: border-color 160ms ease, transform 160ms ease;
+}
+
+#immersiveStage .immersive-history-thumb:hover {
+    border-color: rgba(140, 184, 255, 0.6);
+    transform: translateY(-1px);
+}
+
+#immersiveStage .immersive-history-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* 大图查看：与对话框一致，不用原生 alert/confirm */
+.immersive-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 1090;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(3, 5, 9, 0.82);
+    backdrop-filter: blur(6px);
+    animation: immersive-fade-in 180ms ease;
+}
+
+@keyframes immersive-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.immersive-lightbox figure {
+    margin: 0;
+    max-width: min(1100px, 94vw);
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.immersive-lightbox img {
+    max-width: 100%;
+    max-height: 78vh;
+    object-fit: contain;
+    border-radius: 12px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+    background: #0a0d13;
+}
+
+.immersive-lightbox figcaption {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    text-align: center;
+    font-size: 0.86rem;
+    color: rgba(230, 238, 248, 0.82);
+}
+
+.immersive-lightbox-actions {
+    display: inline-flex;
+    gap: 6px;
+}
+
+.immersive-lightbox-actions button {
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 0.78rem;
+    color: rgba(240, 246, 255, 0.9);
+    background: rgba(12, 16, 24, 0.72);
+    cursor: pointer;
+}
+
+.immersive-lightbox-actions button:hover {
+    background: rgba(52, 74, 108, 0.82);
+    border-color: rgba(140, 184, 255, 0.55);
+    color: #fff;
+}
+
+/* 灯箱打开时锁住底层滚动，关闭后恢复，避免滚轮穿透与滚动位置漂移。 */
+body.immersive-lightbox-open {
+    overflow: hidden;
+}
+
+.immersive-lightbox-close {
+    position: absolute;
+    top: max(14px, env(safe-area-inset-top));
+    right: max(16px, env(safe-area-inset-right));
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    background: rgba(14, 18, 26, 0.78);
+    color: #fff;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.immersive-lightbox-close:hover {
+    background: rgba(52, 74, 108, 0.9);
+}
+
+.immersive-provider-fields[hidden],
+.immersive-platform-panel[hidden],
+.immersive-platform-editor[hidden] {
+    display: none !important;
+}
+
+/* 生图模型平台配置：多条目列表 + 内联编辑器（管理员） */
+.immersive-platform-panel {
+    padding: 10px 12px 12px;
+    border: 1px solid var(--border-color, rgba(127, 127, 127, 0.24));
+    border-radius: 10px;
+    background: var(--surface-muted, rgba(127, 127, 127, 0.06));
+}
+
+.immersive-platform-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 260px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+.immersive-platform-card {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color, rgba(127, 127, 127, 0.2));
+    border-radius: 8px;
+    background: var(--surface-base, rgba(255, 255, 255, 0.03));
+    transition: border-color 160ms ease, background 160ms ease;
+}
+
+.immersive-platform-card:hover {
+    border-color: rgba(120, 150, 200, 0.55);
+}
+
+.immersive-platform-card.is-active {
+    border-color: rgba(96, 148, 224, 0.8);
+    background: rgba(96, 148, 224, 0.08);
+}
+
+.immersive-platform-card-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.immersive-platform-card .badge {
+    font-weight: 500;
+}
+
+.immersive-platform-editor {
+    padding: 10px 12px 12px;
+    border: 1px dashed var(--border-color, rgba(127, 127, 127, 0.3));
+    border-radius: 8px;
+}
+
+#immersivePlatformKeyStatus[data-level="success"] {
+    color: #3c9a6b;
+}
+
+#immersivePlatformKeyStatus[data-level="warning"] {
+    color: #c58a1c;
+}
+
+#immersiveDirectorStatus {
+    white-space: pre-wrap;
+}
+
+.immersive-settings-note {
+    font-size: 0.82rem;
+}
+
+.immersive-settings-note[data-level="error"] {
+    color: #d9534f;
+}
+
+.immersive-settings-note[data-level="success"] {
+    color: #3c9a6b;
+}
+
+#immersiveSecretStatus[data-level="success"] {
+    color: #3c9a6b;
+}
+
+#immersiveSecretStatus[data-level="warning"] {
+    color: #c58a1c;
+}
+
+/* 右侧栏停靠态：分区铺满侧栏，不再做成浮起的小卡片；窄列用 4:3 画幅。 */
+.immersive-sidebar-stage-host #immersiveStage {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+    color: var(--color-text);
+}
+
+.immersive-sidebar-stage-host #immersiveStage .immersive-stage-head {
+    background: transparent;
+    border-bottom-color: var(--border-subtle);
+}
+
+.immersive-sidebar-stage-host #immersiveStage .immersive-stage-kicker {
+    color: var(--color-muted);
+}
+
+.immersive-sidebar-stage-host #immersiveStage .immersive-stage-heading-music {
+    color: var(--color-muted);
+}
+
+.immersive-sidebar-stage-host #immersiveStage .immersive-stage-frame {
+    aspect-ratio: 4 / 3;
+    max-height: min(26vh, 240px);
+    min-height: 118px;
+}
+
+.immersive-sidebar-stage-host #immersiveStage .immersive-stage-overlay {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 22px 8px 8px;
+}
+
+.immersive-sidebar-stage-host #immersiveStage .immersive-stage-scene {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    font-size: 0.78rem;
+}
+
+.immersive-sidebar-stage-host #immersiveStage .immersive-stage-actions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.immersive-sidebar-stage-host #immersiveStage .immersive-stage-actions button {
+    padding: 3px 8px;
+    font-size: 0.72rem;
+}
+
+.immersive-sidebar-stage-host #immersiveStage .immersive-stage-caption {
+    padding: 6px 10px 2px;
+    font-size: 0.74rem;
+}
+
+.immersive-sidebar-stage-host #immersiveStage .immersive-history {
+    flex-wrap: wrap;
+    padding: 6px 10px 10px;
+    overflow: visible;
+}
+
+.immersive-sidebar-stage-host #immersiveStage .immersive-history-thumb {
+    width: 64px;
+    height: 42px;
+}
+
+@media (max-width: 767.98px) {
+    #immersiveStage {
+        border-radius: 12px;
+    }
+
+    #immersiveStage .immersive-stage-frame {
+        aspect-ratio: 4 / 3;
+        max-height: 42vh;
+        min-height: 132px;
+    }
+
+    #immersiveStage .immersive-stage-overlay {
+        padding: 28px 10px 8px;
+    }
+
+    #immersiveStage .immersive-stage-actions button {
+        padding: 3px 9px;
+        font-size: 0.72rem;
+    }
+
+    #immersiveStage .immersive-stage-scene {
+        font-size: 0.78rem;
+    }
+
+    .immersive-lightbox {
+        padding: 12px;
+    }
+
+    .immersive-lightbox figure {
+        max-width: 96vw;
+        max-height: 92dvh;
+    }
+
+    .immersive-lightbox img {
+        max-height: 72dvh;
+    }
+
+    .immersive-lightbox figcaption {
+        gap: 8px;
+        font-size: 0.8rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #immersiveStage .immersive-stage-image,
+    #immersiveStage .immersive-history-thumb,
+    .immersive-lightbox {
+        transition: none;
+        animation: none;
+    }
+
+    #immersiveStage .immersive-stage-placeholder.is-loading::after {
+        animation: none;
+    }
+}

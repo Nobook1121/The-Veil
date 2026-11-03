@@ -421,6 +421,20 @@ narrative unlock <edge|location> [--yes]（手动跳过条件门控，破坏性�
 narrative guard <off|shadow|enforce> [--yes]（切换本房间护栏模式）
 narrative profile <graph|degraded> [--yes]（切换本房间能力档）
 narrative rebuild-state [--yes]（从关键帧+账本重放恢复运行态，破坏性）
+immersive                   （等同 immersive status：本房间配乐/配图状态与历史）
+immersive status            （本房间生效的开关、当前档位/段落与最近配图）
+immersive music show|on|off [--yes]（查看或收紧本房间配乐开关）
+immersive music auto <on|off> [--yes]（本房间是否随剧情自动切歌）
+immersive music set <profile> <intensity> [--yes]（手动切到指定档位/强度）
+immersive illustration show|on|off [--yes]（查看或收紧本房间配图开关）
+immersive illustration auto <on|off> [--yes]（本房间是否随剧情自动配图）
+immersive illustration now [场景描述] [--yes]（立即生成本房间配图，可能产生费用）
+immersive cache show|stats  （本剧本配图缓存文件数/体积与生效开关）
+immersive cache record|prefer <on|off|inherit> [--yes]（房间级收紧剧本缓存，不能越过站点开关）
+immersive cache prune [--yes]（按站点配额 LRU 清理本剧本缓存，默认预演）
+immersive cache clear [--yes]（删除本剧本全部配图缓存，默认预演）
+immersive history           （本房间配乐切换与配图历史）
+immersive director          （只读查看 AI 音乐导演最近采用的乐谱、指纹与段落；不可在房间内修改）
 ```
 
 `dice animation set` / `dice player-roll` / `dice reroll` / `dice reroll-limit` 只写入本房间的房规
@@ -439,6 +453,75 @@ narrative rebuild-state [--yes]（从关键帧+账本重放恢复运行态，破
 
 成员的 `kick` / `promote` 只调整**房间内角色**（`owner` / `admin` / `member`）：不能提升为房间
 所有者，也不会授予网站级 `ADMIN` / `OWNER`，更不复用网站控制台的 `user promote` 实现。
+
+## 实时沉浸（配乐 / 配图）
+
+站点级命令作用于所有房间；房间内请用房间控制台，避免越权。
+
+```text
+immersive status [json]                 查看总开关、配乐/配图、默认平台、导演与今日用量
+immersive on|off [--yes]                站点沉浸总开关
+immersive music                        配乐设置概览
+immersive music on|off [--yes]          站点配乐开关
+immersive music auto <on|off> [--yes]   是否随叙事自动切歌
+immersive music volume <0-100> [--yes]  默认音量
+immersive music crossfade <500-10000> [--yes] 换段交叉淡入毫秒
+immersive music hysteresis <0-10> [--yes]     切换滞回回合
+immersive music seed <seed>|clear [--yes]     固定可复现的音乐种子
+immersive illustration                 配图设置概览
+immersive illustration on|off [--yes]  站点配图开关
+immersive illustration auto <on|off> [--yes]  是否随叙事自动配图
+immersive illustration provider <procedural|platform> [--yes]
+immersive illustration timeout <20-600> [--yes]
+immersive illustration concurrency <1-4> [--yes]
+immersive illustration budget <n> [--yes]     每日提交上限（0=不限）
+immersive illustration cap <n> [--yes]        单房间每小时上限（0=不限）
+immersive illustration min-turns <1-50> [--yes] 自动配图最小间隔回合
+immersive scenario                            剧本配图缓存概览（文件数/体积/策略）
+immersive scenario record <on|off> [--yes]    是否把新生成图写入剧本目录（默认关）
+immersive scenario prefer <on|off> [--yes]    游玩时是否优先复用剧本图（默认开）
+immersive scenario quota <MB> [--yes]         单剧本容量上限（0=不限，默认 256）
+immersive scenario max-image <MB> [--yes]     单张写入剧本的图片上限（默认 8）
+immersive scenario overflow <lru|reject> [--yes] 超限策略（默认 lru）
+immersive scenario stats [scenario_id]        查看缓存文件数/体积（含未登记旧文件）
+immersive scenario clear [scenario_id] [--yes] 删除缓存与索引（默认 dry-run）
+immersive scenario prune [scenario_id] [--yes] 按配额做 LRU 清理（默认 dry-run）
+immersive platform                            列出生图平台表（密钥只回掩码）
+immersive platform show <id>                  查看单条平台
+immersive platform use <id> [--yes]           设为默认生图平台（并把来源切到 platform）
+immersive platform enable|disable <id> [--yes] 启用/停用平台
+immersive platform delete <id> [--yes]        删除平台及其密钥（破坏性，默认预演）
+immersive platform key <id> set <key>|clear [--yes] 轮换/清除密钥（敏感，不回显）
+immersive platform test <id> [--no-generate] [--yes] 先列模型，必要时做一次最小生图探测
+immersive platform migrate [--yes]            把旧单条配置一次性迁移为平台条目
+immersive director                            导演概览（开关、平台/模型、预算、缓存）
+immersive director on|off [--yes]             导演开关
+immersive director platform <id>|clear [--yes] 导演使用的 AI 平台（空=默认平台）
+immersive director model <name>|clear [--yes]  导演模型（空=平台默认）
+immersive director interval <1-20> [--yes]    每 N 回合尝试一次
+immersive director budget <n> [--yes]         每日调用预算（0=不限）
+immersive director ttl <0-86400> [--yes]      乐谱缓存 TTL 秒（0=不复用）
+immersive director min-confidence <0-100> [--yes] 低于该值回退规则分析器
+immersive director fallback <rule|hold> [--yes] 失败回退策略
+immersive director cache [clear] [--yes]      查看 / 清理乐谱缓存
+immersive key set <api_key>|clear [--yes]     写入默认平台密钥（兼容旧命令，默认预演）
+immersive test [--yes]                        探测默认生图平台（可能产生费用）
+immersive usage                               今日外部生图与导演用量
+immersive cache clear [--yes]                 清理图片缓存与用量
+immersive room status <room_id>               查看单房间沉浸状态
+immersive room reset <room_id> [--yes]        清除单房间沉浸状态与历史
+```
+
+默认 `procedural` 使用本地确定性 SVG，不联网、无版权风险。切换到 `platform` 后，
+外部生图只认「生图模型平台表」：每条形如 `config/imageplatform/<id>.json`，密钥单独存放
+在运行时目录，列表只回掩码。旧的 `illustration_base_url/model/size/api_key` 已弃用，
+仅在首次打开设置页或执行 `immersive platform migrate` 时迁移一次，之后运行期只读平台表。
+未配置、超时、预算耗尽或上游报错都会自动回落到程序化图，并在日志与回报中带有
+`degraded` 与原因，不阻塞叙事。
+
+`immersive director` 只影响「后台精修」：规则分析器始终先广播并播放，导演乐谱必须通过
+严格 schema 校验才会被采用；非法、超时、低置信、预算耗尽都会按 `fallback` 回退，
+不会阻塞叙事流或音频播放。房间控制台仅提供 `immersive director` 只读查看。
 
 ## 网络、存档与备份
 

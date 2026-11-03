@@ -775,13 +775,30 @@ body.theme-coc .profile-role-chip {
    再叠加 .world-override-veil 里的法阵，让「改写世界」读起来是一场仪式。
    -------------------------------------------------------------------------- */
 body.theme-coc .modal-backdrop.world-override-backdrop {
-    /* 比默认遮罩更透一点：幕后的触手与符文仍然隐约可见，不至于全屏死黑。 */
-    background-color: rgba(2, 6, 9, 0.56) !important;
+    /*
+     * Bootstrap 5.3 把遮罩放在 1050、弹窗放在 1055；法阵层固定 1049。
+     * 若不把遮罩压到 1040，法阵会落到模糊层后面，被整屏 backdrop-filter 糊掉。
+     */
+    z-index: 1040 !important;
+    /* 遮罩自带的 .show 只有 0.5 透明度，会把配置的不透明度再砍半，这里改成 1。 */
+    background-color: rgba(2, 6, 9, var(--theme-veil-alpha, 0.55)) !important;
     background-image:
-        radial-gradient(ellipse 76% 46% at 50% 104%, rgba(46, 132, 124, 0.34), transparent 68%),
-        radial-gradient(ellipse 56% 44% at 50% 60%, rgba(199, 162, 92, 0.16), transparent 72%),
-        linear-gradient(180deg, rgba(3, 9, 12, 0.72), rgba(1, 3, 5, 0.86));
-    backdrop-filter: blur(5px) saturate(1.05) !important;
+        radial-gradient(ellipse 76% 46% at 50% 104%, rgba(46, 132, 124, 0.3), transparent 68%),
+        radial-gradient(ellipse 56% 44% at 50% 60%, rgba(199, 162, 92, 0.14), transparent 72%);
+    -webkit-backdrop-filter: blur(var(--theme-veil-blur, 10px)) saturate(1.05) !important;
+    backdrop-filter: blur(var(--theme-veil-blur, 10px)) saturate(1.05) !important;
+}
+
+/* 淡入结束时不再被 Bootstrap 的 0.5 透明度减半。 */
+body.theme-coc .modal-backdrop.world-override-backdrop.show {
+    opacity: 1 !important;
+}
+
+/* 不支持 backdrop-filter 的浏览器：退回更实的暗色遮罩，文字对比度不受影响。 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    body.theme-coc .modal-backdrop.world-override-backdrop {
+        background-color: rgba(2, 6, 9, min(0.94, calc(var(--theme-veil-alpha, 0.55) + 0.3))) !important;
+    }
 }
 
 /* 比默认弹窗略宽一点，让「改写世界」这句话有足够的呼吸空间。 */

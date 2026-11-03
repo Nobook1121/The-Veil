@@ -59,6 +59,14 @@ HOUSE_RULE_DEFINITIONS = {
     "bgm_urls": {"type": "url_list", "default": [], "max_items": 20, "ai_prompt": False},
     # 播放模式：列表循环 / 单曲循环 / 随机播放。
     "bgm_mode": {"type": "enum", "default": "list", "values": ["list", "single", "shuffle"], "ai_prompt": False},
+    # 实时沉浸：房间级开关。null 表示跟随管理员默认；房间只能「关」，不能越过站点总开关重开。
+    "immersive_music_enabled": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
+    "immersive_music_auto_switch": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
+    "immersive_illustration_enabled": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
+    "immersive_illustration_auto": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
+    # 剧本配图缓存：房间只能收紧（关闭/不优先），不能越过站点的「记录/优先复用」开关。
+    "immersive_scenario_record": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
+    "immersive_scenario_prefer": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
     # 技能基础值覆盖表：键为技能键（带专精时为 `skillKey.specialtyKey`），值为 0-99 整数。
     # 留空表示沿用下一优先级（用户个性化 > 管理员设置 > 技能目录默认值）。
     "skill_bases": {"type": "skill_bases", "default": {}, "ai_prompt": False},

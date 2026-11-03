@@ -740,6 +740,8 @@ async function enterRoom(room: Room): Promise<void> {
     window.currentRoom = currentRoom;
     // 只有进入房间后才会启用该房间的背景音乐（离开房间时清空）。
     window.TrpgBgm?.setRoom(room);
+    // 实时配乐/配图同样按房间作用域恢复：读取上次段落与最近场景图。
+    window.TrpgImmersive?.setRoom(room);
     // 房间规则优先级最高：切换房间后重建技能基础值，使新房规即时生效。
     void window.COC7CharacterSheet?.reloadSkillBases?.();
     window.restoreThinkingState?.();
@@ -1214,6 +1216,21 @@ function readHouseRuleDiceThreshold(elementId: string): number | null {
     return Math.max(0, Math.min(100, value));
 }
 
+/** 沉浸房规三态布尔：留空（""）表示跟随管理员设置，on/off 为房间显式覆盖。 */
+function readHouseRuleNullableBoolean(elementId: string): boolean | null {
+    const select = document.getElementById(elementId) as HTMLSelectElement | null;
+    const value = select?.value || "";
+    if (value === "on") return true;
+    if (value === "off") return false;
+    return null;
+}
+
+function setHouseRuleNullableBoolean(elementId: string, value: boolean | null | undefined): void {
+    const select = document.getElementById(elementId) as HTMLSelectElement | null;
+    if (!select) return;
+    select.value = value === null || value === undefined ? "" : value ? "on" : "off";
+}
+
 /** 房规弹窗里的世界意志白名单：列出房间内所有成员，按 user_id 预选。 */
 function renderHouseRuleWorldOverrideMembers(selectedIds: string[]): void {
     const select = document.getElementById("houseRuleWorldOverrideUsers") as HTMLSelectElement | null;
@@ -1296,6 +1313,13 @@ async function openHouseRulesModal(): Promise<void> {
                 ? response.data.house_rules.world_override_user_ids.map((item) => String(item))
                 : [],
         );
+        // 沉浸房规：三态选择，留空跟随管理员设置；房间只能收紧开关，不能越过站点总开关。
+        setHouseRuleNullableBoolean("houseRuleImmersiveMusic", response.data.house_rules?.immersive_music_enabled);
+        setHouseRuleNullableBoolean("houseRuleImmersiveMusicAuto", response.data.house_rules?.immersive_music_auto_switch);
+        setHouseRuleNullableBoolean("houseRuleImmersiveIllustration", response.data.house_rules?.immersive_illustration_enabled);
+        setHouseRuleNullableBoolean("houseRuleImmersiveIllustrationAuto", response.data.house_rules?.immersive_illustration_auto);
+        setHouseRuleNullableBoolean("houseRuleImmersiveScenarioRecord", response.data.house_rules?.immersive_scenario_record);
+        setHouseRuleNullableBoolean("houseRuleImmersiveScenarioPrefer", response.data.house_rules?.immersive_scenario_prefer);
         if (animationHint) {
             const defaultsAnim = response.data.dice_animation_defaults;
             const effective = response.data.dice_animation;
@@ -1343,6 +1367,13 @@ async function saveHouseRules(): Promise<void> {
                 // 世界意志直执行：房间开关 + 额外允许使用的成员白名单。
                 world_override_enabled: worldOverrideEnabled ? worldOverrideEnabled.checked : true,
                 world_override_user_ids: worldOverrideUserIds,
+                // 沉浸房规：null 表示跟随管理员设置；房间级关闭始终优先。
+                immersive_music_enabled: readHouseRuleNullableBoolean("houseRuleImmersiveMusic"),
+                immersive_music_auto_switch: readHouseRuleNullableBoolean("houseRuleImmersiveMusicAuto"),
+                immersive_illustration_enabled: readHouseRuleNullableBoolean("houseRuleImmersiveIllustration"),
+                immersive_illustration_auto: readHouseRuleNullableBoolean("houseRuleImmersiveIllustrationAuto"),
+                immersive_scenario_record: readHouseRuleNullableBoolean("houseRuleImmersiveScenarioRecord"),
+                immersive_scenario_prefer: readHouseRuleNullableBoolean("houseRuleImmersiveScenarioPrefer"),
             },
             visibility: visibilitySelect?.value || "private",
         });
@@ -1355,6 +1386,8 @@ async function saveHouseRules(): Promise<void> {
         if (response.data.dice_thresholds) currentRoom.dice_thresholds = response.data.dice_thresholds;
         if (response.data.dice_animation) currentRoom.dice_animation = response.data.dice_animation;
         window.TrpgBgm?.setRoom(currentRoom);
+        // 房规变化会改变房间级沉浸开关，重新拉取生效状态（不重置当前画面）。
+        window.TrpgImmersive?.refreshState?.();
         updateRoomDetail(currentRoom);
         void window.COC7CharacterSheet?.reloadSkillBases?.();
         bootstrap.Modal.getInstance(document.getElementById("roomHouseRulesModal"))?.hide();
@@ -1630,6 +1663,7 @@ async function deleteCurrentRoom(): Promise<void> {
         currentRoom = null;
         window.currentRoom = null;
         window.TrpgBgm?.setRoom(null);
+        window.TrpgImmersive?.setRoom(null);
         window.TrpgCombat?.onRoomChanged();
         window.TrpgWorldOverride?.refresh(null);
         TrpgCookies.remove(getLastRoomStorageKey());
@@ -1784,6 +1818,7 @@ function clearCurrentRoom(): void {
     currentRoom = null;
     window.currentRoom = null;
     window.TrpgBgm?.setRoom(null);
+    window.TrpgImmersive?.setRoom(null);
     window.TrpgDiceTable?.onRoomChanged();
     window.TrpgCombat?.onRoomChanged();
     window.TrpgWorldOverride?.refresh(null);

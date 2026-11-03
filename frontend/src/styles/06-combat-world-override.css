@@ -377,7 +377,9 @@
     font-size: 0.78rem;
 }
 
-/* 世界意志：输入框旁的入口与一句话执行弹窗 */
+/* --------------------------------------------------------------------------
+   世界意志：输入框旁的入口与一句话执行弹窗
+   -------------------------------------------------------------------------- */
 #worldOverrideButton {
     border-color: rgba(224, 82, 82, 0.5);
     color: var(--color-danger);
@@ -389,15 +391,27 @@
     color: var(--color-danger);
 }
 
+/* 默认只用主题 token 画边框；深渊/赛博主题在各自文件里再覆盖成专属配色。 */
 .world-override-modal {
-    border: 1px solid rgba(224, 82, 82, 0.45);
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+    border: 1px solid var(--theme-border-subtle);
+}
+
+/* 窄屏 / 手机：输入区不把按钮顶出屏幕，正文区自己滚动。 */
+.world-override-modal .modal-body {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .world-override-modal .modal-title {
     display: flex;
     align-items: center;
     gap: 8px;
-    color: var(--color-danger);
+    color: var(--theme-text-primary);
 }
 
 .world-override-hint {
@@ -416,11 +430,62 @@
 }
 
 /* --------------------------------------------------------------------------
-   世界意志 · 法阵层
-   遮罩只负责压暗背景，法阵把这一刻读成一次仪式。
-   层级夹在遮罩（1049）与弹窗（1050）之间，且不接收鼠标事件。
+   其他主题（浅色 / 深色 / 秘典）：干净弹窗，没有任何背景动效
+   只做排版与对比度适配，输入框、按钮沿用 Bootstrap + 主题 token。
    -------------------------------------------------------------------------- */
-.world-override-veil {
+body.theme-light .world-override-modal,
+body.theme-dark .world-override-modal,
+body.theme-tome .world-override-modal {
+    border-radius: var(--theme-radius-md);
+}
+
+body.theme-light .world-override-kicker,
+body.theme-dark .world-override-kicker,
+body.theme-tome .world-override-kicker {
+    font-family: var(--theme-font-family-mono);
+    font-size: 0.66rem;
+    line-height: 1;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--theme-text-muted);
+}
+
+body.theme-light .world-override-hint,
+body.theme-dark .world-override-hint,
+body.theme-tome .world-override-hint {
+    color: var(--theme-text-secondary);
+}
+
+body.theme-light .world-override-modal .modal-title,
+body.theme-dark .world-override-modal .modal-title,
+body.theme-tome .world-override-modal .modal-title {
+    color: var(--theme-text-primary);
+}
+
+body.theme-light .world-override-modal .modal-title i,
+body.theme-dark .world-override-modal .modal-title i,
+body.theme-tome .world-override-modal .modal-title i {
+    color: var(--theme-danger);
+}
+
+body.theme-tome .world-override-modal .modal-title {
+    color: var(--theme-accent-primary);
+}
+
+/* --------------------------------------------------------------------------
+   世界意志 · 法阵层（仅「深渊帷幕」）
+   遮罩只负责压暗背景，法阵把这一刻读成一次仪式。
+   层级：遮罩 1040（见 08 主题文件） < 法阵 1049 < 弹窗 1050+。
+   法阵不接收鼠标事件，也始终压在弹窗与输入框下面，不会挡住文字。
+   性能：刻线层只做 transform 旋转（合成器完成，不触发重排重绘）；
+   两层柔光都是静态模糊、只栅格化一次；背景 Canvas 在遮罩出现时自动停帧。
+   -------------------------------------------------------------------------- */
+/* 切主题时若法阵还留在 DOM 里，直接隐藏：避免失去样式后落进页面流。 */
+body:not(.theme-coc) .world-override-veil {
+    display: none !important;
+}
+
+body.theme-coc .world-override-veil {
     position: fixed;
     inset: 0;
     z-index: 1049;
@@ -428,14 +493,15 @@
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.45s ease;
+    contain: layout paint;
 }
 
-.world-override-veil.is-visible {
+body.theme-coc .world-override-veil.is-visible {
     opacity: 1;
 }
 
 /* 弹窗周围的暖金薄雾 + 底部青绿的深渊反光，让整片遮罩不再是死黑。 */
-.world-override-veil-glow {
+body.theme-coc .world-override-veil-glow {
     position: absolute;
     inset: 0;
     background:
@@ -444,7 +510,7 @@
 }
 
 /* 法阵中心的光核：缓慢呼吸，让窗口看起来悬浮在一枚发光的印章上。 */
-.world-override-veil-core {
+body.theme-coc .world-override-veil-core {
     position: absolute;
     inset: 0;
     background: radial-gradient(
@@ -457,7 +523,7 @@
 }
 
 /* 一圈缓慢扫过的光带：让法阵像在“运转”，而不是一张静止的图。 */
-.world-override-veil::before {
+body.theme-coc .world-override-veil::before {
     content: "";
     position: absolute;
     left: 50%;
@@ -482,7 +548,7 @@
 }
 
 /* 最外圈：一道极淡的虚线，把整块遮罩也圈进仪式里。 */
-.world-override-veil::after {
+body.theme-coc .world-override-veil::after {
     content: "";
     position: absolute;
     left: 50%;
@@ -495,59 +561,72 @@
     animation: worldOverrideSpin 320s linear infinite;
 }
 
-/* 三层同心法阵以视口中心为圆心，正好套在世界意志窗口外围。 */
-.world-override-sigil {
+/*
+ * 三层同心法阵以视口中心为圆心，正好套在世界意志窗口外围。
+ * 尺寸取 max(100vmin, 640px)：手机上环也会比窗口宽，不会整圈缩进卡片后面；
+ * 上限 980px 是给超宽屏留的余量，避免法阵被拉得过大。
+ */
+body.theme-coc .world-override-sigil {
     position: absolute;
     left: 50%;
     top: 50%;
-    width: min(96vmin, 900px);
-    height: min(96vmin, 900px);
+    width: min(max(100vmin, 640px), 980px);
+    height: min(max(100vmin, 640px), 980px);
     transform: translate(-50%, -50%);
     /* 叠加发光：金/青的线条与暗背景做 screen 混合，看起来像自发光而不是描边。 */
     mix-blend-mode: screen;
     animation: worldOverrideSigilBreathe 9s ease-in-out infinite;
 }
 
-.world-override-sigil-halo,
-.world-override-sigil-layer {
+body.theme-coc .world-override-sigil-aura,
+body.theme-coc .world-override-sigil-halo,
+body.theme-coc .world-override-sigil-layer {
     position: absolute;
     inset: 0;
 }
 
-/* 柔光层只模糊、不旋转：模糊结果会被缓存，逐帧只做一次合成。 */
-.world-override-sigil-halo {
-    filter: blur(7px);
-    opacity: 0.5;
+/* 外扩光晕：大半径模糊，负责“整枚法阵在发光”的观感。 */
+body.theme-coc .world-override-sigil-aura {
+    filter: blur(20px);
+    opacity: 0.32;
+    animation: worldOverrideAuraPulse 8.4s ease-in-out infinite;
+}
+
+/* 内层柔光：只模糊、不旋转，模糊结果会被缓存，逐帧只做一次合成。 */
+body.theme-coc .world-override-sigil-halo {
+    filter: blur(8px);
+    opacity: 0.52;
     animation: worldOverrideHaloPulse 4.6s ease-in-out infinite;
 }
 
-.world-override-sigil-layer {
+body.theme-coc .world-override-sigil-layer {
     transform-origin: 50% 50%;
     will-change: transform;
 }
 
 /* 外环刻点：随转动依次亮起，让法阵有“能量在流动”的感觉。 */
-.world-override-node {
+body.theme-coc .world-override-node {
     animation: worldOverrideNodePulse 3.6s ease-in-out infinite;
 }
 
-.world-override-sigil-halo svg,
-.world-override-sigil-layer svg {
+body.theme-coc .world-override-sigil-aura svg,
+body.theme-coc .world-override-sigil-halo svg,
+body.theme-coc .world-override-sigil-layer svg {
     display: block;
     width: 100%;
     height: 100%;
 }
 
 /* 三层不同速度、不同方向：外层符文环最慢，中层星盘反向，内层细环稍快。 */
-.world-override-sigil-layer--outer {
+body.theme-coc .world-override-sigil-layer--outer {
     animation: worldOverrideSpin 260s linear infinite;
 }
 
-.world-override-sigil-layer--mid {
+body.theme-coc .world-override-sigil-layer--mid {
     animation: worldOverrideSpin 190s linear infinite reverse;
 }
 
-.world-override-sigil-layer--inner {
+body.theme-coc .world-override-sigil-layer--inner {
     animation: worldOverrideSpin 120s linear infinite;
 }
 
@@ -579,6 +658,17 @@
     }
 }
 
+@keyframes worldOverrideAuraPulse {
+    0%,
+    100% {
+        opacity: 0.22;
+    }
+
+    50% {
+        opacity: 0.4;
+    }
+}
+
 @keyframes worldOverrideNodePulse {
     0%,
     100% {
@@ -602,12 +692,14 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .world-override-veil::before,
-    .world-override-veil::after,
-    .world-override-sigil,
-    .world-override-sigil-halo,
-    .world-override-sigil-layer,
-    .world-override-node {
+    body.theme-coc .world-override-veil::before,
+    body.theme-coc .world-override-veil::after,
+    body.theme-coc .world-override-veil-core,
+    body.theme-coc .world-override-sigil,
+    body.theme-coc .world-override-sigil-aura,
+    body.theme-coc .world-override-sigil-halo,
+    body.theme-coc .world-override-sigil-layer,
+    body.theme-coc .world-override-node {
         animation: none;
     }
 }

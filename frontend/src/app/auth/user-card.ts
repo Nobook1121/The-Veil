@@ -1,4 +1,17 @@
 namespace AuthModule {
+    /*
+     * 用户卡片原来嵌在 #mainContent 里。赛博档案主题给 .col-10 加了
+     * position: relative + z-index: 1，形成层叠上下文，卡片（position: fixed）
+     * 就被困在其中，被同级、z-index: 1000 的左侧栏整块盖住；深渊主题没有这层
+     * 上下文，卡片 9000 的 z-index 直接生效，所以同一个控件表现正常。
+     * 把它挂到 body 上——与 React 的 createPortal 等价——即可脱离主内容区的
+     * 层叠上下文，且不影响其它主题的层级关系。
+     */
+    const initialUserCard = document.getElementById("user-card-popover");
+    if (initialUserCard && initialUserCard.parentElement !== document.body) {
+        document.body.appendChild(initialUserCard);
+    }
+
     let memberCardAnchor: HTMLElement | null = null;
     let memberCardDismissBound = false;
 

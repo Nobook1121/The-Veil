@@ -64,16 +64,30 @@
         }).join("");
     }
 
-    /** 沿圆环排布的符文；textLength 让符文均匀铺满整圈，不受字数影响。 */
-    function runeRing(radius: number, fontSize: number, opacity: number, gradientId: string): string {
-        const pathId = `wo-rune-${radius}`;
+    /**
+     * 沿圆环排布的符文；textLength 让符文均匀铺满整圈，不受字数影响。
+     * idPrefix 用来区分同半径的多份符文环（实线层与柔光层各用各的路径 id）。
+     */
+    function runeRing(
+        radius: number,
+        fontSize: number,
+        opacity: number,
+        gradientId: string,
+        idPrefix: string,
+        darkOutline = true,
+    ): string {
+        const pathId = `${idPrefix}-rune-${radius}`;
         const circumference = Math.round(TAU * radius);
+        // 极细的深色描边垫在字形下面：环带自发光再亮，符文边缘也不会糊进光里。
+        const outline = darkOutline
+            ? 'stroke="#05070b" stroke-width=".9" stroke-opacity=".55" paint-order="stroke fill"'
+            : 'stroke="none"';
         return `
             <defs>
                 <path id="${pathId}" d="M 500 ${(500 - radius).toFixed(1)} A ${radius} ${radius} 0 1 1 499.9 ${(500 - radius).toFixed(1)}" />
             </defs>
             <circle cx="500" cy="500" r="${(radius - fontSize * 0.66).toFixed(1)}" stroke-width=".8" opacity=".26" />
-            <text font-size="${fontSize}" letter-spacing=".24em" fill="url(#${gradientId})" stroke="none" opacity="${opacity}"
+            <text font-size="${fontSize}" letter-spacing=".24em" fill="url(#${gradientId})" ${outline} opacity="${opacity}"
                 style="font-family:'Cinzel','Noto Serif SC',serif">
                 <textPath href="#${pathId}" startOffset="0" textLength="${circumference}" lengthAdjust="spacing">${RUNE_TEXT.repeat(3)}</textPath>
             </text>`;
@@ -106,8 +120,8 @@
                     ${defs}
                     <circle cx="500" cy="500" r="486" stroke-width="1.2" opacity=".62" />
                     <circle cx="500" cy="500" r="472" stroke-width=".9" stroke-dasharray="1 9" opacity=".4" />
-                    ${runeRing(456, 21, 0.72, gradientId)}
-                    <circle cx="500" cy="500" r="436" stroke-width="8" stroke-dasharray="2 12" opacity=".28" />
+                    ${runeRing(456, 22, 0.8, gradientId, "wo-outer")}
+                    <circle cx="500" cy="500" r="436" stroke-width="8" stroke-dasharray="2 12" opacity=".3" />
                     ${cardinalMarks(486, gradientId)}
                     ${pulseNodes(486, 14, gradientId)}
                 </svg>`;
@@ -118,8 +132,8 @@
                     ${defs}
                     <circle cx="500" cy="500" r="416" stroke-width="1.35" opacity=".62" />
                     <circle cx="500" cy="500" r="404" stroke-width=".9" stroke-dasharray="3 10" opacity=".36" />
-                    <circle cx="500" cy="500" r="386" stroke-width="1.1" stroke-dasharray="18 12" opacity=".34" />
-                    ${heptagram(366, 0.56)}
+                    <circle cx="500" cy="500" r="386" stroke-width="1.1" stroke-dasharray="18 12" opacity=".36" />
+                    ${heptagram(366, 0.62)}
                     ${cardinalMarks(416, gradientId)}
                 </svg>`;
         }
@@ -127,22 +141,28 @@
             <svg viewBox="0 0 1000 1000" fill="none" stroke="url(#${gradientId})" aria-hidden="true">
                 ${defs}
                 <circle cx="500" cy="500" r="352" stroke-width="1.1" opacity=".6" />
-                ${runeRing(336, 15, 0.56, gradientId)}
+                ${runeRing(336, 16, 0.66, gradientId, "wo-inner")}
                 <circle cx="500" cy="500" r="312" stroke-width=".8" stroke-dasharray="1 8" opacity=".28" />
                 ${cardinalMarks(352, gradientId)}
             </svg>`;
     }
 
-    /** 静态柔光层：与三层法阵同形，但只模糊、不旋转，栅格化一次即可复用。 */
-    function buildHaloLayer(): string {
+    /**
+     * 静态柔光层：与三层法阵同形，但只模糊、不旋转，栅格化一次即可复用。
+     * 里面同样排一圈符文——模糊后不再可读，只作为「环带自发光」的底光。
+     */
+    function buildHaloLayer(kind: "halo" | "aura"): string {
+        const gradientId = `wo-gradient-${kind}`;
         return `
-            <svg viewBox="0 0 1000 1000" fill="none" stroke="url(#wo-halo-gradient)" aria-hidden="true">
-                ${ringGradient("wo-halo-gradient")}
+            <svg viewBox="0 0 1000 1000" fill="none" stroke="url(#${gradientId})" aria-hidden="true">
+                ${ringGradient(gradientId)}
                 <circle cx="500" cy="500" r="486" stroke-width="2.2" opacity=".6" />
                 <circle cx="500" cy="500" r="456" stroke-width="2" opacity=".5" />
+                ${runeRing(456, 22, 0.9, gradientId, `wo-${kind}`, false)}
                 <circle cx="500" cy="500" r="416" stroke-width="2.4" opacity=".52" />
                 <circle cx="500" cy="500" r="386" stroke-width="2" opacity=".4" />
                 <circle cx="500" cy="500" r="352" stroke-width="2" opacity=".46" />
+                ${runeRing(336, 16, 0.7, gradientId, `wo-${kind}`, false)}
                 <circle cx="500" cy="500" r="312" stroke-width="1.6" opacity=".32" />
                 ${heptagram(366, 0.5)}
             </svg>`;
@@ -160,7 +180,8 @@
             <div class="world-override-veil-glow"></div>
             <div class="world-override-veil-core"></div>
             <div class="world-override-sigil" aria-hidden="true">
-                <div class="world-override-sigil-halo">${buildHaloLayer()}</div>
+                <div class="world-override-sigil-aura">${buildHaloLayer("aura")}</div>
+                <div class="world-override-sigil-halo">${buildHaloLayer("halo")}</div>
                 <div class="world-override-sigil-layer world-override-sigil-layer--outer">${buildLayer("outer")}</div>
                 <div class="world-override-sigil-layer world-override-sigil-layer--mid">${buildLayer("mid")}</div>
                 <div class="world-override-sigil-layer world-override-sigil-layer--inner">${buildLayer("inner")}</div>
@@ -177,9 +198,18 @@
         });
     }
 
+    /** 法阵只属于「深渊帷幕」：其它主题打开世界意志时保持干净弹窗，不生成任何背景特效。 */
+    function veilEnabled(): boolean {
+        return document.body.classList.contains("theme-coc");
+    }
+
     function showVeil(): void {
-        const element = ensureVeil();
+        // 遮罩样式各主题共用（深渊/赛博各自有配色），标记始终打上。
         markBackdrop(true);
+        if (!veilEnabled()) {
+            return;
+        }
+        const element = ensureVeil();
         // 下一帧再加可见类，保证透明度过渡从 0 开始。
         window.requestAnimationFrame(() => element.classList.add("is-visible"));
     }

@@ -1594,6 +1594,13 @@ function initWebSocket(): void {
             const message = typeof data.message === "string" ? data.message : "";
             if (message) showNotification(message, data.level === "error" ? "error" : "warning");
         });
+        // 沉浸系统：配乐导演指令与配图结果都按房间广播，前端做房间作用域过滤后应用。
+        socket.on("immersive_music", (data) => {
+            window.TrpgImmersive?.onMusicEvent(data as ImmersiveMusicPlan);
+        });
+        socket.on("immersive_illustration", (data) => {
+            window.TrpgImmersive?.onIllustrationEvent(data as ImmersiveIllustrationEvent);
+        });
     } catch (error) {
         console.warn("WebSocket 连接失败，消息同步不可用:", error);
     }

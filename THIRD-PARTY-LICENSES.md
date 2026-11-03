@@ -5,6 +5,33 @@
 如需完整许可证文本，请参见对应上游包（Python 包可在 `pip show <包名>`，
 Node 包可在 `node_modules/<包名>/LICENSE` 查看）。
 
+## 实时沉浸系统（v0.5.5b）
+
+本次未新增打包依赖：实时配乐使用浏览器内置 Web Audio API 现场合成，实时配图默认使用
+本地确定性 SVG（Python 标准库 `hashlib` / `random` / `html`）。可选的外部生图能力复用项目
+已有的 `requests` 与 `agents/http_retry.post_with_retry`，仅访问管理员自行配置的 OpenAI 兼容
+`/v1/images/generations` 端点，不随项目分发任何模型、音频或图片素材。上游服务的许可证与
+计费由部署方自行确认。
+
+## 生图模型平台与 AI 音乐导演（v0.5.6b）
+
+本次同样**未新增打包依赖**。
+
+- 「生图模型平台」只是把已有 OpenAI 兼容生图配置改为可复用的多条平台表，仍复用 `requests`
+  与 `post_with_retry`；预设中的厂商名称仅用于填充 Base URL/模型，不打包任何厂商 SDK。
+- 「AI 音乐导演」通过项目已有的 OpenAI 兼容 Chat Completions 客户端调用大模型，输出 JSON
+  乐谱参数；前端仍由浏览器 Web Audio API 合成，不引入任何音频素材或音乐生成 SDK。
+- **未引入外部音乐生成模型**（Suno、Udio、Stable Audio 等）。这类服务的商用授权、计费与
+  输出归属存在不确定性，且预生成音频会带来额外延迟与缓存体积。若部署方自行接入，需自行
+  确认许可证与条款，并保证异步预生成不阻塞实时播放。
+- 所有上游模型调用均由部署方自行配置密钥并承担计费；本仓库不附带密钥、模型权重或生成素材。
+
+## 沉浸面板布局与右侧栏收起（v0.5.8b）
+
+本次**未新增打包依赖**。布局、滚动与收起/展开仅使用现有 React、CSS 与浏览器 API
+（`localStorage`、`matchMedia`、`prefers-reduced-motion`），未引入任何 UI、拖拽或动画库。
+沉浸面板继续由现有前端模块创建与移动节点，不涉及新的第三方运行时。
+
 ## Python 依赖
 
 含 `requirements.txt` 等文件中的直接依赖及其全部传递依赖（取自本地 `.venv` 已安装元数据）。

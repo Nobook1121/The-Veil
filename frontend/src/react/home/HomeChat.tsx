@@ -1,4 +1,4 @@
-import { useRef, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 
 // 主页聊天框附件桥接：只暴露运行时用到的全局字段，避免依赖主脚本类型声明。
@@ -9,6 +9,8 @@ interface HomeChatBridge {
 }
 
 const HOME_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+// 右侧栏收起状态：刷新后保持；Alt+B 与窄条把手都可切换。
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "trpg.homeSidebar.collapsed";
 // 与后端 /api/assets/upload 保持一致的允许类型。
 const HOME_UPLOAD_EXTENSIONS = [
     "png", "jpg", "jpeg", "gif", "webp", "bmp",
@@ -31,6 +33,39 @@ function buildAttachmentMessage(name: string, url: string, mimeType: string): st
 
 export function HomeChat() {
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+        try {
+            return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "1";
+        } catch {
+            return false;
+        }
+    });
+
+    useEffect(() => {
+        try {
+            window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, sidebarCollapsed ? "1" : "0");
+        } catch {
+            // 隐私模式下存储不可用：仅本次会话生效。
+        }
+    }, [sidebarCollapsed]);
+
+    useEffect(() => {
+        const handleShortcut = (event: KeyboardEvent): void => {
+            if (!event.altKey || event.key.toLowerCase() !== "b") return;
+            event.preventDefault();
+            setSidebarCollapsed((value) => !value);
+        };
+        window.addEventListener("keydown", handleShortcut);
+        return () => window.removeEventListener("keydown", handleShortcut);
+    }, []);
+
+    useEffect(() => {
+        // 收起时右侧栏里的配乐按钮会被卸载，重新挂载后同步一次静音状态。
+        window.TrpgImmersive?.syncMusicButton?.();
+    }, [sidebarCollapsed]);
+
+    const toggleSidebar = (): void => setSidebarCollapsed((value) => !value);
+    const toggleRailMusic = (): void => window.TrpgImmersive?.toggleMusic?.();
 
     const notify = (message: string, type?: string): void => {
         const bridge = window as unknown as HomeChatBridge;
@@ -145,6 +180,9 @@ export function HomeChat() {
                         </div>
                     </section>
 
+                    {/* 场景画面与配乐面板：桌面端停靠右侧栏底部；窄屏由脚本移回此宿主。 */}
+                    <div className="immersive-chat-stage-host" id="immersiveChatStageHost" />
+
                     <div className="chat-history" id="chatHistory">
                         <div className="welcome-text" data-i18n="home.welcome">欢迎来到帷幕，请选择一个剧本开始游戏。</div>
                     </div>
@@ -211,13 +249,63 @@ export function HomeChat() {
                     </div>
                 </div>
 
-                <aside className="home-room-members" id="homeRoomMembers" aria-labelledby="homeRoomMembersTitle">
-                    <div className="home-room-members-header">
-                        <span className="home-room-members-title" id="homeRoomMembersTitle" data-i18n="home.members.title">房间成员</span>
-                        <span className="home-room-online" id="homeRoomOnlineCount" data-i18n="room.status.online_players" data-i18n-dynamic="true">在线玩家 0/0</span>
+                <aside
+                    className={`home-room-members${sidebarCollapsed ? " is-collapsed" : ""}`}
+                    id="homeRoomMembers"
+                    aria-labelledby="homeRoomMembersTitle"
+                >
+                    <div className="home-room-members-content">
+                        <div className="home-room-members-header">
+                            <span className="home-room-members-title" id="homeRoomMembersTitle" data-i18n="home.members.title">房间成员</span>
+                            <div className="home-room-members-header-actions">
+                                <span className="home-room-online" id="homeRoomOnlineCount" data-i18n="room.status.online_players" data-i18n-dynamic="true">在线玩家 0/0</span>
+                                <button
+                                    type="button"
+                                    className="home-room-members-collapse"
+                                    id="homeRoomMembersCollapse"
+                                    aria-expanded={!sidebarCollapsed}
+                                    aria-controls="homeRoomMembersBody"
+                                    title="收起右侧栏（Alt+B）"
+                                    aria-label="收起右侧栏"
+                                    onClick={toggleSidebar}
+                                >
+                                    <i className="fa fa-chevron-right" aria-hidden="true" />
+                                </button>
+                            </div>
+                        </div>
+                        <div className="home-room-members-body" id="homeRoomMembersBody">
+                            <div className="home-room-member-list" id="roomMemberList" data-i18n-dynamic="true">
+                                <p className="home-room-members-empty" data-i18n="home.members.empty">加入房间后这里会显示房间成员。</p>
+                            </div>
+                            {/* 沉浸面板停靠点：由沉浸模块把场景画面与配乐控制移到这里。 */}
+                            <div className="immersive-sidebar-stage-host" id="immersiveSidebarStageHost" />
+                        </div>
                     </div>
-                    <div className="home-room-member-list" id="roomMemberList" data-i18n-dynamic="true">
-                        <p className="home-room-members-empty" data-i18n="home.members.empty">加入房间后这里会显示房间成员。</p>
+                    <div
+                        className="home-room-members-rail"
+                        id="homeRoomMembersRail"
+                        aria-hidden={!sidebarCollapsed}
+                    >
+                        <button
+                            type="button"
+                            className="home-room-members-rail-btn home-room-members-rail-handle"
+                            id="homeRoomMembersExpand"
+                            title="展开右侧栏（Alt+B）"
+                            aria-label="展开右侧栏"
+                            onClick={toggleSidebar}
+                        >
+                            <i className="fa fa-chevron-left" aria-hidden="true" />
+                        </button>
+                        <button
+                            type="button"
+                            className="home-room-members-rail-btn"
+                            id="homeRoomMembersRailMusic"
+                            title="静音 / 恢复实时配乐"
+                            aria-label="静音 / 恢复实时配乐"
+                            onClick={toggleRailMusic}
+                        >
+                            <i className="fa fa-music" aria-hidden="true" />
+                        </button>
                     </div>
                 </aside>
             </div>

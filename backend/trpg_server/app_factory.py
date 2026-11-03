@@ -330,6 +330,7 @@ def register_blueprints(app):
     from trpg_server.routes.dice_rolls import bp as dice_rolls_bp
     from trpg_server.routes.dice_textures import bp as dice_textures_bp
     from trpg_server.routes.combat import bp as combat_bp
+    from trpg_server.routes.immersive import bp as immersive_bp
     from trpg_server.routes.scenarios import bp as scenarios_bp
     from trpg_server.routes.scenario_summary import bp as scenario_summary_bp
     from trpg_server.routes.setup import bp as setup_bp
@@ -361,6 +362,7 @@ def register_blueprints(app):
     app.register_blueprint(dice_rolls_bp)
     app.register_blueprint(dice_textures_bp)
     app.register_blueprint(combat_bp)
+    app.register_blueprint(immersive_bp)
     app.register_blueprint(network_bp)
     app.register_blueprint(knowledge_bases_bp)
     app.register_blueprint(pages_bp)

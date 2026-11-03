@@ -832,22 +832,71 @@ input[type="search"] {
 }
 
 .home-room-members {
+    --home-sidebar-width: 260px;
+    position: relative;
     display: flex;
-    flex: 0 0 260px;
+    flex: 0 0 var(--home-sidebar-width);
     flex-direction: column;
     min-width: 0;
     min-height: 0;
     border-left: 1px solid var(--border-subtle);
     background-color: var(--color-panel);
+    overflow: hidden;
+    /* 与左侧主导航栏一致：只过渡宽度，时长与曲线沿用 0.3s ease。 */
+    transition: flex-basis 0.3s ease;
+}
+
+/* 收起后只留一条窄轨：展开把手 + 配乐开关，状态由 localStorage 持久化。 */
+.home-room-members.is-collapsed {
+    flex-basis: 48px;
 }
 
 .home-room-members[hidden] {
     display: none;
 }
 
+/* 内容固定为展开宽度，收起过程中不重排换行。
+   收起时不能在第一帧 display:none：那样内容会瞬间消失，只剩一条空白窄条在缩，
+   观感等同“瞬切”。这里保留内容参与绘制，用透明度 + 轻微位移跟随宽度过渡，
+   过渡结束后才 visibility:hidden（同时禁用指针事件，避免隐藏内容挡住窄轨）。 */
+.home-room-members-content {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    width: calc(var(--home-sidebar-width) - 1px);
+    min-height: 0;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateX(0);
+    transition:
+        opacity 160ms ease,
+        transform 300ms ease,
+        visibility 0s linear 0s;
+}
+
+.home-room-members.is-collapsed .home-room-members-content {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateX(12px);
+    transition:
+        opacity 140ms ease,
+        transform 300ms ease,
+        visibility 0s linear 300ms;
+}
+
+.home-room-members-body {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+}
+
 .home-room-members-header {
     display: flex;
-    align-items: baseline;
+    flex: 0 0 auto;
+    align-items: center;
     justify-content: space-between;
     gap: 8px;
     padding: 12px 14px;
@@ -855,6 +904,10 @@ input[type="search"] {
 }
 
 .home-room-members-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--color-text);
     font-weight: 700;
 }
@@ -862,6 +915,7 @@ input[type="search"] {
 .home-room-members-header .home-room-online {
     color: var(--color-muted);
     font-size: 0.82rem;
+    white-space: nowrap;
 }
 
 .home-room-member-list {
@@ -875,6 +929,91 @@ input[type="search"] {
     margin: 8px 6px;
     color: var(--color-muted);
     font-size: 0.86rem;
+}
+
+.home-room-members-header-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
+}
+
+.home-room-members-collapse,
+.home-room-members-rail-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background-color: var(--color-panel-muted);
+    color: var(--color-muted);
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.home-room-members-collapse:hover,
+.home-room-members-rail-btn:hover {
+    border-color: var(--theme-border-strong);
+    color: var(--color-text);
+}
+
+.home-room-members-collapse:focus-visible,
+.home-room-members-rail-btn:focus-visible {
+    outline: 2px solid var(--theme-accent, var(--color-primary));
+    outline-offset: 2px;
+}
+
+.home-room-members-rail {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 4px;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    /* 收起时延迟淡入，避开宽度过渡的第一帧；展开时快速淡出，避免把手盖住内容。 */
+    transition:
+        opacity 140ms ease,
+        visibility 0s linear 300ms;
+}
+
+.home-room-members.is-collapsed .home-room-members-rail {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition:
+        opacity 180ms ease 100ms,
+        visibility 0s linear 0s;
+}
+
+.home-room-members-rail-btn[data-muted="true"] {
+    border-color: rgba(255, 196, 96, 0.5);
+    color: rgba(255, 214, 150, 0.92);
+}
+
+.home-room-members-rail-handle {
+    width: 34px;
+    height: 34px;
+}
+
+/* 沉浸面板停靠区：右侧栏底部的独立分区，自身滚动，成员列表优先让高。 */
+.immersive-sidebar-stage-host {
+    flex: 0 0 auto;
+    min-height: 0;
+    max-height: var(--immersive-sidebar-stage-max-height, min(52%, 360px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    border-top: 1px solid var(--border-subtle);
+    background-color: color-mix(in srgb, var(--color-panel-muted) 72%, transparent);
 }
 
 .home-room-member-group + .home-room-member-group {
@@ -1055,7 +1194,24 @@ input[type="search"] {
 
 @media (max-width: 991.98px) {
     .home-room-members {
-        flex-basis: 210px;
+        --home-sidebar-width: 210px;
+    }
+}
+
+/* 窄屏右侧栏整体隐藏：沉浸面板由脚本移回聊天区，不能凭空消失。 */
+@media (max-width: 767.98px) {
+    .home-room-members {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .home-room-members,
+    .home-room-members-content,
+    .home-room-members-collapse,
+    .home-room-members-rail,
+    .home-room-members-rail-btn {
+        transition: none;
     }
 }
 

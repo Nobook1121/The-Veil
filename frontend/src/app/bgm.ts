@@ -33,6 +33,8 @@ namespace TrpgBgmModule {
     let trackIndex = 0;
     let roomContext: { id: string; urls: string[]; mode: BgmPlaybackMode } | null = null;
     let pausedByUser = false;
+    // 实时程序化配乐播放时压低房间 BGM，避免两路声音互相干扰。
+    let ducked = false;
     let awaitingGesture = false;
     let gestureArmed = false;
     let cachedTracks: BgmTrack[] = [];
@@ -303,6 +305,17 @@ namespace TrpgBgmModule {
             }
         }
         applyPlaylist(source, urls, source === "room" ? roomMode : personal.mode);
+    }
+
+    /** 沉浸配乐播放/停止时调用：压低或恢复 BGM 音量（不改变用户的播放/暂停状态）。 */
+    export function setDuck(value: boolean): void {
+        ducked = Boolean(value);
+        if (!audio) return;
+        try {
+            audio.volume = ducked ? 0.3 : 1;
+        } catch {
+            // 忽略不支持 volume 的极端环境。
+        }
     }
 
     /** 玩家进入/离开房间时同步房间 BGM 上下文；只有 currentRoom 有值时才会取房间 BGM。 */
@@ -719,6 +732,7 @@ namespace TrpgBgmModule {
         audio = audioElement;
         // 循环策略由播放模式控制（ended 事件里切歌），不再使用浏览器原生 loop。
         audio.loop = false;
+        audio.volume = ducked ? 0.3 : 1;
         audio.addEventListener("play", updateToggleButton);
         audio.addEventListener("pause", updateToggleButton);
         audio.addEventListener("ended", handleEnded);
@@ -743,6 +757,7 @@ namespace TrpgBgmModule {
 window.TrpgBgm = {
     init: TrpgBgmModule.init,
     setRoom: TrpgBgmModule.setRoom,
+    setDuck: TrpgBgmModule.setDuck,
     refresh: TrpgBgmModule.refresh,
     getPersonalSettings: TrpgBgmModule.getPersonalSettings,
     savePersonalSettings: TrpgBgmModule.savePersonalSettings,

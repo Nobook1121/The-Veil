@@ -656,6 +656,15 @@ body.theme-cyber-2 .chat-suggestion-btn:hover {
    -------------------------------------------------------------------------- */
 body.theme-cyber-2 .home-room-members {
     border-left: 1px solid rgba(120, 232, 206, 0.16);
+    /* 上面的「冷光玻璃」面板组把本侧栏也纳入了，且用 transition 简写覆盖了基础规则
+       （.home-room-members 的 flex-basis 0.3s ease），导致赛博主题下收起/展开直接跳变。
+       这里按同一组属性补回 flex-basis；不用 !important，靠本规则位于组规则之后生效。 */
+    transition:
+        flex-basis 0.3s ease,
+        border-color 0.22s ease,
+        box-shadow 0.22s ease,
+        background-color 0.22s ease,
+        transform 0.22s ease;
 }
 
 body.theme-cyber-2 .home-room-members-header {
@@ -982,5 +991,476 @@ body.theme-cyber-2 #mainContent > .tab-content.active > * {
     body.theme-cyber-2 .btn::after,
     body.theme-cyber-2 .scenario-card::after {
         display: none;
+    }
+}
+
+/* ==========================================================================
+   世界意志：终端指令面板（仅赛博档案）
+   同一套结构：遮罩 → 终端标题条 → 命令行式标题 → 等宽输入 → 霓虹按钮。
+   只画静态质感（扫描线为静态纹理），唯一动画是标题旁的光标块，不铺满全屏。
+   ========================================================================== */
+
+/* —— 遮罩：半透明 + 模糊，透过扫描线能看到背后的档案场景 —— */
+body.theme-cyber-2 .modal-backdrop.world-override-backdrop {
+    /* 与深渊一致：压到 1040，让弹窗（1050+）始终在最上层。 */
+    z-index: 1040 !important;
+    background-color: rgba(2, 9, 11, 0.68) !important;
+    background-image:
+        repeating-linear-gradient(
+            to bottom,
+            rgba(94, 240, 200, 0.06) 0,
+            rgba(94, 240, 200, 0.06) 1px,
+            transparent 1px,
+            transparent 4px
+        ),
+        radial-gradient(ellipse 68% 46% at 50% 54%, rgba(38, 176, 158, 0.22), transparent 72%);
+    -webkit-backdrop-filter: blur(7px) saturate(1.08) !important;
+    backdrop-filter: blur(7px) saturate(1.08) !important;
+}
+
+body.theme-cyber-2 .modal-backdrop.world-override-backdrop.show {
+    opacity: 1 !important;
+}
+
+/* 不支持 backdrop-filter：换成更实的暗底，输入框与文字对比度不受影响。 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    body.theme-cyber-2 .modal-backdrop.world-override-backdrop {
+        background-color: rgba(2, 9, 11, 0.94) !important;
+    }
+}
+
+/* —— 弹窗外壳：终端边框 + 顶部命令行标题条 —— */
+body.theme-cyber-2 #worldOverrideModal .modal-dialog {
+    max-width: 580px;
+}
+
+body.theme-cyber-2 .modal-content.world-override-modal {
+    position: relative;
+    overflow: hidden;
+    /* 给顶部标题条留出高度，标题条不会压住弹窗内容。 */
+    padding-top: 30px;
+    color: var(--theme-text-primary);
+    border: 1px solid rgba(94, 240, 200, 0.52);
+    border-radius: 3px;
+    background-color: rgba(4, 14, 18, 0.95);
+    background-image:
+        linear-gradient(158deg, rgba(94, 240, 200, 0.07), transparent 46%),
+        radial-gradient(120% 80% at 50% 0%, rgba(94, 240, 200, 0.1), transparent 62%);
+    box-shadow:
+        inset 0 0 0 1px rgba(94, 240, 200, 0.08),
+        0 0 0 1px rgba(3, 9, 12, 0.9),
+        0 0 26px rgba(94, 240, 200, 0.18),
+        0 30px 64px -24px rgba(0, 0, 0, 0.95);
+}
+
+/* 标题条：三色指示灯 + 命令行文本，替换掉全局弹窗的横移扫描线。 */
+body.theme-cyber-2 .modal-content.world-override-modal::before {
+    content: "OVERRIDE.EXE  //  ROOT ACCESS  //  NODE 07";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 30px;
+    padding: 0 12px 0 56px;
+    box-sizing: border-box;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    line-height: 29px;
+    font-family: var(--theme-font-family-mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: rgba(94, 240, 200, 0.84);
+    text-shadow: 0 0 10px rgba(94, 240, 200, 0.28);
+    background-image:
+        radial-gradient(circle at 17px 15px, #ff6b7f 0 3px, transparent 3.4px),
+        radial-gradient(circle at 29px 15px, #f2b447 0 3px, transparent 3.4px),
+        radial-gradient(circle at 41px 15px, #5ef0c8 0 3px, transparent 3.4px),
+        linear-gradient(180deg, rgba(110, 255, 230, 0.11), rgba(6, 20, 24, 0.92));
+    border-bottom: 1px solid rgba(94, 240, 200, 0.34);
+    animation: none;
+    pointer-events: none;
+}
+
+/* 静态扫描线：只铺在正文区、透明度很低，让终端“有玻璃”而不干扰阅读。 */
+body.theme-cyber-2 .modal-content.world-override-modal::after {
+    content: "";
+    position: absolute;
+    top: 30px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-image: repeating-linear-gradient(
+        to bottom,
+        rgba(94, 240, 200, 0.055) 0,
+        rgba(94, 240, 200, 0.055) 1px,
+        transparent 1px,
+        transparent 4px
+    );
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+/* —— 标题区：kicker 是命令行提示符，标题是「正在执行的指令」 —— */
+body.theme-cyber-2 .world-override-header {
+    align-items: flex-start;
+    padding: 12px 18px 10px;
+    background-color: transparent;
+    background-image: none;
+    border-bottom: 1px solid rgba(94, 240, 200, 0.3);
+}
+
+body.theme-cyber-2 .world-override-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+}
+
+body.theme-cyber-2 .world-override-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--theme-font-family-mono);
+    font-size: 9px;
+    line-height: 1;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--cyber-amber);
+}
+
+/* 命令行提示符 + 光标块：整套界面唯一的持续动画，且只在标题里。 */
+body.theme-cyber-2 .world-override-kicker::before {
+    content: ">";
+    color: var(--cyber-phosphor);
+    letter-spacing: 0;
+}
+
+body.theme-cyber-2 .world-override-kicker::after {
+    content: "";
+    width: 7px;
+    height: 11px;
+    background: var(--cyber-phosphor);
+    opacity: 0.7;
+    animation: cyberWorldOverrideCaret 1.2s steps(1, end) infinite;
+}
+
+@keyframes cyberWorldOverrideCaret {
+    0%,
+    46% {
+        opacity: 0.7;
+    }
+
+    47%,
+    100% {
+        opacity: 0.06;
+    }
+}
+
+body.theme-cyber-2 .world-override-modal .modal-title {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-family: var(--theme-font-family-display);
+    letter-spacing: 0.14em;
+    color: #eafcf7;
+    /* 静态的故障感错位：一红一青，不做抖动动画。 */
+    text-shadow:
+        1px 0 rgba(255, 107, 127, 0.35),
+        -1px 0 rgba(94, 240, 200, 0.35),
+        0 0 24px rgba(94, 240, 200, 0.28);
+}
+
+body.theme-cyber-2 .world-override-modal .modal-title i {
+    color: var(--cyber-phosphor);
+    text-shadow: 0 0 18px rgba(94, 240, 200, 0.7);
+}
+
+/* 关闭按钮：默认的黑色图标在深底上看不见，反转成磷光青。 */
+body.theme-cyber-2 .world-override-header .btn-close {
+    opacity: 0.66;
+    filter: invert(1) sepia(0.6) saturate(3) hue-rotate(110deg);
+}
+
+body.theme-cyber-2 .world-override-header .btn-close:hover,
+body.theme-cyber-2 .world-override-header .btn-close:focus-visible {
+    opacity: 1;
+}
+
+/* —— 正文：注释式提示 + 等宽输入 —— */
+body.theme-cyber-2 .world-override-hint {
+    margin-bottom: 12px;
+    font-family: var(--theme-font-family-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    color: rgba(94, 240, 200, 0.62);
+}
+
+body.theme-cyber-2 .world-override-hint::before {
+    content: "// ";
+    color: rgba(242, 180, 71, 0.8);
+}
+
+body.theme-cyber-2 .world-override-input {
+    font-family: var(--theme-font-family-mono);
+    font-size: 0.86rem;
+    line-height: 1.6;
+    letter-spacing: 0.02em;
+    color: #ddf4ec;
+    caret-color: var(--cyber-phosphor);
+    border: 1px solid rgba(94, 240, 200, 0.4);
+    border-radius: 2px;
+    background-color: rgba(3, 12, 15, 0.88);
+    box-shadow:
+        inset 0 0 0 1px rgba(94, 240, 200, 0.06),
+        inset 0 0 26px rgba(0, 0, 0, 0.6);
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+body.theme-cyber-2 .world-override-input::placeholder {
+    color: rgba(94, 240, 200, 0.34);
+}
+
+body.theme-cyber-2 .world-override-input:focus {
+    color: #f2fffb;
+    border-color: rgba(94, 240, 200, 0.82);
+    background-color: rgba(4, 16, 20, 0.94);
+    box-shadow:
+        inset 0 0 0 1px rgba(94, 240, 200, 0.1),
+        0 0 0 3px rgba(94, 240, 200, 0.12),
+        0 0 26px rgba(94, 240, 200, 0.2);
+}
+
+body.theme-cyber-2 .world-override-message {
+    font-family: var(--theme-font-family-mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.03em;
+    color: rgba(94, 240, 200, 0.55);
+}
+
+/* —— 底部按钮：取消=暗底青边，执行=磷光实心 —— */
+body.theme-cyber-2 .world-override-modal .modal-footer {
+    gap: 10px;
+    border-top-color: rgba(94, 240, 200, 0.28);
+    background-color: transparent;
+    background-image: linear-gradient(0deg, rgba(94, 240, 200, 0.05), transparent);
+}
+
+body.theme-cyber-2 .world-override-modal .modal-footer .btn-secondary {
+    color: rgba(190, 240, 226, 0.9);
+    border: 1px solid rgba(94, 240, 200, 0.36);
+    background-color: rgba(4, 16, 20, 0.86);
+}
+
+body.theme-cyber-2 .world-override-modal .modal-footer .btn-secondary:hover,
+body.theme-cyber-2 .world-override-modal .modal-footer .btn-secondary:focus-visible {
+    color: #eafcf7;
+    border-color: rgba(94, 240, 200, 0.7);
+    background-color: rgba(94, 240, 200, 0.12);
+}
+
+body.theme-cyber-2 .world-override-modal #worldOverrideConfirm {
+    color: #03110d;
+    border: 1px solid rgba(94, 240, 200, 0.9);
+    background-color: var(--cyber-phosphor);
+    background-image: linear-gradient(180deg, rgba(220, 255, 245, 0.28), transparent 62%);
+    box-shadow: 0 0 18px rgba(94, 240, 200, 0.32);
+    text-shadow: none;
+}
+
+body.theme-cyber-2 .world-override-modal #worldOverrideConfirm:hover,
+body.theme-cyber-2 .world-override-modal #worldOverrideConfirm:focus-visible {
+    color: #03110d;
+    border-color: #c8fff1;
+    background-color: #8dffe4;
+    box-shadow: 0 0 26px rgba(94, 240, 200, 0.5);
+}
+
+/* —— 浅色配色：纸质终端 ——
+   赛博档案默认是深色；这里为浅色模式留一套同构的配色，
+   把磷光青翻成深翡翠、把近黑底翻成纸白，保证浅色下文字不发白、边框不消失。 */
+body.theme-cyber-2.light-theme .modal-backdrop.world-override-backdrop {
+    background-color: rgba(232, 243, 239, 0.72) !important;
+    background-image:
+        repeating-linear-gradient(
+            to bottom,
+            rgba(11, 78, 66, 0.05) 0,
+            rgba(11, 78, 66, 0.05) 1px,
+            transparent 1px,
+            transparent 4px
+        ),
+        radial-gradient(ellipse 68% 46% at 50% 54%, rgba(15, 143, 116, 0.16), transparent 72%);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    body.theme-cyber-2.light-theme .modal-backdrop.world-override-backdrop {
+        background-color: rgba(232, 243, 239, 0.96) !important;
+    }
+}
+
+body.theme-cyber-2.light-theme .world-override-modal {
+    color: #0c2b25;
+    border-color: rgba(15, 131, 109, 0.6);
+    background-color: #f3faf7;
+    background-image:
+        linear-gradient(158deg, rgba(15, 143, 116, 0.08), transparent 46%),
+        radial-gradient(120% 80% at 50% 0%, rgba(15, 143, 116, 0.1), transparent 62%);
+    box-shadow:
+        inset 0 0 0 1px rgba(15, 143, 116, 0.08),
+        0 0 0 1px rgba(15, 131, 109, 0.12),
+        0 0 22px rgba(15, 143, 116, 0.12),
+        0 26px 54px -26px rgba(8, 40, 34, 0.32);
+}
+
+body.theme-cyber-2.light-theme .world-override-modal::before {
+    color: #0b5c4e;
+    text-shadow: none;
+    background-image:
+        radial-gradient(circle at 17px 15px, #d94257 0 3px, transparent 3.4px),
+        radial-gradient(circle at 29px 15px, #b57a12 0 3px, transparent 3.4px),
+        radial-gradient(circle at 41px 15px, #0f8f74 0 3px, transparent 3.4px),
+        linear-gradient(180deg, rgba(15, 143, 116, 0.14), rgba(232, 245, 241, 0.96));
+    border-bottom-color: rgba(15, 131, 109, 0.32);
+}
+
+body.theme-cyber-2.light-theme .world-override-modal::after {
+    background-image: repeating-linear-gradient(
+        to bottom,
+        rgba(11, 78, 66, 0.05) 0,
+        rgba(11, 78, 66, 0.05) 1px,
+        transparent 1px,
+        transparent 4px
+    );
+}
+
+body.theme-cyber-2.light-theme .world-override-header {
+    border-bottom-color: rgba(15, 131, 109, 0.26);
+}
+
+body.theme-cyber-2.light-theme .world-override-kicker {
+    color: #9a6210;
+}
+
+body.theme-cyber-2.light-theme .world-override-kicker::before {
+    color: #0f8f74;
+}
+
+body.theme-cyber-2.light-theme .world-override-kicker::after {
+    background: #0f8f74;
+}
+
+body.theme-cyber-2.light-theme .world-override-modal .modal-title {
+    color: #0b2b25;
+    text-shadow:
+        1px 0 rgba(200, 60, 80, 0.18),
+        -1px 0 rgba(15, 143, 116, 0.2),
+        0 0 20px rgba(15, 143, 116, 0.14);
+}
+
+body.theme-cyber-2.light-theme .world-override-modal .modal-title i {
+    color: #0f8f74;
+    text-shadow: 0 0 14px rgba(15, 143, 116, 0.35);
+}
+
+body.theme-cyber-2.light-theme .world-override-header .btn-close {
+    opacity: 0.7;
+    filter: none;
+}
+
+body.theme-cyber-2.light-theme .world-override-hint {
+    color: #2e6357;
+}
+
+body.theme-cyber-2.light-theme .world-override-hint::before {
+    color: #9a6210;
+}
+
+body.theme-cyber-2.light-theme .world-override-input {
+    color: #0c2b25;
+    caret-color: #0f8f74;
+    border-color: rgba(15, 131, 109, 0.45);
+    background-color: #ffffff;
+    box-shadow: inset 0 0 0 1px rgba(15, 143, 116, 0.06);
+}
+
+body.theme-cyber-2.light-theme .world-override-input::placeholder {
+    color: #6b9a8e;
+}
+
+body.theme-cyber-2.light-theme .world-override-input:focus {
+    color: #07211c;
+    border-color: #0f8f74;
+    background-color: #ffffff;
+    box-shadow:
+        inset 0 0 0 1px rgba(15, 143, 116, 0.1),
+        0 0 0 3px rgba(15, 143, 116, 0.16);
+}
+
+body.theme-cyber-2.light-theme .world-override-message {
+    color: #4a7c70;
+}
+
+body.theme-cyber-2.light-theme .world-override-modal .modal-footer {
+    border-top-color: rgba(15, 131, 109, 0.24);
+    background-image: linear-gradient(0deg, rgba(15, 143, 116, 0.06), transparent);
+}
+
+body.theme-cyber-2.light-theme .world-override-modal .modal-footer .btn-secondary {
+    color: #17463d;
+    border-color: rgba(15, 131, 109, 0.45);
+    background-color: #ffffff;
+}
+
+body.theme-cyber-2.light-theme .world-override-modal .modal-footer .btn-secondary:hover,
+body.theme-cyber-2.light-theme .world-override-modal .modal-footer .btn-secondary:focus-visible {
+    color: #07211c;
+    border-color: #0f8f74;
+    background-color: rgba(15, 143, 116, 0.1);
+}
+
+body.theme-cyber-2.light-theme .world-override-modal #worldOverrideConfirm {
+    color: #f4fffb;
+    border-color: #0a7360;
+    background-color: #0d8f74;
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.16), transparent 62%);
+    box-shadow: 0 0 16px rgba(15, 143, 116, 0.24);
+}
+
+body.theme-cyber-2.light-theme .world-override-modal #worldOverrideConfirm:hover,
+body.theme-cyber-2.light-theme .world-override-modal #worldOverrideConfirm:focus-visible {
+    color: #f4fffb;
+    border-color: #08614f;
+    background-color: #0b9d80;
+    box-shadow: 0 0 22px rgba(15, 143, 116, 0.34);
+}
+
+/* —— 窄屏：缩短标题条文本，正文区仍可滚动 —— */
+@media (max-width: 576px) {
+    body.theme-cyber-2 .modal-content.world-override-modal {
+        padding-top: 26px;
+    }
+
+    body.theme-cyber-2 .modal-content.world-override-modal::before {
+        content: "OVERRIDE.EXE  //  NODE 07";
+        height: 26px;
+        line-height: 25px;
+        padding-left: 52px;
+        letter-spacing: 0.14em;
+    }
+
+    body.theme-cyber-2 .modal-content.world-override-modal::after {
+        top: 26px;
+    }
+
+    body.theme-cyber-2 #worldOverrideModal .modal-dialog {
+        margin: 10px;
+    }
+}
+
+/* —— 降级：关闭光标闪烁，保留其余静态终端质感 —— */
+@media (prefers-reduced-motion: reduce) {
+    body.theme-cyber-2 .world-override-kicker::after {
+        animation: none;
+        opacity: 0.6;
     }
 }

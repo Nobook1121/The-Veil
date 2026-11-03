@@ -32,8 +32,12 @@ CONFIG_LABELS = {
     "general": "通用设置",
 }
 
-# 密钥类字段：GET 一律掩码、POST 一律拒写（穿透令牌经 /api/network/penetration/config 管理）。
-_REDACTED_GENERAL_KEYS = frozenset({("network.penetration.settings", "auth_token")})
+# 密钥类字段：GET 一律掩码、POST 一律拒写（穿透令牌经 /api/network/penetration/config 管理，
+# 生图密钥经沉浸设置专用接口 /api/immersive/settings/secret 管理）。
+_REDACTED_GENERAL_KEYS = frozenset({
+    ("network.penetration.settings", "auth_token"),
+    ("immersive", "api_key"),
+})
 
 
 def _get_config_dir():

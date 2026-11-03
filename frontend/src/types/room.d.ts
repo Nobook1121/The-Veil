@@ -102,6 +102,14 @@ interface RoomHouseRules {
     // 重投模式与次数：null 表示跟随管理员默认；次数仅在 limited 时生效。
     dice_reroll_mode?: "off" | "limited" | "unlimited" | null;
     dice_reroll_limit?: number | null;
+    // 实时沉浸系统：null 表示跟随管理员设置；房间只能收紧（关闭），不能越过站点总开关。
+    immersive_music_enabled?: boolean | null;
+    immersive_music_auto_switch?: boolean | null;
+    immersive_illustration_enabled?: boolean | null;
+    immersive_illustration_auto?: boolean | null;
+    // 剧本配图缓存：房间只能关闭/不优先，不能越过站点开关重新开启。
+    immersive_scenario_record?: boolean | null;
+    immersive_scenario_prefer?: boolean | null;
     // 房间背景音乐播放列表（0~20 首，可为音乐库站内地址或 http(s) 外链）。
     bgm_urls?: string[];
     // 播放模式：列表循环 / 单曲循环 / 随机播放。
