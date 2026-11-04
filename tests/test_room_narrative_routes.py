@@ -38,7 +38,9 @@ def _login(client, user_id=1, room_role="owner"):
         session.update(user_id=user_id, username="tester", role="USER", session_token="token", csrf_token="csrf")
 
 
-def _write_room(tmp_path, *, scenario_id="s1", room_role="owner", user_id=1, creator_id=1):
+def _write_room(
+    tmp_path, *, scenario_id="s1", scenario_version=None, room_role="owner", user_id=1, creator_id=1
+):
     room_dir = tmp_path / "rooms" / "r-1"
     room_dir.mkdir(parents=True, exist_ok=True)
     info = {
@@ -47,6 +49,7 @@ def _write_room(tmp_path, *, scenario_id="s1", room_role="owner", user_id=1, cre
         "room_code": "ABCD1234",
         "creator_id": creator_id,
         "scenario_id": scenario_id,
+        "scenario_version": scenario_version,
         "members": [
             {
                 "user_id": user_id,
@@ -62,13 +65,23 @@ def _write_room(tmp_path, *, scenario_id="s1", room_role="owner", user_id=1, cre
     return room_dir
 
 
-def _write_scenario(tmp_path):
+def _write_scenario(tmp_path, *, versioned=False):
     storage = tmp_path / "scenarios" / "scenario-s1"
     storage.mkdir(parents=True, exist_ok=True)
     (storage / "scenario.json").write_text(
         json.dumps({"id": "s1", "title": "测试剧本", "version": "1.0.0", "modules": []}, ensure_ascii=False),
         encoding="utf-8",
     )
+    if versioned:
+        versions_dir = storage / "versions"
+        versions_dir.mkdir(parents=True, exist_ok=True)
+        (versions_dir / "1.0.0.json").write_text(
+            json.dumps(
+                {"id": "s1", "title": "测试剧本", "scenario_version": "1.0.0", "modules": []},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
     bundle = NarrativeBundle(
         scenario_id="s1",
         scenario_version="1.0.0",
@@ -153,3 +166,30 @@ def test_room_trigger_fire_requires_manager(tmp_path):
     response = client.post("/api/rooms/r-1/triggers/trg_manual/fire", headers={"X-CSRF-Token": "csrf"})
 
     assert response.status_code == 403
+
+
+def test_room_narrative_loads_versioned_scenario_from_root_storage(tmp_path):
+    """版本化剧本的 narrative.json 位于剧本根目录，而非 versions/ 子目录。"""
+    _write_room(tmp_path, scenario_version="1.0.0")
+    _write_scenario(tmp_path, versioned=True)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.get("/api/rooms/r-1/narrative")
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["location"]["id"] == "room_hall"
+
+
+def test_room_narrative_loads_non_versioned_scenario(tmp_path):
+    """未绑定版本的旧剧本仍从剧本根目录读取 narrative.json。"""
+    _write_room(tmp_path)
+    _write_scenario(tmp_path)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.get("/api/rooms/r-1/narrative")
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["location"]["id"] == "room_hall"

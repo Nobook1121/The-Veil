@@ -48,7 +48,20 @@ class NarrativeStoreError(RuntimeError):
 
 
 def scenario_dir_for_descriptor(descriptor_path: Path | str) -> Path:
-    return Path(descriptor_path).resolve().parent
+    """返回剧本共享资源所在目录。
+
+    版本化剧本的版本描述符位于 ``<storage>/versions/<ver>.json``，而
+    ``narrative.json`` 与触发器资源仍写在 ``<storage>`` 根目录；解析到版本
+    文件时必须回退到剧本根目录，非版本化剧本保持原行为。
+    """
+    parent = Path(descriptor_path).resolve().parent
+    if (
+        parent.name == "versions"
+        and not (parent / "scenario.json").exists()
+        and (parent.parent / "scenario.json").exists()
+    ):
+        return parent.parent
+    return parent
 
 
 def narrative_path(scenario_dir: Path | str) -> Path:
