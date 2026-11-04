@@ -332,6 +332,40 @@ knowledge reindex [ruleset] [--yes]     重建规则集索引，省略 ruleset �
 说明：剧本被删除时控制台/网页**不会**自动清理其向量条目，这些残留即「孤儿向量」，
 可用 `vector prune` 发现并清理；后端不支持枚举 `scenario_id`（如 Qdrant）时会明确提示无法判定。
 
+## 语音配音（voice）
+
+站点级命令默认关闭语音；`system`（浏览器 Web Speech）始终可用，`local` 需要先安装
+Kokoro v1.1-zh 权重并启用，`cloud` 仍为占位。本地合成走独立回环子服务，异常时自动降级到 `system`。
+
+```text
+voice status [--json]                     查看站点开关、引擎健康、配额、个人覆盖与云端占位（密钥掩码）
+voice on|off                              开启/关闭站点语音总开关
+voice engine <system|local|cloud>         设置默认引擎（cloud 仍为占位）
+voice engine allowed <a,b,c>              设置引擎白名单（逗号分隔）
+voice profile list                        列出 8 个 NPC 人设 + 1 个旁白（含当前绑定的真实说话人）
+voice map list --room <room-id>           查看房间 NPC 音色映射与静音名单
+voice map set <speaker> <profile> --room <room-id> [--yes]
+                                          绑定房间 NPC 音色；缺省预演，--yes 才落盘
+voice test [--json]                       引擎健康检查（不生成音频、不请求外部服务）
+voice usage [--room <room-id>]            最近 voice_* 事件统计与房间小时用量
+voice local status [--json]               本地模型安装状态、子服务健康与 9 个人设的说话人绑定
+voice local install [--yes] [--force]     下载并校验本地模型权重；默认预演
+voice local remove [--yes]                移除本地模型权重；默认预演
+voice local model <模型ID> [--yes]        切换本地模型 ID
+voice local base-url <URL> [--yes]        指定外部托管的子服务地址（留空恢复自动托管）
+voice local concurrency <1-8> [--yes]     设置合成并发（默认 1）
+voice local timeout <5-180> [--yes]       设置单句合成超时秒数（默认 30）
+voice cache stats [--room <room-id>]     本房间语音缓存条数/字节/命中次数（只读）
+voice cache clear [--room <room-id>] [--yes]   清空本房间语音缓存；默认预演
+voice cache prune [--room <room-id>] [--yes]   按配额 LRU 裁剪本房间缓存；默认预演
+```
+
+模型权重与许可证文本落在 `data/runtime/voice/models/<模型>/`，不会进入仓库或发布包。
+安装/卸载/切换引擎仅站点管理员可执行；房间只能查看状态并清理本房间缓存。
+
+配置写入 `general.toml` 的 `[immersive]` 段，使用 tomlkit 往返保留注释。房间只能收紧：
+`voice on` 无法越过站点总开关；字符上限、小时上限只能调低；ducking 级别只能调高。
+
 ## 房间管理
 
 ```text
@@ -423,18 +457,30 @@ narrative profile <graph|degraded> [--yes]（切换本房间能力档）
 narrative rebuild-state [--yes]（从关键帧+账本重放恢复运行态，破坏性）
 immersive                   （等同 immersive status：本房间配乐/配图状态与历史）
 immersive status            （本房间生效的开关、当前档位/段落与最近配图）
-immersive music show|on|off [--yes]（查看或收紧本房间配乐开关）
+immersive music show|on|off [--yes]（查看或收紧本房间配乐开关；show 同时显示生效音乐来源）
 immersive music auto <on|off> [--yes]（本房间是否随剧情自动切歌）
 immersive music set <profile> <intensity> [--yes]（手动切到指定档位/强度）
 immersive illustration show|on|off [--yes]（查看或收紧本房间配图开关）
 immersive illustration auto <on|off> [--yes]（本房间是否随剧情自动配图）
+immersive illustration trigger show（查看生效配图触发档位与来源）
+immersive illustration trigger <inherit|important|off> [--yes]（房间收紧配图档位，只能更紧）
 immersive illustration now [场景描述] [--yes]（立即生成本房间配图，可能产生费用）
-immersive cache show|stats  （本剧本配图缓存文件数/体积与生效开关）
+immersive cache show|stats  （只读：本房间缓存 + 本剧本缓存条数/体积/命中次数）
+immersive cache room show  （本房间缓存条数、文件数、体积、累计命中与目录）
+immersive cache room clear [--yes]（清空本房间目录缓存，默认预演）
 immersive cache record|prefer <on|off|inherit> [--yes]（房间级收紧剧本缓存，不能越过站点开关）
-immersive cache prune [--yes]（按站点配额 LRU 清理本剧本缓存，默认预演）
-immersive cache clear [--yes]（删除本剧本全部配图缓存，默认预演）
+immersive cache prune [--yes]（按单房间配额 LRU 清理本房间缓存，默认预演）
+immersive cache clear [--yes]（删除本房间目录缓存，默认预演；剧本缓存需站点控制台清理）
 immersive history           （本房间配乐切换与配图历史）
 immersive director          （只读查看 AI 音乐导演最近采用的乐谱、指纹与段落；不可在房间内修改）
+voice status                （本房间语音生效值、NPC 映射、静音名单与小时用量）
+voice on|off [--yes]        （本房间语音开关；无法越过站点总开关）
+voice map set <speaker> <profile> [--yes]（绑定 NPC 音色，仅限内置 NPC 人设）
+voice mute <speaker>|list|clear [--yes]（本房间 NPC 静音名单）
+voice usage                 （本房间小时用量与最近 voice_* 事件）
+voice cache stats           （本房间语音缓存条数/体积/命中次数，只读）
+voice cache clear [--yes]   （删除本房间语音缓存，默认预演）
+voice cache prune [--yes]   （按配额 LRU 清理本房间缓存，默认预演）
 ```
 
 `dice animation set` / `dice player-roll` / `dice reroll` / `dice reroll-limit` 只写入本房间的房规
@@ -468,6 +514,9 @@ immersive music volume <0-100> [--yes]  默认音量
 immersive music crossfade <500-10000> [--yes] 换段交叉淡入毫秒
 immersive music hysteresis <0-10> [--yes]     切换滞回回合
 immersive music seed <seed>|clear [--yes]     固定可复现的音乐种子
+immersive music source <realtime|bgm|hybrid> [--yes]  站点音乐来源档位
+immersive music allowed <realtime,bgm,hybrid> [--yes] 个人可覆盖的来源范围
+immersive music personal <on|off> [--yes]     是否允许个人覆盖音乐来源
 immersive illustration                 配图设置概览
 immersive illustration on|off [--yes]  站点配图开关
 immersive illustration auto <on|off> [--yes]  是否随叙事自动配图
@@ -477,6 +526,10 @@ immersive illustration concurrency <1-4> [--yes]
 immersive illustration budget <n> [--yes]     每日提交上限（0=不限）
 immersive illustration cap <n> [--yes]        单房间每小时上限（0=不限）
 immersive illustration min-turns <1-50> [--yes] 自动配图最小间隔回合
+immersive illustration trigger <off|important|turn_interval|frequent> [--yes] 站点触发档位
+immersive illustration allowed <important,turn_interval,frequent> [--yes] 个人可覆盖的触发档位
+immersive illustration kp-budget <n> [--yes]  AI KP 每日判断预算（0=不限）
+immersive kp                                  AI KP 今日调用/预算/平台与模型
 immersive scenario                            剧本配图缓存概览（文件数/体积/策略）
 immersive scenario record <on|off> [--yes]    是否把新生成图写入剧本目录（默认关）
 immersive scenario prefer <on|off> [--yes]    游玩时是否优先复用剧本图（默认开）
