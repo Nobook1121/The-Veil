@@ -202,6 +202,32 @@ illustration_daily_budget = 0
 illustration_room_hourly_cap = 12
 # 自动配图的最小间隔回合数（同房间），避免连续刷图。
 illustration_min_turns = 4
+# 配图触发档位：off / important（仅重要场景转换）/ turn_interval（每 N 回合）/ frequent。
+illustration_trigger = "important"
+# 允许个人覆盖的触发档位（逗号分隔）；off 始终允许，作为个人收紧项。
+illustration_trigger_allowed = "important,turn_interval,frequent"
+# AI KP 配图判断：留空时使用默认启用的聊天平台与模型；复用既有重试/超时链路。
+illustration_kp_platform = ""
+illustration_kp_model = ""
+illustration_kp_timeout = 45
+illustration_kp_daily_budget = 200
+illustration_kp_max_context_chars = 1600
+# NPC 头像：与场景图区分尺寸；同一 NPC 在房间内复用，每回合最多新增一张。
+illustration_npc_enabled = false
+illustration_npc_size = "768x768"
+illustration_npc_max_per_turn = 1
+# 房间级配图缓存：图片与索引写入房间目录（immersive_cache/），随房间归档保留。
+# 条目数与容量上限，0 表示不限制；超限策略 lru（驱逐最久未命中）或 reject（拒绝新图）。
+illustration_room_cache_max_entries = 40
+illustration_room_cache_quota_mb = 64
+illustration_room_cache_max_image_mb = 8
+illustration_room_cache_overflow = "lru"
+# 音乐来源：realtime（仅实时配乐）/ bgm（仅 BGM）/ hybrid（实时配乐主层 + BGM 底噪）。
+music_source = "hybrid"
+# 允许个人选择的音乐来源档位（逗号分隔）；个人只能在站点允许集合内覆盖。
+music_source_allowed = "realtime,bgm,hybrid"
+# 关闭后个人设置中的音乐来源不可覆盖，只能跟随站点默认。
+music_source_allow_personal = true
 # 剧本配图缓存：是否把新生成的配图写入剧本目录（默认关闭，避免无声修改剧本与磁盘增长）。
 illustration_scenario_record = false
 # 游玩时是否优先复用剧本目录里的同 key 配图（默认开启，可省去重复生图与预算）。
@@ -232,6 +258,58 @@ music_director_min_confidence = 55
 music_director_fallback = "rule"
 # 送给导演的最近上下文最大字符数（200-4000）。
 music_director_max_context_chars = 1200
+# AI 对话语音配音：默认关闭；默认使用系统音色（浏览器 Web Speech），无需外部服务。
+voice_enabled = false
+# 引擎：system（前端系统音色，本阶段唯一可用）/ local / cloud（仅占位，未实现）。
+voice_engine = "system"
+# 允许的引擎白名单（逗号分隔）；local/cloud 不在白名单或未实现时明确降级为 engine_unavailable。
+voice_engine_allowed = "system"
+# 是否自动播放（仍受浏览器首次手势限制；默认关闭，需用户点击开启语音）。
+voice_autoplay = false
+# 语音音量（0-100，与背景音乐音量相互独立）。
+voice_volume = 70
+# 语速百分比（50-200，100 为正常）。
+voice_rate = 100
+# 单回合配音字符上限（40-4000，超出部分不发声）。
+voice_max_turn_chars = 800
+# 单段配音字符上限（10-500，长旁白会在句末标点处切块）。
+voice_max_segment_chars = 40
+# 单回合最多配音片段数（1-200）。
+voice_max_segments = 24
+# 新回合与正在播放的语音冲突时：interrupt（打断）/ queue（排队）。
+voice_interrupt_policy = "interrupt"
+# 语音播放期间压低背景音乐与实时配乐。
+voice_ducking = true
+# 压低强度（0-90，数字越大音乐越轻）；房间只能调高不能调低。
+voice_ducking_level = 35
+# 单房间每小时配音回合上限（0 表示不限制；房间只能调低）。
+voice_room_hourly_cap = 120
+# 云端引擎占位配置：本阶段不调用；密钥仅管理员可见并按掩码展示。
+voice_cloud_base_url = ""
+voice_cloud_model = ""
+voice_cloud_api_key = ""
+# 本地多音色引擎：sherpa-onnx + Kokoro-82M-v1.1-zh（Apache-2.0，24kHz，103 个说话人）。
+# 默认关闭；启用前需用 `voice local install` 下载权重（不会随仓库分发）。
+voice_local_enabled = false
+# 留空 = 由主进程托管 127.0.0.1 子服务；填写则连接管理员自托管的回环服务。
+voice_local_base_url = ""
+voice_local_model = "kokoro-int8-multi-lang-v1_1"
+# 语音合成并发（默认 1）；实时配图运行时语音会排队让路，避免争抢 CPU。
+voice_local_concurrency = 1
+# 单句合成超时（秒）；超时按 local_timeout 降级回浏览器音色。
+voice_local_timeout = 30
+# 站点默认的人设→真实说话人绑定（JSON）。留空使用内置默认表；
+# 示例：voice_local_speakers = '{"narrator": 24, "npc_male_elder": 102}'
+# 房间可在 voice.json 的 local_speakers 中覆盖（仅限本房间）。
+voice_local_speakers = ""
+# 语音缓存：落盘到每个房间的 immersive_cache/voice/，随房间归档保留。
+voice_cache_enabled = true
+voice_cache_quota_mb = 64
+voice_cache_max_entries = 300
+# 超限策略：lru（淘汰最久未使用）或 reject（拒绝写入）。
+voice_cache_overflow = "lru"
+# 是否允许个人覆盖语音开关/自动播放/音量/语速（关闭后只能跟随站点默认）。
+voice_allow_personal = true
 
 [site]
 # 站点名称：显示在浏览器标题与页面品牌处（留空使用默认品牌）。

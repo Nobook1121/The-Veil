@@ -45,6 +45,7 @@ ROOM_COMMAND_WHITELIST: dict[str, set[str]] = {
         "guard", "profile", "rebuild-state",
     },
     "immersive": {"status", "music", "illustration", "history", "director"},
+    "voice": {"status", "on", "off", "map", "mute", "usage", "cache"},
 }
 
 # 不带子命令时默认执行的子命令（例如 `members` 等价于 `members list`）。
@@ -53,6 +54,7 @@ DEFAULT_SUBS: dict[str, str] = {
     "dice": "status",
     "narrative": "status",
     "immersive": "status",
+    "voice": "status",
 }
 
 
@@ -124,13 +126,25 @@ def room_command_help_text() -> str:
             "  immersive illustration show  （查看本房间配图开关与最近历史）",
             "  immersive illustration <on|off> [--yes]（本房间配图总开关）",
             "  immersive illustration auto <on|off> [--yes]（本房间自动配图开关）",
+            "  immersive illustration trigger show（查看生效配图触发档位与来源）",
+            "  immersive illustration trigger <inherit|important|off> [--yes]（房间收紧配图档位，只能更紧）",
             "  immersive illustration now [场景描述] [--yes]（立即生成一张图，可能产生费用）",
-            "  immersive cache show|stats      （查看本剧本配图缓存文件数与体积）",
+            "  immersive cache room show         （查看本房间缓存条数/体积/命中次数）",
+            "  immersive cache room clear [--yes]（清空本房间目录缓存，默认预演）",
+            "  immersive cache show|stats      （只读：本房间缓存 + 本剧本缓存统计）",
             "  immersive cache record|prefer <on|off|inherit> （房间级收紧剧本缓存；无法越过站点开关）",
-            "  immersive cache prune [--yes]   （按站点配额 LRU 清理本剧本缓存，默认预演）",
-            "  immersive cache clear [--yes]   （删除本剧本全部配图缓存，默认预演）",
+            "  immersive cache prune [--yes]   （按单房间配额 LRU 清理本房间缓存，默认预演）",
+            "  immersive cache clear [--yes]   （删除本房间目录缓存，默认预演；剧本缓存需站点控制台）",
             "  immersive history            （查看本房间配乐/配图历史）",
             "  immersive director           （只读查看 AI 音乐导演最近采用的乐谱与段落；站点配置不可在房间内修改）",
+            "  voice status                 （本房间语音配音生效值、映射、静音名单与小时用量）",
+            "  voice on|off [--yes]         （本房间语音开关；无法越过站点总开关）",
+            "  voice map set <speaker> <profile> [--yes]（绑定 NPC 音色，只能使用内置 NPC 人设）",
+            "  voice mute <speaker>|list|clear [--yes]（本房间 NPC 静音名单）",
+            "  voice usage                  （本房间小时用量与最近语音事件）",
+            "  voice cache stats            （本房间语音缓存条数/体积/命中次数，只读）",
+            "  voice cache clear [--yes]    （删除本房间语音缓存，默认预演）",
+            "  voice cache prune [--yes]    （按站点/房间配额 LRU 清理本房间缓存，默认预演）",
             "  说明：破坏性命令缺省为「预演」，加 --yes 或在交互确认时输入 y 才会真正执行。",
             "  说明：成员命令只调整房间内角色（房主/管理员/成员），不会授予网站级权限。",
         ]
@@ -229,6 +243,8 @@ def execute_room_command(
         return _dice_status_command(room_dir, room_id)
     if domain == "immersive":
         return _immersive_command(room_dir, room_id, sub, rest, flags, confirm)
+    if domain == "voice":
+        return _voice_command(room_dir, room_id, sub, rest, flags, confirm)
     if domain == "narrative":
         ok, message = handle_room_narrative_command(
             parts[1:],
@@ -474,12 +490,12 @@ def _immersive_command(
     music_state = load_music_state(room_dir)
 
     if sub == "status":
-        return _immersive_status_text(room_id, switches, music_state, room_dir)
+        return _immersive_status_text(room_id, switches, music_state, room_dir, settings, rules)
 
     if sub == "music":
         action = rest[0].lower() if rest else "show"
         if action == "show":
-            return _immersive_status_text(room_id, switches, music_state, room_dir)
+            return _immersive_status_text(room_id, switches, music_state, room_dir, settings, rules)
         if action in {"on", "off"}:
             target = action == "on"
 
@@ -541,7 +557,7 @@ def _immersive_command(
     if sub == "illustration":
         action = rest[0].lower() if rest else "show"
         if action == "show":
-            return _immersive_status_text(room_id, switches, music_state, room_dir)
+            return _immersive_status_text(room_id, switches, music_state, room_dir, settings, rules)
         if action in {"on", "off"}:
             target = action == "on"
             return _confirm_action(
@@ -565,6 +581,44 @@ def _immersive_command(
                 assume_yes=_assume_yes(flags),
                 confirm=confirm,
                 prompt="确认修改自动配图?",
+            )
+        if action == "trigger":
+            from trpg_server.immersive.config import resolve_illustration_trigger
+
+            if not rest[1:]:
+                room_rule = rules.get("immersive_illustration_trigger")
+                effective = resolve_illustration_trigger(settings, rules)
+                return RoomCommandResult(
+                    True,
+                    "本房间配图触发档位（只读提示；修改用 immersive illustration trigger <inherit|important|off>）：\n"
+                    f"  房间收紧: {room_rule if room_rule in ('important', 'off') else '跟随站点'}\n"
+                    f"  站点默认: {settings.get('illustration_trigger')}\n"
+                    f"  生效档位: {effective}",
+                )
+            raw = rest[1].lower()
+            if raw in {"show"}:
+                return _immersive_command(room_dir, room_id, "illustration", ["trigger"], flags, confirm)
+            if raw in {"inherit", "follow", "跟随", "默认"}:
+                target: Any = None
+            elif raw in {"important", "off"}:
+                target = raw
+            else:
+                return RoomCommandResult(
+                    False, "Usage: immersive illustration trigger <inherit|important|off> [--yes]"
+                )
+
+            def _apply_trigger() -> RoomCommandResult:
+                return _set_house_rule(
+                    room_dir, "immersive_illustration_trigger", target, room_id,
+                    f"房间配图触发档位已设为 {('跟随站点' if target is None else target)}（房间只能收紧）",
+                )
+
+            return _confirm_action(
+                preview=f"将把本房间配图触发档位设为『{'跟随站点' if target is None else target}』（只能比站点/个人设置更收紧）。",
+                apply=_apply_trigger,
+                assume_yes=_assume_yes(flags),
+                confirm=confirm,
+                prompt="确认修改本房间配图触发档位?",
             )
         if action == "now":
             if not switches["illustration"]:
@@ -600,24 +654,67 @@ def _immersive_command(
                 confirm=confirm,
                 prompt="确认立即生成本房间配图?",
             )
-        return RoomCommandResult(False, "Usage: immersive illustration show|on|off|auto <on|off>|now [场景]")
+        return RoomCommandResult(
+            False,
+            "Usage: immersive illustration show|on|off|auto <on|off>|trigger <inherit|important|off>|now [场景]",
+        )
 
     if sub == "cache":
-        from trpg_server.immersive import scenario_cache
+        from trpg_server.immersive import room_cache, scenario_cache
+        from trpg_server.immersive.illustration import clear_room_cache, room_cache_stats
         from trpg_server.settings import SCENARIOS_DIR
 
         scenario_id = str(info.get("scenario_id") or "")
         action = rest[0].lower() if rest else "show"
+        if action == "room":
+            room_action = rest[1].lower() if len(rest) > 1 else "show"
+            if room_action in {"show", "stats"}:
+                stats = room_cache_stats(room_dir)
+                return RoomCommandResult(
+                    True,
+                    f"本房间配图缓存：{stats['entries']} 条索引 / {stats['files']} 个文件 / "
+                    f"{_human_bytes(int(stats['bytes']))}\n"
+                    f"  累计命中 {stats.get('hits') or 0} 次 · 最近命中 {stats.get('last_hit_at') or '-'}\n"
+                    f"  目录: {stats.get('directory') or '-'}\n"
+                    "  说明：房间缓存落在本房间目录内，随归档保留；只在本房间复用，不跨房间。",
+                )
+            if room_action == "clear":
+                preview = "将删除本房间目录内的配图缓存（图片与索引），不影响剧本缓存。"
+
+                def _apply_room_cache_clear() -> RoomCommandResult:
+                    files, removed_bytes = clear_room_cache(room_dir)
+                    log_room_event(
+                        room_dir, "清空房间配图缓存", source="room_console", actor=ROOM_CONSOLE_ACTOR
+                    )
+                    return RoomCommandResult(
+                        True,
+                        f"已清空本房间配图缓存：{files} 个文件 / {_human_bytes(removed_bytes)}。",
+                    )
+
+                return _confirm_action(
+                    preview=preview,
+                    apply=_apply_room_cache_clear,
+                    assume_yes=_assume_yes(flags),
+                    confirm=confirm,
+                    prompt="确认清空本房间配图缓存?",
+                )
+            return RoomCommandResult(False, "Usage: immersive cache room show|clear [--yes]")
         if action in {"show", "stats"}:
+            room_stats = room_cache_stats(room_dir)
+            room_text = (
+                f"房间缓存：{room_stats['entries']} 条 / {room_stats['files']} 个文件 / "
+                f"{_human_bytes(int(room_stats['bytes']))} · 命中 {room_stats.get('hits') or 0} 次"
+            )
             if not scenario_id:
-                return RoomCommandResult(False, "本房间未关联剧本，无法统计剧本配图缓存")
+                return RoomCommandResult(True, room_text + "\n本房间未关联剧本，仅显示房间缓存。")
             data = scenario_cache.stats(scenario_id, scenarios_dir=SCENARIOS_DIR)
             rows = data.get("scenarios") or []
             if not rows:
-                return RoomCommandResult(True, f"剧本 {scenario_id} 暂无配图缓存。")
+                return RoomCommandResult(True, room_text + f"\n剧本 {scenario_id} 暂无配图缓存。")
             row = rows[0]
             return RoomCommandResult(
                 True,
+                room_text + "\n"
                 f"剧本配图缓存（{scenario_id}）：\n"
                 f"  文件 {row.get('files')} 个 / {_human_bytes(int(row.get('bytes') or 0))}"
                 f"（索引内 {row.get('tracked_files')}，未登记 {row.get('untracked_files')}）\n"
@@ -626,36 +723,35 @@ def _immersive_command(
                 f"优先复用 {'开' if switches.get('scenario_prefer') else '关'}",
             )
         if action == "clear":
-            if not scenario_id:
-                return RoomCommandResult(False, "本房间未关联剧本，无法清理剧本配图缓存")
-
             def _apply_room_clear() -> RoomCommandResult:
-                files, size = scenario_cache.clear(scenario_id, scenarios_dir=SCENARIOS_DIR)
-                return RoomCommandResult(True, f"已清理剧本 {scenario_id} 的配图缓存：{files} 个文件 / {_human_bytes(size)}")
+                files, size = clear_room_cache(room_dir)
+                log_room_event(
+                    room_dir, "清空房间配图缓存", source="room_console", actor=ROOM_CONSOLE_ACTOR
+                )
+                return RoomCommandResult(
+                    True, f"已清空本房间配图缓存：{files} 个文件 / {_human_bytes(size)}。"
+                )
 
             return _confirm_action(
-                preview=f"将删除剧本 {scenario_id} 的全部配图缓存（不可恢复，相关房间历史链接可能失效）。",
+                preview="将删除本房间目录内的全部配图缓存（不可恢复）；剧本缓存需在站点控制台清理。",
                 apply=_apply_room_clear,
                 assume_yes=_assume_yes(flags),
                 confirm=confirm,
-                prompt="确认清理本剧本配图缓存?",
+                prompt="确认清空本房间配图缓存?",
             )
         if action == "prune":
-            if not scenario_id:
-                return RoomCommandResult(False, "本房间未关联剧本，无法清理剧本配图缓存")
-
             def _apply_room_prune() -> RoomCommandResult:
-                files, size = scenario_cache.prune(
-                    scenario_id=scenario_id, settings=settings, scenarios_dir=SCENARIOS_DIR
+                files, size = room_cache.prune(room_dir, settings)
+                return RoomCommandResult(
+                    True, f"已按单房间配额清理：{files} 个文件 / {_human_bytes(size)}。"
                 )
-                return RoomCommandResult(True, f"已按配额清理剧本 {scenario_id}：{files} 个文件 / {_human_bytes(size)}")
 
             return _confirm_action(
-                preview=f"将按站点配额对剧本 {scenario_id} 做 LRU 清理（删除最旧配图，默认预演）。",
+                preview="将按单房间容量上限做 LRU 清理（删除最久未命中的房间缓存，默认预演）。",
                 apply=_apply_room_prune,
                 assume_yes=_assume_yes(flags),
                 confirm=confirm,
-                prompt="确认执行剧本缓存 LRU 清理?",
+                prompt="确认执行房间缓存 LRU 清理?",
             )
         if action in {"record", "prefer"} and len(rest) > 1:
             raw = rest[1].lower()
@@ -680,7 +776,7 @@ def _immersive_command(
             )
         return RoomCommandResult(
             False,
-            "Usage: immersive cache show|stats|clear|prune|record <on|off|inherit>|prefer <on|off|inherit>",
+            "Usage: immersive cache show|stats|room show|room clear|clear|prune|record <on|off|inherit>|prefer <on|off|inherit>",
         )
 
     if sub == "director":
@@ -732,16 +828,31 @@ def _immersive_status_text(
     switches: dict[str, bool],
     music_state: dict[str, Any],
     room_dir: Path,
+    settings: dict[str, Any] | None = None,
+    rules: dict[str, Any] | None = None,
 ) -> RoomCommandResult:
+    from trpg_server.immersive.config import (
+        load_immersive_settings,
+        resolve_illustration_trigger,
+        resolve_music_source,
+    )
     from trpg_server.immersive.illustration import history_for_room
 
+    if settings is None:
+        settings = load_immersive_settings(None)
+    if rules is None:
+        info = _load_room_info(room_dir)
+        rules = info.get("house_rules") if isinstance(info.get("house_rules"), dict) else {}
+    effective_source = resolve_music_source(settings, rules)
+    effective_trigger = resolve_illustration_trigger(settings, rules)
     history = history_for_room(room_dir, limit=3)
     lines = [
         f"房间 {room_id} 沉浸状态：",
-        f"  配乐: {'开' if switches.get('music') else '关'} · "
+        f"  配乐: {'开' if switches.get('music') else '关'} · 来源 {effective_source}（站点 {settings.get('music_source')}）· "
         f"{music_state.get('profile') or '-'} / {music_state.get('intensity') or '-'} · 第 {music_state.get('section') or 0} 段 · "
         f"回合 {music_state.get('turns') or 0}",
         f"  配图: {'开' if switches.get('illustration') else '关'} · 自动 {'开' if switches.get('illustration_auto') else '关'} · "
+        f"触发档位 {effective_trigger}（站点 {settings.get('illustration_trigger')}）· "
         f"历史 {len(history)} 条（显示最近 3 条）",
     ]
     for item in history:
@@ -1070,3 +1181,224 @@ def _archive_command(
         confirm=confirm,
         prompt="确认归档本房间?",
     )
+
+
+def _voice_command(
+    room_dir: Path,
+    room_id: Any,
+    sub: str,
+    rest: list[str],
+    flags: set[str],
+    confirm: Callable[[str], bool] | None,
+) -> RoomCommandResult:
+    """房间级语音命令；只读写本房间目录，无法越过站点配置。"""
+    from trpg_server.voice import events
+    from trpg_server.voice.config import (
+        load_room_voice,
+        load_voice_settings,
+        resolve_room_voice,
+        room_usage_snapshot,
+        save_room_voice,
+    )
+    from trpg_server.voice.engine import engine_health
+    from trpg_server.voice.profiles import PROFILE_MAP, PROFILE_IDS
+
+    settings = load_voice_settings(None)
+    info = _load_room_info(room_dir)
+    rules = info.get("house_rules") if isinstance(info.get("house_rules"), dict) else {}
+    effective = resolve_room_voice(settings, rules)
+    data = load_room_voice(room_dir)
+    usage = room_usage_snapshot(data)
+
+    if sub == "status":
+        health = engine_health(settings)
+        lines = [
+            f"房间 {room_id} 语音状态：",
+            f"  生效: {'开' if effective['enabled'] else '关'}（站点 {'开' if settings['enabled'] else '关'} · "
+            f"房间规则 {'跟随' if rules.get('voice_enabled') is None else ('开' if rules.get('voice_enabled') else '关')}）",
+            f"  引擎: {effective['engine']} · {'可用' if health.get('ok') else '不可用（' + str(health.get('reason')) + '）'}",
+            f"  上限: 单回合 {effective['max_turn_chars']} 字 · 单段 {effective['max_segment_chars']} 字 · "
+            f"最多 {effective['max_segments']} 段 · 每小时 {effective['room_hourly_cap'] or '不限'} 回合",
+            f"  ducking: {'开' if effective['ducking'] else '关'} · 级别 {effective['ducking_level']}",
+            f"  本小时用量: {usage['count']}（{usage['hour'] or '-'}）",
+            f"  NPC 映射: {len(data['npc_profiles'])} 条 · 静音: {', '.join(data['muted']) or '无'}",
+        ]
+        for name, profile_id in sorted(data["npc_profiles"].items()):
+            label = PROFILE_MAP.get(profile_id).label if profile_id in PROFILE_MAP else "未知"
+            lines.append(f"    {name} -> {profile_id}（{label}）")
+        return RoomCommandResult(True, "\n".join(lines))
+
+    if sub in {"on", "off"}:
+        target = sub == "on"
+        if target and not settings["enabled"]:
+            return RoomCommandResult(False, "站点语音总开关关闭；房间只能收紧，无法单独开启。请先由管理员执行 voice on。")
+
+        def _apply_toggle() -> RoomCommandResult:
+            return _set_house_rule(
+                room_dir, "voice_enabled", target, room_id,
+                f"房间语音已{'开启' if target else '关闭'}",
+            )
+
+        return _confirm_action(
+            preview=f"将把本房间语音设为『{'开' if target else '关'}』（无法越过站点总开关）。",
+            apply=_apply_toggle,
+            assume_yes=_assume_yes(flags),
+            confirm=confirm,
+            prompt="确认修改本房间语音开关?",
+        )
+
+    if sub == "map":
+        action = rest[0].lower() if rest else "list"
+        if action == "list":
+            return _voice_command(room_dir, room_id, "status", [], flags, confirm)
+        if action == "set":
+            if len(rest) < 3:
+                return RoomCommandResult(False, "Usage: voice map set <speaker> <profile> [--yes]")
+            speaker = rest[1]
+            profile_id = rest[2].lower()
+            if profile_id not in PROFILE_MAP or PROFILE_MAP[profile_id].kind != "npc":
+                return RoomCommandResult(
+                    False,
+                    f"未知 NPC 人设: {profile_id}；可选: {', '.join(PROFILE_IDS[1:])}",
+                )
+
+            def _apply_map() -> RoomCommandResult:
+                fresh = load_room_voice(room_dir)
+                fresh["npc_profiles"][speaker] = profile_id
+                if not save_room_voice(room_dir, fresh):
+                    return RoomCommandResult(False, "写入房间 voice.json 失败。")
+                return RoomCommandResult(True, f"已将「{speaker}」映射到 {profile_id}（{PROFILE_MAP[profile_id].label}）")
+
+            return _confirm_action(
+                preview=f"将把本房间「{speaker}」映射到 {profile_id}（{PROFILE_MAP[profile_id].label}）。",
+                apply=_apply_map,
+                assume_yes=_assume_yes(flags),
+                confirm=confirm,
+                prompt="确认修改 NPC 音色映射?",
+            )
+        return RoomCommandResult(False, "Usage: voice map list|set <speaker> <profile>")
+
+    if sub == "mute":
+        action = rest[0].lower() if rest else "list"
+        if action == "list" or not rest:
+            return RoomCommandResult(True, "本房间静音名单: " + (", ".join(data["muted"]) or "无"))
+        if action == "clear":
+            def _apply_clear() -> RoomCommandResult:
+                fresh = load_room_voice(room_dir)
+                fresh["muted"] = []
+                save_room_voice(room_dir, fresh)
+                return RoomCommandResult(True, "已清空本房间静音名单。")
+
+            return _confirm_action(
+                preview="将清空本房间 NPC 静音名单。",
+                apply=_apply_clear,
+                assume_yes=_assume_yes(flags),
+                confirm=confirm,
+                prompt="确认清空静音名单?",
+            )
+        target = rest[0]
+        remove = False
+        if target.lower() in {"off", "remove", "unmute"} and len(rest) > 1:
+            remove = True
+            target = rest[1]
+
+        def _apply_mute() -> RoomCommandResult:
+            fresh = load_room_voice(room_dir)
+            muted = [str(item) for item in fresh.get("muted") or []]
+            lowered = {item.lower() for item in muted}
+            if remove:
+                muted = [item for item in muted if item.lower() != target.lower()]
+                message = f"已从静音名单移除「{target}」。"
+            elif target.lower() in lowered:
+                muted = [item for item in muted if item.lower() != target.lower()]
+                message = f"「{target}」已在静音名单中，现已取消静音。"
+            else:
+                muted.append(target)
+                message = f"已将「{target}」加入静音名单。"
+            fresh["muted"] = muted
+            save_room_voice(room_dir, fresh)
+            return RoomCommandResult(True, message)
+
+        return _confirm_action(
+            preview=f"将{'取消' if remove else '切换'}本房间 NPC「{target}」的静音状态。",
+            apply=_apply_mute,
+            assume_yes=_assume_yes(flags),
+            confirm=confirm,
+            prompt="确认修改静音名单?",
+        )
+
+    if sub == "cache":
+        from trpg_server.voice import local_cache
+
+        action = rest[0].lower() if rest else "stats"
+
+        def _mb(value: int | float) -> str:
+            return f"{float(value or 0) / 1024 / 1024:.1f} MB"
+
+        if action in {"stats", "show"}:
+            info = local_cache.stats(room_dir)
+            lines = [
+                f"房间 {room_id} 语音缓存：",
+                f"  文件: {info['files']} 条 / 上限 {effective.get('cache_max_entries') or '不限'} 条",
+                f"  体积: {_mb(info['bytes'])} / 上限 {int(effective.get('cache_quota_mb') or 0) or '不限'} MB",
+                f"  命中次数: {info['hits']}，最近命中: {info['last_hit_at'] or '-'}",
+                f"  开关: {'开' if effective.get('cache_enabled') else '关'}，超限策略: {effective.get('cache_overflow') or 'lru'}",
+                f"  目录: {info['directory'] or '-'}",
+            ]
+            return RoomCommandResult(True, "\n".join(lines))
+
+        if action == "clear":
+            info = local_cache.stats(room_dir)
+            preview = (
+                f"将删除本房间语音缓存：{info['files']} 个文件，{_mb(info['bytes'])}。"
+                "（不影响模型权重与其他房间缓存）"
+            )
+
+            def _apply_clear() -> RoomCommandResult:
+                files, size = local_cache.clear(room_dir)
+                return RoomCommandResult(True, f"已清理本房间语音缓存：{files} 个文件，{_mb(size)}。")
+
+            return _confirm_action(
+                preview=preview,
+                apply=_apply_clear,
+                assume_yes=_assume_yes(flags),
+                confirm=confirm,
+                prompt="确认清空本房间语音缓存?",
+            )
+
+        if action == "prune":
+            preview = (
+                f"将按 LRU 清理本房间语音缓存，使总条数不超过 {effective.get('cache_max_entries') or '不限'}、"
+                f"总体积不超过 {int(effective.get('cache_quota_mb') or 0) or '不限'} MB。"
+            )
+
+            def _apply_prune() -> RoomCommandResult:
+                removed, freed = local_cache.prune(room_dir, effective)
+                return RoomCommandResult(True, f"已按 LRU 清理本房间语音缓存：{removed} 个文件，释放 {_mb(freed)}。")
+
+            return _confirm_action(
+                preview=preview,
+                apply=_apply_prune,
+                assume_yes=_assume_yes(flags),
+                confirm=confirm,
+                prompt="确认清理本房间语音缓存?",
+            )
+
+        return RoomCommandResult(False, "Usage: voice cache stats|clear|prune [--yes]")
+
+    if sub == "usage":
+        recent = [item for item in events.recent(50) if str(item.get("room_id") or "") == str(room_id)]
+        lines = [
+            f"房间 {room_id} 语音用量：",
+            f"  本小时: {usage['count']} 回合（{usage['hour'] or '-'}，上限 {effective['room_hourly_cap'] or '不限'}）",
+            f"  最近事件: {len(recent)} 条",
+        ]
+        for item in recent[:10]:
+            lines.append(
+                f"    {item.get('ts') or '-'} {item.get('event') or '-'} "
+                f"speaker={item.get('speaker') or '-'} profile={item.get('profile_id') or '-'} "
+                f"reason={item.get('reason') or '-'}"
+            )
+        return RoomCommandResult(True, "\n".join(lines))
+
+    return RoomCommandResult(False, "Usage: voice status|on|off|map <list|set>|mute <speaker|list|clear>|usage")

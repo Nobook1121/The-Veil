@@ -48,6 +48,16 @@ namespace TrpgImmersiveIllustrationModule {
     let lastProfile = "daily";
     let lastIntensity: ImmersiveIntensity = "medium";
     let lastTurn = 0;
+    // NPC 头像按房间复用：同一 NPC 只保留最新一张，避免重复生成与重复展示。
+    const npcPortraits = new Map<string, ImmersiveIllustrationItem>();
+    let stageHintTimer: number | null = null;
+
+    function clearStageHintTimer(): void {
+        if (stageHintTimer !== null) {
+            window.clearTimeout(stageHintTimer);
+            stageHintTimer = null;
+        }
+    }
 
     function byId<T extends HTMLElement>(id: string): T | null {
         return document.getElementById(id) as T | null;
@@ -85,6 +95,7 @@ namespace TrpgImmersiveIllustrationModule {
                     <span id="immersiveStagePlaceholderText">等待下一幕场景</span>
                 </div>
                 <div class="immersive-stage-status" id="immersiveStageStatus" hidden></div>
+                <div class="immersive-npc-strip" id="immersiveNpcStrip" hidden></div>
                 <div class="immersive-stage-overlay">
                     <span class="immersive-stage-scene" id="immersiveStageScene">实时场景</span>
                     <div class="immersive-stage-actions">
@@ -178,6 +189,8 @@ namespace TrpgImmersiveIllustrationModule {
         lastProfile = "daily";
         lastIntensity = "medium";
         lastTurn = 0;
+        npcPortraits.clear();
+        clearStageHintTimer();
         closeLightbox();
         resetStage();
         setVisible(false);
@@ -196,11 +209,20 @@ namespace TrpgImmersiveIllustrationModule {
             ? state.illustration!.history!.filter((item) => item && typeof item.url === "string" && item.url)
             : [];
         history = items.slice(-12);
+        npcPortraits.clear();
+        for (const item of items) {
+            if (item.category === "portrait" && item.npc_name) {
+                npcPortraits.set(String(item.npc_name), item);
+            }
+        }
+        renderNpcStrip();
         updateSceneLabel();
         updateButtons();
         if (history.length) {
-            const latest = history[history.length - 1];
+            const sceneItems = history.filter((item) => item.category !== "portrait");
+            const latest = sceneItems[sceneItems.length - 1];
             if (latest) renderImage(latest, false);
+            else showIdle();
             renderHistory();
         } else {
             showIdle();
@@ -229,22 +251,100 @@ namespace TrpgImmersiveIllustrationModule {
     export function onIllustration(payload: ImmersiveIllustrationEvent): void {
         if (!roomId) return;
         if (payload.room_id && String(payload.room_id) !== roomId) return;
-        if (payload.status === "pending") {
+        const status = String(payload.status || "");
+        if (status === "deciding") {
+            showStageStatus(payload.label || "KP 正在判断是否需要配图…", "pending");
+            return;
+        }
+        if (status === "generating") {
             showPending(payload.scene || lastScene || "当前场景");
             return;
         }
-        if (payload.status === "error") {
-            showError(payload.error || "配图服务暂不可用");
+        if (status === "skipped") {
+            showTransientStatus("本轮无需配图", "muted");
+            return;
+        }
+        if (status === "complete") {
+            showTransientStatus("配图完成", "muted", 1600);
+            return;
+        }
+        if (status === "pending") {
+            showPending(payload.scene || lastScene || "当前场景");
+            return;
+        }
+        if (status === "error") {
+            showError(payload.error || payload.reason || "配图服务暂不可用", payload.retryable !== false);
             return;
         }
         if (!payload.url) return;
         const item = normalizeItem(payload);
+        if (item.category === "portrait" && item.npc_name) {
+            const key = String(item.npc_name);
+            const existing = npcPortraits.get(key);
+            if (existing && existing.url === item.url) return;
+            npcPortraits.set(key, item);
+            renderNpcStrip();
+            showTransientStatus(`${key} 的立绘已就绪`, "muted", 1400);
+            return;
+        }
         if (current && current.url === item.url) return;
         if (item.scene) lastScene = item.scene;
         appendHistory(item);
         renderImage(item, true);
         renderHistory();
         setVisible(true);
+    }
+
+    function showStageStatus(text: string, level: "pending" | "muted" | "error"): void {
+        clearStageHintTimer();
+        const status = byId<HTMLElement>("immersiveStageStatus");
+        if (!status) return;
+        status.hidden = false;
+        status.textContent = text;
+        status.dataset.level = level;
+    }
+
+    function showTransientStatus(text: string, level: "pending" | "muted" | "error", delay = 2400): void {
+        showStageStatus(text, level);
+        clearStageHintTimer();
+        stageHintTimer = window.setTimeout(() => {
+            const status = byId<HTMLElement>("immersiveStageStatus");
+            if (status) {
+                status.hidden = true;
+                status.textContent = "";
+                delete status.dataset.level;
+            }
+            stageHintTimer = null;
+        }, delay);
+    }
+
+    function renderNpcStrip(): void {
+        const strip = byId<HTMLElement>("immersiveNpcStrip");
+        if (!strip) return;
+        strip.innerHTML = "";
+        const entries = Array.from(npcPortraits.entries());
+        if (!entries.length) {
+            strip.hidden = true;
+            return;
+        }
+        for (const [name, item] of entries) {
+            const chip = document.createElement("button");
+            chip.type = "button";
+            chip.className = "immersive-npc-chip";
+            chip.title = `查看 ${name} 的立绘`;
+            const image = document.createElement("img");
+            image.src = item.url;
+            image.alt = `${name} 立绘`;
+            image.loading = "lazy";
+            image.decoding = "async";
+            const label = document.createElement("span");
+            label.textContent = name;
+            chip.appendChild(image);
+            chip.appendChild(label);
+            chip.addEventListener("click", () => openLightbox(item));
+            strip.appendChild(chip);
+        }
+        strip.hidden = false;
     }
 
     export function requestNow(): void {
@@ -298,6 +398,9 @@ namespace TrpgImmersiveIllustrationModule {
             degraded: payload.degraded,
             error: payload.error,
             turn: payload.turn,
+            category: payload.category,
+            npc_name: payload.npc_name,
+            cache_level: payload.cache_level,
             created_at: payload.created_at || new Date().toLocaleTimeString(),
         };
     }
@@ -309,6 +412,7 @@ namespace TrpgImmersiveIllustrationModule {
     }
 
     function resetStage(): void {
+        clearStageHintTimer();
         const image = byId<HTMLImageElement>("immersiveStageImage");
         if (image) {
             image.removeAttribute("src");
@@ -334,6 +438,11 @@ namespace TrpgImmersiveIllustrationModule {
             historyList.innerHTML = "";
             historyList.hidden = true;
         }
+        const npcStrip = byId<HTMLElement>("immersiveNpcStrip");
+        if (npcStrip) {
+            npcStrip.innerHTML = "";
+            npcStrip.hidden = true;
+        }
     }
 
     function setVisible(visible: boolean): void {
@@ -350,7 +459,7 @@ namespace TrpgImmersiveIllustrationModule {
             placeholder.classList.remove("is-error", "is-loading");
         }
         const placeholderText = byId<HTMLElement>("immersiveStagePlaceholderText");
-        if (placeholderText) placeholderText.textContent = switches.illustration ? "场景画面将在关键回合自动生成" : "配乐进行中";
+        if (placeholderText) placeholderText.textContent = switches.illustration ? "等待场景推进，关键回合会自动配图" : "等待场景推进";
         const status = byId<HTMLElement>("immersiveStageStatus");
         if (status) {
             status.hidden = true;
@@ -420,10 +529,11 @@ namespace TrpgImmersiveIllustrationModule {
     }
 
     function showPending(scene: string): void {
+        clearStageHintTimer();
         const status = byId<HTMLElement>("immersiveStageStatus");
         if (status) {
             status.hidden = false;
-            status.textContent = "正在绘制场景…";
+            status.textContent = scene && scene !== lastScene ? "正在切换场景并配图…" : "正在配图…";
             status.dataset.level = "pending";
         }
         const placeholder = byId<HTMLElement>("immersiveStagePlaceholder");
@@ -434,16 +544,19 @@ namespace TrpgImmersiveIllustrationModule {
             placeholder.hidden = false;
             placeholder.classList.add("is-loading");
             placeholder.classList.remove("is-error");
-            placeholderText.textContent = scene ? `正在绘制：${scene}` : "正在绘制场景…";
+            placeholderText.textContent = scene ? `正在配图：${scene}` : "正在配图…";
         }
-        if (scene) setText("immersiveStageScene", `${scene} · 绘制中`);
+        if (scene) setText("immersiveStageScene", `${scene} · 配图中`);
     }
 
-    function showError(message: string): void {
+    function showError(message: string, retryable = true): void {
+        clearStageHintTimer();
         const status = byId<HTMLElement>("immersiveStageStatus");
         if (status) {
             status.hidden = false;
-            status.textContent = `配图暂不可用：${shortReason(message)}`;
+            status.textContent = retryable && canManage
+                ? `配图失败：${shortReason(message)}（可点击「重新配图」重试）`
+                : `配图失败：${shortReason(message)}`;
             status.dataset.level = "error";
         }
         if (!current) {
@@ -453,7 +566,7 @@ namespace TrpgImmersiveIllustrationModule {
                 placeholder.hidden = false;
                 placeholder.classList.add("is-error");
                 placeholder.classList.remove("is-loading");
-                placeholderText.textContent = "配图暂不可用，叙事继续";
+                placeholderText.textContent = "配图失败，叙事继续";
             }
         }
     }
@@ -488,10 +601,19 @@ namespace TrpgImmersiveIllustrationModule {
         }
         const musicButton = byId<HTMLButtonElement>("immersiveMusicToggle");
         if (musicButton) {
+            const source = window.TrpgImmersive?.getMusicSource?.() || "hybrid";
             const muted = Boolean(window.TrpgImmersiveMusic?.isMuted());
-            musicButton.textContent = muted ? "配乐已静音" : "配乐开";
-            musicButton.dataset.muted = muted ? "true" : "false";
-            musicButton.title = muted ? "点击恢复实时配乐" : "点击静音实时配乐";
+            if (source === "bgm") {
+                musicButton.textContent = "配乐未启用";
+                musicButton.dataset.muted = "true";
+                musicButton.disabled = true;
+                musicButton.title = "当前音乐来源为「仅 BGM」；可在个人设置中切换";
+            } else {
+                musicButton.textContent = muted ? "配乐已静音" : "配乐开";
+                musicButton.dataset.muted = muted ? "true" : "false";
+                musicButton.disabled = false;
+                musicButton.title = muted ? "点击恢复实时配乐" : "点击静音实时配乐";
+            }
         }
         // 右侧栏收起后只剩窄条，配乐开关仍需随手可及。
         const railMusic = byId<HTMLButtonElement>("homeRoomMembersRailMusic");

@@ -623,6 +623,12 @@ def normalize_scenario_payload(scenario: dict[str, Any], storage_dir: Path | Non
     normalized["preparation"] = legacy_fields["preparation"]
     normalized["timeline"] = legacy_fields["timeline"]
     normalized["allow_open_ending"] = legacy_fields["allow_open_ending"]
+    # 剧本作者开关：是否接受由房间运行时生成的配图进入跨房间复用池。
+    # 默认关闭：房间生成图未经作者审阅，默认只在本房间内复用，避免其他房间看到
+    # 与剧本设定不一致的画面。
+    normalized["accept_room_images"] = _coerce_bool(
+        scenario.get("accept_room_images", scenario.get("acceptRoomImages")), False
+    )
     trigger_cards = []
     for card in scenario.get("trigger_cards", []) if isinstance(scenario.get("trigger_cards"), list) else []:
         if not isinstance(card, dict):

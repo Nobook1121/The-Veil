@@ -11,19 +11,25 @@ import time
 from pathlib import Path
 from typing import Any
 
-from trpg_server.immersive import broadcast, director, image_platforms
+from trpg_server.immersive import broadcast, director, illustration_director, image_platforms
 from trpg_server.immersive.analyzer import analyze_narrative
-from trpg_server.immersive.config import load_immersive_settings, resolve_room_switches
+from trpg_server.immersive.config import (
+    load_immersive_settings,
+    resolve_illustration_trigger,
+    resolve_music_source,
+    resolve_room_switches,
+)
 from trpg_server.immersive.illustration import (
     generate_now,
     history_for_room,
     load_room_state,
     next_turn_index,
+    scenario_accepts_room_images,
     should_auto_generate,
-    submit_generation,
     usage_snapshot,
 )
 from trpg_server.immersive.music import apply_director
+from trpg_server.immersive.music import current_payload as live_music_payload
 from trpg_server.immersive.music import load_state as load_music_state
 from trpg_server.immersive.music import plan_music
 from trpg_server.room_log import log_room_event
@@ -100,9 +106,12 @@ def _log_director(
     )
 
 
-def _music_payload(plan: dict[str, Any], analysis: dict[str, Any]) -> dict[str, Any]:
+def _music_payload(
+    plan: dict[str, Any], analysis: dict[str, Any], music_source: str = "hybrid"
+) -> dict[str, Any]:
     payload = dict(plan)
     payload["kind"] = "music"
+    payload["music_source"] = music_source
     payload["analysis"] = {
         "profile": analysis.get("profile"),
         "intensity": analysis.get("intensity"),
@@ -111,6 +120,282 @@ def _music_payload(plan: dict[str, Any], analysis: dict[str, Any]) -> dict[str, 
         "reason": analysis.get("reason"),
     }
     return payload
+
+
+def _broadcast_thinking_start(room_id: str, thinking_id: str) -> None:
+    broadcast.emit(
+        "new_message",
+        {
+            "room_id": room_id,
+            "type": "ai_thinking_start",
+            "aiRequestId": thinking_id,
+            "roleName": "KP · 配图",
+            "startedAt": time.time() * 1000,
+        },
+    )
+
+
+def _broadcast_thinking_stage(
+    room_id: str, thinking_id: str, stage: str, label: str
+) -> None:
+    broadcast.emit(
+        "new_message",
+        {
+            "room_id": room_id,
+            "type": "ai_thinking_stage",
+            "aiRequestId": thinking_id,
+            "stage": stage,
+            "label": label,
+        },
+    )
+
+
+def _broadcast_thinking_end(room_id: str, thinking_id: str) -> None:
+    broadcast.emit(
+        "new_message",
+        {"room_id": room_id, "type": "ai_thinking_end", "aiRequestId": thinking_id},
+    )
+
+
+def _is_important_scene(
+    structured: dict[str, Any] | None, analysis: dict[str, Any], room_dir: Path | None
+) -> bool:
+    """「仅重要场景转换」档位判定：显式 next_scene、高置信度或场景标签变化。"""
+    if isinstance(structured, dict) and str(structured.get("next_scene") or "").strip():
+        return True
+    if str(analysis.get("confidence") or "").lower() == "high":
+        return True
+    current = str(analysis.get("scene") or "").strip()
+    if not current:
+        return False
+    history = history_for_room(room_dir)
+    last_scene = str((history[0] or {}).get("scene") or "").strip() if history else ""
+    return bool(last_scene) and current != last_scene
+
+
+def _kp_done(
+    fut: Any,
+    *,
+    room_id: str,
+    room_dir: Path | None,
+    seed: str,
+    started: float,
+    thinking_id: str,
+    analysis: dict[str, Any],
+    scenario_id: str,
+    settings: dict[str, Any],
+    config_dir: Path | str | None,
+    house_rules: dict[str, Any] | None,
+) -> None:
+    """AI KP 决策回调：生成场景图与 NPC 头像，广播状态并结束「正在思考」占位。"""
+    try:
+        outcome = fut.result()
+    except Exception as exc:  # noqa: BLE001 - 后台任务失败不能影响房间
+        logger.warning("immersive illustration KP job failed: %s", exc)
+        broadcast.emit(
+            "immersive_illustration",
+            {
+                "kind": "illustration",
+                "status": "error",
+                "room_id": room_id,
+                "seed": seed,
+                "reason": "kp_job_failed",
+                "error": str(exc)[:180],
+            },
+        )
+        _broadcast_thinking_end(room_id, thinking_id)
+        _room_log(room_dir, room_id, "配图判断失败，已跳过本轮配图", level="warning", error=str(exc)[:180])
+        return
+
+    decision = outcome.get("decision") if isinstance(outcome, dict) else None
+    decision = decision if isinstance(decision, dict) else {}
+    should = bool(decision.get("should_illustrate"))
+    _room_log(
+        room_dir,
+        room_id,
+        f"配图判断：{'需要' if should else '不需要'}（{decision.get('reason') or '-'}）",
+        level="info",
+        trigger=outcome.get("trigger") if isinstance(outcome, dict) else "",
+        kp_accepted=outcome.get("accepted") if isinstance(outcome, dict) else False,
+        kp_validation=outcome.get("validation") if isinstance(outcome, dict) else "",
+        kp_platform=outcome.get("platform") if isinstance(outcome, dict) else "",
+        kp_model=outcome.get("model") if isinstance(outcome, dict) else "",
+        kp_elapsed_ms=outcome.get("elapsed_ms") if isinstance(outcome, dict) else 0,
+        kp_fallback=bool(outcome.get("fallback")) if isinstance(outcome, dict) else False,
+        kp_fallback_reason=str(outcome.get("fallback_reason") or "")[:180]
+        if isinstance(outcome, dict)
+        else "",
+        prompt=(decision.get("scene_prompt") or "")[:120],
+        npc_count=len(decision.get("npcs") or []),
+    )
+    if not should:
+        broadcast.emit(
+            "immersive_illustration",
+            {
+                "kind": "illustration",
+                "status": "skipped",
+                "room_id": room_id,
+                "seed": seed,
+                "reason": decision.get("reason") or "kp_declined",
+                "trigger": outcome.get("trigger") if isinstance(outcome, dict) else "",
+            },
+        )
+        _broadcast_thinking_stage(room_id, thinking_id, "done", "本轮无需配图")
+        _broadcast_thinking_end(room_id, thinking_id)
+        return
+
+    scene = str(analysis.get("scene") or "未知场景")
+    profile = str(analysis.get("profile") or "daily")
+    intensity = str(analysis.get("intensity") or "medium")
+    allow_cross_room = scenario_accepts_room_images(scenario_id)
+    _broadcast_thinking_stage(room_id, thinking_id, "illustrating", "正在配图…")
+    broadcast.emit(
+        "immersive_illustration",
+        {
+            "kind": "illustration",
+            "status": "generating",
+            "room_id": room_id,
+            "seed": seed,
+            "scene": scene,
+            "profile": profile,
+            "intensity": intensity,
+            "category": "scene",
+        },
+    )
+
+    scene_payload: dict[str, Any] | None = None
+    try:
+        scene_payload = generate_now(
+            room_dir=room_dir,
+            room_id=room_id,
+            scene=scene,
+            profile=profile,
+            intensity=intensity,
+            seed=seed,
+            settings=settings,
+            force=False,
+            config_dir=config_dir,
+            scenario_id=scenario_id,
+            house_rules=house_rules,
+            prompt_override=str(decision.get("scene_prompt") or ""),
+            category="scene",
+            allow_cross_room=allow_cross_room,
+        )
+        scene_payload = dict(scene_payload)
+        scene_payload.update(
+            {
+                "kind": "illustration",
+                "status": "ready",
+                "room_id": room_id,
+                "category": "scene",
+                "trigger": outcome.get("trigger") if isinstance(outcome, dict) else "",
+                "kp_reason": decision.get("reason") or "",
+            }
+        )
+        broadcast.emit("immersive_illustration", scene_payload)
+        _room_log(
+            room_dir,
+            room_id,
+            f"场景配图完成：{scene}（{scene_payload.get('provider')}）",
+            level="warning" if scene_payload.get("degraded") else "info",
+            category="scene",
+            provider=scene_payload.get("provider"),
+            degraded=scene_payload.get("degraded"),
+            error=scene_payload.get("error") or "-",
+            cache_hit=bool(scene_payload.get("cache_hit")),
+            cache_level=scene_payload.get("cache_level") or "-",
+            source_room=scene_payload.get("source_room") or "-",
+            reuse_source=scene_payload.get("reuse_source") or "-",
+            elapsed_ms=round((time.monotonic() - started) * 1000, 1),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("immersive scene illustration failed: %s", exc)
+        broadcast.emit(
+            "immersive_illustration",
+            {
+                "kind": "illustration",
+                "status": "error",
+                "room_id": room_id,
+                "seed": seed,
+                "category": "scene",
+                "reason": "generation_failed",
+                "error": str(exc)[:180],
+            },
+        )
+        _room_log(room_dir, room_id, "场景配图失败", level="warning", error=str(exc)[:180])
+
+    npc_limit = int(settings.get("illustration_npc_max_per_turn") or 0)
+    if settings.get("illustration_npc_enabled") and npc_limit > 0:
+        for npc in (decision.get("npcs") or [])[:npc_limit]:
+            name = str(npc.get("name") or "").strip()
+            if not name:
+                continue
+            fingerprint = f"npc:{' '.join(name.casefold().split())}"
+            npc_prompt = str(npc.get("prompt") or "").strip() or (
+                f"Character portrait of {name}, head and shoulders composition, "
+                "detailed face, cinematic lighting, simple uncluttered background"
+            )
+            try:
+                npc_payload = generate_now(
+                    room_dir=room_dir,
+                    room_id=room_id,
+                    scene=name,
+                    profile=profile,
+                    intensity=intensity,
+                    seed=f"{seed}:npc:{fingerprint}",
+                    settings=settings,
+                    force=False,
+                    config_dir=config_dir,
+                    scenario_id=scenario_id,
+                    house_rules=house_rules,
+                    prompt_override=npc_prompt,
+                    category="portrait",
+                    fingerprint=fingerprint,
+                    npc_name=name,
+                    size_override=str(settings.get("illustration_npc_size") or "768x768"),
+                    allow_cross_room=allow_cross_room,
+                )
+                npc_payload = dict(npc_payload)
+                npc_payload.update(
+                    {
+                        "kind": "illustration",
+                        "status": "ready",
+                        "room_id": room_id,
+                        "category": "portrait",
+                        "npc_name": name,
+                        "trigger": outcome.get("trigger") if isinstance(outcome, dict) else "",
+                    }
+                )
+                broadcast.emit("immersive_illustration", npc_payload)
+                _room_log(
+                    room_dir,
+                    room_id,
+                    f"NPC 头像完成：{name}（{npc_payload.get('provider')}）",
+                    level="warning" if npc_payload.get("degraded") else "info",
+                    category="portrait",
+                    npc_name=name,
+                    provider=npc_payload.get("provider"),
+                    cache_hit=bool(npc_payload.get("cache_hit")),
+                    cache_level=npc_payload.get("cache_level") or "-",
+                    source_room=npc_payload.get("source_room") or "-",
+                    degraded=bool(npc_payload.get("degraded")),
+                    error=npc_payload.get("error") or "-",
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("immersive NPC portrait failed: %s", exc)
+                _room_log(room_dir, room_id, f"NPC 头像失败：{name}", level="warning", error=str(exc)[:180])
+
+    broadcast.emit(
+        "immersive_illustration",
+        {
+            "kind": "illustration",
+            "status": "complete",
+            "room_id": room_id,
+            "seed": seed,
+            "elapsed_ms": round((time.monotonic() - started) * 1000, 1),
+        },
+    )
+    _broadcast_thinking_end(room_id, thinking_id)
 
 
 def on_narrative_turn(
@@ -123,6 +408,7 @@ def on_narrative_turn(
     state: dict[str, Any] | None = None,
     scenario_id: str = "",
     config_dir: Path | str | None = None,
+    personal_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """处理一个叙事回合；返回本次触发的摘要（失败时为空结构）。"""
     result: dict[str, Any] = {"music": None, "illustration": None}
@@ -134,6 +420,11 @@ def on_narrative_turn(
         switches = resolve_room_switches(settings, house_rules)
         if not switches["music"] and not switches["illustration"]:
             return result
+        # 生效音乐来源：站点默认 < 个人覆盖（站点允许时）< 房间收紧。
+        music_source = resolve_music_source(
+            settings, house_rules, (personal_override or {}).get("music_source")
+        )
+        result["music_source"] = music_source
 
         analysis = analyze_narrative(
             text,
@@ -197,7 +488,7 @@ def on_narrative_turn(
                         confidence=int(cached.get("confidence") or 0),
                     )
 
-            broadcast.emit("immersive_music", _music_payload(plan, analysis))
+            broadcast.emit("immersive_music", _music_payload(plan, analysis, music_source))
             if plan.get("changed"):
                 _room_log(
                     room_dir,
@@ -273,7 +564,7 @@ def on_narrative_turn(
                                 "section": updated.get("section"),
                             }
                         )
-                        broadcast.emit("immersive_music", _music_payload(updated, analysis))
+                        broadcast.emit("immersive_music", _music_payload(updated, analysis, music_source))
                         _log_director(
                             room_dir,
                             room_id,
@@ -286,81 +577,88 @@ def on_narrative_turn(
 
                     future.add_done_callback(_director_done)
 
-        if switches["illustration"] and switches["illustration_auto"]:
+        # 配图触发档位：站点默认 < 个人覆盖（站点允许时）< 房间收紧。
+        illustration_trigger = resolve_illustration_trigger(
+            settings, house_rules, (personal_override or {}).get("illustration_trigger")
+        )
+        result["illustration_trigger"] = illustration_trigger
+
+        if switches["illustration"] and illustration_trigger != "off":
             # 配图冷却用独立回合计数：即使配乐被关闭，冷却仍按叙事回合推进。
             turn_index = next_turn_index(room_dir)
-            allowed, cooldown_reason = should_auto_generate(
-                room_dir, turn_index, settings.get("illustration_min_turns") or 4
+            min_turns = (
+                int(settings.get("illustration_min_turns") or 4)
+                if illustration_trigger == "turn_interval"
+                else 1
             )
+            allowed, cooldown_reason = should_auto_generate(room_dir, turn_index, min_turns)
             if not allowed:
-                logger.info("immersive illustration room=%s skipped=%s", room_id, cooldown_reason)
-            else:
-                seed = f"{room_id}:{turn_index}:{analysis.get('scene')}"
-                pending = {
-                    "kind": "illustration",
-                    "status": "pending",
-                    "room_id": room_id,
-                    "scene": analysis.get("scene"),
-                    "profile": analysis.get("profile"),
-                    "intensity": analysis.get("intensity"),
-                    "seed": seed,
-                    "turn": turn_index,
-                }
-                broadcast.emit("immersive_illustration", pending)
-                started = time.monotonic()
-                future = submit_generation(
-                    room_dir=room_dir,
-                    room_id=room_id,
-                    scene=analysis.get("scene") or "未知场景",
-                    profile=analysis.get("profile") or "daily",
-                    intensity=analysis.get("intensity") or "medium",
-                    seed=seed,
-                    turn_index=turn_index,
-                    settings=settings,
-                    force=False,
-                    config_dir=config_dir,
-                    scenario_id=scenario_id,
-                    house_rules=house_rules,
+                logger.info(
+                    "immersive illustration room=%s skipped=%s trigger=%s",
+                    room_id, cooldown_reason, illustration_trigger,
                 )
-                result["illustration"] = pending
-
-                def _done(fut, room_id=room_id, room_dir=room_dir, seed=seed, started=started):
-                    try:
-                        payload = fut.result()
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning("immersive illustration job failed: %s", exc)
-                        broadcast.emit(
-                            "immersive_illustration",
-                            {
-                                "kind": "illustration",
-                                "status": "error",
-                                "room_id": room_id,
-                                "seed": seed,
-                                "error": str(exc)[:180],
-                            },
-                        )
-                        _room_log(room_dir, room_id, "配图生成失败（已降级为无图）", level="warning", error=str(exc)[:180])
-                        return
-                    payload = dict(payload)
-                    payload["kind"] = "illustration"
-                    payload["status"] = "ready"
-                    broadcast.emit("immersive_illustration", payload)
-                    elapsed_ms = round((time.monotonic() - started) * 1000, 1)
-                    _room_log(
-                        room_dir,
+            else:
+                important_signal = _is_important_scene(structured, analysis, room_dir)
+                if illustration_trigger == "important" and not important_signal:
+                    logger.info(
+                        "immersive illustration room=%s skipped=not_important_scene trigger=important",
                         room_id,
-                        f"配图完成：{payload.get('scene') or '-'}（{payload.get('provider')}）",
-                        level="warning" if payload.get("degraded") else "info",
-                        provider=payload.get("provider"),
-                        degraded=payload.get("degraded"),
-                        error=payload.get("error") or "-",
-                        cache_hit=bool(payload.get("cache_hit")),
-                        reuse_source=payload.get("reuse_source") or "-",
-                        elapsed_ms=elapsed_ms,
-                        turn=payload.get("turn"),
                     )
-
-                future.add_done_callback(_done)
+                else:
+                    seed = f"{room_id}:{turn_index}:{analysis.get('scene')}"
+                    pending = {
+                        "kind": "illustration",
+                        "status": "deciding",
+                        "room_id": room_id,
+                        "scene": analysis.get("scene"),
+                        "profile": analysis.get("profile"),
+                        "intensity": analysis.get("intensity"),
+                        "seed": seed,
+                        "turn": turn_index,
+                        "trigger": illustration_trigger,
+                    }
+                    broadcast.emit("immersive_illustration", pending)
+                    result["illustration"] = pending
+                    thinking_id = f"illus-{room_id}-{turn_index}"
+                    _broadcast_thinking_start(room_id, thinking_id)
+                    _broadcast_thinking_stage(room_id, thinking_id, "deciding", "KP 正在判断是否需要配图…")
+                    started = time.monotonic()
+                    future = illustration_director.submit(
+                        room_id=room_id,
+                        room_dir=room_dir,
+                        text=text,
+                        analysis=analysis,
+                        structured=structured,
+                        settings=settings,
+                        trigger=illustration_trigger,
+                        important_signal=important_signal,
+                        config_dir=config_dir,
+                    )
+                    if future is None:
+                        _broadcast_thinking_end(room_id, thinking_id)
+                        logger.info(
+                            "immersive illustration room=%s skipped=kp_in_flight trigger=%s",
+                            room_id, illustration_trigger,
+                        )
+                    else:
+                        future.add_done_callback(
+                            lambda fut, room_id=room_id, room_dir=room_dir, seed=seed,
+                            started=started, thinking_id=thinking_id, analysis=analysis,
+                            scenario_id=scenario_id, settings=settings,
+                            config_dir=config_dir, house_rules=house_rules: _kp_done(
+                                fut,
+                                room_id=room_id,
+                                room_dir=room_dir,
+                                seed=seed,
+                                started=started,
+                                thinking_id=thinking_id,
+                                analysis=analysis,
+                                scenario_id=scenario_id,
+                                settings=settings,
+                                config_dir=config_dir,
+                                house_rules=house_rules,
+                            )
+                        )
         return result
     except Exception:  # noqa: BLE001 - 沉浸系统永远不能阻塞叙事
         logger.exception("immersive turn failed room=%s", room_id)
@@ -464,10 +762,14 @@ def immersive_status(
 ) -> dict[str, Any]:
     switches = resolve_room_switches(settings, house_rules)
     music = load_music_state(room_dir)
+    live = live_music_payload(room_dir)
     illustration = load_room_state(room_dir)
     return {
         "room_id": room_id,
         "switches": switches,
+        # 站点 + 房间收紧后的生效值；个人覆盖由前端在允许范围内再解析一次。
+        "music_source": resolve_music_source(settings, house_rules),
+        "illustration_trigger": resolve_illustration_trigger(settings, house_rules),
         "music": {
             "profile": music.get("profile"),
             "intensity": music.get("intensity"),
@@ -481,7 +783,16 @@ def immersive_status(
             "duck_bgm": bool(settings.get("music_duck_bgm", True)),
             "last_reason": music.get("last_reason"),
             "history": music.get("history") or [],
-            "score": (music.get("director") or {}).get("score") if isinstance(music.get("director"), dict) else None,
+            # 优先复用最后一次实际广播的乐谱（含本地自动作曲家结果），
+            # 否则刷新页面后自动配乐会回落到「只有档位参数」。
+            "score": (live or {}).get("score")
+            or (
+                (music.get("director") or {}).get("score")
+                if isinstance(music.get("director"), dict)
+                else None
+            ),
+            # 共享播放位置：刷新页面/回到房间时也能接上当前进度，而不是从头播放。
+            "sync": (live or {}).get("sync"),
             "director": (
                 {
                     key: music["director"].get(key)

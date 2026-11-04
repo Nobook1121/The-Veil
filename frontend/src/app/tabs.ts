@@ -169,6 +169,8 @@ function closeDropdownButtons(): void {
 }
 
 function switchSettingsTab(tabName: string): void {
+    // 兼容旧链接/书签：音乐库已并入「实时沉浸」标签卡。
+    if (tabName === "bgm") tabName = "immersive";
     const settingsTabs = document.querySelectorAll<HTMLElement>(".settings-tab");
     const settingsContents = document.querySelectorAll<HTMLElement>(".settings-content");
 
@@ -194,11 +196,10 @@ function switchSettingsTab(tabName: string): void {
         void loadScenarioKnowledge();
         void loadEmbeddingHealth();
     }
-    if (tabName === "bgm") {
-        void window.TrpgBgm?.loadLibraryPanel();
-    }
     if (tabName === "immersive") {
         window.TrpgImmersive?.renderSettings?.();
+        // 音乐库已并入「实时沉浸」标签卡，切换到这里时按需加载列表。
+        void window.TrpgBgm?.loadLibraryPanel();
     }
     // 骰子贴图库按需初始化，避免非管理员页面加载时发出多余请求。
     window.TrpgAdminDiceTextures?.init();
@@ -308,6 +309,9 @@ function initSettingsTabs(): void {
     bindGeneralCheckboxSetting("immersiveMusicDuckBgm", "immersive", "music_duck_bgm");
     bindGeneralSelectSetting("immersiveMusicDefaultProfile", "immersive", "music_default_profile");
     bindGeneralSelectSetting("immersiveMusicDefaultIntensity", "immersive", "music_default_intensity");
+    bindGeneralSelectSetting("immersiveMusicSource", "immersive", "music_source");
+    bindGeneralTextSetting("immersiveMusicSourceAllowed", "immersive", "music_source_allowed");
+    bindGeneralCheckboxSetting("immersiveMusicSourceAllowPersonal", "immersive", "music_source_allow_personal");
     bindGeneralNumberSetting("immersiveMusicVolume", "immersive", "music_volume", 0, 100);
     bindGeneralNumberSetting("immersiveMusicCrossfade", "immersive", "music_crossfade_ms", 500, 10000);
     bindGeneralNumberSetting("immersiveMusicHysteresis", "immersive", "music_hysteresis_turns", 0, 10);
@@ -330,11 +334,41 @@ function initSettingsTabs(): void {
     bindGeneralNumberSetting("immersiveIllustrationDailyBudget", "immersive", "illustration_daily_budget", 0, 100000);
     bindGeneralNumberSetting("immersiveIllustrationRoomHourlyCap", "immersive", "illustration_room_hourly_cap", 0, 500);
     bindGeneralNumberSetting("immersiveIllustrationMinTurns", "immersive", "illustration_min_turns", 1, 50);
+    bindGeneralSelectSetting("immersiveIllustrationTrigger", "immersive", "illustration_trigger");
+    bindGeneralTextSetting("immersiveIllustrationTriggerAllowed", "immersive", "illustration_trigger_allowed");
     bindGeneralCheckboxSetting("immersiveScenarioRecord", "immersive", "illustration_scenario_record");
     bindGeneralCheckboxSetting("immersiveScenarioPrefer", "immersive", "illustration_scenario_prefer");
     bindGeneralNumberSetting("immersiveScenarioQuotaMb", "immersive", "illustration_scenario_quota_mb", 0, 102400);
     bindGeneralNumberSetting("immersiveScenarioMaxImageMb", "immersive", "illustration_scenario_max_image_mb", 1, 64);
     bindGeneralSelectSetting("immersiveScenarioOverflow", "immersive", "illustration_scenario_overflow");
+    // AI 对话语音配音（P1）：站点默认关闭，system 引擎默认可用；local/cloud 仅占位。
+    bindGeneralCheckboxSetting("voiceEnabled", "immersive", "voice_enabled");
+    bindGeneralSelectSetting("voiceEngine", "immersive", "voice_engine");
+    bindGeneralTextSetting("voiceEngineAllowed", "immersive", "voice_engine_allowed");
+    bindGeneralCheckboxSetting("voiceAutoplay", "immersive", "voice_autoplay");
+    bindGeneralNumberSetting("voiceVolume", "immersive", "voice_volume", 0, 100);
+    bindGeneralNumberSetting("voiceRate", "immersive", "voice_rate", 50, 200);
+    bindGeneralNumberSetting("voiceMaxTurnChars", "immersive", "voice_max_turn_chars", 40, 4000);
+    bindGeneralNumberSetting("voiceMaxSegmentChars", "immersive", "voice_max_segment_chars", 10, 500);
+    bindGeneralNumberSetting("voiceMaxSegments", "immersive", "voice_max_segments", 1, 200);
+    bindGeneralSelectSetting("voiceInterruptPolicy", "immersive", "voice_interrupt_policy");
+    bindGeneralCheckboxSetting("voiceDucking", "immersive", "voice_ducking");
+    bindGeneralNumberSetting("voiceDuckingLevel", "immersive", "voice_ducking_level", 0, 90);
+    bindGeneralNumberSetting("voiceRoomHourlyCap", "immersive", "voice_room_hourly_cap", 0, 10000);
+    bindGeneralCheckboxSetting("voiceAllowPersonal", "immersive", "voice_allow_personal");
+    bindGeneralTextSetting("voiceCloudBaseUrl", "immersive", "voice_cloud_base_url");
+    bindGeneralTextSetting("voiceCloudModel", "immersive", "voice_cloud_model");
+    bindGeneralCheckboxSetting("voiceLocalEnabled", "immersive", "voice_local_enabled");
+    bindGeneralTextSetting("voiceLocalBaseUrl", "immersive", "voice_local_base_url");
+    bindGeneralTextSetting("voiceLocalModel", "immersive", "voice_local_model");
+    bindGeneralNumberSetting("voiceLocalConcurrency", "immersive", "voice_local_concurrency", 1, 8);
+    bindGeneralNumberSetting("voiceLocalTimeout", "immersive", "voice_local_timeout", 5, 180);
+    bindGeneralTextSetting("voiceLocalSpeakers", "immersive", "voice_local_speakers");
+    bindGeneralCheckboxSetting("voiceCacheEnabled", "immersive", "voice_cache_enabled");
+    bindGeneralNumberSetting("voiceCacheQuotaMb", "immersive", "voice_cache_quota_mb", 0, 1024);
+    bindGeneralNumberSetting("voiceCacheMaxEntries", "immersive", "voice_cache_max_entries", 0, 10000);
+    bindGeneralSelectSetting("voiceCacheOverflow", "immersive", "voice_cache_overflow");
+    initVoiceLocalPanel();
     document.getElementById("savePermissionConfig")?.addEventListener("click", () => {
         void savePermissionConfig();
     });
@@ -1029,6 +1063,172 @@ async function savePermissionConfig(): Promise<void> {
             message.textContent = settingsErrorMessage(error);
             message.className = "settings-message error";
         }
+    }
+}
+
+// 本地多音色引擎面板：状态、安装、移除与首次启用未安装提示。
+let voiceLocalPanelInitialized = false;
+let voiceLocalInstallTimer: number | null = null;
+let voiceLocalInstallRunning = false;
+
+function initVoiceLocalPanel(): void {
+    if (voiceLocalPanelInitialized) return;
+    const panel = document.getElementById("voiceLocalPanel");
+    if (!panel) return;
+    voiceLocalPanelInitialized = true;
+    document.getElementById("voiceLocalStatusButton")?.addEventListener("click", () => {
+        void refreshVoiceLocalStatus(true);
+    });
+    document.getElementById("voiceLocalInstallButton")?.addEventListener("click", () => {
+        void installVoiceLocalModel();
+    });
+    document.getElementById("voiceLocalRemoveButton")?.addEventListener("click", () => {
+        void removeVoiceLocalModel();
+    });
+    // 首次勾选启用时主动刷新状态：未安装会立即看到「请安装模型」的提示。
+    document.getElementById("voiceLocalEnabled")?.addEventListener("change", () => {
+        void refreshVoiceLocalStatus(false);
+    });
+    void refreshVoiceLocalStatus(false);
+}
+
+function setVoiceLocalStatus(text: string, tone: "muted" | "success" | "warning" | "error" = "muted"): void {
+    const element = document.getElementById("voiceLocalStatus");
+    if (!element) return;
+    element.textContent = text;
+    element.style.whiteSpace = "pre-line";
+    element.classList.remove("text-muted", "text-success", "text-warning", "text-danger");
+    element.classList.add(
+        tone === "success" ? "text-success" : tone === "warning" ? "text-warning" : tone === "error" ? "text-danger" : "text-muted",
+    );
+}
+
+function formatVoiceLocalBytes(bytes: unknown): string {
+    const value = Number(bytes) || 0;
+    if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+    if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+    if (value >= 1024) return `${(value / 1024).toFixed(0)} KB`;
+    return `${value} B`;
+}
+
+function describeVoiceLocalStatus(data: Record<string, any>): { text: string; tone: "muted" | "success" | "warning" | "error" } {
+    const model = (data.model || {}) as Record<string, any>;
+    const health = (data.health || {}) as Record<string, any>;
+    const install = (data.install || model.install || {}) as Record<string, any>;
+    const lines: string[] = [];
+    if (install.running) {
+        lines.push(`模型安装进行中：${String(install.message || "下载中")}${install.started_at ? `（开始于 ${install.started_at}）` : ""}`);
+    }
+    lines.push(
+        model.installed
+            ? `模型：${String(model.label || model.model || "Kokoro")} 已安装（${formatVoiceLocalBytes(model.bytes)}）`
+            : `模型：${String(model.label || model.model || "Kokoro")} 未安装。启用本地引擎会因缺少权重降级为浏览器音色，请点击「安装模型」下载（约 170 MB）。`,
+    );
+    if (data.enabled) {
+        lines.push(
+            health.ok
+                ? `本地子服务正常：${String(data.base_url || "自动托管")}，并发 ${Number(data.concurrency || 1)}，当前合成 ${Number(data.active || 0)} 条。`
+                : `本地子服务不可用（${String(health.reason || "unknown")}），将降级为浏览器音色。`,
+        );
+    } else {
+        lines.push("站点当前未启用本地引擎；勾选「启用本地引擎」并保存后才会启动子服务。");
+    }
+    const bindings = (data.bindings || {}) as Record<string, Record<string, any>>;
+    const profileIds = Object.keys(bindings);
+    if (profileIds.length) {
+        lines.push(
+            "人设说话人：" +
+                profileIds
+                    .map((id) => `${id} → ${String(bindings[id]?.voice_id || "?")}（${String(bindings[id]?.gender || "?")}）`)
+                    .join("，"),
+        );
+    }
+    if (install.error && !install.running) lines.push(`最近一次安装失败：${String(install.error)}`);
+    const tone: "muted" | "success" | "warning" | "error" = install.running
+        ? "warning"
+        : !model.installed
+          ? "warning"
+          : data.enabled && health.ok
+            ? "success"
+            : "muted";
+    return { text: lines.join("\n"), tone };
+}
+
+async function refreshVoiceLocalStatus(announce = false): Promise<void> {
+    if (announce) setVoiceLocalStatus("正在读取本地引擎状态…");
+    try {
+        const response = await TrpgApi.get<ApiResponse<Record<string, any>>>("/api/voice/local/status");
+        if (!response.success || !response.data) {
+            throw new Error(response.message || response.error || "读取本地引擎状态失败");
+        }
+        const data = response.data as Record<string, any>;
+        const model = (data.model || {}) as Record<string, any>;
+        voiceLocalInstallRunning = Boolean((data.install || model.install || {}).running);
+        const described = describeVoiceLocalStatus(data);
+        setVoiceLocalStatus(described.text, described.tone);
+        if (voiceLocalInstallRunning) {
+            scheduleVoiceLocalInstallPoll();
+        } else {
+            clearVoiceLocalInstallPoll();
+            // 安装刚结束时刷新一次，让「已安装」状态和按钮语义立即更新。
+            if (announce) void refreshVoiceLocalStatus(false);
+        }
+    } catch (error) {
+        setVoiceLocalStatus(`读取本地引擎状态失败：${settingsErrorMessage(error)}`, "error");
+    }
+}
+
+function scheduleVoiceLocalInstallPoll(): void {
+    if (voiceLocalInstallTimer !== null) return;
+    voiceLocalInstallTimer = window.setTimeout(() => {
+        voiceLocalInstallTimer = null;
+        void refreshVoiceLocalStatus(false).then(() => {
+            if (voiceLocalInstallRunning) scheduleVoiceLocalInstallPoll();
+        });
+    }, 3000);
+}
+
+function clearVoiceLocalInstallPoll(): void {
+    if (voiceLocalInstallTimer === null) return;
+    window.clearTimeout(voiceLocalInstallTimer);
+    voiceLocalInstallTimer = null;
+}
+
+async function installVoiceLocalModel(): Promise<void> {
+    const confirmed = await window.TrpgDialog?.confirm({
+        title: "安装本地语音模型",
+        message: "将从 Hugging Face 镜像下载约 170 MB 的 Kokoro 中文多音色权重到运行时数据目录（不会进入仓库）。下载失败不会破坏已有安装。继续吗？",
+        confirmText: "开始安装",
+    });
+    if (confirmed === false) return;
+    setVoiceLocalStatus("已提交安装请求，正在启动下载…", "warning");
+    try {
+        const response = await TrpgApi.post<ApiResponse<Record<string, any>>>("/api/voice/local/install", {});
+        if (!response.success) throw new Error(response.message || response.error || "安装请求失败");
+        setVoiceLocalStatus(response.message || "已开始后台安装。", "warning");
+        voiceLocalInstallRunning = true;
+        scheduleVoiceLocalInstallPoll();
+    } catch (error) {
+        setVoiceLocalStatus(`安装请求失败：${settingsErrorMessage(error)}`, "error");
+    }
+}
+
+async function removeVoiceLocalModel(): Promise<void> {
+    const confirmed = await window.TrpgDialog?.confirm({
+        title: "移除本地语音模型",
+        message: "将删除运行时数据目录中的模型权重（已生成的语音缓存不受影响）。之后本地引擎会降级为浏览器音色。确认移除吗？",
+        confirmText: "移除",
+        danger: true,
+    });
+    if (confirmed === false) return;
+    setVoiceLocalStatus("正在移除模型…", "warning");
+    try {
+        const response = await TrpgApi.post<ApiResponse<Record<string, any>>>("/api/voice/local/remove", {});
+        if (!response.success) throw new Error(response.message || response.error || "移除请求失败");
+        clearVoiceLocalInstallPoll();
+        await refreshVoiceLocalStatus(false);
+    } catch (error) {
+        setVoiceLocalStatus(`移除模型失败：${settingsErrorMessage(error)}`, "error");
     }
 }
 

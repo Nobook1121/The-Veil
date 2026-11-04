@@ -18,11 +18,16 @@ INTENSITIES = ("low", "medium", "high")
 # 外部生图的地址/模型/密钥只认 ``imageplatform`` 平台表，避免两套真相。
 PROVIDERS = ("procedural", "platform", "openai_compatible")
 DIRECTOR_FALLBACKS = ("rule", "hold")
+MUSIC_SOURCES = ("realtime", "bgm", "hybrid")
+ILLUSTRATION_TRIGGERS = ("off", "important", "turn_interval", "frequent")
+# 档位越低越「收紧」：房间只能把触发档位往下压，不能抬高。
+_TRIGGER_RANK = {"off": 0, "important": 1, "turn_interval": 2, "frequent": 3}
 
 _MUSIC_KEYS = (
     "enabled", "music_enabled", "music_auto_switch", "music_default_profile",
     "music_default_intensity", "music_volume", "music_crossfade_ms",
-    "music_hysteresis_turns", "music_seed", "music_duck_bgm",
+    "music_hysteresis_turns", "music_seed", "music_duck_bgm", "music_source",
+    "music_source_allowed", "music_source_allow_personal",
     "music_director_enabled", "music_director_platform", "music_director_model",
     "music_director_interval_turns", "music_director_daily_budget", "music_director_timeout",
     "music_director_cache_ttl", "music_director_min_confidence", "music_director_fallback",
@@ -33,6 +38,12 @@ _ILLUSTRATION_KEYS = (
     "illustration_platform_id", "illustration_base_url", "illustration_model",
     "illustration_size", "api_key", "illustration_timeout", "illustration_concurrency",
     "illustration_daily_budget", "illustration_room_hourly_cap", "illustration_min_turns",
+    "illustration_trigger", "illustration_trigger_allowed",
+    "illustration_kp_platform", "illustration_kp_model", "illustration_kp_timeout",
+    "illustration_kp_daily_budget", "illustration_kp_max_context_chars",
+    "illustration_npc_enabled", "illustration_npc_size", "illustration_npc_max_per_turn",
+    "illustration_room_cache_max_entries", "illustration_room_cache_quota_mb",
+    "illustration_room_cache_max_image_mb", "illustration_room_cache_overflow",
     "illustration_scenario_record", "illustration_scenario_prefer",
     "illustration_scenario_quota_mb", "illustration_scenario_max_image_mb",
     "illustration_scenario_overflow",
@@ -60,6 +71,19 @@ def _as_choice(value: Any, default: str, choices: tuple[str, ...]) -> str:
     return text if text in choices else default
 
 
+def _as_mode_list(value: Any, default: tuple[str, ...], choices: tuple[str, ...]) -> list[str]:
+    """把逗号分隔的档位配置归一化成去重、保序的合法列表。"""
+    if isinstance(value, (list, tuple)):
+        raw_items = [str(item or "").strip().lower() for item in value]
+    else:
+        raw_items = [item.strip().lower() for item in str(value or "").split(",")]
+    result: list[str] = []
+    for item in raw_items:
+        if item in choices and item not in result:
+            result.append(item)
+    return result or list(default)
+
+
 def load_immersive_settings(config_dir: Path | str | None = None) -> dict[str, Any]:
     """读取生效配置并归一化，保证后续逻辑不依赖模板/用户配置是否完整。"""
     settings = load_settings(config_dir)
@@ -77,6 +101,11 @@ def load_immersive_settings(config_dir: Path | str | None = None) -> dict[str, A
         "music_hysteresis_turns": _as_int(raw.get("music_hysteresis_turns"), 2, 0, 10),
         "music_seed": str(raw.get("music_seed") or "").strip()[:64],
         "music_duck_bgm": _as_bool(raw.get("music_duck_bgm"), True),
+        "music_source": _as_choice(raw.get("music_source"), "hybrid", MUSIC_SOURCES),
+        "music_source_allowed": _as_mode_list(
+            raw.get("music_source_allowed"), MUSIC_SOURCES, MUSIC_SOURCES
+        ),
+        "music_source_allow_personal": _as_bool(raw.get("music_source_allow_personal"), True),
         "music_director_enabled": _as_bool(raw.get("music_director_enabled"), False),
         "music_director_platform": str(raw.get("music_director_platform") or "").strip()[:64],
         "music_director_model": str(raw.get("music_director_model") or "").strip()[:120],
@@ -100,6 +129,39 @@ def load_immersive_settings(config_dir: Path | str | None = None) -> dict[str, A
         "illustration_daily_budget": _as_int(raw.get("illustration_daily_budget"), 0, 0, 100000),
         "illustration_room_hourly_cap": _as_int(raw.get("illustration_room_hourly_cap"), 12, 0, 500),
         "illustration_min_turns": _as_int(raw.get("illustration_min_turns"), 4, 1, 50),
+        "illustration_trigger": _as_choice(
+            raw.get("illustration_trigger"), "important", ILLUSTRATION_TRIGGERS
+        ),
+        "illustration_trigger_allowed": _as_mode_list(
+            raw.get("illustration_trigger_allowed"),
+            ("important", "turn_interval", "frequent"),
+            ILLUSTRATION_TRIGGERS,
+        ),
+        "illustration_kp_platform": str(raw.get("illustration_kp_platform") or "").strip()[:64],
+        "illustration_kp_model": str(raw.get("illustration_kp_model") or "").strip()[:120],
+        "illustration_kp_timeout": _as_int(raw.get("illustration_kp_timeout"), 45, 10, 300),
+        "illustration_kp_daily_budget": _as_int(raw.get("illustration_kp_daily_budget"), 200, 0, 10000),
+        "illustration_kp_max_context_chars": _as_int(
+            raw.get("illustration_kp_max_context_chars"), 1600, 200, 8000
+        ),
+        "illustration_npc_enabled": _as_bool(raw.get("illustration_npc_enabled"), False),
+        "illustration_npc_size": str(raw.get("illustration_npc_size") or "768x768").strip()[:32],
+        "illustration_npc_max_per_turn": _as_int(
+            raw.get("illustration_npc_max_per_turn"), 1, 0, 4
+        ),
+        # 房间级缓存：落盘在房间目录内，默认 40 条 / 64MB / 单图 8MB，超限 LRU。
+        "illustration_room_cache_max_entries": _as_int(
+            raw.get("illustration_room_cache_max_entries"), 40, 0, 200
+        ),
+        "illustration_room_cache_quota_mb": _as_int(
+            raw.get("illustration_room_cache_quota_mb"), 64, 0, 1024
+        ),
+        "illustration_room_cache_max_image_mb": _as_int(
+            raw.get("illustration_room_cache_max_image_mb"), 8, 1, 64
+        ),
+        "illustration_room_cache_overflow": _as_choice(
+            raw.get("illustration_room_cache_overflow"), "lru", ("lru", "reject")
+        ),
         # 剧本配图缓存：默认「不写剧本、优先复用」，避免无声修改作者剧本与磁盘膨胀。
         "illustration_scenario_record": _as_bool(raw.get("illustration_scenario_record"), False),
         "illustration_scenario_prefer": _as_bool(raw.get("illustration_scenario_prefer"), True),
@@ -148,6 +210,70 @@ def resolve_room_switches(settings: dict[str, Any], house_rules: dict[str, Any] 
             True if scenario_prefer_room is None else bool(scenario_prefer_room)
         ),
     }
+
+
+def resolve_music_source(
+    settings: dict[str, Any],
+    house_rules: dict[str, Any] | None,
+    personal_override: str | None = None,
+) -> str:
+    """解析生效的音乐来源。
+
+    优先级：站点默认 < 个人覆盖（站点允许时）< 房间收紧。
+    房间只能通过既有 ``immersive_music_enabled=false`` 把实时配乐关掉，
+    因此收紧结果为 ``bgm``；不会把站点/个人选择的 ``bgm`` 重新放宽为混合或实时。
+    """
+    rules = house_rules if isinstance(house_rules, dict) else {}
+    site_source = str(settings.get("music_source") or "hybrid")
+    allowed = settings.get("music_source_allowed") or ["realtime", "bgm", "hybrid"]
+    effective = site_source
+    candidate = str(personal_override or "").strip().lower()
+    if (
+        settings.get("music_source_allow_personal", True)
+        and candidate in MUSIC_SOURCES
+        and candidate in allowed
+    ):
+        effective = candidate
+    room_music = rules.get("immersive_music_enabled")
+    if room_music is False:
+        effective = "bgm"
+    if effective not in MUSIC_SOURCES:
+        effective = "hybrid"
+    return effective
+
+
+def resolve_illustration_trigger(
+    settings: dict[str, Any],
+    house_rules: dict[str, Any] | None,
+    personal_override: str | None = None,
+) -> str:
+    """解析生效的配图触发档位：站点默认 < 个人覆盖 < 房间收紧。
+
+    个人可选项受 ``illustration_trigger_allowed`` 限制；``off`` 始终允许。
+    房间通过 ``immersive_illustration_trigger``（important/off）与既有开关收紧，
+    取两者中更低的档位，绝不抬高。
+    """
+    rules = house_rules if isinstance(house_rules, dict) else {}
+    if not bool(settings.get("illustration_enabled")):
+        return "off"
+    if not bool(settings.get("illustration_auto")):
+        return "off"
+    effective = str(settings.get("illustration_trigger") or "important")
+    if effective not in ILLUSTRATION_TRIGGERS:
+        effective = "important"
+    allowed = settings.get("illustration_trigger_allowed") or []
+    candidate = str(personal_override or "").strip().lower()
+    if candidate in ILLUSTRATION_TRIGGERS and (candidate == "off" or candidate in allowed):
+        effective = candidate
+    if rules.get("immersive_illustration_enabled") is False:
+        return "off"
+    if rules.get("immersive_illustration_auto") is False:
+        return "off"
+    room_trigger = str(rules.get("immersive_illustration_trigger") or "").strip().lower()
+    if room_trigger in ("off", "important"):
+        if _TRIGGER_RANK[room_trigger] <= _TRIGGER_RANK.get(effective, 1):
+            effective = room_trigger
+    return effective
 
 
 def set_image_api_key(value: str, config_dir: Path | str | None = None) -> None:

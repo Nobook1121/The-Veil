@@ -149,6 +149,11 @@ class ConfigManager {
         configSetInputValue("immersiveMusicCrossfade", this.get("general", "immersive", "music_crossfade_ms", 3000));
         configSetInputValue("immersiveMusicHysteresis", this.get("general", "immersive", "music_hysteresis_turns", 2));
         configSetInputValue("immersiveMusicSeed", this.get("general", "immersive", "music_seed", ""));
+        configSetSelectValue("immersiveIllustrationTrigger", this.get("general", "immersive", "illustration_trigger", "important"));
+        configSetInputValue("immersiveIllustrationTriggerAllowed", this.get("general", "immersive", "illustration_trigger_allowed", "important,turn_interval,frequent"));
+        configSetSelectValue("immersiveMusicSource", this.get("general", "immersive", "music_source", "hybrid"));
+        configSetInputValue("immersiveMusicSourceAllowed", this.get("general", "immersive", "music_source_allowed", "realtime,bgm,hybrid"));
+        configSetCheckboxValue("immersiveMusicSourceAllowPersonal", this.get("general", "immersive", "music_source_allow_personal", true));
         // AI 音乐导演（LLM 只做后台精修；平台/模型留空即用默认）
         configSetCheckboxValue("immersiveDirectorEnabled", this.get("general", "immersive", "music_director_enabled", false));
         configSetInputValue("immersiveDirectorPlatform", this.get("general", "immersive", "music_director_platform", ""));
@@ -173,6 +178,17 @@ class ConfigManager {
         configSetInputValue("immersiveScenarioQuotaMb", this.get("general", "immersive", "illustration_scenario_quota_mb", 256));
         configSetInputValue("immersiveScenarioMaxImageMb", this.get("general", "immersive", "illustration_scenario_max_image_mb", 8));
         configSetSelectValue("immersiveScenarioOverflow", this.get("general", "immersive", "illustration_scenario_overflow", "lru"));
+        // 本地多音色语音：权重路径、并发、超时与房间缓存额度。
+        configSetCheckboxValue("voiceLocalEnabled", this.get("general", "immersive", "voice_local_enabled", false));
+        configSetInputValue("voiceLocalBaseUrl", this.get("general", "immersive", "voice_local_base_url", ""));
+        configSetInputValue("voiceLocalModel", this.get("general", "immersive", "voice_local_model", "kokoro-int8-multi-lang-v1_1"));
+        configSetInputValue("voiceLocalConcurrency", this.get("general", "immersive", "voice_local_concurrency", 1));
+        configSetInputValue("voiceLocalTimeout", this.get("general", "immersive", "voice_local_timeout", 30));
+        configSetInputValue("voiceLocalSpeakers", this.get("general", "immersive", "voice_local_speakers", ""));
+        configSetCheckboxValue("voiceCacheEnabled", this.get("general", "immersive", "voice_cache_enabled", true));
+        configSetInputValue("voiceCacheQuotaMb", this.get("general", "immersive", "voice_cache_quota_mb", 64));
+        configSetInputValue("voiceCacheMaxEntries", this.get("general", "immersive", "voice_cache_max_entries", 300));
+        configSetSelectValue("voiceCacheOverflow", this.get("general", "immersive", "voice_cache_overflow", "lru"));
 
         // UI 回填完成后记录「已保存基线」，让设置页的保存条据此判断未保存改动。
         window.refreshGeneralSettingsBaseline?.();

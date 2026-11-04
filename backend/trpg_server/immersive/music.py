@@ -1,10 +1,14 @@
-"""配乐导演：带滞回、段落推进与可复现种子的「切歌」状态机。
+"""配乐导演：带滞回、房间级同步时钟与可复现种子的「切歌」状态机。
 
 只决定「放什么」（档位/强度/段落/种子），实际声音由前端 Web Audio 合成器按
 同一份种子现场生成，因此没有版权风险，也不需要下载音频。
 
 可复现性：``seed = base_seed + section``。同一房间、同一基准种子、同一段落，
 前端永远得到同一串乐句走向；调试时可用 ``immersive music seed`` 固定种子。
+
+房间同步：状态里维护一个 ``cue_epoch`` 与 ``cue_position_bars``。同一份谱面
+只推进播放位置（以小节计），换谱才开启新 epoch。所有客户端拿到同一个
+``sync`` 后按位置对齐，新加入的玩家补发当前状态，因此不会从 cue 开头重放。
 """
 from __future__ import annotations
 
@@ -12,13 +16,14 @@ import time
 from pathlib import Path
 from typing import Any
 
+from trpg_server.immersive.auto_score import build_auto_score
 from trpg_server.immersive.config import INTENSITIES, PROFILES
 from trpg_server.json_store import read_json, write_json_atomic
 
 STATE_FILENAME = "immersive_music.json"
-# 每若干回合推进一个段落：换动机、换配器组合，避免「一直一个调」。
-SECTION_TURNS = 4
 _HISTORY_LIMIT = 8
+# 缺省小节时长（72 BPM 的 4/4）——只有乐谱缺少合法 tempo 时才会用到。
+_DEFAULT_BAR_SECONDS = 240.0 / 72.0
 
 
 def _state_path(room_dir: Path | None) -> Path | None:
@@ -53,6 +58,132 @@ def _seed_base(room_id: str, seed_setting: str, scenario_id: str) -> str:
 def _history(state: dict[str, Any]) -> list[dict[str, Any]]:
     history = state.get("history")
     return [item for item in history if isinstance(item, dict)] if isinstance(history, list) else []
+
+
+def _score_identity(score: Any) -> str:
+    """谱面身份：只包含真正改变听感的字段。
+
+    tempo 不在其中——强度变化只该改变演奏速度，不应该被当成「换了一首曲子」
+    让房间里所有人从头再听一遍。
+    """
+    if not isinstance(score, dict):
+        return ""
+    chords = score.get("chords") if isinstance(score.get("chords"), list) else []
+    variants = score.get("motif_variants") if isinstance(score.get("motif_variants"), list) else []
+    sections = score.get("sections") if isinstance(score.get("sections"), list) else []
+    instrumentation = score.get("instrumentation") if isinstance(score.get("instrumentation"), list) else []
+    dynamics = score.get("dynamics") if isinstance(score.get("dynamics"), list) else []
+    return "|".join(
+        [
+            str(score.get("mode") or ""),
+            ",".join(str(item) for item in instrumentation),
+            ";".join(
+                f"{item.get('root')}:{','.join(str(value) for value in (item.get('intervals') or []))}"
+                for item in chords
+                if isinstance(item, dict)
+            ),
+            ";".join(
+                f"{item.get('role')}:{','.join(str(value) for value in (item.get('degrees') or []))}:"
+                f"{','.join(str(value) for value in (item.get('rhythm') or []))}"
+                for item in variants
+                if isinstance(item, dict)
+            ),
+            ";".join(
+                f"{item.get('bars')}:{item.get('dynamic')}"
+                for item in sections
+                if isinstance(item, dict)
+            ),
+            ",".join(str(value) for value in dynamics),
+            "" if score.get("pedal") is None else str(score.get("pedal")),
+        ]
+    )
+
+
+def _bar_seconds(score: Any) -> float:
+    """单小节秒数。与前端 ``tempo=Math.round(...)`` + ``barDuration = 60 / tempo * 4`` 对齐。"""
+    tempo = 0.0
+    if isinstance(score, dict):
+        try:
+            tempo = float(score.get("tempo") or 0)
+        except (TypeError, ValueError):
+            tempo = 0.0
+    tempo = round(tempo)
+    if tempo < 30 or tempo > 200:
+        return _DEFAULT_BAR_SECONDS
+    return 240.0 / tempo
+
+
+def _advance_cue(
+    state: dict[str, Any],
+    *,
+    score: Any,
+    profile: str,
+    section: int,
+    base_seed: str,
+    now: float,
+) -> dict[str, Any]:
+    """推进房间共享时钟：同一谱面累加播放位置，换谱才开新 epoch。"""
+    bar_seconds = _bar_seconds(score)
+    key = "|".join([base_seed, str(profile), str(section), _score_identity(score)])
+    epoch = int(state.get("cue_epoch") or 0)
+    previous_key = str(state.get("cue_key") or "")
+    position = float(state.get("cue_position_bars") or 0.0)
+    previous_bar_seconds = float(state.get("cue_bar_seconds") or 0.0)
+    updated = float(state.get("cue_updated_at") or 0.0)
+    if previous_key and previous_key == key and updated > 0:
+        elapsed = max(0.0, now - updated)
+        if previous_bar_seconds > 0:
+            position += elapsed / previous_bar_seconds
+    else:
+        epoch += 1
+        position = 0.0
+    state.update(
+        {
+            "cue_epoch": epoch,
+            "cue_key": key,
+            "cue_bar_seconds": round(bar_seconds, 4),
+            "cue_position_bars": round(position, 4),
+            "cue_updated_at": now,
+        }
+    )
+    return {
+        "epoch": epoch,
+        "position_bars": round(position, 3),
+        "bar_seconds": round(bar_seconds, 4),
+        "server_now_ms": int(now * 1000),
+    }
+
+
+def current_sync(room_dir: Path | None) -> dict[str, Any] | None:
+    """只读地推算当前播放位置，供新玩家加入时补发（不写盘）。"""
+    state = load_state(room_dir)
+    if not state.get("cue_key"):
+        return None
+    now = time.time()
+    position = float(state.get("cue_position_bars") or 0.0)
+    bar_seconds = float(state.get("cue_bar_seconds") or 0.0)
+    updated = float(state.get("cue_updated_at") or 0.0)
+    if bar_seconds > 0 and updated > 0:
+        position += max(0.0, now - updated) / bar_seconds
+    return {
+        "epoch": int(state.get("cue_epoch") or 0),
+        "position_bars": round(position, 3),
+        "bar_seconds": round(bar_seconds, 4),
+        "server_now_ms": int(now * 1000),
+    }
+
+
+def current_payload(room_dir: Path | None, room_id: str = "") -> dict[str, Any] | None:
+    """加入房间时补发：当前配乐指令 + 共享播放位置（不从 cue 开头重放）。"""
+    state = load_state(room_dir)
+    payload = state.get("cue_payload")
+    sync = current_sync(room_dir)
+    if not isinstance(payload, dict) or not payload or sync is None:
+        return None
+    result = dict(payload)
+    result["room_id"] = result.get("room_id") or room_id
+    result["sync"] = sync
+    return result
 
 
 def plan_music(
@@ -136,32 +267,49 @@ def plan_music(
 
     total_turns += 1
     turns_in_profile += 1
-    # 段落推进：同一氛围持续若干回合后换段落，保证动机与配器轮换。
-    if not changed and turns_in_profile >= SECTION_TURNS:
-        section += 1
-        turns_in_profile = 0
-        changed = True
-        reason = "section"
+    # 段落推进只由「内容真的变了」触发（换档位/手动指令/导演新谱）。
+    # cue 自身在客户端按循环持续变奏，不再每 4 回合硬切一次，
+    # 否则慢回合的 cue 会在高潮前被替换，快回合又永远听不到完整结构。
 
     director_state = state.get("director") if isinstance(state.get("director"), dict) else None
     prior_history = _history(state)
     if reason == "manual":
         # 手动指令代表房主明确要求换歌，旧导演乐谱不再代表当前意图。
         director_state = None
-    state = {
-        "profile": current_profile,
-        "intensity": current_intensity,
-        "section": section,
-        "turns": total_turns,
-        "turns_in_profile": turns_in_profile,
-        "pending_profile": pending,
-        "pending_turns": pending_turns,
-        "base_seed": base_seed,
-        "scene": analysis.get("scene") or "",
-        "last_reason": reason,
-        "director": director_state,
-        "updated_at": state.get("updated_at"),
-    }
+
+    director_score = (
+        (director_state or {}).get("score")
+        if director_state and ((director_state.get("score") or {}).get("mood") == current_profile)
+        else None
+    )
+    # AI 导演不可用（未配置/预算耗尽/校验失败）时，本地自动作曲家接管，
+    # 保证「叙事→配乐」链路始终有完整乐谱，而不是只有氛围档位参数。
+    auto_score = None if director_score else build_auto_score(
+        profile=current_profile,
+        intensity=current_intensity,
+        section=section,
+        scene=str(analysis.get("scene") or ""),
+        seed=base_seed,
+    )
+    score = director_score or auto_score
+
+    new_state = dict(state)
+    new_state.update(
+        {
+            "profile": current_profile,
+            "intensity": current_intensity,
+            "section": section,
+            "turns": total_turns,
+            "turns_in_profile": turns_in_profile,
+            "pending_profile": pending,
+            "pending_turns": pending_turns,
+            "base_seed": base_seed,
+            "scene": analysis.get("scene") or "",
+            "last_reason": reason,
+            "director": director_state,
+            "updated_at": state.get("updated_at"),
+        }
+    )
     entry = {
         "at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "profile": current_profile,
@@ -170,10 +318,17 @@ def plan_music(
         "reason": reason,
         "analysis": analysis.get("reason"),
     }
-    state["history"] = (prior_history + [entry])[-_HISTORY_LIMIT:]
-    _save_state(room_dir, state)
+    new_state["history"] = (prior_history + [entry])[-_HISTORY_LIMIT:]
+    sync = _advance_cue(
+        new_state,
+        score=score,
+        profile=current_profile,
+        section=section,
+        base_seed=base_seed,
+        now=time.time(),
+    )
 
-    return {
+    payload = {
         "room_id": room_id,
         "profile": current_profile,
         "intensity": current_intensity,
@@ -188,8 +343,8 @@ def plan_music(
         "changed": changed,
         "auto_switch": auto_switch,
         "turns": total_turns,
-        "score": (director_state or {}).get("score") if director_state
-        and (director_state.get("score") or {}).get("mood") == current_profile else None,
+        "score": score,
+        "sync": sync,
         "director": (
             {
                 "fingerprint": director_state.get("fingerprint"),
@@ -202,8 +357,12 @@ def plan_music(
             if director_state
             else None
         ),
-        "history": state["history"],
+        "history": new_state["history"],
     }
+    # 供新玩家加入时补发：保留最后一份完整指令（sync 会在补发时按当前时间重算）。
+    new_state["cue_payload"] = payload
+    _save_state(room_dir, new_state)
+    return payload
 
 
 def apply_director(
@@ -270,7 +429,14 @@ def apply_director(
         "analysis": f"{model or '-'} · cached={cached}",
     }
     state["history"] = (_history(state) + [entry])[-_HISTORY_LIMIT:]
-    _save_state(room_dir, state)
+    sync = _advance_cue(
+        state,
+        score=score,
+        profile=profile,
+        section=section,
+        base_seed=base_seed,
+        now=time.time(),
+    )
     payload = dict(plan)
     payload.update(
         {
@@ -283,6 +449,7 @@ def apply_director(
             "reason": "director",
             "changed": True,
             "score": score,
+            "sync": sync,
             "director": {
                 "fingerprint": fingerprint,
                 "model": model,
@@ -294,4 +461,6 @@ def apply_director(
             "history": state["history"],
         }
     )
+    state["cue_payload"] = payload
+    _save_state(room_dir, state)
     return payload

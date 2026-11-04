@@ -44,6 +44,7 @@ interface CommandDefinition {
 
 interface ChatApiResponse {
     content?: string;
+    voice?: VoicePayload;
     error?: string;
     message?: string;
     token_count?: number;
@@ -324,6 +325,8 @@ async function sendToAI(chatInput: HTMLInputElement, sendButton: HTMLButtonEleme
                 scenario_start: options.scenarioStart === true,
                 // 世界意志：跳过剧本保护与战斗判定的直执行请求（后端会再次校验权限）。
                 world_override: options.worldOverride === true || requestMessages.some((message) => message.worldOverride === true),
+                // 个人沉浸偏好：后端在站点允许范围内再次 clamp，房间仍可收紧。
+                immersive_personal: window.TrpgImmersive?.getPersonalPreferences?.() || undefined,
             },
         });
         if (!response.ok) {
@@ -366,10 +369,23 @@ async function sendToAI(chatInput: HTMLInputElement, sendButton: HTMLButtonEleme
             cacheHitRate: data.cache_hit_rate,
             cacheKey: data.cache_key,
             knowledgeUsage: data.knowledge_usage,
+            // 配音片段随消息 metadata 持久化，历史回看也能单条重播。
+            ...(data.voice ? { voice: data.voice, voice_segments: data.voice.segments } : {}),
         });
         if (persisted) {
             persisted.sender_name = role.name || "KP";
             broadcastMessage(persisted);
+            // 发起端不渲染自己的广播消息，这里把语音按钮挂到已替换的思考消息并触发自动播放。
+            const voiceElement = document.querySelector<HTMLElement>(
+                `#chatHistory .message[data-ai-request-id="${String(aiRequestId)}"]`
+            );
+            if (voiceElement) {
+                window.TrpgVoice?.attachMessageButton(
+                    voiceElement,
+                    { id: persisted.id, metadata: { voice: data.voice } },
+                    true,
+                );
+            }
         }
 
         // Action suggestions returned by the KP tool are transient UI state: the
@@ -1512,7 +1528,13 @@ function renderRoomMessage(message: ChatMessage | null, animate = false): void {
     );
     const messageElement = document.querySelector<HTMLElement>(`#chatHistory .message[data-id="${String(renderedId)}"]`);
     // 骰子结果按房间生效档位渲染虚拟投掷桌；历史消息静态展示，避免回看时重播动画。
-    if (messageElement) window.TrpgDiceTable?.renderForMessage(messageElement, displayMessage, animate);
+    if (messageElement) {
+        window.TrpgDiceTable?.renderForMessage(messageElement, displayMessage, animate);
+        // KP 消息带语音片段时挂上小喇叭按钮；实时到达的消息按站点/个人设置自动播放。
+        if (type === "kp") {
+            window.TrpgVoice?.attachMessageButton(messageElement, displayMessage, animate);
+        }
+    }
     // 仅对实时到达的 KP 消息做渐进显现；历史记录一次性铺满，避免回看时跳动。
     if (animate && type === "kp") {
         const contentElement = messageElement?.querySelector<HTMLElement>(".message-content")

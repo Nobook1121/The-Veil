@@ -187,7 +187,7 @@ class ScenarioView {
     }
 
     fillDraftData(draft: ScenarioInput): void {
-        this.fillScenarioForm({ id: 0, title: draft.title || "", author: draft.author || "", playerCount: draft.playerCount || 0, notes: draft.notes || "", ...(draft.allow_open_ending === undefined ? {} : { allow_open_ending: draft.allow_open_ending }), modules: draft.modules || [], cover: draft.cover || "" });
+        this.fillScenarioForm({ id: 0, title: draft.title || "", author: draft.author || "", playerCount: draft.playerCount || 0, notes: draft.notes || "", ...(draft.allow_open_ending === undefined ? {} : { allow_open_ending: draft.allow_open_ending }), ...(draft.accept_room_images === undefined ? {} : { accept_room_images: draft.accept_room_images }), modules: draft.modules || [], cover: draft.cover || "" });
         updateScenarioModalTitle("scenario.modal.create", "创建剧本");
     }
 
@@ -621,13 +621,14 @@ class ScenarioView {
             scenario_version: scenarioVersion,
             notes: textarea("scenarioNotes").value.trim(),
             allow_open_ending: checkbox("scenarioAllowOpenEnding").checked,
+            accept_room_images: checkbox("scenarioAcceptRoomImages").checked,
             modules,
             cover: input("scenarioCoverUrl").value,
         };
     }
 
     getDraftData(): ScenarioInput {
-        return { title: input("scenarioTitle").value.trim(), author: input("scenarioAuthor").value.trim(), playerCount: Number.parseInt(input("scenarioPlayerCount").value, 10) || 0, notes: textarea("scenarioNotes").value.trim(), allow_open_ending: checkbox("scenarioAllowOpenEnding").checked, modules: collectScenarioModules(), cover: input("scenarioCoverUrl").value, scenario_version: input("scenarioVersion").value.trim() };
+        return { title: input("scenarioTitle").value.trim(), author: input("scenarioAuthor").value.trim(), playerCount: Number.parseInt(input("scenarioPlayerCount").value, 10) || 0, notes: textarea("scenarioNotes").value.trim(), allow_open_ending: checkbox("scenarioAllowOpenEnding").checked, accept_room_images: checkbox("scenarioAcceptRoomImages").checked, modules: collectScenarioModules(), cover: input("scenarioCoverUrl").value, scenario_version: input("scenarioVersion").value.trim() };
     }
 
     showMessage(message: string, isError = false): void {
@@ -1031,6 +1032,7 @@ class ScenarioView {
         input("scenarioPlayerCount").value = String(scenario.playerCount);
         textarea("scenarioNotes").value = scenario.notes || "";
         checkbox("scenarioAllowOpenEnding").checked = Boolean(scenario.allow_open_ending);
+        checkbox("scenarioAcceptRoomImages").checked = Boolean(scenario.accept_room_images);
         input("scenarioCoverUrl").value = scenario.cover || "";
         image("coverPreview").src = safeScenarioCover(scenario.title, scenario.cover);
 

@@ -40,6 +40,7 @@ from trpg_server.agents.narrative.prejudge import prepare_turn, render_contract,
 from trpg_server.agents.narrative.runtime import NarrativeRuntime, NarrativeRuntimeError, narrative_available
 from trpg_server.agents.narrative.runtime_settings import log_bypass_once, resolve_narrative_settings
 from trpg_server.immersive.service import on_narrative_turn
+from trpg_server.voice.director import prepare_voice
 from trpg_server.agents.narrative.state_store import narrative_from_room_state
 from trpg_server.agents.narrative.store import NarrativeStoreError, load_bundle
 from trpg_server.agents.narrative.trace import append_trace
@@ -1210,6 +1211,29 @@ def chat():
                 mode=opening_plan.opening_mode,
                 reason="empty_response",
             )
+        # 语音配音：先剥离台词标记，再决定是否下发播放片段。标记永远不进入正文与历史，
+        # 即使语音开关关闭也执行；任何异常只降级日志，不影响叙事返回。
+        voice_turn: dict[str, object] = {"content": ai_response, "voice": None}
+        try:
+            scenario_data = room_snapshot.get("scenario") if isinstance(room_snapshot, dict) else None
+            scene_data = room_snapshot.get("scene") if isinstance(room_snapshot, dict) else None
+            projected = projected_state if isinstance(projected_state, dict) else {}
+            clock = projected.get("clock") if isinstance(projected.get("clock"), dict) else {}
+            voice_turn = prepare_voice(
+                ai_response,
+                room_id=str(room_id or ""),
+                room_dir=agent_context.room_dir,
+                house_rules=house_rules,
+                scenario=scenario_data if isinstance(scenario_data, dict) else None,
+                scene=scene_data if isinstance(scene_data, dict) else None,
+                message_id=str(ai_request_id or ""),
+                turn=int(clock.get("turn") or 0),
+                config_dir=current_app.config.get("CONFIG_DIR"),
+            )
+            if voice_turn.get("content"):
+                ai_response = str(voice_turn["content"])
+        except Exception:  # noqa: BLE001 - 配音解析绝不能阻塞主流程
+            logger.exception("voice prepare failed room=%s", room_id)
         if not ai_response:
             return error_response(
                 "AI platform did not return a response",
@@ -1340,6 +1364,12 @@ def chat():
                     state=projected_state,
                     scenario_id=str((agent_context.room_info() or {}).get("scenario_id") or ""),
                     config_dir=current_app.config.get("CONFIG_DIR"),
+                    personal_override=(
+                        message_data.get("immersive_personal")
+                        if isinstance(message_data, dict)
+                        and isinstance(message_data.get("immersive_personal"), dict)
+                        else None
+                    ),
                 )
             except Exception:  # noqa: BLE001 - 沉浸增强不能影响主流程
                 logger.exception("immersive turn hook failed room=%s", room_id)
@@ -1361,6 +1391,7 @@ def chat():
             cache_key=cache_key,
             prefix_cache_hit=prefix_cache_hit,
             knowledge_usage=knowledge_usage,
+            voice=voice_turn.get("voice"),
             scenario_started_at=scenario_started_at,
             ending_reached=ending_reached,
             structured_output=(

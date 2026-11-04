@@ -130,6 +130,15 @@
                         <span data-i18n="scenario.open_ending">开放结局</span>
                     </label>
 
+                    <label class="scenario-open-ending-toggle" title="默认关闭：其他房间不会读取本剧本由房间生成的配图">
+                        <input type="checkbox" id="scenarioAcceptRoomImages">
+                        <span>接受房间配图进入跨房间复用池</span>
+                    </label>
+                    <p class="text-muted small mb-2">
+                        默认关闭：房间生成的配图只留在本房间目录。开启后，其他房间跑同一剧本时可复用这些图；
+                        仍需站点管理员开启「写入剧本」才会真正写入剧本目录。
+                    </p>
+
                     <div id="scenarioModules" class="scenario-module-list">
                         <!-- 模块将在这里动态生成 -->
                     </div>

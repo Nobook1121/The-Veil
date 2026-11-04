@@ -6,9 +6,27 @@
  * - 配图是房间级场景面板，独立于聊天消息流，不改变任何消息渲染逻辑。
  */
 namespace TrpgImmersiveModule {
+    const PERSONAL_PREF_KEY = "trpg_immersive_personal";
+
+    type MusicSource = "realtime" | "bgm" | "hybrid";
+    type IllustrationTrigger = "off" | "important" | "turn_interval" | "frequent";
+
+    interface PersonalImmersivePrefs {
+        music_source?: MusicSource | undefined;
+        illustration_trigger?: IllustrationTrigger | undefined;
+        voice_enabled?: boolean | undefined;
+        voice_autoplay?: boolean | undefined;
+        voice_volume?: number | undefined;
+        voice_rate?: number | undefined;
+        voice_text_only?: boolean | undefined;
+        voice_muted_speakers?: string[] | undefined;
+    }
+
     let currentRoom: Room | null = null;
     let loadingRoomId = "";
     let initialized = false;
+    let lastState: ImmersiveRoomState | null = null;
+    let currentSource: MusicSource = "hybrid";
 
     function byId<T extends HTMLElement>(id: string): T | null {
         return document.getElementById(id) as T | null;
@@ -18,7 +36,247 @@ namespace TrpgImmersiveModule {
         return room ? String(room.id || "") : "";
     }
 
+    function siteValue(key: string, fallback: unknown): unknown {
+        try {
+            return window.configManager?.get?.("general", "immersive", key, fallback) ?? fallback;
+        } catch {
+            return fallback;
+        }
+    }
+
+    function allowedChoices(key: string, fallback: string[]): string[] {
+        const raw = siteValue(key, fallback.join(","));
+        const values = Array.isArray(raw) ? raw.map(String) : String(raw ?? "").split(",");
+        const cleaned = values.map((item) => item.trim().toLowerCase()).filter(Boolean);
+        return cleaned.length ? cleaned : fallback;
+    }
+
+    export function getPersonalPreferences(): PersonalImmersivePrefs {
+        try {
+            const parsed: unknown = JSON.parse(window.localStorage.getItem(PERSONAL_PREF_KEY) || "{}");
+            if (!parsed || typeof parsed !== "object") return {};
+            const record = parsed as PersonalImmersivePrefs;
+            return {
+                music_source: record.music_source,
+                illustration_trigger: record.illustration_trigger,
+                voice_enabled: typeof record.voice_enabled === "boolean" ? record.voice_enabled : undefined,
+                voice_autoplay: typeof record.voice_autoplay === "boolean" ? record.voice_autoplay : undefined,
+                voice_volume: typeof record.voice_volume === "number" ? record.voice_volume : undefined,
+                voice_rate: typeof record.voice_rate === "number" ? record.voice_rate : undefined,
+                voice_text_only: typeof record.voice_text_only === "boolean" ? record.voice_text_only : undefined,
+                voice_muted_speakers: Array.isArray(record.voice_muted_speakers)
+                    ? record.voice_muted_speakers.map((item) => String(item)).filter(Boolean)
+                    : undefined,
+            };
+        } catch {
+            return {};
+        }
+    }
+
+    function savePersonalPreferences(patch: PersonalImmersivePrefs): void {
+        const next = { ...getPersonalPreferences(), ...patch };
+        try {
+            window.localStorage.setItem(PERSONAL_PREF_KEY, JSON.stringify(next));
+        } catch (error) {
+            console.warn("保存个人沉浸偏好失败", error);
+        }
+        applyMusicSource(resolveMusicSource(lastState), lastState);
+    }
+
+    /** 站点默认 < 个人（仅当站点允许）< 房间收紧（配乐关闭时强制仅 BGM）。 */
+    export function resolveMusicSource(state: ImmersiveRoomState | null): MusicSource {
+        const site = String(siteValue("music_source", "hybrid")).toLowerCase() as MusicSource;
+        const allowed = allowedChoices("music_source_allowed", ["realtime", "bgm", "hybrid"]);
+        const allowPersonal = Boolean(siteValue("music_source_allow_personal", true));
+        const personal = getPersonalPreferences().music_source;
+        let source: MusicSource = site;
+        if (allowPersonal && personal && allowed.includes(personal)) source = personal;
+        if (state?.switches && !state.switches.music) source = "bgm";
+        return source;
+    }
+
+    export function getMusicSource(): MusicSource {
+        return currentSource;
+    }
+
+    function applyMusicSource(source: MusicSource, state: ImmersiveRoomState | null): void {
+        currentSource = source;
+        const music = window.TrpgImmersiveMusic;
+        const bgm = window.TrpgBgm;
+        // 不在房间内时不启用实时配乐，也不压制页面 BGM。
+        if (!roomIdOf(currentRoom)) {
+            if (music?.isEnabled()) music.shutdown();
+            else music?.stop();
+            bgm?.setSuppressed(false);
+            bgm?.setDuck(false);
+            return;
+        }
+        if (source === "bgm") {
+            // 仅 BGM：实时引擎完全停止并销毁 AudioContext，绝不发声。
+            if (music?.isEnabled()) music.shutdown();
+            else music?.stop();
+            bgm?.setSuppressed(false);
+            bgm?.setDuck(false);
+        } else {
+            // 仅实时配乐：BGM 淡出并暂停；混合：BGM 由引擎按既有规则压低。
+            bgm?.setSuppressed(source === "realtime");
+            const roomId = roomIdOf(currentRoom);
+            if (!roomId || !state?.switches?.music || !state.music?.profile) {
+                music?.stop();
+            } else {
+                music?.apply(planFromState(roomId, state.music));
+            }
+        }
+        TrpgImmersiveIllustrationModule.syncMusicButton();
+    }
+
+    function updatePersonalControls(): void {
+        const musicSelect = byId<HTMLSelectElement>("personalImmersiveMusicSource");
+        const triggerSelect = byId<HTMLSelectElement>("personalImmersiveIllustrationTrigger");
+        const prefs = getPersonalPreferences();
+        const musicAllowed = allowedChoices("music_source_allowed", ["realtime", "bgm", "hybrid"]);
+        const allowPersonal = Boolean(siteValue("music_source_allow_personal", true));
+        if (musicSelect) {
+            const allowedSet = new Set(musicAllowed);
+            Array.from(musicSelect.options).forEach((option) => {
+                option.disabled = !allowedSet.has(option.value);
+            });
+            musicSelect.disabled = !allowPersonal;
+            const fallback = String(siteValue("music_source", "hybrid")).toLowerCase();
+            musicSelect.value = allowPersonal && prefs.music_source && allowedSet.has(prefs.music_source)
+                ? prefs.music_source
+                : fallback;
+        }
+        if (triggerSelect) {
+            // 「关闭」始终可选（只会更省）；其余档位需在站点允许集合内。
+            const allowedSet = new Set([...allowedChoices("illustration_trigger_allowed", ["important", "turn_interval", "frequent"]), "off"]);
+            Array.from(triggerSelect.options).forEach((option) => {
+                option.disabled = !allowedSet.has(option.value);
+            });
+            const fallback = String(siteValue("illustration_trigger", "important")).toLowerCase();
+            triggerSelect.value = prefs.illustration_trigger && allowedSet.has(prefs.illustration_trigger)
+                ? prefs.illustration_trigger
+                : fallback;
+        }
+        updatePersonalVoiceControls(prefs);
+    }
+
+    /** 个人语音覆盖：站点允许时才可改开关/自动播放/音量/语速；只看文字与按 NPC 静音始终可用。 */
+    function updatePersonalVoiceControls(prefs: PersonalImmersivePrefs): void {
+        const allowPersonal = Boolean(siteValue("voice_allow_personal", true));
+        const siteEnabled = Boolean(siteValue("voice_enabled", false));
+        const siteAutoplay = Boolean(siteValue("voice_autoplay", false));
+        const siteVolume = Number(siteValue("voice_volume", 70)) || 70;
+        const siteRate = Number(siteValue("voice_rate", 100)) || 100;
+        const enabled = byId<HTMLInputElement>("personalVoiceEnabled");
+        const autoplay = byId<HTMLInputElement>("personalVoiceAutoplay");
+        const volume = byId<HTMLInputElement>("personalVoiceVolume");
+        const rate = byId<HTMLInputElement>("personalVoiceRate");
+        const volumeLabel = byId<HTMLElement>("personalVoiceVolumeValue");
+        const rateLabel = byId<HTMLElement>("personalVoiceRateValue");
+        const textOnly = byId<HTMLInputElement>("personalVoiceTextOnly");
+        const muted = byId<HTMLInputElement>("personalVoiceMutedSpeakers");
+        if (enabled) {
+            enabled.checked = allowPersonal && typeof prefs.voice_enabled === "boolean" ? prefs.voice_enabled : siteEnabled;
+            enabled.disabled = !allowPersonal;
+        }
+        if (autoplay) {
+            autoplay.checked = allowPersonal && typeof prefs.voice_autoplay === "boolean" ? prefs.voice_autoplay : siteAutoplay;
+            autoplay.disabled = !allowPersonal;
+        }
+        if (volume) {
+            volume.value = String(allowPersonal && typeof prefs.voice_volume === "number" ? prefs.voice_volume : siteVolume);
+            volume.disabled = !allowPersonal;
+            if (volumeLabel) volumeLabel.textContent = volume.value;
+        }
+        if (rate) {
+            rate.value = String(allowPersonal && typeof prefs.voice_rate === "number" ? prefs.voice_rate : siteRate);
+            rate.disabled = !allowPersonal;
+            if (rateLabel) rateLabel.textContent = `${rate.value}%`;
+        }
+        if (textOnly) textOnly.checked = Boolean(prefs.voice_text_only);
+        if (muted) muted.value = (prefs.voice_muted_speakers || []).join(", ");
+    }
+
+    function parseMutedSpeakers(raw: string): string[] {
+        return String(raw || "")
+            .split(/[,，、]/)
+            .map((item) => item.trim())
+            .filter(Boolean);
+    }
+
+    function bindPersonalControls(): void {
+        const musicSelect = byId<HTMLSelectElement>("personalImmersiveMusicSource");
+        const triggerSelect = byId<HTMLSelectElement>("personalImmersiveIllustrationTrigger");
+        const message = byId<HTMLElement>("personalImmersiveMessage");
+        const notify = (text: string): void => {
+            if (message) message.textContent = text;
+        };
+        musicSelect?.addEventListener("change", () => {
+            const value = musicSelect.value as MusicSource;
+            savePersonalPreferences({ music_source: value });
+            updatePersonalControls();
+            notify("音乐来源偏好已保存（仅保存在当前浏览器）");
+        });
+        triggerSelect?.addEventListener("change", () => {
+            const value = triggerSelect.value as IllustrationTrigger;
+            savePersonalPreferences({ illustration_trigger: value });
+            updatePersonalControls();
+            notify("配图触发偏好已保存（仅保存在当前浏览器）");
+        });
+        const voiceEnabled = byId<HTMLInputElement>("personalVoiceEnabled");
+        const voiceAutoplay = byId<HTMLInputElement>("personalVoiceAutoplay");
+        const voiceVolume = byId<HTMLInputElement>("personalVoiceVolume");
+        const voiceRate = byId<HTMLInputElement>("personalVoiceRate");
+        const voiceVolumeLabel = byId<HTMLElement>("personalVoiceVolumeValue");
+        const voiceRateLabel = byId<HTMLElement>("personalVoiceRateValue");
+        const voiceTextOnly = byId<HTMLInputElement>("personalVoiceTextOnly");
+        const voiceMuted = byId<HTMLInputElement>("personalVoiceMutedSpeakers");
+        voiceEnabled?.addEventListener("change", () => {
+            savePersonalPreferences({ voice_enabled: voiceEnabled.checked });
+            notify("语音开关偏好已保存（仅保存在当前浏览器）");
+        });
+        voiceAutoplay?.addEventListener("change", () => {
+            savePersonalPreferences({ voice_autoplay: voiceAutoplay.checked });
+            notify("语音自动播放偏好已保存（仅保存在当前浏览器）");
+        });
+        voiceVolume?.addEventListener("input", () => {
+            if (voiceVolumeLabel) voiceVolumeLabel.textContent = voiceVolume.value;
+        });
+        voiceVolume?.addEventListener("change", () => {
+            savePersonalPreferences({ voice_volume: Number(voiceVolume.value) });
+            notify("语音音量偏好已保存（仅保存在当前浏览器）");
+        });
+        voiceRate?.addEventListener("input", () => {
+            if (voiceRateLabel) voiceRateLabel.textContent = `${voiceRate.value}%`;
+        });
+        voiceRate?.addEventListener("change", () => {
+            savePersonalPreferences({ voice_rate: Number(voiceRate.value) });
+            notify("语音语速偏好已保存（仅保存在当前浏览器）");
+        });
+        voiceTextOnly?.addEventListener("change", () => {
+            savePersonalPreferences({ voice_text_only: voiceTextOnly.checked });
+            window.TrpgVoice?.setTextOnly(voiceTextOnly.checked);
+            notify("只看文字偏好已保存（仅保存在当前浏览器）");
+        });
+        voiceMuted?.addEventListener("change", () => {
+            const names = parseMutedSpeakers(voiceMuted.value);
+            voiceMuted.value = names.join(", ");
+            savePersonalPreferences({ voice_muted_speakers: names });
+            window.TrpgVoice?.setMutedSpeakers(names);
+            notify("按 NPC 静音偏好已保存（仅保存在当前浏览器）");
+        });
+        // 设置页在配置加载后才打开，点击入口时重新按站点允许范围刷新一次。
+        document.addEventListener("click", (event) => {
+            const target = event.target as HTMLElement | null;
+            if (target?.closest('[data-profile-target="profile-immersive"]')) updatePersonalControls();
+        });
+        updatePersonalControls();
+    }
+
     function toggleMusicPlayback(): void {
+        // 仅 BGM 档位下实时引擎不启用，按钮不应唤醒 AudioContext。
+        if (currentSource === "bgm") return;
         const muted = Boolean(window.TrpgImmersiveMusic?.toggleMuted());
         if (!muted) window.TrpgImmersiveMusic?.unlock();
         TrpgImmersiveIllustrationModule.syncMusicButton();
@@ -29,6 +287,7 @@ namespace TrpgImmersiveModule {
         initialized = true;
         TrpgImmersiveIllustrationModule.init();
         TrpgImmersiveSettingsModule.init();
+        bindPersonalControls();
         byId<HTMLButtonElement>("immersiveMusicToggle")?.addEventListener("click", toggleMusicPlayback);
         // 右侧栏可能因刷新时处于收起状态而没有主按钮，初始化时同步一次窄条图标。
         TrpgImmersiveIllustrationModule.syncMusicButton();
@@ -44,7 +303,9 @@ namespace TrpgImmersiveModule {
         TrpgImmersiveIllustrationModule.setRoom(room);
         if (!roomId) {
             loadingRoomId = "";
+            lastState = null;
             window.TrpgImmersiveMusic?.stop();
+            window.TrpgBgm?.setSuppressed(false);
             return;
         }
         void loadState(roomId);
@@ -58,17 +319,14 @@ namespace TrpgImmersiveModule {
             );
             if (loadingRoomId !== roomId) return;
             const state = response.success ? response.data || null : null;
+            lastState = state;
             if (!state) {
                 TrpgImmersiveIllustrationModule.applyState(null);
+                applyMusicSource(resolveMusicSource(state), state);
                 return;
             }
             TrpgImmersiveIllustrationModule.applyState(state);
-            const switches = state.switches;
-            if (switches?.music && state.music?.profile) {
-                window.TrpgImmersiveMusic?.apply(planFromState(roomId, state.music));
-            } else {
-                window.TrpgImmersiveMusic?.stop();
-            }
+            applyMusicSource(resolveMusicSource(state), state);
         } catch (error) {
             console.warn("读取沉浸状态失败，配乐与配图保持静默", error);
         }
@@ -93,6 +351,7 @@ namespace TrpgImmersiveModule {
             changed: false,
             score: music.score || null,
             director: music.director || null,
+            sync: music.sync || null,
         };
     }
 
@@ -100,8 +359,21 @@ namespace TrpgImmersiveModule {
         const roomId = roomIdOf(currentRoom);
         if (!roomId) return;
         if (plan.room_id && String(plan.room_id) !== roomId) return;
-        window.TrpgImmersiveMusic?.apply(plan);
+        const music = window.TrpgImmersiveMusic;
+        const bgm = window.TrpgBgm;
+        const source = resolveMusicSource(lastState);
+        currentSource = source;
+        if (source === "bgm") {
+            if (music?.isEnabled()) music.shutdown();
+            else music?.stop();
+            bgm?.setSuppressed(false);
+            bgm?.setDuck(false);
+        } else {
+            bgm?.setSuppressed(source === "realtime");
+            music?.apply(plan);
+        }
         TrpgImmersiveIllustrationModule.onMusic(plan);
+        TrpgImmersiveIllustrationModule.syncMusicButton();
     }
 
     export function onIllustrationEvent(payload: ImmersiveIllustrationEvent): void {
@@ -137,6 +409,8 @@ window.TrpgImmersive = {
     requestIllustration: TrpgImmersiveModule.requestIllustration,
     toggleMusic: TrpgImmersiveModule.toggleMusic,
     syncMusicButton: TrpgImmersiveIllustrationModule.syncMusicButton,
+    getPersonalPreferences: TrpgImmersiveModule.getPersonalPreferences,
+    getMusicSource: TrpgImmersiveModule.getMusicSource,
 };
 
 if (document.readyState === "loading") {

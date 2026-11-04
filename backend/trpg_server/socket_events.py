@@ -165,6 +165,16 @@ def register_socket_events(socketio):
         )
         # 用户刚上线/进入房间，通知房间内其他人刷新成员列表。
         _notify_room_members_changed(room_id)
+        # 补发当前配乐：带上共享播放位置，新进入的玩家与其他人在同一处，
+        # 而不是从 cue 开头重听（emit 默认只发给当前连接）。
+        try:
+            from trpg_server.immersive.music import current_payload
+
+            payload = current_payload(room_dir, room_id)
+            if payload:
+                emit("immersive_music", payload)
+        except Exception:  # noqa: BLE001 - 补发失败不能影响进房
+            logger.debug("immersive music resync failed", exc_info=True)
 
     @socketio.on("leave_room")
     def handle_leave_room(data):

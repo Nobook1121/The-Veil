@@ -412,6 +412,7 @@
                                         <button type="button" class="profile-section-tab" data-profile-target="profile-website-theme" data-i18n="profile.section.website_theme">外观偏好</button>
                                         <button type="button" class="profile-section-tab" data-profile-target="profile-theme" data-i18n="profile.section.theme">主题</button>
                                         <button type="button" class="profile-section-tab" data-profile-target="profile-dice-appearance" data-i18n="profile.section.dice_appearance">骰子外观</button>
+                                        <button type="button" class="profile-section-tab" data-profile-target="profile-immersive">沉浸偏好</button>
                                         <button type="button" class="profile-section-tab" data-profile-target="profile-skill-bases" data-i18n="profile.section.skill_bases">技能基础值</button>
                                     </div>
                                 </details>
@@ -537,6 +538,57 @@
                                     <p class="profile-section-hint" data-i18n="profile.note.dice_appearance">颜色、桌面贴图与骰子皮肤只保存在当前浏览器，不影响其他玩家。</p>
                                     <div id="diceAppearanceSettings"></div>
                                 </section>
+                                <section class="profile-panel-section" id="profile-immersive">
+                                    <h4>沉浸偏好</h4>
+                                    <p class="profile-section-hint">仅保存在当前浏览器；只能在站点允许的范围内覆盖，房间房规仍可收紧。</p>
+                                    <label class="profile-setting-row" for="personalImmersiveMusicSource">
+                                        <span>音乐来源：</span>
+                                        <select class="form-select" id="personalImmersiveMusicSource">
+                                            <option value="realtime">仅实时配乐</option>
+                                            <option value="bgm">仅 BGM</option>
+                                            <option value="hybrid">混合</option>
+                                        </select>
+                                    </label>
+                                    <label class="profile-setting-row" for="personalImmersiveIllustrationTrigger">
+                                        <span>配图触发：</span>
+                                        <select class="form-select" id="personalImmersiveIllustrationTrigger">
+                                            <option value="off">关闭</option>
+                                            <option value="important">仅重要场景转换</option>
+                                            <option value="turn_interval">每 N 回合</option>
+                                            <option value="frequent">频繁</option>
+                                        </select>
+                                    </label>
+                                    <label class="profile-setting-row" for="personalVoiceEnabled">
+                                        <span>语音配音：</span>
+                                        <input class="form-check-input" type="checkbox" id="personalVoiceEnabled">
+                                        <small class="text-muted ms-2">关闭后仍可查看文字与单条重播按钮</small>
+                                    </label>
+                                    <label class="profile-setting-row" for="personalVoiceAutoplay">
+                                        <span>自动播放：</span>
+                                        <input class="form-check-input" type="checkbox" id="personalVoiceAutoplay">
+                                        <small class="text-muted ms-2">首次需点击页面一次</small>
+                                    </label>
+                                    <label class="profile-setting-row" for="personalVoiceVolume">
+                                        <span>语音音量：</span>
+                                        <input type="range" id="personalVoiceVolume" min="0" max="100" step="5">
+                                        <span class="text-muted small" id="personalVoiceVolumeValue">70</span>
+                                    </label>
+                                    <label class="profile-setting-row" for="personalVoiceRate">
+                                        <span>语音语速：</span>
+                                        <input type="range" id="personalVoiceRate" min="50" max="200" step="5">
+                                        <span class="text-muted small" id="personalVoiceRateValue">100%</span>
+                                    </label>
+                                    <label class="profile-setting-row" for="personalVoiceTextOnly">
+                                        <span>只看文字：</span>
+                                        <input class="form-check-input" type="checkbox" id="personalVoiceTextOnly">
+                                        <small class="text-muted ms-2">不发声，也不影响其他玩家</small>
+                                    </label>
+                                    <label class="profile-setting-row" for="personalVoiceMutedSpeakers">
+                                        <span>按 NPC 静音：</span>
+                                        <input type="text" class="form-control" id="personalVoiceMutedSpeakers" placeholder="多个名字用逗号分隔，例如：艾德温,玛丽">
+                                    </label>
+                                    <div class="password-message" id="personalImmersiveMessage" aria-live="polite"></div>
+                                </section>
                             </div>
                         </div>
                     </div>
@@ -562,7 +614,6 @@
                             <button class="settings-tab" data-settings="users" data-admin-only="true" data-i18n="settings.tab.users">用户管理</button>
                             <button class="settings-tab" data-settings="permissions" data-i18n="settings.tab.permissions">权限配置</button>
                             <button class="settings-tab" data-settings="knowledge" data-admin-only="true">知识库管理</button>
-                            <button class="settings-tab" data-settings="bgm" data-admin-only="true" data-i18n="settings.tab.bgm">音乐库</button>
                             <button class="settings-tab" data-settings="immersive" data-admin-only="true">实时沉浸</button>
                             <button class="settings-tab" data-settings="about" data-i18n="settings.tab.about">关于应用</button>
                         </div>
@@ -1272,27 +1323,7 @@
                             </section>
                         </div>
                         
-                        <!-- 音乐库内容（管理员） -->
-                        <div id="bgm-settings-content" class="settings-content" data-admin-only="true">
-                            <section class="permission-settings-panel">
-                                <div class="mb-3">
-                                    <h4 data-i18n="settings.bgm.title">背景音乐库</h4>
-                                    <p class="text-muted" data-i18n="settings.bgm.hint">上传的音乐保存在服务端本地，房间可直接选用；内置音乐随程序分发，不存在外链版权风险。</p>
-                                </div>
-                                <div class="d-flex flex-wrap gap-2 align-items-end mb-2">
-                                    <div class="form-group mb-0">
-                                        <label for="bgmUploadInput" data-i18n="settings.bgm.upload_label">选择音频文件</label>
-                                        <input type="file" class="form-control" id="bgmUploadInput" accept="audio/*,.mp3,.m4a,.aac,.ogg,.wav,.flac,.webm,.opus">
-                                    </div>
-                                    <button type="button" class="btn btn-primary" id="bgmUploadButton" data-i18n="settings.bgm.upload">上传音乐</button>
-                                </div>
-                                <p class="text-muted small" data-i18n="settings.bgm.supported">支持 mp3 / m4a / aac / ogg / wav / flac / webm / opus，单个文件不超过 30MB。</p>
-                                <div class="bgm-library-list" id="bgmLibraryList"></div>
-                                <div class="settings-message" id="bgmLibraryMessage" aria-live="polite"></div>
-                            </section>
-                        </div>
-
-                        <!-- 实时沉浸系统（管理员） -->
+                        <!-- 实时沉浸系统（管理员；音乐库已并入本标签卡） -->
                         <div id="immersive-settings-content" class="settings-content" data-admin-only="true">
                             <section class="permission-settings-panel">
                                 <div class="mb-3">
@@ -1340,6 +1371,26 @@
                                         <option value="medium">中（均衡）</option>
                                         <option value="high">高（密集、压迫感强）</option>
                                     </select>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveMusicSource">音乐来源</label>
+                                    <select class="form-select" id="immersiveMusicSource">
+                                        <option value="realtime">仅实时配乐（程序化生成；BGM 自动停播）</option>
+                                        <option value="bgm">仅 BGM（实时引擎不启动，零音频开销）</option>
+                                        <option value="hybrid">混合（实时配乐主层，BGM 压低作底噪）</option>
+                                    </select>
+                                    <small class="form-text text-muted">默认「混合」：维持既有的实时配乐 + BGM 压低行为。切到「仅 BGM」会销毁实时引擎的 AudioContext。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveMusicSourceAllowed">个人可选来源（逗号分隔）</label>
+                                    <input type="text" class="form-control" id="immersiveMusicSourceAllowed" maxlength="120" placeholder="realtime,bgm,hybrid">
+                                    <small class="form-text text-muted">个人设置只能在此集合内覆盖；房间关闭配乐时强制回到仅 BGM。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="immersiveMusicSourceAllowPersonal">
+                                        <label class="form-check-label" for="immersiveMusicSourceAllowPersonal">允许个人覆盖音乐来源</label>
+                                    </div>
                                 </div>
                                 <div class="form-group mt-2">
                                     <label for="immersiveMusicVolume">配乐音量（0-100）</label>
@@ -1568,12 +1619,200 @@
                                     <input type="number" class="form-control" id="immersiveIllustrationMinTurns" min="1" max="50">
                                     <small class="form-text text-muted">普通玩家的手动入口默认不可用；房主/房间管理员仍受该间隔与配额限制。</small>
                                 </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveIllustrationTrigger">配图触发档位</label>
+                                    <select class="form-select" id="immersiveIllustrationTrigger">
+                                        <option value="off">关闭（不自动配图）</option>
+                                        <option value="important">仅重要场景转换（默认）</option>
+                                        <option value="turn_interval">每 N 回合（按上面的最小间隔）</option>
+                                        <option value="frequent">频繁（每个回合都可能配图）</option>
+                                    </select>
+                                    <small class="form-text text-muted">开启后由 AI KP 判断本轮是否需要配图并产出提示词；判断失败自动回退到规则档位，绝不阻塞叙事。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="immersiveIllustrationTriggerAllowed">个人可选触发档位（逗号分隔）</label>
+                                    <input type="text" class="form-control" id="immersiveIllustrationTriggerAllowed" maxlength="120" placeholder="important,turn_interval,frequent">
+                                    <small class="form-text text-muted">「关闭」始终允许个人选择（只会更省）；房间侧只能收紧到「仅重要场景转换 / 关闭」。</small>
+                                </div>
                                 <div class="d-flex flex-wrap gap-2 mt-3">
                                     <button type="button" class="btn btn-outline-secondary btn-sm" id="immersiveTestProvider">检查默认平台</button>
                                     <button type="button" class="btn btn-outline-secondary btn-sm" id="immersiveRefreshUsage">刷新用量</button>
                                 </div>
                                 <div class="settings-message immersive-settings-note mt-2" id="immersiveSettingsMessage" aria-live="polite"></div>
                                 <p class="text-muted small mt-2" id="immersiveUsageOutput">今日外部生图用量尚未加载。</p>
+                            </section>
+                            <section class="permission-settings-panel mt-4" id="immersiveVoicePanel">
+                                <div class="mb-3">
+                                    <h4>AI 对话语音配音</h4>
+                                    <p class="text-muted">默认关闭。默认使用浏览器系统音色（Web Speech），无需外部服务；local / cloud 本阶段仅占位，选择后会明确降级为 engine_unavailable。</p>
+                                </div>
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <label class="form-check-label d-block">
+                                            <input class="form-check-input" type="checkbox" id="voiceEnabled">
+                                            启用站点语音配音
+                                        </label>
+                                        <small class="form-text text-muted">关闭后房间与个人都无法开启。</small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-check-label d-block">
+                                            <input class="form-check-input" type="checkbox" id="voiceAutoplay">
+                                            自动播放
+                                        </label>
+                                        <small class="form-text text-muted">仍受浏览器首次手势限制，需用户点一次页面才发声。</small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-check-label d-block">
+                                            <input class="form-check-input" type="checkbox" id="voiceDucking">
+                                            语音播放时压低音乐
+                                        </label>
+                                        <small class="form-text text-muted">BGM 与实时配乐分别降增益，结束后 400ms 恢复。</small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="voiceEngine">默认引擎</label>
+                                        <select class="form-select" id="voiceEngine">
+                                            <option value="system">system（系统音色，本阶段可用）</option>
+                                            <option value="local">local（占位，未实现）</option>
+                                            <option value="cloud">cloud（占位，未实现）</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="voiceEngineAllowed">允许的引擎白名单</label>
+                                        <input type="text" class="form-control" id="voiceEngineAllowed" maxlength="80" placeholder="system">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="voiceInterruptPolicy">新回合与当前语音冲突</label>
+                                        <select class="form-select" id="voiceInterruptPolicy">
+                                            <option value="interrupt">打断当前语音（默认）</option>
+                                            <option value="queue">排队播放</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="voiceVolume">音量（0-100）</label>
+                                        <input type="number" class="form-control" id="voiceVolume" min="0" max="100">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="voiceRate">语速（50-200%）</label>
+                                        <input type="number" class="form-control" id="voiceRate" min="50" max="200">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="voiceDuckingLevel">压低强度（0-90）</label>
+                                        <input type="number" class="form-control" id="voiceDuckingLevel" min="0" max="90">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="voiceRoomHourlyCap">单房间每小时上限（0 不限）</label>
+                                        <input type="number" class="form-control" id="voiceRoomHourlyCap" min="0" max="10000">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="voiceMaxTurnChars">单回合字符上限</label>
+                                        <input type="number" class="form-control" id="voiceMaxTurnChars" min="40" max="4000">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="voiceMaxSegmentChars">单段字符上限</label>
+                                        <input type="number" class="form-control" id="voiceMaxSegmentChars" min="10" max="500">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="voiceMaxSegments">单回合最多片段</label>
+                                        <input type="number" class="form-control" id="voiceMaxSegments" min="1" max="200">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-check-label d-block mt-4">
+                                            <input class="form-check-input" type="checkbox" id="voiceAllowPersonal">
+                                            允许个人覆盖开关/自动播放/音量/语速
+                                        </label>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="voiceCloudBaseUrl">云端占位：Base URL</label>
+                                        <input type="text" class="form-control" id="voiceCloudBaseUrl" maxlength="500" placeholder="本阶段不调用">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="voiceCloudModel">云端占位：模型</label>
+                                        <input type="text" class="form-control" id="voiceCloudModel" maxlength="120" placeholder="本阶段不调用">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="voiceCloudApiKey">云端占位：密钥</label>
+                                        <input type="password" class="form-control" id="voiceCloudApiKey" maxlength="500" disabled placeholder="本阶段不启用；通过 general.toml 配置，命令输出仅掩码">
+                                    </div>
+                                </div>
+                                <small class="form-text text-muted d-block mt-2">房间只能收紧：开关只关不开、字符/小时上限只降、ducking 级别只升。修改后按现有设置页保存确认流程生效。</small>
+                                <div class="mt-4" id="voiceLocalPanel">
+                                    <h5>本地多音色引擎（Kokoro v1.1-zh）</h5>
+                                    <p class="text-muted small mb-2">Apache-2.0 权重，24kHz，中文男/女各 4 个年龄段音色。权重不会进入仓库或发布包，需点击下方「安装模型」从镜像下载到运行时数据目录。</p>
+                                    <div class="row g-3">
+                                        <div class="col-md-4">
+                                            <label class="form-check-label d-block">
+                                                <input class="form-check-input" type="checkbox" id="voiceLocalEnabled">
+                                                启用本地引擎
+                                            </label>
+                                            <small class="form-text text-muted">未安装权重时自动降级回系统音色。</small>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label for="voiceLocalModel">模型 ID</label>
+                                            <input type="text" class="form-control" id="voiceLocalModel" maxlength="120" value="kokoro-int8-multi-lang-v1_1">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label for="voiceLocalBaseUrl">子服务地址（留空自动托管）</label>
+                                            <input type="text" class="form-control" id="voiceLocalBaseUrl" maxlength="500" placeholder="http://127.0.0.1:8081">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label for="voiceLocalConcurrency">合成并发（1-8）</label>
+                                            <input type="number" class="form-control" id="voiceLocalConcurrency" min="1" max="8" step="1">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label for="voiceLocalTimeout">单句超时（秒，5-180）</label>
+                                            <input type="number" class="form-control" id="voiceLocalTimeout" min="5" max="180" step="1">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label for="voiceLocalSpeakers">人设→说话人（JSON，留空用内置）</label>
+                                            <input type="text" class="form-control" id="voiceLocalSpeakers" maxlength="500" placeholder='{"narrator": 57}'>
+                                        </div>
+                                    </div>
+                                    <div class="row g-3 mt-1">
+                                        <div class="col-md-3">
+                                            <label class="form-check-label d-block">
+                                                <input class="form-check-input" type="checkbox" id="voiceCacheEnabled">
+                                                启用语音缓存
+                                            </label>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label for="voiceCacheQuotaMb">房间缓存上限（MB）</label>
+                                            <input type="number" class="form-control" id="voiceCacheQuotaMb" min="0" max="1024" step="1">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label for="voiceCacheMaxEntries">房间缓存条数上限</label>
+                                            <input type="number" class="form-control" id="voiceCacheMaxEntries" min="0" max="10000" step="1">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label for="voiceCacheOverflow">超限策略</label>
+                                            <select class="form-select" id="voiceCacheOverflow">
+                                                <option value="lru">LRU：淘汰最久未使用</option>
+                                                <option value="reject">拒绝写入</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="d-flex flex-wrap gap-2 mt-2">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="voiceLocalStatusButton">查看本地引擎状态</button>
+                                        <button type="button" class="btn btn-outline-primary btn-sm" id="voiceLocalInstallButton">安装模型</button>
+                                        <button type="button" class="btn btn-outline-danger btn-sm" id="voiceLocalRemoveButton">移除模型</button>
+                                    </div>
+                                    <p class="text-muted small mt-2 mb-0" id="voiceLocalStatus" aria-live="polite">本地引擎状态尚未加载。</p>
+                                </div>
+                            </section>
+                            <section class="permission-settings-panel mt-4" id="immersiveBgmLibraryPanel">
+                                <div class="mb-3">
+                                    <h4 data-i18n="settings.bgm.title">背景音乐库</h4>
+                                    <p class="text-muted" data-i18n="settings.bgm.hint">上传的音乐保存在服务端本地，房间可直接选用；内置音乐随程序分发，不存在外链版权风险。</p>
+                                </div>
+                                <div class="d-flex flex-wrap gap-2 align-items-end mb-2">
+                                    <div class="form-group mb-0">
+                                        <label for="bgmUploadInput" data-i18n="settings.bgm.upload_label">选择音频文件</label>
+                                        <input type="file" class="form-control" id="bgmUploadInput" accept="audio/*,.mp3,.m4a,.aac,.ogg,.wav,.flac,.webm,.opus">
+                                    </div>
+                                    <button type="button" class="btn btn-primary" id="bgmUploadButton" data-i18n="settings.bgm.upload">上传音乐</button>
+                                </div>
+                                <p class="text-muted small" data-i18n="settings.bgm.supported">支持 mp3 / m4a / aac / ogg / wav / flac / webm / opus，单个文件不超过 30MB。</p>
+                                <div class="bgm-library-list" id="bgmLibraryList"></div>
+                                <div class="settings-message" id="bgmLibraryMessage" aria-live="polite"></div>
                             </section>
                         </div>
 

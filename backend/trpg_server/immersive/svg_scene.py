@@ -205,3 +205,80 @@ def render_scene_svg(
   </g>
   <rect x="18" y="18" width="{WIDTH - 36}" height="{HEIGHT - 36}" fill="none" stroke="{accent}" stroke-width="1.2" opacity="0.22"/>
 </svg>"""
+
+
+def render_portrait_svg(
+    profile: str,
+    intensity: str,
+    npc_name: str,
+    seed: str,
+    size: int = 768,
+) -> str:
+    """生成 NPC 头像级 SVG（头肩构图、方形、确定性、无文字）。"""
+    palette = _PALETTES.get(profile, _PALETTES["daily"])
+    accent = _ACCENT.get(profile, "#c9d6e5")
+    rank = {"low": 0, "medium": 1, "high": 2}.get(intensity, 1)
+    rng = random.Random(_seed_number("portrait", profile, intensity, npc_name, seed))
+    center = size / 2
+    shoulder_y = size * 0.78
+    overall = 0.62 + rank * 0.08
+    hair_tilt = rng.uniform(-8, 8)
+    hair_width = size * rng.uniform(0.20, 0.26)
+    hair_height = size * rng.uniform(0.28, 0.36)
+    head_r = size * rng.uniform(0.13, 0.16)
+    neck_w = size * rng.uniform(0.07, 0.09)
+    shoulder_w = size * rng.uniform(0.42, 0.52)
+    rim = accent
+    motes = "".join(
+        f'<circle cx="{rng.uniform(size * 0.1, size * 0.9):.1f}" cy="{rng.uniform(size * 0.08, size * 0.9):.1f}" '
+        f'r="{rng.uniform(1.2, 3.4):.1f}" fill="{palette["particle"]}" opacity="{rng.uniform(0.18, 0.55):.2f}"/>'
+        for _ in range(18 + rank * 18)
+    )
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" width="{size}" height="{size}" role="img">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="36%" r="78%">
+      <stop offset="0%" stop-color="{palette["sky2"]}"/>
+      <stop offset="58%" stop-color="{palette["sky"]}"/>
+      <stop offset="100%" stop-color="#06060a"/>
+    </radialGradient>
+    <radialGradient id="lamp" cx="68%" cy="24%" r="40%">
+      <stop offset="0%" stop-color="{palette["glow"]}" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="{palette["glow"]}" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="vig" cx="50%" cy="46%" r="66%">
+      <stop offset="52%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.68"/>
+    </radialGradient>
+    <linearGradient id="cloth" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="{palette["ridge"]}"/>
+      <stop offset="100%" stop-color="#07070b"/>
+    </linearGradient>
+  </defs>
+  <rect width="{size}" height="{size}" fill="url(#bg)"/>
+  <rect width="{size}" height="{size}" fill="url(#lamp)"/>
+  {motes}
+  <g opacity="{overall:.2f}">
+    <path d="M {center - shoulder_w / 2:.1f} {size} L {center - shoulder_w * 0.38:.1f} {shoulder_y + 18:.1f}
+      L {center - neck_w:.1f} {shoulder_y - size * 0.06:.1f} L {center + neck_w:.1f} {shoulder_y - size * 0.06:.1f}
+      L {center + shoulder_w * 0.38:.1f} {shoulder_y + 18:.1f} L {center + shoulder_w / 2:.1f} {size} Z"
+      fill="url(#cloth)"/>
+    <rect x="{center - neck_w:.1f}" y="{shoulder_y - size * 0.18:.1f}" width="{neck_w * 2:.1f}" height="{size * 0.16:.1f}" rx="{neck_w * 0.5:.1f}" fill="{palette["ridge"]}"/>
+    <ellipse cx="{center:.1f}" cy="{shoulder_y - size * 0.24:.1f}" rx="{head_r:.1f}" ry="{head_r * 1.12:.1f}" fill="#0b0b10"/>
+    <ellipse cx="{center - head_r * 0.24:.1f}" cy="{shoulder_y - size * 0.25:.1f}" rx="{head_r * 0.52:.1f}" ry="{head_r * 0.72:.1f}" fill="{palette["ground"]}" opacity="0.55"/>
+    <path d="M {center - hair_width:.1f} {shoulder_y - size * 0.24:.1f}
+      C {center - hair_width * 0.7:.1f} {shoulder_y - size * 0.24 - hair_height:.1f}
+        {center + hair_width * 0.7:.1f} {shoulder_y - size * 0.24 - hair_height:.1f}
+        {center + hair_width:.1f} {shoulder_y - size * 0.24:.1f}
+      L {center + hair_width * 0.72:.1f} {shoulder_y - size * 0.10:.1f}
+      L {center - hair_width * 0.72:.1f} {shoulder_y - size * 0.10:.1f} Z"
+      fill="#0a0a0f" transform="rotate({hair_tilt:.1f} {center:.1f} {shoulder_y - size * 0.24:.1f})"/>
+    <path d="M {center + head_r * 0.62:.1f} {shoulder_y - size * 0.34:.1f}
+      C {center + head_r * 0.95:.1f} {shoulder_y - size * 0.27:.1f}
+        {center + head_r * 0.92:.1f} {shoulder_y - size * 0.17:.1f}
+        {center + head_r * 0.66:.1f} {shoulder_y - size * 0.13:.1f}"
+      fill="none" stroke="{rim}" stroke-width="{2 + rank}" opacity="0.55"/>
+    <ellipse cx="{center - head_r * 0.28:.1f}" cy="{shoulder_y - size * 0.27:.1f}" rx="{head_r * 0.10:.1f}" ry="{head_r * 0.045:.1f}" fill="{rim}" opacity="0.35"/>
+  </g>
+  <rect width="{size}" height="{size}" fill="url(#vig)"/>
+  <rect x="14" y="14" width="{size - 28}" height="{size - 28}" fill="none" stroke="{rim}" stroke-width="1.2" opacity="0.18"/>
+</svg>"""

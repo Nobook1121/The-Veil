@@ -145,6 +145,7 @@ interface Scenario {
     playerCount: number;
     notes?: string;
     allow_open_ending?: boolean;
+    accept_room_images?: boolean;
     modules?: ScenarioModule[];
     cover?: string;
     owner_id?: string | number;

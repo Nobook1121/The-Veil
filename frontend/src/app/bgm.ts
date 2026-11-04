@@ -35,6 +35,9 @@ namespace TrpgBgmModule {
     let pausedByUser = false;
     // 实时程序化配乐播放时压低房间 BGM，避免两路声音互相干扰。
     let ducked = false;
+    // 音乐来源为「仅实时配乐」时彻底停播 BGM（暂停 + 音量归零），切回后恢复播放状态。
+    let suppressed = false;
+    let fadeTimer: number | null = null;
     let awaitingGesture = false;
     let gestureArmed = false;
     let cachedTracks: BgmTrack[] = [];
@@ -189,7 +192,7 @@ namespace TrpgBgmModule {
     }
 
     function attemptPlay(): void {
-        if (!audio || !currentUrl || pausedByUser) return;
+        if (!audio || !currentUrl || pausedByUser || suppressed) return;
         const result = audio.play();
         if (result && typeof result.then === "function") {
             result
@@ -221,6 +224,43 @@ namespace TrpgBgmModule {
         pausedByUser = false;
         awaitingGesture = false;
         updateToggleButton();
+    }
+
+    /** 当前应达到的目标音量：仅实时配乐时整体静音，混合时压低。 */
+    function targetVolume(): number {
+        if (suppressed) return 0;
+        return ducked ? 0.3 : 1;
+    }
+
+    /** 音量渐变，避免来源切换时出现突然的爆音或断音。 */
+    function fadeVolumeTo(target: number, durationMs: number, done?: () => void): void {
+        if (fadeTimer !== null) {
+            window.clearInterval(fadeTimer);
+            fadeTimer = null;
+        }
+        if (!audio) return;
+        const from = Number.isFinite(audio.volume) ? audio.volume : target;
+        const steps = Math.max(1, Math.round(durationMs / 50));
+        let step = 0;
+        fadeTimer = window.setInterval(() => {
+            step += 1;
+            if (!audio) {
+                if (fadeTimer !== null) window.clearInterval(fadeTimer);
+                fadeTimer = null;
+                return;
+            }
+            const ratio = Math.min(1, step / steps);
+            try {
+                audio.volume = Math.max(0, Math.min(1, from + (target - from) * ratio));
+            } catch {
+                // 忽略不支持 volume 的极端环境。
+            }
+            if (ratio >= 1) {
+                if (fadeTimer !== null) window.clearInterval(fadeTimer);
+                fadeTimer = null;
+                done?.();
+            }
+        }, 50);
     }
 
     function loadTrackAt(index: number, autoPlay: boolean): void {
@@ -310,12 +350,43 @@ namespace TrpgBgmModule {
     /** 沉浸配乐播放/停止时调用：压低或恢复 BGM 音量（不改变用户的播放/暂停状态）。 */
     export function setDuck(value: boolean): void {
         ducked = Boolean(value);
-        if (!audio) return;
+        if (!audio || suppressed) return;
         try {
             audio.volume = ducked ? 0.3 : 1;
         } catch {
             // 忽略不支持 volume 的极端环境。
         }
+    }
+
+    /**
+     * 音乐来源为「仅实时配乐」时叫用：先淡出到 0 再暂停，避免切断爆音；
+     * 切回仅 BGM / 混合时按原始音量与之前是否在播恢复。
+     */
+    export function setSuppressed(value: boolean): void {
+        const next = Boolean(value);
+        if (next === suppressed) return;
+        suppressed = next;
+        updateToggleButton();
+        if (!audio) return;
+        if (next) {
+            fadeVolumeTo(0, 600, () => {
+                if (!suppressed || !audio) return;
+                try {
+                    audio.pause();
+                } catch {
+                    // 某些浏览器暂停未加载的音频会抛错，忽略即可。
+                }
+            });
+            return;
+        }
+        fadeVolumeTo(targetVolume(), 600, () => {
+            if (suppressed || pausedByUser) return;
+            attemptPlay();
+        });
+    }
+
+    export function isSuppressed(): boolean {
+        return suppressed;
     }
 
     /** 玩家进入/离开房间时同步房间 BGM 上下文；只有 currentRoom 有值时才会取房间 BGM。 */
@@ -732,7 +803,7 @@ namespace TrpgBgmModule {
         audio = audioElement;
         // 循环策略由播放模式控制（ended 事件里切歌），不再使用浏览器原生 loop。
         audio.loop = false;
-        audio.volume = ducked ? 0.3 : 1;
+        audio.volume = targetVolume();
         audio.addEventListener("play", updateToggleButton);
         audio.addEventListener("pause", updateToggleButton);
         audio.addEventListener("ended", handleEnded);
@@ -758,6 +829,8 @@ window.TrpgBgm = {
     init: TrpgBgmModule.init,
     setRoom: TrpgBgmModule.setRoom,
     setDuck: TrpgBgmModule.setDuck,
+    setSuppressed: TrpgBgmModule.setSuppressed,
+    isSuppressed: TrpgBgmModule.isSuppressed,
     refresh: TrpgBgmModule.refresh,
     getPersonalSettings: TrpgBgmModule.getPersonalSettings,
     savePersonalSettings: TrpgBgmModule.savePersonalSettings,

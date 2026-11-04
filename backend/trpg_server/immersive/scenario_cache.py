@@ -71,18 +71,23 @@ def cache_key(
     platform: str,
     model: str,
     size: str,
+    category: str = "",
 ) -> str:
-    """稳定 key：不同剧本/平台/模型/尺寸组合互不命中。"""
-    raw = "|".join(
-        (
-            str(scenario_id or ""),
-            str(fingerprint or ""),
-            str(platform or "").strip().lower(),
-            str(model or "").strip().lower(),
-            str(size or "").strip().lower(),
-        )
-    )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+    """稳定 key：不同剧本/平台/模型/尺寸/画幅类别组合互不命中。
+
+    ``category`` 为空时保持旧 key 格式，保证已有场景图缓存继续可命中；
+    NPC 头像传入 ``portrait``，避免与同尺寸的场景图串图。
+    """
+    parts = [
+        str(scenario_id or ""),
+        str(fingerprint or ""),
+        str(platform or "").strip().lower(),
+        str(model or "").strip().lower(),
+        str(size or "").strip().lower(),
+    ]
+    if category:
+        parts.append(str(category).strip().lower())
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:24]
 
 
 def _base_dir(scenarios_dir: Path | str | None = None) -> Path:
@@ -172,12 +177,41 @@ def lookup(
     size: str,
     *,
     scenarios_dir: Path | str | None = None,
+    category: str = "",
 ) -> dict[str, Any] | None:
-    """按 key 命中剧本缓存；缺少指纹或文件缺失的历史条目不参与命中。"""
+    """按 key 命中剧本缓存；缺少指纹或文件缺失的历史条目不参与命中。
+
+    带 ``category`` 时先按新 key 命中；未命中且类别为场景时回退旧 key，
+    以兼容升级前写入的剧本场景图。
+    """
     safe_id = safe_scenario_id(scenario_id)
     if not safe_id or not fingerprint:
         return None
-    key = cache_key(safe_id, fingerprint, platform, model, size)
+    keys = [cache_key(safe_id, fingerprint, platform, model, size, category)]
+    if category and str(category).strip().lower() == "scene":
+        legacy = cache_key(safe_id, fingerprint, platform, model, size)
+        if legacy not in keys:
+            keys.append(legacy)
+    for key in keys:
+        found = _lookup_by_key(safe_id, key, fingerprint, platform, model, size, scenarios_dir)
+        if found is not None:
+            return found
+    logger.info(
+        "immersive_scenario_cache miss scenario=%s key=%s category=%s platform=%s model=%s size=%s",
+        safe_id, keys[0], category or "-", platform, model, size,
+    )
+    return None
+
+
+def _lookup_by_key(
+    safe_id: str,
+    key: str,
+    fingerprint: str,
+    platform: str,
+    model: str,
+    size: str,
+    scenarios_dir: Path | str | None,
+) -> dict[str, Any] | None:
     for directory in _candidate_dirs(safe_id, scenarios_dir):
         if not directory.is_dir():
             continue
@@ -209,14 +243,10 @@ def lookup(
                 pass
             continue
         logger.info(
-            "immersive_scenario_cache hit scenario=%s key=%s platform=%s model=%s size=%s",
-            safe_id, key, platform, model, size,
+            "immersive_scenario_cache hit scenario=%s key=%s category=%s platform=%s model=%s size=%s",
+            safe_id, key, entry.get("category") or "-", platform, model, size,
         )
         return {"key": key, "path": path, "entry": entry, "directory": directory}
-    logger.info(
-        "immersive_scenario_cache miss scenario=%s key=%s platform=%s model=%s size=%s",
-        safe_id, cache_key(safe_id, fingerprint, platform, model, size), platform, model, size,
-    )
     return None
 
 
@@ -259,6 +289,9 @@ def store(
     height: int = 0,
     degraded: bool = False,
     scenarios_dir: Path | str | None = None,
+    category: str = "scene",
+    origin: str = "scenario",
+    source_room: str = "",
 ) -> tuple[bool, str, dict[str, Any] | None]:
     """写入剧本缓存；返回 ``(是否写入, 原因, 条目)``。"""
     safe_id = safe_scenario_id(scenario_id)
@@ -289,7 +322,7 @@ def store(
     policy = str(settings.get("illustration_scenario_overflow") or "lru").strip().lower()
     if policy not in {"lru", "reject"}:
         policy = "lru"
-    key = cache_key(safe_id, fingerprint, platform, model, size)
+    key = cache_key(safe_id, fingerprint, platform, model, size, category)
 
     with _LOCK:
         directory = cache_dir(safe_id, for_write=True, scenarios_dir=scenarios_dir)
@@ -356,6 +389,9 @@ def store(
             "platform_name": str(platform_name or ""),
             "model": str(model or ""),
             "size": str(size or ""),
+            "category": str(category or "scene").strip().lower(),
+            "origin": str(origin or "scenario").strip().lower()[:16],
+            "source_room": str(source_room or room_id or "")[:80],
             "room_id": str(room_id or ""),
             "width": int(width or 0),
             "height": int(height or 0),

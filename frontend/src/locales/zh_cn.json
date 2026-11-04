@@ -1648,6 +1648,18 @@
     "Cover uploaded": "封面上传成功",
     "Upload failed": "上传失败",
     "Failed": "失败",
-    "Succeeded": "成功"
+    "Succeeded": "成功",
+    "voice.profile.narrator": "旁白",
+    "voice.profile.npc_male_teen": "少年（男）",
+    "voice.profile.npc_male_youth": "青年（男）",
+    "voice.profile.npc_male_middle": "中年（男）",
+    "voice.profile.npc_male_elder": "老年（男）",
+    "voice.profile.npc_female_teen": "少女",
+    "voice.profile.npc_female_youth": "青年（女）",
+    "voice.profile.npc_female_middle": "中年（女）",
+    "voice.profile.npc_female_elder": "老年（女）",
+    "voice.ui.replay": "朗读这条消息",
+    "voice.ui.unlock": "点击开启语音",
+    "voice.ui.gesture_required": "语音已就绪，浏览器需要一次点击才能发声。"
   }
 }

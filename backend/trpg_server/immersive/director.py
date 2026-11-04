@@ -53,14 +53,16 @@ SYSTEM_PROMPT = (
     '  "mode": "major|minor|dorian|phrygian|lydian|mixolydian|harmonic_minor|whole_tone|chromatic",\n'
     '  "tempo": 30-200 的整数,\n'
     '  "chords": [{"root": 0-11 的整数, "quality": "major|minor|sus2|sus4|dim|aug|power"}]，2-8 个,\n'
-    '  "instrumentation": ["pad|bass|arp|pulse|bells|drone|strings|choir|noise"]，1-6 个,\n'
+    '  "instrumentation": ["pad|bass|arp|pulse|bells|drone|strings|choir|noise|organ|timpani|ostinato|brass|pluck|rumble"]，1-6 个,\n'
     '  "motif": [-12~24 的整数]，2-8 个，表示主题音级序列,\n'
     '  "sections": [{"label": "段落名", "dynamic": "low|medium|high", "bars": 2-16}]，1-4 个,\n'
     '  "dynamics": [0~1 的数值]，2-8 个，逐段响度曲线,\n'
+    '  "pedal": "可选，0-11 的整数，持续低音的音高类；想制造 pedal point 压迫感时填写",\n'
+    '  "motif_variants": "可选，1-4 个 {degrees: [-12~24 整数], rhythm: [0.25~4 数值], role: statement|answer|climax|fragment}",\n'
     '  "confidence": 0-100 的整数，表示这份乐谱与叙事的贴合程度\n'
     "}\n"
     "要求：音乐必须服务叙事，不要突然改变情绪；恐怖/紧迫场景可以用不协和音程与更快 tempo，"
-    "但整体仍要可听。"
+    "但整体仍要可听。段落之间请用持续低音或共同和弦衔接；高潮段再让铜管/定音鼓进入，不要一开头就满编。"
 )
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)

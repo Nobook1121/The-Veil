@@ -64,6 +64,13 @@ HOUSE_RULE_DEFINITIONS = {
     "immersive_music_auto_switch": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
     "immersive_illustration_enabled": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
     "immersive_illustration_auto": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
+    # 房间只能把配图触发档位收得更紧：important（仅重要场景）/ off；null 表示跟随。
+    "immersive_illustration_trigger": {
+        "type": "nullable_enum",
+        "default": None,
+        "values": ["important", "off"],
+        "ai_prompt": False,
+    },
     # 剧本配图缓存：房间只能收紧（关闭/不优先），不能越过站点的「记录/优先复用」开关。
     "immersive_scenario_record": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
     "immersive_scenario_prefer": {"type": "nullable_boolean", "default": None, "ai_prompt": False},

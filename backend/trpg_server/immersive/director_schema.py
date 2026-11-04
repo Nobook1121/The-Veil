@@ -25,6 +25,7 @@ DIRECTOR_MODES: tuple[str, ...] = (
     "harmonic_minor",
     "whole_tone",
     "chromatic",
+    "locrian",
 )
 
 CHORD_QUALITIES: dict[str, tuple[int, ...]] = {
@@ -35,6 +36,14 @@ CHORD_QUALITIES: dict[str, tuple[int, ...]] = {
     "dim": (0, 3, 6),
     "aug": (0, 4, 8),
     "power": (0, 7),
+    # 电影配乐常用的色彩和弦：半减七、减七、小大七、三全音与音簇。
+    "min7": (0, 3, 7, 10),
+    "maj7": (0, 4, 7, 11),
+    "min_maj7": (0, 3, 7, 11),
+    "half_dim": (0, 3, 6, 10),
+    "dim7": (0, 3, 6, 9),
+    "tritone": (0, 6, 12),
+    "cluster": (0, 1, 3),
 }
 
 INSTRUMENTS: tuple[str, ...] = (
@@ -47,6 +56,12 @@ INSTRUMENTS: tuple[str, ...] = (
     "strings",
     "choir",
     "noise",
+    "organ",
+    "timpani",
+    "ostinato",
+    "brass",
+    "pluck",
+    "rumble",
 )
 
 DIRECTOR_INTENSITIES: tuple[str, ...] = ("low", "medium", "high")
@@ -54,6 +69,7 @@ MOODS: tuple[str, ...] = (
     "daily", "suspense", "unease", "horror",
     "urgency", "sorrow", "awe", "aftermath",
 )
+MOTIF_ROLES: tuple[str, ...] = ("statement", "answer", "climax", "fragment")
 
 MIN_SECTIONS = 1
 MAX_SECTIONS = 4
@@ -63,6 +79,8 @@ MIN_MOTIF = 2
 MAX_MOTIF = 8
 MIN_DYNAMICS = 2
 MAX_DYNAMICS = 8
+MAX_MOTIF_VARIANTS = 4
+MAX_VARIANT_DEGREES = 6
 
 
 def _text(value: Any, limit: int) -> str:
@@ -190,6 +208,65 @@ def validate_score(raw: Any, *, min_confidence: int = 0) -> tuple[dict[str, Any]
             else:
                 dynamics.append(round(level, 3))
 
+    # 可选扩展字段：pedal point 与动机变体。字段缺失时保持旧乐谱逐字节兼容；
+    # 一旦出现就必须通过严格校验，避免半截扩展字段进入播放链路。
+    pedal: int | None = None
+    raw_pedal = raw.get("pedal")
+    if raw_pedal is not None:
+        pedal = _valid_int(raw_pedal, 0, 11)
+        if pedal is None:
+            errors.append("pedal 必须是 0-11 的整数（绝对音高类）")
+
+    motif_variants: list[dict[str, Any]] = []
+    raw_variants = raw.get("motif_variants")
+    if raw_variants is not None:
+        if not isinstance(raw_variants, list) or not (1 <= len(raw_variants) <= MAX_MOTIF_VARIANTS):
+            errors.append(f"motif_variants 必须是 1-{MAX_MOTIF_VARIANTS} 个对象的数组")
+        else:
+            for index, item in enumerate(raw_variants):
+                if not isinstance(item, dict):
+                    errors.append(f"motif_variants[{index}] 必须是对象")
+                    continue
+                raw_degrees = item.get("degrees")
+                degrees: list[int] = []
+                if not isinstance(raw_degrees, list) or not (MIN_MOTIF <= len(raw_degrees) <= MAX_VARIANT_DEGREES):
+                    errors.append(
+                        f"motif_variants[{index}].degrees 必须是 {MIN_MOTIF}-{MAX_VARIANT_DEGREES} 个音级的数组"
+                    )
+                else:
+                    for note_index, note in enumerate(raw_degrees):
+                        value = _valid_int(note, -12, 24)
+                        if value is None:
+                            errors.append(
+                                f"motif_variants[{index}].degrees[{note_index}] 必须是 -12~24 的整数"
+                            )
+                        else:
+                            degrees.append(value)
+                raw_rhythm = item.get("rhythm")
+                rhythm: list[float] = []
+                if raw_rhythm is not None:
+                    if not isinstance(raw_rhythm, list) or len(raw_rhythm) != len(degrees) or not degrees:
+                        errors.append(
+                            f"motif_variants[{index}].rhythm 必须是和 degrees 等长的 0.25~4 数值数组"
+                        )
+                    else:
+                        for beat_index, beat in enumerate(raw_rhythm):
+                            value = _valid_float(beat, 0.25, 4.0)
+                            if value is None:
+                                errors.append(
+                                    f"motif_variants[{index}].rhythm[{beat_index}] 必须是 0.25~4 的数值"
+                                )
+                            else:
+                                rhythm.append(round(value, 3))
+                role = str(item.get("role") or "statement").strip().lower()
+                if role not in MOTIF_ROLES:
+                    errors.append(f"motif_variants[{index}].role 必须是 {list(MOTIF_ROLES)}")
+                if degrees:
+                    variant: dict[str, Any] = {"degrees": degrees, "role": role}
+                    if rhythm:
+                        variant["rhythm"] = rhythm
+                    motif_variants.append(variant)
+
     confidence_raw = raw.get("confidence")
     if isinstance(confidence_raw, bool) or not isinstance(confidence_raw, (int, float)):
         errors.append("confidence 必须是 0-100 的整数")
@@ -212,6 +289,10 @@ def validate_score(raw: Any, *, min_confidence: int = 0) -> tuple[dict[str, Any]
         "dynamics": dynamics,
         "confidence": confidence,
     }
+    if pedal is not None:
+        score["pedal"] = pedal
+    if motif_variants:
+        score["motif_variants"] = motif_variants
     if confidence < max(0, min(100, int(min_confidence))):
         return None, ["low_confidence"], confidence
     return score, [], confidence

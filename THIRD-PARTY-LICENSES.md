@@ -32,6 +32,70 @@ Node 包可在 `node_modules/<包名>/LICENSE` 查看）。
 （`localStorage`、`matchMedia`、`prefers-reduced-motion`），未引入任何 UI、拖拽或动画库。
 沉浸面板继续由现有前端模块创建与移动节点，不涉及新的第三方运行时。
 
+## 配乐引擎升级与配乐 Skill（v0.5.13a）
+
+本次**未新增任何打包依赖，也未引入外部音乐生成模型**（Suno、Udio、Stable Audio 等）。
+作曲逻辑全部为项目自有代码，运行在浏览器内置的 Web Audio API 上：
+
+- 新增前端模块 `frontend/src/app/immersive/music-theory.ts`、`music-arranger.ts`、`music-voices.ts`，
+  重写 `music-engine.ts`；仅使用 `OscillatorNode`、`BiquadFilterNode`、`ConvolverNode`、
+  `StereoPannerNode`、`DelayNode`、`DynamicsCompressorNode` 等浏览器标准接口。混响脉冲响应由代码
+  现场生成（合成早期反射 + 指数衰减），不加载任何采样音频。
+- 动机、和弦进行、编配配方均为项目原创的音程/节奏组合；**不包含、不复制任何受版权保护的乐谱、
+  音频、歌词或具体作品旋律**。
+- 新增文档型 Skill `skills/film-scoring/`（`SKILL.md` 与 `references/*.md`），只提炼公开的音乐学
+  概念与技法名称（pedal point、ostinato、tintinnabuli、微复调、平行五度、半减七、那不勒斯 bII 等），
+  不随项目分发乐谱或音频素材。调研参考的手法是公有的作曲技法，不构成对具体作品的复制：
+
+  | 参考方向 | 用途 |
+  | --- | --- |
+  | Bernard Herrmann 的 pedal point / 固定低音 ostinato / 集群和弦 | 恐怖档位的和声与低音写法 |
+  | Hans Zimmer 的分层 ostinato / 分阶段声部进入 | 紧迫与敬畏档位的密度与配器 |
+  | Arvo Pärt 的 tintinnabuli 双声写法 | 余韵档位的持续音与钟声 |
+  | Ligeti 的微复调 | 多声部同音高集合、不同节奏的卡农 |
+  | Debussy / Ravel 的平行五度与色彩和声 | 非功能性和声与「空」和声 |
+  | Jóhann Jóhannsson / Ryuichi Sakamoto 的慢速管弦与留白 | 铺垫/余韵的动态曲线 |
+  | Ennio Morricone 的打击乐语法与合唱进入 | 定音鼓心跳、合唱进入时机 |
+  | 恐怖配乐通用语法（tritone、locrian、bII、cluster、silence as accent） | 反模式清单与和弦色彩表 |
+
+  以上仅作为**技法来源**引用，相关作品、乐谱与录音的版权归各自权利人所有；本项目不复制、
+  不改编、不分发这些素材。详细来源与工程转译见 `skills/film-scoring/references/reference-analysis.md`。
+  若后续需要引入第三方音频采样或音乐生成服务，必须在此登记许可证并确认商用授权，且不得阻塞实时播放。
+- 新增 `backend/trpg_server/immersive/auto_score.py` 为纯 Python 本地作曲器（仅用标准库
+  `hashlib`），按档位生成确定性乐谱；不调用任何外部模型或网络服务，也不分发音频素材。
+
+## 本地多音色语音引擎（v0.5.13c）
+
+本次为可选的本地 TTS 新增运行时依赖，权重不随项目分发、也不进入 Git 或发布包：
+
+| 组件 | 版本 | 许可证 | 来源 |
+| --- | --- | --- | --- |
+| sherpa-onnx | 2.0.1 | Apache-2.0 | https://github.com/k2-fsa/sherpa-onnx |
+| onnxruntime（sherpa-onnx 依赖的推理后端） | 由 wheel 带入 | MIT | https://github.com/microsoft/onnxruntime |
+| numpy | 2.5.4 | BSD-3-Clause | https://numpy.org/ |
+| Kokoro-82M-v1.1-zh int8 权重 | `kokoro-int8-multi-lang-v1_1` | Apache-2.0 | https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh |
+| 导出/打包仓库 | `csukuangfj/kokoro-int8-multi-lang-v1_1` | Apache-2.0（继承上游权重） | https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1 |
+| espeak-ng 音素化数据（随权重包提供） | 同包 | Apache-2.0 | https://github.com/espeak-ng/espeak-ng |
+
+- 安装位置：`data/runtime/voice/models/<模型>/`；安装时会写入 `INSTALL.json`（文件大小清单）
+  与 `LICENSE.txt`（许可证文本摘要），便于离线审计与再分发合规。
+- **明确排除**：AISHELL-3 的 VITS 多说话人导出权重虽然数据集为 Apache-2.0，但导出模型采样率仅
+  8kHz，音质与年龄区分不达标，因此不采用；任何 CC-BY-NC、CC-BY-NC-SA 或来源不明的中文权重
+  一律不下载、不引用。AISHELL-3 数据集本身的信息保留在选型文档中，仅用于说明排除理由。
+- 部署方若自行替换为其它模型，必须确认「允许商用 + 允许再分发」，并在本文件补充登记。
+
+## 开发参考 Skill（Oil UI，2026-11-04）
+
+本次新增一份第三方 Skill，原样安装到 `skills/`，**仅作为开发期参考文档，不进入发布包，也不改变运行时行为**，因此**无新增打包依赖**：
+
+| Skill | 安装路径 | 上游仓库 | 版本 / 提交 | 许可证 |
+| --- | --- | --- | --- | --- |
+| Oil UI（界面设计 / 评审 Skill） | `skills/oil-ui/` | https://github.com/oil-oil/oil-ui | v0.31.0，`5b03da0997e0c57650880c521bf5462696d3efe9` | MIT |
+
+- **安装方式**：从上游仓库 `main` 分支的 tarball 解压后整目录复制，未改写、未摘要、未裁剪任何上游文件；来源信息（仓库、分支、提交、获取时间、许可证）记录在 Skill 目录的 `SOURCE.json`，上游 MIT 许可证文本随目录保存在 `LICENSE`。
+- **Oil UI**：完整安装上游仓库（`SKILL.md`、`references/`、`scripts/`、`assets/`、`tests/`、README 与 LICENSE）。其可选脚本不依赖 npm 包：`scripts/*.mjs` 需要 Node.js 22+ 与本机 Chrome/Chromium/Edge，`scripts/*.py` 仅使用 Python 标准库；上游 `check_update.py` 会访问 `ui.oiloil.org` 检查版本，属可选联网行为。上述脚本不会被项目构建或运行流程调用。
+- 该 Skill 不随 `dist/`、`requirements.txt`、`package.json` 分发，也不被打包进发布包。
+
 ## Python 依赖
 
 含 `requirements.txt` 等文件中的直接依赖及其全部传递依赖（取自本地 `.venv` 已安装元数据）。

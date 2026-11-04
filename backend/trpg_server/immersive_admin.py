@@ -20,7 +20,7 @@ from typing import Any, Callable
 
 from trpg_server.config import update_sections
 from trpg_server.config.paths import general_config_path, resolve_config_dir
-from trpg_server.immersive import audit, director, image_platforms, scenario_cache
+from trpg_server.immersive import audit, director, illustration_director, image_platforms, scenario_cache
 from trpg_server.immersive.config import (
     DIRECTOR_FALLBACKS,
     INTENSITIES,
@@ -76,7 +76,12 @@ def _usage_text() -> str:
     daily_used = int(usage.get("daily_used") or 0)
     rooms = usage.get("rooms") if isinstance(usage.get("rooms"), dict) else {}
     director_usage = director.usage_snapshot()
-    lines = [f"今日外部生图提交: {daily_used}", f"今日导演调用: {director_usage.get('calls') or 0}"]
+    kp_usage = illustration_director.usage_snapshot()
+    lines = [
+        f"今日外部生图提交: {daily_used}",
+        f"今日导演调用: {director_usage.get('calls') or 0}",
+        f"今日 AI KP 配图判断: {kp_usage.get('calls') or 0}",
+    ]
     for room_id, entry in sorted(rooms.items()):
         if isinstance(entry, dict):
             lines.append(f"  {room_id}: 本小时 {entry.get('hour_used') or 0} 次（{entry.get('hour') or '-'}）")
@@ -197,6 +202,56 @@ def handle_immersive_command(
                 confirm=confirm,
                 prompt="确认修改配乐种子?",
             )
+        if action == "source" and len(positionals) > 1:
+            value = positionals[1].lower()
+            if value not in {"realtime", "bgm", "hybrid"}:
+                return False, "Usage: immersive music source <realtime|bgm|hybrid> [--yes]"
+
+            def _apply_source() -> tuple[bool, str]:
+                _write({"music_source": value}, config_dir)
+                logger.info("immersive music source=%s by console", value)
+                return True, f"站点音乐来源已设为 {value}（个人可在允许范围内覆盖，房间可收紧）"
+
+            return _confirm(
+                preview=f"将把站点音乐来源设为『{value}』。",
+                apply=_apply_source,
+                assume_yes=assume_yes,
+                confirm=confirm,
+                prompt="确认修改音乐来源?",
+            )
+        if action == "allowed" and len(positionals) > 1:
+            raw = ",".join(positionals[1:]).lower()
+            modes = [item for item in raw.split(",") if item in {"realtime", "bgm", "hybrid"}]
+            if not modes:
+                return False, "Usage: immersive music allowed <realtime,bgm,hybrid> [--yes]"
+
+            def _apply_allowed() -> tuple[bool, str]:
+                _write({"music_source_allowed": ",".join(dict.fromkeys(modes))}, config_dir)
+                return True, f"个人可选音乐来源已限制为 {', '.join(dict.fromkeys(modes))}"
+
+            return _confirm(
+                preview=f"将把个人可选音乐来源限制为『{', '.join(modes)}』。",
+                apply=_apply_allowed,
+                assume_yes=assume_yes,
+                confirm=confirm,
+                prompt="确认修改个人可选范围?",
+            )
+        if action == "personal" and len(positionals) > 1:
+            value = _as_bool_arg(positionals[1])
+            if value is None:
+                return False, "Usage: immersive music personal <on|off> [--yes]"
+
+            def _apply_personal() -> tuple[bool, str]:
+                _write({"music_source_allow_personal": value}, config_dir)
+                return True, f"个人覆盖音乐来源已{'开启' if value else '关闭'}"
+
+            return _confirm(
+                preview=f"将把个人覆盖音乐来源设为『{'开' if value else '关'}』。",
+                apply=_apply_personal,
+                assume_yes=assume_yes,
+                confirm=confirm,
+                prompt="确认修改个人覆盖权限?",
+            )
         return False, _music_usage()
 
     if sub == "illustration":
@@ -256,7 +311,68 @@ def handle_immersive_command(
         if action == "cap" and len(positionals) > 1:
             return _set_int("illustration_room_hourly_cap", positionals[1], 0, 500, "房间每小时上限（0=不限）", config_dir, assume_yes, confirm)
         if action == "min-turns" and len(positionals) > 1:
-            return _set_int("illustration_min_turns", positionals[1], 1, 50, "自动配图最小间隔（回合）", config_dir, assume_yes, confirm)
+            return _set_int("illustration_min_turns", positionals[1], 1, 50, "自动配图最小间隔（回合，也是每 N 回合档位的 N）", config_dir, assume_yes, confirm)
+        if action == "trigger" and len(positionals) > 1:
+            value = positionals[1].lower()
+            if value not in {"off", "important", "turn_interval", "frequent"}:
+                return False, "Usage: immersive illustration trigger <off|important|turn_interval|frequent> [--yes]"
+
+            def _apply_trigger() -> tuple[bool, str]:
+                _write({"illustration_trigger": value}, config_dir)
+                return True, f"配图触发档位已设为 {value}（房间可进一步收紧）"
+
+            return _confirm(
+                preview=f"将把配图触发档位设为『{value}』。",
+                apply=_apply_trigger,
+                assume_yes=assume_yes,
+                confirm=confirm,
+                prompt="确认修改配图触发档位?",
+            )
+        if action == "allowed" and len(positionals) > 1:
+            raw = ",".join(positionals[1:]).lower()
+            modes = [
+                item for item in raw.split(",")
+                if item in {"off", "important", "turn_interval", "frequent"}
+            ]
+            if not modes:
+                return False, "Usage: immersive illustration allowed <important,turn_interval,frequent> [--yes]"
+
+            def _apply_trigger_allowed() -> tuple[bool, str]:
+                _write({"illustration_trigger_allowed": ",".join(dict.fromkeys(modes))}, config_dir)
+                return True, f"个人可选配图档位已设为 {', '.join(dict.fromkeys(modes))}"
+
+            return _confirm(
+                preview=f"将把个人可选配图档位设为『{', '.join(modes)}』。",
+                apply=_apply_trigger_allowed,
+                assume_yes=assume_yes,
+                confirm=confirm,
+                prompt="确认修改个人可选配图档位?",
+            )
+        if action == "npc" and len(positionals) > 1:
+            value = _as_bool_arg(positionals[1])
+            if value is None:
+                return False, "Usage: immersive illustration npc <on|off> [--yes]"
+
+            def _apply_npc() -> tuple[bool, str]:
+                _write({"illustration_npc_enabled": value}, config_dir)
+                return True, f"NPC 头像生成已{'开启' if value else '关闭'}"
+
+            return _confirm(
+                preview=f"将把 NPC 头像生成设为『{'开' if value else '关'}』。",
+                apply=_apply_npc,
+                assume_yes=assume_yes,
+                confirm=confirm,
+                prompt="确认修改 NPC 头像生成?",
+            )
+        if action == "npc-size" and len(positionals) > 1:
+            return _set_value(
+                "illustration_npc_size", positionals[1], f"NPC 头像尺寸为 {positionals[1]}",
+                config_dir, assume_yes, confirm, "建议使用正方形尺寸（如 768x768）。",
+            )
+        if action == "npc-limit" and len(positionals) > 1:
+            return _set_int("illustration_npc_max_per_turn", positionals[1], 0, 4, "每回合新增 NPC 头像上限", config_dir, assume_yes, confirm)
+        if action == "kp-budget" and len(positionals) > 1:
+            return _set_int("illustration_kp_daily_budget", positionals[1], 0, 10000, "AI KP 每日调用预算（0=不限）", config_dir, assume_yes, confirm)
         return False, _illustration_usage()
 
     if sub == "scenario":
@@ -353,6 +469,14 @@ def handle_immersive_command(
             prompt="确认执行生图连通性测试?",
         )
 
+    if sub == "kp":
+        usage = illustration_director.usage_snapshot()
+        return True, (
+            f"AI KP 配图判断：今日调用 {usage.get('calls') or 0} 次 · "
+            f"预算 {settings.get('illustration_kp_daily_budget')} 次/日 · "
+            f"平台 {settings.get('illustration_kp_platform') or '默认启用平台'} · "
+            f"模型 {settings.get('illustration_kp_model') or '平台默认'}"
+        )
     if sub == "usage":
         return True, _usage_text()
 
@@ -423,9 +547,18 @@ def immersive_help_text() -> str:
             "  immersive music crossfade <500-10000> [--yes]    （交叉淡入毫秒）",
             "  immersive music hysteresis <0-10> [--yes]        （切换滞回回合）",
             "  immersive music seed <seed>|clear [--yes]        （固定可复现种子）",
+            "  immersive music source <realtime|bgm|hybrid> [--yes]（音乐来源档位）",
+            "  immersive music allowed <realtime,bgm,hybrid> [--yes]（个人可选来源范围）",
+            "  immersive music personal <on|off> [--yes]        （是否允许个人覆盖音乐来源）",
             "  immersive illustration                           （配图设置概览）",
             "  immersive illustration on|off [--yes]            （站点配图开关）",
             "  immersive illustration auto <on|off> [--yes]     （自动配图）",
+            "  immersive illustration trigger <off|important|turn_interval|frequent> [--yes]（触发档位）",
+            "  immersive illustration allowed <a,b,...> [--yes] （个人可选触发档位范围）",
+            "  immersive illustration npc <on|off> [--yes]      （NPC 头像生成）",
+            "  immersive illustration npc-size <WxH> [--yes]    （NPC 头像尺寸）",
+            "  immersive illustration npc-limit <0-4> [--yes]   （每回合最多新增 NPC 头像数）",
+            "  immersive illustration kp-budget <n> [--yes]     （AI KP 每日判断调用预算，0=不限）",
             "  immersive illustration provider <procedural|platform> [--yes]",
             "  immersive illustration timeout <20-600> [--yes]  （单次请求总预算秒数）",
             "  immersive illustration concurrency <1-4> [--yes] （后台并发）",
@@ -462,6 +595,7 @@ def immersive_help_text() -> str:
             "  immersive key set <api_key>|clear [--yes]        （写入默认平台密钥；默认预演）",
             "  immersive test [--yes]                           （探测默认生图平台，可能产生费用）",
             "  immersive usage                                  （今日外部生图与导演用量）",
+            "  immersive kp                                     （AI KP 配图判断的今日用量/预算/平台）",
             "  immersive cache clear [--yes]                    （清理运行期图片缓存与用量）",
             "  immersive scenario ...                           （剧本配图缓存，见上）",
             "  immersive room status <room_id>                  （查看单房间沉浸状态）",
@@ -870,6 +1004,8 @@ def _music_summary(settings: dict[str, Any]) -> str:
         f"默认 {settings.get('music_default_profile')}/{settings.get('music_default_intensity')} · "
         f"音量 {settings.get('music_volume')}% · 交叉淡入 {settings.get('music_crossfade_ms')}ms · "
         f"滞回 {settings.get('music_hysteresis_turns')} 回合 · 种子 {settings.get('music_seed') or '（自动）'}\n"
+        f"音乐来源: {settings.get('music_source')} · 个人可选 {', '.join(settings.get('music_source_allowed') or [])} · "
+        f"个人覆盖 {_bool_label(settings.get('music_source_allow_personal'))}\n"
         f"可选档位: {', '.join(PROFILES)}\n可选强度: {', '.join(INTENSITIES)}"
     )
 
@@ -887,6 +1023,12 @@ def _illustration_summary(settings: dict[str, Any], config_dir: Any = None) -> s
         f"默认平台: {platform_text}\n"
         f"超时 {settings.get('illustration_timeout')}s · 并发 {settings.get('illustration_concurrency')} · "
         f"每日预算 {settings.get('illustration_daily_budget') or '不限'} · 房间每小时 {settings.get('illustration_room_hourly_cap') or '不限'}\n"
+        f"触发档位: {settings.get('illustration_trigger')} · 个人可选 {', '.join(settings.get('illustration_trigger_allowed') or [])}\n"
+        f"AI KP: 预算 {settings.get('illustration_kp_daily_budget') or '不限'} 次/日 · "
+        f"超时 {settings.get('illustration_kp_timeout')}s · "
+        f"平台 {settings.get('illustration_kp_platform') or '默认启用平台'}\n"
+        f"NPC 头像: {_bool_label(settings.get('illustration_npc_enabled'))} · 尺寸 {settings.get('illustration_npc_size')} · "
+        f"每回合最多 {settings.get('illustration_npc_max_per_turn')} 张\n"
         f"剧本缓存: 记录新图 {_bool_label(settings.get('illustration_scenario_record'))} · "
         f"优先复用 {_bool_label(settings.get('illustration_scenario_prefer'))} · "
         f"单剧本上限 {settings.get('illustration_scenario_quota_mb') if settings.get('illustration_scenario_quota_mb') else '不限'}MB · "
@@ -1036,11 +1178,14 @@ def _human_bytes(value: int) -> str:
 
 
 def _music_usage() -> str:
-    return "Usage: immersive music [on|off|auto|volume|crossfade|hysteresis|seed] ...\n" + immersive_help_text()
+    return "Usage: immersive music [on|off|auto|volume|crossfade|hysteresis|seed|source|allowed|personal] ...\n" + immersive_help_text()
 
 
 def _illustration_usage() -> str:
-    return "Usage: immersive illustration [on|off|auto|provider|timeout|concurrency|budget|cap|min-turns] ...\n" + immersive_help_text()
+    return (
+        "Usage: immersive illustration [on|off|auto|provider|timeout|concurrency|budget|cap|min-turns"
+        "|trigger|allowed|npc|npc-size|npc-limit|kp-budget] ...\n" + immersive_help_text()
+    )
 
 
 def _provider_problems(settings: dict[str, Any], config_dir: Any = None) -> list[str]:

@@ -28,11 +28,11 @@ from urllib.parse import urlparse
 import requests
 
 from trpg_server.agents.http_retry import post_with_retry
-from trpg_server.immersive import image_platforms, scenario_cache
+from trpg_server.immersive import image_platforms, room_cache, scenario_cache, task_gate
 from trpg_server.immersive.config import resolve_room_switches
-from trpg_server.immersive.svg_scene import render_scene_svg
+from trpg_server.immersive.svg_scene import render_portrait_svg, render_scene_svg
 from trpg_server.json_store import read_json, write_json_atomic
-from trpg_server.settings import RUNTIME_DIR
+from trpg_server.settings import RUNTIME_DIR, SCENARIOS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +180,79 @@ def _cache_key(provider: str, model: str, size: str, prompt: str) -> str:
     return hashlib.sha256(raw).hexdigest()[:24]
 
 
+def _room_cache_key(provider: str, model: str, size: str, category: str, fingerprint: str) -> str:
+    raw = f"{provider}|{model}|{size}|{category}|{fingerprint}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:24]
+
+
+def room_cache_lookup(
+    room_dir: Path | None,
+    key: str,
+    *,
+    fingerprint: str = "",
+    platform: str = "",
+    model: str = "",
+    size: str = "",
+    category: str = "",
+) -> dict[str, Any] | None:
+    """房间级缓存查询：图片与索引都在房间目录内，命中不扣生图预算。"""
+    return room_cache.lookup(
+        room_dir,
+        key,
+        fingerprint=fingerprint,
+        platform=platform,
+        model=model,
+        size=size,
+        category=category,
+    )
+
+
+def room_cache_store(
+    room_dir: Path | None,
+    key: str,
+    *,
+    scene: str,
+    npc_name: str,
+    category: str,
+    fingerprint: str,
+    platform: str,
+    model: str,
+    size: str,
+    payload: dict[str, Any],
+    settings: dict[str, Any] | None = None,
+) -> None:
+    """把刚生成的图片复制进房间缓存目录；降级图不写，避免固化失败结果。"""
+    if not key or not room_dir or payload.get("degraded"):
+        return
+    filename = str(payload.get("filename") or "")
+    if not _FILENAME_RE.match(filename):
+        return
+    source = IMAGE_CACHE_DIR / filename
+    try:
+        content = source.read_bytes()
+    except OSError:
+        logger.warning("immersive_room_cache write skipped key=%s reason=read_failed", key)
+        return
+    room_cache.store(
+        room_dir,
+        key,
+        fingerprint=fingerprint,
+        platform=platform,
+        model=model,
+        size=size,
+        category=category,
+        content=content,
+        suffix=source.suffix.lstrip("."),
+        scene=scene,
+        npc_name=npc_name,
+        provider=str(payload.get("provider") or ""),
+        platform_id=str(payload.get("platform_id") or ""),
+        width=int(payload.get("width") or 0),
+        height=int(payload.get("height") or 0),
+        settings=settings,
+    )
+
+
 def _file_for_key(key: str, suffix: str) -> Path:
     return IMAGE_CACHE_DIR / f"{key}.{suffix}"
 
@@ -202,6 +275,28 @@ def _materialize_scenario_hit(hit: dict[str, Any]) -> Path | None:
             shutil.copyfile(source, target)
     except OSError:
         logger.warning("scenario cache materialize failed source=%s", source, exc_info=True)
+        return None
+    return target
+
+
+def _materialize_room_hit(hit: dict[str, Any], room_id: str) -> Path | None:
+    """把房间目录里的缓存图片复制到运行期目录，返回可公开访问的路径。
+
+    运行期文件名由「房间 ID + 缓存 key」再哈希，避免不同房间同 key 互相覆盖。
+    """
+    source = Path(hit.get("path") or "")
+    key = str(hit.get("key") or "")
+    suffix = source.suffix.lower().lstrip(".")
+    if not key or suffix not in {"svg", "png", "jpg", "jpeg", "webp"}:
+        return None
+    filename_key = hashlib.sha256(f"{room_id}|{key}".encode("utf-8")).hexdigest()[:24]
+    target = _file_for_key(filename_key, suffix)
+    try:
+        IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        if not target.is_file():
+            shutil.copyfile(source, target)
+    except OSError:
+        logger.warning("room cache materialize failed source=%s", source, exc_info=True)
         return None
     return target
 
@@ -230,7 +325,65 @@ def _build_prompt(scene: str, profile: str, intensity: str) -> str:
     )[:900]
 
 
-def _write_svg(room_dir: Path | None, scene: str, profile: str, intensity: str, seed: str) -> dict[str, Any]:
+def build_prompt_for_scene(scene: str, profile: str, intensity: str) -> str:
+    """供 AI KP 降级链路复用的场景提示词构造器。"""
+    return _build_prompt(scene, profile, intensity)
+
+
+def room_cache_stats(room_dir: Path | None) -> dict[str, Any]:
+    return room_cache.stats(room_dir)
+
+
+def clear_room_cache(room_dir: Path | None, *, delete_files: bool = True) -> tuple[int, int]:
+    """清空本房间缓存目录（图片 + 索引），不触碰剧本目录。"""
+    return room_cache.clear(room_dir)
+
+
+def scenario_accepts_room_images(
+    scenario_id: str, scenarios_dir: Path | str | None = None
+) -> bool:
+    """读取剧本作者开关：是否接受来自房间的生成图片进入跨房间复用池。"""
+    safe_id = scenario_cache.safe_scenario_id(scenario_id)
+    if not safe_id:
+        return False
+    base = Path(scenarios_dir) if scenarios_dir else Path(SCENARIOS_DIR)
+    descriptor = base / f"scenario-{safe_id}" / "scenario.json"
+    try:
+        data = read_json(descriptor, default={})
+    except OSError:
+        return False
+    return bool(isinstance(data, dict) and data.get("accept_room_images"))
+
+
+def _write_svg(
+    room_dir: Path | None,
+    scene: str,
+    profile: str,
+    intensity: str,
+    seed: str,
+    category: str = "scene",
+    size_override: str = "",
+) -> dict[str, Any]:
+    if str(category).strip().lower() == "portrait":
+        side = 768
+        match = re.match(r"(\d{2,4})x(\d{2,4})", str(size_override or ""))
+        if match:
+            side = max(384, min(1536, int(match.group(1))))
+        key = _cache_key("procedural", "svg-portrait-v1", f"{side}x{side}", f"{scene}|{profile}|{intensity}|{seed}")
+        path = _file_for_key(key, "svg")
+        if not path.is_file():
+            IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            svg = render_portrait_svg(profile, intensity, scene, seed, size=side)
+            path.write_text(svg, encoding="utf-8")
+        return {
+            "provider": "procedural",
+            "url": _public_url(path),
+            "filename": path.name,
+            "width": side,
+            "height": side,
+            "degraded": False,
+            "error": "",
+        }
     key = _cache_key("procedural", "svg-v1", "1280x720", f"{scene}|{profile}|{intensity}|{seed}")
     path = _file_for_key(key, "svg")
     if not path.is_file():
@@ -281,6 +434,9 @@ def _download_image(url: str) -> tuple[bytes, str]:
 def _generate_external(
     prompt: str,
     platform: dict[str, Any],
+    *,
+    category: str = "scene",
+    size_override: str = "",
 ) -> dict[str, Any]:
     """按平台表配置真实生成一张图。
 
@@ -292,12 +448,12 @@ def _generate_external(
     base_url = str(platform.get("base_url") or "").strip().rstrip("/")
     api_key = str(platform.get("api_key") or "").strip()
     model = str(platform.get("model") or "")
-    size = str(platform.get("size") or "1024x1024")
+    size = str(size_override or platform.get("size") or "1024x1024")
     platform_id = str(platform.get("id") or "")
     platform_name = str(platform.get("name") or platform_id)
     if not base_url or not api_key:
         raise RuntimeError("not_configured")
-    key = _cache_key(protocol, model, size, prompt)
+    key = _cache_key(protocol, model, size, f"{category}|{prompt}" if category else prompt)
     for candidate in ("png", "webp", "jpg"):
         existing = _file_for_key(key, candidate)
         if existing.is_file():
@@ -399,6 +555,12 @@ def generate_now(
     scenario_id: str = "",
     scenarios_dir: Path | str | None = None,
     house_rules: dict[str, Any] | None = None,
+    prompt_override: str = "",
+    category: str = "scene",
+    fingerprint: str = "",
+    allow_cross_room: bool = False,
+    npc_name: str = "",
+    size_override: str = "",
 ) -> dict[str, Any]:
     """同步生成一张图（供手动触发/控制台使用），失败自动回落程序化图。
 
@@ -415,29 +577,41 @@ def generate_now(
     external_allowed = bool(platform) and bool(switches.get("illustration"))
     degradation = ""
     payload: dict[str, Any] | None = None
+    category_norm = "portrait" if str(category).strip().lower() == "portrait" else "scene"
+    if category_norm == "portrait" and not size_override:
+        size_override = str(settings.get("illustration_npc_size") or "768x768")
     scenario_sid = scenario_cache.safe_scenario_id(scenario_id)
-    scenario_fp = scenario_cache.scene_fingerprint(scene, profile, intensity)
-    reuse_allowed = bool(switches.get("scenario_prefer")) and not force
-    record_allowed = bool(switches.get("scenario_record"))
-    scenario_key = ""
+    scenario_fp = str(fingerprint or "").strip() or scenario_cache.scene_fingerprint(
+        scene, profile, intensity
+    )
+    reuse_allowed = (bool(switches.get("scenario_prefer")) or bool(allow_cross_room)) and not force
+    # 房间生成的图片进入跨房间复用池，必须同时满足「站点允许写入剧本」与「剧本作者接受」，
+    # 默认两者都关闭；不满足时只写本房间目录，其他房间不会命中。
+    record_allowed = bool(switches.get("scenario_record")) and bool(allow_cross_room)
+    room_key = ""
 
     # 命中 key 需要平台/模型/尺寸；外部平台未配置时无法确定 key，直接走降级逻辑。
     if wants_external and platform is not None:
         target_platform = str(platform.get("id") or platform.get("protocol") or "platform")
         target_model = str(platform.get("model") or "")
-        target_size = str(platform.get("size") or "")
+        target_size = str(size_override or platform.get("size") or "")
         target_platform_name = str(platform.get("name") or target_platform)
     elif not wants_external:
         target_platform = "procedural"
-        target_model = "svg-v1"
-        target_size = "1280x720"
-        target_platform_name = "程序化场景"
+        target_model = "svg-portrait-v1" if category_norm == "portrait" else "svg-v1"
+        target_size = str(size_override or "") if category_norm == "portrait" else "1280x720"
+        target_platform_name = "程序化头像" if category_norm == "portrait" else "程序化场景"
     else:
         target_platform = target_model = target_size = target_platform_name = ""
 
+    scenario_key = ""
     if scenario_sid and (reuse_allowed or record_allowed):
         scenario_key = scenario_cache.cache_key(
-            scenario_sid, scenario_fp, target_platform, target_model, target_size
+            scenario_sid, scenario_fp, target_platform, target_model, target_size, category_norm
+        )
+    if target_platform and target_model and target_size:
+        room_key = _room_cache_key(
+            target_platform, target_model, target_size, category_norm, scenario_fp
         )
 
     if reuse_allowed and scenario_sid and target_platform:
@@ -448,10 +622,20 @@ def generate_now(
             target_model,
             target_size,
             scenarios_dir=scenarios_dir,
+            category=category_norm,
         )
         if hit:
-            path = _materialize_scenario_hit(hit)
             entry_meta = hit.get("entry") if isinstance(hit.get("entry"), dict) else {}
+            entry_origin = str(entry_meta.get("origin") or "scenario").strip().lower()
+            source_room = str(entry_meta.get("source_room") or "")
+            if source_room and source_room != room_id and not allow_cross_room:
+                logger.info(
+                    "immersive_scenario_cache cross-room blocked room=%s source=%s scenario=%s key=%s reason=author_not_accepted",
+                    room_id, source_room, scenario_sid, hit.get("key"),
+                )
+                hit = None
+        if hit:
+            path = _materialize_scenario_hit(hit)
             if path is not None:
                 payload = {
                     "provider": "procedural" if target_platform == "procedural" else "platform",
@@ -465,12 +649,18 @@ def generate_now(
                     "error": "",
                     "cached": True,
                     "cache_hit": True,
+                    "cache_level": (
+                        "cross-room" if source_room and source_room != room_id else "scenario"
+                    ),
                     "reuse_source": "scenario",
                     "scenario_key": hit.get("key"),
+                    "source_room": source_room,
                 }
                 logger.info(
-                    "immersive_scenario_cache reuse room=%s scenario=%s key=%s scene=%s",
-                    room_id, scenario_sid, hit.get("key"), scene,
+                    "immersive_scenario_cache reuse room=%s scenario=%s key=%s level=%s origin=%s source=%s",
+                    room_id, scenario_sid, hit.get("key"),
+                    "cross-room" if source_room and source_room != room_id else "scenario",
+                    entry_origin, source_room or "-",
                 )
             else:
                 logger.warning(
@@ -489,6 +679,48 @@ def generate_now(
             "prefer_disabled" if not switches.get("scenario_prefer") else "force",
         )
 
+    # 剧本级未命中（或未开启）时，再看房间级缓存：场景/地点来回切换直接复用。
+    if payload is None and room_key and not force:
+        room_hit = room_cache_lookup(
+            room_dir,
+            room_key,
+            fingerprint=scenario_fp,
+            platform=target_platform,
+            model=target_model,
+            size=target_size,
+            category=category_norm,
+        )
+        if room_hit is not None:
+            path = _materialize_room_hit(room_hit, room_id)
+            room_entry = room_hit.get("entry") if isinstance(room_hit.get("entry"), dict) else {}
+            if path is not None:
+                payload = {
+                    "provider": room_entry.get("provider") or "platform",
+                    "platform_id": room_entry.get("platform_id") or "",
+                    "platform_name": target_platform_name,
+                    "url": _public_url(path),
+                    "filename": path.name,
+                    "width": int(room_entry.get("width") or 0),
+                    "height": int(room_entry.get("height") or 0),
+                    "degraded": False,
+                    "error": "",
+                    "cached": True,
+                    "cache_hit": True,
+                    "cache_level": "room",
+                    "reuse_source": "room",
+                    "room_key": room_key,
+                    "source_room": room_id,
+                }
+                logger.info(
+                    "immersive_room_cache reuse room=%s key=%s category=%s scene=%s npc=%s",
+                    room_id, room_key, category_norm, scene, npc_name or "-",
+                )
+            else:
+                logger.warning(
+                    "immersive_room_cache reuse failed room=%s key=%s reason=materialize_failed",
+                    room_id, room_key,
+                )
+
     if payload is None:
         if wants_external and platform is None:
             # 选择了外部生图但平台表里没有可用条目：明确降级，而不是静默使用旧字段。
@@ -498,9 +730,11 @@ def generate_now(
             if not allowed:
                 degradation = reason
             else:
-                prompt = _build_prompt(scene, profile, intensity)
+                prompt = str(prompt_override or "").strip() or _build_prompt(scene, profile, intensity)
                 try:
-                    payload = _generate_external(prompt, platform)
+                    payload = _generate_external(
+                        prompt, platform, category=category_norm, size_override=size_override
+                    )
                 except Exception as exc:  # noqa: BLE001 - 外部服务不可控
                     logger.warning("immersive_illustration external failed: %s", exc)
                     degradation = str(exc)[:180]
@@ -509,7 +743,10 @@ def generate_now(
             # 避免默认配置下每张图都被标记成异常。
             if not degradation and external_allowed:
                 degradation = "external_failed"
-            payload = _write_svg(room_dir, scene, profile, intensity, seed)
+            payload = _write_svg(
+                room_dir, scene, profile, intensity, seed,
+                category=category_norm, size_override=size_override,
+            )
             payload["degraded"] = bool(degradation)
             payload["error"] = degradation
             payload["fallback"] = bool(degradation)
@@ -549,11 +786,33 @@ def generate_now(
                 height=int(payload.get("height") or 0),
                 degraded=bool(payload.get("degraded")),
                 scenarios_dir=scenarios_dir,
+                category=category_norm,
+                origin="room" if allow_cross_room else "scenario",
+                source_room=room_id,
             )
             payload["scenario_key"] = (stored or {}).get("key") or scenario_key
             logger.info(
-                "immersive_scenario_cache write room=%s scenario=%s key=%s recorded=%s reason=%s",
-                room_id, scenario_sid, payload["scenario_key"], recorded, reason,
+                "immersive_scenario_cache write room=%s scenario=%s key=%s category=%s recorded=%s reason=%s",
+                room_id, scenario_sid, payload["scenario_key"], category_norm, recorded, reason,
+            )
+        payload.setdefault("cache_level", "none")
+        room_cache_store(
+            room_dir,
+            room_key,
+            scene=scene,
+            npc_name=npc_name,
+            category=category_norm,
+            fingerprint=scenario_fp,
+            platform=target_platform,
+            model=target_model,
+            size=target_size,
+            payload=payload,
+            settings=settings,
+        )
+        if room_key:
+            logger.info(
+                "immersive_room_cache write room=%s key=%s category=%s file=%s",
+                room_id, room_key, category_norm, payload.get("filename"),
             )
     entry = {
         "id": f"{int(time.time() * 1000)}-{seed[-6:]}",
@@ -565,7 +824,12 @@ def generate_now(
         "provider": payload.get("provider"),
         "platform_id": payload.get("platform_id") or "",
         "cache_hit": bool(payload.get("cache_hit")),
+        "cache_level": payload.get("cache_level") or ("none" if not payload.get("cache_hit") else ""),
+        "category": category_norm,
+        "npc_name": npc_name,
+        "fingerprint": scenario_fp,
         "reuse_source": payload.get("reuse_source") or "",
+        "source_room": payload.get("source_room") or "",
         "scenario_key": payload.get("scenario_key") or "",
         "degraded": payload.get("degraded", False),
         "error": payload.get("error", ""),
@@ -587,10 +851,16 @@ def generate_now(
     return payload
 
 
+def _generate_with_gate(**kwargs: Any) -> Any:
+    # 生图期间标记为重任务，语音合成会排队让路，避免争抢 CPU。
+    with task_gate.heavy_task():
+        return generate_now(**kwargs)
+
+
 def submit_generation(**kwargs: Any) -> futures.Future:
     """异步提交，调用方立即返回；结果通过 Socket.IO 广播。"""
     concurrency = int(kwargs.get("settings", {}).get("illustration_concurrency") or 1)
-    return _executor(concurrency).submit(generate_now, **kwargs)
+    return _executor(concurrency).submit(_generate_with_gate, **kwargs)
 
 
 def history_for_room(room_dir: Path | None, limit: int = 12) -> list[dict[str, Any]]:

@@ -30,6 +30,7 @@ from trpg_server.character_ai import (
     scenario_context_from_record,
 )
 from trpg_server.immersive_admin import handle_immersive_command
+from trpg_server.voice_admin import handle_voice_command
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.narrative_admin import handle_narrative_command
 from trpg_server.scenario_admin import (
@@ -239,6 +240,15 @@ def execute_console_command(
         )
         return _log_result(ConsoleCommandResult(ok, text))
 
+    if domain == "voice":
+        ok, text = handle_voice_command(
+            parts[1:],
+            confirm=confirm,
+            rooms_dir=rooms_dir,
+            config_dir=(app.config.get("CONFIG_DIR") if app is not None else None),
+        )
+        return _log_result(ConsoleCommandResult(ok, text))
+
     if domain == "vector" and subcommand:
         if subcommand == "health":
             return _log_result(_vector_health_command(vector_store, embedding_provider, ocr_provider))
@@ -397,6 +407,13 @@ def command_help_text() -> str:
             "  immersive scenario [record|prefer|quota|max-image|overflow|stats|clear|prune]",
             "                                                   （剧本配图缓存：开关、配额、统计与清理；破坏性命令默认预演）",
             "  immersive cache clear [--yes] / immersive room reset <room_id> [--yes]",
+            "  voice status [--json] / voice on|off              （AI 对话语音配音：默认关闭、系统音色）",
+            "  voice engine <system|local|cloud> / voice engine allowed <a,b,c>",
+            "                                                   （local/cloud 本阶段仅占位，会明确降级）",
+            "  voice profile list                                （8 个 NPC 人设 + 1 个旁白）",
+            "  voice map list|set <speaker> <profile> --room <room_id> [--yes]",
+            "  voice test [--json] / voice usage [--room <room_id>]",
+            "                                                   （引擎健康检查 / 结构化事件与房间小时用量）",
             "  network status / network test                    （网络状态 / 连通性测试）",
             "  config show [--section <name>]                   （查看生效配置与部署锁定来源）",
             "  config migrate [--yes]                           （遗留 JSON 并入 general.toml，原文件改名 .legacy）",

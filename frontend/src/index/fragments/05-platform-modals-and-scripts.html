@@ -221,11 +221,16 @@
     <script src="js/latex.js"></script>
     <script src="js/chat.js"></script>
     <script src="js/bgm.js"></script>
-    <!-- 实时沉浸系统：配乐引擎 → 场景面板 → 设置 → 入口（依赖 bgm 的 ducking API） -->
+    <!-- 实时沉浸系统：乐理/编配/声部 → 配乐引擎 → 场景面板 → 设置 → 入口（依赖 bgm 的 ducking API） -->
+    <script src="js/immersive/music-theory.js"></script>
+    <script src="js/immersive/music-arranger.js"></script>
+    <script src="js/immersive/music-voices.js"></script>
     <script src="js/immersive/music-engine.js"></script>
     <script src="js/immersive/illustration.js"></script>
     <script src="js/immersive/settings.js"></script>
     <script src="js/immersive/index.js"></script>
+    <!-- AI 对话语音配音：依赖 bgm 的 ducking 与实时配乐的 setDucking，独立于音乐图 -->
+    <script src="js/immersive/voice.js"></script>
     <script src="js/combat.js"></script>
     <script src="js/worldOverride.js"></script>
     <script src="js/auth/api.js"></script>

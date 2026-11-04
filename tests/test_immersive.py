@@ -157,20 +157,61 @@ def test_music_escalates_immediately_on_danger(tmp_path):
     assert escalated["reason"] == "escalate"
 
 
-def test_music_section_advances_even_when_mood_stable(tmp_path):
+def test_music_section_follows_cue_not_turn_count(tmp_path):
     room_dir = tmp_path / "room"
     room_dir.mkdir()
     settings = _music_settings()
     sections = []
+    positions = []
+    epochs = []
     for _ in range(7):
         plan = plan_music(
             room_dir=room_dir, room_id="r-1", analysis=_analysis("daily", "medium"), settings=settings,
         )
         sections.append(plan["section"])
-    # 每 SECTION_TURNS(4) 回合推进一段，避免「一直一个调」。
-    assert sections[0] == 0
-    assert sections[-1] >= 1
-    assert sections == sorted(sections)
+        positions.append(plan["sync"]["position_bars"])
+        epochs.append(plan["sync"]["epoch"])
+    # 段落只由内容变化驱动：同一氛围持续 7 回合仍在自己 cue 的同一段里推进，
+    # 不再每 4 回合硬切一次（否则慢回合的 cue 会在高潮前被替换）。
+    assert sections == [0] * 7
+    assert len(set(epochs)) == 1
+    assert positions == sorted(positions)
+
+
+def test_music_sync_position_survives_new_turns(tmp_path):
+    """同一谱面在时间推进后位置继续前进，而不是每次重新从 0 小节开始。"""
+    room_dir = tmp_path / "room"
+    room_dir.mkdir()
+    settings = _music_settings()
+    first = plan_music(
+        room_dir=room_dir, room_id="r-1", analysis=_analysis("suspense", "medium"), settings=settings,
+    )
+    second = plan_music(
+        room_dir=room_dir, room_id="r-1", analysis=_analysis("suspense", "medium"), settings=settings,
+    )
+    assert first["sync"]["epoch"] == second["sync"]["epoch"]
+    assert second["sync"]["position_bars"] >= first["sync"]["position_bars"]
+
+
+def test_music_cue_restarts_only_when_content_changes(tmp_path):
+    """换档位才开启新 cue；强度变化只影响演奏，不算换歌。"""
+    room_dir = tmp_path / "room"
+    room_dir.mkdir()
+    settings = _music_settings()
+    base = plan_music(
+        room_dir=room_dir, room_id="r-1", analysis=_analysis("daily", "low"), settings=settings,
+    )
+    louder = plan_music(
+        room_dir=room_dir, room_id="r-1", analysis=_analysis("daily", "high"), settings=settings,
+    )
+    assert louder["sync"]["epoch"] == base["sync"]["epoch"]
+    # 档位滞回需要连续两帧确认（settings.music_hysteresis_turns=2）。
+    for _ in range(2):
+        switched = plan_music(
+            room_dir=room_dir, room_id="r-1", analysis=_analysis("urgency", "high"), settings=settings,
+        )
+    assert switched["profile"] == "urgency"
+    assert switched["sync"]["epoch"] > base["sync"]["epoch"]
 
 
 def test_music_seed_is_reproducible_across_rooms(tmp_path):

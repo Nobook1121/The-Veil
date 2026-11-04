@@ -313,6 +313,55 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec("illustration_daily_budget", "immersive", ("illustration_daily_budget",), clamped_int(minimum=0, maximum=100000), 0),
     FieldSpec("illustration_room_hourly_cap", "immersive", ("illustration_room_hourly_cap",), clamped_int(minimum=0, maximum=500), 12),
     FieldSpec("illustration_min_turns", "immersive", ("illustration_min_turns",), clamped_int(minimum=1, maximum=50), 4),
+    # 配图触发档位：off / important（仅重要场景转换）/ turn_interval（每 N 回合）/ frequent。
+    FieldSpec(
+        "illustration_trigger",
+        "immersive",
+        ("illustration_trigger",),
+        as_enum("illustration_trigger", frozenset({"off", "important", "turn_interval", "frequent"})),
+        "important",
+    ),
+    # 允许个人覆盖的档位（逗号分隔）；off 始终允许，作为个人收紧项。
+    FieldSpec(
+        "illustration_trigger_allowed",
+        "immersive",
+        ("illustration_trigger_allowed",),
+        as_text,
+        "important,turn_interval,frequent",
+    ),
+    # AI KP 判断与提示词链路：复用既有聊天平台、重试、超时与独立每日预算。
+    FieldSpec("illustration_kp_platform", "immersive", ("illustration_kp_platform",), as_text, ""),
+    FieldSpec("illustration_kp_model", "immersive", ("illustration_kp_model",), as_text, ""),
+    FieldSpec("illustration_kp_timeout", "immersive", ("illustration_kp_timeout",), clamped_int(minimum=10, maximum=300), 45),
+    FieldSpec("illustration_kp_daily_budget", "immersive", ("illustration_kp_daily_budget",), clamped_int(minimum=0, maximum=10000), 200),
+    FieldSpec(
+        "illustration_kp_max_context_chars",
+        "immersive",
+        ("illustration_kp_max_context_chars",),
+        clamped_int(minimum=200, maximum=8000),
+        1600,
+    ),
+    # NPC 头像：尺寸与场景图区分，每回合最多新增一张，同一 NPC 在房间内复用。
+    FieldSpec("illustration_npc_enabled", "immersive", ("illustration_npc_enabled",), as_bool, False),
+    FieldSpec("illustration_npc_size", "immersive", ("illustration_npc_size",), as_text, "768x768"),
+    FieldSpec("illustration_npc_max_per_turn", "immersive", ("illustration_npc_max_per_turn",), clamped_int(minimum=0, maximum=4), 1),
+    # 房间级缓存：落盘在房间目录内，可随归档保留；默认 40 条 / 64MB / 单图 8MB，超限 LRU。
+    FieldSpec("illustration_room_cache_max_entries", "immersive", ("illustration_room_cache_max_entries",), clamped_int(minimum=0, maximum=200), 40),
+    FieldSpec("illustration_room_cache_quota_mb", "immersive", ("illustration_room_cache_quota_mb",), clamped_int(minimum=0, maximum=1024), 64),
+    FieldSpec("illustration_room_cache_max_image_mb", "immersive", ("illustration_room_cache_max_image_mb",), clamped_int(minimum=1, maximum=64), 8),
+    FieldSpec("illustration_room_cache_overflow", "immersive", ("illustration_room_cache_overflow",), as_enum("illustration_room_cache_overflow", frozenset({"lru", "reject"})), "lru"),
+    # 音乐来源：realtime（仅实时配乐）/ bgm（仅 BGM）/ hybrid（实时配乐主层 + BGM 底噪）。
+    FieldSpec(
+        "music_source",
+        "immersive",
+        ("music_source",),
+        as_enum("music_source", frozenset({"realtime", "bgm", "hybrid"})),
+        "hybrid",
+    ),
+    # 允许个人选择的音乐来源档位（逗号分隔）；个人只能在站点允许集合内覆盖。
+    FieldSpec("music_source_allowed", "immersive", ("music_source_allowed",), as_text, "realtime,bgm,hybrid"),
+    # 关闭后个人设置中的音乐来源不可覆盖，只能跟随站点默认。
+    FieldSpec("music_source_allow_personal", "immersive", ("music_source_allow_personal",), as_bool, True),
     # 剧本配图缓存：默认只复用、不写入作者剧本目录，避免无声修改与磁盘膨胀。
     FieldSpec("illustration_scenario_record", "immersive", ("illustration_scenario_record",), as_bool, False),
     FieldSpec("illustration_scenario_prefer", "immersive", ("illustration_scenario_prefer",), as_bool, True),
@@ -346,6 +395,58 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
         "rule",
     ),
     FieldSpec("music_director_max_context_chars", "immersive", ("music_director_max_context_chars",), clamped_int(minimum=200, maximum=4000), 1200),
+    # [immersive] AI 对话语音配音：默认关闭，系统音色（浏览器 Web Speech）默认引擎。
+    FieldSpec("voice_enabled", "immersive", ("voice_enabled",), as_bool, False),
+    FieldSpec(
+        "voice_engine",
+        "immersive",
+        ("voice_engine",),
+        as_enum("voice_engine", frozenset({"system", "local", "cloud"})),
+        "system",
+    ),
+    # 允许的引擎白名单（逗号分隔）；本阶段只有 system 真正可用。
+    FieldSpec("voice_engine_allowed", "immersive", ("voice_engine_allowed",), as_text, "system"),
+    FieldSpec("voice_autoplay", "immersive", ("voice_autoplay",), as_bool, False),
+    FieldSpec("voice_volume", "immersive", ("voice_volume",), clamped_int(minimum=0, maximum=100), 70),
+    FieldSpec("voice_rate", "immersive", ("voice_rate",), clamped_int(minimum=50, maximum=200), 100),
+    FieldSpec("voice_max_turn_chars", "immersive", ("voice_max_turn_chars",), clamped_int(minimum=40, maximum=4000), 800),
+    FieldSpec("voice_max_segment_chars", "immersive", ("voice_max_segment_chars",), clamped_int(minimum=10, maximum=500), 40),
+    FieldSpec("voice_max_segments", "immersive", ("voice_max_segments",), clamped_int(minimum=1, maximum=200), 24),
+    FieldSpec(
+        "voice_interrupt_policy",
+        "immersive",
+        ("voice_interrupt_policy",),
+        as_enum("voice_interrupt_policy", frozenset({"interrupt", "queue"})),
+        "interrupt",
+    ),
+    FieldSpec("voice_ducking", "immersive", ("voice_ducking",), as_bool, True),
+    FieldSpec("voice_ducking_level", "immersive", ("voice_ducking_level",), clamped_int(minimum=0, maximum=90), 35),
+    FieldSpec("voice_room_hourly_cap", "immersive", ("voice_room_hourly_cap",), clamped_int(minimum=0, maximum=10000), 120),
+    # 云端引擎占位：本阶段不发起请求，密钥只在管理员可见范围内掩码展示。
+    FieldSpec("voice_cloud_base_url", "immersive", ("voice_cloud_base_url",), as_text, ""),
+    FieldSpec("voice_cloud_model", "immersive", ("voice_cloud_model",), as_text, ""),
+    FieldSpec("voice_cloud_api_key", "immersive", ("voice_cloud_api_key",), as_text, ""),
+    # 本地多音色引擎（sherpa-onnx + Kokoro v1.1-zh）；默认关闭，需管理员显式开启并安装权重。
+    FieldSpec("voice_local_enabled", "immersive", ("voice_local_enabled",), as_bool, False),
+    # 留空表示由主进程托管本地子服务；填写后连接管理员自托管的回环服务。
+    FieldSpec("voice_local_base_url", "immersive", ("voice_local_base_url",), as_text, ""),
+    FieldSpec("voice_local_model", "immersive", ("voice_local_model",), as_text, "kokoro-int8-multi-lang-v1_1"),
+    # 语音并发固定可配；与实时配图错峰，默认 1。
+    FieldSpec("voice_local_concurrency", "immersive", ("voice_local_concurrency",), clamped_int(minimum=1, maximum=8), 1),
+    FieldSpec("voice_local_timeout", "immersive", ("voice_local_timeout",), clamped_int(minimum=5, maximum=180), 30),
+    # 站点默认的人设→说话人绑定（JSON 文本，例如 {"narrator": 24, "npc_male_elder": 102}）。
+    FieldSpec("voice_local_speakers", "immersive", ("voice_local_speakers",), as_text, ""),
+    FieldSpec("voice_cache_enabled", "immersive", ("voice_cache_enabled",), as_bool, True),
+    FieldSpec("voice_cache_quota_mb", "immersive", ("voice_cache_quota_mb",), clamped_int(minimum=0, maximum=1024), 64),
+    FieldSpec("voice_cache_max_entries", "immersive", ("voice_cache_max_entries",), clamped_int(minimum=0, maximum=10000), 300),
+    FieldSpec(
+        "voice_cache_overflow",
+        "immersive",
+        ("voice_cache_overflow",),
+        as_enum("voice_cache_overflow", frozenset({"lru", "reject"})),
+        "lru",
+    ),
+    FieldSpec("voice_allow_personal", "immersive", ("voice_allow_personal",), as_bool, True),
     # [site]（整合自原 site.json；setup.py 读写）
     FieldSpec("name", "site", ("name",), as_text, ""),
     FieldSpec("domain", "site", ("domain",), as_text, ""),
