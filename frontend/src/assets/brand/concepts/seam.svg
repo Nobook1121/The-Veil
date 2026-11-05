@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Concept A — The Seam">
+  <!--
+    方案 A · 帷幕之缝
+    母题形状 3 个：左帘、右帘、中间透出的光（底板不算母题）。
+    缝的两条边都是二次曲线，全程等宽 118、同向左弯约 49 —— 缝是一道弯的光带，
+    不是两头收拢的梭形，避免读成眼睛。
+    左帘上宽 334 / 下宽 412，右帘上宽 380 / 下宽 302：两片帘子的疏密不对称。
+  -->
+  <defs>
+    <radialGradient id="plate" cx="512" cy="480" r="700" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0B211E"/>
+      <stop offset="0.55" stop-color="#071613"/>
+      <stop offset="1" stop-color="#030A09"/>
+    </radialGradient>
+    <linearGradient id="leftCloth" x1="120" y1="200" x2="480" y2="860" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F0D79A"/>
+      <stop offset="0.5" stop-color="#C7A25C"/>
+      <stop offset="1" stop-color="#8E6C39"/>
+    </linearGradient>
+    <linearGradient id="rightCloth" x1="920" y1="200" x2="560" y2="860" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2F6E64"/>
+      <stop offset="0.55" stop-color="#17453F"/>
+      <stop offset="1" stop-color="#0A2622"/>
+    </linearGradient>
+    <linearGradient id="lightSeam" x1="520" y1="160" x2="480" y2="864" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFF2CF"/>
+      <stop offset="0.5" stop-color="#E8E0CD"/>
+      <stop offset="1" stop-color="#6FC2AA"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="url(#plate)"/>
+
+  <!-- 缝里透出的光：上边 430→548，下边 508→626，等宽 118 -->
+  <path d="M430 160 Q370 512 508 864 L626 864 Q488 512 548 160 Z" fill="url(#lightSeam)"/>
+  <!-- 左帘 -->
+  <path d="M96 264 A104 104 0 0 1 200 160 L430 160 Q370 512 508 864 L200 864 A104 104 0 0 1 96 760 Z" fill="url(#leftCloth)"/>
+  <!-- 右帘 -->
+  <path d="M626 864 Q488 512 548 160 L824 160 A104 104 0 0 1 928 264 L928 760 A104 104 0 0 1 824 864 Z" fill="url(#rightCloth)"/>
+</svg>

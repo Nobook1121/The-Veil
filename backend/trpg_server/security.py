@@ -29,6 +29,7 @@ CSRF_EXEMPT_PATHS = {
     "/api/setup/site",
     "/api/setup/ai",
     "/api/setup/ai/test",
+    "/api/setup/features",
     "/api/setup/embedding/status",
     "/api/setup/embedding/download",
     "/api/setup/embedding/upload",

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>帷幕 · A 的三个变体</title>
+<style>
+  :root { --brass: #c7a25c; --bone: #e8e0cd; --abyss: #071613; }
+  body { margin: 0; font-family: Georgia, "Songti SC", "Noto Serif SC", serif; }
+  .sheet { padding: 40px 36px 32px; }
+  .sheet-dark { background: var(--abyss); color: var(--bone); }
+  .sheet-light { background: #f3efe5; color: #1e2b27; }
+  .sheet-head { display: flex; align-items: baseline; gap: 18px; margin-bottom: 24px; }
+  .sheet-head h1 { margin: 0; font-size: 20px; letter-spacing: .26em; font-weight: 600; }
+  .sheet-head p { margin: 0; font-size: 12px; letter-spacing: .08em; opacity: .58; }
+  .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .concept { border: 1px solid rgba(199, 162, 92, .24); border-radius: 6px; padding: 22px 20px 20px; }
+  .sheet-dark .concept { background: #0b211e; }
+  .sheet-light .concept { background: #fffdf8; border-color: #ded5c1; }
+  .concept header { display: flex; align-items: center; gap: 10px; }
+  .tag { padding: 3px 8px; border: 1px solid rgba(199, 162, 92, .5); border-radius: 4px;
+         font-size: 11px; letter-spacing: .12em; color: var(--brass); }
+  .concept h2 { margin: 0; font-size: 15px; letter-spacing: .12em; font-weight: 600; }
+  .concept h2 em { font-style: normal; font-size: 9px; letter-spacing: .2em; opacity: .45; margin-left: 6px; }
+  .note { margin: 12px 0 0; font-size: 11px; line-height: 1.7; opacity: .74; }
+  .weak { margin: 6px 0 0; font-size: 11px; line-height: 1.7; opacity: .52; }
+  .weak b, .note b { font-weight: 600; }
+  .srow { display: flex; align-items: flex-end; gap: 24px; margin-top: 16px; }
+  .stack { display: flex; flex-direction: column; align-items: flex-end; gap: 14px; }
+  figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 7px; }
+  figcaption { font-size: 9px; letter-spacing: .16em; opacity: .4; }
+  .srow.mono { margin-top: 12px; padding-top: 14px; border-top: 1px dashed rgba(199, 162, 92, .22); }
+  .sheet-light .srow.mono { border-top-color: #e2dac7; }
+  .rowlabel { font-size: 9px; letter-spacing: .22em; opacity: .38; margin: 14px 0 -2px; }
+  .zoom-band { margin-top: 14px; display: flex; gap: 22px; }
+  .zoom-band .z { display: flex; flex-direction: column; gap: 8px; }
+  .zoom-band img { image-rendering: pixelated; }
+  .zoom-band p { margin: 0; font-size: 10px; letter-spacing: .1em; opacity: .45; }
+  footer { margin-top: 24px; font-size: 10.5px; letter-spacing: .1em; opacity: .4; }
+</style>
+</head>
+<body>
+
+<section class="sheet sheet-dark" id="sheet-dark">
+  <div class="sheet-head">
+    <h1>A 的三个变体 · 深色底</h1>
+    <p>256 / 64 / 32 / 16 并排；单色版只判剪影；杆不承担 16px 辨识度</p>
+  </div>
+
+  <div class="cols">
+    <article class="concept">
+      <header><span class="tag">A1</span><h2>悬杆 + 偏缝<em>HANGING SEAM</em></h2></header>
+      <p class="note"><b>手段 1+4</b>｜4 个形状：横杆 / 左帘 / 右帘 / 缝光。杆高 36、两端出头 36；
+        缝 130→210 宽、缝心在 37%；左帘 220 : 右帘 434。</p>
+      <p class="weak"><b>弱点</b>：缝做得宽才保得住 16px，宽了又容易读成「一束光」而不是被拨开的布。</p>
+      <div class="srow">
+        <figure><img src="a1-256.png" width="256" height="256" alt="A1"><figcaption>256</figcaption></figure>
+        <div class="stack">
+          <figure><img src="a1-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure>
+          <figure><img src="a1-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+          <figure><img src="a1-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>
+        </div>
+      </div>
+      <p class="rowlabel">单色 · 纯白</p>
+      <div class="srow mono">
+        <figure><img src="a1-mono-white-256.png" width="256" height="256" alt=""><figcaption>256</figcaption></figure>
+        <div class="stack">
+          <figure><img src="a1-mono-white-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure>
+          <figure><img src="a1-mono-white-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+          <figure><img src="a1-mono-white-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>
+        </div>
+      </div>
+    </article>
+
+    <article class="concept">
+      <header><span class="tag">A2</span><h2>单幅布 + 褶<em>PLEATS</em></h2></header>
+      <p class="note"><b>手段 1+2</b>｜4 个形状：横杆 / 一幅布 / 两道阴褶 + 一道亮褶。布上缘 660 宽、
+        下缘 856 宽（被杆收住再垂开）；褶 22 / 96 / 26 宽，间距 280 / 220。</p>
+      <p class="weak"><b>弱点</b>：单色版把亮褶也挖成负空间，布被切成几条，容易读成竖百叶。</p>
+      <div class="srow">
+        <figure><img src="a2-256.png" width="256" height="256" alt="A2"><figcaption>256</figcaption></figure>
+        <div class="stack">
+          <figure><img src="a2-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure>
+          <figure><img src="a2-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+          <figure><img src="a2-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>
+        </div>
+      </div>
+      <p class="rowlabel">单色 · 纯白</p>
+      <div class="srow mono">
+        <figure><img src="a2-mono-white-256.png" width="256" height="256" alt=""><figcaption>256</figcaption></figure>
+        <div class="stack">
+          <figure><img src="a2-mono-white-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure>
+          <figure><img src="a2-mono-white-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+          <figure><img src="a2-mono-white-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>
+        </div>
+      </div>
+    </article>
+
+    <article class="concept">
+      <header><span class="tag">A3</span><h2>悬杆 + 束起一侧<em>TIED PANEL</em></h2></header>
+      <p class="note"><b>手段 1+5</b>｜4 个形状：横杆 / 窄帘 182 宽（垂到 744 被束带系住）/ 束带 / 宽帘 484 宽（垂到 884）。</p>
+      <p class="weak"><b>弱点</b>：束带在 16px 消失，窄帘退成一根短条，整枚偏重右半边。</p>
+      <div class="srow">
+        <figure><img src="a3-256.png" width="256" height="256" alt="A3"><figcaption>256</figcaption></figure>
+        <div class="stack">
+          <figure><img src="a3-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure>
+          <figure><img src="a3-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+          <figure><img src="a3-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>
+        </div>
+      </div>
+      <p class="rowlabel">单色 · 纯白</p>
+      <div class="srow mono">
+        <figure><img src="a3-mono-white-256.png" width="256" height="256" alt=""><figcaption>256</figcaption></figure>
+        <div class="stack">
+          <figure><img src="a3-mono-white-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure>
+          <figure><img src="a3-mono-white-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+          <figure><img src="a3-mono-white-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>
+        </div>
+      </div>
+    </article>
+  </div>
+
+  <p class="rowlabel" style="margin-top: 26px">16px 像素放大 ×8</p>
+  <div class="zoom-band">
+    <div class="z"><p>A1</p><img src="a1-mono-white-16.png" width="128" height="128" alt=""></div>
+    <div class="z"><p>A2</p><img src="a2-mono-white-16.png" width="128" height="128" alt=""></div>
+    <div class="z"><p>A3</p><img src="a3-mono-white-16.png" width="128" height="128" alt=""></div>
+  </div>
+
+  <footer>A1/A2/A3 仅替换 A；B、C 未改动；正式 icon.svg 等线上文件仍未触碰。</footer>
+</section>
+
+<section class="sheet sheet-light" id="sheet-light">
+  <div class="sheet-head">
+    <h1>A 的三个变体 · 浅色底</h1>
+    <p>同一组四尺寸，单色版换纯黑</p>
+  </div>
+
+  <div class="cols">
+    <article class="concept">
+      <header><span class="tag">A1</span><h2>悬杆 + 偏缝<em>HANGING SEAM</em></h2></header>
+      <p class="note"><b>手段 1+4</b>｜杆比布边各出头 36，缝向 1/3 处偏移并向下张开。</p>
+      <p class="weak"><b>弱点</b>：浅底上左帘的暗金与深青都会压成深色，缝只能靠露出的白底成立。</p>
+      <div class="srow">
+        <figure><img src="a1-256.png" width="256" height="256" alt="A1"><figcaption>256</figcaption></figure>
+        <div class="stack">
+          <figure><img src="a1-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure>
+          <figure><img src="a1-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+          <figure><img src="a1-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>
+        </div>
+      </div>
+      <p class="rowlabel">单色 · 纯黑</p>
+      <div class="srow mono">
+        <figure><img src="a1-mono-black-256.png" width="256" height="256" alt=""><figcaption>256</figcaption></figure>
+        <div class="stack">
+          <figure><img src="a1-mono-black-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure>
+          <figure><img src="a1-mono-black-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+          <figure><img src="a1-mono-black-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>
+        </div>
+      </div>
+    </article>
+
+    <article class="concept">
+      <header><span class="tag">A2</span><h2>单幅布 + 褶<em>PLEATS</em></h2></header>
+      <p class="note"><b>手段 1+2</b>｜三道褶宽窄与间距都不等；布上窄下宽，下缘两侧比中段长。</p>
+      <p class="weak"><b>弱点</b>：亮褶是「宽」的那条，缩小后它反而最像面板的分界，而不是光的褶皱。</p>
+      <div class="srow">
+        <figure><img src="a2-256.png" width="256" height="256" alt="A2"><figcaption>256</figcaption></figure>
+        <div class="stack">
+          <figure><img src="a2-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure>
+          <figure><img src="a2-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+          <figure><img src="a2-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>
+        </div>
+      </div>
+      <p class="rowlabel">单色 · 纯黑</p>
+      <div class="srow mono">
+        <figure><img src="a2-mono-black-256.png" width="256" height="256" alt=""><figcaption>256</figcaption></figure>
+        <div class="stack">
+          <figure><img src="a2-mono-black-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure>
+          <figure><img src="a2-mono-black-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+          <figure><img src="a2-mono-black-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>
+        </div>
+      </div>
+    </article>
+
+    <article class="concept">
+      <header><span class="tag">A3</span><h2>悬杆 + 束起一侧<em>TIED PANEL</em></h2></header>
+      <p class="note"><b>手段 1+5</b>｜窄帘只到 744，宽帘垂到 884，宽度比 182 : 484，下缘高度差 140。</p>
+      <p class="weak"><b>弱点</b>：下半部左侧是一整块空区，远看重心偏右，不像居中图标。</p>
+      <div class="srow">
+        <figure><img src="a3-256.png" width="256" height="256" alt="A3"><figcaption>256</figcaption></figure>
+        <div class="stack">
+          <figure><img src="a3-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure>
+          <figure><img src="a3-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+          <figure><img src="a3-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>
+        </div>
+      </div>
+      <p class="rowlabel">单色 · 纯黑</p>
+      <div class="srow mono">
+        <figure><img src="a3-mono-black-256.png" width="256" height="256" alt=""><figcaption>256</figcaption></figure>
+        <div class="stack">
+          <figure><img src="a3-mono-black-64.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure>
+          <figure><img src="a3-mono-black-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+          <figure><img src="a3-mono-black-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>
+        </div>
+      </div>
+    </article>
+  </div>
+
+  <footer>三套变体共用同一底板（960×960 / rx224）；单色版一律无底板、无渐变。</footer>
+</section>
+
+</body>
+</html>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="E1b — 16px 单色重画">
+  <!-- 16px 单色：五段剪影（顶块 / 檐 / 身 / 座 / 双脚），无光晕、无火焰孔。 -->
+  <g style="color:#E8E0CD">
+    <rect x="448" y="128" width="128" height="64" fill="currentColor"/>
+    <rect x="320" y="192" width="384" height="128" fill="currentColor"/>
+    <rect x="384" y="320" width="256" height="448" fill="currentColor"/>
+    <rect x="320" y="768" width="384" height="64" fill="currentColor"/>
+    <rect x="384" y="832" width="64" height="64" fill="currentColor"/>
+    <rect x="576" y="832" width="64" height="64" fill="currentColor"/>
+  </g>
+</svg>

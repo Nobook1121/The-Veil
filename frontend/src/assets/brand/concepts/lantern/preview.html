@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>提灯三变体 · E1a / E1b / E1c</title>
+<style>
+  :root { --brass:#c7a25c; --bone:#e8e0cd; --abyss:#061411; }
+  body { margin:0; font-family: Georgia, "Songti SC", "Noto Serif SC", serif; }
+  .sheet { padding:38px 34px 30px; }
+  .sheet-dark { background:var(--abyss); color:var(--bone); }
+  .sheet-light { background:#f3efe5; color:#1e2b27; }
+  .sheet-sil { background:#f4f1e8; color:#20201c; }
+  .sheet-zoom { background:#101a17; color:#e8e0cd; }
+  .head { display:flex; align-items:baseline; gap:18px; margin-bottom:14px; }
+  .head h1 { margin:0; font-size:20px; letter-spacing:.24em; font-weight:600; }
+  .head p { margin:0; font-size:11.5px; letter-spacing:.08em; opacity:.55; }
+  .cols { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
+  .col { border:1px solid rgba(199,162,92,.24); border-radius:6px; padding:20px 16px 18px; }
+  .sheet-dark .col { background:#0b211e; }
+  .sheet-light .col { background:#fffdf8; border-color:#ded5c1; }
+  .col header { display:flex; align-items:center; gap:9px; }
+  .tag { padding:2px 7px; border:1px solid rgba(199,162,92,.5); border-radius:4px;
+         font-size:10.5px; letter-spacing:.12em; color:var(--brass); }
+  .tag-rec { background:rgba(199,162,92,.18); border-color:var(--brass); font-weight:600; }
+  .col h2 { margin:0; font-size:14px; letter-spacing:.1em; font-weight:600; }
+  .col h2 em { font-style:normal; font-size:8.5px; letter-spacing:.18em; opacity:.42; margin-left:5px; }
+  .note { margin:10px 0 0; font-size:10.5px; line-height:1.8; opacity:.78; }
+  .note b { font-weight:600; }
+  .weak { margin:6px 0 0; font-size:10.5px; line-height:1.8; opacity:.56; }
+  .pal { display:flex; gap:5px; margin-top:9px; align-items:center; flex-wrap:wrap; }
+  .pal i { width:14px; height:14px; border-radius:3px; display:block; }
+  .pal span { font-size:9px; letter-spacing:.04em; opacity:.55; margin-left:3px; }
+  .rowlabel { font-size:8.5px; letter-spacing:.22em; opacity:.4; margin:16px 0 6px; }
+  .sizes { display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap; }
+  figure { margin:0; display:flex; flex-direction:column; gap:5px; align-items:center; }
+  figcaption { font-size:8px; letter-spacing:.14em; opacity:.38; }
+  .zoom { margin-top:10px; display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
+  .zoom img { image-rendering:pixelated; }
+  table { border-collapse:collapse; margin-top:16px; width:100%; font-size:11px; }
+  th, td { border-bottom:1px solid rgba(199,162,92,.22); padding:6px 8px; text-align:left; }
+  th { font-weight:600; letter-spacing:.08em; opacity:.7; }
+  .sil-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:22px; margin-top:8px; }
+  .sil-cell { display:flex; gap:20px; align-items:flex-end; padding:14px 16px;
+              background:#fff; border:1px solid #ddd6c6; border-radius:6px; }
+  footer { margin-top:24px; font-size:10.5px; letter-spacing:.06em; opacity:.45; line-height:1.8; }
+</style>
+</head>
+<body>
+
+<section class="sheet sheet-dark" id="sheet-dark">
+  <div class="head">
+    <h1>提灯 · 三变体</h1>
+    <p>深底 · 主色 7 档 / 深底 4 档 / 单色 7 档（骨白）</p>
+  </div>
+  <div class="cols" id="cols-dark"></div>
+  <footer>三变体共用同一套「提环 + 带檐顶盖 + 灯身 + 底座」骨架：包围盒一律 x 居中、y 224–800，上下留白 224 / 224（各 21.9%，左右留白 372–382 不等）。16 / 32 分别按 64 / 32 单位网格独立重画，不是母版缩放。</footer>
+</section>
+
+<section class="sheet sheet-light" id="sheet-light">
+  <div class="head">
+    <h1>提灯 · 三变体</h1>
+    <p>浅底 · 单色 7 档（纯黑）</p>
+  </div>
+  <div class="cols" id="cols-light"></div>
+  <footer>浅底上光晕盘会变成一块色斑，因此单色版与浅底版都去掉光晕，只靠剪影判断。</footer>
+</section>
+
+<section class="sheet sheet-sil" id="silhouette-panel">
+  <div class="head">
+    <h1>剪影测试</h1>
+    <p>压成纯黑 · 16 / 32 / 256 三档，白底，不做任何解释</p>
+  </div>
+  <div class="sil-grid" id="sil-grid"></div>
+  <footer>16px 为原始像素（另见下方 ×8 放大）；32 / 256 按 1:1 显示（32 另有 ×4 放大）。三档单色下均为 1 个连通块，不碎开。</footer>
+</section>
+
+<section class="sheet sheet-zoom" id="zoom-panel">
+  <div class="head">
+    <h1>16px ×8 / 32px ×4 像素放大</h1>
+    <p>每个尺寸左主色 / 右单色　（image-rendering: pixelated）</p>
+  </div>
+  <div class="cols" id="zoom-grid"></div>
+</section>
+
+<script>
+const C = [
+  {
+    tag: "E1a", name: "挂环 + 锥顶", latin: "BAIL / CONE",
+    motif: "整圆挂环压在 45° 锥形帽上，帽下一道外扩宽檐，方身两根竖框分三格，厚座收脚。",
+    shapes: "7 个形状：提环 / 锥顶 / 宽檐 / 灯身框 / 2 竖框 / 底座 / 双脚（火焰是负空间）",
+    geom: "包围盒 x 380–644 × y 224–800（264×576）→ 中心 (512,512)；上下留白 224 / 224（各 21.9%），左右 380 / 380。灯身 208×312（1.500）；檐 264（1.269×）；座 232（1.115×）；锥顶 176→264、高 70；环 ⌀164、描边 36、可见弧高 62。",
+    center: "灯身包围盒中心 (512,552)｜整体墨量重心 (512,519)（+7）",
+    signals: "提环 ✓　带檐顶盖 ✓　分格 ✓　底座+脚 ✓　火焰 ✓",
+    pal: ["#070A12", "#17314F", "#2C507F", "#DCE9F8", "#F4FAFF", "#6EA8FF"],
+    palText: "夜 #070A12 · 光晕 #17314F · 玻璃 #2C507F · 身 #DCE9F8 · 檐座 #F4FAFF · 环 #6EA8FF（取自 09-cyber）",
+    ink: "16px：环 2×1px、檐 6×2px、身 4×7px、座 6×1px、双脚 1×1px —— 五段全在，竖框与火焰删掉。32px：身 6×10px 实心，只留 2×3px + 1px 尖的火焰孔；环 4px ⌀、檐 8×1px、座 6×2px。",
+    weak: "锥顶的 45° 边坡与宽檐在 16px 合成一个「T」，不看双脚就是一枚奖章；提环被锥顶吃掉最多，可见弧高只有 62（三变体最短），「提」的信号最弱。"
+  },
+  {
+    tag: "E1b", name: "提梁 + 宽檐", latin: "BAIL / EAVES",
+    motif: "П 形提梁开口朝下压在 1.25× 宽檐上，檐下再收一块顶块，厚座收脚。",
+    shapes: "8 个形状：提梁（顶梁 + 2 腿）/ 顶块 / 宽檐 / 灯身框 / 2 竖框 / 底座 / 双脚",
+    geom: "包围盒 x 372–652 × y 224–800（280×576）→ 中心 (512,512)；上下留白 224 / 224，左右 372 / 372。灯身 224×348（1.554）；檐 280（1.250×）；座 256（1.143×）；提梁 168×40、腿 36 宽；顶块 176×40。",
+    center: "灯身包围盒中心 (512,538)｜整体墨量重心 (512,514)（+2）",
+    signals: "提环 ✓✓（开口可辨）　带檐顶盖 ✓✓（顶块 + 宽檐两级）　分格 ✓　底座+脚 ✓　火焰 ✓",
+    pal: ["#17110A", "#3A2A12", "#5C4218", "#E8D3A8", "#F6E7C4", "#E0A94B"],
+    palText: "褐夜 #17110A · 光晕 #3A2A12 · 玻璃 #5C4218 · 身 #E8D3A8 · 檐座 #F6E7C4 · 梁 #E0A94B（07-abyss 黄铜提亮）",
+    ink: "16px：顶块 2×1px、檐 6×2px、身 4×7px、座 6×1px、双脚 1×1px —— 「上宽 / 中窄 / 下宽」最稳。32px：顶梁 4×1px + 两条 1px 腿、顶块 5×2px、檐 8×1px、身 6×11px、座 6×2px，帽的两级台阶最清楚。",
+    weak: "提梁的开口在 32px 只剩 1px 缝，再小就黏成实心块；暖色在深底上的对比比冷蓝低一档。但它是唯一「提环 + 带檐顶盖 + 底座」三件在 16px 剪影里仍各占一段的变体。"
+  },
+  {
+    tag: "E1c", name: "圆环 + 圆顶", latin: "RING / DOME",
+    motif: "粗圆环挂在一个窄穹顶上，穹顶下是宽出檐 + 平顶平底的桶身，细框分三格。",
+    shapes: "7 个形状：圆环 / 圆顶 / 出檐 / 桶身框 / 2 细竖框 / 底座 / 双脚（火焰是负空间）",
+    geom: "包围盒 x 382–642 × y 224–800（260×576）→ 中心 (512,512)；上下留白 224 / 224，左右 382 / 382。桶身 206×300（1.456）；檐 260（1.262×）；座 220（1.068×）；圆顶 208 宽 / ry 84；环 ⌀160、描边 40、可见弧高 64。",
+    center: "灯身包围盒中心 (512,558)｜整体墨量重心 (512,523)（+11）",
+    signals: "提环 ✓（环孔在剪影里可见）　带檐顶盖 ✓（窄穹顶 + 宽出檐）　分格 ✓　底座+脚 ✓　火焰 ✓",
+    pal: ["#04120F", "#0B3A31", "#1A5C52", "#C2EDE0", "#DFFBF2", "#5EF0C8"],
+    palText: "深松 #04120F · 光晕 #0B3A31 · 玻璃 #1A5C52 · 身 #C2EDE0 · 帽座 #DFFBF2 · 环 #5EF0C8（取自 09-cyber 磷光）",
+    ink: "16px：环点 2×1px、檐 6×2px、身 4×7px、座 6×1px、双脚 1×1px —— 圆角被抹平，读成「工」字。32px：身 6×10px（两侧鼓起 7px）、环 4px ⌀、圆顶 6×2px、檐 8×1px；曲线必然跨半像素，会比 e1a / e1b 糊一点。",
+    weak: "桶身最矮、底座相对最宽，墨量重心 523（三变体里最偏下）；32px 的曲面跨半像素，不同渲染器会有 1px 差异。圆环 + 圆顶在 16px 退化成「点在帽上」，最像印章。"
+  }
+];
+
+const SIZES = [256, 128, 64, 48, 32, 24, 16];
+const SMALL = [128, 64, 32, 16];
+
+function sizeRow(prefix, list) {
+  return `<div class="sizes">${list.map(s =>
+    `<figure><img src="${prefix}-${s}.png" width="${s}" height="${s}" alt=""><figcaption>${s}</figcaption></figure>`
+  ).join("")}</div>`;
+}
+
+function colBody(c, sheet) {
+  const monoKey = sheet === "dark" ? "white" : "black";
+  const id = c.tag.toLowerCase();
+  const rec = c.tag === "E1b" ? `<span class="tag tag-rec">推荐</span>` : "";
+  const darkRow = sheet === "dark"
+    ? `<p class="rowlabel">深底版</p>${sizeRow(id + "-dark", SMALL)}` : "";
+  const lightRow = sheet === "dark"
+    ? `<p class="rowlabel">浅底版（bone 板 + 墨色灯体）</p>${sizeRow(id + "-light", [256, 128])}` : "";
+  return `
+    <header><span class="tag">${c.tag}</span>${rec}<h2>${c.name}<em>${c.latin}</em></h2></header>
+    <p class="note"><b>母题</b>｜${c.motif}<br><b>形状</b>｜${c.shapes}<br><b>几何</b>｜${c.geom}<br><b>居中</b>｜${c.center}<br><b>结构信号</b>｜${c.signals}</p>
+    <div class="pal">${c.pal.map(h => `<i style="background:${h}"></i>`).join("")}<span>${c.palText}</span></div>
+    <p class="rowlabel">主色版</p>${sizeRow(id, SIZES)}
+    ${darkRow}
+    ${lightRow}
+    <p class="rowlabel">单色版</p>${sizeRow(id + "-mono-" + monoKey, SIZES)}
+    <p class="rowlabel">小尺寸信息量</p><p class="note">${c.ink}</p>
+    <p class="weak"><b>最大弱点</b>：${c.weak}</p>`;
+}
+
+function build(sheet) {
+  document.getElementById("cols-" + sheet).innerHTML = C.map(c =>
+    `<article class="col">${colBody(c, sheet)}</article>`).join("");
+}
+build("dark");
+build("light");
+
+document.getElementById("sil-grid").innerHTML = C.map(c => {
+  const id = c.tag.toLowerCase();
+  return `<div class="sil-cell">
+    ${[16, 32, 256].map(s =>
+      `<figure><img src="${id}-silhouette-${s}.png" width="${s}" height="${s}" alt=""><figcaption>${c.tag} · ${s}</figcaption></figure>`
+    ).join("")}
+  </div>`;
+}).join("");
+
+document.getElementById("zoom-grid").innerHTML = C.map(c => {
+  const id = c.tag.toLowerCase();
+  return `<article class="col" style="background:#12211d">
+    <header><span class="tag">${c.tag}</span><h2>16px ×8 / 32px ×4<em>PIXEL</em></h2></header>
+    <div class="zoom">
+      <figure><img src="${id}-16.png" width="128" height="128" alt=""><figcaption>16 主色</figcaption></figure>
+      <figure><img src="${id}-mono-white-16.png" width="128" height="128" alt=""><figcaption>16 单色</figcaption></figure>
+      <figure><img src="${id}-32.png" width="128" height="128" alt=""><figcaption>32 主色</figcaption></figure>
+      <figure><img src="${id}-mono-white-32.png" width="128" height="128" alt=""><figcaption>32 单色</figcaption></figure>
+    </div>
+    <p class="note"><b>16px 逐像素</b>：${c.ink.split("32px")[0]}<br><b>32px 逐像素</b>：${c.ink.split("32px")[1] || ""}</p>
+  </article>`;
+}).join("");
+</script>
+</body>
+</html>

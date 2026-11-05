@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="D2 — 32px 单色">
+  <!-- 32px 单色：Y 缝加宽到 32（1 整像素），否则 0.875px 的缝会灰成一片。 -->
+  <defs>
+    <mask id="d2cut32" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <path d="M512 192 L800 352 L800 672 L512 832 L224 672 L224 352 Z" fill="#FFFFFF"/>
+      <path d="M512 512 L800 352 M512 512 L224 352 M512 512 L512 832" stroke="#000000" stroke-width="32"/>
+    </mask>
+  </defs>
+  <g style="color:#E8E0CD" mask="url(#d2cut32)">
+    <path d="M512 192 L800 352 L800 672 L512 832 L224 672 L224 352 Z" fill="currentColor"/>
+  </g>
+</svg>

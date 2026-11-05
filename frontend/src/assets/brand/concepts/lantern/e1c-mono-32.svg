@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="E1c — 32px 单色重画">
+  <!-- 32px 单色：玻璃并入桶身；只留 2×3px + 1px 尖的火焰孔。无光晕盘。 -->
+  <defs>
+    <mask id="e1cBody32M" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <path d="M416 384 L608 384 C624 416 624 672 608 704 L416 704 C400 672 400 416 416 384 Z" fill="#FFFFFF"/>
+      <path d="M496 448 L528 448 L528 480 L544 480 L544 576 L480 576 L480 480 L496 480 Z" fill="#000000"/>
+    </mask>
+  </defs>
+  <g style="color:#E8E0CD">
+    <g mask="url(#e1cBody32M)">
+      <path d="M416 384 L608 384 C624 416 624 672 608 704 L416 704 C400 672 400 416 416 384 Z" fill="currentColor"/>
+    </g>
+    <circle cx="512" cy="288" r="48" fill="none" stroke="currentColor" stroke-width="32"/>
+    <path d="M416 352 A96 64 0 0 1 608 352 L416 352 Z" fill="currentColor"/>
+    <rect x="384" y="352" width="256" height="32" fill="currentColor"/>
+    <rect x="416" y="704" width="192" height="64" fill="currentColor"/>
+    <rect x="416" y="768" width="32" height="32" fill="currentColor"/>
+    <rect x="576" y="768" width="32" height="32" fill="currentColor"/>
+  </g>
+</svg>

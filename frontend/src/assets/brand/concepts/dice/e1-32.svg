@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="E1 — 32px 独立重画">
+  <!--
+    E1 · 32px 独立重画（坐标落在 32 的整数倍）
+    灯罩上边 128 = 4px、下边 176 = 5.5px、灯座 208 = 6.5px 宽，灯身高 272 = 8.5px。
+    火焰压成 32 = 1px 宽、160 = 5px 高的竖槽（曲线在 1px 上无法成立，宁可留一个「灯芯」）。
+    光晕盘 r=256（直径 16px）；提环 r=48、描边 32 = 1px。
+  -->
+  <defs>
+    <mask id="e1flame32" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <path d="M448 352 L576 352 L600 576 L616 576 L616 624 L408 624 L408 576 L424 576 Z" fill="#FFFFFF"/>
+      <rect x="496" y="384" width="32" height="160" fill="#000000"/>
+    </mask>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="#070A12"/>
+  <circle cx="512" cy="480" r="256" fill="#17314F"/>
+  <path d="M448 352 L576 352 L600 576 L616 576 L616 624 L408 624 L408 576 L424 576 Z" fill="#070A12"
+        transform="translate(512 488) scale(1.2) translate(-512 -488)"/>
+  <g mask="url(#e1flame32)">
+    <path d="M448 352 L576 352 L600 576 L616 576 L616 624 L408 624 L408 576 L424 576 Z" fill="#E8F2FF"/>
+  </g>
+  <circle cx="512" cy="272" r="48" fill="none" stroke="#6EA8FF" stroke-width="32"/>
+</svg>

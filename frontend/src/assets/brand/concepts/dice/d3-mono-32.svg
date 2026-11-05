@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="D3 — 32px 单色">
+  <!-- 32px 单色：折缝 96 = 3px。 -->
+  <defs>
+    <mask id="d3cut32" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <path d="M512 256 L224 768 L800 768 Z" fill="#FFFFFF"/>
+      <path d="M368 395 L544 656 L617 354" stroke="#000000" stroke-width="96"/>
+    </mask>
+  </defs>
+  <g style="color:#E8E0CD" mask="url(#d3cut32)">
+    <path d="M512 256 L224 768 L800 768 Z" fill="currentColor"/>
+  </g>
+</svg>

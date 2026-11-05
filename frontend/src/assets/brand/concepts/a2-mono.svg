@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" style="color:#E8E0CD" role="img" aria-label="Variant A2 — mono">
+  <!-- 单色剪影：横杆 + 上窄下宽的布幅，三道不等褶线作为负空间切进去。 -->
+  <defs>
+    <mask id="pleats">
+      <path d="M200 188 L860 188 Q900 560 940 872 Q840 830 720 872 Q600 826 470 866 Q330 812 210 862 Q140 890 84 900 Z" fill="#fff"/>
+      <path d="M310 140 Q322 560 306 980 L330 980 Q340 560 332 140 Z" fill="#000"/>
+      <path d="M552 140 Q590 560 562 980 L652 980 Q660 560 606 140 Z" fill="#000"/>
+      <path d="M808 140 Q820 560 806 980 L832 980 Q840 560 830 140 Z" fill="#000"/>
+    </mask>
+  </defs>
+  <rect x="84" y="152" width="856" height="36" rx="8" fill="currentColor"/>
+  <path d="M200 188 L860 188 Q900 560 940 872 Q840 830 720 872 Q600 826 470 866 Q330 812 210 862 Q140 890 84 900 Z" fill="currentColor" mask="url(#pleats)"/>
+</svg>

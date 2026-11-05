@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="D3 — 16px 独立重画">
+  <!--
+    D3 · 16px 独立重画（坐标落在 64 的整数倍）
+    三角：顶点 (512,256)，底边 (256,768)–(768,768)；高 512 = 8px、底 512 = 8px（压成 53° 顶角，
+    16px 上更抗糊）。折缝宽 128 = 2px（母版比例的 1.6 倍，否则 16px 会灰成一条细线）。
+  -->
+  <defs>
+    <clipPath id="d3tri16">
+      <path d="M512 256 L256 768 L768 768 Z"/>
+    </clipPath>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="#0C0810"/>
+  <path d="M512 256 L256 768 L768 768 Z" fill="#D86A5F"/>
+  <path d="M300 560 L360 478 L525 688 L635 425 L768 768 L256 768 Z" fill="#7E3A34" clip-path="url(#d3tri16)"/>
+</svg>

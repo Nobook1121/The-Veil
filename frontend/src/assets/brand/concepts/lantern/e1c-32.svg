@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="E1c — 32px 独立重画">
+  <!-- 32px 独立重画，坐标全落 32 的整数倍（1px = 32）。提环外径 4px（r 48 / 描边 32）；圆顶 2px 高、6px 宽；
+       檐 8×1px；桶身左右平边 6px、高 10px，两侧鼓起 7px；玻璃 4×8px；底座 6×2px；双脚 1px。
+       包围盒 224–800 = 18px，上下留白 224 / 224。桶身两侧是曲线，必然跨半像素，这是圆形的代价。 -->
+  <defs>
+    <mask id="e1cPane32" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect x="448" y="416" width="128" height="256" rx="32" fill="#FFFFFF"/>
+      <path d="M496 448 L528 448 L528 480 L544 480 L544 576 L480 576 L480 480 L496 480 Z" fill="#000000"/>
+    </mask>
+    <mask id="e1cBody32" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <path d="M416 384 L608 384 C624 416 624 672 608 704 L416 704 C400 672 400 416 416 384 Z" fill="#FFFFFF"/>
+      <rect x="448" y="416" width="128" height="256" rx="32" fill="#000000"/>
+    </mask>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="#04120F"/>
+  <circle cx="512" cy="528" r="240" fill="#0B3A31"/>
+  <rect x="448" y="416" width="128" height="256" fill="#F0FFF9"/>
+  <rect x="448" y="416" width="128" height="256" rx="32" fill="#1A5C52" mask="url(#e1cPane32)"/>
+  <path d="M416 384 L608 384 C624 416 624 672 608 704 L416 704 C400 672 400 416 416 384 Z" fill="#C2EDE0" mask="url(#e1cBody32)"/>
+  <circle cx="512" cy="288" r="48" fill="none" stroke="#5EF0C8" stroke-width="32"/>
+  <path d="M416 352 A96 64 0 0 1 608 352 L416 352 Z" fill="#DFFBF2"/>
+  <rect x="384" y="352" width="256" height="32" fill="#DFFBF2"/>
+  <rect x="416" y="704" width="192" height="64" fill="#DFFBF2"/>
+  <rect x="416" y="768" width="32" height="32" fill="#DFFBF2"/>
+  <rect x="576" y="768" width="32" height="32" fill="#DFFBF2"/>
+</svg>

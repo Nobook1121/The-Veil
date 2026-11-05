@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="E1 — 16px 单色">
+  <!-- 16px 单色：0.5px 的环会消失，按「细节删减」只留灯身剪影（灯罩梯形 + 灯座横条）。 -->
+  <g style="color:#E8E0CD">
+    <path d="M448 320 L576 320 L608 640 L640 640 L640 672 L384 672 L384 640 L416 640 Z" fill="currentColor"/>
+  </g>
+</svg>

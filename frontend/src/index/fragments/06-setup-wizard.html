@@ -188,6 +188,7 @@
                 <span class="setup-progress-step" data-step="4"></span>
                 <span class="setup-progress-step" data-step="5"></span>
                 <span class="setup-progress-step" data-step="6"></span>
+                <span class="setup-progress-step" data-step="7"></span>
             </div>
 
             <section class="setup-panel is-active" data-setup-step="1">
@@ -301,7 +302,35 @@
             </section>
 
             <section class="setup-panel" data-setup-step="5">
-                <h3 data-i18n="setup.owner.heading">5. 创建 Owner 账号</h3>
+                <h3 data-i18n="setup.features.heading">5. 可选功能</h3>
+                <p class="setup-hint" data-i18n="setup.features.hint">以下功能默认关闭，避免初始化完成后立即产生额外 AI 调用或打断叙事节奏；随时可在「设置 - 实时沉浸」中开启。</p>
+                <div class="setup-option-list">
+                    <label class="setup-option">
+                        <input type="checkbox" id="setupFeatureMusic">
+                        <span>
+                            <strong data-i18n="setup.features.music">实时程序化配乐</strong>
+                            <small data-i18n="setup.features.music_hint">由浏览器现场合成，不依赖外部服务；开启后进入房间会按氛围播放音乐。</small>
+                        </span>
+                    </label>
+                    <label class="setup-option">
+                        <input type="checkbox" id="setupFeatureIllustration">
+                        <span>
+                            <strong data-i18n="setup.features.illustration">实时配图</strong>
+                            <small data-i18n="setup.features.illustration_hint">按叙事自动生成场景图。使用外部生图平台会产生费用，默认关闭。</small>
+                        </span>
+                    </label>
+                    <label class="setup-option">
+                        <input type="checkbox" id="setupFeatureVoice">
+                        <span>
+                            <strong data-i18n="setup.features.voice">AI 对话语音配音</strong>
+                            <small data-i18n="setup.features.voice_hint">使用浏览器系统音色朗读 AI 回复；开启后仍需点击一次才允许播放。</small>
+                        </span>
+                    </label>
+                </div>
+            </section>
+
+            <section class="setup-panel" data-setup-step="6">
+                <h3 data-i18n="setup.owner.heading">6. 创建 Owner 账号</h3>
                 <p class="setup-hint" data-i18n="setup.owner.hint">这是最高权限账号，用于管理网站。用户名 3-32 位，密码至少 8 位。</p>
                 <div class="mb-3">
                     <label class="form-label" for="setupOwnerUsername" data-i18n="setup.owner.username">用户名</label>
@@ -321,10 +350,11 @@
                 </div>
             </section>
 
-            <section class="setup-panel" data-setup-step="6">
-                <h3 data-i18n="setup.done.heading">6. 完成</h3>
+            <section class="setup-panel" data-setup-step="7">
+                <h3 data-i18n="setup.done.heading">7. 完成</h3>
                 <p class="setup-hint" data-i18n="setup.done.hint">初始化已完成，点击下方按钮进入系统。</p>
                 <ul class="setup-summary" id="setupSummary"></ul>
+                <a class="btn btn-link btn-sm px-0" href="/DEPLOYMENT.md" target="_blank" rel="noopener" data-i18n="setup.done.deploy_doc">查看部署与访问文档</a>
             </section>
 
             <div class="setup-message" id="setupMessage"></div>

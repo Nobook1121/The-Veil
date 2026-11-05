@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="E1c — 提灯（浅底版）">
+  <!-- E1c 浅底版：几何不变。底板 #EFEAE0、光晕 #DBE8E2、玻璃 #8FB3AA、桶身墨 #10221D、
+       顶/檐/座 #0B1815、提环 #2C7D68、亮芯 #FFFFFF。 -->
+  <defs>
+    <mask id="e1cPaneL" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect x="434" y="430" width="156" height="256" rx="28" fill="#FFFFFF"/>
+      <path d="M512 472 C500 504 490 536 488 560 C486 576 490 590 496 596 L528 596 C534 590 538 576 536 560 C534 536 524 504 512 472 Z" fill="#000000"/>
+    </mask>
+    <mask id="e1cBodyL" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <path d="M420 408 L604 408 C616 450 616 666 604 708 L420 708 C408 666 408 450 420 408 Z" fill="#FFFFFF"/>
+      <rect x="434" y="430" width="156" height="256" rx="28" fill="#000000"/>
+    </mask>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="#EFEAE0"/>
+  <circle cx="512" cy="528" r="244" fill="#DBE8E2"/>
+  <ellipse cx="512" cy="550" rx="96" ry="124" fill="#FFFFFF"/>
+  <rect x="434" y="430" width="156" height="256" rx="28" fill="#8FB3AA" mask="url(#e1cPaneL)"/>
+  <path d="M420 408 L604 408 C616 450 616 666 604 708 L420 708 C408 666 408 450 420 408 Z" fill="#10221D" mask="url(#e1cBodyL)"/>
+  <rect x="456" y="430" width="16" height="256" fill="#10221D"/>
+  <rect x="552" y="430" width="16" height="256" fill="#10221D"/>
+  <circle cx="512" cy="304" r="60" fill="none" stroke="#2C7D68" stroke-width="40"/>
+  <path d="M408 372 A104 84 0 0 1 616 372 L408 372 Z" fill="#0B1815"/>
+  <rect x="382" y="372" width="260" height="36" fill="#0B1815"/>
+  <rect x="402" y="708" width="220" height="68" fill="#0B1815"/>
+  <rect x="424" y="776" width="40" height="24" fill="#0B1815"/>
+  <rect x="560" y="776" width="40" height="24" fill="#0B1815"/>
+</svg>

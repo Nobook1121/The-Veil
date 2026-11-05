@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="E1c — 提灯（单色）">
+  <!-- 单色版：玻璃并入桶身；只留火焰孔。圆环、窄圆顶、宽出檐、桶身、底座、双脚全部保留。 -->
+  <defs>
+    <mask id="e1cBodyM" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <path d="M420 408 L604 408 C616 450 616 666 604 708 L420 708 C408 666 408 450 420 408 Z" fill="#FFFFFF"/>
+      <path d="M512 472 C500 504 490 536 488 560 C486 576 490 590 496 596 L528 596 C534 590 538 576 536 560 C534 536 524 504 512 472 Z" fill="#000000"/>
+    </mask>
+  </defs>
+  <g style="color:#E8E0CD">
+    <g mask="url(#e1cBodyM)">
+      <path d="M420 408 L604 408 C616 450 616 666 604 708 L420 708 C408 666 408 450 420 408 Z" fill="currentColor"/>
+    </g>
+    <circle cx="512" cy="304" r="60" fill="none" stroke="currentColor" stroke-width="40"/>
+    <path d="M408 372 A104 84 0 0 1 616 372 L408 372 Z" fill="currentColor"/>
+    <rect x="382" y="372" width="260" height="36" fill="currentColor"/>
+    <rect x="402" y="708" width="220" height="68" fill="currentColor"/>
+    <rect x="424" y="776" width="40" height="24" fill="currentColor"/>
+    <rect x="560" y="776" width="40" height="24" fill="currentColor"/>
+  </g>
+</svg>

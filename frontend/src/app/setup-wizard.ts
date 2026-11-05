@@ -39,8 +39,8 @@ namespace SetupWizard {
         path: string;
     }
 
-    const TOTAL_STEPS = 6;
-    const SKIPPABLE_STEPS = [1, 2, 4];
+    const TOTAL_STEPS = 7;
+    const SKIPPABLE_STEPS = [1, 2, 4, 5];
     const DEFAULT_SITE_NAME = "帷幕";
     const DISMISS_STORAGE_KEY = "trpg_setup_dismissed";
     const EMBEDDING_POLL_INTERVAL = 2000;
@@ -53,6 +53,7 @@ namespace SetupWizard {
     let aiPlatform = "";
     let aiModel = "";
     let embeddingSummary = "";
+    let featuresSummary = "";
     let embeddingPlatformsLoaded = false;
     let embeddingPollTimer: number | null = null;
     let skipPromise: Promise<void> | null = null;
@@ -229,8 +230,11 @@ namespace SetupWizard {
                 if (!(await saveSiteStep())) return;
                 renderStep(5);
             } else if (currentStep === 5) {
-                if (!(await createOwnerStep())) return;
+                if (!(await saveFeaturesStep())) return;
                 renderStep(6);
+            } else if (currentStep === 6) {
+                if (!(await createOwnerStep())) return;
+                renderStep(7);
             }
         } catch (error) {
             setMessage(errorMessage(error), "error");
@@ -252,6 +256,37 @@ namespace SetupWizard {
         if (currentStep === 4) {
             renderStep(5);
         }
+        if (currentStep === 5) {
+            // 跳过可选功能即保持默认关闭，不写入任何开关。
+            renderStep(6);
+        }
+    }
+
+    /** 写入可选功能开关：三项默认关闭，用户勾选后才开启。 */
+    async function saveFeaturesStep(): Promise<boolean> {
+        const music = byId<HTMLInputElement>("setupFeatureMusic")?.checked === true;
+        const illustration = byId<HTMLInputElement>("setupFeatureIllustration")?.checked === true;
+        const voice = byId<HTMLInputElement>("setupFeatureVoice")?.checked === true;
+
+        const response = await TrpgApi.post<ApiResponse>("/api/setup/features", {
+            music,
+            illustration,
+            voice,
+        });
+        if (!response.success) {
+            setMessage(backendMessage(response.message || response.error || "", msg("setup.error.features_save_failed", "保存可选功能失败")), "error");
+            return false;
+        }
+        const labels = [
+            msg("setup.features.music", "实时程序化配乐"),
+            msg("setup.features.illustration", "实时配图"),
+            msg("setup.features.voice", "AI 对话语音配音"),
+        ];
+        const enabled = [music, illustration, voice].filter(Boolean).length;
+        featuresSummary = enabled
+            ? labels.filter((_, index) => [music, illustration, voice][index]).join(" / ")
+            : msg("setup.features.all_off", "全部关闭");
+        return true;
     }
 
     async function saveAiStep(): Promise<boolean> {
@@ -690,6 +725,7 @@ namespace SetupWizard {
             [msg("setup.summary.embedding", "Embedding 模型"), embeddingSummary || msg("setup.summary.unset", "未配置")],
             [msg("setup.summary.site_name", "网站名称"), siteName || "-"],
             [msg("setup.summary.domain", "域名"), siteDomain || msg("setup.summary.domain_unbound", "未绑定")],
+            [msg("setup.summary.features", "可选功能"), featuresSummary || msg("setup.features.all_off", "全部关闭")],
         ];
         summary.innerHTML = rows
             .map(([label, content]) => `<li><span>${escapeHtml(label)}</span><strong>${escapeHtml(content)}</strong></li>`)

@@ -106,6 +106,20 @@ async function copyLocales() {
   await cp(source, destination, { recursive: true });
 }
 
+async function copyBrandAssets() {
+  const source = path.join(root, "frontend", "src", "assets", "brand");
+  const destination = path.join(root, "dist", "public", "assets", "brand");
+  await mkdir(destination, { recursive: true });
+  await cp(source, destination, {
+    recursive: true,
+    // 只分发正式品牌图标：concepts/ 下的设计草案与说明文档不进 dist。
+    filter: (filePath) => !filePath.endsWith(".md") && !filePath.endsWith("preview.html") && !filePath.split(path.sep).includes("concepts"),
+  });
+  for (const name of ["favicon.ico", "apple-touch-icon.png"]) {
+    await cp(path.join(source, name), path.join(root, "dist", "public", name));
+  }
+}
+
 async function main() {
   const assetsOnly = process.argv.includes("--assets-only");
   if (!assetsOnly) {
@@ -121,6 +135,7 @@ async function main() {
   });
   await generateTemplates();
   await copyLocales();
+  await copyBrandAssets();
 }
 
 await main();

@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="E1c — 提灯（圆环 + 窄圆顶 + 圆桶身 + 细框）">
+  <!--
+    E1c · 圆环 + 窄圆顶 + 圆桶身 + 细框（青绿）
+    整体包围盒 y 224–800、x 382–642：中心 (512,512)，上下留白 224 / 224。
+    提环：整圆 (512,304) r 60、描边 40 → 外径 160 × 160，顶端 224、底端 384；露在圆顶 288 之上的可见弧高 64。
+    圆顶：半椭圆 x 408–616（宽 208，只有檐的 0.80 倍）ry 84，顶 288、平底 372。
+    出檐：x 382–642 宽 260 = 桶身 206 的 1.262 倍 × 36。
+    桶身：上下平边 (420,408)–(604,408) 与 (604,708)–(420,708)，两侧鼓起，最宽 206（411–613）
+            → 可见 206 × 300，高宽比 1.456。这是本轮新换的形体：旧版的整椭圆上下都收成尖，
+            加上圆顶就变成「人形 / 铃铛」，所以改成平顶平底的桶身。
+    细框：玻璃面 434–590 × 450–706（圆角 28）；两根 16 宽竖框（456–472 / 552–568），玻璃 22 / 80 / 22 三格。
+    火焰：尖顶 (512,492)、平底 616、最宽 48，高 124；负空间，透出亮芯。
+    底座：x 402–622 宽 220（1.068 倍）× 48；双脚各 40 × 24。
+  -->
+  <defs>
+    <mask id="e1cPane" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect x="434" y="430" width="156" height="256" rx="28" fill="#FFFFFF"/>
+      <path d="M512 472 C500 504 490 536 488 560 C486 576 490 590 496 596 L528 596 C534 590 538 576 536 560 C534 536 524 504 512 472 Z" fill="#000000"/>
+    </mask>
+    <mask id="e1cBody" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <path d="M420 408 L604 408 C616 450 616 666 604 708 L420 708 C408 666 408 450 420 408 Z" fill="#FFFFFF"/>
+      <rect x="434" y="430" width="156" height="256" rx="28" fill="#000000"/>
+    </mask>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="#04120F"/>
+  <circle cx="512" cy="528" r="244" fill="#0B3A31"/>
+  <ellipse cx="512" cy="550" rx="96" ry="124" fill="#F0FFF9"/>
+  <rect x="434" y="430" width="156" height="256" rx="28" fill="#1A5C52" mask="url(#e1cPane)"/>
+  <path d="M420 408 L604 408 C616 450 616 666 604 708 L420 708 C408 666 408 450 420 408 Z" fill="#C2EDE0" mask="url(#e1cBody)"/>
+  <rect x="456" y="430" width="16" height="256" fill="#C2EDE0"/>
+  <rect x="552" y="430" width="16" height="256" fill="#C2EDE0"/>
+  <circle cx="512" cy="304" r="60" fill="none" stroke="#5EF0C8" stroke-width="40"/>
+  <path d="M408 372 A104 84 0 0 1 616 372 L408 372 Z" fill="#DFFBF2"/>
+  <rect x="382" y="372" width="260" height="36" fill="#DFFBF2"/>
+  <rect x="402" y="708" width="220" height="68" fill="#DFFBF2"/>
+  <rect x="424" y="776" width="40" height="24" fill="#DFFBF2"/>
+  <rect x="560" y="776" width="40" height="24" fill="#DFFBF2"/>
+</svg>

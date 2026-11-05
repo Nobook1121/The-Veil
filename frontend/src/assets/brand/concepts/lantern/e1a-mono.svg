@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="E1a — 提灯（单色）">
+  <!-- 单色版：玻璃与灯框同色，灯身成为一块实心 → 剪影只有「环 + 锥顶 + 粗横檐 + 身 + 底座 + 双脚」。
+       火焰保留为透明负空间（尖顶 / 平底），所以单色下仍读得出「腔里有火」。 -->
+  <defs>
+    <mask id="e1aBodyM" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect x="408" y="396" width="208" height="312" fill="#FFFFFF"/>
+      <path d="M512 450 C497 486 486 522 482 550 C480 568 484 584 492 590 L532 590 C540 584 544 568 542 550 C538 522 527 486 512 450 Z" fill="#000000"/>
+    </mask>
+  </defs>
+  <g style="color:#E8E0CD">
+    <g mask="url(#e1aBodyM)">
+      <rect x="408" y="396" width="208" height="312" fill="currentColor"/>
+    </g>
+    <circle cx="512" cy="306" r="64" fill="none" stroke="currentColor" stroke-width="36"/>
+    <path d="M424 286 L600 286 L644 356 L380 356 Z" fill="currentColor"/>
+    <rect x="380" y="356" width="264" height="40" fill="currentColor"/>
+    <rect x="396" y="708" width="232" height="68" fill="currentColor"/>
+    <rect x="410" y="776" width="40" height="24" fill="currentColor"/>
+    <rect x="574" y="776" width="40" height="24" fill="currentColor"/>
+  </g>
+</svg>

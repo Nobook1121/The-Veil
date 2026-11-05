@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="帷幕 The Veil — 16px 独立重画">
+  <!-- 16px 独立重画（E1b 暖光提灯），坐标全落 64 的整数倍。包围盒 128–896 = 12px，上下留白 2px / 2px。
+       提梁退化为 2×1px 的顶块（1px 内画不出「П」的开口）；檐 6×2px；身 4×7px；座 6×1px；双脚 1×1px。
+       16 档删掉玻璃、竖框与火焰。 -->
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="#17110A"/>
+  <circle cx="512" cy="544" r="256" fill="#3A2A12"/>
+  <rect x="448" y="128" width="128" height="64" fill="#E0A94B"/>
+  <rect x="320" y="192" width="384" height="128" fill="#F6E7C4"/>
+  <rect x="384" y="320" width="256" height="448" fill="#E8D3A8"/>
+  <rect x="320" y="768" width="384" height="64" fill="#F6E7C4"/>
+  <rect x="384" y="832" width="64" height="64" fill="#F6E7C4"/>
+  <rect x="576" y="832" width="64" height="64" fill="#F6E7C4"/>
+</svg>

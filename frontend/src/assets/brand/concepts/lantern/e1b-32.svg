@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="E1b — 32px 独立重画">
+  <!-- 32px 独立重画，坐标全落 32 的整数倍（1px = 32）。提梁顶梁 4×1px + 两条 1px 腿；顶块 5×2px；
+       宽檐 8×1px；灯身 6×11px；玻璃 4×9px；火焰 2×3px + 1px 尖；底座 6×2px；双脚 1px。
+       包围盒 224–800 = 18px，上下留白 224 / 224。32 档不画竖框。 -->
+  <defs>
+    <mask id="e1bPane32" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect x="448" y="384" width="128" height="288" fill="#FFFFFF"/>
+      <path d="M496 416 L528 416 L528 448 L544 448 L544 544 L480 544 L480 448 L496 448 Z" fill="#000000"/>
+    </mask>
+    <mask id="e1bBody32" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect x="416" y="352" width="192" height="352" fill="#FFFFFF"/>
+      <rect x="448" y="384" width="128" height="288" fill="#000000"/>
+    </mask>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="#17110A"/>
+  <circle cx="512" cy="528" r="240" fill="#3A2A12"/>
+  <rect x="448" y="384" width="128" height="288" fill="#FFE9B0"/>
+  <rect x="448" y="384" width="128" height="288" fill="#5C4218" mask="url(#e1bPane32)"/>
+  <rect x="416" y="352" width="192" height="352" fill="#E8D3A8" mask="url(#e1bBody32)"/>
+  <rect x="448" y="224" width="128" height="32" fill="#E0A94B"/>
+  <rect x="448" y="256" width="32" height="32" fill="#E0A94B"/>
+  <rect x="544" y="256" width="32" height="32" fill="#E0A94B"/>
+  <rect x="432" y="256" width="160" height="64" fill="#F6E7C4"/>
+  <rect x="384" y="320" width="256" height="32" fill="#F6E7C4"/>
+  <rect x="416" y="704" width="192" height="64" fill="#F6E7C4"/>
+  <rect x="416" y="768" width="32" height="32" fill="#F6E7C4"/>
+  <rect x="576" y="768" width="32" height="32" fill="#F6E7C4"/>
+</svg>

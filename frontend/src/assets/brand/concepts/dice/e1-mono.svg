@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="E1 — 提灯与光晕（单色）">
+  <!-- 单色版：光晕盘压成 32 宽的实心环（r 284 / 252），灯身保留火焰负空间（透明），环与灯身不相交。 -->
+  <defs>
+    <mask id="e1flameM" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <path d="M444 336 L580 336 L604 592 L620 592 L620 644 L404 644 L404 592 L420 592 Z" fill="#FFFFFF"/>
+      <path d="M512 396 C486 448 486 516 512 566 C538 516 538 448 512 396 Z" fill="#000000"/>
+    </mask>
+  </defs>
+  <g style="color:#E8E0CD">
+    <path d="M228 496 A284 284 0 1 0 796 496 A284 284 0 1 0 228 496 M260 496 A252 252 0 1 1 764 496 A252 252 0 1 1 260 496 Z" fill="currentColor" fill-rule="evenodd"/>
+    <circle cx="512" cy="268" r="32" fill="none" stroke="currentColor" stroke-width="20"/>
+    <g mask="url(#e1flameM)">
+      <path d="M444 336 L580 336 L604 592 L620 592 L620 644 L404 644 L404 592 L420 592 Z" fill="currentColor"/>
+    </g>
+  </g>
+</svg>

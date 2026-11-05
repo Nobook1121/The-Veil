@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="D3 — d4 内的负空间（单色）">
+  <!-- 单色版：两片压成同色，靠 112 宽的折缝（透明）保持「里外两层」；缝端刻出边缘，剪影被切成上下两块。 -->
+  <defs>
+    <mask id="d3cut" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <path d="M512 152 L152 776 L872 776 Z" fill="#FFFFFF"/>
+      <path d="M263 408 L548 668 L691 321" stroke="#000000" stroke-width="112"/>
+    </mask>
+  </defs>
+  <g style="color:#E8E0CD" mask="url(#d3cut)">
+    <path d="M512 152 L152 776 L872 776 Z" fill="currentColor"/>
+  </g>
+</svg>

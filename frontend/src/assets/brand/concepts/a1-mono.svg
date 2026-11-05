@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" style="color:#E8E0CD" role="img" aria-label="Variant A1 — mono">
+  <!-- 单色剪影：横杆 + 两片帘，缝是负空间。杆只占 4.5% 高度，不承担辨识度。 -->
+  <rect x="84" y="152" width="856" height="36" rx="8" fill="currentColor"/>
+  <path d="M120 188 L340 188 Q280 520 300 868 Q230 844 120 886 Z" fill="currentColor"/>
+  <path d="M470 188 L904 188 L904 882 Q690 844 510 870 Q500 500 470 188 Z" fill="currentColor"/>
+</svg>

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>骰子意象四候选 · D1 / D2 / D3 / E1</title>
+<style>
+  :root { --brass:#c7a25c; --bone:#e8e0cd; --abyss:#071613; }
+  body { margin:0; font-family: Georgia, "Songti SC", "Noto Serif SC", serif; }
+  .sheet { padding:40px 36px 32px; }
+  .sheet-dark { background:var(--abyss); color:var(--bone); }
+  .sheet-light { background:#f3efe5; color:#1e2b27; }
+  .head { display:flex; align-items:baseline; gap:18px; margin-bottom:8px; }
+  .head h1 { margin:0; font-size:20px; letter-spacing:.24em; font-weight:600; }
+  .head p { margin:0; font-size:11.5px; letter-spacing:.08em; opacity:.55; }
+  .strip { display:flex; gap:34px; align-items:flex-end; margin:20px 0 30px;
+           padding:16px 20px; border:1px solid rgba(199,162,92,.22); border-radius:6px; }
+  .strip figure { margin:0; display:flex; flex-direction:column; gap:8px; align-items:center; }
+  .strip figcaption { font-size:9px; letter-spacing:.18em; opacity:.5; }
+  .cols { display:grid; grid-template-columns:repeat(4,1fr); gap:18px; }
+  .col { border:1px solid rgba(199,162,92,.24); border-radius:6px; padding:20px 16px 18px; }
+  .sheet-dark .col { background:#0b211e; }
+  .sheet-light .col { background:#fffdf8; border-color:#ded5c1; }
+  .col header { display:flex; align-items:center; gap:9px; }
+  .tag { padding:2px 7px; border:1px solid rgba(199,162,92,.5); border-radius:4px;
+         font-size:10.5px; letter-spacing:.12em; color:var(--brass); }
+  .col h2 { margin:0; font-size:14px; letter-spacing:.1em; font-weight:600; }
+  .col h2 em { font-style:normal; font-size:8.5px; letter-spacing:.18em; opacity:.42; margin-left:5px; }
+  .note { margin:10px 0 0; font-size:10.5px; line-height:1.75; opacity:.76; }
+  .note b { font-weight:600; }
+  .weak { margin:6px 0 0; font-size:10.5px; line-height:1.75; opacity:.52; }
+  .pal { display:flex; gap:5px; margin-top:8px; align-items:center; }
+  .pal i { width:14px; height:14px; border-radius:3px; display:block; }
+  .pal span { font-size:9px; letter-spacing:.06em; opacity:.55; margin-left:4px; }
+  .rowlabel { font-size:8.5px; letter-spacing:.22em; opacity:.38; margin:16px 0 6px; }
+  .sizes { display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap; }
+  figure { margin:0; display:flex; flex-direction:column; gap:5px; align-items:center; }
+  figcaption { font-size:8px; letter-spacing:.14em; opacity:.38; }
+  .zoom { margin-top:14px; display:flex; gap:14px; align-items:flex-end; }
+  .zoom img { image-rendering:pixelated; }
+  footer { margin-top:26px; font-size:10.5px; letter-spacing:.08em; opacity:.42; line-height:1.8; }
+</style>
+</head>
+<body>
+
+<section class="sheet sheet-dark" id="sheet-dark">
+  <div class="head">
+    <h1>骰子意象 · 四候选</h1>
+    <p>深色底 · 主色版 7 档 / 深底版 4 档 / 单色版 7 档</p>
+  </div>
+  <div class="strip" id="strip-dark"></div>
+  <div class="cols" id="cols-dark"></div>
+  <footer>16px 为独立重画：三角/六边形/折缝/光晕各自按像素网格重排，不是母版缩放。<br>
+    正式文件（icon.svg / favicon.ico / apple-touch-icon.png）本轮未改动。</footer>
+</section>
+
+<section class="sheet sheet-light" id="sheet-light">
+  <div class="head">
+    <h1>骰子意象 · 四候选</h1>
+    <p>浅色底 · 主色版 7 档 / 单色版 7 档（纯黑）</p>
+  </div>
+  <div class="strip" id="strip-light"></div>
+  <div class="cols" id="cols-light"></div>
+  <footer>浅底检验：D2 的底板本来就是骨白，浅底上会与页面并成一片，这是它作为「深底优先」方案的固有短板。</footer>
+</section>
+
+<script>
+const C = [
+  {
+    tag: "D1", name: "d20 单面掀起", latin: "LIFTED FACE",
+    motif: "把骰面当一页纸，沿底边从右端掀开。",
+    shapes: "2 个形状（面 + 掀起的底面）+ 圆角底板",
+    geom: "面 656×568，半顶角 30.0°（等边）；缝左端 6 → 右端 62，片厚 86 → 116，铰点在左端。",
+    pal: ["#1D3A34", "#8E6C39", "#F6F1E7"],
+    palText: "骰桌 #1D3A34 / 背光黄铜 #8E6C39 / 桌文字 #F6F1E7",
+    ink: "16px：三角 7×6px + 0.5→1px 斜缝 + 5×2px 掀片；缝的「左薄右厚」是 16px 唯一的动作线索。32px：掀片厚 2→3px 可辨，掀开方向清楚。",
+    weak: "只看轮廓仍可能被读成「三角压着一条斜带」；母版缝左端只有 6 单位（256px 上 1.5px），几乎看不见。"
+  },
+  {
+    tag: "D2", name: "等轴骰三面", latin: "ISO CUBE",
+    motif: "三个面三档明度，顶面刻一枚骰点。",
+    shapes: "3 个菱形 + 1 个刻点 + 圆角底板",
+    geom: "六边形 R=336：上 (512,176)、左右 (±291,344/672)、下 (512,848)；宽 582 / 高 672；顶面重心 (512,344)，点 r=44。",
+    pal: ["#E9E1CF", "#4E9E8E", "#2F6E64", "#17453F"],
+    palText: "骨白 #E9E1CF / 顶 #4E9E8E / 左 #2F6E64 / 右 #17453F",
+    ink: "16px：只剩六边形剪影（按约定退化）。32px：三面明度差 78/55/32 仍能读出朝向，刻点 3px 可辨。",
+    weak: "最「通用骰子图标」的一个；骨白底板上骨白页面里底板会消失，需要靠三面自身对比撑住。"
+  },
+  {
+    tag: "D3", name: "d4 内负空间", latin: "INNER FACET",
+    motif: "一道折缝切开三角，露出一层「里面的面」。",
+    shapes: "3 个形状（上片 / 下片 / 折缝留白）",
+    geom: "外三角 720×624（半顶角 30.0°）；折缝 L(328,470)→M(548,668)→R(657,404)，宽 112；拐点比重心低 100。",
+    pal: ["#0C0810", "#D86A5F", "#7E3A34"],
+    palText: "深靛 #0C0810 / 上片 #D86A5F / 下片 #7E3A34",
+    ink: "16px：缝 2px，剪影被切成上小下大两块。32px：折线拐点位置可读，两层关系清楚。",
+    weak: "上片偏亮、下片偏暗，二分对比一旦被压平（比如灰度打印）就退成「三角里有一条折线」。"
+  },
+  {
+    tag: "E1", name: "提灯", latin: "THE LAMP",
+    motif: "提环 + 灯身 + 一圈光晕，KP 是暗里的那盏灯。",
+    shapes: "2 个形状（灯身含火焰负空间 / 提环）+ 光晕盘 1",
+    geom: "灯罩 136→184，灯座 216×52，灯身高 256；火焰负空间 52×170；光晕盘 (512,496) r=284；本体放大 1.2 倍挖出光环；提环 r=32 / 描边 20。",
+    pal: ["#070A12", "#17314F", "#E8F2FF", "#6EA8FF"],
+    palText: "夜 #070A12 / 光晕 #17314F / 灯身 #E8F2FF / 提环 #6EA8FF",
+    ink: "16px：删提环、火焰与台沿，留「梯形灯罩 + 灯座横条 + 光晕圆」，6×5.5px 的灯身仍成立。32px：1px 灯芯槽 + 1px 提环都能看见，光晕是一整圈。",
+    weak: "光晕盘在浅底上会变成一块灰蓝斑；单色 16px 只能靠灯身剪影，光的语义全部丢失。"
+  }
+];
+
+const SIZES = [256, 128, 64, 48, 32, 24, 16];
+const SMALL = [256, 64, 32, 16];
+
+function colBody(c, sheet) {
+  const monoKey = sheet === "dark" ? "white" : "black";
+  const sizeRow = (prefix, list) => `<div class="sizes">${
+    list.map(s => `<figure><img src="${prefix}-${s}.png" width="${s}" height="${s}" alt=""><figcaption>${s}</figcaption></figure>`).join("")
+  }</div>`;
+  const darkRow = sheet === "dark"
+    ? `<p class="rowlabel">深底版</p>${sizeRow(c.tag.toLowerCase() + "-dark", SMALL)}` : "";
+  return `
+    <header><span class="tag">${c.tag}</span><h2>${c.name}<em>${c.latin}</em></h2></header>
+    <p class="note"><b>母题</b>｜${c.motif}<br><b>形状</b>｜${c.shapes}<br><b>几何</b>｜${c.geom}</p>
+    <div class="pal">${c.pal.map(h => `<i style="background:${h}"></i>`).join("")}<span>${c.palText}</span></div>
+    <p class="rowlabel">主色版</p>${sizeRow(c.tag.toLowerCase(), SIZES)}
+    ${darkRow}
+    <p class="rowlabel">单色版</p>${sizeRow(c.tag.toLowerCase() + "-mono-" + monoKey, SIZES)}
+    <p class="rowlabel">小尺寸信息量</p>
+    <p class="note">${c.ink}</p>
+    <p class="weak"><b>最大弱点</b>：${c.weak}</p>
+    <p class="rowlabel">16px 放大 ×8</p>
+    <div class="zoom">
+      <img src="${c.tag.toLowerCase()}-16.png" width="128" height="128" alt="">
+      <img src="${c.tag.toLowerCase()}-mono-${monoKey}-16.png" width="128" height="128" alt="">
+    </div>`;
+}
+
+function build(sheet) {
+  document.getElementById("cols-" + sheet).innerHTML = C.map(c =>
+    `<article class="col">${colBody(c, sheet)}</article>`).join("");
+  document.getElementById("strip-" + sheet).innerHTML = C.map(c =>
+    `<figure><img src="${c.tag.toLowerCase()}-128.png" width="128" height="128" alt=""><figcaption>${c.tag} · 128</figcaption></figure>
+     <figure><img src="${c.tag.toLowerCase()}-32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+     <figure><img src="${c.tag.toLowerCase()}-16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>`).join("");
+}
+build("dark");
+build("light");
+</script>
+</body>
+</html>

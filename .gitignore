@@ -124,3 +124,6 @@ docs/样本
 
 #ignore project backups
 /projectbackups/
+# Local-only artifacts (screenshots / share packages)
+/.screenshots/
+/.trae-html-share-packages/

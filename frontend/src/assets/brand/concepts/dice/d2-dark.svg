@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="D2 — 等轴骰三面（深底版）">
+  <!-- D2 深底版：底板 #071613，三面明度整体上移（#7FD3BC / #3E8C7E / #245A52），刻点改挖空为 #071613。 -->
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="#071613"/>
+  <path d="M221 344 L512 512 L512 848 L221 672 Z" fill="#3E8C7E"/>
+  <path d="M803 344 L803 672 L512 848 L512 512 Z" fill="#245A52"/>
+  <path d="M221 344 L512 176 L803 344 L512 512 Z" fill="#7FD3BC"/>
+  <circle cx="512" cy="344" r="44" fill="#071613"/>
+</svg>

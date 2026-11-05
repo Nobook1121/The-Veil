@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>帷幕 The Veil · 图标验收</title>
+<style>
+  :root {
+    --abyss: #071613;
+    --abyss-2: #0b211e;
+    --brass: #c7a25c;
+    --brass-hi: #e6cc8d;
+    --bone: #e8e0cd;
+    --iris: #2e9c86;
+    --oxblood: #8e3a32;
+    --paper: #f4f1e8;
+    --ink: #20211d;
+    --mono: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+    --serif: "Cinzel", "EB Garamond", "Noto Serif SC", "Songti SC", SimSun, serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: #050a09;
+    color: var(--bone);
+    font-family: var(--serif);
+    padding: 56px 40px 72px;
+  }
+  .page { max-width: 1000px; margin: 0 auto; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.42em;
+    text-transform: uppercase;
+    color: var(--brass);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .eyebrow::after { content: ""; height: 1px; flex: 1; background: linear-gradient(90deg, rgba(199,162,92,.5), transparent); }
+  h1 {
+    font-size: clamp(34px, 5vw, 62px);
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    margin: 22px 0 10px;
+    line-height: 1.05;
+  }
+  h1 span { color: var(--brass-hi); }
+  .lede { max-width: 720px; color: rgba(232, 224, 205, 0.66); font-size: 15px; line-height: 1.9; margin: 0 0 34px; }
+  .palette { display: flex; flex-wrap: wrap; gap: 10px 26px; margin-bottom: 46px; font-family: var(--mono); font-size: 11px; letter-spacing: .08em; }
+  .swatch { display: flex; align-items: center; gap: 9px; color: rgba(232,224,205,.74); }
+  .swatch i { width: 16px; height: 16px; border-radius: 4px; display: block; border: 1px solid rgba(232,224,205,.18); }
+  .section-title { display: flex; align-items: baseline; gap: 16px; margin: 0 0 16px; font-size: 18px; letter-spacing: .18em; font-weight: 600; }
+  .section-title small { font-family: var(--mono); font-size: 10px; letter-spacing: .24em; color: rgba(232,224,205,.42); font-weight: 400; }
+  .panel {
+    border-radius: 20px;
+    padding: 34px 34px 30px;
+    border: 1px solid rgba(199,162,92,.24);
+    margin-bottom: 34px;
+    position: relative;
+    overflow: hidden;
+  }
+  .panel-dark {
+    background:
+      radial-gradient(circle at 16% 6%, rgba(46,156,134,.16), transparent 52%),
+      radial-gradient(circle at 92% 88%, rgba(199,162,92,.14), transparent 46%),
+      #07100e;
+  }
+  .panel-light {
+    background:
+      radial-gradient(circle at 18% 4%, rgba(46,156,134,.1), transparent 46%),
+      radial-gradient(circle at 90% 90%, rgba(199,162,92,.16), transparent 44%),
+      #f4f1e8;
+    border-color: rgba(32,33,29,.16);
+    color: #20211d;
+  }
+  .panel-light .section-title small { color: rgba(32,33,29,.46); }
+  .row { display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-end; }
+  .tile { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+  .tile .frame { padding: 14px; border-radius: 14px; display: grid; place-items: center; }
+  .panel-dark .frame { background: rgba(2, 10, 9, 0.45); box-shadow: inset 0 0 0 1px rgba(232,224,205,.06); }
+  .panel-light .frame { background: rgba(255,255,255,.5); box-shadow: inset 0 0 0 1px rgba(32,33,29,.1); }
+  .tile img { display: block; }
+  .tile .name { font-family: var(--mono); font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: rgba(232,224,205,.5); }
+  .panel-light .name { color: rgba(32,33,29,.52); }
+  .ladder { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 30px; margin-top: 28px; padding-top: 24px; border-top: 1px dashed rgba(199,162,92,.22); }
+  .panel-light .ladder { border-color: rgba(32,33,29,.16); }
+  .step { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+  .step .px { font-family: var(--mono); font-size: 10px; color: rgba(232,224,205,.45); }
+  .panel-light .step .px { color: rgba(32,33,29,.5); }
+  .step .box { display: grid; place-items: center; }
+  .step .box img { display: block; }
+  .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; margin-top: 44px; }
+  .card {
+    border: 1px solid rgba(199,162,92,.22);
+    border-radius: 14px;
+    padding: 18px 20px;
+    background: rgba(11, 33, 30, .5);
+  }
+  .card h3 { margin: 0 0 10px; font-size: 13px; letter-spacing: .2em; color: var(--brass-hi); font-weight: 600; }
+  .card p, .card li { font-family: var(--mono); font-size: 11px; line-height: 1.9; color: rgba(232,224,205,.66); margin: 0; }
+  .card ul { margin: 0; padding-left: 15px; }
+  .mono-note { font-family: var(--mono); font-size: 10.5px; color: rgba(232,224,205,.45); margin-top: 14px; }
+  .circle-crop { border-radius: 50%; overflow: hidden; }
+  .foot { margin-top: 34px; font-family: var(--mono); font-size: 10px; letter-spacing: .2em; color: rgba(232,224,205,.3); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="eyebrow">The Veil · Brand Mark · 2026</div>
+  <h1>帷幕 <span>THE VEIL</span></h1>
+  <p class="lede">以「守秘人手里的提灯」为母题：П 形提梁挂起一盏方形提灯，带檐的顶盖、分三格的灯身、比灯身略宽的底座与双脚，腔内是一枚尖顶火苗。提梁 / 带檐顶盖 / 底座三件在剪影里独立成立——不看细节也知道这是提灯，也就是「帷幕之后仍有一盏灯」。</p>
+
+  <div class="palette">
+    <div class="swatch"><i style="background:#17110a"></i>褐夜 #17110A</div>
+    <div class="swatch"><i style="background:#e0a94b"></i>琥珀 #E0A94B</div>
+    <div class="swatch"><i style="background:#f6e7c4"></i>麦白 #F6E7C4</div>
+    <div class="swatch"><i style="background:#e8d3a8"></i>灯身 #E8D3A8</div>
+    <div class="swatch"><i style="background:#5c4218"></i>玻璃 #5C4218</div>
+    <div class="swatch"><i style="background:#ffe9b0"></i>亮芯 #FFE9B0</div>
+  </div>
+
+  <section id="panel-dark" class="panel panel-dark">
+    <h2 class="section-title">深色背景 <small>DARK FIELD</small></h2>
+    <div class="row">
+      <div class="tile"><div class="frame"><img src="icon.svg" width="128" height="128" alt="母版"></div><div class="name">icon.svg · 母版</div></div>
+      <div class="tile"><div class="frame"><img src="icon-simple.svg" width="128" height="128" alt="简化版"></div><div class="name">icon-simple.svg · 简化</div></div>
+      <div class="tile"><div class="frame"><img src="icon-mono.svg" width="128" height="128" alt="单色版"></div><div class="name">icon-mono.svg · 单色</div></div>
+      <div class="tile"><div class="frame circle-crop"><img src="icon-maskable.svg" width="128" height="128" alt="可遮罩版"></div><div class="name">icon-maskable.svg · 圆形裁切</div></div>
+    </div>
+    <div class="ladder">
+      <div class="step"><div class="box"><img src="icon.svg" width="128" height="128" alt=""></div><div class="px">母版 128</div></div>
+      <div class="step"><div class="box"><img src="icon.svg" width="64" height="64" alt=""></div><div class="px">64</div></div>
+      <div class="step"><div class="box"><img src="icon-simple.svg" width="64" height="64" alt=""></div><div class="px">简化 64</div></div>
+      <div class="step"><div class="box"><img src="icon-simple.svg" width="32" height="32" alt=""></div><div class="px">32</div></div>
+      <div class="step"><div class="box"><img src="icon-16.svg" width="16" height="16" alt="" style="image-rendering:pixelated"></div><div class="px">16（独立重画）</div></div>
+      <div class="step"><div class="box"><img src="apple-touch-icon.png" width="76" height="76" alt=""></div><div class="px">apple-touch 180</div></div>
+    </div>
+    <p class="mono-note">单色版为透明底 currentColor，可整体换色；深色背景直接呈骨白。</p>
+  </section>
+
+  <section id="panel-light" class="panel panel-light">
+    <h2 class="section-title">浅色背景 <small>LIGHT FIELD</small></h2>
+    <div class="row">
+      <div class="tile"><div class="frame"><img src="icon.svg" width="128" height="128" alt="母版"></div><div class="name">icon.svg · 母版</div></div>
+      <div class="tile"><div class="frame"><img src="icon-simple.svg" width="128" height="128" alt="简化版"></div><div class="name">icon-simple.svg · 简化</div></div>
+      <div class="tile"><div class="frame"><img src="icon-mono.svg" width="128" height="128" alt="单色版" style="filter: invert(0.86) sepia(0.08)"></div><div class="name">icon-mono.svg · 反相示意</div></div>
+      <div class="tile"><div class="frame circle-crop"><img src="icon-maskable.svg" width="128" height="128" alt="可遮罩版"></div><div class="name">icon-maskable.svg · 圆形裁切</div></div>
+    </div>
+    <div class="ladder">
+      <div class="step"><div class="box"><img src="icon.svg" width="128" height="128" alt=""></div><div class="px">母版 128</div></div>
+      <div class="step"><div class="box"><img src="icon.svg" width="64" height="64" alt=""></div><div class="px">64</div></div>
+      <div class="step"><div class="box"><img src="icon-simple.svg" width="64" height="64" alt=""></div><div class="px">简化 64</div></div>
+      <div class="step"><div class="box"><img src="icon-simple.svg" width="32" height="32" alt=""></div><div class="px">32</div></div>
+      <div class="step"><div class="box"><img src="icon-16.svg" width="16" height="16" alt="" style="image-rendering:pixelated"></div><div class="px">16（独立重画）</div></div>
+      <div class="step"><div class="box"><img src="apple-touch-icon.png" width="76" height="76" alt=""></div><div class="px">apple-touch 180</div></div>
+    </div>
+    <p class="mono-note">底板本身是褐夜 #17110A，主色版在浅色页面上靠底板与麦白边线保持对比；单色版需按用途换色（此处反相仅作示意）。</p>
+  </section>
+
+  <div class="notes">
+    <div class="card">
+      <h3>几何基准</h3>
+      <ul>
+        <li>圆心 (512,512)，画布 1024</li>
+        <li>包围盒 280×576，上下留白 224 / 224</li>
+        <li>灯身 224×348（高宽比 1.554）</li>
+        <li>宽檐 280 = 1.250× 灯身</li>
+        <li>底座 256 = 1.143× 灯身</li>
+        <li>提梁宽 168，腿宽 36，顶块 176×40</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>小尺寸策略</h3>
+      <ul>
+        <li>32 用 32 单位整数网格，16 单独用 16 单位网格重画</li>
+        <li>32px 省掉竖框，只留 2px 火焰孔</li>
+        <li>16px 只留五段剪影：提梁 / 帽 / 身 / 座 / 双脚</li>
+        <li>三档单色下均为 1 个连通块，不碎开</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>文件清单</h3>
+      <ul>
+        <li>icon.svg / icon-simple.svg / icon-16.svg</li>
+        <li>icon-maskable.svg / icon-mono.svg</li>
+        <li>icon-512/256/128/64/48/32/16.png</li>
+        <li>favicon.ico（16/32/48 BMP）</li>
+        <li>apple-touch-icon.png（180）</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="foot">THE VEIL · ICON SPECIMEN SHEET · SVG HAND-AUTHORED</div>
+</div>
+</body>
+</html>

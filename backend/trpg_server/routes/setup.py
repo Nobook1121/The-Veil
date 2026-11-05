@@ -162,6 +162,45 @@ def save_site_config():
         return server_error("Save failed")
 
 
+@bp.route("/api/setup/features", methods=["POST"])
+def save_optional_features():
+    """记录可选功能开关（实时配乐 / 实时配图 / 对话语音）。
+
+    这些功能默认关闭，避免首次部署完成后立即产生外部请求或额外 AI 开销；
+    三项开关均为布尔值，缺项按未开启处理。
+    """
+    try:
+        if _owner_exists(_get_user_manager()):
+            return _setup_locked_response()
+
+        config_data = request.get_json(silent=True) or {}
+        flags = {
+            "music": config_data.get("music", False),
+            "illustration": config_data.get("illustration", False),
+            "voice": config_data.get("voice", False),
+        }
+        if any(not isinstance(value, bool) for value in flags.values()):
+            return error_response("Invalid feature flag", 400, "Invalid feature flag")
+
+        values = {
+            "music_enabled": flags["music"],
+            "illustration_enabled": flags["illustration"],
+            "voice_enabled": flags["voice"],
+        }
+        update_sections(general_config_path(_get_config_dir()), {"immersive": values})
+
+        logger.info(
+            "Setup optional features saved music_enabled=%s illustration_enabled=%s voice_enabled=%s",
+            values["music_enabled"],
+            values["illustration_enabled"],
+            values["voice_enabled"],
+        )
+        return success_response(values)
+    except Exception as exc:
+        logger.exception("Failed to save optional feature flags")
+        return server_error("Save failed")
+
+
 @bp.route("/api/setup/ai", methods=["POST"])
 def save_ai_platform():
     try:

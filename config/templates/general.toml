@@ -157,7 +157,8 @@ max_messages_per_conversation = 200
 # 沉浸系统总开关：关闭后配乐与配图都不再随叙事触发（前端仍可手动播放房间 BGM）。
 enabled = true
 # 实时程序化配乐：由服务端分析叙事氛围，前端 Web Audio 现场合成，无版权风险。
-music_enabled = true
+# 默认关闭：新实例首次启动不自动播放音乐，由用户在「设置 - 实时沉浸」中开启。
+music_enabled = false
 # 叙事氛围变化时自动切歌/换段；关闭后仅首次进入房间按默认档位播放。
 music_auto_switch = true
 # 默认氛围档位（daily/suspense/unease/horror/urgency/sorrow/awe/aftermath）。
