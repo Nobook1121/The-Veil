@@ -131,7 +131,7 @@ Get-ChildItem -Path $App -Recurse -Force -Directory | Where-Object { $forbiddenN
 Get-ChildItem -Path $App -Recurse -Force -File -Include '*.pyc', '*.pyo' | ForEach-Object {
     Remove-Item -Path $_.FullName -Force
 }
-Get-ChildItem -Path $App -Recurse -Force -File -Include '.env' | ForEach-Object {
+Get-ChildItem -Path $App -Recurse -Force -File -Include '.env', '.gitignore' | ForEach-Object {
     Remove-Item -Path $_.FullName -Force
 }
 
