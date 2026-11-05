@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="帷幕 The Veil — 提灯（暖光）">
+  <!--
+    帷幕 The Veil · 方形母版 1024×1024（E1b 暖光提灯，正式定稿）
+    整体包围盒 y 224–800、x 372–652：中心 (512,512)，上下留白 224 / 224。
+    提梁：顶梁 (428,224)–(596,264) 宽 168 × 40；两条 36 宽的腿落到 308（比顶块多压 20，保证不断块）。
+    顶块：x 424–600 宽 176 × 40（288–328）。
+    宽檐：x 372–652 宽 280 = 灯身 224 的 1.250 倍 × 52。
+    灯身：x 400–624 宽 224、y 380–728 高 348（高宽比 1.554）。
+    灯框：四边 24 宽；玻璃面 424–600 × 404–704。
+    分格：两根 24 宽竖框（452–476 / 548–572），玻璃 28 / 72 / 28 三格。
+    火焰：尖顶 (512,466)、平底 606、最宽 60，高 140；负空间，透出琥珀亮芯。
+    底座：x 384–640 宽 256（1.143 倍）× 64；双脚各 40 × 24。
+  -->
+  <defs>
+    <mask id="e1bPane" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect x="424" y="388" width="176" height="300" fill="#FFFFFF"/>
+      <path d="M512 450 C497 486 486 522 482 550 C480 568 484 584 492 590 L532 590 C540 584 544 568 542 550 C538 522 527 486 512 450 Z" fill="#000000"/>
+    </mask>
+    <mask id="e1bBody" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect x="400" y="364" width="224" height="348" fill="#FFFFFF"/>
+      <rect x="424" y="388" width="176" height="300" fill="#000000"/>
+    </mask>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="#17110A"/>
+  <circle cx="512" cy="528" r="248" fill="#3A2A12"/>
+  <ellipse cx="512" cy="550" rx="108" ry="140" fill="#FFE9B0"/>
+  <rect x="424" y="388" width="176" height="300" fill="#5C4218" mask="url(#e1bPane)"/>
+  <rect x="400" y="364" width="224" height="348" fill="#E8D3A8" mask="url(#e1bBody)"/>
+  <rect x="452" y="388" width="24" height="300" fill="#E8D3A8"/>
+  <rect x="548" y="388" width="24" height="300" fill="#E8D3A8"/>
+  <rect x="428" y="224" width="168" height="40" fill="#E0A94B"/>
+  <rect x="428" y="264" width="36" height="28" fill="#E0A94B"/>
+  <rect x="560" y="264" width="36" height="28" fill="#E0A94B"/>
+  <rect x="424" y="272" width="176" height="40" fill="#F6E7C4"/>
+  <rect x="372" y="312" width="280" height="52" fill="#F6E7C4"/>
+  <rect x="384" y="712" width="256" height="64" fill="#F6E7C4"/>
+  <rect x="408" y="776" width="40" height="24" fill="#F6E7C4"/>
+  <rect x="576" y="776" width="40" height="24" fill="#F6E7C4"/>
+</svg>
