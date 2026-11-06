@@ -200,9 +200,9 @@ body.theme-cyber-2 .tab-content {
     background-color: transparent;
 }
 
+/* Keep nested dialogs in the same stacking context as body-level backdrops. */
 body.theme-cyber-2 .col-10 {
     position: relative;
-    z-index: 1;
 }
 
 /* —— 文本选中：磷光青高亮 —— */
