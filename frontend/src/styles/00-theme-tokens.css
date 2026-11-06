@@ -309,6 +309,11 @@ body {
 body.theme-tome {
     color-scheme: light;
 
+    /* 让 body 成为层叠上下文。纸张底纹与环境光都是 z-index 负层级的背景层，
+       只有当 body 自身构成层叠上下文时，它们才会绘制在页面底色之上、正文内容之下，
+       同时不会在内容区祖先上建立层叠上下文，把挂在 body 上的弹窗困住。 */
+    isolation: isolate;
+
     --theme-bg-page: #ece3d1;
     --theme-bg-page-layer: #e2d7bf;
     --theme-bg-panel: #faf5e9;
@@ -412,7 +417,7 @@ body.theme-tome::before {
     content: "";
     position: fixed;
     inset: 0;
-    z-index: 0;
+    z-index: -2;
     display: var(--theme-tome-ambient-display);
     pointer-events: none;
     background-color: #e9dcc0;
@@ -438,10 +443,10 @@ body.theme-tome::before {
     background-position: center center;
 }
 
-/* 主内容列置于纸张底纹之上 */
+/* 主内容列只保留定位基准：不再设置 z-index，避免形成层叠上下文后
+   把 .modal（1050）关在 body 级遮罩（1049）下面，导致弹窗点不到。 */
 body.theme-tome .col-10 {
     position: relative;
-    z-index: 1;
 }
 
 /* —— 环境光与浮尘：缓慢漂移的柔光与光尘，赋予纸张“呼吸感” —— */
@@ -449,7 +454,7 @@ body.theme-tome::after {
     content: "";
     position: fixed;
     inset: -12%;
-    z-index: 0;
+    z-index: -1;
     display: var(--theme-tome-ambient-display);
     pointer-events: none;
     opacity: var(--theme-tome-ambient-opacity);
