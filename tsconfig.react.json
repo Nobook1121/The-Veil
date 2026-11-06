@@ -7,5 +7,9 @@
     "noEmit": true,
     "types": ["react", "react-dom"]
   },
-  "include": ["frontend/src/react/**/*.ts", "frontend/src/react/**/*.tsx"]
+  "include": [
+    "frontend/src/react/**/*.ts",
+    "frontend/src/react/**/*.tsx",
+    "frontend/src/types/**/*.d.ts"
+  ]
 }
