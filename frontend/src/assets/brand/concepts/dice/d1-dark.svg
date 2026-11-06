@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="D1 — d20 单面被掀起（深底版）">
-  <!-- D1 深底版：底板 #0C1D19，面 #FFFCF2，掀起片 #C7A25C（深底上提一档，保证缝仍然读得出来）。 -->
-  <rect x="32" y="32" width="960" height="960" rx="224" fill="#0C1D19"/>
-  <path d="M196 742 L836 798 L800 908 L240 816 Z" fill="#C7A25C"/>
-  <path d="M512 168 L184 736 L840 736 Z" fill="#FFFCF2"/>
-</svg>

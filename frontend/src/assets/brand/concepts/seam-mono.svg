@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" style="color:#E8E0CD" role="img" aria-label="Concept A — mono">
-  <!-- 单色剪影：只保留两片帘，缝是负空间，不画底板。 -->
-  <path d="M96 264 A104 104 0 0 1 200 160 L430 160 Q370 512 508 864 L200 864 A104 104 0 0 1 96 760 Z" fill="currentColor"/>
-  <path d="M626 864 Q488 512 548 160 L824 160 A104 104 0 0 1 928 264 L928 760 A104 104 0 0 1 824 864 Z" fill="currentColor"/>
-</svg>

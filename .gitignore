@@ -1,5 +1,5 @@
 # Dependencies
-/node_modules/
+**/node_modules/
 
 # TypeScript and frontend build outputs
 /js/
@@ -46,6 +46,9 @@ htmlcov/
 /data/users/*
 /data/users/ip_configs/
 /data/scenarios/*
+# 示例剧本随发布包分发，必须保持跟踪
+!/data/scenarios/scenario-1793438085450/
+!/data/scenarios/scenario-1793438085450/**
 
 # User-uploaded avatars
 /data/assets/avatars/*
@@ -59,6 +62,11 @@ htmlcov/
 # Logs and temp files
 *.log
 *.tmp
+*.bak
+*.orig
+*.rej
+*.save
+*.old
 /tmp/
 /temp/
 
@@ -75,6 +83,11 @@ pnpm-debug.log*
 Thumbs.db
 desktop.ini
 *.swp
+.claude/
+.cursor/
+.codex/
+.agents/
+*.code-workspace
 
 # Secrets and local env; keep example templates tracked
 .env
@@ -91,22 +104,30 @@ docs/*.secret
 
 docs/problems.md
 docs/improvement.md
-docs/problems.md
 docs/todolist.md
 docs/屏幕截图 2026-08-27 002535.png
-docs/problems.md
-docs/样本/Madtougue-长生俑.docx
-docs/样本/常暗之厢（7版规则，简体修正版）.doc
-docs/problems.md
-docs/样本/模组6  神秘渡轮.docx
-docs/样本/疯狂之馆(最终定稿) .docx
+docs/样本/
 docs/模板.json
 docs/过去改进/improved1.md
 docs/过去改进/improved2.md
 tmp_doc_clean.txt
 tmp_doc_utf16.txt
 /.trae/
-docs/样本
+
+# AI / agent 过程产物：本地保留，不进仓库
+/docs/superpowers/
+/memory/
+/docs/project-structure-requirements.md
+/docs/code-review-report.md
+/docs/console-commands-plan.md
+/COC_THEME_FINAL.md
+/COC_THEME_ULTIMATE.md
+/THEME_COC_SUMMARY.md
+/docs/assets-backup/
+/frontend/src/assets/brand/concepts/
+
+# 本地开发用第三方 Skill：仅保留在本地，不进仓库、不进发布包
+/skills/oil-ui/
 
 # Release archives: upload to GitHub Releases instead of committing
 /release/*.zip
@@ -117,7 +138,6 @@ docs/样本
 
 # Self-hosting guide: shipped inside release packages, not tracked by git
 /SELF-HOSTING-GUIDE.txt
-/使用指南.txt
 
 #ignore wiki
 /docs/the-veil.wiki

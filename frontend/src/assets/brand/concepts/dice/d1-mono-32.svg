@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="D1 — 32px 单色">
-  <!-- D1 单色 · 32px 独立重画：缝 1px → 2px，片厚 2px → 3px。 -->
-  <g style="color:#E8E0CD">
-    <path d="M224 736 L800 768 L768 864 L256 800 Z" fill="currentColor"/>
-    <path d="M512 192 L224 704 L800 704 Z" fill="currentColor"/>
-  </g>
-</svg>

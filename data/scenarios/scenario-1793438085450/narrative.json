@@ -1,0 +1,1580 @@
+{
+  "schema_version": 2,
+  "scenario_id": "1793438085450",
+  "scenario_version": "1.0.0",
+  "topology": "hybrid",
+  "topology_confidence": 0.0,
+  "topology_source": "auto",
+  "build_hash": "sha1:789c5221e838aa97bdb47a01ba5a62c4be1419ff",
+  "generated_at": "2026-10-31T09:14:48Z",
+  "source_document_hash": "",
+  "start": {
+    "location_id": "porch",
+    "opening_module_id": null,
+    "opening_mode": "hybrid",
+    "public_intro": [],
+    "opening_attachments": [],
+    "allow_enter_triggers": true,
+    "allow_model_continuation": true,
+    "kp_truth": "",
+    "opening_text": "雨夜，灰垣宅的铁门没有锁。门厅里只亮着一盏煤油灯，管家站在楼梯口，像是已经等了很久。\n\n“诸位调查员，艾琳小姐在图书馆休息。请尽量……不要惊动她。”"
+  },
+  "nodes": [
+    {
+      "id": "act_1",
+      "kind": "act",
+      "title": "第一幕：灰垣宅",
+      "parent": null,
+      "order": 0,
+      "summary": "调查员进入宅邸，寻找失踪的妹妹。",
+      "body": "",
+      "body_ref": {},
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "area_upper",
+      "kind": "area",
+      "title": "宅邸上层",
+      "parent": "act_1",
+      "order": 0,
+      "summary": "门厅与图书馆所在的楼层。",
+      "body": "",
+      "body_ref": {},
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "area_lower",
+      "kind": "area",
+      "title": "地下层",
+      "parent": "act_1",
+      "order": 0,
+      "summary": "地窖与祭坛室所在的地下结构。",
+      "body": "",
+      "body_ref": {},
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {
+        "x": 295,
+        "y": 59
+      },
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "porch",
+      "kind": "location",
+      "title": "门厅",
+      "parent": "area_upper",
+      "order": 0,
+      "summary": "灰垣宅的门厅。邮件堆与旧提灯都在这里。",
+      "body": "门厅不大，墙边立着伞架，衣帽架上挂着一盏旧提灯。地板上散着一叠没有拆开的邮件，最上面一封的收件人写着“灰垣宅·管家收”。\n\n管家霍尔特站在楼梯口，左手藏在袖子里。",
+      "body_ref": {},
+      "scene_role": "stage",
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [
+        {
+          "id": "obj_mail",
+          "name": "邮件堆",
+          "summary": "一叠被雨水打湿的邮件，最下面压着几页账本。",
+          "visible": true,
+          "visibility": "public",
+          "interactions": [
+            {
+              "id": "interact_mail",
+              "skill": "侦查",
+              "difficulty": "regular",
+              "repeatable": true,
+              "outcomes": {
+                "success": {
+                  "text": "你从邮件堆底部抽出几页账本，上面反复写着“地下室·食料·一份”。",
+                  "effects": {
+                    "clue": [
+                      "clue_butler_ledger"
+                    ],
+                    "flags": {
+                      "butler_trust": false
+                    }
+                  }
+                },
+                "fail": {
+                  "text": "邮件太多，你只翻出几封无关紧要的账单。"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "obj_lantern",
+          "name": "旧提灯",
+          "summary": "衣帽架上的旧提灯，灯罩内侧刻着“给艾琳”。",
+          "visible": true,
+          "visibility": "public",
+          "interactions": [
+            {
+              "id": "interact_lantern",
+              "repeatable": true,
+              "outcomes": {
+                "success": {
+                  "text": "你点亮提灯，暖黄色灯光照亮了门厅角落的泥脚印。",
+                  "effects": {
+                    "items": {
+                      "old_lantern": "add"
+                    },
+                    "flags": {
+                      "has_lantern": true
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "门厅",
+        "管家",
+        "邮件"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "library",
+      "kind": "location",
+      "title": "图书馆",
+      "parent": "area_upper",
+      "order": 0,
+      "summary": "高窗、旧书与红木书桌。妹妹被反锁在书架后的暗格里。",
+      "body": "图书馆的窗帘只拉开一半，雨水在玻璃上留下细长的痕。红木书桌靠墙摆放，抽屉半开，里面散落着票据和一把黄铜钥匙。\n\n书架后传来轻轻的敲击声。",
+      "body_ref": {},
+      "scene_role": "room",
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [
+        {
+          "id": "obj_desk",
+          "name": "红木书桌",
+          "summary": "抽屉半开，夹层里似乎藏着东西。",
+          "visible": true,
+          "visibility": "public",
+          "interactions": [
+            {
+              "id": "interact_desk_search",
+              "skill": "侦查",
+              "difficulty": "regular",
+              "repeatable": true,
+              "outcomes": {
+                "success": {
+                  "text": "你撬开夹层，找到一本皮面日记和一把黄铜钥匙。书桌后方的墙板发出空洞的回声。",
+                  "effects": {
+                    "clue": [
+                      "clue_diary"
+                    ],
+                    "items": {
+                      "brass_key": "add"
+                    },
+                    "flags": {
+                      "has_key": true
+                    }
+                  }
+                },
+                "fail": {
+                  "text": "抽屉卡住了。你只翻出一叠无用的账单，夹层仍然紧闭。"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "图书馆",
+        "书桌",
+        "日记",
+        "妹妹"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "cellar",
+      "kind": "location",
+      "title": "地窖",
+      "parent": "area_lower",
+      "order": 0,
+      "summary": "潮湿的石阶通向地窖，一具穿礼服的尸体靠墙坐着。",
+      "body": "石阶尽头是地窖。墙角的尸体靠墙坐着，礼服前襟被撕开，胸口刻着一个裂隙符号。潮湿的空气里有铁锈味。\n\n内门后传来低低的数数声。",
+      "body_ref": {},
+      "scene_role": "room",
+      "access": "gated",
+      "repeatable": true,
+      "beats": [],
+      "objects": [
+        {
+          "id": "obj_corpse",
+          "name": "尸体",
+          "summary": "穿礼服的男性尸体，胸口刻着裂隙符号。",
+          "visible": true,
+          "visibility": "public",
+          "interactions": [
+            {
+              "id": "interact_corpse_search",
+              "skill": "侦查",
+              "difficulty": "regular",
+              "repeatable": true,
+              "outcomes": {
+                "success": {
+                  "text": "你在尸体怀里摸到一封潮湿的信。信纸边缘写着“第四次之后，门就不再需要钥匙”。",
+                  "effects": {
+                    "clue": [
+                      "clue_cultist_letter"
+                    ],
+                    "clocks": {
+                      "doom_clock": {
+                        "delta": 1
+                      }
+                    }
+                  }
+                },
+                "fail": {
+                  "text": "你翻动尸体时只闻到更浓的铁锈味，没有找到有用的东西。"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "地窖",
+        "尸体",
+        "信件"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "ritual",
+      "kind": "location",
+      "title": "祭坛室",
+      "parent": "area_lower",
+      "order": 0,
+      "summary": "黑石祭坛、银匕首与正在扩张的裂隙。",
+      "body": "祭坛室比地窖更低。黑石祭坛立在房间中央，表面刻满细密的符号；裂隙在墙面渗出微光，像一只缓慢睁开的眼睛。\n\n祭坛中央摆着一把银匕首。",
+      "body_ref": {},
+      "scene_role": "room",
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [
+        {
+          "id": "obj_altar",
+          "name": "黑石祭坛",
+          "summary": "祭坛背面刻着封印仪式的图样。",
+          "visible": true,
+          "visibility": "public",
+          "interactions": [
+            {
+              "id": "interact_altar_study",
+              "skill": "神秘学",
+              "difficulty": "regular",
+              "repeatable": true,
+              "outcomes": {
+                "success": {
+                  "text": "你辨认出祭坛背面的图样：银匕首必须由读过图的人握住，才能封住裂隙。",
+                  "effects": {
+                    "clue": [
+                      "clue_ritual_diagram"
+                    ],
+                    "clocks": {
+                      "doom_clock": {
+                        "delta": 1
+                      }
+                    }
+                  }
+                },
+                "fail": {
+                  "text": "符号在你眼里不断游动，你只记住了一个“四”字。"
+                }
+              }
+            },
+            {
+              "id": "interact_altar_perform",
+              "skill": "神秘学",
+              "difficulty": "hard",
+              "repeatable": false,
+              "outcomes": {
+                "success": {
+                  "text": "你把银匕首按在祭坛中央，符号逐一亮起。裂隙的扩张停了一瞬。",
+                  "effects": {
+                    "flags": {
+                      "altar_ready": true
+                    },
+                    "clocks": {
+                      "doom_clock": {
+                        "delta": 1
+                      }
+                    }
+                  }
+                },
+                "fail": {
+                  "text": "仪式没有完成。祭坛上的符号亮了又灭，裂隙仍在扩张。",
+                  "effects": {
+                    "clocks": {
+                      "doom_clock": {
+                        "delta": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "obj_dagger",
+          "name": "银匕首",
+          "summary": "没有开刃的银匕首，刀柄刻着裂隙符号。",
+          "visible": true,
+          "visibility": "hidden",
+          "reveal_when": {
+            "clue": "clue_ritual_diagram"
+          },
+          "interactions": [
+            {
+              "id": "interact_take_dagger",
+              "repeatable": false,
+              "outcomes": {
+                "success": {
+                  "text": "你握住银匕首。刀柄冰凉，裂隙的光在刀身上停了一瞬。",
+                  "effects": {
+                    "items": {
+                      "silver_dagger": "add"
+                    },
+                    "flags": {
+                      "has_dagger": true
+                    },
+                    "clocks": {
+                      "doom_clock": {
+                        "delta": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "祭坛",
+        "匕首",
+        "裂隙",
+        "仪式"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "ending_seal",
+      "kind": "ending",
+      "title": "结局：封印裂隙",
+      "parent": "act_1",
+      "order": 0,
+      "summary": "银匕首完成封印，裂隙闭合。",
+      "body": "银匕首按进祭坛中央，最后一道符号熄灭。裂隙像被缝合的伤口一样合拢，墙里的数数声停了。\n\n艾琳在图书馆里睡着，手里还攥着那本皮面日记。",
+      "body_ref": {},
+      "scene_role": "ending",
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": {
+        "all": [
+          {
+            "clue": "clue_ritual_diagram"
+          },
+          {
+            "flag": "has_dagger"
+          },
+          {
+            "flag": "altar_ready"
+          }
+        ]
+      },
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "封印",
+        "结局"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "ending_escape",
+      "kind": "ending",
+      "title": "结局：逃离灰垣宅",
+      "parent": "act_1",
+      "order": 0,
+      "summary": "调查员带着妹妹撤离，裂隙仍在身后扩张。",
+      "body": "你们从地窖撤回门厅，雨已经停了。身后的墙里仍有人在数数，但声音越来越远。\n\n灰垣宅在黎明前被雾吞没。",
+      "body_ref": {},
+      "scene_role": "ending",
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": {
+        "any": [
+          {
+            "visited": "cellar"
+          },
+          {
+            "clue": "clue_diary"
+          }
+        ]
+      },
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "逃离",
+        "结局"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "ending_doom",
+      "kind": "ending",
+      "title": "结局：厄运降临",
+      "parent": "act_1",
+      "order": 0,
+      "summary": "厄运时钟走满，裂隙彻底张开。",
+      "body": "墙里的数数声停在“四”。裂隙从墙面涌出，把祭坛室吞进一片没有方向的灰白。\n\n最后一盏提灯熄灭时，灰垣宅已经不在原来的地方了。",
+      "body_ref": {},
+      "scene_role": "ending",
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": {
+        "clock": "doom_clock",
+        "gte": 4
+      },
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "厄运",
+        "结局",
+        "时钟"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "npc_butler",
+      "kind": "npc",
+      "title": "管家 霍尔特",
+      "parent": "porch",
+      "order": 0,
+      "summary": "灰垣宅的老管家，左手小指缺了一截。",
+      "body": "霍尔特在灰垣宅服务了三十年。他知道地窖的裂隙，也知道邪教徒在做什么，但他只关心艾琳能否活着离开。",
+      "body_ref": {},
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "管家",
+        "霍尔特"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {
+        "x": 232,
+        "y": 457
+      },
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "npc_sister",
+      "kind": "npc",
+      "title": "妹妹 艾琳",
+      "parent": "library",
+      "order": 0,
+      "summary": "被反锁在图书馆暗格里的年轻女性。",
+      "body": "艾琳手腕有绳索勒痕，反复念叨“别让钟走到四”。她见过裂隙，损失了少量理智。",
+      "body_ref": {},
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "妹妹",
+        "艾琳"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "npc_cultist",
+      "kind": "npc",
+      "title": "邪教徒 灰袍人",
+      "parent": "ritual",
+      "order": 0,
+      "summary": "穿灰袍的男人，脸上画着裂隙符号。",
+      "body": "灰袍人认为只要让时钟走满，裂隙就会赐予他不死的身体。他会阻止任何试图封印裂隙的人。",
+      "body_ref": {},
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "邪教徒",
+        "灰袍人"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "brass_key",
+      "kind": "item",
+      "title": "黄铜钥匙",
+      "parent": "library",
+      "order": 0,
+      "summary": "书桌夹层里的黄铜钥匙。",
+      "body": "黄铜钥匙用于打开图书馆书桌后的暗门。",
+      "body_ref": {},
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "黄铜钥匙",
+        "钥匙"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "silver_dagger",
+      "kind": "item",
+      "title": "银匕首",
+      "parent": "ritual",
+      "order": 0,
+      "summary": "祭坛中央的银匕首。",
+      "body": "没有开刃的银匕首，刀柄刻着裂隙符号，是封印仪式的器具。",
+      "body_ref": {},
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "银匕首",
+        "匕首"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "old_lantern",
+      "kind": "item",
+      "title": "旧提灯",
+      "parent": "porch",
+      "order": 0,
+      "summary": "门厅衣帽架上的旧提灯。",
+      "body": "还能点亮的旧提灯，灯罩内侧写着“给艾琳”。",
+      "body_ref": {},
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "提灯",
+        "灯"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "clue_diary",
+      "kind": "clue",
+      "title": "皮面日记",
+      "parent": "library",
+      "order": 0,
+      "summary": "艾琳的日记，记录墙里有人在数数。",
+      "body": "日记最后几页写着：他每天都来，从一数到四，然后墙里会安静一会儿。",
+      "body_ref": {},
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "日记",
+        "艾琳"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "clue_butler_ledger",
+      "kind": "clue",
+      "title": "管家账本",
+      "parent": "porch",
+      "order": 0,
+      "summary": "反复出现“地下室·食料·一份”的账页。",
+      "body": "账本显示管家每晚会向地窖送一份食料，收货人署名只有一个符号。",
+      "body_ref": {},
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "账本",
+        "管家"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "clue_cultist_letter",
+      "kind": "clue",
+      "title": "邪教徒信件",
+      "parent": "cellar",
+      "order": 0,
+      "summary": "写着“第四次之后，门就不再需要钥匙”的信。",
+      "body": "信件说明裂隙在第四次喂食后完全张开，届时任何钥匙都不再重要。",
+      "body_ref": {},
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "信件",
+        "邪教徒"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    },
+    {
+      "id": "clue_ritual_diagram",
+      "kind": "clue",
+      "title": "祭坛图",
+      "parent": "ritual",
+      "order": 0,
+      "summary": "祭坛背面的封印仪式图样。",
+      "body": "图样说明封印需要三个条件：读图者、银匕首、已就绪的祭坛。",
+      "body_ref": {},
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "beats": [],
+      "objects": [],
+      "completion": null,
+      "on_enter": [],
+      "on_reenter": [],
+      "keywords": [
+        "祭坛图",
+        "仪式"
+      ],
+      "aliases": [],
+      "negative_keywords": [],
+      "scope": "local",
+      "constant": false,
+      "keyword_weight": 1.0,
+      "keyword_match": "word",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "spoiler_level": 0,
+      "token_cost": 0,
+      "layout": {},
+      "source": "ai_import",
+      "content_hash": null
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_porch_library",
+      "from": "porch",
+      "to": "library",
+      "type": "adjacent",
+      "hard": false,
+      "bidirectional": true,
+      "condition": null,
+      "label": "北侧楼梯",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_library_cellar",
+      "from": "library",
+      "to": "cellar",
+      "type": "portal",
+      "hard": true,
+      "bidirectional": false,
+      "condition": {
+        "flag": "has_key"
+      },
+      "label": "书桌后的暗门（需要黄铜钥匙）",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_cellar_ritual",
+      "from": "cellar",
+      "to": "ritual",
+      "type": "adjacent",
+      "hard": false,
+      "bidirectional": true,
+      "condition": null,
+      "label": "内门",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_ritual_seal",
+      "from": "ritual",
+      "to": "ending_seal",
+      "type": "leads_to",
+      "hard": true,
+      "bidirectional": false,
+      "condition": null,
+      "label": "完成封印",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_cellar_escape",
+      "from": "cellar",
+      "to": "ending_escape",
+      "type": "leads_to",
+      "hard": true,
+      "bidirectional": false,
+      "condition": null,
+      "label": "撤离灰垣宅",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_ritual_doom",
+      "from": "ritual",
+      "to": "ending_doom",
+      "type": "leads_to",
+      "hard": true,
+      "bidirectional": false,
+      "condition": null,
+      "label": "厄运降临",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_porch_npc_butler",
+      "from": "npc_butler",
+      "to": "porch",
+      "type": "inhabits",
+      "hard": false,
+      "bidirectional": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_library_npc_sister",
+      "from": "npc_sister",
+      "to": "library",
+      "type": "inhabits",
+      "hard": false,
+      "bidirectional": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_ritual_npc_cultist",
+      "from": "npc_cultist",
+      "to": "ritual",
+      "type": "inhabits",
+      "hard": false,
+      "bidirectional": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_porch_lantern",
+      "from": "porch",
+      "to": "old_lantern",
+      "type": "contains",
+      "hard": false,
+      "bidirectional": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_library_key",
+      "from": "library",
+      "to": "brass_key",
+      "type": "contains",
+      "hard": false,
+      "bidirectional": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_ritual_dagger",
+      "from": "ritual",
+      "to": "silver_dagger",
+      "type": "contains",
+      "hard": false,
+      "bidirectional": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_library_diary",
+      "from": "library",
+      "to": "clue_diary",
+      "type": "contains",
+      "hard": false,
+      "bidirectional": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_porch_ledger",
+      "from": "porch",
+      "to": "clue_butler_ledger",
+      "type": "contains",
+      "hard": false,
+      "bidirectional": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_cellar_letter",
+      "from": "cellar",
+      "to": "clue_cultist_letter",
+      "type": "contains",
+      "hard": false,
+      "bidirectional": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_ritual_diagram",
+      "from": "ritual",
+      "to": "clue_ritual_diagram",
+      "type": "contains",
+      "hard": false,
+      "bidirectional": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_library_diary_reveals",
+      "from": "library",
+      "to": "clue_diary",
+      "type": "reveals",
+      "hard": false,
+      "bidirectional": false,
+      "condition": null,
+      "label": "书房线索",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_butler_ledger_knows",
+      "from": "npc_butler",
+      "to": "clue_butler_ledger",
+      "type": "knows",
+      "hard": false,
+      "bidirectional": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_sister_diary_knows",
+      "from": "npc_sister",
+      "to": "clue_diary",
+      "type": "knows",
+      "hard": false,
+      "bidirectional": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_cultist_diagram_knows",
+      "from": "npc_cultist",
+      "to": "clue_ritual_diagram",
+      "type": "knows",
+      "hard": false,
+      "bidirectional": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_butler_cultist_relation",
+      "from": "npc_butler",
+      "to": "npc_cultist",
+      "type": "relationship",
+      "hard": false,
+      "bidirectional": false,
+      "condition": null,
+      "label": "暗中交易：每晚送一次食料",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    },
+    {
+      "id": "edge_sister_butler_relation",
+      "from": "npc_sister",
+      "to": "npc_butler",
+      "type": "relationship",
+      "hard": false,
+      "bidirectional": false,
+      "condition": null,
+      "label": "被监护人 / 看守人",
+      "visibility": "public",
+      "kp_notes": null,
+      "reveal_when": null,
+      "weight": 1.0,
+      "evidence": null,
+      "confidence": 1.0,
+      "source": "ai_import"
+    }
+  ],
+  "triggers": [
+    {
+      "id": "trg_enter_library",
+      "label": "进入图书馆",
+      "binding": {
+        "kind": "enter",
+        "location_id": "library",
+        "first_time": true
+      },
+      "visibility": "player_visible",
+      "once": true,
+      "once_scope": "room",
+      "priority": 10,
+      "attachments": [
+        {
+          "id": "att_library_richtext",
+          "kind": "richtext",
+          "format": "markdown",
+          "order": 0,
+          "body": "# 图书馆\n\n推门时，雨水的气味跟着你进来。\n\n> “艾琳小姐在里面休息。请尽量不要惊动她。”\n\n你能注意到：\n\n- 高窗只拉开一半，玻璃上全是细长的雨痕；\n- 红木书桌的抽屉半开，夹层里似乎压着东西；\n- 书架后传来轻轻的敲击声。\n\n**这里一定有人。**"
+        }
+      ]
+    },
+    {
+      "id": "trg_clue_diary",
+      "label": "读到皮面日记",
+      "binding": {
+        "kind": "clue",
+        "clue_id": "clue_diary"
+      },
+      "visibility": "player_visible",
+      "once": true,
+      "priority": 20,
+      "attachments": [
+        {
+          "id": "att_diary_richtext",
+          "kind": "richtext",
+          "format": "markdown",
+          "order": 0,
+          "body": "## 皮面日记\n\n最后三页只有反复的句子：\n\n| 日期 | 记录 |\n| --- | --- |\n| 第三天 | 墙里有人在数数，从一数到四。 |\n| 第五天 | 管家又来送饭。他叫我不要出声。 |\n| 第七天 | 数到四之后，墙里安静了一会儿。 |\n\n> “别让钟走到四。”\n\n字迹在这里被水渍晕开。"
+        }
+      ]
+    },
+    {
+      "id": "trg_npc_butler",
+      "label": "管家开口",
+      "binding": {
+        "kind": "npc",
+        "npc_id": "npc_butler"
+      },
+      "visibility": "player_visible",
+      "once": true,
+      "once_scope": "pc",
+      "priority": 30,
+      "content": "霍尔特把左手往袖子里缩了缩：“诸位远道而来，先喝口热茶吧。艾琳小姐只是受了点惊。”",
+      "attachments": []
+    },
+    {
+      "id": "trg_interaction_altar",
+      "label": "读懂祭坛图",
+      "binding": {
+        "kind": "interaction",
+        "location_id": "ritual",
+        "object_id": "obj_altar",
+        "interaction_id": "interact_altar_study",
+        "result": "success"
+      },
+      "visibility": "player_visible",
+      "once": true,
+      "priority": 40,
+      "attachments": [
+        {
+          "id": "att_altar_richtext",
+          "kind": "richtext",
+          "format": "markdown",
+          "order": 0,
+          "body": "### 祭坛背面\n\n符号汇成一张图：\n\n1. 读过图的人握住银匕首；\n2. 匕首按在祭坛中央；\n3. 祭坛必须已经“就绪”。\n\n> 图样右下角刻着一行小字：“第四次之后，门就不再需要钥匙。”"
+        }
+      ]
+    },
+    {
+      "id": "trg_clock_doom_warning",
+      "label": "厄运时钟：第三次",
+      "binding": {
+        "kind": "clock",
+        "clock_id": "doom_clock",
+        "gte": 3
+      },
+      "visibility": "player_visible",
+      "once": true,
+      "priority": 50,
+      "content": "墙里的数数声突然清晰起来：“一、二、三……”",
+      "attachments": [
+        {
+          "id": "att_doom_richtext",
+          "kind": "richtext",
+          "format": "markdown",
+          "order": 0,
+          "body": "## 裂隙在回应\n\n你听见墙里有人在数数。\n\n> **“一、二、三……”**\n\n下一次就是四。必须做决定了：封印、离开，或者让它发生。"
+        }
+      ]
+    },
+    {
+      "id": "trg_manual_ritual",
+      "label": "开始仪式",
+      "binding": {
+        "kind": "manual",
+        "keyword": "开始仪式",
+        "action": "开始仪式"
+      },
+      "condition": {
+        "all": [
+          {
+            "flag": "has_dagger"
+          },
+          {
+            "flag": "altar_ready"
+          }
+        ]
+      },
+      "visibility": "player_visible",
+      "once": true,
+      "priority": 60,
+      "attachments": [
+        {
+          "id": "att_ritual_richtext",
+          "kind": "richtext",
+          "format": "markdown",
+          "order": 0,
+          "body": "## 封印仪式\n\n银匕首按在祭坛中央。裂隙的光从墙面退了一寸。\n\n- **第一下**：符号亮起。\n- **第二下**：墙里的数数声停了。\n- **第三下**：你听见远处有人在关门。\n\n> 如果仪式失败，KP 可以让裂隙反噬：损失 1D6 理智，并把厄运时钟推进一格。"
+        }
+      ]
+    },
+    {
+      "id": "trg_enter_cellar",
+      "label": "进入地窖",
+      "binding": {
+        "kind": "enter",
+        "location_id": "cellar",
+        "first_time": true
+      },
+      "visibility": "player_visible",
+      "once": true,
+      "priority": 70,
+      "content": "石阶很陡。你手里的提灯照出一小圈光，墙角的尸体正对着你。"
+    }
+  ],
+  "flags": [
+    {
+      "id": "has_key",
+      "title": "黄铜钥匙",
+      "description": "调查员已经从书桌夹层取得黄铜钥匙，图书馆到地窖的硬门控可以放行。"
+    },
+    {
+      "id": "has_lantern",
+      "title": "旧提灯",
+      "description": "调查员已经取得旧提灯，可在黑暗地窖中获得照明。"
+    },
+    {
+      "id": "has_dagger",
+      "title": "银匕首",
+      "description": "调查员已经取得银匕首，封印仪式的必备条件之一。"
+    },
+    {
+      "id": "altar_ready",
+      "title": "祭坛已就绪",
+      "description": "调查员已完成祭坛仪式的前置步骤，封印可以开始。"
+    },
+    {
+      "id": "butler_trust",
+      "title": "管家信任",
+      "description": "管家对调查员的态度标记；默认 false，出示账本后仍为 false。"
+    }
+  ],
+  "clocks": [
+    {
+      "id": "doom_clock",
+      "title": "裂隙扩张",
+      "description": "每进行一次鲁莽研究或取用仪式物品就前进一格；达到 4 时触发厄运结局。",
+      "threshold": 4,
+      "value": 0,
+      "visibility": "public"
+    }
+  ],
+  "assets": [],
+  "warnings": [],
+  "meta": {
+    "generator": "bundle_import",
+    "bundle_format": "the-veil-scenario-bundle",
+    "bundle_version": 1,
+    "exclusions": [],
+    "scenario_id": "1793438085450",
+    "published_from": "import",
+    "repair": {
+      "ok": true,
+      "applied": [],
+      "applied_count": 0,
+      "remaining_count": 0,
+      "remaining": []
+    },
+    "revision": 3,
+    "updated_at": "2026-11-01T00:19:50.000Z",
+    "updated_by": "1"
+  }
+}

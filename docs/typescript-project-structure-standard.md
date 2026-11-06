@@ -1,6 +1,6 @@
 ﻿# TypeScript 项目文件结构与命名规范
 
-本文基于当前仓库 `C:\Mine\AIbased TRPG` 的实际文件盘点，完成 `docs/project-structure-requirements.md` 要求的四部分输出：现状诊断、规范化目录方案、项目文件标准、落地维护建议。
+本文基于当前仓库 `C:\Mine\AIbased TRPG` 的实际文件盘点，输出四部分内容：现状诊断、规范化目录方案、项目文件标准、落地维护建议。
 
 本文最初用于输出方案和标准；当前已完成两阶段落地：前端浏览器源码迁入 `frontend/src/app/`，手写类型迁入 `frontend/src/types/`，前端产物统一输出到 `dist/public/`，浏览器 URL 继续兼容 `/js/...` 和 `/data/tools/...`。
 
@@ -139,7 +139,7 @@
 | 已整改 | `tools` 源码和产物分离方式特殊 | `frontend/src/tools/*.ts` 编译到 `dist/public/tools/` 后被脚本移动到 `dist/public/data/tools/` | URL 兼容，产物边界清晰 |
 | 已整改 | `.gitignore` 规则包含全量 `/docs` 和 `/tests/*` | 当前文档和测试默认可提交 | 新文档和新测试不再默认漏提交 |
 | 已整改 | 运行数据和种子数据同处 `data/` | 默认运行写入位置已迁到 `data/runtime/`，`data/config`、`data/assets` 继续作为版本化资源 | 旧运行目录仍在 `.gitignore` 中防止遗留数据误提交 |
-| 已整改 | 文件命名存在非英文和拼写问题 | `docs/project-structure-requirements.md`、`tests/fixtures/test_character.json` 已使用英文工程名；内容资产仍可保留中文 | 内容资产边界继续按数据目录规则管理 |
+| 已整改 | 文件命名存在非英文和拼写问题 | `tests/fixtures/test_character.json` 已使用英文工程名；内容资产仍可保留中文 | 内容资产边界继续按数据目录规则管理 |
 | 已整改 | 构建产物没有统一 `dist/` 目录 | 当前使用 `dist/public/` | 与常见 TS 项目约定一致 |
 
 ### 1.5 重复用途文件夹对照表
@@ -314,7 +314,7 @@
 | `docs/typescript-security-migration.md` | `docs/typescript-security-migration.md` | 保留 |
 | `docs/patterns/*.md` | `docs/patterns/*.md` | 保留 |
 | `docs/superpowers/**` | `docs/superpowers/**` | 保留 |
-| `docs/问题点.md` | `docs/project-structure-requirements.md` | 建议英文命名 |
+| `docs/问题点.md` | 不入库（本地保留） | 已移出仓库并加入忽略规则 |
 | `docs/Test_charactor.json` | `tests/fixtures/test_character.json` | 已迁移，且修正 `charactor` 拼写 |
 | `docs/anythingllm.secret` | 不入库；本地迁至 `.env.local` 或安全凭证库 | 必须忽略 |
 | `tests/test_*.py` | `tests/test_*.py` | 保留并取消 `.gitignore` 的全量忽略 |

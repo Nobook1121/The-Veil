@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" style="color:#E8E0CD" role="img" aria-label="Concept C — mono">
-  <!-- 单色剪影：断口环 + 崩落碎片。 -->
-  <path d="M844.55 320 A384 384 0 1 1 630.66 146.79 L586.16 283.75 A240 240 0 1 0 719.85 392 Z" fill="currentColor"/>
-  <path d="M676.32 142.93 A404 404 0 0 1 802.61 231.36 L871.67 164.67 A500 500 0 0 0 715.37 55.23 Z" fill="currentColor" transform="rotate(9 512 512)"/>
-</svg>

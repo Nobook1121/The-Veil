@@ -106,6 +106,12 @@ foreach ($dir in $runtimeDirs) {
     Copy-Relative $dir
 }
 
+# oil-ui 是本地开发 agent 使用的第三方 Skill：仅保留在本地，不随发布包分发
+$oilUiSkill = Join-Path $App 'skills/oil-ui'
+if (Test-Path $oilUiSkill) {
+    Remove-Item -Path $oilUiSkill -Recurse -Force
+}
+
 # ---------------------------------------------------------------- 单文件运行资源
 Copy-Relative 'data/character_skills.json'
 Copy-Relative 'scripts/build-frontend.mjs'
@@ -164,6 +170,7 @@ foreach ($item in $required) {
 $forbidden = @(
     'docs',
     'tests',
+    'skills/oil-ui',
     'release/changelog',
     '.gitignore',
     '.git',

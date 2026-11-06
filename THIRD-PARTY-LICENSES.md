@@ -84,18 +84,6 @@ Node 包可在 `node_modules/<包名>/LICENSE` 查看）。
   一律不下载、不引用。AISHELL-3 数据集本身的信息保留在选型文档中，仅用于说明排除理由。
 - 部署方若自行替换为其它模型，必须确认「允许商用 + 允许再分发」，并在本文件补充登记。
 
-## 开发参考 Skill（Oil UI，2026-11-04）
-
-本次新增一份第三方 Skill，原样安装到 `skills/`，**仅作为开发期参考文档，不进入发布包，也不改变运行时行为**，因此**无新增打包依赖**：
-
-| Skill | 安装路径 | 上游仓库 | 版本 / 提交 | 许可证 |
-| --- | --- | --- | --- | --- |
-| Oil UI（界面设计 / 评审 Skill） | `skills/oil-ui/` | https://github.com/oil-oil/oil-ui | v0.31.0，`5b03da0997e0c57650880c521bf5462696d3efe9` | MIT |
-
-- **安装方式**：从上游仓库 `main` 分支的 tarball 解压后整目录复制，未改写、未摘要、未裁剪任何上游文件；来源信息（仓库、分支、提交、获取时间、许可证）记录在 Skill 目录的 `SOURCE.json`，上游 MIT 许可证文本随目录保存在 `LICENSE`。
-- **Oil UI**：完整安装上游仓库（`SKILL.md`、`references/`、`scripts/`、`assets/`、`tests/`、README 与 LICENSE）。其可选脚本不依赖 npm 包：`scripts/*.mjs` 需要 Node.js 22+ 与本机 Chrome/Chromium/Edge，`scripts/*.py` 仅使用 Python 标准库；上游 `check_update.py` 会访问 `ui.oiloil.org` 检查版本，属可选联网行为。上述脚本不会被项目构建或运行流程调用。
-- 该 Skill 不随 `dist/`、`requirements.txt`、`package.json` 分发，也不被打包进发布包。
-
 ## Python 依赖
 
 含 `requirements.txt` 等文件中的直接依赖及其全部传递依赖（取自本地 `.venv` 已安装元数据）。

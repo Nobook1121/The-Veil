@@ -1,0 +1,732 @@
+{
+  "id": 1793438085450,
+  "scenario_version": "1.0.0",
+  "title": "裂隙回廊（系统测试剧本）",
+  "author": "The Veil 测试组",
+  "creator_username": "Nobook1121",
+  "playerCount": 2,
+  "notes": "本剧本只用于测试《帷幕》的图谱、战斗、触发器与结局。测试清单：1) 图谱能否正确表示 4 个房间、3 件物品、4 条线索与 3 名 NPC 的所属/居住关系；2) 两条人物关系边是否在 KP 面板正确显示；3) 图书馆到地窖的硬门控（需要黄铜钥匙）是否生效；4) 触发器：进入图书馆富文本、日记富文本表格、管家对话、祭坛检定成功、厄运时钟阈值、手动词条“开始仪式”；5) 战斗轮：管家、邪教徒、妹妹三组数值是否可直接开战；6) 三个结局（封印/逃脱/厄运）是否分别按条件触发。建议 KP 开房后依次执行：门厅取灯与信件 → 图书馆搜书桌 → 地窖验尸 → 祭坛研究并取匕首 → 执行仪式 → 观察结局。",
+  "global_summary": "1923 年，调查员受委托前往乡间宅邸“灰垣宅”，寻找失踪的委托人妹妹。宅邸地窖藏着一道正在扩张的裂隙，管家、邪教徒与妹妹各自守着不同的秘密。调查员必须在裂隙完全张开前做出选择：封印、逃离，或让厄运降临。",
+  "modules": [
+    {
+      "id": "porch",
+      "scene_id": 1793438085600,
+      "title": "门厅",
+      "module_type": "scene",
+      "card_type": "scene",
+      "content": "门厅是调查员进入宅邸后的第一个房间。\n\n可调查物件：邮件堆（obj_mail）可得到管家账本线索；旧提灯（obj_lantern）可取得照明物品。\n\n在场 NPC：管家霍尔特（npc_butler）。他表面恭顺，实际在与地窖里的邪教徒做交易；若调查员出示管家账本，他会明显慌乱。\n\n出口：北侧楼梯通往图书馆；图书馆书桌后藏有通往地窖的暗门。",
+      "summary": "灰垣宅的门厅，雨声顺着门缝渗进来。管家站在楼梯口，邮件散落一地。",
+      "visibility": "public",
+      "keywords": [
+        "门厅",
+        "管家",
+        "邮件",
+        "提灯"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "notes": "测试点：进入门厅后应能看到 obj_mail 与 obj_lantern 两个可交互物件；npc_butler 应作为 inhabits 关系挂在 porch 下。",
+      "send_to_ai": true,
+      "triggers": []
+    },
+    {
+      "id": "library",
+      "scene_id": 1793438085600,
+      "title": "图书馆",
+      "module_type": "scene",
+      "card_type": "scene",
+      "content": "图书馆是调查核心房间。\n\n可调查物件：红木书桌（obj_desk）。成功侦查可找到皮面日记（clue_diary）与黄铜钥匙（brass_key），并取得 flag has_key；黄铜钥匙用于打开书桌后的暗门通往地窖。\n\n在场 NPC：妹妹艾琳（npc_sister）。她精神恍惚，只会重复“别让钟走到四”。\n\n测试点：进入本房间应触发富文本触发器 trg_enter_library；获得日记应触发富文本表格触发器 trg_clue_diary。",
+      "summary": "高窗、旧书与一张红木书桌；妹妹被反锁在书架后的暗格里。",
+      "visibility": "public",
+      "keywords": [
+        "图书馆",
+        "日记",
+        "书桌",
+        "妹妹"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "send_to_ai": true,
+      "triggers": []
+    },
+    {
+      "id": "cellar",
+      "scene_id": 1793438085600,
+      "title": "地窖",
+      "module_type": "scene",
+      "card_type": "scene",
+      "content": "地窖是中途房间，连接图书馆与祭坛。\n\n可调查物件：尸体（obj_corpse）。成功侦查可取得邪教徒信件（clue_cultist_letter），并让厄运时钟 doom_clock 前进 1。\n\n出口：石阶向上回到图书馆（需黄铜钥匙）；内门通往祭坛。\n\n测试点：从图书馆进入地窖必须满足硬门控 flag has_key；若没有钥匙，出口应显示 blocked 与缺失条件。",
+      "summary": "潮湿的石阶通向地窖，一具穿礼服的尸体靠墙坐着，胸口刻着裂隙符号。",
+      "visibility": "public",
+      "keywords": [
+        "地窖",
+        "尸体",
+        "信件"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "send_to_ai": true,
+      "triggers": []
+    },
+    {
+      "id": "ritual",
+      "scene_id": 1793438085600,
+      "title": "祭坛室",
+      "module_type": "scene",
+      "card_type": "scene",
+      "content": "祭坛室是终局房间。\n\n可调查物件：黑石祭坛（obj_altar）与银匕首（obj_dagger，需先获得祭坛图才能看见）。\n\n- 研究祭坛（神秘学）：取得祭坛图 clue_ritual_diagram，厄运时钟 +1。\n- 取走银匕首：取得物品 silver_dagger 与 flag has_dagger，厄运时钟 +1。\n- 执行仪式：设置 flag altar_ready，厄运时钟 +1。\n\n在场 NPC：邪教徒（npc_cultist）。他会试图阻止仪式，也可能主动攻击。\n\n测试点：三个结局都在本房间的出口列表里；只有满足 completion 的结局才会 ready。",
+      "summary": "地下祭坛由黑石砌成，银匕首摆在中央，裂隙在墙面渗出微光。",
+      "visibility": "public",
+      "keywords": [
+        "祭坛",
+        "匕首",
+        "邪教徒",
+        "仪式"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "send_to_ai": true,
+      "triggers": []
+    },
+    {
+      "id": "ending_seal",
+      "scene_id": "ending_seal",
+      "title": "结局：封印裂隙",
+      "module_type": "ending",
+      "card_type": "ending",
+      "content": "封印结局：需要同时满足“已取得祭坛图”“已取得银匕首”“祭坛已就绪”。\n\n达成后，KP 可让调查员进行最后一次 POW 或神秘学检定；成功则裂隙闭合，妹妹获救。失败的代价由 KP 决定，例如损失 1D6 理智。",
+      "summary": "调查员用银匕首完成封印，裂隙闭合，灰垣宅恢复寂静。",
+      "visibility": "public",
+      "keywords": [
+        "封印",
+        "结局"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "notes": "测试点：ending_seal 的 completion 是三段 all；缺任意一项时 exits 中 ready=false。",
+      "send_to_ai": true,
+      "open_ending": false
+    },
+    {
+      "id": "ending_escape",
+      "scene_id": "ending_escape",
+      "title": "结局：逃离灰垣宅",
+      "module_type": "ending",
+      "card_type": "ending",
+      "content": "逃脱结局：只要到过地窖，或已经读到日记，就可以选择撤离。\n\n这是一个“保命但不解决”的结局，适合队伍拒绝冒险时使用。",
+      "summary": "调查员带着妹妹从地窖撤出，身后的裂隙在雨夜里继续扩张。",
+      "visibility": "public",
+      "keywords": [
+        "逃离",
+        "结局"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "notes": "测试点：ending_escape 的 completion 是 any(visited cellar, clue diary)。",
+      "send_to_ai": true,
+      "open_ending": false
+    },
+    {
+      "id": "ending_doom",
+      "scene_id": "ending_doom",
+      "title": "结局：厄运降临",
+      "module_type": "ending",
+      "card_type": "ending",
+      "content": "厄运结局：当厄运时钟 doom_clock 达到 4 时触发。\n\n调查员的每一次鲁莽研究（验尸、研究祭坛、取匕首、执行仪式）都会推进时钟。KP 应在时钟达到 3 时用触发器给出明确警告。",
+      "summary": "厄运时钟走满，裂隙彻底张开，宅邸被吞没。",
+      "visibility": "public",
+      "keywords": [
+        "厄运",
+        "结局",
+        "时钟"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "notes": "测试点：ending_doom 的 completion 为 clock doom_clock >= 4；时钟阈值触发器在 3 时应先行触发。",
+      "send_to_ai": true,
+      "open_ending": false
+    },
+    {
+      "id": "npc_butler",
+      "scene_id": "npc_butler",
+      "title": "管家 霍尔特",
+      "module_type": "npc",
+      "card_type": "npc",
+      "content": "霍尔特在灰垣宅服务了三十年。他知道地窖的裂隙，也知道邪教徒在做什么，但他只关心妹妹艾琳能否活着离开。\n\n扮演提示：说话缓慢、礼貌，回答问题时习惯先停顿。被出示管家账本（clue_butler_ledger）时会短暂失态。\n\n战斗：如果调查员强行闯入祭坛室，霍尔特会试图用手杖阻止，但不会主动下死手。",
+      "summary": "灰垣宅的老管家，左手小指缺了一截，袖口沾着地窖的泥。",
+      "visibility": "public",
+      "keywords": [
+        "管家",
+        "霍尔特",
+        "NPC"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "skills": [
+        {
+          "name": "侦查",
+          "value": 60
+        },
+        {
+          "name": "聆听",
+          "value": 55
+        },
+        {
+          "name": "斗殴",
+          "value": 45
+        },
+        {
+          "name": "闪避",
+          "value": 30
+        }
+      ],
+      "weapons": [
+        {
+          "name": "手杖",
+          "damage": "1D6",
+          "skill": "斗殴"
+        }
+      ],
+      "battle": {
+        "name": "管家 霍尔特",
+        "dex": 55,
+        "str": 60,
+        "siz": 65,
+        "con": 50,
+        "hp": 12,
+        "max_hp": 12,
+        "armor": 0,
+        "skills": [
+          {
+            "name": "斗殴",
+            "value": 45
+          },
+          {
+            "name": "闪避",
+            "value": 30
+          }
+        ],
+        "weapons": [
+          {
+            "name": "手杖",
+            "damage": "1D6",
+            "skill": "斗殴"
+          }
+        ],
+        "side": "npc"
+      },
+      "attributes": {
+        "STR": 60,
+        "CON": 50,
+        "SIZ": 65,
+        "DEX": 55,
+        "INT": 70,
+        "POW": 65,
+        "EDU": 70
+      },
+      "notes": "测试点：npc 触发器 trg_npc_butler 不写 event，任意态度/状态更新都应触发一次。",
+      "send_to_ai": true,
+      "code": "N-SjKkCS"
+    },
+    {
+      "id": "npc_sister",
+      "scene_id": "npc_sister",
+      "title": "妹妹 艾琳",
+      "module_type": "npc",
+      "card_type": "npc",
+      "content": "艾琳在三天前被管家安置在图书馆暗格。她见过裂隙，也因此损失了少量理智。\n\n扮演提示：她不会直接说出真相，只重复零碎句子；若调查员出示日记（clue_diary），她会崩溃并说出“管家在喂它”。\n\n战斗：艾琳不会战斗，受伤时会试图逃跑。",
+      "summary": "被反锁在图书馆暗格里的年轻女性，手腕有绳索勒痕，反复念叨“别让钟走到四”。",
+      "visibility": "public",
+      "keywords": [
+        "妹妹",
+        "艾琳",
+        "NPC"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "skills": [
+        {
+          "name": "闪避",
+          "value": 40
+        },
+        {
+          "name": "心理学",
+          "value": 35
+        }
+      ],
+      "weapons": [],
+      "battle": {
+        "name": "妹妹 艾琳",
+        "dex": 60,
+        "str": 40,
+        "siz": 50,
+        "con": 45,
+        "hp": 9,
+        "max_hp": 9,
+        "armor": 0,
+        "skills": [
+          {
+            "name": "闪避",
+            "value": 40
+          }
+        ],
+        "weapons": [],
+        "side": "npc"
+      },
+      "attributes": {
+        "STR": 40,
+        "CON": 45,
+        "SIZ": 50,
+        "DEX": 60,
+        "INT": 65,
+        "POW": 50,
+        "EDU": 60
+      },
+      "notes": "测试点：relationship 边 npc_sister ↔ npc_butler 应在图谱中显示为人物关系。",
+      "send_to_ai": true,
+      "code": "N-wddPUZ"
+    },
+    {
+      "id": "npc_cultist",
+      "scene_id": "npc_cultist",
+      "title": "邪教徒 灰袍人",
+      "module_type": "npc",
+      "card_type": "npc",
+      "content": "灰袍人是裂隙的崇拜者，认为只要让时钟走满，裂隙就会“赐予”他不死的身体。\n\n扮演提示：他说话急促、夹杂宗教术语；被问及管家时会说“他是喂食者”。\n\n战斗：灰袍人会主动攻击试图封印裂隙的人。",
+      "summary": "穿灰袍的男人，脸上用炭笔画着裂隙符号，右手握着一把生锈的短刀。",
+      "visibility": "public",
+      "keywords": [
+        "邪教徒",
+        "灰袍人",
+        "NPC"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "skills": [
+        {
+          "name": "斗殴",
+          "value": 55
+        },
+        {
+          "name": "闪避",
+          "value": 40
+        },
+        {
+          "name": "神秘学",
+          "value": 50
+        }
+      ],
+      "weapons": [
+        {
+          "name": "生锈短刀",
+          "damage": "1D4+2",
+          "skill": "斗殴"
+        }
+      ],
+      "battle": {
+        "name": "邪教徒 灰袍人",
+        "dex": 65,
+        "str": 55,
+        "siz": 60,
+        "con": 55,
+        "hp": 11,
+        "max_hp": 11,
+        "armor": 0,
+        "skills": [
+          {
+            "name": "斗殴",
+            "value": 55
+          },
+          {
+            "name": "闪避",
+            "value": 40
+          }
+        ],
+        "weapons": [
+          {
+            "name": "生锈短刀",
+            "damage": "1D4+2",
+            "skill": "斗殴"
+          }
+        ],
+        "side": "npc"
+      },
+      "attributes": {
+        "STR": 55,
+        "CON": 55,
+        "SIZ": 60,
+        "DEX": 65,
+        "INT": 55,
+        "POW": 70,
+        "EDU": 40
+      },
+      "notes": "测试点：relationship 边 npc_butler ↔ npc_cultist 与 knows 边 npc_cultist → clue_ritual_diagram 应存在。",
+      "send_to_ai": true,
+      "code": "N-WbVr3J"
+    },
+    {
+      "id": "item_brass_key",
+      "scene_id": "item_brass_key",
+      "title": "黄铜钥匙",
+      "module_type": "custom",
+      "card_type": "item",
+      "content": "黄铜钥匙藏在图书馆书桌的夹层里，用于打开书桌后的暗门（图书馆 → 地窖）。\n\n持有 flag has_key 时，硬门控边 edge_library_cellar 才会放行。",
+      "summary": "一把掌心大小的黄铜钥匙，齿口沾着黑色石粉。",
+      "visibility": "public",
+      "keywords": [
+        "黄铜钥匙",
+        "钥匙"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "send_to_ai": false
+    },
+    {
+      "id": "item_silver_dagger",
+      "scene_id": "item_silver_dagger",
+      "title": "银匕首",
+      "module_type": "custom",
+      "card_type": "item",
+      "content": "银匕首是封印裂隙的仪式器具。它摆在祭坛中央，只有在取得祭坛图（clue_ritual_diagram）后，调查员才能注意到它。\n\n取得后设置 flag has_dagger，厄运时钟 +1。",
+      "summary": "没有开刃的银匕首，刀柄刻着与祭坛相同的裂隙符号。",
+      "visibility": "public",
+      "keywords": [
+        "银匕首",
+        "匕首"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "send_to_ai": false
+    },
+    {
+      "id": "item_old_lantern",
+      "scene_id": "item_old_lantern",
+      "title": "旧提灯",
+      "module_type": "custom",
+      "card_type": "item",
+      "content": "旧提灯挂在门厅衣帽架上。它不参与门控，但可以在黑暗的地窖里提供照明，让 KP 有理由降低侦查难度。",
+      "summary": "一盏还能点亮的旧提灯，灯罩内侧写着“给艾琳”。",
+      "visibility": "public",
+      "keywords": [
+        "提灯",
+        "灯"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "send_to_ai": false
+    },
+    {
+      "id": "clue_diary",
+      "scene_id": "clue_diary",
+      "title": "线索：皮面日记",
+      "module_type": "custom",
+      "card_type": "clue",
+      "content": "皮面日记记录了艾琳被关进图书馆暗格前七天的经历。她听见地窖方向有人数数，从一数到四，然后墙里会安静一会儿。\n\n关键信息：裂隙需要“四次数数”才会完全张开；管家每天会送一次食物到地窖。",
+      "summary": "妹妹艾琳的日记，最后几页记录了她听见墙里“有人在数数”。",
+      "visibility": "public",
+      "keywords": [
+        "日记",
+        "艾琳",
+        "线索"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "send_to_ai": false
+    },
+    {
+      "id": "clue_butler_ledger",
+      "scene_id": "clue_butler_ledger",
+      "title": "线索：管家账本",
+      "module_type": "custom",
+      "card_type": "clue",
+      "content": "账本显示管家每晚会向地窖送一份“食料”，收货人署名只有一个符号。\n\n关键信息：管家与邪教徒有长期交易；把账本出示给管家，会显著动摇他的态度。",
+      "summary": "一叠用缩写记账的纸页，反复出现“地下室·食料·一份”。",
+      "visibility": "public",
+      "keywords": [
+        "账本",
+        "管家",
+        "线索"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "send_to_ai": false
+    },
+    {
+      "id": "clue_cultist_letter",
+      "scene_id": "clue_cultist_letter",
+      "title": "线索：邪教徒信件",
+      "module_type": "custom",
+      "card_type": "clue",
+      "content": "信件是灰袍人写给同伙的。信中提到：裂隙在第四次“喂食”后完全张开，届时任何钥匙都不再重要，宅邸会自行封闭。\n\n关键信息：厄运时钟达到 4 即触发厄运结局；调查员必须在时钟走满前完成封印或撤离。",
+      "summary": "尸体怀里的信，写着“第四次之后，门就不再需要钥匙”。",
+      "visibility": "public",
+      "keywords": [
+        "信件",
+        "邪教徒",
+        "线索"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "send_to_ai": false
+    },
+    {
+      "id": "clue_ritual_diagram",
+      "scene_id": "clue_ritual_diagram",
+      "title": "线索：祭坛图",
+      "module_type": "custom",
+      "card_type": "clue",
+      "content": "祭坛图说明封印仪式的三个条件：读图者、银匕首、已就绪的祭坛。缺一不可。\n\n关键信息：这也是 ending_seal 的 completion 来源。",
+      "summary": "刻在祭坛背面的图样：银匕首必须由“读过图的人”握住，才能封住裂隙。",
+      "visibility": "public",
+      "keywords": [
+        "祭坛图",
+        "仪式",
+        "线索"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "send_to_ai": false
+    },
+    {
+      "id": "test_checklist",
+      "scene_id": "test_checklist",
+      "title": "测试说明：如何使用本剧本",
+      "module_type": "background",
+      "card_type": "background",
+      "content": "本剧本是系统测试用例，不追求叙事完整度。建议按以下顺序执行并记录结果：\n\n1. 开门厅：检查地点卡是否列出 obj_mail 与 obj_lantern；执行“检查邮件堆”得到管家账本线索。\n2. 进图书馆：确认 enter 触发器给出富文本标题/引用/列表。搜索书桌，成功侦查应同时得到日记、黄铜钥匙与 flag has_key。\n3. 观察去向：在图书馆查看出口，地窖应显示为 blocked，直到 has_key 成立。\n4. 进地窖：确认硬门控放行；验尸得到信件并推进 doom_clock 到 1。\n5. 进祭坛室：研究祭坛得到祭坛图并推进时钟到 2；此时观察 obj_dagger 是否因 reveal_when 显现。\n6. 取匕首：得到 silver_dagger 与 flag has_dagger，时钟到 3，应触发厄运警告触发器。\n7. 执行仪式：设置 altar_ready，时钟到 4；此时 ending_doom 的 completion 成立，ending_seal 也因三项齐备成立。\n8. 观察结局：分别检查三个 ending 的 ready 状态；用 KP 工具进入其中一个，确认结局文本可读。\n\n战斗测试：在祭坛室用 combat.start 加入“管家 霍尔特”与“邪教徒 灰袍人”，确认先攻顺序、HP、武器伤害与回合推进正常。",
+      "summary": "给测试者的操作顺序与判定观察点。",
+      "visibility": "public",
+      "keywords": [
+        "测试",
+        "清单"
+      ],
+      "secondary_keywords": [],
+      "secondary_logic": "and_any",
+      "is_constant": false,
+      "tier": "background",
+      "probability": 100,
+      "group": "",
+      "trigger_chunks": true,
+      "spoiler_level": 0,
+      "source_ref": {},
+      "metadata": {},
+      "send_to_ai": true
+    }
+  ],
+  "import_mode": "ai",
+  "import_exclusions": [],
+  "conversion": {
+    "version": 5,
+    "source_preserved": true,
+    "document_import": true,
+    "bundle_import": true,
+    "warnings": [],
+    "repair": {
+      "ok": true,
+      "applied": [],
+      "applied_count": 0,
+      "remaining_count": 0,
+      "remaining": []
+    },
+    "stages": [
+      "bundle",
+      "normalize",
+      "graph",
+      "embed"
+    ]
+  },
+  "narrative_summary": {
+    "nodes": 20,
+    "edges": 22,
+    "locations": 4,
+    "endings": 3,
+    "repair_count": 0,
+    "error_count": 0,
+    "warning_count": 0
+  },
+  "owner_id": "1",
+  "public_id": "vDCZ7u",
+  "createdAt": "2026-10-31T17:14:45.000Z",
+  "updatedAt": "2026-10-31T17:14:45.000Z",
+  "cover": "",
+  "scenes": [
+    {
+      "id": 1793438085600,
+      "content": "门厅是调查员进入宅邸后的第一个房间。\n\n可调查物件：邮件堆（obj_mail）可得到管家账本线索；旧提灯（obj_lantern）可取得照明物品。\n\n在场 NPC：管家霍尔特（npc_butler）。他表面恭顺，实际在与地窖里的邪教徒做交易；若调查员出示管家账本，他会明显慌乱。\n\n出口：北侧楼梯通往图书馆；图书馆书桌后藏有通往地窖的暗门。",
+      "marker": "灰垣宅的门厅，雨声顺着门缝渗进来。管家站在楼梯口，邮件散落一地。"
+    },
+    {
+      "id": 1793438085600,
+      "content": "图书馆是调查核心房间。\n\n可调查物件：红木书桌（obj_desk）。成功侦查可找到皮面日记（clue_diary）与黄铜钥匙（brass_key），并取得 flag has_key；黄铜钥匙用于打开书桌后的暗门通往地窖。\n\n在场 NPC：妹妹艾琳（npc_sister）。她精神恍惚，只会重复“别让钟走到四”。\n\n测试点：进入本房间应触发富文本触发器 trg_enter_library；获得日记应触发富文本表格触发器 trg_clue_diary。",
+      "marker": "高窗、旧书与一张红木书桌；妹妹被反锁在书架后的暗格里。"
+    },
+    {
+      "id": 1793438085600,
+      "content": "地窖是中途房间，连接图书馆与祭坛。\n\n可调查物件：尸体（obj_corpse）。成功侦查可取得邪教徒信件（clue_cultist_letter），并让厄运时钟 doom_clock 前进 1。\n\n出口：石阶向上回到图书馆（需黄铜钥匙）；内门通往祭坛。\n\n测试点：从图书馆进入地窖必须满足硬门控 flag has_key；若没有钥匙，出口应显示 blocked 与缺失条件。",
+      "marker": "潮湿的石阶通向地窖，一具穿礼服的尸体靠墙坐着，胸口刻着裂隙符号。"
+    },
+    {
+      "id": 1793438085600,
+      "content": "祭坛室是终局房间。\n\n可调查物件：黑石祭坛（obj_altar）与银匕首（obj_dagger，需先获得祭坛图才能看见）。\n\n- 研究祭坛（神秘学）：取得祭坛图 clue_ritual_diagram，厄运时钟 +1。\n- 取走银匕首：取得物品 silver_dagger 与 flag has_dagger，厄运时钟 +1。\n- 执行仪式：设置 flag altar_ready，厄运时钟 +1。\n\n在场 NPC：邪教徒（npc_cultist）。他会试图阻止仪式，也可能主动攻击。\n\n测试点：三个结局都在本房间的出口列表里；只有满足 completion 的结局才会 ready。",
+      "marker": "地下祭坛由黑石砌成，银匕首摆在中央，裂隙在墙面渗出微光。"
+    }
+  ],
+  "endings": [
+    {
+      "id": "ending_seal",
+      "content": "封印结局：需要同时满足“已取得祭坛图”“已取得银匕首”“祭坛已就绪”。\n\n达成后，KP 可让调查员进行最后一次 POW 或神秘学检定；成功则裂隙闭合，妹妹获救。失败的代价由 KP 决定，例如损失 1D6 理智。",
+      "marker": "调查员用银匕首完成封印，裂隙闭合，灰垣宅恢复寂静。"
+    },
+    {
+      "id": "ending_escape",
+      "content": "逃脱结局：只要到过地窖，或已经读到日记，就可以选择撤离。\n\n这是一个“保命但不解决”的结局，适合队伍拒绝冒险时使用。",
+      "marker": "调查员带着妹妹从地窖撤出，身后的裂隙在雨夜里继续扩张。"
+    },
+    {
+      "id": "ending_doom",
+      "content": "厄运结局：当厄运时钟 doom_clock 达到 4 时触发。\n\n调查员的每一次鲁莽研究（验尸、研究祭坛、取匕首、执行仪式）都会推进时钟。KP 应在时钟达到 3 时用触发器给出明确警告。",
+      "marker": "厄运时钟走满，裂隙彻底张开，宅邸被吞没。"
+    }
+  ],
+  "background": "本剧本是系统测试用例，不追求叙事完整度。建议按以下顺序执行并记录结果：\n\n1. 开门厅：检查地点卡是否列出 obj_mail 与 obj_lantern；执行“检查邮件堆”得到管家账本线索。\n2. 进图书馆：确认 enter 触发器给出富文本标题/引用/列表。搜索书桌，成功侦查应同时得到日记、黄铜钥匙与 flag has_key。\n3. 观察去向：在图书馆查看出口，地窖应显示为 blocked，直到 has_key 成立。\n4. 进地窖：确认硬门控放行；验尸得到信件并推进 doom_clock 到 1。\n5. 进祭坛室：研究祭坛得到祭坛图并推进时钟到 2；此时观察 obj_dagger 是否因 reveal_when 显现。\n6. 取匕首：得到 silver_dagger 与 flag has_dagger，时钟到 3，应触发厄运警告触发器。\n7. 执行仪式：设置 altar_ready，时钟到 4；此时 ending_doom 的 completion 成立，ending_seal 也因三项齐备成立。\n8. 观察结局：分别检查三个 ending 的 ready 状态；用 KP 工具进入其中一个，确认结局文本可读。\n\n战斗测试：在祭坛室用 combat.start 加入“管家 霍尔特”与“邪教徒 灰袍人”，确认先攻顺序、HP、武器伤害与回合推进正常。",
+  "public_info": "",
+  "preparation": "",
+  "timeline": "",
+  "allow_open_ending": false
+}

@@ -388,7 +388,6 @@
 
 ## 相关文档
 
-- [项目结构](project-structure-requirements.md)
 - [开发说明](development.md)
 - [剧本格式](scenario-format.md)
 - [剧本导入](scenario-import.md)
