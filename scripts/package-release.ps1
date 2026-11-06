@@ -58,6 +58,102 @@ function Assert-Absent([string]$Relative) {
     }
 }
 
+# 首启状态的真实来源：data/config/general.toml 首次启动时从 config/templates/general.toml 复制，
+# [site] setup_dismissed 必须为 false，且包内不能带任何 OWNER/运行数据。
+function Test-SetupDismissedDisabled([string]$TomlText) {
+    $site = [regex]::Match($TomlText, '(?ms)^\s*\[site\]\s*\r?\n(.*?)(?=^\s*\[|\z)')
+    if (-not $site.Success) {
+        return $false
+    }
+    return [regex]::IsMatch($site.Groups[1].Value, '(?m)^\s*setup_dismissed\s*=\s*false\s*(#.*)?$')
+}
+
+function Assert-FirstRunReady {
+    $problems = New-Object System.Collections.Generic.List[string]
+
+    $templatePath = Join-Path $App 'config/templates/general.toml'
+    if (-not (Test-Path $templatePath)) {
+        $problems.Add('缺少 config/templates/general.toml（首次启动无法生成站点配置）')
+    } else {
+        $toml = [System.IO.File]::ReadAllText($templatePath, [System.Text.Encoding]::UTF8)
+        if (-not (Test-SetupDismissedDisabled $toml)) {
+            $problems.Add('config/templates/general.toml 的 [site] setup_dismissed 不是 false（首启会跳过安装向导）')
+        }
+    }
+
+    foreach ($item in @('data/config', 'data/runtime', 'data/users', 'backend/data')) {
+        if (Test-Path (Join-Path $App $item)) {
+            $problems.Add("混入了运行时/用户数据目录: $item")
+        }
+    }
+
+    Get-ChildItem -Path $App -Recurse -File -Force | Where-Object {
+        $_.Name -in @('users.sqlite3', 'users.json')
+    } | ForEach-Object {
+        $problems.Add("混入了用户数据库: $($_.FullName.Substring($App.Length + 1))")
+    }
+
+    if (-not (Test-Path (Join-Path $App 'dist/public/js/setup-wizard.js'))) {
+        $problems.Add('缺少首启向导脚本 dist/public/js/setup-wizard.js')
+    }
+
+    if ($problems.Count -gt 0) {
+        $detail = ($problems | ForEach-Object { "  - $_" }) -join [Environment]::NewLine
+        throw @"
+发布包首启校验失败，已中止打包：
+$detail
+要求：包内不得包含 OWNER/用户数据与 data/config、data/runtime；
+配置模板的 [site] setup_dismissed 必须为 false，且必须包含首启向导脚本。
+"@
+    }
+    Write-Step '首启校验通过: setup_dismissed=false，未混入用户/运行数据'
+}
+
+function Assert-ZipFirstRunReady([string]$ZipPath) {
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    $problems = New-Object System.Collections.Generic.List[string]
+    try {
+        $entries = @($archive.Entries)
+        foreach ($entry in $entries) {
+            $relative = (($entry.FullName -replace '\\', '/') -replace '^[^/]+/', '')
+            foreach ($prefix in @('data/config/', 'data/runtime/', 'data/users/', 'backend/data/')) {
+                if ($relative.StartsWith($prefix)) {
+                    $problems.Add("压缩包内混入: $relative")
+                }
+            }
+            if ($entry.Name -in @('users.sqlite3', 'users.json')) {
+                $problems.Add("压缩包内混入用户数据库: $relative")
+            }
+        }
+
+        $templateEntry = $entries | Where-Object {
+            (($_.FullName -replace '\\', '/') -replace '^[^/]+/', '') -eq 'config/templates/general.toml'
+        } | Select-Object -First 1
+        if (-not $templateEntry) {
+            $problems.Add('压缩包缺少 config/templates/general.toml')
+        } else {
+            $reader = New-Object System.IO.StreamReader($templateEntry.Open(), [System.Text.Encoding]::UTF8)
+            try {
+                $toml = $reader.ReadToEnd()
+            } finally {
+                $reader.Dispose()
+            }
+            if (-not (Test-SetupDismissedDisabled $toml)) {
+                $problems.Add('压缩包内配置模板的 [site] setup_dismissed 不是 false')
+            }
+        }
+    } finally {
+        $archive.Dispose()
+    }
+
+    if ($problems.Count -gt 0) {
+        Remove-Item -Path $ZipPath -Force -ErrorAction SilentlyContinue
+        $detail = ($problems | ForEach-Object { "  - $_" }) -join [Environment]::NewLine
+        throw "发布包首启校验失败（已删除坏包 $Name.zip）：$([Environment]::NewLine)$detail"
+    }
+    Write-Step '压缩包首启校验通过'
+}
+
 if (Test-Path $Staging) {
     Remove-Item -Path $Staging -Recurse -Force
 }
@@ -179,6 +275,8 @@ $forbidden = @(
     '.worktrees',
     'data/config',
     'data/runtime',
+    'data/users',
+    'backend/data',
     'data/assets/aiplatform',
     'data/assets/avatars',
     'data/assets/bgm'
@@ -186,6 +284,9 @@ $forbidden = @(
 foreach ($item in $forbidden) {
     Assert-Absent $item
 }
+
+# 首启防线：打包结束前直接校验暂存产物，防止打出「解压后不进入安装向导」的坏包
+Assert-FirstRunReady
 
 # ---------------------------------------------------------------- 生成压缩包
 if (-not (Test-Path $OutDir)) {
@@ -202,6 +303,9 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.CompressionLevel]::Optimal,
     $false
 )
+
+# 再对最终 zip 做一次独立审计；不通过会删除坏包并非零退出
+Assert-ZipFirstRunReady $Zip
 
 $hash = (Get-FileHash -Path $Zip -Algorithm SHA256).Hash.ToLowerInvariant()
 $zipSizeMb = [math]::Round((Get-Item $Zip).Length / 1MB, 2)

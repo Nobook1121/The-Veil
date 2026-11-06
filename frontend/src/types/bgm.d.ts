@@ -9,7 +9,7 @@ interface BgmPersonalSettings {
     priority: BgmPlaybackPriority;
 }
 
-/** 服务端音乐库中的一首曲目：内置音乐或管理员上传的音乐。 */
+/** 服务端音乐库中的一首曲目：内置目录或管理员上传的音乐。 */
 interface BgmTrack {
     url: string;
     name: string;

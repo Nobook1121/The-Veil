@@ -42,7 +42,6 @@ namespace SetupWizard {
     const TOTAL_STEPS = 7;
     const SKIPPABLE_STEPS = [1, 2, 4, 5];
     const DEFAULT_SITE_NAME = "帷幕";
-    const DISMISS_STORAGE_KEY = "trpg_setup_dismissed";
     const EMBEDDING_POLL_INTERVAL = 2000;
     let currentStep = 1;
     let brandingName = "";
@@ -64,9 +63,9 @@ namespace SetupWizard {
             const status = await TrpgApi.get<ApiResponse<SetupStatusData>>("/api/setup/status");
             const data = status.data;
             applySiteBranding(data?.site_name || "");
-            // 已在本浏览器跳过引导时不再弹出（服务端状态未及时更新也能生效）。
-            // 只要服务端已有 OWNER，就说明本机已完成初始化，任何入口都不再弹出引导。
-            if (status.success && data && data.setup_required && data.owner_exists !== true && !isDismissedLocally()) {
+            // 服务端状态是唯一权威：只要它要求引导且尚无 OWNER，就必须展示。
+            // 不使用浏览器本地标记，否则同一浏览器访问过旧实例后会永久跳过新部署的首次引导。
+            if (status.success && data && data.setup_required && data.owner_exists !== true) {
                 startWizard();
                 return true;
             }
@@ -74,22 +73,6 @@ namespace SetupWizard {
             console.error("[setup] 无法获取初始化状态", error);
         }
         return false;
-    }
-
-    function isDismissedLocally(): boolean {
-        try {
-            return localStorage.getItem(DISMISS_STORAGE_KEY) === "true";
-        } catch {
-            return false;
-        }
-    }
-
-    function markDismissedLocally(): void {
-        try {
-            localStorage.setItem(DISMISS_STORAGE_KEY, "true");
-        } catch {
-            // 存储不可用时仍可通过服务端状态避免重复弹出。
-        }
     }
 
     /** 用户点击“跳过全部引导”后完成，调用方据此继续初始化主应用。 */
@@ -149,8 +132,7 @@ namespace SetupWizard {
 
     /** 跳过全部引导：关闭向导并让主应用继续初始化。 */
     function skipAll(): void {
-        markDismissedLocally();
-        // 通知服务端记录“已跳过”，避免刷新后再次弹出；失败也不影响本地跳过。
+        // 只由服务端记录“已跳过”：刷新后是否再弹出必须与真实首启状态一致。
         void TrpgApi.post<ApiResponse>("/api/setup/dismiss", {}).catch(() => undefined);
         const wizard = document.getElementById("setupWizard");
         if (wizard) wizard.hidden = true;

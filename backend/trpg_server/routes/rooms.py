@@ -245,7 +245,7 @@ _BGM_AUDIO_SUFFIXES = {".mp3", ".m4a", ".aac", ".ogg", ".oga", ".wav", ".flac", 
 
 
 def _is_local_bgm_path(url):
-    """判断是否为音乐库内的站内相对地址（内置音乐或管理员上传）。"""
+    """判断是否为音乐库内的站内相对地址（内置目录或管理员上传）。"""
 
     lowered = url.lower()
     prefix = next((item for item in _BGM_LOCAL_PREFIXES if lowered.startswith(item)), None)
