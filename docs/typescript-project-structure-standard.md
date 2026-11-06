@@ -313,7 +313,7 @@
 | `docs/character_skills.md` | `docs/character_skills.md` | 保留 |
 | `docs/typescript-security-migration.md` | `docs/typescript-security-migration.md` | 保留 |
 | `docs/patterns/*.md` | `docs/patterns/*.md` | 保留 |
-| `docs/superpowers/**` | `docs/superpowers/**` | 保留 |
+| `docs/superpowers/**` | `docs/superpowers/**` | 本地保留，不入库 |
 | `docs/问题点.md` | 不入库（本地保留） | 已移出仓库并加入忽略规则 |
 | `docs/Test_charactor.json` | `tests/fixtures/test_character.json` | 已迁移，且修正 `charactor` 拼写 |
 | `docs/anythingllm.secret` | 不入库；本地迁至 `.env.local` 或安全凭证库 | 必须忽略 |
