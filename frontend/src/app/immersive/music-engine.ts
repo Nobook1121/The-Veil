@@ -708,7 +708,8 @@ namespace TrpgImmersiveMusicModule {
             this.barIndex = 0;
             this.cycle += 1;
             this.timeline = TrpgImmersiveMusicArranger.buildTimeline(this.spec, this.cycle);
-            this.resetSustain();
+            // 循环接缝处保留上一条长音的尾巴，让新循环的第一小节做等功率接力。
+            this.resetSustain(true);
         }
 
         /** 持续声部的「段落键」：和弦与配器都相同的小节共用同一条长音。 */
@@ -767,10 +768,11 @@ namespace TrpgImmersiveMusicModule {
         }
 
         /** 换循环 / 跳播 / 重建谱面后必须重新起音，不能沿用上一段的持续状态。 */
-        private resetSustain(): void {
+        private resetSustain(keepTail = false): void {
             this.sustainKey = "";
-            this.sustainReady = false;
             this.bassKey = "";
+            if (keepTail) return;
+            this.sustainReady = false;
             this.bassReady = false;
             this.sustainUntil = 0;
             this.bassUntil = 0;
@@ -785,7 +787,8 @@ namespace TrpgImmersiveMusicModule {
                 this.timeline = TrpgImmersiveMusicArranger.buildTimeline(this.spec, this.cycle);
                 guard += 1;
             }
-            this.resetSustain();
+            // 只有真的跨过循环才清空延续状态；普通逐小节推进必须保持长音不断。
+            if (guard > 0) this.resetSustain();
         }
 
         private startDrone(at: number): void {
