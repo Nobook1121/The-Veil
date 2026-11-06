@@ -49,19 +49,59 @@ namespace TrpgImmersiveMusicVoices {
             return this.host.quality;
         }
 
-        private envelope(start: number, duration: number, gain: number, attack: number, release: number): GainNode {
+        /**
+         * 增益包络。
+         *
+         * 持续声部（pad/strings/organ/choir/bass）在段落交接处使用等功率曲线：
+         * 旧声部按 cos 收尾、新声部按 sin 起音，两条曲线在同一段时间内互补，
+         * 叠加后的功率保持恒定；普通瞬态声部仍沿用原来的线性起音 + 指数收尾。
+         */
+        private envelope(
+            start: number,
+            duration: number,
+            gain: number,
+            attack: number,
+            release: number,
+            shapes: { attack?: "natural" | "equalPower"; release?: "exponential" | "equalPower" } = {},
+        ): GainNode {
             const node = this.ctx.createGain();
             const safeDuration = Math.max(0.08, duration);
             const safeAttack = Math.min(Math.max(0.02, attack), safeDuration * 0.5);
-            const safeRelease = Math.min(Math.max(0.05, release), safeDuration * 0.55);
+            const safeRelease = Math.min(
+                Math.max(0.05, release),
+                safeDuration * 0.55,
+                Math.max(0.05, safeDuration - safeAttack),
+            );
             const peakTime = start + safeAttack;
             const releaseTime = Math.max(peakTime, start + safeDuration - safeRelease);
+            const peak = Math.max(0.0002, gain);
             node.gain.setValueAtTime(0.0001, start);
-            node.gain.linearRampToValueAtTime(Math.max(0.0002, gain), peakTime);
-            node.gain.setValueAtTime(Math.max(0.0002, gain), releaseTime);
-            node.gain.exponentialRampToValueAtTime(0.0001, start + safeDuration);
+            if (shapes.attack === "equalPower") {
+                node.gain.setValueCurveAtTime(this.fadeCurve(0.0001, peak, true), start, safeAttack);
+            } else {
+                node.gain.linearRampToValueAtTime(peak, peakTime);
+            }
+            node.gain.setValueAtTime(peak, releaseTime);
+            if (shapes.release === "equalPower") {
+                node.gain.setValueCurveAtTime(this.fadeCurve(peak, 0.0001, false), releaseTime, safeRelease);
+            } else {
+                node.gain.exponentialRampToValueAtTime(0.0001, start + safeDuration);
+            }
             node.connect(this.host.out);
             return node;
+        }
+
+        /** 互补的等功率淡入/淡出曲线，采样密度足够让 3–10ms 的音频块平滑过渡。 */
+        private fadeCurve(from: number, to: number, rising: boolean, samples = 32): Float32Array<ArrayBuffer> {
+            const curve = new Float32Array(new ArrayBuffer(samples * 4));
+            for (let index = 0; index < samples; index += 1) {
+                const progress = samples <= 1 ? 1 : index / (samples - 1);
+                const shape = rising
+                    ? Math.sin((progress * Math.PI) / 2)
+                    : Math.cos((progress * Math.PI) / 2);
+                curve[index] = Math.max(0.0001, from + (to - from) * shape);
+            }
+            return curve;
         }
 
         private osc(type: OscillatorType, note: number, start: number, duration: number, detune = 0): OscillatorNode {
@@ -122,7 +162,16 @@ namespace TrpgImmersiveMusicVoices {
         }
 
         /** 长音和声垫：每个音 1~2 个振荡器，整体一个低通，避免逐音建滤波器。 */
-        pad(notes: number[], start: number, duration: number, gain: number, cutoff: number, pan = 0): void {
+        pad(
+            notes: number[],
+            start: number,
+            duration: number,
+            gain: number,
+            cutoff: number,
+            pan = 0,
+            release = 0.55,
+            shape: { legato?: boolean; continuous?: boolean } = {},
+        ): void {
             const list = notes.filter((note) => Number.isFinite(note));
             if (!list.length) return;
             const at = this.startAt(start, 0.01);
@@ -136,7 +185,14 @@ namespace TrpgImmersiveMusicVoices {
             filter.connect(panner);
             panner.connect(this.host.out);
 
-            const envelope = this.envelope(at, duration, gain, 0.5, 0.55);
+            const envelope = this.envelope(
+                at,
+                duration,
+                gain,
+                shape.legato ? release : 0.5,
+                release,
+                { attack: shape.legato ? "equalPower" : "natural", release: shape.continuous ? "equalPower" : "exponential" },
+            );
             envelope.connect(filter);
 
             const perNote = gain / Math.max(1, list.length);
@@ -159,7 +215,16 @@ namespace TrpgImmersiveMusicVoices {
         }
 
         /** 弦乐：锯齿波 + 低通 + 轻微颤音，起音比 pad 慢。 */
-        strings(notes: number[], start: number, duration: number, gain: number, cutoff: number, pan = 0): void {
+        strings(
+            notes: number[],
+            start: number,
+            duration: number,
+            gain: number,
+            cutoff: number,
+            pan = 0,
+            release = 0.5,
+            shape: { legato?: boolean; continuous?: boolean } = {},
+        ): void {
             const list = notes.filter((note) => Number.isFinite(note));
             if (!list.length) return;
             const at = this.startAt(start, 0.015);
@@ -173,7 +238,14 @@ namespace TrpgImmersiveMusicVoices {
             panner.connect(this.host.out);
             // 弓噪：真实弦乐起音时的高频摩擦，是「合成弦乐」最缺的一层。
             this.air(panner, at, Math.min(0.7, duration * 0.55), gain * 0.12, "bandpass", 2700, 1.2);
-            const envelope = this.envelope(at, duration, gain, 0.7, 0.5);
+            const envelope = this.envelope(
+                at,
+                duration,
+                gain,
+                shape.legato ? release : 0.7,
+                release,
+                { attack: shape.legato ? "equalPower" : "natural", release: shape.continuous ? "equalPower" : "exponential" },
+            );
             envelope.connect(filter);
 
             const perNote = gain / Math.max(1, list.length);
@@ -243,13 +315,27 @@ namespace TrpgImmersiveMusicVoices {
         }
 
         /** 管风琴式持续音：整数谐波叠加，稳定无颤音，承担 pedal point。 */
-        organ(notes: number[], start: number, duration: number, gain: number): void {
+        organ(
+            notes: number[],
+            start: number,
+            duration: number,
+            gain: number,
+            release = 0.45,
+            shape: { legato?: boolean; continuous?: boolean } = {},
+        ): void {
             const list = notes.filter((note) => Number.isFinite(note));
             if (!list.length) return;
             const out = this.ctx.createGain();
             out.gain.value = gain / Math.max(1, list.length);
             out.connect(this.host.out);
-            const envelope = this.envelope(start, duration, 1, 0.3, 0.45);
+            const envelope = this.envelope(
+                start,
+                duration,
+                1,
+                shape.legato ? release : 0.3,
+                release,
+                { attack: shape.legato ? "equalPower" : "natural", release: shape.continuous ? "equalPower" : "exponential" },
+            );
             envelope.connect(out);
             const harmonics = this.quality >= 2 ? [1, 2] : [1, 2, 3, 4];
             list.forEach((note) => {
@@ -264,7 +350,14 @@ namespace TrpgImmersiveMusicVoices {
         }
 
         /** 人声般的合唱垫：带通共振 + 缓慢颤音。 */
-        choir(notes: number[], start: number, duration: number, gain: number): void {
+        choir(
+            notes: number[],
+            start: number,
+            duration: number,
+            gain: number,
+            release = 0.7,
+            shape: { legato?: boolean; continuous?: boolean } = {},
+        ): void {
             if (this.quality >= 2) return;
             const list = notes.filter((note) => Number.isFinite(note));
             if (!list.length) return;
@@ -276,7 +369,14 @@ namespace TrpgImmersiveMusicVoices {
             formant.connect(this.host.out);
             // 合唱呼吸：长音下的低幅气流噪声，避免「一群人形正弦波」。
             this.air(formant, at, Math.min(1.2, duration * 0.7), gain * 0.1, "bandpass", 640, 0.9);
-            const envelope = this.envelope(at, duration, gain, 0.8, 0.7);
+            const envelope = this.envelope(
+                at,
+                duration,
+                gain,
+                shape.legato ? release : 0.8,
+                release,
+                { attack: shape.legato ? "equalPower" : "natural", release: shape.continuous ? "equalPower" : "exponential" },
+            );
             envelope.connect(formant);
             const perNote = gain / Math.max(1, list.length);
             list.forEach((note, index) => {
@@ -305,13 +405,27 @@ namespace TrpgImmersiveMusicVoices {
         }
 
         /** 低音：正弦 + 低通锯齿，短起音，负责和声根音与低频脉冲。 */
-        bass(note: number, start: number, duration: number, gain: number): void {
+        bass(
+            note: number,
+            start: number,
+            duration: number,
+            gain: number,
+            release = 0.25,
+            shape: { legato?: boolean; continuous?: boolean } = {},
+        ): void {
             if (!Number.isFinite(note)) return;
             const filter = this.ctx.createBiquadFilter();
             filter.type = "lowpass";
             filter.frequency.setValueAtTime(320, start);
             filter.connect(this.host.out);
-            const envelope = this.envelope(start, duration, gain, 0.08, 0.25);
+            const envelope = this.envelope(
+                start,
+                duration,
+                gain,
+                shape.legato ? release : 0.08,
+                release,
+                { attack: shape.legato ? "equalPower" : "natural", release: shape.continuous ? "equalPower" : "exponential" },
+            );
             envelope.connect(filter);
             const sine = this.osc("sine", note, start, duration);
             const sub = this.ctx.createGain();

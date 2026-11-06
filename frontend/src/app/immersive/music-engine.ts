@@ -28,6 +28,14 @@ namespace TrpgImmersiveMusicModule {
     const SCHEDULER_INTERVAL_MS = 220;
     /** 本地进度与服务端共享位置偏差超过这么多小节才重新对齐，避免频繁重建。 */
     const SYNC_DRIFT_LIMIT_BARS = 2;
+    /**
+     * 长音跨小节延续：和弦声部只在「和弦真正变化」时重新触发，并额外多留一段尾巴，
+     * 让旧声部在下一段起音时仍未归零。旧实现的每小节重触发会让长音在每小节末尾
+     * 衰减到约 0.3% 再从小节线重新爬升，听感就是「每小节断一次」。
+     */
+    const SUSTAIN_OVERLAP_RATIO = 0.16;
+    const SUSTAIN_OVERLAP_MIN = 0.3;
+    const SUSTAIN_OVERLAP_MAX = 0.75;
 
     const INTENSITY_SPECS: Record<ImmersiveIntensity, { gain: number; tempo: number; density: number }> = {
         low: { gain: 0.82, tempo: 0.92, density: 0.72 },
@@ -86,6 +94,27 @@ namespace TrpgImmersiveMusicModule {
     function clamp(value: number, minimum: number, maximum: number): number {
         if (!Number.isFinite(value)) return minimum;
         return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    /** 长音尾巴长度：按时值成比例，兼顾慢速恐怖的长混响与快速紧迫的干净切分。 */
+    function sustainOverlap(barDuration: number): number {
+        return clamp(barDuration * SUSTAIN_OVERLAP_RATIO, SUSTAIN_OVERLAP_MIN, SUSTAIN_OVERLAP_MAX);
+    }
+
+    /**
+     * 等功率交叉淡化曲线：A/B 总线切换时，旧总线按 cos 淡出、新总线按 sin 淡入，
+     * 两条不相关信号的功率之和保持恒定，避免线性淡化在中点掉 3dB 的「凹槽」。
+     */
+    function equalPowerCurve(from: number, to: number, rising: boolean, samples = 48): Float32Array<ArrayBuffer> {
+        const curve = new Float32Array(new ArrayBuffer(samples * 4));
+        for (let index = 0; index < samples; index += 1) {
+            const progress = samples <= 1 ? 1 : index / (samples - 1);
+            const shape = rising
+                ? Math.sin((progress * Math.PI) / 2)
+                : Math.cos((progress * Math.PI) / 2);
+            curve[index] = Math.max(0.0001, from + (to - from) * shape);
+        }
+        return curve;
     }
 
     /** 轻饱和曲线：只给峰值加一点偶次谐波，避免纯数学波形「塑料感」。 */
@@ -372,6 +401,17 @@ namespace TrpgImmersiveMusicModule {
         private bridgeSeconds = 0;
         /** 等待期间用哪一小节的余料做过渡，避免新玩家进来先听到静音。 */
         private bridgeBarIndex = 0;
+        /** 当前正在延续的持续声部和弦键；相同键的小节共用一条长音，不逐小节重触发。 */
+        private sustainKey = "";
+        private sustainReady = false;
+        /** 低音同样按「同一根音」跨小节延续，避免每小节线出现低频断口。 */
+        private bassKey = "";
+        private bassReady = false;
+        /** 上一条长音/低音实际响到什么时候，用来判断下一条是否需要等功率接力。 */
+        private sustainUntil = 0;
+        private bassUntil = 0;
+        /** 上一次长音的实际音高排列，用于把新和弦转位到最近的位置（声部连接）。 */
+        private lastChordNotes: number[] = [];
 
         constructor(
             ctx: AudioContext,
@@ -459,8 +499,13 @@ namespace TrpgImmersiveMusicModule {
 
         start(at: number, fadeMs: number): void {
             this.currentLevel = 0;
+            // 等功率淡入：与旧总线的 cos 淡出配对，交叉期间功率不塌陷。
             this.gain.gain.setValueAtTime(0.0001, at);
-            this.gain.gain.linearRampToValueAtTime(Math.max(0.001, this.baseLevel), at + fadeMs / 1000);
+            this.gain.gain.setValueCurveAtTime(
+                equalPowerCurve(0.0001, Math.max(0.001, this.baseLevel), true),
+                at,
+                Math.max(0.05, fadeMs / 1000),
+            );
             this.currentLevel = this.baseLevel;
             // 从共享位置切入时先补齐当前小节的余料，再在整齐的小节边界继续，
             // 这样不同客户端听到的是同一小节里的同一拍，而不是各自重新开歌。
@@ -478,11 +523,16 @@ namespace TrpgImmersiveMusicModule {
             const now = this.ctx.currentTime;
             const prev = this.baseLevel;
             this.baseLevel = level;
+            const live = Math.max(0.0001, Number(this.gain.gain.value) || this.currentLevel);
             if (this.currentLevel > 0 && prev > 0) {
                 this.currentLevel = this.currentLevel * (level / prev);
             }
-            this.gain.gain.cancelScheduledValues(now);
-            this.gain.gain.setValueAtTime(Math.max(0.0001, this.currentLevel), now);
+            try {
+                this.gain.gain.cancelAndHoldAtTime(now);
+            } catch {
+                this.gain.gain.cancelScheduledValues(now);
+            }
+            this.gain.gain.setValueAtTime(live, now);
             this.gain.gain.linearRampToValueAtTime(Math.max(0.0001, level), now + Math.max(0.2, fadeSeconds));
         }
 
@@ -490,9 +540,19 @@ namespace TrpgImmersiveMusicModule {
             if (this.expired || this.disposed) return;
             this.expired = true;
             const seconds = Math.max(0.2, fadeMs / 1000);
-            this.gain.gain.cancelScheduledValues(now);
-            this.gain.gain.setValueAtTime(Math.max(0.0001, this.currentLevel), now);
-            this.gain.gain.linearRampToValueAtTime(0.0001, now + seconds);
+            const from = Math.max(0.0001, Number(this.gain.gain.value) || this.currentLevel || 0.0001);
+            try {
+                this.gain.gain.cancelAndHoldAtTime(now);
+            } catch {
+                this.gain.gain.cancelScheduledValues(now);
+            }
+            // 与 oncoming 总线的 sin 淡入配对，为中点保持等功率。
+            this.gain.gain.setValueAtTime(from, now);
+            this.gain.gain.setValueCurveAtTime(
+                equalPowerCurve(from, 0.0001, false),
+                now,
+                seconds,
+            );
             this.currentLevel = 0;
             this.disposeTimer = window.setTimeout(() => this.dispose(), seconds * 1000 + 320);
         }
@@ -554,6 +614,8 @@ namespace TrpgImmersiveMusicModule {
                 }
             }
             this.barIndex = Math.max(0, Math.min(index, Math.max(0, this.timeline.bars.length - 1)));
+            this.lastChordNotes = [];
+            this.resetSustain();
         }
 
         /** 切入等待期的过渡垫：用同一位置上的和弦/低音先填满余下的小节。 */
@@ -563,12 +625,20 @@ namespace TrpgImmersiveMusicModule {
             const bar = bars[Math.max(0, Math.min(this.bridgeBarIndex, bars.length - 1))];
             if (!bar) return;
             const duration = Math.max(0.2, seconds);
+            // 过渡垫多留一点尾巴，与下一小节的等功率起音时长一致，
+            // 玩家中途加入时不会先听到空白，交接点前后功率互补。
+            const tail = Math.max(0.15, sustainOverlap(this.timeline.barDuration));
             if (bar.chord) {
                 const notes = bar.chord.intervals.map((interval) => (bar.chord ? bar.chord.root + interval : 0));
-                this.rack.pad(notes, at, duration, bar.dynamic * 0.7, bar.cutoff);
+                this.rack.pad(notes, at, duration + tail, bar.dynamic * 0.7, bar.cutoff, 0, tail, { continuous: true });
+                this.lastChordNotes = notes;
+                this.sustainUntil = at + duration + tail;
+                this.sustainReady = true;
             }
             if (bar.bass !== null) {
-                this.rack.bass(bar.bass, at, duration, bar.dynamic * 0.8);
+                this.rack.bass(bar.bass, at, duration + tail * 0.7, bar.dynamic * 0.8, tail * 0.7, { continuous: true });
+                this.bassUntil = at + duration + tail * 0.7;
+                this.bassReady = true;
             }
         }
 
@@ -581,6 +651,7 @@ namespace TrpgImmersiveMusicModule {
                     this.barIndex += skipped;
                     this.nextBarTime += skipped * this.timeline.barDuration;
                     this.normalizeTimeline();
+                    this.resetSustain();
                 }
             }
             let guard = 0;
@@ -637,6 +708,72 @@ namespace TrpgImmersiveMusicModule {
             this.barIndex = 0;
             this.cycle += 1;
             this.timeline = TrpgImmersiveMusicArranger.buildTimeline(this.spec, this.cycle);
+            this.resetSustain();
+        }
+
+        /** 持续声部的「段落键」：和弦与配器都相同的小节共用同一条长音。 */
+        private sustainKeyFor(bar: TrpgImmersiveMusicArranger.BarPlan): string {
+            if (!bar.chord || !bar.chordVoices.length) return "";
+            return [
+                bar.chord.root,
+                bar.chord.intervals.join(","),
+                bar.chordVoices.join(","),
+            ].join("|");
+        }
+
+        private bassKeyFor(bar: TrpgImmersiveMusicArranger.BarPlan): string {
+            return bar.bass === null ? "" : `bass:${bar.bass}`;
+        }
+
+        /** 从当前小节向后数，有多少个连续小节仍共享同一个段落键（遇到留白即停）。 */
+        private spanBars(fromIndex: number, keyOf: (bar: TrpgImmersiveMusicArranger.BarPlan) => string): number {
+            const bars = this.timeline.bars;
+            const first = bars[fromIndex];
+            if (!first) return 0;
+            const key = keyOf(first);
+            if (!key) return 0;
+            let count = 1;
+            for (let index = fromIndex + 1; index < bars.length; index += 1) {
+                const next = bars[index];
+                if (!next || next.silence || keyOf(next) !== key) break;
+                count += 1;
+            }
+            return count;
+        }
+
+        /**
+         * 保持和弦级数不变，只把各声部按八度移到离上一次发声最近的位置。
+         * 这样 C→G 之类的进行不会让整块 pad 平行大跳，听感更接近持续配乐。
+         */
+        private voiceLead(notes: number[]): number[] {
+            if (!this.lastChordNotes.length) return notes.slice();
+            const voiced = notes.map((note, index) => {
+                const anchor = this.lastChordNotes[index];
+                if (anchor === undefined || !Number.isFinite(anchor)) return note;
+                let moved = note;
+                while (moved - anchor > 6) moved -= 12;
+                while (anchor - moved > 6) moved += 12;
+                return moved;
+            });
+            // 连续五度进行时逐声部就近转位会一路把整块和声带偏；以本和弦的原始根音为锚，
+            // 整块八度平移回 ±1 八度内，既保留平滑的声部移动，也不会让 pad 越飘越低/越高。
+            const anchor = notes[0];
+            if (anchor === undefined || !voiced.length) return voiced;
+            const low = Math.min(...voiced);
+            let shift = 0;
+            while (low + shift - anchor > 12) shift -= 12;
+            while (anchor - (low + shift) > 12) shift += 12;
+            return shift === 0 ? voiced : voiced.map((note) => note + shift);
+        }
+
+        /** 换循环 / 跳播 / 重建谱面后必须重新起音，不能沿用上一段的持续状态。 */
+        private resetSustain(): void {
+            this.sustainKey = "";
+            this.sustainReady = false;
+            this.bassKey = "";
+            this.bassReady = false;
+            this.sustainUntil = 0;
+            this.bassUntil = 0;
         }
 
         /** 后台节流跳过后，把超出一个循环的索引折算成新的循环，保持谱面连续。 */
@@ -648,6 +785,7 @@ namespace TrpgImmersiveMusicModule {
                 this.timeline = TrpgImmersiveMusicArranger.buildTimeline(this.spec, this.cycle);
                 guard += 1;
             }
+            this.resetSustain();
         }
 
         private startDrone(at: number): void {
@@ -709,37 +847,80 @@ namespace TrpgImmersiveMusicModule {
             this.delaySend.gain.setTargetAtTime(bar.section === "climax" ? 0.05 : 0.1, start, 0.3);
             this.droneGain.gain.setTargetAtTime(this.droneTarget(bar.section), start, 0.5);
 
-            if (bar.silence) return;
+            if (bar.silence) {
+                // 留白是真正的休止：清空延续状态，休止后的同和弦也要重新起音。
+                this.resetSustain();
+                return;
+            }
             const random = TrpgImmersiveMusicArranger.streamRandom(
                 this.spec.seedBase,
                 ["play", this.cycle, bar.index],
             );
 
+            const overlap = sustainOverlap(barDuration);
             if (bar.chord) {
                 const notes = bar.chord.intervals.map((interval) => bar.chord ? bar.chord.root + interval : 0);
-                const duration = Math.max(beat * 0.8, barDuration * (closing ? 0.55 : 1.04));
-                bar.chordVoices.forEach((voice, voiceIndex) => {
-                    const pan = (voiceIndex - (bar.chordVoices.length - 1) / 2) * 0.18;
-                    const gain = VOICE_GAIN[voice] || 0.06;
-                    switch (voice) {
-                        case "strings":
-                            this.rack.strings(notes, start, duration, gain, bar.cutoff, pan);
-                            break;
-                        case "organ":
-                            this.rack.organ(notes, start, duration, gain * 0.85);
-                            break;
-                        case "choir":
-                            this.rack.choir(notes, start, duration, gain * 0.9);
-                            break;
-                        case "pad":
-                        default:
-                            this.rack.pad(notes, start, duration, gain, bar.cutoff, pan);
-                            break;
-                    }
-                });
-                if (bar.brass) {
-                    this.rack.brass(notes, start + beat * 0.55, duration * 0.75, VOICE_GAIN.brass || 0.05, bar.cutoff);
+                const voiced = this.voiceLead(notes);
+                const key = this.sustainKeyFor(bar);
+                // 同一和弦/配器只在第一小节起音一次；后续小节共用同一条长音，
+                // 不再每小节重新做一遍淡入淡出（那正是「每小节断一次」的来源）。
+                if (!key) {
+                    this.sustainKey = "";
+                    this.sustainReady = false;
+                } else if (!this.sustainReady || key !== this.sustainKey) {
+                    const span = Math.max(1, this.spanBars(this.barIndex, (item) => this.sustainKeyFor(item)));
+                    const spanSeconds = span * barDuration;
+                    // 整条长音结束后如果紧接留白，就在最后一个尾音前收干净；否则让它跨过段落线。
+                    const afterSpan = this.timeline.bars[this.barIndex + span];
+                    const endsInSilence = Boolean(afterSpan && afterSpan.silence);
+                    const duration = Math.max(
+                        beat * 0.8,
+                        endsInSilence
+                            ? spanSeconds - barDuration * 0.45
+                            : spanSeconds + overlap,
+                    );
+                    // 上一条长音如果此刻仍在响（和弦切换点），新声部用等功率曲线接力；
+                    // 从留白/首次进入时则保留原本的慢起音，音色不变。
+                    const legato = this.sustainReady && start < this.sustainUntil - 0.01;
+                    const shape = { continuous: true, legato };
+                    bar.chordVoices.forEach((voice, voiceIndex) => {
+                        const pan = (voiceIndex - (bar.chordVoices.length - 1) / 2) * 0.18;
+                        const gain = VOICE_GAIN[voice] || 0.06;
+                        switch (voice) {
+                            case "strings":
+                                this.rack.strings(voiced, start, duration, gain, bar.cutoff, pan, overlap, shape);
+                                break;
+                            case "organ":
+                                this.rack.organ(voiced, start, duration, gain * 0.85, overlap, shape);
+                                break;
+                            case "choir":
+                                this.rack.choir(voiced, start, duration, gain * 0.9, overlap, shape);
+                                break;
+                            case "pad":
+                            default:
+                                this.rack.pad(voiced, start, duration, gain, bar.cutoff, pan, overlap, shape);
+                                break;
+                        }
+                    });
+                    this.lastChordNotes = voiced;
+                    this.sustainKey = key;
+                    this.sustainReady = true;
+                    this.sustainUntil = start + duration;
                 }
+                if (bar.brass) {
+                    // 铜管是每小节的进入型声部，起音时长保持原配方，不随长音联动。
+                    this.rack.brass(
+                        voiced,
+                        start + beat * 0.55,
+                        Math.max(beat * 0.8, barDuration * (closing ? 0.42 : 0.78)),
+                        VOICE_GAIN.brass || 0.05,
+                        bar.cutoff,
+                    );
+                }
+            } else {
+                // 抽空段没有和弦：清空延续状态，下一段仍会正常起音。
+                this.sustainKey = "";
+                this.sustainReady = false;
             }
 
             const bassNote = bar.bass;
@@ -750,8 +931,38 @@ namespace TrpgImmersiveMusicModule {
                         this.rack.bass(bassNote, start + index * beat, beat * 0.62, (VOICE_GAIN.bass || 0.15) * 0.85);
                     }
                 } else {
-                    this.rack.bass(bassNote, start, barDuration * (closing ? 0.6 : 0.96), VOICE_GAIN.bass || 0.15);
+                    const key = this.bassKeyFor(bar);
+                    if (!key) {
+                        this.bassKey = "";
+                        this.bassReady = false;
+                    } else if (!this.bassReady || key !== this.bassKey) {
+                        const span = Math.max(1, this.spanBars(this.barIndex, (item) => this.bassKeyFor(item)));
+                        const spanSeconds = span * barDuration;
+                        const afterSpan = this.timeline.bars[this.barIndex + span];
+                        const endsInSilence = Boolean(afterSpan && afterSpan.silence);
+                        const duration = Math.max(
+                            beat * 0.8,
+                            endsInSilence
+                                ? spanSeconds - barDuration * 0.4
+                                : spanSeconds + overlap * 0.8,
+                        );
+                        const legato = this.bassReady && start < this.bassUntil - 0.01;
+                        this.rack.bass(
+                            bassNote,
+                            start,
+                            duration,
+                            VOICE_GAIN.bass || 0.15,
+                            overlap * 0.8,
+                            { continuous: true, legato },
+                        );
+                        this.bassKey = key;
+                        this.bassReady = true;
+                        this.bassUntil = start + duration;
+                    }
                 }
+            } else {
+                this.bassKey = "";
+                this.bassReady = false;
             }
 
             if (bar.ostinato) {
