@@ -2,9 +2,19 @@
 
 .agent-ball-layer {
     position: fixed;
-    right: 24px;
-    bottom: 24px;
-    z-index: 2400;
+    left: 0;
+    top: 0;
+    z-index: 1030;
+    /* 只有 56×56 的悬浮球本身接收手势，页面其他区域的滚动不受影响。 */
+    touch-action: manipulation;
+    will-change: transform;
+}
+
+/* 拖动时禁用页面文本选中，避免拖拽过程里选中背景文字。 */
+html.agent-ball-dragging,
+html.agent-ball-dragging * {
+    user-select: none !important;
+    -webkit-user-select: none !important;
 }
 
 .agent-ball {
@@ -20,13 +30,32 @@
     color: var(--theme-text-inverse);
     background: var(--theme-accent-primary);
     box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28);
-    cursor: pointer;
+    cursor: grab;
+    /* 悬浮球自身需要完整接管触摸拖动；其余区域仍按页面默认策略滚动。 */
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
     transition: transform 0.18s ease, background-color 0.18s ease;
+}
+
+/* 提高优先级覆盖 Bootstrap 对 button 的 cursor: pointer。 */
+.agent-ball-layer .agent-ball {
+    cursor: grab;
 }
 
 .agent-ball:hover {
     transform: translateY(-2px);
     background: var(--theme-accent-primary-hover);
+}
+
+.agent-ball-layer-dragging,
+.agent-ball-layer-dragging .agent-ball {
+    cursor: grabbing;
+}
+
+.agent-ball-layer-dragging .agent-ball {
+    transform: none;
+    transition: none;
 }
 
 .agent-ball-open {
@@ -45,9 +74,9 @@
 }
 
 .agent-ball-menu {
-    position: fixed;
-    right: 24px;
-    bottom: 90px;
+    position: absolute;
+    left: 0;
+    top: 0;
     display: flex;
     flex-direction: column;
     min-width: 168px;
@@ -76,7 +105,8 @@
 
 .agent-window {
     position: fixed;
-    z-index: 2300;
+    /* 悬浮球（1030）需要在窗口之上；两者都低于弹窗遮罩（1040）。 */
+    z-index: 1020;
     display: flex;
     flex-direction: column;
     min-width: 360px;
