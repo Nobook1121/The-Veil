@@ -1,1 +1,0 @@
-- [CoC主题设计计划](coc-theme-plan.md) — AI跑团平台新主题工程计划
