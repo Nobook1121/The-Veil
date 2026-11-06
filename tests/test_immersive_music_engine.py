@@ -84,7 +84,11 @@ def test_dynamics_and_silence_are_not_constant(cue_probe: dict) -> None:
     for profile in cue_probe["profiles"]:
         dynamics = profile["dynamics"]
         assert max(dynamics) - min(dynamics) >= 0.3, profile["profile"]
-        assert profile["silence_bars"] >= 1, profile["profile"]
+        # v1.0.1：留白不再整小节静音（旧实现每 3 小节插一个 silence 小节，
+        # horror 44 BPM 下等于连续 5.45 秒没有推进，听感就是播放中断）。
+        # 现在改为「抽掉和弦 + 压低总线 + 心跳/颗粒托底」的低电平空洞。
+        assert profile["silence_bars"] == 0, profile["profile"]
+        assert profile["hollow_bars"] >= 1, profile["profile"]
         # 高潮必须明显高于开场铺垫。
         climax_levels = [level for level, kind in zip(dynamics, profile["kinds"]) if kind == "climax"]
         bed_levels = [level for level, kind in zip(dynamics, profile["kinds"]) if kind == "bed"]
@@ -167,10 +171,18 @@ def test_auto_score_sections_are_long_enough_and_unique(cue_probe: dict) -> None
         ids = [run["id"] for run in runs]
         assert len(ids) == len(set(ids)), (profile, ids)
         assert len(runs) >= 5, (profile, ids)
-        # 所有段落（含 void 呼吸段）都不少于 8 小节。
+        # 叙事段落至少 8 小节（void 见下一行单独约束）。
         assert data["min_melodic_section_bars"] >= 8, (profile, data["min_melodic_section_bars"])
-        assert data["total_bars"] >= 40, (profile, data["total_bars"])
-        assert all(run["bars"] >= 8 for run in runs), (profile, runs)
+        # 整条 cue 以「时长」而不是固定小节数衡量：留白段收敛后，
+        # 慢速档位少几小节并不代表曲子变短。
+        assert data["total_bars"] >= 30, (profile, data["total_bars"])
+        assert data["total_bars"] * data["bar_duration"] >= 60, (profile, data["total_bars"], data["bar_duration"])
+        # 叙事段落至少 8 小节；void 呼吸段按秒数收敛到 2–4 小节（约 6–11 秒），
+        # 避免慢速档位出现 40 秒以上的空档。
+        assert all(
+            run["bars"] >= 8 if run["kind"] != "void" else 2 <= run["bars"] <= 4
+            for run in runs
+        ), (profile, runs)
         for run in runs:
             if run["kind"] == "void":
                 continue

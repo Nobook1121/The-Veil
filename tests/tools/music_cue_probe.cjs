@@ -58,6 +58,9 @@ function summarize(profile, intensity, seed, score) {
         kinds: bars.map((bar) => bar.section),
         dynamics: bars.map((bar) => Number(bar.dynamic.toFixed(3))),
         silence_bars: bars.filter((bar) => bar.silence).length,
+        // 留白段的和弦被抽空，但仍有心跳/颗粒/钟声托底：
+        // 用「无和弦小节数」衡量空洞，而不是用全静音小节数。
+        hollow_bars: bars.filter((bar) => !bar.chord).length,
         chord_roots: bars.filter((bar) => bar.chord).map((bar) => bar.chord.root),
         motif_ids: bars.filter((bar) => bar.motif).map((bar) => bar.motif.cell.id),
         motif_instruments: bars.filter((bar) => bar.motif).map((bar) => bar.motif.instrument),

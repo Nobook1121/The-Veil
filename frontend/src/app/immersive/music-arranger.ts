@@ -53,6 +53,28 @@ namespace TrpgImmersiveMusicArranger {
         gain: number;
     }
 
+    /**
+     * 内声部推进：不改变和弦，只在和声内部做一次短小的级进/经过音。
+     * 当和声节奏本来就慢时，这一层负责让听感「在走」，而不是停在一个音响块上。
+     */
+    export interface MotionPlan {
+        degrees: number[];
+        /** 每个音的时值，单位拍。 */
+        rhythm: number[];
+        startBeat: number;
+        instrument: "pluck" | "organ" | "strings" | "bell";
+        gain: number;
+        octave: number;
+    }
+
+    /** 低频/时钟式律动：心跳让人感到「还在呼吸」，时钟让人感到时间在走。 */
+    export interface PulsePlan {
+        kind: "heartbeat" | "clock";
+        /** 单位拍。 */
+        hits: number[];
+        gain: number;
+    }
+
     /** 段落间衔接：枢轴和弦、动机承接或留白呼吸。探针据此断言「段落不是硬切」。 */
     export interface TransitionPlan {
         kind: "open" | "pivot" | "pickup" | "breath";
@@ -81,6 +103,15 @@ namespace TrpgImmersiveMusicArranger {
         ostinato: OstinatoPlan | null;
         motif: MotifPlan | null;
         counter: MotifPlan | null;
+        /** 段落内部的内声部推进；与动机不同，它不占前景，只维持流动感。 */
+        motion: MotionPlan | null;
+        pulse: PulsePlan | null;
+        /** 颗粒织体层：给长音垫加一层极轻的「空气」，避免整段只有振荡器。 */
+        texture: boolean;
+        /** 高潮进入点的打击落点。 */
+        impact: boolean;
+        /** 进入高潮前的长渐强（riser）。 */
+        riser: boolean;
         timpani: TimpaniPlan | null;
         bell: number | null;
         noiseHit: boolean;
@@ -131,10 +162,32 @@ namespace TrpgImmersiveMusicArranger {
 
     /**
      * 叙事段落的最短长度。低于这个长度，听众只会听到「一句没展开就换段」，
-     * 因此所有段落（包括 `void` 呼吸段）一律不少于 8 小节。
+     * 因此除 `void` 呼吸段外的所有段落都不少于 8 小节。
      */
     const MIN_SECTION_BARS = 8;
-    const MIN_BREATH_BARS = 8;
+    /**
+     * 留白是「一口气」，不是「一首曲子结束」。
+     * 旧实现同样强制 8 小节：horror（44 BPM，每小节 5.45 秒）会留下 43.6 秒
+     * 几乎没有和声的空档，听感就是播放戛然而止。这里按秒数收敛到 7.5 秒左右，
+     * 再按当前速度折算成小节，最快与最慢档位都落在 7–11 秒。
+     */
+    const BREATH_SECONDS = 7.5;
+    const BREATH_BARS_MIN = 2;
+    const BREATH_BARS_MAX = 4;
+
+    /**
+     * 和声节奏（多少小节换一次和弦）不再固定为 4/2/1/3 小节，
+     * 而是按「目标秒数 ÷ 当前小节秒数」折算：慢速档位每小节就换和弦，
+     * 快速档位可以连续 4 小节再换。这样任何速度下，一个和弦都不会拖过约 8 秒。
+     * 旧规则在 horror 的 bed 段是 4 × 5.45 = 21.8 秒一个和弦，audit 实测最长 32.7 秒。
+     */
+    const HARMONY_SECONDS: Record<SectionKind, number> = {
+        bed: 6,
+        rise: 4.5,
+        climax: 3,
+        void: 99,
+        tail: 5,
+    };
 
     /** FNV-1a：把任意种子字符串压成 32 位整数。 */
     export function hashSeed(input: string): number {
@@ -436,15 +489,10 @@ namespace TrpgImmersiveMusicArranger {
         }
     }
 
-    function harmonicRhythmFor(kind: SectionKind): number {
-        switch (kind) {
-            case "bed": return 4;
-            case "rise": return 2;
-            case "climax": return 1;
-            case "void": return 99;
-            case "tail": return 3;
-            default: return 2;
-        }
+    function harmonicRhythmFor(kind: SectionKind, barDuration: number): number {
+        const target = HARMONY_SECONDS[kind] ?? 6;
+        // 至少 1 小节；最多 4 小节，避免快速档位把和弦拖成「一块背景」。
+        return Math.max(1, Math.min(4, Math.round(target / Math.max(0.2, barDuration))));
     }
 
     function dynamicCurve(kind: SectionKind, bar: number, bars: number, base: number, random: () => number): number {
@@ -571,27 +619,47 @@ namespace TrpgImmersiveMusicArranger {
         random: () => number,
     ): ChordPlan[] {
         const count = Math.max(1, shape.bars);
-        const rhythm = harmonicRhythmFor(shape.kind);
+        const rhythm = harmonicRhythmFor(shape.kind, spec.barDuration);
         const result: ChordPlan[] = [];
         let current: ChordPlan | null = previous;
         let step = Math.floor(cycle / 2) + sectionIndex;
+        // 第 0 小节沿用上一段最后一个和弦（延留），所以第一次换和弦从第 1 小节起算；
+        // 否则「延留 + 一个完整和声节奏」会在段落线附近叠成两倍时长。
+        const anchor = previous ? 1 : 0;
+        const sameChord = (a: ChordPlan | null, b: ChordPlan | null): boolean => Boolean(
+            a && b
+            && a.root === b.root
+            && a.intervals.length === b.intervals.length
+            && a.intervals.every((value, index) => value === b.intervals[index]),
+        );
         for (let bar = 0; bar < count; bar += 1) {
-            const shouldChange = bar === 0 || bar % rhythm === 0;
+            const shouldChange = bar === 0 || (bar - anchor) % rhythm === 0;
             if (shouldChange) {
                 if (bar === 0 && previous) {
                     current = previous;
-                } else if (spec.explicitChords && spec.explicitChords.length) {
-                    const list = spec.explicitChords;
-                    const picked = list[step % list.length];
-                    if (picked) {
-                        current = { root: picked.root + (cycle % 2 === 0 ? 0 : 1), intervals: picked.intervals.slice() };
-                    }
-                    step += 1;
                 } else {
-                    const list = spec.progression;
-                    const degree = list.length ? list[step % list.length] || 0 : 0;
-                    current = chordFromDegree(spec, degree, shape.kind, random);
-                    step += 1;
+                    // 进行里允许重复级数（例如 0-0-3-1-0），但连续两次落在同一个和弦上
+                    // 会让听感重新「停住」；这里跳过与上一小节完全相同的和弦。
+                    const lastPushed = result.length ? result[result.length - 1] ?? null : null;
+                    let candidate: ChordPlan | null = null;
+                    let guard = 0;
+                    do {
+                        if (spec.explicitChords && spec.explicitChords.length) {
+                            const list = spec.explicitChords;
+                            const picked = list[step % list.length];
+                            if (picked) {
+                                candidate = { root: picked.root + (cycle % 2 === 0 ? 0 : 1), intervals: picked.intervals.slice() };
+                            }
+                            step += 1;
+                        } else {
+                            const list = spec.progression;
+                            const degree = list.length ? list[step % list.length] || 0 : 0;
+                            candidate = chordFromDegree(spec, degree, shape.kind, random);
+                            step += 1;
+                        }
+                        guard += 1;
+                    } while (guard < 4 && sameChord(candidate, lastPushed));
+                    if (candidate) current = candidate;
                 }
             }
             if (shape.kind === "climax" && bar === Math.floor(count / 2)) {
@@ -656,16 +724,131 @@ namespace TrpgImmersiveMusicArranger {
         };
     }
 
+    /**
+     * 内声部推进：用和弦音在弱拍做 2–3 个音的短句，不引入调外音，
+     * 因此不会改变和声功能，只让长音之间「有东西在走」。
+     * 有前景动机的小节让位，避免把乐句塞满。
+     */
+    function motionFor(
+        spec: CompositionSpec,
+        shape: SectionShape,
+        sectionBar: number,
+        chord: ChordPlan,
+        random: () => number,
+    ): MotionPlan | null {
+        const tones = chord.intervals;
+        if (tones.length < 2 || shape.kind === "void") return null;
+        const low = tones[0] ?? 0;
+        const third = tones[1] ?? low;
+        const fifth = tones[tones.length - 1] ?? low;
+        let degrees: number[];
+        let rhythm: number[];
+        let startBeat: number;
+        let gain: number;
+        let octave: number;
+        switch (shape.kind) {
+            case "bed":
+                degrees = [third + 12, fifth + 12];
+                rhythm = [1.25, 0.75];
+                startBeat = 2.5;
+                gain = 0.085;
+                octave = 0;
+                break;
+            case "rise":
+                degrees = [low + 12, third + 12, fifth + 12];
+                rhythm = [0.5, 0.5, 1];
+                startBeat = 2;
+                gain = 0.1;
+                octave = 0;
+                break;
+            case "climax":
+                degrees = [fifth + 12, third + 12, low + 24];
+                rhythm = [0.5, 0.5, 1];
+                startBeat = 1.5;
+                gain = 0.105;
+                octave = 0;
+                break;
+            case "tail":
+                degrees = [third + 12, low + 12];
+                rhythm = [1.5, 1];
+                startBeat = 2;
+                gain = 0.07;
+                octave = 0;
+                break;
+            default:
+                return null;
+        }
+        // 每隔几小节换一次音区与落拍，避免内声部自己也变成固定 loop。
+        if (sectionBar % 4 === 3) {
+            degrees = degrees.slice().reverse();
+            startBeat = Math.min(3, startBeat + 0.5);
+        }
+        if (random() < 0.22) octave = 12;
+        if (spec.intensity === "low") gain *= 0.75;
+        if (spec.intensity === "high") gain *= 1.12;
+        const instrument: MotionPlan["instrument"] = spec.profile === "horror" || spec.profile === "unease"
+            ? "organ"
+            : spec.profile === "awe" || spec.profile === "suspense"
+                ? "bell"
+                : "pluck";
+        return { degrees, rhythm, startBeat, instrument, gain, octave };
+    }
+
+    /**
+     * 低频脉动：心跳是「Lub-Dub」两下，时钟是单点。
+     * 这两层只在低频/时间感重要的档位出现，紧迫档位已有 16 分 ostinato，不再叠加。
+     */
+    function pulseFor(
+        spec: CompositionSpec,
+        shape: SectionShape,
+        sectionBar: number,
+    ): PulsePlan | null {
+        if (!spec.lowPulse) return null;
+        // 留白段保留一条极稀疏的心跳：抽空的是和声，不是「房间」。
+        // 这也是判断「音乐还在不在播」最直接的听觉锚点；
+        // urgency 的 ostinato 在留白段整体撤掉，更需要这条心跳托住。
+        if (shape.kind === "void") {
+            return { kind: "heartbeat", hits: [0], gain: 0.03 };
+        }
+        if (spec.profile === "urgency") return null;
+        if (spec.profile === "suspense" || spec.profile === "unease") {
+            if (shape.kind === "bed") {
+                return sectionBar % 2 === 0
+                    ? { kind: "clock", hits: [sectionBar % 4 === 0 ? 1 : 2], gain: 0.028 }
+                    : null;
+            }
+            if (shape.kind === "tail" && sectionBar > 1) return null;
+        }
+        if (shape.kind === "bed") {
+            return sectionBar % 2 === 0 ? { kind: "heartbeat", hits: [0, 0.3], gain: 0.048 } : null;
+        }
+        if (shape.kind === "tail") {
+            return sectionBar % 2 === 0 ? { kind: "heartbeat", hits: [0, 0.3], gain: 0.038 } : null;
+        }
+        if (shape.kind === "rise") {
+            return { kind: "heartbeat", hits: sectionBar % 2 === 0 ? [0, 0.3] : [1.5, 1.8], gain: 0.052 };
+        }
+        return { kind: "heartbeat", hits: [0, 0.3, 2, 2.3], gain: 0.062 };
+    }
+
+    /** 颗粒织体只给「空、亮、残响」类档位与留白，普通日常不加，避免糊成一片。 */
+    function textureFor(spec: CompositionSpec, shape: SectionShape): boolean {
+        if (shape.kind === "void") return true;
+        if (spec.intensity === "low") return false;
+        if (spec.profile === "awe" || spec.profile === "aftermath") {
+            return shape.kind === "bed" || shape.kind === "tail";
+        }
+        if (spec.profile === "sorrow") return shape.kind === "bed";
+        return false;
+    }
+
     function timpaniFor(
         spec: CompositionSpec,
         shape: SectionShape,
         sectionBar: number,
         random: () => number,
     ): TimpaniPlan | null {
-        if (!spec.timpani) {
-            if (!spec.lowPulse) return null;
-            if (shape.kind !== "rise" && shape.kind !== "climax") return null;
-        }
+        if (!spec.timpani) return null;
         if (shape.kind === "bed" && sectionBar < shape.bars - 1) return null;
         if (shape.kind === "void") return null;
         if (shape.kind === "tail" && sectionBar > 1) return null;
@@ -711,11 +894,22 @@ namespace TrpgImmersiveMusicArranger {
             const kind = shape.kind;
             const dynamic = dynamicCurve(kind, bar, shape.bars, shape.dynamic, barRandom);
             const isVoid = kind === "void";
-            // 留白段最少 8 小节：只保留三处真正的「空拍」（1/4/7），
-            // 其余小节仍有稀疏钟声与动机碎片，否则会变成半首静音。
-            const silence = isVoid && bar % 3 === 1;
+            // 留白段不再设「整小节全静音」：旧实现每 3 小节插一个 silence 小节，
+            // 在 44 BPM 的 horror 里等于连续 5.45 秒没有任何推进，听感就是播放中断。
+            // 现在留白靠「抽掉和弦 + 压低总线 + 只留心跳/颗粒/钟声」表达，
+            // 是低电平的空洞，而不是真正的静音，因此永远不会出现断流。
             const pedal = isVoid ? null : spec.pedal;
-            const bass = isVoid || !chord ? null : (pedal !== null ? pedal - 12 : chord.root - 12);
+            // 踏板音按「2 小节一块」在主音与属音之间交替（I–V pedal）：
+            // 既保留 pedal point 的悬置感，又不会在 44 BPM 的 horror 里
+            // 连续 43 秒只有一个低音（那会让人误以为整段停在一个音上）。
+            const pedalHold = pedal !== null
+                && (kind === "bed" || kind === "tail")
+                && Math.floor(bar / 2) % 2 === 0;
+            const bass = isVoid || !chord
+                ? null
+                : pedal !== null && (kind === "bed" || kind === "tail")
+                    ? pedal - 12 + (pedalHold ? 0 : 7)
+                    : chord.root - 12;
             const transition: TransitionPlan | null = bar === 0
                 ? {
                     kind: previousSectionId === null
@@ -768,16 +962,24 @@ namespace TrpgImmersiveMusicArranger {
             }
             if (motif) sectionMotif = motif.cell;
 
-            const ostinato = silence ? null : ostinatoFor(spec, family, shape, bar, cycle);
-            const timpani = silence ? null : timpaniFor(spec, shape, bar, barRandom);
+            const ostinato = ostinatoFor(spec, family, shape, bar, cycle);
+            const timpani = timpaniFor(spec, shape, bar, barRandom);
+            // 内声部只在没有前景动机的小节进入，保证「一直在动」但不和动机抢位置。
+            const motion = isVoid || !chord || motif || counter
+                ? null
+                : motionFor(spec, shape, bar, chord, barRandom);
+            const pulse = pulseFor(spec, shape, bar);
+            const texture = textureFor(spec, shape);
+            const impact = kind === "climax" && bar === 0;
+            const riser = kind === "rise" && bar === shape.bars - 1;
             const densityScale = spec.intensity === "low" ? 0.72 : spec.intensity === "high" ? 1.16 : 1;
             const bellChance = (kind === "bed" ? 0.16 : kind === "tail" ? 0.2 : 0.08) * densityScale;
-            const bell = !silence && hasBells && (kind === "void" || barRandom() < bellChance)
+            const bell = hasBells && (kind === "void" || barRandom() < bellChance)
                 ? (chord ? chord.root + 24 + (chord.intervals[0] || 0) : spec.tonic + 24)
                 : null;
-            const brass = !silence && brassAvailable && kind === "climax" && bar >= Math.floor(shape.bars / 2);
-            const swell = !silence && (kind === "climax" ? bar === 0 : kind === "rise" && bar === shape.bars - 1 && hasNoise);
-            const noiseHit = !silence && hasNoise && kind === "climax" && barRandom() < 0.4 * densityScale;
+            const brass = brassAvailable && kind === "climax" && bar >= Math.floor(shape.bars / 2);
+            const swell = kind === "climax" ? bar === 0 : kind === "rise" && bar === shape.bars - 1 && hasNoise;
+            const noiseHit = hasNoise && kind === "climax" && barRandom() < 0.4 * densityScale;
 
             bars.push({
                 index: -1,
@@ -789,18 +991,23 @@ namespace TrpgImmersiveMusicArranger {
                 chord: isVoid ? null : chord,
                 bass,
                 pedal,
-                chordVoices: silence || isVoid ? [] : voices,
+                chordVoices: isVoid ? [] : voices,
                 brass,
-                ostinato: silence ? null : ostinato,
-                motif: silence ? null : motif,
-                counter: silence ? null : counter,
+                ostinato,
+                motif,
+                counter,
+                motion,
+                pulse,
+                texture,
+                impact,
+                riser,
                 timpani,
                 bell,
                 noiseHit,
                 swell,
                 cutoff: cutoffFor(kind, bar, shape.bars, spec.brightness),
                 reverb: reverbFor(kind, spec),
-                silence,
+                silence: false,
                 transition,
             });
         }
@@ -846,10 +1053,12 @@ namespace TrpgImmersiveMusicArranger {
         let previousMotif: MotifCell | null = null;
         const usage = new Map<number, number>();
         cueArc(spec, cycle).forEach((shape, sectionIndex) => {
-            const barsCount = Math.round(Math.max(
-                shape.kind === "void" ? MIN_BREATH_BARS : MIN_SECTION_BARS,
-                shape.bars,
-            ));
+            const barsCount = shape.kind === "void"
+                ? Math.max(
+                    BREATH_BARS_MIN,
+                    Math.min(BREATH_BARS_MAX, Math.round(BREATH_SECONDS / Math.max(0.2, spec.barDuration))),
+                )
+                : Math.round(Math.max(MIN_SECTION_BARS, shape.bars));
             const normalized: SectionShape = { ...shape, bars: barsCount };
             const section = buildSection(
                 spec,

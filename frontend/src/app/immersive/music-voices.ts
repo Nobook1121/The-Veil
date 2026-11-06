@@ -34,6 +34,104 @@ namespace TrpgImmersiveMusicVoices {
         return Math.max(min, Math.min(max, value));
     }
 
+    /**
+     * 预渲染纹理：impact / riser / 颗粒层只需要在初始化时算一次，
+     * 之后按需播放。比每次实时叠十几个节点便宜，也比把它们塞进主循环更可控。
+     * 用 WeakMap 挂在 AudioContext 上，shutdown 后随上下文一起释放。
+     */
+    interface TextureBuffers {
+        impact: AudioBuffer;
+        riser: AudioBuffer;
+        grains: AudioBuffer;
+    }
+
+    const textureCache = new WeakMap<AudioContext, TextureBuffers>();
+
+    function buildImpact(ctx: AudioContext): AudioBuffer {
+        const length = Math.floor(ctx.sampleRate * 1.6);
+        const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        let noise = 0;
+        for (let index = 0; index < length; index += 1) {
+            const t = index / ctx.sampleRate;
+            const decay = Math.exp(-t * 4.2);
+            const freq = 38 + 62 * Math.exp(-t * 9);
+            const body = Math.sin(2 * Math.PI * freq * t) * decay;
+            noise = noise * 0.72 + (Math.random() * 2 - 1) * 0.28;
+            const crack = noise * Math.exp(-t * 14) * 0.55;
+            const tail = noise * Math.exp(-t * 2.4) * 0.12;
+            data[index] = Math.tanh((body * 0.8 + crack + tail) * 1.4) * 0.9;
+        }
+        return buffer;
+    }
+
+    function buildRiser(ctx: AudioContext): AudioBuffer {
+        const seconds = 4;
+        const length = Math.floor(ctx.sampleRate * seconds);
+        const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        // 一阶状态变量滤波：中心频率从 180Hz 指数升到 5kHz，幅度同步抬升。
+        let low = 0;
+        let band = 0;
+        for (let index = 0; index < length; index += 1) {
+            const t = index / length;
+            const center = 180 * Math.pow(5000 / 180, Math.pow(t, 0.8));
+            const f = 2 * Math.sin(Math.PI * Math.min(0.24, center / ctx.sampleRate));
+            const q = 0.9;
+            const input = Math.random() * 2 - 1;
+            low += f * band;
+            const high = input - low - q * band;
+            band += f * high;
+            const swell = Math.pow(t, 1.7);
+            const noise = band * swell;
+            const gliss = Math.sin(2 * Math.PI * (120 + 820 * t * t) * t) * 0.05 * swell;
+            data[index] = Math.tanh((noise * 0.85 + gliss) * 1.2);
+        }
+        // 末尾 30ms 淡出，避免一次性播放结束时出现爆音。
+        const fade = Math.floor(ctx.sampleRate * 0.03);
+        for (let index = 0; index < fade; index += 1) {
+            const at = length - 1 - index;
+            data[at] = (data[at] ?? 0) * (index / fade);
+        }
+        return buffer;
+    }
+
+    function buildGrains(ctx: AudioContext): AudioBuffer {
+        const seconds = 3;
+        const length = Math.floor(ctx.sampleRate * seconds);
+        const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        const pitches = [0, 7, 12, 15, 19, 24];
+        const grainCount = 120;
+        for (let grain = 0; grain < grainCount; grain += 1) {
+            const duration = 0.06 + Math.random() * 0.16;
+            const size = Math.max(8, Math.floor(duration * ctx.sampleRate));
+            const start = Math.floor(Math.random() * length);
+            const freq = 110 * Math.pow(2, (pitches[Math.floor(Math.random() * pitches.length)] ?? 0) / 12);
+            for (let index = 0; index < size; index += 1) {
+                const t = index / size;
+                const window = Math.sin(Math.PI * t);
+                // 环绕写入，保证 3 秒 buffer 首尾相接时没有空洞。
+                const at = (start + index) % length;
+                data[at] = (data[at] ?? 0)
+                    + Math.sin(2 * Math.PI * freq * (index / ctx.sampleRate)) * window * 0.014;
+            }
+        }
+        return buffer;
+    }
+
+    function ensureTextures(ctx: AudioContext): TextureBuffers {
+        const cached = textureCache.get(ctx);
+        if (cached) return cached;
+        const textures: TextureBuffers = {
+            impact: buildImpact(ctx),
+            riser: buildRiser(ctx),
+            grains: buildGrains(ctx),
+        };
+        textureCache.set(ctx, textures);
+        return textures;
+    }
+
     export class Rack {
         private readonly host: VoiceHost;
 
@@ -179,6 +277,18 @@ namespace TrpgImmersiveMusicVoices {
             filter.type = "lowpass";
             filter.frequency.setValueAtTime(clampValue(cutoff, 120, 6000), at);
             filter.Q.setValueAtTime(0.6, at);
+            // 缓慢的滤波呼吸：让 pad 不是一块死掉的和弦，而是持续在变形的织体。
+            if (this.quality <= 1) {
+                const lfo = this.ctx.createOscillator();
+                lfo.type = "sine";
+                lfo.frequency.value = 0.045 + this.host.random() * 0.07;
+                const depth = this.ctx.createGain();
+                depth.gain.value = clampValue(cutoff, 120, 6000) * 0.22;
+                lfo.connect(depth);
+                depth.connect(filter.frequency);
+                lfo.start(at);
+                lfo.stop(at + Math.max(0.2, duration + release));
+            }
 
             const panner = this.ctx.createStereoPanner();
             panner.pan.setValueAtTime(clampValue(pan, -0.8, 0.8), at);
@@ -564,6 +674,148 @@ namespace TrpgImmersiveMusicVoices {
             env.connect(this.host.out);
             source.start(start);
             source.stop(start + duration + 0.25);
+        }
+
+        /**
+         * 心跳：Lub-Dub 两下，音高从 62Hz 滑到 46Hz，身体感来自低通与短促的噪声。
+         * 与定音鼓的区别是它不占拍点重音，只负责「房间在呼吸」。
+         */
+        heartbeat(start: number, gain: number): void {
+            if (this.quality >= 2) return;
+            const thump = (at: number, level: number): void => {
+                const osc = this.ctx.createOscillator();
+                osc.type = "sine";
+                osc.frequency.setValueAtTime(64, at);
+                osc.frequency.exponentialRampToValueAtTime(44, at + 0.14);
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = "lowpass";
+                filter.frequency.value = 140;
+                const env = this.ctx.createGain();
+                env.gain.setValueAtTime(0.0001, at);
+                env.gain.exponentialRampToValueAtTime(Math.max(0.0003, level), at + 0.018);
+                env.gain.exponentialRampToValueAtTime(0.0001, at + 0.26);
+                osc.connect(filter);
+                filter.connect(env);
+                env.connect(this.host.out);
+                osc.start(at);
+                osc.stop(at + 0.32);
+            };
+            thump(start, gain);
+            thump(start + 0.3, gain * 0.62);
+        }
+
+        /** 时钟：极短的高频噪声点 + 一点金属泛音，只做时间感，不做旋律。 */
+        clock(start: number, gain: number, pan = 0): void {
+            if (this.quality >= 2 || !this.host.noise) return;
+            const panner = this.ctx.createStereoPanner();
+            panner.pan.value = clampValue(pan, -0.8, 0.8);
+            panner.connect(this.host.out);
+            const source = this.ctx.createBufferSource();
+            source.buffer = this.host.noise;
+            const filter = this.ctx.createBiquadFilter();
+            filter.type = "bandpass";
+            filter.frequency.value = 2800;
+            filter.Q.value = 9;
+            const env = this.ctx.createGain();
+            env.gain.setValueAtTime(0.0001, start);
+            env.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain), start + 0.004);
+            env.gain.exponentialRampToValueAtTime(0.0001, start + 0.07);
+            source.connect(filter);
+            filter.connect(env);
+            env.connect(panner);
+            source.start(start, this.host.random() * 1.5);
+            source.stop(start + 0.09);
+            const ping = this.osc("sine", 96, start, 0.06, 0);
+            const pingEnv = this.ctx.createGain();
+            pingEnv.gain.setValueAtTime(0.0001, start);
+            pingEnv.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain * 0.35), start + 0.004);
+            pingEnv.gain.exponentialRampToValueAtTime(0.0001, start + 0.06);
+            ping.connect(pingEnv);
+            pingEnv.connect(panner);
+        }
+
+        /** 颗粒织体：预渲染的 grain cloud，循环播放，只做空气层，不参与和声。 */
+        texture(start: number, duration: number, gain: number, cutoff: number): void {
+            if (this.quality >= 2) return;
+            const textures = ensureTextures(this.ctx);
+            const source = this.ctx.createBufferSource();
+            source.buffer = textures.grains;
+            source.loop = true;
+            source.playbackRate.value = 0.85 + this.host.random() * 0.3;
+            const filter = this.ctx.createBiquadFilter();
+            filter.type = "lowpass";
+            filter.frequency.value = clampValue(cutoff * 0.9, 200, 5000);
+            const env = this.ctx.createGain();
+            const safe = Math.max(0.4, duration);
+            env.gain.setValueAtTime(0.0001, start);
+            env.gain.linearRampToValueAtTime(Math.max(0.0002, gain), start + Math.min(1.4, safe * 0.45));
+            env.gain.setValueAtTime(Math.max(0.0002, gain), start + Math.max(0.2, safe - 0.8));
+            env.gain.linearRampToValueAtTime(0.0001, start + safe + 0.6);
+            source.connect(filter);
+            filter.connect(env);
+            env.connect(this.host.out);
+            source.start(start, this.host.random() * 1.2);
+            source.stop(start + safe + 0.7);
+        }
+
+        /** 打击落点：预渲染的低频冲击 + 噪声裂口，负责「进入高潮」的第一下。 */
+        impact(start: number, gain: number): void {
+            if (this.quality >= 2) return;
+            const textures = ensureTextures(this.ctx);
+            const source = this.ctx.createBufferSource();
+            source.buffer = textures.impact;
+            const env = this.ctx.createGain();
+            env.gain.setValueAtTime(Math.max(0.0003, gain), start);
+            env.gain.exponentialRampToValueAtTime(0.0001, start + 1.5);
+            source.connect(env);
+            env.connect(this.host.out);
+            source.start(start);
+            source.stop(start + 1.6);
+        }
+
+        /** 渐强：预渲染的上升噪声，按目标时长变速播放，省掉每次现搭滤波扫频。 */
+        riser(start: number, duration: number, gain: number): void {
+            if (this.quality >= 2) return;
+            const textures = ensureTextures(this.ctx);
+            const source = this.ctx.createBufferSource();
+            source.buffer = textures.riser;
+            const safe = Math.max(0.5, duration);
+            source.playbackRate.value = textures.riser.duration / safe;
+            const env = this.ctx.createGain();
+            env.gain.setValueAtTime(0.0001, start);
+            env.gain.linearRampToValueAtTime(Math.max(0.0002, gain), start + safe * 0.92);
+            env.gain.linearRampToValueAtTime(0.0001, start + safe + 0.08);
+            source.connect(env);
+            env.connect(this.host.out);
+            source.start(start);
+            source.stop(start + safe + 0.1);
+        }
+
+        /** FM 钟：非整数比率调制器给铃音一层金属泛音，用于点缀与留白后的第一声。 */
+        fmBell(note: number, start: number, gain: number): void {
+            if (this.quality >= 1 || !Number.isFinite(note)) return;
+            const freq = midiToFreq(note);
+            const carrier = this.ctx.createOscillator();
+            carrier.type = "sine";
+            carrier.frequency.value = freq;
+            const modulator = this.ctx.createOscillator();
+            modulator.type = "sine";
+            modulator.frequency.value = freq * 3.5;
+            const index = this.ctx.createGain();
+            index.gain.setValueAtTime(Math.max(0.0003, freq * 3.2), start);
+            index.gain.exponentialRampToValueAtTime(Math.max(0.0003, freq * 0.25), start + 1.4);
+            modulator.connect(index);
+            index.connect(carrier.frequency);
+            const env = this.ctx.createGain();
+            env.gain.setValueAtTime(0.0001, start);
+            env.gain.exponentialRampToValueAtTime(Math.max(0.0003, gain), start + 0.01);
+            env.gain.exponentialRampToValueAtTime(0.0001, start + 2.4);
+            carrier.connect(env);
+            env.connect(this.host.out);
+            carrier.start(start);
+            carrier.stop(start + 2.5);
+            modulator.start(start);
+            modulator.stop(start + 2.5);
         }
     }
 }

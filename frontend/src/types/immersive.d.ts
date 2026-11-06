@@ -298,6 +298,70 @@ interface TrpgImmersiveMusicApi {
     toggleMuted: () => boolean;
     unlock: () => boolean;
     isRunning: () => boolean;
+    /** 运行时诊断：当前 AudioContext 状态、每条总线的进度与下一小节时间。 */
+    diagnostics: () => ImmersiveMusicDiagnostics;
+}
+
+interface ImmersiveMusicBusDiagnostics {
+    cycle: number;
+    bar_index: number;
+    next_bar_at: number;
+    position_bars: number;
+    section: string;
+    /** 累计已排程小节数；连续两个窗口不增长就说明调度断供。 */
+    scheduled_bars: number;
+    /** 当前小节的总线动态目标。 */
+    level: number;
+}
+
+/** 一个调度窗口：这一拍补排了几个小节、总线上有几条声部。 */
+interface ImmersiveMusicScheduleWindow {
+    at: number;
+    buses: number;
+    bars: number;
+    level: number;
+}
+
+interface ImmersiveMusicDiagnostics {
+    context: string;
+    quality: number;
+    muted: boolean;
+    buses: ImmersiveMusicBusDiagnostics[];
+    /** 最近约 26 秒的调度窗口（220ms 一次，最多 120 条）。 */
+    windows: ImmersiveMusicScheduleWindow[];
+}
+
+/**
+ * 程序化环境音（P2）。与配乐共用混音总线、限幅与语音 ducking，
+ * 但有独立开关与音量，默认开启。
+ */
+interface TrpgImmersiveAmbientApi {
+    /** 跟随配乐 plan 的场景/档位切换环境音；相同场景不会重建。 */
+    apply: (plan: ImmersiveMusicPlan) => void;
+    stop: (fadeMs?: number) => void;
+    setEnabled: (enabled: boolean) => void;
+    isEnabled: () => boolean;
+    /** 0~1，独立于配乐音量。 */
+    setVolume: (volume: number) => void;
+    getVolume: () => number;
+    isRunning: () => boolean;
+    getScene: () => string | null;
+    /** 重新拉起最近一个场景（用于「仅 BGM」模式下停掉配乐但保留环境音）。 */
+    resume: () => void;
+    /** 配乐是否在播放；环境音据此自动让位，避免两套声音打架。 */
+    setMusicActive: (active: boolean) => void;
+    diagnostics: () => ImmersiveAmbientDiagnostics;
+}
+
+interface ImmersiveAmbientDiagnostics {
+    context: string;
+    enabled: boolean;
+    running: boolean;
+    scene: string | null;
+    volume: number;
+    music_active: boolean;
+    layers: string[];
+    scheduled_events: number;
 }
 
 interface TrpgImmersiveApi {
@@ -316,5 +380,6 @@ interface TrpgImmersiveApi {
 
 interface Window {
     TrpgImmersiveMusic?: TrpgImmersiveMusicApi;
+    TrpgImmersiveAmbient?: TrpgImmersiveAmbientApi;
     TrpgImmersive?: TrpgImmersiveApi;
 }
