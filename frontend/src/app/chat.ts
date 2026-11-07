@@ -872,6 +872,7 @@ function getAvatarSrc(type: string, message: ChatMessage | null, sender: string)
 function defaultSenderName(type: string): string {
     switch (type) {
         case "kp": return "KP";
+        case "gm": return "GM";
         case "dice": return "骰娘";
         case "system": return "系统";
         default: return getCurrentUsername();
@@ -882,6 +883,8 @@ function getMessageClass(type: string): string {
     switch (type) {
         case "player": return "player-message";
         case "kp": return "kp-message";
+        // GM 手动叙事块沿用 KP 的叙事视觉，但不参与配音/逐字揭示。
+        case "gm": return "kp-message";
         case "dice": return "dice-message";
         case "system": return "other-message";
         case "other": return "other-message";
@@ -1636,6 +1639,12 @@ function initWebSocket(): void {
             const room = getCurrentRoom();
             if (event.room_id && room?.id !== event.room_id) return;
             window.TrpgImmersiveExternal?.applyEvent(event);
+        });
+        // 播放反馈：交叉淡化完成 / 加载失败回传服务端，写入房间控制台（同一条失败只记一次）。
+        window.TrpgImmersiveExternal?.setReporter?.((event) => {
+            const room = getCurrentRoom();
+            if (!room?.id || !socket?.connected) return;
+            socket.emit("immersive_music_report", { room_id: room.id, ...event });
         });
     } catch (error) {
         console.warn("WebSocket 连接失败，消息同步不可用:", error);

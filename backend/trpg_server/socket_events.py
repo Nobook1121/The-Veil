@@ -1,4 +1,6 @@
 import logging
+import threading
+import time
 from typing import Any, cast
 
 from flask import current_app, request, session
@@ -14,6 +16,10 @@ from trpg_server.security import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 客户端播放反馈去重：同一房间、同一曲目、同一原因在 120 秒内只写一条房间日志。
+_MUSIC_REPORT_SEEN: dict[str, float] = {}
+_MUSIC_REPORT_LOCK = threading.Lock()
 
 # 记录每个用户当前加入的 Socket.IO 房间，便于断线时通知相关房间刷新成员在线状态。
 # 常量定义在 security 中（房间内在线/自动存档判定也要读它），这里直接复用避免重复。
@@ -216,3 +222,62 @@ def register_socket_events(socketio):
         room_id = str((data or {}).get("room_id") or "").strip()
         if room_id and is_user_in_room(session.get("user_id"), room_id):
             socketio.emit("user_typing", data, room=room_id, include_self=False)
+
+    @socketio.on("immersive_music_report")
+    def handle_immersive_music_report(data):
+        """接收客户端的播放反馈（交叉淡化完成 / 加载失败），写入房间控制台。"""
+        if not _session_is_current():
+            emit("session_expired")
+            disconnect()
+            return
+
+        payload = data or {}
+        room_id = str(payload.get("room_id") or "").strip()
+        if not room_id or not is_user_in_room(session.get("user_id"), room_id):
+            return
+        event = str(payload.get("event") or "").strip().lower()
+        if event not in {"crossfade_done", "load_failed", "play_failed"}:
+            return
+        track_key = str(payload.get("track_key") or "")[:160]
+        title = str(payload.get("title") or track_key or "-")[:160]
+        artist = str(payload.get("artist") or "未知作者")[:160]
+        reason = str(payload.get("reason") or "")[:160]
+
+        dedupe_key = f"{room_id}|{event}|{track_key}|{reason}"
+        now = time.time()
+        with _MUSIC_REPORT_LOCK:
+            if now - _MUSIC_REPORT_SEEN.get(dedupe_key, 0.0) < 120:
+                return
+            _MUSIC_REPORT_SEEN[dedupe_key] = now
+            if len(_MUSIC_REPORT_SEEN) > 512:
+                cutoff = now - 3600
+                for key in [name for name, stamp in _MUSIC_REPORT_SEEN.items() if stamp < cutoff]:
+                    _MUSIC_REPORT_SEEN.pop(key, None)
+
+        rooms_dir = current_app.config.get("ROOMS_DIR")
+        details: dict[str, Any] = {"track_key": track_key}
+        if event == "crossfade_done":
+            seconds = payload.get("seconds")
+            if isinstance(seconds, (int, float)):
+                details["seconds"] = round(float(seconds), 1)
+            log_room_event(
+                room_id=room_id,
+                rooms_dir=rooms_dir,
+                message=f"交叉淡化完成：{title} — {artist}",
+                level="info",
+                actor="配乐引擎",
+                source="immersive",
+                **details,
+            )
+            return
+        label = "加载失败" if event == "load_failed" else "播放失败"
+        log_room_event(
+            room_id=room_id,
+            rooms_dir=rooms_dir,
+            message=f"外链曲目{label}：{title} — {artist}（{reason or '未知原因'}）",
+            level="warning",
+            actor="配乐引擎",
+            source="immersive",
+            reason=reason,
+            **details,
+        )

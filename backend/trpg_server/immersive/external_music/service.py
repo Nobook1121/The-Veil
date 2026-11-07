@@ -24,8 +24,10 @@ from typing import Any
 from urllib.parse import quote, urlparse
 
 from trpg_server.immersive import broadcast
-from trpg_server.immersive.config import load_immersive_settings
+from trpg_server.immersive.config import MUSIC_ENGINES, load_immersive_settings, resolve_audio_blocks
 from trpg_server.immersive.external_music import cache, license as license_mod, providers, search
+from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.room_log import log_room_event
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +37,17 @@ ENGINE_OFF = "off"
 ENGINES = (ENGINE_PROCEDURAL, ENGINE_EXTERNAL, ENGINE_OFF)
 _PROVIDER_ORDER = ("jamendo", "openverse")
 
+# 房间目录内的外链播放状态（当前曲目 + 备选），供控制台 status/switch 使用。
+EXTERNAL_STATE_FILENAME = "immersive_music_external.json"
+
 _EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="immersive-music-ext")
 _IN_FLIGHT: dict[str, str] = {}
 _IN_FLIGHT_LOCK = threading.Lock()
 _LAST_ENGINE: dict[str, str] = {}
+_LAST_ENGINE_REASON: dict[str, str] = {}
+# 同一失败原因在短时间内只写一条房间日志，避免每个叙事回合重复刷屏。
+_LAST_FAILURE_LOG: dict[str, float] = {}
+_FAILURE_LOG_LOCK = threading.Lock()
 
 _CIRCUIT: dict[str, dict[str, Any]] = {}
 _CIRCUIT_LOCK = threading.Lock()
@@ -55,56 +64,243 @@ def _as_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, number))
 
 
+# ---------------------------------------------------------------- 房间日志 / 播放状态
+
+def _console_log(room_dir: Path | str | None, room_id: str, message: str, *, level: str = "info", **details: Any) -> None:
+    """写一条配乐相关的房间控制台日志；日志失败绝不影响播放主流程。"""
+    if room_dir is None:
+        return
+    try:
+        log_room_event(
+            room_dir,
+            message,
+            level=level,
+            actor="配乐引擎",
+            source="immersive",
+            room_id=room_id,
+            **details,
+        )
+    except Exception:  # noqa: BLE001 - 日志是增强能力
+        logger.debug("external_music room log failed", exc_info=True)
+
+
+def _console_failure_once(
+    room_dir: Path | str | None,
+    room_id: str,
+    key: str,
+    message: str,
+    **details: Any,
+) -> None:
+    """同一失败（同一房间 + 原因）在 180 秒内只记录一次 WARNING。"""
+    now = time.time()
+    dedupe_key = f"{room_id}|{key}"
+    with _FAILURE_LOG_LOCK:
+        last = _LAST_FAILURE_LOG.get(dedupe_key, 0.0)
+        if now - last < 180:
+            return
+        _LAST_FAILURE_LOG[dedupe_key] = now
+        if len(_LAST_FAILURE_LOG) > 512:
+            cutoff = now - 3600
+            for item in [name for name, stamp in _LAST_FAILURE_LOG.items() if stamp < cutoff]:
+                _LAST_FAILURE_LOG.pop(item, None)
+    _console_log(room_dir, room_id, message, level="warning", **details)
+
+
+def _fallback_note(payload: dict[str, Any]) -> str:
+    """失败时的可读收尾说明：兼容“底床保留”和“外链失败即停”两种引擎语义。"""
+    fallback = str(payload.get("fallback") or ENGINE_PROCEDURAL)
+    if fallback == ENGINE_PROCEDURAL:
+        return "降级到程序化底床"
+    if fallback == ENGINE_OFF:
+        return "外链配乐停止（无可用曲目）"
+    return f"回落到 {fallback}"
+
+
+def _state_path(room_dir: Path | str | None) -> Path | None:
+    return Path(room_dir) / EXTERNAL_STATE_FILENAME if room_dir is not None else None
+
+
+def load_selection(room_dir: Path | str | None) -> dict[str, Any]:
+    """读取房间最近一次外链检索结果（当前曲目 + 备选）。"""
+    path = _state_path(room_dir)
+    if path is None:
+        return {}
+    payload = read_json(path, default={})
+    return payload if isinstance(payload, dict) else {}
+
+
+def save_selection(room_dir: Path | str | None, payload: dict[str, Any]) -> None:
+    path = _state_path(room_dir)
+    if path is None:
+        return
+    track = payload.get("track") if isinstance(payload.get("track"), dict) else None
+    if not track:
+        return
+    alternatives = [item for item in (payload.get("alternatives") or []) if isinstance(item, dict) and item.get("track_key")][:8]
+    state = {
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "engine": payload.get("engine") or ENGINE_EXTERNAL,
+        "trigger": payload.get("trigger") or "",
+        "track": track,
+        "alternatives": alternatives,
+    }
+    try:
+        write_json_atomic(path, state)
+    except OSError:
+        logger.debug("external_music state write failed room=%s", path.parent, exc_info=True)
+
+
+def publish_selection(
+    payload: dict[str, Any],
+    *,
+    room_dir: Path | str | None,
+    room_id: str,
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    """补齐播放参数、落盘当前曲目、写切曲日志并广播给房间。"""
+    result = dict(payload)
+    result["room_id"] = room_id
+    result["fade_ms"] = int(settings.get("music_external_fade_ms") or 4200)
+    result["crossfade_ms"] = result["fade_ms"]
+    result["phrase_bars"] = int(settings.get("music_external_phrase_bars") or 8)
+    track = result.get("track") if isinstance(result.get("track"), dict) else None
+    if result.get("status") == "selected" and track:
+        save_selection(room_dir, result)
+        label = track.get("license_label") or track.get("license") or "-"
+        _console_log(
+            room_dir,
+            room_id,
+            f"切曲：{track.get('title') or track.get('track_key')} — {track.get('artist') or '未知作者'}"
+            f"（许可 {label}{' · 控制台手动' if result.get('trigger') == 'room_console' else ''}）",
+            track_key=track.get("track_key"),
+            provider=track.get("provider"),
+            license=track.get("license"),
+            attribution=track.get("attribution"),
+            link_url=track.get("source_url"),
+            link_text="署名",
+            trigger=result.get("trigger"),
+        )
+    broadcast.emit("immersive_music_external", result)
+    return result
+
+
 # ---------------------------------------------------------------- 引擎解析
+
+def _block_to_engine(music_block: str) -> str:
+    """配乐块 → 播放引擎。生成模型没有内置合成器，运行时不播放程序化底床。"""
+    if music_block == "external":
+        return ENGINE_EXTERNAL
+    if music_block == "procedural":
+        return ENGINE_PROCEDURAL
+    return ENGINE_OFF
+
 
 def resolve_engine(
     settings: dict[str, Any],
     house_rules: dict[str, Any] | None = None,
+    *,
+    music_model_available: bool = False,
 ) -> tuple[str, str]:
-    """解析生效引擎：站点默认 < 房间只能降级。
+    """解析生效引擎（由音频块模型派生）。
 
-    返回 ``(engine, reason)``。``reason`` 只用于日志/前端提示，不参与播放决策。
+    返回 ``(engine, reason)``。``reason`` 用于日志/前端提示，不参与播放决策。
+    外链块生效时引擎为 ``external``，程序化底床由前端显式关闭。
     """
     if not settings.get("enabled") or not settings.get("music_enabled"):
         return ENGINE_OFF, "site_music_disabled"
-    site = str(settings.get("music_engine") or ENGINE_PROCEDURAL).strip().lower()
-    reason = "site"
-    if site not in ENGINES:
-        site = ENGINE_PROCEDURAL
-        reason = "invalid_config"
     rules = house_rules if isinstance(house_rules, dict) else {}
-    # 房间关掉配乐是「直接降到 off」，与是否单独指定引擎无关。
+    # 房间关掉配乐是「直接降到 off」，环境音由用户开关单独控制。
     if rules.get("immersive_music_enabled") is False:
         return ENGINE_OFF, "room_music_disabled"
-    room = rules.get("immersive_music_engine")
-    if room is None or str(room).strip() == "":
-        return site, reason
-    room_engine = str(room).strip().lower()
-    if room_engine not in ENGINES:
-        return site, "invalid_room_engine"
-    if room_engine == ENGINE_OFF:
-        return ENGINE_OFF, "room_off"
-    if room_engine == ENGINE_PROCEDURAL:
-        return (ENGINE_OFF if site == ENGINE_OFF else ENGINE_PROCEDURAL), "room_procedural"
-    # 房间请求 external：只有站点本身是 external 才生效，否则只能降级。
-    if site != ENGINE_EXTERNAL:
-        return (site if site in ENGINES else ENGINE_PROCEDURAL), "room_cannot_upgrade"
-    return ENGINE_EXTERNAL, "room_external"
+
+    blocks = resolve_audio_blocks(
+        settings, rules, music_model_available=music_model_available
+    )
+    music = str(blocks.get("music") or "off")
+    legacy_room = str(rules.get("immersive_music_engine") or "").strip().lower()
+    if (
+        legacy_room
+        and legacy_room not in MUSIC_ENGINES
+        and not rules.get("immersive_audio_blocks")
+    ):
+        return _block_to_engine(music), "invalid_room_engine"
+    if music == "music_model":
+        return ENGINE_OFF, "music_model_pending"
+    reason = str(blocks.get("degrade_reason") or "site")
+    if not blocks.get("degrade_reason"):
+        if legacy_room == "procedural" and music == "procedural":
+            reason = "room_procedural"
+        elif legacy_room == "off" and music == "off":
+            reason = "room_off"
+        elif legacy_room == "external" and music == "external":
+            reason = "room_external"
+        elif not legacy_room and str(settings.get("music_engine") or "") not in MUSIC_ENGINES:
+            reason = "invalid_config"
+    elif blocks.get("degrade_reason") == "room_music_block_revoked":
+        # 兼容旧前端/日志文案：房间请求的块被收回，等价于旧版「不能升级」。
+        reason = "room_cannot_upgrade"
+    return _block_to_engine(music), reason
 
 
-def notify_engine(room_id: str, engine: str, *, fade_ms: int = 2200, force: bool = False) -> None:
+def notify_engine(
+    room_id: str,
+    engine: str,
+    *,
+    fade_ms: int = 2200,
+    force: bool = False,
+    room_dir: Path | str | None = None,
+    reason: str = "",
+    site_engine: str = "",
+    blocks: dict[str, Any] | None = None,
+) -> None:
     """把引擎状态广播给房间，供前端平滑过渡（不硬切）。"""
     previous = _LAST_ENGINE.get(room_id)
+    previous_reason = _LAST_ENGINE_REASON.get(room_id)
+    _LAST_ENGINE_REASON[room_id] = reason
+    refused = engine == ENGINE_PROCEDURAL and reason == "room_cannot_upgrade"
     if previous == engine and not force:
+        # 引擎没变也要在“刚被拒绝”时留一条记录，否则房间请求外链会被静默忽略。
+        if refused and previous_reason != reason:
+            _console_log(
+                room_dir,
+                room_id,
+                f"房间请求外链引擎被拒绝：站点引擎为 {site_engine or ENGINE_PROCEDURAL}，保持 {engine}",
+                level="warning",
+                reason=reason,
+                site_engine=site_engine,
+            )
         return
     _LAST_ENGINE[room_id] = engine
+    if refused:
+        _console_log(
+            room_dir,
+            room_id,
+            f"房间请求外链引擎被拒绝：站点引擎为 {site_engine or ENGINE_PROCEDURAL}，保持 {engine}",
+            level="warning",
+            reason=reason,
+            site_engine=site_engine,
+        )
+    elif previous != engine:
+        _console_log(
+            room_dir,
+            room_id,
+            f"配乐引擎切换：{previous or '未知'} → {engine}（{reason or '未说明'}）",
+            previous=previous,
+            engine=engine,
+            reason=reason,
+        )
     broadcast.emit(
         "immersive_music_engine",
         {
             "room_id": room_id,
             "engine": engine,
-            "fade_ms": max(500, int(fade_ms)),
-            "fallback": ENGINE_PROCEDURAL if engine == ENGINE_EXTERNAL else engine,
+            # 外链块生效时不再保留程序化底床：失败就停，不再回落到 procedural。
+            "fallback": ENGINE_OFF if engine == ENGINE_EXTERNAL else engine,
+            "reason": reason,
+            "audio_blocks": list((blocks or {}).get("blocks") or []),
+            "ambient": bool((blocks or {}).get("ambient")),
+            "degrade_reason": str((blocks or {}).get("degrade_reason") or ""),
+            "degrade_message": str((blocks or {}).get("degrade_message") or ""),
         },
     )
 
@@ -145,9 +341,17 @@ def _circuit_open(provider: str, settings: dict[str, Any]) -> bool:
         return float(state.get("open_until") or 0) > time.time()
 
 
-def _record_provider(provider: str, ok: bool, settings: dict[str, Any]) -> None:
+def _record_provider(
+    provider: str,
+    ok: bool,
+    settings: dict[str, Any],
+    *,
+    room_dir: Path | str | None = None,
+    room_id: str = "",
+) -> None:
     threshold = _as_int(settings.get("music_external_circuit_failures"), 3, 1, 20)
     cooldown = _as_int(settings.get("music_external_circuit_cooldown_s"), 600, 30, 7200)
+    opened = False
     with _CIRCUIT_LOCK:
         state = _CIRCUIT.setdefault(provider, {"failures": 0, "open_until": 0.0})
         if ok:
@@ -155,12 +359,23 @@ def _record_provider(provider: str, ok: bool, settings: dict[str, Any]) -> None:
             state["open_until"] = 0.0
             return
         state["failures"] = int(state.get("failures") or 0) + 1
-        if int(state["failures"]) >= threshold:
+        if int(state["failures"]) >= threshold and float(state.get("open_until") or 0) <= time.time():
             state["open_until"] = time.time() + cooldown
+            opened = True
             logger.warning(
                 "external_music circuit opened provider=%s failures=%s cooldown=%ss",
                 provider, state["failures"], cooldown,
             )
+    if opened:
+        _console_log(
+            room_dir,
+            room_id,
+            f"外链曲库熔断：{provider} 连续失败 {state['failures']} 次，冷却 {cooldown} 秒",
+            level="warning",
+            provider=provider,
+            failures=int(state["failures"]),
+            cooldown_s=cooldown,
+        )
 
 
 # ---------------------------------------------------------------- 工具函数
@@ -219,6 +434,8 @@ def _search_providers(
     query: str,
     tags: list[str],
     limit: int,
+    room_dir: Path | str | None = None,
+    room_id: str = "",
 ) -> tuple[list[dict[str, Any]], list[str], int]:
     """按优先级检索；返回 ``(曲目, 失败原因, 耗时毫秒)``。"""
     started = time.monotonic()
@@ -237,7 +454,7 @@ def _search_providers(
         else:
             result = providers.search_openverse(query=query, tags=tags, timeout=timeout, limit=limit)
         ok = bool(result.get("ok")) and bool(result.get("tracks"))
-        _record_provider(provider, ok, settings)
+        _record_provider(provider, ok, settings, room_dir=room_dir, room_id=room_id)
         if ok:
             tracks.extend(result.get("tracks") or [])
         else:
@@ -360,7 +577,8 @@ def search_and_select(
         "status": "degraded",
         "engine": engine,
         "engine_reason": engine_reason,
-        "fallback": ENGINE_PROCEDURAL,
+        # 外链块选中后程序化配乐已关闭，失败时不再回落到 procedural。
+        "fallback": ENGINE_OFF if engine == ENGINE_EXTERNAL else engine,
         "track": None,
         "request_id": request_id,
         "trigger": trigger,
@@ -393,8 +611,9 @@ def search_and_select(
     instrumental_only = bool(cfg.get("music_external_instrumental_only", True))
 
     # 1) 查询缓存：优先剧本（若开启），其次房间；空列表即负缓存。
+    #    force=True 时跳过缓存，用于控制台「重新检索」。
     cache_dirs = [scenario_cache_dir, room_cache_dir] if prefer_scenario else [room_cache_dir, scenario_cache_dir]
-    for directory in cache_dirs:
+    for directory in (cache_dirs if not force else []):
         if directory is None:
             continue
         hit = cache.get_query(directory, qkey)
@@ -404,6 +623,11 @@ def search_and_select(
         if not keys:
             base.update({"status": "empty", "reason": "negative_cache", "cached": True})
             base["elapsed_ms"] = int((time.monotonic() - started) * 1000)
+            _console_failure_once(
+                room_path, room_id, "negative_cache",
+                f"外链曲目检索未命中（缓存为空，{profile}/{intensity}），{_fallback_note(base)}",
+                profile=profile, intensity=intensity,
+            )
             return base
         cached_tracks = _resolve_cached(
             keys,
@@ -424,6 +648,17 @@ def search_and_select(
             base.update({"ok": True, "status": "selected", "track": payload, "cached": True})
             base["elapsed_ms"] = int((time.monotonic() - started) * 1000)
             base["provider"] = payload["provider"]
+            _console_log(
+                room_path,
+                room_id,
+                f"外链曲目命中缓存：{payload.get('title') or payload['track_key']} — {payload.get('artist') or '未知作者'}",
+                track_key=payload["track_key"],
+                provider=payload["provider"],
+                license=payload.get("license"),
+                attribution=payload.get("attribution"),
+                link_url=payload.get("source_url"),
+                link_text="署名",
+            )
             logger.info(
                 "external_music cache_hit room=%s profile=%s provider=%s key=%s",
                 room_id, profile, payload["provider"], payload["track_key"],
@@ -435,6 +670,11 @@ def search_and_select(
     if not allowed:
         base.update({"status": "throttled", "reason": budget_reason})
         base["elapsed_ms"] = int((time.monotonic() - started) * 1000)
+        _console_failure_once(
+            room_path, room_id, f"throttled:{budget_reason}",
+            f"外链曲目检索被限流（{budget_reason}），{_fallback_note(base)}",
+            reason=budget_reason,
+        )
         logger.info("external_music throttled room=%s reason=%s", room_id, budget_reason)
         return base
     limit = _as_int(cfg.get("music_external_result_limit"), 10, 3, 20)
@@ -442,7 +682,16 @@ def search_and_select(
     scene_hints = search.scene_tags(scene)[:3]
     if scene_hints:
         query_text = f"{query_text} {' '.join(scene_hints)}"
-    tracks, reasons, elapsed = _search_providers(settings=cfg, query=query_text, tags=tags, limit=limit)
+    trigger_label = "控制台手动" if trigger == "room_console" else "自动"
+    _console_log(
+        room_path,
+        room_id,
+        f"外链曲目检索开始（{profile}/{intensity} · 场景「{scene or '默认'}」· {trigger_label}）",
+        profile=profile, intensity=intensity, scene=scene, trigger=trigger,
+    )
+    tracks, reasons, elapsed = _search_providers(
+        settings=cfg, query=query_text, tags=tags, limit=limit, room_dir=room_path, room_id=room_id
+    )
     accepted, rejected = _prepare_candidates(tracks, settings=cfg, room_id=room_id)
     ranked = search.rank(
         accepted, tags=tags, recent_ids=recent, instrumental_only=instrumental_only, limit=10
@@ -460,6 +709,11 @@ def search_and_select(
         reason = ",".join(reasons) if reasons else ("all_rejected" if rejected else "empty")
         base.update({"status": "empty", "reason": reason})
         base["elapsed_ms"] = int((time.monotonic() - started) * 1000)
+        _console_failure_once(
+            room_path, room_id, f"empty:{reason}",
+            f"外链曲目检索失败（{reason}），{_fallback_note(base)}",
+            reason=reason, rejected=rejected,
+        )
         logger.info(
             "external_music empty room=%s profile=%s reasons=%s rejected=%s elapsed_ms=%s",
             room_id, profile, reason, rejected, base["elapsed_ms"],
@@ -486,6 +740,19 @@ def search_and_select(
         }
     )
     base["elapsed_ms"] = int((time.monotonic() - started) * 1000)
+    _console_log(
+        room_path,
+        room_id,
+        f"外链曲目检索命中：{payload.get('title') or payload['track_key']} — {payload.get('artist') or '未知作者'}"
+        f"（{payload['provider']} · {base['elapsed_ms']}ms）",
+        track_key=payload["track_key"],
+        provider=payload["provider"],
+        license=payload.get("license"),
+        attribution=payload.get("attribution"),
+        link_url=payload.get("source_url"),
+        link_text="署名",
+        elapsed_ms=base["elapsed_ms"],
+    )
     logger.info(
         "external_music selected room=%s profile=%s provider=%s key=%s license=%s elapsed_ms=%s",
         room_id, profile, payload["provider"], payload["track_key"], payload["license"], base["elapsed_ms"],
@@ -541,11 +808,16 @@ def submit(
             )
         except Exception as exc:  # noqa: BLE001 - 外链任务失败绝不能影响主流程
             logger.warning("external_music job failed room=%s: %s", room_id, exc, exc_info=True)
+            _console_failure_once(
+                room_dir, room_id, "internal_error",
+                f"外链曲目检索异常（{exc.__class__.__name__}），停止外链播放",
+                error=str(exc)[:200],
+            )
             payload = {
                 "ok": False,
                 "status": "degraded",
                 "engine": ENGINE_EXTERNAL,
-                "fallback": ENGINE_PROCEDURAL,
+                "fallback": ENGINE_OFF,
                 "track": None,
                 "request_id": rid,
                 "trigger": trigger,
@@ -558,11 +830,7 @@ def submit(
         if payload.get("status") == "disabled":
             return
         cfg = settings if isinstance(settings, dict) else load_immersive_settings(config_dir)
-        payload["room_id"] = room_id
-        payload["fade_ms"] = int(cfg.get("music_external_fade_ms") or 4200)
-        payload["crossfade_ms"] = payload["fade_ms"]
-        payload["phrase_bars"] = int(cfg.get("music_external_phrase_bars") or 8)
-        broadcast.emit("immersive_music_external", payload)
+        publish_selection(payload, room_dir=room_dir, room_id=room_id, settings=cfg)
 
     try:
         _EXECUTOR.submit(_job)

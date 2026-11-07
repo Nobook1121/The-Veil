@@ -1623,11 +1623,12 @@ namespace TrpgImmersiveMusicModule {
         const now = ctx.currentTime;
         const gain = engineGain.gain;
         gain.cancelScheduledValues(now);
-        if (next === "off") {
+        // 外链块生效时程序化配乐必须关闭：与 off 一样淡出并停止总线，不再保留底床。
+        if (next === "off" || next === "external") {
             gain.setValueAtTime(Math.max(0.0001, gain.value), now);
             gain.exponentialRampToValueAtTime(0.0001, now + seconds);
             window.setTimeout(() => {
-                if (engineMode !== "off") return;
+                if (engineMode !== "off" && engineMode !== "external") return;
                 activeSignature = "";
                 for (const bus of liveBuses.slice()) bus.fadeOut(context?.currentTime ?? now, 0.25);
                 liveBuses = [];

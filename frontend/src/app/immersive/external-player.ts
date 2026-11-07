@@ -38,6 +38,36 @@ namespace TrpgImmersiveExternalModule {
     let lastReason = "";
     let lastError = "";
     let lastBedLevel = 1;
+    let reporter: ((event: Record<string, unknown>) => void) | null = null;
+    let lastFailureKey = "";
+    let lastFailureAt = 0;
+
+    function reportPlayback(event: string, track: ImmersiveExternalTrack | null, reason = "", extra: Record<string, unknown> = {}): void {
+        if (!reporter || !track) return;
+        if (event !== "crossfade_done") {
+            const key = `${track.track_key}|${reason}`;
+            const now = Date.now();
+            if (key === lastFailureKey && now - lastFailureAt < 60000) return;
+            lastFailureKey = key;
+            lastFailureAt = now;
+        }
+        try {
+            reporter({
+                event,
+                track_key: track.track_key,
+                title: track.title,
+                artist: track.artist,
+                reason,
+                ...extra,
+            });
+        } catch {
+            // 上报失败不影响播放。
+        }
+    }
+
+    export function setReporter(next: ((event: Record<string, unknown>) => void) | null): void {
+        reporter = next;
+    }
 
     function clamp(value: number, minimum: number, maximum: number): number {
         if (!Number.isFinite(value)) return minimum;
@@ -191,6 +221,15 @@ namespace TrpgImmersiveExternalModule {
         }
     }
 
+    /**
+     * 外链结束/失败时是否把程序化底床抬回来。
+     * 外链块生效期间程序化配乐已关闭，不保留底床，因此保持静音并依赖可见提示。
+     */
+    function restoreBed(seconds: number): void {
+        if (window.TrpgImmersiveMusic?.currentEngineMode?.() === "external") return;
+        rampBed(1, seconds, true);
+    }
+
     /** 外链接入最多等这么久：4s 淡入本身已跨越大半个慢速小节，再等更久只会显得迟滞。 */
     const MAX_ALIGN_WAIT_SECONDS = 3.2;
 
@@ -246,7 +285,7 @@ namespace TrpgImmersiveExternalModule {
         currentTrack = null;
         playingTrack = null;
         setAttribution(null);
-        rampBed(1, 0.9, true);
+        restoreBed(0.9);
         later(() => {
             if (generation !== token || mode !== "idle") return;
             if (elements) {
@@ -270,7 +309,7 @@ namespace TrpgImmersiveExternalModule {
         if (graph) {
             for (const gain of graph.gains) rampGain(gain, 0.0001, seconds, false, graph.ctx);
         }
-        rampBed(1, seconds, true);
+        restoreBed(seconds);
         const token = generation;
         mode = "idle";
         playingIndex = -1;
@@ -349,6 +388,7 @@ namespace TrpgImmersiveExternalModule {
         }
         const graph = ensureGraph();
         if (!graph) {
+            reportPlayback("load_failed", next, "no_audio_graph");
             degrade("no_audio_graph");
             return;
         }
@@ -359,6 +399,7 @@ namespace TrpgImmersiveExternalModule {
         const index = playingIndex >= 0 ? (playingIndex === 0 ? 1 : 0) : activeIndex;
         const element = graph.elements[index];
         if (!element) {
+            reportPlayback("load_failed", next, "no_audio_element");
             degrade("no_audio_element");
             return;
         }
@@ -374,6 +415,7 @@ namespace TrpgImmersiveExternalModule {
         const ready = await waitReady(element, LOAD_TIMEOUT_MS);
         if (token !== generation) return;
         if (!ready) {
+            reportPlayback("load_failed", next, lastError || "load_timeout");
             degrade(lastError || "load_timeout");
             return;
         }
@@ -395,6 +437,7 @@ namespace TrpgImmersiveExternalModule {
             await element.play();
         } catch {
             lastError = "play_rejected";
+            reportPlayback("play_failed", track, "play_rejected");
             degrade("play_rejected");
             return;
         }
@@ -403,8 +446,8 @@ namespace TrpgImmersiveExternalModule {
             return;
         }
         const previousIndex = playingIndex >= 0 && playingIndex !== index ? playingIndex : -1;
-        const api = window.TrpgImmersiveMusic;
-        const bedLevel = api?.bedDuckLevel ? api.bedDuckLevel() : 0.38;
+        // 外链块生效时程序化配乐必须完全关闭（不再保留底床），环境音独立播放。
+        const bedLevel = 0.0001;
         rampBed(bedLevel, fade, false);
         const previousGain = previousIndex >= 0 ? gains[previousIndex] : undefined;
         if (previousGain) {
@@ -427,7 +470,7 @@ namespace TrpgImmersiveExternalModule {
             mode = "idle";
             if (playingIndex === index) playingIndex = -1;
             playingTrack = null;
-            rampBed(1, 1.4, true);
+            restoreBed(1.4);
             setAttribution(null);
             currentTrack = null;
         };
@@ -437,6 +480,10 @@ namespace TrpgImmersiveExternalModule {
         mode = "playing";
         setAttribution(track, "播放中");
         scheduleLoop(token);
+        later(() => {
+            if (token !== generation) return;
+            reportPlayback("crossfade_done", track, "", { seconds: fade });
+        }, fade * 1000 + 100);
     }
 
     export function applyEvent(payload: ImmersiveExternalEvent | null | undefined): void {
@@ -494,4 +541,5 @@ window.TrpgImmersiveExternal = {
     applyEngine: TrpgImmersiveExternalModule.applyEngine,
     stop: TrpgImmersiveExternalModule.stopAll,
     state: TrpgImmersiveExternalModule.state,
+    setReporter: TrpgImmersiveExternalModule.setReporter,
 };

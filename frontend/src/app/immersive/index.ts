@@ -34,6 +34,10 @@ namespace TrpgImmersiveModule {
     let initialized = false;
     let lastState: ImmersiveRoomState | null = null;
     let currentSource: MusicSource = "hybrid";
+    /** 管理员/房间是否允许环境音块；用户开关只在其允许时生效。 */
+    let ambientAllowed = true;
+    /** 已提示过的降级原因，避免每次轮询都弹同一条提示。 */
+    let lastDegradeNotice = "";
 
     function byId<T extends HTMLElement>(id: string): T | null {
         return document.getElementById(id) as T | null;
@@ -144,7 +148,9 @@ namespace TrpgImmersiveModule {
         const music = window.TrpgImmersiveMusic;
         if (music && music.isMuted() !== musicMuted) music.setMuted(musicMuted);
         const ambient = window.TrpgImmersiveAmbient;
-        if (ambient && ambient.isEnabled() !== ambientEnabled) ambient.setEnabled(ambientEnabled);
+        // 管理员/房间未允许环境音块时，用户开关也不能把它打开。
+        const effectiveAmbient = ambientAllowed && ambientEnabled;
+        if (ambient && ambient.isEnabled() !== effectiveAmbient) ambient.setEnabled(effectiveAmbient);
         TrpgImmersiveIllustrationModule.syncMusicButton();
     }
 
@@ -212,6 +218,11 @@ namespace TrpgImmersiveModule {
                 ? prefs.music_source
                 : fallback;
         }
+        const bgmPrioritySelect = byId<HTMLSelectElement>("personalImmersiveBgmPriority");
+        if (bgmPrioritySelect) {
+            const priority = window.TrpgBgm?.getPersonalSettings?.().priority;
+            bgmPrioritySelect.value = priority === "personal" ? "personal" : "room";
+        }
         if (triggerSelect) {
             // 「关闭」始终可选（只会更省）；其余档位需在站点允许集合内。
             const allowedSet = new Set([...allowedChoices("illustration_trigger_allowed", ["important", "turn_interval", "frequent"]), "off"]);
@@ -272,6 +283,7 @@ namespace TrpgImmersiveModule {
 
     function bindPersonalControls(): void {
         const musicSelect = byId<HTMLSelectElement>("personalImmersiveMusicSource");
+        const bgmPrioritySelect = byId<HTMLSelectElement>("personalImmersiveBgmPriority");
         const triggerSelect = byId<HTMLSelectElement>("personalImmersiveIllustrationTrigger");
         const message = byId<HTMLElement>("personalImmersiveMessage");
         const notify = (text: string): void => {
@@ -282,6 +294,11 @@ namespace TrpgImmersiveModule {
             savePersonalPreferences({ music_source: value });
             updatePersonalControls();
             notify("音乐来源偏好已保存（仅保存在当前浏览器）");
+        });
+        bgmPrioritySelect?.addEventListener("change", () => {
+            const priority = bgmPrioritySelect.value === "personal" ? "personal" : "room";
+            window.TrpgBgm?.savePersonalSettings?.({ priority });
+            notify("BGM 来源偏好已保存（仅保存在当前浏览器）");
         });
         triggerSelect?.addEventListener("change", () => {
             const value = triggerSelect.value as IllustrationTrigger;
@@ -351,6 +368,12 @@ namespace TrpgImmersiveModule {
     export function toggleAmbient(): void {
         const ambient = window.TrpgImmersiveAmbient;
         if (!ambient) return;
+        if (!ambientAllowed) {
+            if (lastState?.audio_blocks?.degrade_message) {
+                console.info(lastState.audio_blocks.degrade_message);
+            }
+            return;
+        }
         const enabled = !ambient.isEnabled();
         ambient.setEnabled(enabled);
         if (enabled) ambient.resume();
@@ -405,6 +428,14 @@ namespace TrpgImmersiveModule {
             if (loadingRoomId !== roomId) return;
             const state = response.success ? response.data || null : null;
             lastState = state;
+            applyAmbientAvailability(state);
+            const degradeMessage = state?.audio_blocks?.degrade_message || "";
+            if (degradeMessage && degradeMessage !== lastDegradeNotice) {
+                lastDegradeNotice = degradeMessage;
+                showNotification(`配乐配置已调整：${degradeMessage}`, "warning");
+            } else if (!degradeMessage) {
+                lastDegradeNotice = "";
+            }
             if (!state) {
                 TrpgImmersiveIllustrationModule.applyState(null);
                 applyMusicSource(resolveMusicSource(state), state);
@@ -415,6 +446,21 @@ namespace TrpgImmersiveModule {
         } catch (error) {
             console.warn("读取沉浸状态失败，配乐与配图保持静默", error);
         }
+    }
+
+    /**
+     * 环境音是否可用由「管理员允许 + 房间选择」决定；用户开关只决定自己听不听。
+     * 不允许时强制关闭，但不改写用户偏好，恢复允许后按偏好自动重开。
+     */
+    function applyAmbientAvailability(state: ImmersiveRoomState | null): void {
+        ambientAllowed = !state || !state.audio_blocks || state.audio_blocks.ambient !== false;
+        const ambient = window.TrpgImmersiveAmbient;
+        if (!ambient) return;
+        if (!ambientAllowed) {
+            ambient.setEnabled(false);
+            return;
+        }
+        applyUserAudioPrefs();
     }
 
     function planFromState(roomId: string, music: ImmersiveMusicState): ImmersiveMusicPlan {

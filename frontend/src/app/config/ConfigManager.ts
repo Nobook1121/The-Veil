@@ -154,8 +154,26 @@ class ConfigManager {
         configSetSelectValue("immersiveMusicSource", this.get("general", "immersive", "music_source", "hybrid"));
         configSetInputValue("immersiveMusicSourceAllowed", this.get("general", "immersive", "music_source_allowed", "realtime,bgm,hybrid"));
         configSetCheckboxValue("immersiveMusicSourceAllowPersonal", this.get("general", "immersive", "music_source_allow_personal", true));
-        // 音乐引擎与外链曲库（P4 管理员开关 + P3 调参）
-        configSetSelectValue("immersiveMusicEngine", this.get("general", "immersive", "music_engine", "procedural"));
+        // 音频块允许清单（旧 music_engine 只作为迁移来源）
+        const rawAudioBlocks = this.get("general", "immersive", "audio_blocks_allowed", "");
+        let audioBlocksAllowed = Array.isArray(rawAudioBlocks)
+            ? rawAudioBlocks.join(",")
+            : String(rawAudioBlocks || "").trim();
+        if (!audioBlocksAllowed) {
+            const legacyEngine = String(this.get("general", "immersive", "music_engine", "procedural") || "procedural");
+            const legacyAllowed = String(this.get("general", "immersive", "music_engine_allowed", "procedural,external") || "");
+            const engines = legacyAllowed.split(",").map((item) => item.trim()).filter((item) => item);
+            if (engines.indexOf(legacyEngine) < 0) engines.unshift(legacyEngine);
+            const map: Record<string, string> = { procedural: "procedural", external: "external", off: "off" };
+            const blocks = ["ambient"];
+            engines.forEach((engine) => {
+                const block = map[engine];
+                if (block && blocks.indexOf(block) < 0) blocks.push(block);
+            });
+            if (blocks.indexOf("off") < 0) blocks.push("off");
+            audioBlocksAllowed = blocks.join(",");
+        }
+        configSetInputValue("immersiveAudioBlocksAllowed", audioBlocksAllowed);
         configSetInputValue("immersiveExternalProviders", this.get("general", "immersive", "music_external_providers", "jamendo,openverse"));
         configSetInputValue("immersiveExternalLicenseAllow", this.get("general", "immersive", "music_external_license_allow", "cc0,by,by-sa"));
         configSetInputValue("immersiveExternalTimeout", this.get("general", "immersive", "music_external_timeout", 6));

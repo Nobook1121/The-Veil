@@ -26,6 +26,7 @@ from trpg_server.settings import AI_PLATFORM_SECRET_DIR
 CAPABILITY_CHAT = "chat"
 CAPABILITY_ILLUSTRATION = "illustration"
 CAPABILITY_MUSIC_DIRECTOR = "music_director"
+CAPABILITY_MUSIC_MODEL = "music_model"
 CAPABILITY_SCENARIO = "scenario"
 CAPABILITY_AGENT = "agent"
 CAPABILITY_VOICE = "voice"
@@ -45,6 +46,11 @@ CAPABILITY_OPTIONS: tuple[dict[str, str], ...] = (
         "value": CAPABILITY_MUSIC_DIRECTOR,
         "label": "音乐导演",
         "description": "实时配乐的后台 LLM 精修",
+    },
+    {
+        "value": CAPABILITY_MUSIC_MODEL,
+        "label": "音乐生成模型",
+        "description": "房间配乐块「音乐生成模型」的接入点；未启用任何此类平台时该块不可选",
     },
     {
         "value": CAPABILITY_SCENARIO,

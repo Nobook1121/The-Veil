@@ -1231,18 +1231,28 @@ function setHouseRuleNullableBoolean(elementId: string, value: boolean | null | 
     select.value = value === null || value === undefined ? "" : value ? "on" : "off";
 }
 
-/** 房间音乐的引擎选择：空串表示跟随管理员；其余值由服务端再做一次降级校验。 */
-function readHouseRuleNullableMusicEngine(): "external" | "procedural" | "off" | null {
-    const select = document.getElementById("houseRuleImmersiveMusicEngine") as HTMLSelectElement | null;
-    const value = select?.value || "";
-    if (value === "external" || value === "procedural" || value === "off") return value;
-    return null;
+/** 房间音频块：环境音可叠加，配乐四选一；服务端再做一次「管理员子集」校验。 */
+function readHouseRuleAudioBlocks(): string[] | null {
+    const blocks = window.TrpgAudioBlocks?.getSelection("roomAudioBlocksPicker") || [];
+    return blocks.length ? blocks : null;
 }
 
-function setHouseRuleNullableMusicEngine(value: "external" | "procedural" | "off" | null | undefined): void {
-    const select = document.getElementById("houseRuleImmersiveMusicEngine") as HTMLSelectElement | null;
-    if (!select) return;
-    select.value = value === "external" || value === "procedural" || value === "off" ? value : "";
+function legacyAudioBlocks(legacyEngine: string | null | undefined): string[] | null {
+    const engine = String(legacyEngine || "").trim().toLowerCase();
+    if (engine !== "external" && engine !== "procedural" && engine !== "off") return null;
+    return ["ambient", engine];
+}
+
+function setHouseRuleAudioBlocks(
+    value: string[] | null | undefined,
+    legacyEngine: string | null | undefined,
+    fallback: string[],
+    options: ImmersiveAudioBlockOption[] | undefined,
+): void {
+    const selected = Array.isArray(value) && value.length
+        ? value.map((item) => String(item))
+        : (legacyAudioBlocks(legacyEngine) || fallback || []);
+    window.TrpgAudioBlocks?.render("roomAudioBlocksPicker", options || [], selected, { mode: "select" });
 }
 
 /** 房规弹窗里的世界意志白名单：列出房间内所有成员，按 user_id 预选。 */
@@ -1274,7 +1284,13 @@ async function openHouseRulesModal(): Promise<void> {
     const diceHint = document.getElementById("houseRuleDiceDefaultHint") as HTMLElement | null;
     if (!modalElement) return;
     try {
-        const response = await TrpgApi.get<ApiResponse<RoomHouseRulesPayload>>(`/api/rooms/${encodeURIComponent(currentRoom.id)}/house-rules`);
+        const [response, immersiveConfig] = await Promise.all([
+            TrpgApi.get<ApiResponse<RoomHouseRulesPayload>>(`/api/rooms/${encodeURIComponent(currentRoom.id)}/house-rules`),
+            TrpgApi.get<ApiResponse<{
+                audio_blocks?: ImmersiveAudioBlocksMeta;
+                audio_blocks_state?: ImmersiveAudioBlocksState;
+            }>>(`/api/immersive/config?room_id=${encodeURIComponent(currentRoom.id)}`).catch(() => null),
+        ]);
         if (!response.success || !response.data) {
             showNotification(response.message || response.error || "加载房规失败", "error");
             return;
@@ -1330,7 +1346,27 @@ async function openHouseRulesModal(): Promise<void> {
         // 沉浸房规：三态选择，留空跟随管理员设置；房间只能收紧开关，不能越过站点总开关。
         setHouseRuleNullableBoolean("houseRuleImmersiveMusic", response.data.house_rules?.immersive_music_enabled);
         setHouseRuleNullableBoolean("houseRuleImmersiveMusicAuto", response.data.house_rules?.immersive_music_auto_switch);
-        setHouseRuleNullableMusicEngine(response.data.house_rules?.immersive_music_engine);
+        const blockMeta = immersiveConfig?.success ? immersiveConfig.data?.audio_blocks : undefined;
+        const blockState = immersiveConfig?.success ? immersiveConfig.data?.audio_blocks_state : undefined;
+        const houseRules = response.data.house_rules;
+        setHouseRuleAudioBlocks(
+            houseRules?.immersive_audio_blocks,
+            houseRules?.immersive_music_engine,
+            Array.isArray(blockState?.blocks) ? blockState.blocks : [],
+            blockMeta?.options,
+        );
+        const audioBlocksHint = document.getElementById("roomAudioBlocksHint") as HTMLElement | null;
+        if (audioBlocksHint) {
+            const labels = new Map((blockMeta?.options || []).map((item) => [item.value, item.label]));
+            const effective = (blockState?.blocks || []).map((block) => labels.get(block as ImmersiveAudioBlock) || String(block));
+            const parts: string[] = [];
+            if (blockState?.degrade_message) parts.push(blockState.degrade_message);
+            if (effective.length) parts.push(`当前生效：${effective.join(" + ")}`);
+            audioBlocksHint.textContent = parts.join(" ");
+            audioBlocksHint.className = blockState?.degrade_message
+                ? "form-text text-warning mt-1 mb-0"
+                : "form-text text-muted mt-1 mb-0";
+        }
         setHouseRuleNullableBoolean("houseRuleImmersiveIllustration", response.data.house_rules?.immersive_illustration_enabled);
         setHouseRuleNullableBoolean("houseRuleImmersiveIllustrationAuto", response.data.house_rules?.immersive_illustration_auto);
         setHouseRuleNullableBoolean("houseRuleImmersiveScenarioRecord", response.data.house_rules?.immersive_scenario_record);
@@ -1385,7 +1421,9 @@ async function saveHouseRules(): Promise<void> {
                 // 沉浸房规：null 表示跟随管理员设置；房间级关闭始终优先。
                 immersive_music_enabled: readHouseRuleNullableBoolean("houseRuleImmersiveMusic"),
                 immersive_music_auto_switch: readHouseRuleNullableBoolean("houseRuleImmersiveMusicAuto"),
-                immersive_music_engine: readHouseRuleNullableMusicEngine(),
+                // 新块模型；旧 music_engine 仅由后端读取迁移，这里显式清空避免两套真相。
+                immersive_music_engine: null,
+                immersive_audio_blocks: readHouseRuleAudioBlocks(),
                 immersive_illustration_enabled: readHouseRuleNullableBoolean("houseRuleImmersiveIllustration"),
                 immersive_illustration_auto: readHouseRuleNullableBoolean("houseRuleImmersiveIllustrationAuto"),
                 immersive_scenario_record: readHouseRuleNullableBoolean("houseRuleImmersiveScenarioRecord"),

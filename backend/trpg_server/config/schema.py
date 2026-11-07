@@ -370,6 +370,9 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     ),
     # 管理员允许的引擎档位（逗号分隔）；房间只能取其中更低的一档。
     FieldSpec("music_engine_allowed", "immersive", ("music_engine_allowed",), as_text, "procedural,external"),
+    # 音频块允许清单（逗号分隔）：ambient,procedural,music_model,external,off。
+    # 缺失时由旧 music_engine / music_engine_allowed 自动推导，升级不会突然静音。
+    FieldSpec("audio_blocks_allowed", "immersive", ("audio_blocks_allowed",), as_text, "ambient,procedural,external,off"),
     # 外链曲库：Jamendo 主源 + Openverse 次源。
     FieldSpec("music_external_providers", "immersive", ("music_external_providers",), as_text, "jamendo,openverse"),
     FieldSpec("music_external_license_allow", "immersive", ("music_external_license_allow",), as_text, "cc0,by,by-sa"),

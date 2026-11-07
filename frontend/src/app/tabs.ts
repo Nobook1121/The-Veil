@@ -316,7 +316,7 @@ function initSettingsTabs(): void {
     bindGeneralSelectSetting("immersiveMusicSource", "immersive", "music_source");
     bindGeneralTextSetting("immersiveMusicSourceAllowed", "immersive", "music_source_allowed");
     bindGeneralCheckboxSetting("immersiveMusicSourceAllowPersonal", "immersive", "music_source_allow_personal");
-    bindGeneralSelectSetting("immersiveMusicEngine", "immersive", "music_engine");
+    bindGeneralTextSetting("immersiveAudioBlocksAllowed", "immersive", "audio_blocks_allowed");
     bindGeneralTextSetting("immersiveExternalProviders", "immersive", "music_external_providers");
     bindGeneralTextSetting("immersiveExternalLicenseAllow", "immersive", "music_external_license_allow");
     bindGeneralNumberSetting("immersiveExternalTimeout", "immersive", "music_external_timeout", 2, 30);
@@ -660,6 +660,8 @@ function refreshGeneralSettingsBaseline(): void {
     applyGeneralDeploymentOverrides();
     bindDicePlayerRollTimeoutState();
     bindDiceRerollLimitState();
+    // 音频块选择器由隐藏输入驱动；配置回填后需要同步重绘。
+    (window as unknown as { refreshImmersiveAudioBlocksPicker?: () => void }).refreshImmersiveAudioBlocksPicker?.();
     generalSettingControls.forEach((control) => {
         control.savedValue = readGeneralSettingValue(control);
     });

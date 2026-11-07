@@ -23,8 +23,11 @@ from trpg_server.immersive.config import (
     DIRECTOR_FALLBACKS,
     INTENSITIES,
     PROFILES,
+    audio_block_options,
     load_immersive_settings,
+    music_model_available,
     public_settings,
+    resolve_audio_blocks,
     resolve_room_switches,
 )
 from trpg_server.immersive.illustration import (
@@ -117,7 +120,17 @@ def get_immersive_config():
         return login_error
     settings = _settings()
     room_id = str(request.args.get("room_id") or "").strip()
-    payload = {"config": public_settings(settings), "profiles": list(PROFILES), "intensities": list(INTENSITIES)}
+    model_available = music_model_available(_config_dir())
+    payload = {
+        "config": public_settings(settings),
+        "profiles": list(PROFILES),
+        "intensities": list(INTENSITIES),
+        "audio_blocks": {
+            "options": audio_block_options(model_available),
+            "allowed": list(settings.get("audio_blocks_allowed") or []),
+            "music_model_available": model_available,
+        },
+    }
     if _site_manage_allowed():
         _migrate_quietly()
         payload.update(_platform_payload(settings))
@@ -126,7 +139,13 @@ def get_immersive_config():
         if room_dir:
             rules = info.get("house_rules") if isinstance(info.get("house_rules"), dict) else {}
             payload["switches"] = resolve_room_switches(settings, rules)
-            engine, engine_reason = external_music.resolve_engine(settings, rules)
+            blocks = resolve_audio_blocks(
+                settings, rules, music_model_available=model_available
+            )
+            payload["audio_blocks_state"] = blocks
+            engine, engine_reason = external_music.resolve_engine(
+                settings, rules, music_model_available=model_available
+            )
             payload["music_engine"] = engine
             payload["music_engine_reason"] = engine_reason
             payload["room_id"] = info.get("id") or room_id
@@ -336,14 +355,20 @@ def get_room_immersive_state(room_id):
         return error_response("Room not found", 404, "Room not found")
     settings = _settings()
     rules = info.get("house_rules") if isinstance(info.get("house_rules"), dict) else {}
+    model_available = music_model_available(_config_dir())
     state = immersive_status(
         room_id=str(info.get("id") or room_id),
         room_dir=room_dir,
         settings=settings,
         house_rules=rules,
         scenario_id=str(info.get("scenario_id") or ""),
+        audio_blocks=resolve_audio_blocks(
+            settings, rules, music_model_available=model_available
+        ),
     )
     state["config"] = public_settings(settings)
+    state["audio_block_options"] = audio_block_options(model_available)
+    state["music_model_available"] = model_available
     # 前端据此显示/隐藏「手动配乐」「立即配图」等高成本入口（仅房主/房间管理员）。
     state["can_manage"] = bool(_can_manage(info))
     return success_response(state, "Room immersive state loaded")
@@ -445,23 +470,16 @@ def post_external_music_search(room_id):
         force=force,
     )
     if result.get("status") == "selected":
-        payload_out = _external_broadcast_payload(result, str(info.get("id") or room_id), settings)
-        from trpg_server.immersive import broadcast as immersive_broadcast
-
-        immersive_broadcast.emit("immersive_music_external", payload_out)
+        external_music.publish_selection(
+            result,
+            room_dir=room_dir,
+            room_id=str(info.get("id") or room_id),
+            settings=settings,
+        )
     status_code = 200 if result.get("ok") else 409
     return success_response(result, "External music searched") if status_code == 200 else error_response(
         str(result.get("reason") or "No playable track"), 409, "External music unavailable"
     )
-
-
-def _external_broadcast_payload(result: dict, room_id: str, settings: dict) -> dict:
-    payload = dict(result)
-    payload["room_id"] = room_id
-    payload["fade_ms"] = int(settings.get("music_external_fade_ms") or 4200)
-    payload["phrase_bars"] = int(settings.get("music_external_phrase_bars") or 8)
-    payload["crossfade_ms"] = payload["fade_ms"]
-    return payload
 
 
 @bp.route("/api/immersive/rooms/<room_id>/music/external/audio/<track_key>", methods=["GET"])

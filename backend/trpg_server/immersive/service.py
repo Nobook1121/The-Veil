@@ -21,6 +21,8 @@ from trpg_server.immersive import (
 from trpg_server.immersive.analyzer import analyze_narrative
 from trpg_server.immersive.config import (
     load_immersive_settings,
+    music_model_available,
+    resolve_audio_blocks,
     resolve_illustration_trigger,
     resolve_music_source,
     resolve_room_switches,
@@ -431,7 +433,12 @@ def on_narrative_turn(
             settings, house_rules, (personal_override or {}).get("music_source")
         )
         result["music_source"] = music_source
-        # 引擎矩阵：外部曲库只是「叠在程序化底床之上」，底床逻辑保持不变。
+        # 音频块：环境音可叠加；配乐块四选一。外链块生效时程序化底床由前端关闭。
+        audio_blocks = resolve_audio_blocks(
+            settings, house_rules, music_model_available=music_model_available(config_dir)
+        )
+        result["audio_blocks"] = audio_blocks
+        result["ambient_audio"] = bool(audio_blocks.get("ambient"))
         engine, engine_reason = external_music.resolve_engine(settings, house_rules)
         result["music_engine"] = engine
         result["music_engine_reason"] = engine_reason
@@ -443,6 +450,10 @@ def on_narrative_turn(
                 if engine == external_music.ENGINE_EXTERNAL
                 else settings.get("music_crossfade_ms") or 3000
             ),
+            room_dir=room_dir,
+            reason=engine_reason,
+            site_engine=str(settings.get("music_engine") or external_music.ENGINE_PROCEDURAL),
+            blocks=audio_blocks,
         )
 
         analysis = analyze_narrative(
@@ -796,11 +807,13 @@ def immersive_status(
     settings: dict[str, Any],
     house_rules: dict[str, Any] | None = None,
     scenario_id: str = "",
+    audio_blocks: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     switches = resolve_room_switches(settings, house_rules)
     music = load_music_state(room_dir)
     live = live_music_payload(room_dir)
     illustration = load_room_state(room_dir)
+    blocks = audio_blocks if isinstance(audio_blocks, dict) else resolve_audio_blocks(settings, house_rules)
     engine, engine_reason = external_music.resolve_engine(settings, house_rules)
     return {
         "room_id": room_id,
@@ -809,6 +822,8 @@ def immersive_status(
         "music_source": resolve_music_source(settings, house_rules),
         "music_engine": engine,
         "music_engine_reason": engine_reason,
+        "audio_blocks": blocks,
+        "ambient_audio": bool(blocks.get("ambient")),
         "external_music": {
             "providers": str(settings.get("music_external_providers") or ""),
             "license_allow": str(settings.get("music_external_license_allow") or ""),

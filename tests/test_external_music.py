@@ -3,7 +3,7 @@
 覆盖：
 - 许可归一化 / 白名单 / 署名完整性；
 - 缓存键稳定性、两级缓存、负缓存；
-- 引擎降级链（房间不能升级）；
+- 音频块模型（管理员允许清单 + 房间子集、收回后降级）；
 - 曲库解析与许可过滤（完全本地桩，不访问网络）；
 - 代理 SSRF 防护。
 
@@ -105,6 +105,60 @@ class _Session:
 )
 def test_normalize_license(raw, expected):
     assert lic.normalize_license(raw) == expected
+
+
+def test_publish_selection_persists_state_and_logs_track(tmp_path):
+    from trpg_server.json_store import read_json
+    from trpg_server.room_log import read_room_log
+
+    room_dir = tmp_path / "rooms" / "r-1"
+    room_dir.mkdir(parents=True)
+    (room_dir / "info.json").write_text('{"id": "r-1"}', encoding="utf-8")
+    settings = _settings(tmp_path, music_external_fade_ms=4200, music_external_phrase_bars=8)
+    payload = {
+        "ok": True,
+        "status": "selected",
+        "engine": "external",
+        "trigger": "room_console",
+        "track": {
+            "track_key": "jamendo:t-1",
+            "title": "Quiet Halls",
+            "artist": "Test Artist",
+            "provider": "jamendo",
+            "license": "by-sa",
+            "license_label": "CC BY-SA",
+            "attribution": "Test Artist",
+            "source_url": "https://www.jamendo.com/track/t-1",
+        },
+        "alternatives": [],
+    }
+
+    published = service.publish_selection(payload, room_dir=room_dir, room_id="r-1", settings=settings)
+
+    assert published["fade_ms"] == 4200
+    assert published["phrase_bars"] == 8
+    state = read_json(room_dir / service.EXTERNAL_STATE_FILENAME, default={})
+    assert state["track"]["track_key"] == "jamendo:t-1"
+    entries = read_room_log(room_dir)["entries"]
+    assert entries[-1]["message"].startswith("切曲：Quiet Halls — Test Artist")
+    assert entries[-1]["level"] == "info"
+    assert entries[-1]["details"]["link_url"] == "https://www.jamendo.com/track/t-1"
+
+
+def test_console_failure_dedupe_logs_once(tmp_path):
+    from trpg_server.room_log import read_room_log
+
+    room_dir = tmp_path / "rooms" / "r-2"
+    room_dir.mkdir(parents=True)
+    (room_dir / "info.json").write_text('{"id": "r-2"}', encoding="utf-8")
+    service._LAST_FAILURE_LOG.clear()
+
+    service._console_failure_once(room_dir, "r-2", "empty", "外链曲目检索失败（provider:timeout），降级到程序化底床")
+    service._console_failure_once(room_dir, "r-2", "empty", "外链曲目检索失败（provider:timeout），降级到程序化底床")
+
+    entries = [item for item in read_room_log(room_dir)["entries"] if "检索失败" in item["message"]]
+    assert len(entries) == 1
+    assert entries[0]["level"] == "warning"
 
 
 def test_allowed_licenses_filters_unknown_and_keeps_default():
@@ -359,7 +413,8 @@ def test_search_and_select_empty_is_negative_cached(tmp_path, monkeypatch):
         room_dir=room_dir, room_id="r-2", profile="horror", intensity="high",
         scene="洞穴", settings=settings,
     )
-    assert first["status"] == "empty" and first["fallback"] == "procedural"
+    # 外链块生效时不再保留程序化底床，空结果直接保持静音（由前端展示可见提示）。
+    assert first["status"] == "empty" and first["fallback"] == "off"
     second = service.search_and_select(
         room_dir=room_dir, room_id="r-2", profile="horror", intensity="high",
         scene="洞穴", settings=settings,
@@ -375,8 +430,13 @@ def test_search_and_select_disabled_engine_returns_procedural(tmp_path):
     assert result["fallback"] == "procedural"
 
 
-def test_search_and_select_room_cannot_upgrade(tmp_path, monkeypatch):
-    settings = _settings(tmp_path, music_engine="procedural")
+def test_search_and_select_room_block_revoked_stays_on_procedural(tmp_path, monkeypatch):
+    """管理员允许清单不含外链时，房间的外链选择应降级且不触发检索。"""
+    settings = _settings(
+        tmp_path,
+        music_engine="procedural",
+        audio_blocks_allowed=["ambient", "procedural", "off"],
+    )
     room_dir = tmp_path / "room"
     room_dir.mkdir()
     called = {"hit": False}
@@ -389,7 +449,7 @@ def test_search_and_select_room_cannot_upgrade(tmp_path, monkeypatch):
     monkeypatch.setattr(providers, "search_openverse", _mark)
     result = service.search_and_select(
         room_dir=room_dir, room_id="r-4", settings=settings,
-        house_rules={"immersive_music_engine": "external"},
+        house_rules={"immersive_audio_blocks": ["ambient", "external"]},
     )
     assert result["status"] == "disabled" and result["reason"] == "room_cannot_upgrade"
     assert called["hit"] is False

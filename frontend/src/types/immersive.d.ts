@@ -168,6 +168,36 @@ interface ImmersiveSettings {
     illustration_npc_enabled: boolean;
     illustration_npc_size: string;
     illustration_npc_max_per_turn: number;
+    /** 管理员允许的音频块清单（缺失时后端按旧 music_engine 推导）。 */
+    audio_blocks_allowed?: string[] | string;
+}
+
+type ImmersiveAudioBlock = "ambient" | "procedural" | "music_model" | "external" | "off";
+
+interface ImmersiveAudioBlockOption {
+    value: ImmersiveAudioBlock;
+    label: string;
+    description: string;
+    stackable: boolean;
+    available: boolean;
+    unavailable_reason?: string;
+}
+
+interface ImmersiveAudioBlocksMeta {
+    options: ImmersiveAudioBlockOption[];
+    allowed: ImmersiveAudioBlock[];
+    music_model_available: boolean;
+}
+
+interface ImmersiveAudioBlocksState {
+    ambient: boolean;
+    music: ImmersiveAudioBlock;
+    blocks: ImmersiveAudioBlock[];
+    requested: ImmersiveAudioBlock[];
+    allowed: ImmersiveAudioBlock[];
+    revoked: ImmersiveAudioBlock[];
+    degrade_reason: string;
+    degrade_message: string;
 }
 
 interface ImmersiveImagePlatform {
@@ -213,6 +243,7 @@ interface ImmersiveDirectorUsage {
 }
 
 interface ImmersivePlatformPayload {
+    audio_blocks?: ImmersiveAudioBlocksMeta;
     platforms: ImmersiveImagePlatform[];
     presets: ImmersiveImagePreset[];
     protocols: ImmersiveProtocolOption[];
@@ -278,9 +309,14 @@ interface ImmersiveRoomState {
     can_manage?: boolean;
     /** 站点 + 房间收紧后的生效值；个人覆盖由前端再解析。 */
     music_source?: "realtime" | "bgm" | "hybrid";
-    /** 生效音乐引擎（P4）：站点默认与房间降级之后的结果。 */
+    /** 生效音乐引擎（P4）：由音频块模型派生。 */
     music_engine?: "procedural" | "external" | "off";
     music_engine_reason?: string;
+    /** 房间生效的音频块组合与降级说明。 */
+    audio_blocks?: ImmersiveAudioBlocksState;
+    audio_block_options?: ImmersiveAudioBlockOption[];
+    ambient_audio?: boolean;
+    music_model_available?: boolean;
     illustration_trigger?: "off" | "important" | "turn_interval" | "frequent";
 }
 
@@ -445,6 +481,18 @@ interface TrpgImmersiveExternalApi {
     applyEngine: (event: ImmersiveMusicEngineEvent | null | undefined) => void;
     stop: (fadeMs?: number) => void;
     state: () => Record<string, unknown>;
+    setReporter: (reporter: ((event: Record<string, unknown>) => void) | null) => void;
+}
+
+interface TrpgAudioBlocksApi {
+    render: (
+        containerId: string,
+        options: ImmersiveAudioBlockOption[],
+        selected: string[],
+        renderOptions?: { mode?: "allow" | "select"; onChange?: (blocks: string[]) => void },
+    ) => void;
+    getSelection: (containerId: string) => string[];
+    setSelection: (containerId: string, blocks: string[]) => void;
 }
 
 interface Window {
@@ -452,4 +500,5 @@ interface Window {
     TrpgImmersiveAmbient?: TrpgImmersiveAmbientApi;
     TrpgImmersiveExternal?: TrpgImmersiveExternalApi;
     TrpgImmersive?: TrpgImmersiveApi;
+    TrpgAudioBlocks?: TrpgAudioBlocksApi;
 }

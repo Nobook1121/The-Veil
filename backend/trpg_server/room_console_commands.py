@@ -42,7 +42,7 @@ ROOM_COMMAND_WHITELIST: dict[str, set[str]] = {
     "narrative": {
         "status", "state", "map", "exits", "ledger", "facts", "clocks", "triggers",
         "trigger", "media", "opening", "trace", "summary", "reset", "unlock",
-        "guard", "profile", "rebuild-state",
+        "guard", "profile", "rebuild-state", "insert", "say",
     },
     "immersive": {"status", "music", "illustration", "history", "director"},
     "voice": {"status", "on", "off", "map", "mute", "usage", "cache"},
@@ -119,10 +119,12 @@ def room_command_help_text() -> str:
             "  dice cancel [request_id] [--yes]（取消本房间待投掷请求，缺省取消最早的一条）",
             *ROOM_NARRATIVE_HELP().splitlines(),
             "  immersive                    （本房间配乐/配图状态与开关）",
-            "  immersive music show         （查看本房间配乐档位、强度、段落与种子）",
+            "  immersive music show         （查看配乐引擎、档位、当前外链曲目与底床状态）",
             "  immersive music set <profile> <intensity> [--yes]（手动指定配乐，档位见站点设置）",
             "  immersive music auto <on|off> [--yes]（本房间自动切歌开关）",
-            "  immersive music <on|off> [--yes]（本房间配乐总开关）",
+            "  immersive music <on|off> [--yes]（本房间配乐总开关；房间级，与个人本地开关无关）",
+            "  immersive music search [场景] [--tags=a,b] [--profile=x] [--intensity=y]（重新检索外链 BGM）",
+            "  immersive music switch [序号|track_key|标题]（在最近检索结果中切换曲目；省略参数=换一首）",
             "  immersive illustration show  （查看本房间配图开关与最近历史）",
             "  immersive illustration <on|off> [--yes]（本房间配图总开关）",
             "  immersive illustration auto <on|off> [--yes]（本房间自动配图开关）",
@@ -173,6 +175,7 @@ def execute_room_command(
     app: Any = None,
     actor: Any = None,
     actor_id: Any = None,
+    actor_rank: Any = None,
     confirm: Callable[[str], bool] | None = None,
 ) -> RoomCommandResult:
     """执行一条房间控制台命令；非白名单命令一律拒绝。"""
@@ -254,6 +257,7 @@ def execute_room_command(
             app=app,
             actor=actor,
             actor_id=actor_id,
+            actor_rank=actor_rank,
             confirm=confirm,
         )
         return RoomCommandResult(ok, message)
@@ -552,7 +556,19 @@ def _immersive_command(
                 confirm=confirm,
                 prompt="确认切换本房间配乐?",
             )
-        return RoomCommandResult(False, "Usage: immersive music show|on|off|auto <on|off>|set <profile> <intensity>")
+        if action in {"search", "rescan"}:
+            return _music_external_search(
+                room_dir, room_id, rest[1:], flags, info, settings, rules, music_state
+            )
+        if action in {"switch", "next"}:
+            return _music_external_switch(
+                room_dir, room_id, rest, action, settings
+            )
+        return RoomCommandResult(
+            False,
+            "Usage: immersive music show|on|off|auto <on|off>|set <profile> <intensity>|"
+            "search [场景] [--tags=a,b] [--profile=x] [--intensity=y]|switch [序号|track_key|标题]",
+        )
 
     if sub == "illustration":
         action = rest[0].lower() if rest else "show"
@@ -798,6 +814,159 @@ def _human_bytes(value: int) -> str:
     return f"{number:.1f}GB"
 
 
+def _flag_value(flags: set[str], name: str) -> str:
+    prefix = f"--{name}="
+    for item in flags:
+        if item.startswith(prefix):
+            return item[len(prefix):].strip()
+    return ""
+
+
+def _music_external_search(
+    room_dir: Path,
+    room_id: Any,
+    args: list[str],
+    flags: set[str],
+    info: dict[str, Any],
+    settings: dict[str, Any],
+    rules: dict[str, Any],
+    music_state: dict[str, Any],
+) -> RoomCommandResult:
+    """控制台手动重新检索外链 BGM（force 绕过查询缓存）。"""
+    from trpg_server.immersive.config import INTENSITIES, PROFILES, resolve_room_switches
+    from trpg_server.immersive.external_music import service as external_music
+
+    if not resolve_room_switches(settings, rules).get("music"):
+        return RoomCommandResult(False, "本房间配乐已关闭，先执行 immersive music on")
+    engine, engine_reason = external_music.resolve_engine(settings, rules)
+    if engine != external_music.ENGINE_EXTERNAL:
+        return RoomCommandResult(
+            False,
+            f"当前引擎为 {engine}（{engine_reason}），无法检索外链曲库；"
+            "需站点开启 external 且房间未收紧为 off/procedural。程序化底床仍可正常播放。",
+        )
+
+    profile = (_flag_value(flags, "profile") or music_state.get("profile") or settings.get("music_default_profile") or "daily").lower()
+    intensity = (_flag_value(flags, "intensity") or music_state.get("intensity") or settings.get("music_default_intensity") or "medium").lower()
+    if profile not in PROFILES:
+        return RoomCommandResult(False, f"未知档位 {profile}；可选：{', '.join(PROFILES)}")
+    if intensity not in INTENSITIES:
+        return RoomCommandResult(False, f"未知强度 {intensity}；可选：{', '.join(INTENSITIES)}")
+    tags = [item.strip() for item in _flag_value(flags, "tags").replace("，", ",").split(",") if item.strip()][:8]
+    scene = " ".join(args).strip()[:120]
+    force = "--cache" not in flags
+
+    result = external_music.search_and_select(
+        room_dir=room_dir,
+        room_id=str(info.get("id") or room_id),
+        scenario_id=str(info.get("scenario_id") or ""),
+        profile=profile,
+        intensity=intensity,
+        scene=scene,
+        extra_tags=tags,
+        settings=settings,
+        house_rules=rules,
+        trigger="room_console",
+        force=force,
+    )
+    if result.get("status") != "selected":
+        reason = result.get("reason") or result.get("status")
+        fallback = str(result.get("fallback") or "procedural")
+        note = "已降级到程序化底床" if fallback == "procedural" else "外链配乐已停止"
+        return RoomCommandResult(
+            False,
+            f"外链检索未命中（{reason}），{note}；可换场景/标签重试："
+            "immersive music search 雨夜街道 --tags=dark,ambient",
+        )
+    external_music.publish_selection(
+        result, room_dir=room_dir, room_id=str(info.get("id") or room_id), settings=settings
+    )
+    track = result.get("track") or {}
+    alternatives = result.get("alternatives") or []
+    return RoomCommandResult(
+        True,
+        f"已重新检索并切曲：{track.get('title') or track.get('track_key')} — {track.get('artist') or '未知作者'}\n"
+        f"  许可: {track.get('license') or '-'} · 署名: {track.get('attribution') or '-'} · 来源: {track.get('provider') or '-'}\n"
+        f"  备选: {len(alternatives)} 首（用 immersive music switch 换一首）",
+    )
+
+
+def _music_external_switch(
+    room_dir: Path,
+    room_id: Any,
+    rest: list[str],
+    action: str,
+    settings: dict[str, Any],
+) -> RoomCommandResult:
+    """在最近一次检索结果中切换曲目；无参数时换下一首。"""
+    from trpg_server.immersive.external_music import service as external_music
+
+    state = external_music.load_selection(room_dir)
+    track = state.get("track") if isinstance(state.get("track"), dict) else {}
+    if not track:
+        return RoomCommandResult(False, "尚无外链检索结果；先执行 immersive music search [场景]")
+    candidates = [track] + [item for item in (state.get("alternatives") or []) if isinstance(item, dict)]
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in candidates:
+        key = str(item.get("track_key") or "")
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(item)
+    if action == "next" or len(rest) <= 1:
+        if len(deduped) < 2:
+            return RoomCommandResult(False, "当前检索结果只有 1 首；先执行 immersive music search 获取更多备选")
+        chosen = deduped[1]
+    else:
+        target = rest[1].strip()
+        if target.isdigit():
+            index = int(target) - 1
+            if index < 0 or index >= len(deduped):
+                return RoomCommandResult(False, f"序号超出范围（1-{len(deduped)}）")
+            chosen = deduped[index]
+        else:
+            needle = target.casefold()
+            chosen = next(
+                (
+                    item for item in deduped
+                    if needle in str(item.get("track_key") or "").casefold()
+                    or needle in str(item.get("title") or "").casefold()
+                    or needle in str(item.get("artist") or "").casefold()
+                ),
+                {},
+            )
+            if not chosen:
+                listing = "；".join(
+                    f"{index + 1}. {item.get('title') or item.get('track_key')} — {item.get('artist') or '未知作者'}"
+                    for index, item in enumerate(deduped)
+                )
+                return RoomCommandResult(False, f"未找到匹配曲目。可选：{listing}")
+
+    alternatives = [item for item in deduped if item.get("track_key") != chosen.get("track_key")][:3]
+    payload = {
+        "ok": True,
+        "status": "selected",
+        "engine": external_music.ENGINE_EXTERNAL,
+        "engine_reason": "room_console",
+        "fallback": external_music.ENGINE_PROCEDURAL,
+        "track": chosen,
+        "alternatives": alternatives,
+        "request_id": "",
+        "trigger": "room_console",
+        "cached": bool(state.get("trigger") != "room_console"),
+        "reason": "console_switch",
+        "elapsed_ms": 0,
+    }
+    external_music.publish_selection(
+        payload, room_dir=room_dir, room_id=room_id, settings=settings
+    )
+    return RoomCommandResult(
+        True,
+        f"已切换外链曲目：{chosen.get('title') or chosen.get('track_key')} — {chosen.get('artist') or '未知作者'}\n"
+        f"  许可: {chosen.get('license') or '-'} · 署名: {chosen.get('attribution') or '-'}",
+    )
+
+
 def _immersive_director_text(settings: dict[str, Any], music_state: dict[str, Any]) -> RoomCommandResult:
     director_state = music_state.get("director") if isinstance(music_state.get("director"), dict) else {}
     score = director_state.get("score") if isinstance(director_state.get("score"), dict) else {}
@@ -846,11 +1015,39 @@ def _immersive_status_text(
     effective_source = resolve_music_source(settings, rules)
     effective_trigger = resolve_illustration_trigger(settings, rules)
     history = history_for_room(room_dir, limit=3)
+    from trpg_server.immersive.external_music import service as external_music
+
+    engine, engine_reason = external_music.resolve_engine(settings, rules)
+    selection = external_music.load_selection(room_dir)
+    track = selection.get("track") if isinstance(selection.get("track"), dict) else {}
+    if track:
+        track_line = (
+            f"{track.get('title') or track.get('track_key')} — {track.get('artist') or '未知作者'}"
+            f"（{track.get('provider') or '-'} · 许可 {track.get('license') or '-'} · {selection.get('updated_at') or '-'}）"
+        )
+    else:
+        track_line = "尚未检索（外链曲目会叠在程序化底床上）"
+    bed_state = {
+        "off": "已静音（引擎 off）",
+        "external": "运行中（外链播放时自动压低）",
+        "procedural": "运行中（程序化生成）",
+    }.get(engine, f"未知（{engine}）")
+    try:
+        from trpg_server.immersive.config import resolve_audio_blocks
+
+        blocks = resolve_audio_blocks(settings, rules)
+        block_names = blocks.get("blocks") or []
+        if block_names:
+            bed_state = "运行中" if "procedural" in block_names else "关闭（音频块未选中 procedural）"
+    except Exception:  # noqa: BLE001 - 兼容尚未启用音频块的版本
+        pass
     lines = [
         f"房间 {room_id} 沉浸状态：",
         f"  配乐: {'开' if switches.get('music') else '关'} · 来源 {effective_source}（站点 {settings.get('music_source')}）· "
         f"{music_state.get('profile') or '-'} / {music_state.get('intensity') or '-'} · 第 {music_state.get('section') or 0} 段 · "
         f"回合 {music_state.get('turns') or 0}",
+        f"  引擎: {engine}（{engine_reason}）· 底床: {bed_state}",
+        f"  当前外链曲目: {track_line}",
         f"  配图: {'开' if switches.get('illustration') else '关'} · 自动 {'开' if switches.get('illustration_auto') else '关'} · "
         f"触发档位 {effective_trigger}（站点 {settings.get('illustration_trigger')}）· "
         f"历史 {len(history)} 条（显示最近 3 条）",

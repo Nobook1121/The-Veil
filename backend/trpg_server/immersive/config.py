@@ -20,7 +20,55 @@ INTENSITIES = ("low", "medium", "high")
 PROVIDERS = ("procedural", "platform", "openai_compatible")
 DIRECTOR_FALLBACKS = ("rule", "hold")
 MUSIC_SOURCES = ("realtime", "bgm", "hybrid")
+# 旧版单值引擎（保留读取与迁移）；新配置请使用「音频块」。
 MUSIC_ENGINES = ("procedural", "external", "off")
+# 音频块：环境音可叠加，其余四项是互斥的配乐选择。
+AUDIO_BLOCK_AMBIENT = "ambient"
+AUDIO_BLOCK_PROCEDURAL = "procedural"
+AUDIO_BLOCK_MUSIC_MODEL = "music_model"
+AUDIO_BLOCK_EXTERNAL = "external"
+AUDIO_BLOCK_OFF = "off"
+AUDIO_BLOCKS = (
+    AUDIO_BLOCK_AMBIENT,
+    AUDIO_BLOCK_PROCEDURAL,
+    AUDIO_BLOCK_MUSIC_MODEL,
+    AUDIO_BLOCK_EXTERNAL,
+    AUDIO_BLOCK_OFF,
+)
+MUSIC_BLOCKS = (
+    AUDIO_BLOCK_PROCEDURAL,
+    AUDIO_BLOCK_MUSIC_MODEL,
+    AUDIO_BLOCK_EXTERNAL,
+    AUDIO_BLOCK_OFF,
+)
+# 解析到多个配乐块时的固定优先级（房间 UI 只会提交一个；这里兜底历史/脏数据）。
+MUSIC_BLOCK_PRIORITY = (
+    AUDIO_BLOCK_EXTERNAL,
+    AUDIO_BLOCK_MUSIC_MODEL,
+    AUDIO_BLOCK_PROCEDURAL,
+    AUDIO_BLOCK_OFF,
+)
+DEFAULT_AUDIO_BLOCKS = (AUDIO_BLOCK_AMBIENT, AUDIO_BLOCK_PROCEDURAL)
+# 旧引擎 → 块：off 也映射到 off，保证升级后不会突然失去「关闭」选项。
+LEGACY_ENGINE_TO_BLOCK = {
+    "procedural": AUDIO_BLOCK_PROCEDURAL,
+    "external": AUDIO_BLOCK_EXTERNAL,
+    "off": AUDIO_BLOCK_OFF,
+}
+AUDIO_BLOCK_LABELS = {
+    AUDIO_BLOCK_AMBIENT: "环境音",
+    AUDIO_BLOCK_PROCEDURAL: "程序化生成配乐",
+    AUDIO_BLOCK_MUSIC_MODEL: "音乐生成模型",
+    AUDIO_BLOCK_EXTERNAL: "外链 BGM",
+    AUDIO_BLOCK_OFF: "不使用（静音）",
+}
+AUDIO_BLOCK_DESCRIPTIONS = {
+    AUDIO_BLOCK_AMBIENT: "雨声、风声、火焰等环境层；可与任意配乐块叠加，并受每个用户自己的环境音开关控制。",
+    AUDIO_BLOCK_PROCEDURAL: "浏览器 Web Audio 现场合成，随叙事氛围变化，无版权风险。",
+    AUDIO_BLOCK_MUSIC_MODEL: "调用管理员在「模型设置」中接入的音乐生成平台；未接入时不可选。",
+    AUDIO_BLOCK_EXTERNAL: "从外链免费曲库检索可播放曲目；启用后程序化配乐自动关闭，环境音照常。",
+    AUDIO_BLOCK_OFF: "不播放任何配乐；环境音（若允许且用户开启）仍然播放。",
+}
 EXTERNAL_PROVIDERS = ("jamendo", "openverse")
 ILLUSTRATION_TRIGGERS = ("off", "important", "turn_interval", "frequent")
 # 档位越低越「收紧」：房间只能把触发档位往下压，不能抬高。
@@ -31,7 +79,7 @@ _MUSIC_KEYS = (
     "music_default_intensity", "music_volume", "music_crossfade_ms",
     "music_hysteresis_turns", "music_seed", "music_duck_bgm", "music_source",
     "music_source_allowed", "music_source_allow_personal",
-    "music_engine", "music_engine_allowed",
+    "music_engine", "music_engine_allowed", "audio_blocks_allowed",
     "music_external_providers", "music_external_license_allow",
     "music_external_instrumental_only", "music_external_timeout",
     "music_external_search_ttl", "music_external_url_ttl",
@@ -99,6 +147,61 @@ def _as_mode_list(value: Any, default: tuple[str, ...], choices: tuple[str, ...]
     return result or list(default)
 
 
+def _parse_audio_blocks(value: Any) -> list[str] | None:
+    """解析音频块列表；``None``/空值表示未配置（与「显式空清单」区分）。"""
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        raw_items = [str(item or "").strip().lower() for item in value]
+    else:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        raw_items = [item.strip().lower() for item in text.split(",")]
+    result: list[str] = []
+    for item in raw_items:
+        if item in AUDIO_BLOCKS and item not in result:
+            result.append(item)
+    return result
+
+
+def legacy_audio_blocks(engine: str) -> list[str]:
+    """把旧版单值引擎映射成块组合；始终包含环境音。"""
+    block = LEGACY_ENGINE_TO_BLOCK.get(str(engine or "").strip().lower(), AUDIO_BLOCK_PROCEDURAL)
+    return [AUDIO_BLOCK_AMBIENT, block]
+
+
+def derive_allowed_audio_blocks(raw_engine: Any, raw_engine_allowed: Any) -> list[str]:
+    """旧配置迁移：由 ``music_engine`` / ``music_engine_allowed`` 推导管理员允许清单。
+
+    - 旧版房间始终可以选 off，因此 ``off`` 保留在允许清单里；
+    - 环境音在旧版就是独立能力，迁移后默认允许；
+    - 结果去重保序，至少包含一个配乐块，避免升级后突然变静音。
+    """
+    legacy_engine = _as_choice(raw_engine, "procedural", MUSIC_ENGINES)
+    missing_allowed = raw_engine_allowed is None or (
+        not isinstance(raw_engine_allowed, (list, tuple)) and not str(raw_engine_allowed).strip()
+    ) or (isinstance(raw_engine_allowed, (list, tuple)) and not raw_engine_allowed)
+    # 未显式配置允许清单时只保留旧引擎本身，避免把旧版「关闭」的站点重新点亮。
+    if missing_allowed:
+        # 旧版允许房间从 external 降级到 procedural；off 站点则保持全关。
+        engines = [legacy_engine]
+        if legacy_engine == "external":
+            engines.append("procedural")
+    else:
+        engines = _as_mode_list(raw_engine_allowed, (legacy_engine,), MUSIC_ENGINES)
+    if legacy_engine not in engines:
+        engines.insert(0, legacy_engine)
+    result = [AUDIO_BLOCK_AMBIENT]
+    for engine in engines:
+        block = LEGACY_ENGINE_TO_BLOCK[engine]
+        if block not in result:
+            result.append(block)
+    if AUDIO_BLOCK_OFF not in result:
+        result.append(AUDIO_BLOCK_OFF)
+    return result
+
+
 def load_immersive_settings(config_dir: Path | str | None = None) -> dict[str, Any]:
     """读取生效配置并归一化，保证后续逻辑不依赖模板/用户配置是否完整。"""
     settings = load_settings(config_dir)
@@ -125,6 +228,12 @@ def load_immersive_settings(config_dir: Path | str | None = None) -> dict[str, A
         "music_engine": _as_choice(raw.get("music_engine"), "procedural", MUSIC_ENGINES),
         "music_engine_allowed": _as_mode_list(
             raw.get("music_engine_allowed"), ("procedural", "external"), MUSIC_ENGINES
+        ),
+        # 音频块：管理员只划定「允许什么」，房间在范围内决定「用什么」。
+        # 新键缺失时按旧 music_engine / music_engine_allowed 平滑迁移。
+        "audio_blocks_allowed": (
+            _parse_audio_blocks(raw.get("audio_blocks_allowed"))
+            or derive_allowed_audio_blocks(raw.get("music_engine"), raw.get("music_engine_allowed"))
         ),
         "music_external_providers": ",".join(
             _as_mode_list(raw.get("music_external_providers"), EXTERNAL_PROVIDERS, EXTERNAL_PROVIDERS)
@@ -267,6 +376,156 @@ def resolve_room_switches(settings: dict[str, Any], house_rules: dict[str, Any] 
         "scenario_prefer": bool(settings.get("illustration_scenario_prefer")) and site and (
             True if scenario_prefer_room is None else bool(scenario_prefer_room)
         ),
+    }
+
+
+def audio_block_options(music_model_available: bool) -> list[dict[str, Any]]:
+    """管理员/房间 UI 的块定义：名称、说明与当前是否可选。"""
+    options: list[dict[str, Any]] = []
+    for block in AUDIO_BLOCKS:
+        available = block != AUDIO_BLOCK_MUSIC_MODEL or music_model_available
+        options.append(
+            {
+                "value": block,
+                "label": AUDIO_BLOCK_LABELS[block],
+                "description": AUDIO_BLOCK_DESCRIPTIONS[block],
+                "stackable": block == AUDIO_BLOCK_AMBIENT,
+                "available": available,
+                "unavailable_reason": "" if available else "尚未接入音乐生成服务：请管理员先在「模型设置 → 平台」中启用声明了 music_model 用途的平台。",
+            }
+        )
+    return options
+
+
+def music_model_available(config_dir: Path | str | None = None) -> bool:
+    """是否有已启用的平台声明了 ``music_model`` 用途（不探测真实可用性）。"""
+    try:
+        from trpg_server.ai_platform_resolver import CAPABILITY_MUSIC_MODEL, resolve_platform_targets
+
+        return bool(resolve_platform_targets(config_dir, CAPABILITY_MUSIC_MODEL, include_unavailable=True))
+    except Exception:  # noqa: BLE001 - 平台表缺失时按「未接入」处理
+        return False
+
+
+def _default_audio_blocks(settings: dict[str, Any], allowed: list[str]) -> list[str]:
+    """房间未配置时的默认组合：环境音 + 旧版站点引擎对应的配乐块。"""
+    default_engine = str(settings.get("music_engine") or "procedural").strip().lower()
+    preferred = LEGACY_ENGINE_TO_BLOCK.get(default_engine, AUDIO_BLOCK_PROCEDURAL)
+    music = next(
+        (
+            block
+            for block in [preferred, *MUSIC_BLOCK_PRIORITY]
+            if block in allowed
+        ),
+        AUDIO_BLOCK_OFF,
+    )
+    blocks = ([AUDIO_BLOCK_AMBIENT] if AUDIO_BLOCK_AMBIENT in allowed else []) + [music]
+    return blocks
+
+
+def resolve_audio_blocks(
+    settings: dict[str, Any],
+    house_rules: dict[str, Any] | None,
+    *,
+    music_model_available: bool = False,
+) -> dict[str, Any]:
+    """解析生效的音频块组合。
+
+    规则：
+    - 环境音可叠加，配乐块（程序化 / 生成模型 / 外链 / 不使用）四选一；
+    - 管理员允许清单是上限，房间只能取子集；
+    - 房间请求的块被管理员收回时，回落到管理员允许的默认配乐块并给出可见原因，
+      绝不报错、也不静默变成静音；
+    - ``music_model`` 未接入时不可用，按同一降级路径处理。
+    """
+    allowed_raw = settings.get("audio_blocks_allowed")
+    allowed = [block for block in (allowed_raw or []) if block in AUDIO_BLOCKS]
+    if not allowed:
+        # 旧配置/测试里只有 music_engine 时，按迁移规则推导允许清单。
+        allowed = derive_allowed_audio_blocks(
+            settings.get("music_engine"), settings.get("music_engine_allowed")
+        )
+    site_enabled = bool(settings.get("enabled", True)) and bool(settings.get("music_enabled", True))
+
+    rules = house_rules if isinstance(house_rules, dict) else {}
+    requested_raw = _parse_audio_blocks(rules.get("immersive_audio_blocks"))
+    if requested_raw is None:
+        legacy_room = str(rules.get("immersive_music_engine") or "").strip().lower()
+        requested_raw = legacy_audio_blocks(legacy_room) if legacy_room in MUSIC_ENGINES else None
+    requested = list(requested_raw) if requested_raw is not None else _default_audio_blocks(settings, allowed)
+
+    effective = [block for block in requested if block in allowed]
+    revoked = [block for block in requested if block not in allowed]
+    degrade_reason = ""
+    detail = ""
+
+    music_candidates = [block for block in effective if block in MUSIC_BLOCKS]
+    if len(music_candidates) > 1:
+        chosen = next(block for block in MUSIC_BLOCK_PRIORITY if block in music_candidates)
+        music_candidates = [chosen]
+        degrade_reason = "multiple_music_blocks"
+        detail = "房间同时提交了多个配乐块，已按固定优先级只保留一个。"
+    if not music_candidates:
+        if any(block in MUSIC_BLOCKS for block in revoked):
+            fallback = [block for block in _default_audio_blocks(settings, allowed) if block in MUSIC_BLOCKS]
+            music = fallback[0] if fallback else AUDIO_BLOCK_OFF
+            degrade_reason = "room_music_block_revoked"
+            detail = "房间选择的配乐块已被管理员收回，已回落到允许的配乐块。"
+        else:
+            music = AUDIO_BLOCK_OFF
+            degrade_reason = "ambient_only"
+            detail = "房间只启用了环境音，未选择配乐块。"
+    else:
+        music = music_candidates[0]
+
+    if music == AUDIO_BLOCK_MUSIC_MODEL and music_model_available and not degrade_reason:
+        # 平台已接入，但项目本身不内置音乐生成适配器：明确告知，不偷偷回落到程序化。
+        degrade_reason = "music_model_pending"
+        detail = "音乐生成模型已接入平台，但当前版本尚未内置生成适配器，配乐暂不播放；请改选程序化或外链 BGM。"
+    if music == AUDIO_BLOCK_MUSIC_MODEL and not music_model_available:
+        fallback = [
+            block
+            for block in [AUDIO_BLOCK_PROCEDURAL, AUDIO_BLOCK_EXTERNAL, AUDIO_BLOCK_OFF]
+            if block in allowed
+        ]
+        music = fallback[0] if fallback else AUDIO_BLOCK_OFF
+        degrade_reason = "music_model_unavailable"
+        detail = "音乐生成模型尚未接入，已回落到允许的配乐块。"
+        if AUDIO_BLOCK_MUSIC_MODEL not in revoked:
+            revoked.append(AUDIO_BLOCK_MUSIC_MODEL)
+
+    if not site_enabled or not bool(settings.get("music_enabled", True)):
+        return {
+            "ambient": False,
+            "music": AUDIO_BLOCK_OFF,
+            "blocks": [],
+            "requested": requested,
+            "allowed": allowed,
+            "revoked": revoked,
+            "degrade_reason": "site_music_disabled",
+            "degrade_message": "站点已关闭实时沉浸配乐。",
+        }
+
+    if rules.get("immersive_music_enabled") is False and music != AUDIO_BLOCK_OFF:
+        music = AUDIO_BLOCK_OFF
+        degrade_reason = "room_music_disabled"
+        detail = "房间已关闭配乐，仅保留环境音。"
+
+    ambient = AUDIO_BLOCK_AMBIENT in allowed and AUDIO_BLOCK_AMBIENT in effective
+    blocks: list[str] = []
+    if ambient:
+        blocks.append(AUDIO_BLOCK_AMBIENT)
+    if music != AUDIO_BLOCK_OFF:
+        blocks.append(music)
+    return {
+        "ambient": ambient,
+        "music": music,
+        "blocks": blocks,
+        "requested": requested,
+        "allowed": allowed,
+        "revoked": revoked,
+        "degrade_reason": degrade_reason,
+        "degrade_message": detail if degrade_reason else "",
     }
 
 

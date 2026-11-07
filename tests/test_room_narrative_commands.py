@@ -56,6 +56,89 @@ def test_help_mentions_narrative_commands(tmp_path):
     text = room_command_help_text()
     assert "narrative status" in text
     assert "narrative rebuild-state" in text
+    assert "narrative insert" in text
+
+
+def test_narrative_insert_persists_broadcasts_and_writes_history(tmp_path):
+    scenarios_dir, rooms_dir, room_dir = _prepare(tmp_path)
+    history_dir = tmp_path / "history"
+    history_dir.mkdir()
+    write_json_atomic(history_dir / "room-r-1-kp.json", [])
+
+    class _App:
+        config = {"SCENARIOS_DIR": scenarios_dir, "HISTORY_DIR": history_dir}
+
+    result = execute_room_command(
+        "narrative insert 雕像的眼睛缓缓转向你。",
+        room_id="r-1",
+        room_dir=room_dir,
+        rooms_dir=rooms_dir,
+        app=_App(),
+        actor="tester",
+        actor_id=1,
+        actor_rank=3,
+    )
+
+    assert result.ok, result.message
+    assert "已广播给所有玩家" in result.message
+    messages = json.loads((room_dir / "messages.json").read_text(encoding="utf-8"))
+    assert messages[-1]["type"] == "gm"
+    assert messages[-1]["content"] == "雕像的眼睛缓缓转向你。"
+    assert messages[-1]["sender_name"] == "tester"
+
+    history = json.loads((history_dir / "room-r-1-kp.json").read_text(encoding="utf-8"))
+    assert history[-1]["role"] == "system"
+    assert "既定事实" in history[-1]["content"]
+    assert "雕像的眼睛" in history[-1]["content"]
+
+
+def test_narrative_insert_requires_room_admin(tmp_path):
+    scenarios_dir, rooms_dir, room_dir = _prepare(tmp_path)
+    info = json.loads((room_dir / "info.json").read_text(encoding="utf-8"))
+    info["members"].append(
+        {"user_id": 2, "username": "player", "role": "USER", "room_role": "member", "status": "active", "is_active": True}
+    )
+    write_json_atomic(room_dir / "info.json", info)
+
+    class _App:
+        config = {"SCENARIOS_DIR": scenarios_dir}
+
+    result = execute_room_command(
+        "narrative insert 不该被普通成员插入",
+        room_id="r-1",
+        room_dir=room_dir,
+        rooms_dir=rooms_dir,
+        app=_App(),
+        actor="player",
+        actor_id=2,
+        actor_rank=1,
+    )
+
+    assert result.ok is False
+    assert "房主/房间管理员" in result.message
+    messages = json.loads((room_dir / "messages.json").read_text(encoding="utf-8"))
+    assert messages == []
+
+
+def test_narrative_insert_rejects_empty_text(tmp_path):
+    scenarios_dir, rooms_dir, room_dir = _prepare(tmp_path)
+
+    class _App:
+        config = {"SCENARIOS_DIR": scenarios_dir}
+
+    result = execute_room_command(
+        "narrative insert",
+        room_id="r-1",
+        room_dir=room_dir,
+        rooms_dir=rooms_dir,
+        app=_App(),
+        actor="tester",
+        actor_id=1,
+        actor_rank=3,
+    )
+
+    assert result.ok is False
+    assert "用法" in result.message
 
 
 def test_status_state_map_and_exits(tmp_path):

@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import logging
+import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -16,12 +18,13 @@ from trpg_server.agents.narrative.runtime import NarrativeRuntime, NarrativeRunt
 from trpg_server.agents.narrative.runtime_settings import resolve_narrative_settings
 from trpg_server.agents.narrative.state_store import load_narrative_state, rebuild_narrative_state, save_narrative_state
 from trpg_server.agents.narrative.trace import read_trace
-from trpg_server.json_store import read_json
+from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.room_log import log_room_event
 
 logger = logging.getLogger(__name__)
 
 ROOM_NARRATIVE_ACTOR = "房间控制台"
+MAX_NARRATIVE_CHARS = 4000
 VALUE_OPTIONS = {"depth", "limit", "search", "turn", "entity", "status", "location", "object", "mode"}
 
 
@@ -677,6 +680,112 @@ def _rebuild_state(
     )
 
 
+def _actor_rank(room_dir: Path, actor_id: Any, actor_rank: Any) -> int:
+    if actor_rank is not None:
+        try:
+            return int(actor_rank)
+        except (TypeError, ValueError):
+            return 0
+    if actor_id is None:
+        return 0
+    from trpg_server.routes.rooms import _find_member, _room_permission
+
+    info = _info(room_dir)
+    member = _find_member(info, user_id=str(actor_id), active_only=True)
+    role = _room_permission(member, info)
+    return {"owner": 3, "admin": 2, "member": 1}.get(str(role or ""), 0)
+
+
+def _append_history_fact(room_id: Any, text: str, app: Any) -> int:
+    """把 GM 叙事作为“既定事实”写入本房间各 agent 的历史文件，供后续回合读取。"""
+    if app is None:
+        return 0
+    try:
+        from trpg_server.routes.chat_helpers import _safe_history_part
+        from trpg_server.settings import HISTORY_DIR
+    except Exception:  # noqa: BLE001 - 历史写入失败不能影响叙事广播
+        return 0
+    history_dir = Path(app.config.get("HISTORY_DIR") or HISTORY_DIR)
+    if not history_dir.exists():
+        return 0
+    pattern = f"room-{_safe_history_part(str(room_id))}-*.json"
+    entry = {
+        "role": "system",
+        "content": f"【GM 叙事·既定事实】{text}"
+        "\n（这是主持人直接确认的叙事，后续回合必须把它当作已经发生的事实，不需要再检定或推翻。）",
+        "gm_narrative": True,
+        "created_at": time.time(),
+    }
+    written = 0
+    for path in history_dir.glob(pattern):
+        history = read_json(path, default=[])
+        if not isinstance(history, list):
+            history = []
+        history.append(dict(entry))
+        try:
+            write_json_atomic(path, history)
+            written += 1
+        except OSError:
+            logger.warning("gm narrative history write failed: %s", path, exc_info=True)
+    return written
+
+
+def _insert(
+    room_id: Any,
+    room_dir: Path,
+    rest: list[str],
+    app: Any,
+    actor: Any,
+    actor_id: Any,
+    actor_rank: Any,
+) -> tuple[bool, str]:
+    """房主/管理员手动插入一条叙事块：直接广播、不触发检定、不改角色状态。"""
+    text = " ".join(rest).strip()
+    if not text:
+        return False, "用法：narrative insert <叙事文本>（仅房主/房间管理员；不触发检定、不改变角色状态）"
+    if len(text) > MAX_NARRATIVE_CHARS:
+        return False, f"叙事块过长（{len(text)} 字），上限 {MAX_NARRATIVE_CHARS} 字"
+    if _actor_rank(room_dir, actor_id, actor_rank) < 2:
+        return False, "只有房主/房间管理员可以插入叙事块"
+
+    from trpg_server.routes.rooms import _read_messages, _timestamp, _write_messages
+
+    message = {
+        "id": uuid.uuid4().hex,
+        "type": "gm",
+        "sender_id": None,
+        "sender_name": str(actor or "GM"),
+        "avatar": "",
+        "content": text,
+        "time": time.strftime("%H:%M"),
+        "created_at": _timestamp(),
+        "metadata": {"source": "gm_narrative", "actor_id": actor_id},
+    }
+    messages = _read_messages(room_dir)
+    messages.append(message)
+    _write_messages(room_dir, messages)
+
+    try:
+        from trpg_server.immersive import broadcast
+
+        broadcast.emit("new_message", {**message, "room_id": str(room_id)})
+    except Exception:  # noqa: BLE001 - 广播失败不回滚已落库的叙事
+        logger.warning("gm narrative broadcast failed room=%s", room_id, exc_info=True)
+
+    history_written = _append_history_fact(room_id, text, app)
+    log_room_event(
+        room_dir,
+        f"GM 插入叙事块：{text[:60]}{'…' if len(text) > 60 else ''}",
+        actor=str(actor or ROOM_NARRATIVE_ACTOR),
+        source="room_console",
+        room_id=room_id,
+        字数=len(text),
+        历史文件=history_written,
+    )
+    suffix = f"，已写入 {history_written} 个上下文历史" if history_written else ""
+    return True, f"已插入叙事块（{len(text)} 字），已广播给所有玩家{suffix}"
+
+
 def handle_room_narrative_command(
     args: list[str],
     *,
@@ -687,6 +796,7 @@ def handle_room_narrative_command(
     app: Any = None,
     actor: Any = None,
     actor_id: Any = None,
+    actor_rank: Any = None,
     confirm: Callable[[str], bool] | None = None,
 ) -> tuple[bool, str]:
     """执行 `narrative <subcommand>` 房间命令；返回 (ok, 文本)。"""
@@ -698,6 +808,8 @@ def handle_room_narrative_command(
     sub = positionals[0].lower()
     rest = positionals[1:]
 
+    if sub in {"insert", "say"}:
+        return _insert(room_id, room_dir, rest, app, actor, actor_id, actor_rank)
     if sub == "status":
         return _status(room_dir, room_id, rooms_dir, scenarios_dir)
     if sub == "state":
@@ -770,6 +882,7 @@ def _help_text() -> str:
     return "\n".join(
         [
             "房间世界树命令（仅作用于本房间）：",
+            "  narrative insert <文本>              （房主/管理员手动插入叙事块，直接广播且写入后续上下文）",
             "  narrative status                     （能力档、拓扑、位置、版本与护栏状态）",
             "  narrative state [--json]             （位置、旗标、时钟、线索与触发记录）",
             "  narrative map [--depth N]            （当前可达地图：已访问/未揭示/门控）",

@@ -228,11 +228,15 @@ music_source = "hybrid"
 music_source_allowed = "realtime,bgm,hybrid"
 # 关闭后个人设置中的音乐来源不可覆盖，只能跟随站点默认。
 music_source_allow_personal = true
-# 音乐引擎：procedural（默认，程序化实时配乐）/ external（外链免费曲库 + 程序化底床）/
-# off（关闭实时音乐，房间 BGM 不受影响）。房间只能在此基础上降级，不能升级。
+# 旧版单值引擎：仅作为迁移与默认值来源保留；新部署请使用下面的音频块清单。
+# procedural / external / off。房间只能在此基础上降级，不能升级。
 music_engine = "procedural"
-# 管理员允许的引擎档位；个人/房间只能取其中更低的一档。
+# 旧版允许的引擎档位；缺失 audio_blocks_allowed 时用于推导块清单。
 music_engine_allowed = "procedural,external"
+# 音频块允许清单（管理员只划定范围，房间在此范围内选择）：
+# ambient（可叠加）/ procedural / music_model / external / off（后四者四选一）。
+# music_model 只有在「模型设置」里启用声明了 music_model 用途的平台后才可选。
+audio_blocks_allowed = "ambient,procedural,external,off"
 # 外链曲库（主源 Jamendo，次源 Openverse）。两者都不可达时自动停留在程序化底床。
 music_external_providers = "jamendo,openverse"
 # 许可白名单：只有 cc0 / by / by-sa 可播放；缺署名信息的曲目一律不播。

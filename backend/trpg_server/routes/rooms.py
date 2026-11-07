@@ -9,6 +9,7 @@ from flask import Blueprint, current_app, request, session
 
 from trpg_server import weapon_catalog
 from trpg_server.config import load_settings
+from trpg_server.immersive.config import AUDIO_BLOCKS, MUSIC_BLOCKS, MUSIC_BLOCK_PRIORITY
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.media_defaults import normalize_avatar
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
@@ -62,11 +63,19 @@ HOUSE_RULE_DEFINITIONS = {
     # 实时沉浸：房间级开关。null 表示跟随管理员默认；房间只能「关」，不能越过站点总开关重开。
     "immersive_music_enabled": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
     "immersive_music_auto_switch": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
-    # 音乐引擎：null 跟随管理员；房间只能降级（external → procedural → off），不能升级。
+    # 旧版单值音乐引擎：仅保留读取迁移，新房间请使用 immersive_audio_blocks。
     "immersive_music_engine": {
         "type": "nullable_enum",
         "default": None,
         "values": ["external", "procedural", "off"],
+        "ai_prompt": False,
+    },
+    # 音频块组合：环境音可叠加，配乐四选一；候选项来自管理员允许清单。
+    # null 表示未配置（沿用管理员默认组合）。
+    "immersive_audio_blocks": {
+        "type": "audio_blocks",
+        "default": None,
+        "values": list(AUDIO_BLOCKS),
         "ai_prompt": False,
     },
     "immersive_illustration_enabled": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
@@ -199,6 +208,8 @@ def _room_house_rules(info):
             value = candidate if candidate in spec.get("values", []) else None
         elif spec["type"] == "nullable_integer":
             value = _normalize_nullable_int(value, spec.get("min", 0), spec.get("max", 100))
+        elif spec["type"] == "audio_blocks":
+            value = _normalize_audio_blocks(value)
         elif spec["type"] == "enum":
             candidate = str(value).strip().lower() if value is not None else ""
             value = candidate if candidate in spec.get("values", []) else spec["default"]
@@ -332,6 +343,23 @@ def _normalize_nullable_int(value, minimum, maximum):
     except (TypeError, ValueError):
         return None
     return max(minimum, min(maximum, number))
+
+
+def _normalize_audio_blocks(value):
+    """规范化房间音频块：去重、过滤未知值，并保证最多一个配乐块。"""
+    if not isinstance(value, list):
+        return None
+    blocks = []
+    for item in value:
+        block = str(item or "").strip().lower()
+        if block in AUDIO_BLOCKS and block not in blocks:
+            blocks.append(block)
+    music = [block for block in blocks if block in MUSIC_BLOCKS]
+    if len(music) > 1:
+        keep = next(block for block in MUSIC_BLOCK_PRIORITY if block in music)
+        blocks = [block for block in blocks if block not in MUSIC_BLOCKS]
+        blocks.append(keep)
+    return blocks
 
 
 def _admin_dice_thresholds():
@@ -1625,6 +1653,34 @@ def update_room_house_rules(room_id):
                 except (TypeError, ValueError):
                     return error_response(f"House rule {key} must be an integer", 400, "Invalid house rule type")
             current[key] = _normalize_nullable_int(value, spec.get("min", 0), spec.get("max", 100))
+        elif spec["type"] == "audio_blocks":
+            if value is None:
+                current[key] = None
+                continue
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                return error_response(
+                    f"House rule {key} must be a list of audio blocks",
+                    400,
+                    "Invalid house rule type",
+                )
+            blocks = []
+            for item in value:
+                block = str(item or "").strip().lower()
+                if block not in AUDIO_BLOCKS:
+                    return error_response(
+                        f"House rule {key} contains unknown block: {item}",
+                        400,
+                        "Invalid house rule type",
+                    )
+                if block not in blocks:
+                    blocks.append(block)
+            if len([block for block in blocks if block in MUSIC_BLOCKS]) > 1:
+                return error_response(
+                    f"House rule {key} allows at most one music block",
+                    400,
+                    "Invalid house rule type",
+                )
+            current[key] = blocks
         elif spec["type"] == "url":
             if value is None:
                 current[key] = ""

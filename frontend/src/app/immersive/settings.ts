@@ -14,6 +14,7 @@ namespace TrpgImmersiveSettingsModule {
     let presets: ImmersiveImagePreset[] = [];
     let protocols: ImmersiveProtocolOption[] = [];
     let selectedPlatformId = "";
+    let audioBlockOptions: ImmersiveAudioBlockOption[] = [];
 
     function byId<T extends HTMLElement>(id: string): T | null {
         return document.getElementById(id) as T | null;
@@ -99,6 +100,26 @@ namespace TrpgImmersiveSettingsModule {
             }
             fillForm(findPlatform(platformId));
         });
+        // ConfigManager 回填隐藏输入后，重新渲染块选择器（配置加载晚于标签页初始化）。
+        (window as unknown as Record<string, unknown>).refreshImmersiveAudioBlocksPicker = () => {
+            renderAdminAudioBlockPicker();
+        };
+    }
+
+    function renderAdminAudioBlockPicker(): void {
+        const hidden = byId<HTMLInputElement>("immersiveAudioBlocksAllowed");
+        if (!hidden || !byId<HTMLElement>("adminAudioBlocksPicker")) return;
+        const selected = (hidden.value || "")
+            .split(",")
+            .map((item) => item.trim())
+            .filter((item) => item);
+        TrpgAudioBlocks.render("adminAudioBlocksPicker", audioBlockOptions, selected, {
+            mode: "allow",
+            onChange: (blocks) => {
+                hidden.value = blocks.join(",");
+                hidden.dispatchEvent(new Event("change", { bubbles: true }));
+            },
+        });
     }
 
     export function render(): void {
@@ -127,6 +148,14 @@ namespace TrpgImmersiveSettingsModule {
             }>>("/api/immersive/config");
             const data = response.data;
             if (!response.success || !data) return;
+            if (data.audio_blocks && Array.isArray(data.audio_blocks.options)) {
+                audioBlockOptions = data.audio_blocks.options;
+                const hidden = byId<HTMLInputElement>("immersiveAudioBlocksAllowed");
+                if (hidden && !hidden.value.trim() && Array.isArray(data.audio_blocks.allowed)) {
+                    hidden.value = data.audio_blocks.allowed.join(",");
+                }
+                renderAdminAudioBlockPicker();
+            }
             presets = Array.isArray(data.presets) ? data.presets : [];
             protocols = Array.isArray(data.protocols) ? data.protocols : [];
             platforms = Array.isArray(data.platforms) ? data.platforms : [];

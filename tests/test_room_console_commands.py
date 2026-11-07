@@ -34,6 +34,173 @@ def _run(rooms_dir, room_id, line, **kwargs):
     )
 
 
+def test_help_lists_music_external_commands(tmp_path):
+    rooms_dir = _rooms_dir(tmp_path, "r-1")
+
+    result = _run(rooms_dir, "r-1", "help")
+
+    assert result.ok is True
+    assert "immersive music search" in result.message
+    assert "immersive music switch" in result.message
+
+
+def test_music_show_reports_engine_and_bed_state(tmp_path):
+    rooms_dir = _rooms_dir(tmp_path, "r-1")
+
+    result = _run(rooms_dir, "r-1", "immersive music show")
+
+    assert result.ok is True
+    assert "引擎:" in result.message
+    assert "底床:" in result.message
+    assert "当前外链曲目:" in result.message
+
+
+def test_music_switch_without_selection_fails(tmp_path):
+    rooms_dir = _rooms_dir(tmp_path, "r-1")
+
+    result = _run(rooms_dir, "r-1", "immersive music switch")
+
+    assert result.ok is False
+    assert "尚无外链检索结果" in result.message
+
+
+def test_music_search_uses_external_engine_and_reports_track(tmp_path, monkeypatch):
+    from trpg_server.immersive.external_music import service as external_music
+
+    rooms_dir = _rooms_dir(tmp_path, "r-1")
+    monkeypatch.setattr(external_music, "resolve_engine", lambda settings, rules: ("external", "site"))
+    monkeypatch.setattr(
+        external_music,
+        "search_and_select",
+        lambda **kwargs: {
+            "ok": True,
+            "status": "selected",
+            "provider": "jamendo",
+            "trigger": "room_console",
+            "track": {
+                "track_key": "jamendo:t-1",
+                "title": "Rainy Alley",
+                "artist": "Field Artist",
+                "license": "by-sa",
+                "attribution": "Field Artist",
+                "provider": "jamendo",
+            },
+            "alternatives": [{"track_key": "jamendo:t-2", "title": "Second", "artist": "A"}],
+        },
+    )
+    published = {}
+    monkeypatch.setattr(
+        external_music,
+        "publish_selection",
+        lambda payload, **kwargs: published.update(payload),
+    )
+
+    result = _run(rooms_dir, "r-1", "immersive music search 雨夜街道 --tags=dark,ambient")
+
+    assert result.ok is True
+    assert "已重新检索并切曲" in result.message
+    assert "Rainy Alley" in result.message
+    assert "备选: 1 首" in result.message
+    assert published["trigger"] == "room_console"
+
+
+def test_music_search_rejects_unknown_profile(tmp_path, monkeypatch):
+    from trpg_server.immersive.external_music import service as external_music
+
+    rooms_dir = _rooms_dir(tmp_path, "r-1")
+    monkeypatch.setattr(external_music, "resolve_engine", lambda settings, rules: ("external", "site"))
+
+    result = _run(rooms_dir, "r-1", "immersive music search --profile=nope")
+
+    assert result.ok is False
+    assert "未知档位" in result.message
+
+
+def test_music_switch_selects_alternative_by_index(tmp_path, monkeypatch):
+    from trpg_server.immersive.external_music import service as external_music
+    from trpg_server.json_store import write_json_atomic
+
+    rooms_dir = _rooms_dir(tmp_path, "r-1")
+    write_json_atomic(
+        rooms_dir / "r-1" / external_music.EXTERNAL_STATE_FILENAME,
+        {
+            "track": {"track_key": "jamendo:t-1", "title": "First", "artist": "A"},
+            "alternatives": [{"track_key": "jamendo:t-2", "title": "Second", "artist": "B"}],
+        },
+    )
+    published = {}
+    monkeypatch.setattr(
+        external_music,
+        "publish_selection",
+        lambda payload, **kwargs: published.update(payload),
+    )
+
+    result = _run(rooms_dir, "r-1", "immersive music switch 2")
+
+    assert result.ok is True
+    assert "Second" in result.message
+    assert published["track"]["track_key"] == "jamendo:t-2"
+    assert published["trigger"] == "room_console"
+
+
+def test_console_route_executes_narrative_insert_and_reports_music_status(tmp_path):
+    from trpg_server.app_factory import create_app
+    from trpg_server.json_store import read_json
+
+    class FakeManager:
+        def is_session_current(self, user_id, token):
+            return True
+
+        def get_user_by_id(self, user_id):
+            return {"id": user_id, "username": "tester", "role": "ADMIN"}
+
+    rooms_dir = _rooms_dir(tmp_path, "r-1")
+    history_dir = tmp_path / "history"
+    history_dir.mkdir()
+    (history_dir / "room-r-1-kp.json").write_text("[]", encoding="utf-8")
+    app = create_app(
+        {
+            "TESTING": True,
+            "USER_MANAGER": FakeManager(),
+            "CONFIG_DIR": tmp_path / "config",
+            "ROOMS_DIR": rooms_dir,
+            "HISTORY_DIR": history_dir,
+        }
+    )
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session.update(
+            user_id=1,
+            username="tester",
+            role="ADMIN",
+            session_token="token",
+            csrf_token="csrf",
+        )
+
+    insert_response = client.post(
+        "/api/rooms/r-1/console/command",
+        json={"command": "narrative insert 雕像的眼睛动了一下"},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert insert_response.status_code == 200
+    payload = insert_response.get_json()["data"]
+    assert payload["ok"] is True
+    assert "已广播给所有玩家" in payload["message"]
+
+    messages = read_json(rooms_dir / "r-1" / "messages.json", default=[])
+    assert messages[-1]["type"] == "gm"
+    history = read_json(history_dir / "room-r-1-kp.json", default=[])
+    assert history[-1]["role"] == "system"
+
+    status_response = client.post(
+        "/api/rooms/r-1/console/command",
+        json={"command": "immersive music show"},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert status_response.status_code == 200
+    assert "引擎:" in status_response.get_json()["data"]["message"]
+
+
 def test_help_lists_room_commands(tmp_path):
     rooms_dir = _rooms_dir(tmp_path, "r-1")
 

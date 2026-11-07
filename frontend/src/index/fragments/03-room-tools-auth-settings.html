@@ -123,14 +123,10 @@
                                     </select>
                                 </div>
                                 <div class="form-group mt-2">
-                                    <label for="houseRuleImmersiveMusicEngine">音乐引擎（只能降级）</label>
-                                    <select class="form-select" id="houseRuleImmersiveMusicEngine">
-                                        <option value="">跟随管理员设置</option>
-                                        <option value="external">外链曲库 + 底床（需管理员已开启）</option>
-                                        <option value="procedural">程序化底床</option>
-                                        <option value="off">关闭实时音乐</option>
-                                    </select>
-                                    <small class="form-text text-muted">房间请求外链时，若管理员未开启外链引擎会自动退回程序化底床，不会升级。</small>
+                                    <label>房间配乐与环境音</label>
+                                    <div id="roomAudioBlocksPicker"></div>
+                                    <p class="form-text mt-1 mb-0" id="roomAudioBlocksHint"></p>
+                                    <small class="form-text text-muted">候选项只来自管理员允许清单；环境音可叠加，配乐四选一。管理员收回某个块后，房间会自动回落到允许的块并在这里提示。</small>
                                 </div>
                                 <div class="form-group mt-2">
                                     <label for="houseRuleImmersiveIllustration">实时配图</label>
@@ -557,6 +553,13 @@
                                             <option value="realtime">仅实时配乐</option>
                                             <option value="bgm">仅 BGM</option>
                                             <option value="hybrid">混合</option>
+                                        </select>
+                                    </label>
+                                    <label class="profile-setting-row" for="personalImmersiveBgmPriority">
+                                        <span>BGM 来源：</span>
+                                        <select class="form-select" id="personalImmersiveBgmPriority">
+                                            <option value="room">优先播放房间 BGM</option>
+                                            <option value="personal">优先播放自己的 BGM</option>
                                         </select>
                                     </label>
                                     <label class="profile-setting-row" for="personalImmersiveIllustrationTrigger">
@@ -1462,14 +1465,11 @@
                                     </select>
                                     <small class="form-text text-muted">默认「混合」：维持既有的实时配乐 + BGM 压低行为。切到「仅 BGM」会销毁实时引擎的 AudioContext。</small>
                                 </div>
-                                <div class="form-group mt-2">
-                                    <label for="immersiveMusicEngine">音乐引擎</label>
-                                    <select class="form-select" id="immersiveMusicEngine">
-                                        <option value="procedural">程序化实时配乐（默认）</option>
-                                        <option value="external">外链免费曲库 + 程序化底床</option>
-                                        <option value="off">关闭实时音乐（保留房间 BGM）</option>
-                                    </select>
-                                    <small class="form-text text-muted">外链模式始终以程序化底床托底，曲库失败时自动退回底床；房间只能在此基础下降级（external → procedural → off），切换时平滑交叉淡化。</small>
+                                <div class="form-group mt-3">
+                                    <label>允许的音频块</label>
+                                    <div id="adminAudioBlocksPicker"></div>
+                                    <input type="hidden" id="immersiveAudioBlocksAllowed">
+                                    <small class="form-text text-muted">管理员只划定「允许什么」，不决定房间实际使用哪一个。房间只能在这个清单内选择；未接入的平台对应块会显示为不可选并注明原因。</small>
                                 </div>
                                 <div class="form-group mt-2">
                                     <label for="immersiveMusicSourceAllowed">个人可选来源（逗号分隔）</label>

@@ -34,8 +34,16 @@
 
     function formatDetails(details?: Record<string, unknown>): string {
         if (!details) return "";
-        const parts = Object.keys(details).map((key) => `${key}=${String(details[key])}`);
+        const parts = Object.keys(details)
+            // 署名链接单独渲染成 <a>，不再作为 key=value 文本重复显示。
+            .filter((key) => key !== "link_url" && key !== "link_text")
+            .map((key) => `${key}=${String(details[key])}`);
         return parts.length ? `  ${parts.join(" ")}` : "";
+    }
+
+    function safeLink(raw: unknown): string {
+        const value = typeof raw === "string" ? raw.trim() : "";
+        return /^https?:\/\//i.test(value) ? value : "";
     }
 
     function renderEntry(entry: RoomConsoleEntry): void {
@@ -45,6 +53,18 @@
         line.className = `room-console-line ${levelClass(entry.level)}`.trim();
         const actor = entry.actor ? `${entry.actor}: ` : "";
         line.textContent = `[${entry.ts || ""}] ${actor}${entry.message || ""}${formatDetails(entry.details)}`;
+        const linkUrl = safeLink(entry.details?.link_url);
+        if (linkUrl) {
+            const anchor = document.createElement("a");
+            anchor.href = linkUrl;
+            anchor.textContent = String(entry.details?.link_text || "署名");
+            anchor.target = "_blank";
+            anchor.rel = "noopener noreferrer";
+            anchor.style.color = "#7ec8ff";
+            anchor.style.textDecoration = "underline";
+            line.appendChild(document.createTextNode(" "));
+            line.appendChild(anchor);
+        }
         output.appendChild(line);
         output.scrollTop = output.scrollHeight;
     }

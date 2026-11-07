@@ -48,6 +48,8 @@ _DESTRUCTIVE_AFTER_ARCHIVE = {
     ("narrative", "unlock"),
     ("narrative", "trigger"),
     ("narrative", "rebuild-state"),
+    ("narrative", "insert"),
+    ("narrative", "say"),
 }
 
 
@@ -182,6 +184,7 @@ def run_room_console_command(room_id):
         app=current_app._get_current_object(),
         actor=actor,
         actor_id=session.get("user_id"),
+        actor_rank=_current_rank(info),
     )
     append_room_log(
         room_dir,
