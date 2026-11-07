@@ -29,6 +29,14 @@ namespace TrpgAudioBlocks {
         mode?: PickerMode;
         allowed?: string[];
         onChange?: (blocks: string[]) => void;
+        /** 覆盖默认提示语：成员白名单等非音频场景复用本控件时使用。 */
+        placeholder?: string;
+        /** 传空串可隐藏控件自带的说明文字。 */
+        hint?: string;
+        /** 提示语里对候选项的称呼，默认「块」；成员白名单传「成员」。 */
+        noun?: string;
+        /** allow 模式清空时的提示；传空串可关闭该提示。 */
+        allowEmptyNotice?: string;
     }
 
     interface PickerState {
@@ -36,6 +44,10 @@ namespace TrpgAudioBlocks {
         allowed: string[] | null;
         mode: PickerMode;
         onChange: ((blocks: string[]) => void) | null;
+        placeholder: string;
+        hint: string;
+        noun: string;
+        allowEmptyNotice: string;
         query: string;
         activeIndex: number;
         open: boolean;
@@ -209,23 +221,20 @@ namespace TrpgAudioBlocks {
     }
 
     function renderSkeleton(element: HTMLElement, containerId: string, state: PickerState): void {
-        const placeholder = state.mode === "allow"
-            ? "输入关键词添加音频块（如 environment、外链）…"
-            : "输入关键词筛选音频块（如 environment、静音）…";
-        const hint = state.mode === "allow"
-            ? "管理员只划定允许范围，房间只能在这里面选择；不可用的块会标注原因。"
-            : "候选项来自管理员允许清单；配乐块四选一，环境音可与任意配乐叠加。";
+        const hint = state.hint
+            ? `<small class="form-text text-muted d-block mt-1">${escapeHtml(state.hint)}</small>`
+            : "";
         element.innerHTML = `
             <div class="audio-tags-control" data-audio-tags-control>
                 <span class="audio-tags-chips" data-audio-tags-chips></span>
                 <input type="text" class="audio-tags-input" data-audio-tags-input
                     role="combobox" aria-autocomplete="list" aria-expanded="false"
                     aria-controls="${escapeHtml(containerId)}-menu" autocomplete="off"
-                    placeholder="${escapeHtml(placeholder)}">
+                    placeholder="${escapeHtml(state.placeholder)}">
             </div>
             <div class="audio-tags-menu" id="${escapeHtml(containerId)}-menu" data-audio-tags-menu role="listbox" hidden></div>
             <div class="audio-tags-notice" data-audio-tags-notice role="status" aria-live="polite" hidden></div>
-            <small class="form-text text-muted d-block mt-1">${hint}</small>
+            ${hint}
         `;
     }
 
@@ -277,7 +286,7 @@ namespace TrpgAudioBlocks {
         }
         menu.hidden = false;
         if (items.length === 0) {
-            menu.innerHTML = `<div class="audio-tags-empty">${state.query.trim() ? "没有匹配的块" : "已添加全部可选项"}</div>`;
+            menu.innerHTML = `<div class="audio-tags-empty">${state.query.trim() ? `没有匹配的${escapeHtml(state.noun)}` : "已添加全部可选项"}</div>`;
             return;
         }
         menu.innerHTML = items.map((item, index) => {
@@ -285,9 +294,6 @@ namespace TrpgAudioBlocks {
             const classes = ["audio-tags-option"];
             if (active) classes.push("is-active");
             if (!item.selectable) classes.push("is-disabled");
-            const badge = item.option.stackable
-                ? '<span class="badge bg-info text-dark">可叠加</span>'
-                : '<span class="badge bg-secondary">配乐四选一</span>';
             const reason = item.reason
                 ? `<span class="audio-tags-option-reason">${escapeHtml(item.reason)}</span>`
                 : "";
@@ -295,8 +301,7 @@ namespace TrpgAudioBlocks {
                 ? (active ? ' aria-selected="true"' : ' aria-selected="false"')
                 : ' aria-disabled="true"';
             return `<button type="button" role="option" class="${classes.join(" ")}" data-audio-block-option="${escapeHtml(item.option.value)}" data-index="${index}"${aria}>
-                <span class="audio-tags-option-head"><strong>${escapeHtml(item.option.label)}</strong>${badge}</span>
-                <span class="audio-tags-option-desc">${escapeHtml(item.option.description)}</span>
+                <span class="audio-tags-option-head"><strong>${escapeHtml(item.option.label)}</strong></span>
                 ${reason}
             </button>`;
         }).join("");
@@ -363,7 +368,7 @@ namespace TrpgAudioBlocks {
         if (!element || !state) return;
         const option = findOption(state, value);
         if (!option) {
-            showNotice(containerId, "没有匹配的块，未添加任何内容。", "warning");
+            showNotice(containerId, `没有匹配的${state.noun}，未添加任何内容。`, "warning");
             return;
         }
         const availability = optionAvailability(state, option);
@@ -426,11 +431,7 @@ namespace TrpgAudioBlocks {
                 "warning",
             );
         } else if (state.mode === "allow" && next.length === 0) {
-            showNotice(
-                containerId,
-                "允许清单已清空：保存后会回退为旧版配乐引擎推导出的默认范围。",
-                "warning",
-            );
+            if (state.allowEmptyNotice) showNotice(containerId, state.allowEmptyNotice, "warning");
         } else {
             showNotice(containerId, `已移除「${label}」。`);
         }
@@ -561,7 +562,7 @@ namespace TrpgAudioBlocks {
                 } else {
                     showNotice(
                         containerId,
-                        state.query.trim() ? "没有匹配的块，未添加任何内容。" : "没有可添加的块。",
+                        state.query.trim() ? `没有匹配的${state.noun}，未添加任何内容。` : "没有可添加的块。",
                         "warning",
                     );
                 }
@@ -593,11 +594,26 @@ namespace TrpgAudioBlocks {
     ): void {
         const element = container(containerId);
         if (!element) return;
+        const mode: PickerMode = renderOptions.mode === "select" ? "select" : "allow";
         const state: PickerState = {
             options: Array.isArray(options) ? options : [],
             allowed: Array.isArray(renderOptions.allowed) ? renderOptions.allowed : null,
-            mode: renderOptions.mode === "select" ? "select" : "allow",
+            mode,
             onChange: renderOptions.onChange || null,
+            placeholder: renderOptions.placeholder !== undefined
+                ? renderOptions.placeholder
+                : (mode === "select"
+                    ? "输入关键词筛选音频块（如 environment、静音）…"
+                    : "输入关键词添加音频块（如 environment、外链）…"),
+            hint: renderOptions.hint !== undefined
+                ? renderOptions.hint
+                : (mode === "select"
+                    ? "候选项来自管理员允许清单；配乐块四选一，环境音可与任意配乐叠加。"
+                    : "管理员只划定允许范围，房间只能在这里面选择；不可用的块会标注原因。"),
+            noun: renderOptions.noun || "块",
+            allowEmptyNotice: renderOptions.allowEmptyNotice !== undefined
+                ? renderOptions.allowEmptyNotice
+                : "允许清单已清空：保存后会回退为旧版配乐引擎推导出的默认范围。",
             query: "",
             activeIndex: -1,
             open: false,

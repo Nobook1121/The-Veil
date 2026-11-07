@@ -146,9 +146,9 @@
     justify-content: space-between;
     gap: 0.5rem;
     padding: 0.4rem 0.55rem;
-    border: 1px solid var(--bs-border-color, #dee2e6);
+    border: 1px solid var(--border-subtle);
     border-radius: 0.4rem;
-    background: var(--bs-body-bg, #fff);
+    background: var(--color-panel-muted);
     font-size: 0.85rem;
 }
 

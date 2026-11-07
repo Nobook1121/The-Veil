@@ -58,6 +58,22 @@ def test_build_and_save_roundtrip(tmp_path):
     assert len(loaded.nodes) == len(result.bundle.nodes)
 
 
+def test_bundle_cache_hit_does_not_log(tmp_path, caplog):
+    """缓存命中不算状态变化：房间面板轮询不应反复刷 bundle.load。"""
+    scenario_dir = tmp_path / "scenario-45"
+    build_from_scenario(_scenario(), scenario_dir=scenario_dir, save=True)
+
+    with caplog.at_level("INFO", logger="trpg_server.narrative"):
+        first = load_bundle(scenario_dir)
+        assert first is not None
+        assert any("bundle.load" in record.getMessage() for record in caplog.records)
+
+        caplog.clear()
+        second = load_bundle(scenario_dir)
+        assert second is first
+        assert not any("bundle.load" in record.getMessage() for record in caplog.records)
+
+
 def test_build_without_save_does_not_touch_disk(tmp_path):
     scenario_dir = tmp_path / "scenario-43"
     result = build_from_scenario(_scenario(), scenario_dir=scenario_dir, save=False)

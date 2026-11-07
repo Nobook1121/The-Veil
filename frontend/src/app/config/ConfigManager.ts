@@ -140,7 +140,6 @@ class ConfigManager {
         configSetInputValue("siteAgentActionTtlSeconds", this.get("general", "site_agent", "action_ttl_seconds", 300));
         // 实时沉浸：站点级开关、配乐默认档位与配图预算。API Key 不走这里回填（独立密文接口只回掩码）。
         configSetCheckboxValue("immersiveEnabled", this.get("general", "immersive", "enabled", true));
-        configSetCheckboxValue("immersiveMusicEnabled", this.get("general", "immersive", "music_enabled", true));
         configSetCheckboxValue("immersiveMusicAutoSwitch", this.get("general", "immersive", "music_auto_switch", true));
         configSetCheckboxValue("immersiveMusicDuckBgm", this.get("general", "immersive", "music_duck_bgm", true));
         configSetSelectValue("immersiveMusicDefaultProfile", this.get("general", "immersive", "music_default_profile", "daily"));

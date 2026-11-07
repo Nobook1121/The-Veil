@@ -116,7 +116,7 @@ _cache_lock = threading.Lock()
 _bundle_cache: dict[str, tuple[float, NarrativeBundle]] = {}
 
 
-def _log_bundle_load(bundle: NarrativeBundle, *, cached: bool, started: float) -> None:
+def _log_bundle_load(bundle: NarrativeBundle, *, started: float) -> None:
     log_event(
         "bundle.load",
         scenario_id=bundle.scenario_id,
@@ -124,7 +124,6 @@ def _log_bundle_load(bundle: NarrativeBundle, *, cached: bool, started: float) -
         nodes=len(bundle.nodes),
         edges=len(bundle.edges),
         topology=bundle.topology,
-        cached=cached,
         latency_ms=round((time.monotonic() - started) * 1000, 1),
     )
 
@@ -143,7 +142,8 @@ def load_bundle(scenario_dir: Path | str, *, use_cache: bool = True) -> Narrativ
         with _cache_lock:
             cached = _bundle_cache.get(cache_key)
         if cached and cached[0] == mtime:
-            _log_bundle_load(cached[1], cached=True, started=started)
+            # 缓存命中不是状态变化：房间面板每几秒轮询一次，这里若也记日志会把
+            # 「bundle 被重新解析」和「又一次读到了同一份缓存」混为一谈。
             return cached[1]
     try:
         payload = read_json(path, default=None)
@@ -155,7 +155,7 @@ def load_bundle(scenario_dir: Path | str, *, use_cache: bool = True) -> Narrativ
     if use_cache:
         with _cache_lock:
             _bundle_cache[cache_key] = (mtime, bundle)
-    _log_bundle_load(bundle, cached=False, started=started)
+    _log_bundle_load(bundle, started=started)
     return bundle
 
 

@@ -484,15 +484,35 @@ interface TrpgImmersiveExternalApi {
     setReporter: (reporter: ((event: Record<string, unknown>) => void) | null) => void;
 }
 
+/**
+ * 标签输入控件的候选项。除音频块外，房规里的成员白名单也复用同一控件，
+ * 因此 `value` 放宽为 string 而不是音频块枚举。
+ */
+interface TrpgAudioBlockOptionInput {
+    value: string;
+    label: string;
+    description?: string;
+    stackable?: boolean;
+    available?: boolean;
+    unavailable_reason?: string;
+}
+
 interface TrpgAudioBlocksApi {
     render: (
         containerId: string,
-        options: ImmersiveAudioBlockOption[],
+        options: TrpgAudioBlockOptionInput[],
         selected: string[],
         renderOptions?: {
             mode?: "allow" | "select";
             allowed?: string[];
             onChange?: (blocks: string[]) => void;
+            /** 覆盖默认提示语；传空串可隐藏控件自带的说明文字。 */
+            placeholder?: string;
+            hint?: string;
+            /** 提示语里对候选项的称呼，默认「块」。 */
+            noun?: string;
+            /** allow 模式清空时的提示；传空串可关闭该提示。 */
+            allowEmptyNotice?: string;
         },
     ) => void;
     getSelection: (containerId: string) => string[];

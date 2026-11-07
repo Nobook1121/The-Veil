@@ -170,8 +170,8 @@
                                 </div>
                                 <p class="form-text mt-2" data-i18n="room.house_rules.world_override_hint">站点管理员始终可用，不受此开关限制；房主与房间管理员默认可用。</p>
                                 <div class="form-group mt-2">
-                                    <label for="houseRuleWorldOverrideUsers" data-i18n="room.house_rules.world_override_users">额外允许使用的成员（可多选）</label>
-                                    <select class="form-select" id="houseRuleWorldOverrideUsers" multiple size="5"></select>
+                                    <label data-i18n="room.house_rules.world_override_users">额外允许使用的成员（可多选）</label>
+                                    <div id="houseRuleWorldOverrideUsers"></div>
                                     <p class="form-text" data-i18n="room.house_rules.world_override_users_hint">白名单只对普通成员生效；房主、房管与站点管理员始终可用。</p>
                                 </div>
                                 <hr class="my-3">
@@ -1423,10 +1423,10 @@
                                 </div>
                                 <h5 class="mt-4">实时配乐</h5>
                                 <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="immersiveMusicEnabled">
-                                        <label class="form-check-label" for="immersiveMusicEnabled">启用程序化实时配乐</label>
-                                    </div>
+                                    <label>允许的音频块</label>
+                                    <div id="adminAudioBlocksPicker"></div>
+                                    <input type="hidden" id="immersiveAudioBlocksAllowed">
+                                    <small class="form-text text-muted">管理员只划定「允许什么」，不决定房间实际使用哪一个。输入关键词（如 environment、外链）即可添加；未接入的平台对应块会禁用并注明原因。清单里没有配乐块时即为关闭站点配乐。</small>
                                 </div>
                                 <div class="form-group mt-2">
                                     <div class="form-check">
@@ -1464,12 +1464,6 @@
                                         <option value="hybrid">混合（实时配乐主层，BGM 压低作底噪）</option>
                                     </select>
                                     <small class="form-text text-muted">默认「混合」：维持既有的实时配乐 + BGM 压低行为。切到「仅 BGM」会销毁实时引擎的 AudioContext。</small>
-                                </div>
-                                <div class="form-group mt-3">
-                                    <label>允许的音频块</label>
-                                    <div id="adminAudioBlocksPicker"></div>
-                                    <input type="hidden" id="immersiveAudioBlocksAllowed">
-                                    <small class="form-text text-muted">管理员只划定「允许什么」，不决定房间实际使用哪一个。输入关键词（如 environment、外链）即可添加；未接入的平台对应块会禁用并注明原因。</small>
                                 </div>
                                 <div class="form-group mt-2">
                                     <label for="immersiveMusicSourceAllowed">个人可选来源（逗号分隔）</label>

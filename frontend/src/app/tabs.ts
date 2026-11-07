@@ -308,7 +308,6 @@ function initSettingsTabs(): void {
     bindGeneralNumberSetting("siteAgentActionTtlSeconds", "site_agent", "action_ttl_seconds", 30, 3600);
     // 实时沉浸：配乐/配图的站点级开关、默认档位与预算限额（管理员的密钥与连通性测试走独立接口）。
     bindGeneralCheckboxSetting("immersiveEnabled", "immersive", "enabled");
-    bindGeneralCheckboxSetting("immersiveMusicEnabled", "immersive", "music_enabled");
     bindGeneralCheckboxSetting("immersiveMusicAutoSwitch", "immersive", "music_auto_switch");
     bindGeneralCheckboxSetting("immersiveMusicDuckBgm", "immersive", "music_duck_bgm");
     bindGeneralSelectSetting("immersiveMusicDefaultProfile", "immersive", "music_default_profile");
@@ -706,6 +705,20 @@ async function saveGeneralSettingsChanges(): Promise<void> {
         }
         generalConfig[control.section] = section;
     });
+    // 「启用程序化实时配乐」复选框已并入「允许的音频块」：清单含任一配乐块即视为启用站点配乐，
+    // 只剩环境音/静音时视为关闭。空清单保持后端按旧配置推导，这里不改写。
+    const immersiveSection = generalConfig["immersive"];
+    if (isConfigObject(immersiveSection)) {
+        const allowed = String(immersiveSection["audio_blocks_allowed"] || "")
+            .split(",")
+            .map((item) => item.trim())
+            .filter((item) => item);
+        if (allowed.length > 0) {
+            immersiveSection["music_enabled"] = allowed.some(
+                (block) => block === "procedural" || block === "music_model" || block === "external",
+            );
+        }
+    }
     if (!(await configManager.saveConfig("general", generalConfig))) return;
     generalSettingControls.forEach((control) => {
         control.savedValue = readGeneralSettingValue(control);

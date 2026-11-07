@@ -18,6 +18,8 @@
     let canManage = false;
     let loading = false;
     let pollTimer: number | null = null;
+    /** 上次成功加载触发列表时的状态签名；未变化时轮询不再重复请求 /triggers。 */
+    let triggerSignature = "";
 
     interface NarrativeLocation {
         id: string;
@@ -219,6 +221,18 @@
         }).join("");
     }
 
+    /**
+     * 可用触发器只取决于当前地点与已揭示线索（见后端 TriggerResolver.available），
+     * 因此这两项没变时重复请求 /triggers 不会拿到新结果。
+     */
+    function triggerSignatureOf(snapshot: NarrativeSnapshot): string {
+        const location = snapshot.location?.id || "";
+        const clues = Array.isArray(snapshot.status?.revealed_clues)
+            ? snapshot.status.revealed_clues.join(",")
+            : "";
+        return `${location}|${clues}`;
+    }
+
     async function refresh(silent = false): Promise<void> {
         if (!currentRoomId || loading) return;
         loading = true;
@@ -244,7 +258,12 @@
             renderParty(snapshot.party);
             renderStatus(snapshot.status);
             renderClocks(snapshot.status);
-            if (canManage) await loadTriggers();
+            if (canManage) {
+                const signature = triggerSignatureOf(snapshot);
+                if (signature !== triggerSignature && await loadTriggers()) {
+                    triggerSignature = signature;
+                }
+            }
         } catch (error) {
             if (!silent) {
                 const message = error instanceof Error ? error.message : String(error);
@@ -255,17 +274,19 @@
         }
     }
 
-    async function loadTriggers(): Promise<void> {
-        if (!currentRoomId || !canManage) return;
+    async function loadTriggers(): Promise<boolean> {
+        if (!currentRoomId || !canManage) return false;
         try {
             const { response, data } = await window.TrpgApi.requestWithResponse<{ success: boolean; data?: { triggers?: AvailableTrigger[] } }>(
                 `/api/rooms/${encodeURIComponent(currentRoomId)}/triggers`,
                 { method: "GET" },
             );
-            if (!response.ok || !data?.success || !data.data) return;
+            if (!response.ok || !data?.success || !data.data) return false;
             renderTriggers(Array.isArray(data.data.triggers) ? data.data.triggers : []);
+            return true;
         } catch {
             // 静默失败：下一次轮询会重试，避免打断房间主流程。
+            return false;
         }
     }
 
@@ -287,6 +308,8 @@
                 throw new Error(data?.message || data?.error || `HTTP ${response.status}`);
             }
             showNotification(t("room.narrative.fired", "触发器已手动触发。"), "success");
+            // 触发会改写运行态，强制重取一次列表与快照。
+            triggerSignature = "";
             await refresh(true);
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -319,6 +342,7 @@
         currentRoomId = "";
         canManage = false;
         loading = false;
+        triggerSignature = "";
         for (const id of ["roomNarrativeLocation", "roomNarrativeParty", "roomNarrativeStatus", "roomNarrativeClocks", "roomNarrativeTriggers"]) {
             const host = byId(id);
             if (host) host.innerHTML = "";

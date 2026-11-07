@@ -1261,22 +1261,26 @@ function setHouseRuleAudioBlocks(
     });
 }
 
-/** 房规弹窗里的世界意志白名单：列出房间内所有成员，按 user_id 预选。 */
+/** 房规弹窗里的世界意志白名单：复用音频块标签控件，按 user_id 预选。 */
 function renderHouseRuleWorldOverrideMembers(selectedIds: string[]): void {
-    const select = document.getElementById("houseRuleWorldOverrideUsers") as HTMLSelectElement | null;
-    if (!select || !currentRoom) return;
+    if (!currentRoom) return;
     const seen = new Set<string>();
-    const rows: string[] = [];
+    const options: TrpgAudioBlockOptionInput[] = [];
     for (const member of activeRoomMembers(currentRoom)) {
         const userId = String(member.user_id || "").trim();
         if (!userId || seen.has(userId)) continue;
         seen.add(userId);
         const character = member.character_card?.name;
         const label = character ? `${member.username || userId}（${character}）` : (member.username || userId);
-        const selected = selectedIds.includes(userId) ? " selected" : "";
-        rows.push(`<option value="${escapeRoomHtml(userId)}"${selected}>${escapeRoomHtml(label)}</option>`);
+        options.push({ value: userId, label, description: "", stackable: true, available: true });
     }
-    select.innerHTML = rows.join("");
+    window.TrpgAudioBlocks?.render("houseRuleWorldOverrideUsers", options, selectedIds, {
+        mode: "allow",
+        placeholder: "输入成员姓名筛选…",
+        hint: "",
+        noun: "成员",
+        allowEmptyNotice: "成员白名单已清空：保存后只有房主、房管与站点管理员可用。",
+    });
 }
 
 async function openHouseRulesModal(): Promise<void> {
@@ -1405,12 +1409,9 @@ async function saveHouseRules(): Promise<void> {
     const playerRollSelect = document.getElementById("houseRulePlayerDiceRoll") as HTMLSelectElement | null;
     const rerollModeSelect = document.getElementById("houseRuleDiceRerollMode") as HTMLSelectElement | null;
     const worldOverrideEnabled = document.getElementById("houseRuleWorldOverrideEnabled") as HTMLInputElement | null;
-    const worldOverrideUsers = document.getElementById("houseRuleWorldOverrideUsers") as HTMLSelectElement | null;
     const playerRuleValue = playerRollSelect?.value || "";
     const rerollModeValue = rerollModeSelect?.value || "";
-    const worldOverrideUserIds = Array.from(worldOverrideUsers?.selectedOptions || [])
-        .map((option) => option.value)
-        .filter((value) => value);
+    const worldOverrideUserIds = window.TrpgAudioBlocks?.getSelection("houseRuleWorldOverrideUsers") || [];
     try {
         const response = await TrpgApi.put<ApiResponse<RoomHouseRulesPayload>>(`/api/rooms/${encodeURIComponent(currentRoom.id)}/house-rules`, {
             house_rules: {
