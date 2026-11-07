@@ -15,6 +15,7 @@ from trpg_server.ai_platform_config import (
     ordered_platform_paths,
     save_platform_config,
 )
+from trpg_server.ai_platform_resolver import CAPABILITY_OPTIONS, normalize_capabilities
 from trpg_server.config import load_settings, update_sections
 from trpg_server.config.paths import general_config_path
 from trpg_server.config.sources import read_toml_file
@@ -207,6 +208,9 @@ def list_ai_platform_configs():
             if not isinstance(config, dict):
                 continue
             config.setdefault("platform", public_path.stem)
+            # 旧配置没有 capabilities 字段时补上默认用途，前端才能直接渲染多选状态；
+            # 解析侧同样对缺失字段回落默认值，二者保持一致。
+            config["capabilities"] = normalize_capabilities(config.get("capabilities"))
             platforms.append(config)
 
         log_user_action(
@@ -215,7 +219,9 @@ def list_ai_platform_configs():
             用户ID=session.get("user_id"),
             平台数=len(platforms),
         )
-        return success_response(data={"platforms": platforms})
+        return success_response(
+            data={"platforms": platforms, "capability_options": list(CAPABILITY_OPTIONS)}
+        )
     except Exception as exc:
         logger.exception("Failed to list AI platform configs")
         return server_error("Load failed")
@@ -231,6 +237,9 @@ def save_ai_platform_config(platform):
 
         config_path = safe_join(_get_ai_platform_dir(), f"{platform}.json")
         secret_path = safe_join(_get_ai_platform_secret_dir(), f"{platform}.json")
+        if "capabilities" in config_data:
+            # 只保留已知用途并去重；未传该字段时保持「缺失」语义（后端按默认值解析）。
+            config_data["capabilities"] = normalize_capabilities(config_data.get("capabilities"))
         save_platform_config(config_path, secret_path, config_data)
 
         log_user_action(

@@ -15,6 +15,11 @@ from uuid import uuid4
 from flask import current_app
 from trpg_server.ai_capabilities import responses_endpoint
 from trpg_server.ai_platform_config import load_platform_config, ordered_platform_paths
+from trpg_server.ai_platform_resolver import (
+    CAPABILITY_CHAT,
+    is_platform_available,
+    platform_supports,
+)
 from trpg_server.agents.profiles import AgentProfile
 from trpg_server.agents.latex import clean_history_for_model, clean_message_for_model, load_latex_settings
 from trpg_server.agents.prompt_builder import wrap_user_input
@@ -173,11 +178,13 @@ def _get_role_config_file():
     return current_app.config.get("ROLE_CONFIG_FILE", CONFIG_DIR / "roles" / "roles.json")
 
 
-def _load_enabled_platforms(provider_id=None):
-    """返回按加载顺序排列的「已启用」平台列表：``[(platform_id, config), ...]``。
+def _load_enabled_platforms(provider_id=None, purpose=CAPABILITY_CHAT):
+    """返回按 ``order`` 排列、可用于 ``purpose`` 的候选平台 ``[(platform_id, config), ...]``。
 
-    顺序由各平台配置的 ``order`` 决定（管理员在设置页拖动排序）。房间内 AI 对话
-    依次尝试：先加载 order 最小的启用平台，失败（报错、余额不足等）时回退到下一个。
+    顺序由各平台配置的 ``order`` 决定（管理员在设置页拖动排序）。过滤条件与
+    :mod:`trpg_server.ai_platform_resolver` 一致：已启用 → 用途包含本次用途 →
+    近期没有失败记录。房间内 AI 对话依次尝试，失败（报错、余额不足等）时回退到
+    下一个；调用方在成功/失败后需要写入健康缓存。
     """
     platform_dir = _get_ai_platform_dir()
     secret_dir = _get_ai_platform_secret_dir()
@@ -196,14 +203,19 @@ def _load_enabled_platforms(provider_id=None):
             logger.exception("Failed to read AI platform config: %s", path.name)
             continue
 
-        if config.get("enabled", False):
-            platforms.append((path.stem, config))
+        if not config.get("enabled", False):
+            continue
+        if not platform_supports(config, purpose):
+            continue
+        if not is_platform_available(path.stem, purpose):
+            continue
+        platforms.append((path.stem, config))
 
     return platforms
 
 
-def _load_enabled_platform(provider_id=None):
-    platforms = _load_enabled_platforms(provider_id)
+def _load_enabled_platform(provider_id=None, purpose=CAPABILITY_CHAT):
+    platforms = _load_enabled_platforms(provider_id, purpose)
     return platforms[0] if platforms else (None, None)
 
 

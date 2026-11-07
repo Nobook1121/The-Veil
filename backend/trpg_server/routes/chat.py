@@ -14,6 +14,11 @@ from pathlib import Path
 import requests
 from flask import Blueprint, current_app, request, session
 from trpg_server.ai_capabilities import chat_completions_endpoint
+from trpg_server.ai_platform_resolver import (
+    CAPABILITY_CHAT,
+    mark_platform_failure,
+    mark_platform_success,
+)
 from trpg_server.agents.ai_request import merge_request_template
 from trpg_server.agents.config import load_ai_runtime_config
 from trpg_server.agents.context import build_agent_context
@@ -286,7 +291,9 @@ def chat():
             _get_kp_prompt_file(),
             prefer_prompt_file=str(role_config.get("id") or "kp") == "kp",
         )
-        selected_platform, platform_config = _load_enabled_platform(agent_profile.provider)
+        selected_platform, platform_config = _load_enabled_platform(
+            agent_profile.provider, purpose=CAPABILITY_CHAT
+        )
         if not platform_config:
             return error_response(
                 "No enabled AI platform",
@@ -938,14 +945,15 @@ def chat():
             模型=request_data["model"],
             内容长度=len(content),
         )
-        # 房间内 AI 对话：按管理员拖动排序后的顺序加载启用平台；首个平台无法加载
-        # （报错、余额不足等）时自动切换到下一个启用平台，同一时刻只使用一个平台。
-        # 切换原因推送给在线管理员。非房间场景（模块摘要、剧本导入等）仍只用首选平台。
+        # 按管理员拖动排序后的顺序加载用途包含「对话」的候选平台；首个平台无法加载
+        # （报错、余额不足等）时自动顺延到下一个，同一时刻只使用一个平台。
+        # 切换原因推送给在线管理员。非房间场景（模块摘要、剧本导入等）同样按顺序回退。
         attempt_platforms = [(selected_platform, platform_config)]
-        if room_id:
-            for _candidate_id, _candidate_config in _load_enabled_platforms(agent_profile.provider):
-                if _candidate_id != selected_platform:
-                    attempt_platforms.append((_candidate_id, _candidate_config))
+        for _candidate_id, _candidate_config in _load_enabled_platforms(
+            agent_profile.provider, purpose=CAPABILITY_CHAT
+        ):
+            if _candidate_id != selected_platform:
+                attempt_platforms.append((_candidate_id, _candidate_config))
 
         result = None
         last_error = None
@@ -964,6 +972,7 @@ def chat():
                 )
             if not attempt_state:
                 last_error = f"AI 平台「{attempt_platform}」配置不完整"
+                mark_platform_failure(attempt_platform, CAPABILITY_CHAT)
                 if next_platform:
                     _notify_platform_switch(attempt_platform, next_platform, "配置不完整")
                 continue
@@ -1004,6 +1013,7 @@ def chat():
                     session.get("user_id"),
                     attempt_result.error,
                 )
+                mark_platform_failure(attempt_platform, CAPABILITY_CHAT)
                 if next_platform:
                     _notify_platform_switch(attempt_platform, next_platform, attempt_result.error)
                     continue
@@ -1012,6 +1022,7 @@ def chat():
             result = attempt_result
             selected_platform = attempt_platform
             model = attempt_state["model"]
+            mark_platform_success(attempt_platform, CAPABILITY_CHAT)
             break
 
         if result is None:

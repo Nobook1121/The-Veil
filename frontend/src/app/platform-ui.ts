@@ -29,6 +29,19 @@ let platformModalState: { config: AIPlatformConfig; isNew: boolean; iconUploaded
 
 // 供应商 API 标准选项：仅作为元数据持久化/展示，不改变后端请求构造。
 const PROVIDER_TYPE_OPTIONS = ["openai", "openai-compatible", "anthropic"];
+
+// 平台用途多选：与后端 ai_platform_resolver.CAPABILITY_OPTIONS 保持一致。
+// 卡片上以可点击 chip 展示，点击即切换并保存；顺序即平台解析的候选顺序。
+const PLATFORM_CAPABILITY_OPTIONS: Array<{ value: string; label: string; description: string }> = [
+    { value: "chat", label: "对话 / KP", description: "房间 AI 对话、角色卡生成与叙事续写" },
+    { value: "illustration", label: "配图判断", description: "AI KP 判断是否配图并生成画面提示词；实际渲染仍走生图平台表" },
+    { value: "music_director", label: "音乐导演", description: "实时配乐的后台 LLM 精修" },
+    { value: "scenario", label: "剧本创建", description: "剧本摘要、导入拆分与模块分析" },
+    { value: "agent", label: "站点 Agent", description: "站点助手的对话与工具调用" },
+    { value: "voice", label: "语音配音", description: "云端语音占位；当前本地配音不经过 AI 平台" },
+];
+// 旧平台没有 capabilities 字段时的默认用途（与后端 DEFAULT_CAPABILITIES 一致）。
+const DEFAULT_PLATFORM_CAPABILITIES = ["chat", "illustration", "music_director", "scenario", "agent"];
 // 平台头像上传大小上限，data URL 会写进平台配置文件，需保持精简。
 const PLATFORM_ICON_MAX_BYTES = 1 * 1024 * 1024;
 
@@ -345,6 +358,22 @@ function setRoleConfigMessage(message: string, isError = false): void {
     messageElement.classList.toggle("success", Boolean(message && !isError));
 }
 
+function platformCapabilities(platform: AIPlatformConfig): string[] {
+    // 显式空数组表示「不参与任何用途」；只有字段缺失时才回落旧平台默认值。
+    if (Array.isArray(platform.capabilities)) {
+        return platform.capabilities.filter((item) => PLATFORM_CAPABILITY_OPTIONS.some((option) => option.value === item));
+    }
+    return [...DEFAULT_PLATFORM_CAPABILITIES];
+}
+
+function capabilityChipsHTML(platform: AIPlatformConfig): string {
+    const active = new Set(platformCapabilities(platform));
+    return PLATFORM_CAPABILITY_OPTIONS.map((option) => {
+        const checked = active.has(option.value);
+        return `<button type="button" class="platform-capability-chip${checked ? " is-active" : ""}" data-capability="${platformEscapeHtml(option.value)}" title="${platformEscapeHtml(option.description)}" aria-pressed="${checked ? "true" : "false"}">${platformEscapeHtml(option.label)}</button>`;
+    }).join("");
+}
+
 function createPlatformCard(platform: AIPlatformConfig): HTMLElement {
     const card = document.createElement("div");
     card.className = "ai-platform-card";
@@ -377,6 +406,10 @@ function createPlatformCard(platform: AIPlatformConfig): HTMLElement {
                 </button>
             </div>
         </div>
+        <div class="platform-capability-row" role="group" aria-label="${platformEscapeHtml(platformT("platform.card.capabilities", "平台用途"))}">
+            <span class="platform-capability-label">${platformEscapeHtml(platformT("platform.card.capabilities", "平台用途"))}</span>
+            ${capabilityChipsHTML(platform)}
+        </div>
     `;
 
     card.querySelector(".platform-enabled-btn")?.addEventListener("click", async (event) => {
@@ -398,6 +431,38 @@ function createPlatformCard(platform: AIPlatformConfig): HTMLElement {
 
     card.querySelector(".platform-delete-btn")?.addEventListener("click", () => {
         void deletePlatform(platform);
+    });
+
+    // 用途多选：点击 chip 立即切换并保存到平台配置，卡片上始终展示当前声明。
+    card.querySelectorAll<HTMLButtonElement>(".platform-capability-chip").forEach((chip) => {
+        chip.addEventListener("click", async () => {
+            const value = chip.dataset.capability || "";
+            if (!value) return;
+            const current = new Set(platformCapabilities(platform));
+            const wasActive = current.has(value);
+            if (wasActive) current.delete(value);
+            else current.add(value);
+            const previous = platform.capabilities;
+            platform.capabilities = PLATFORM_CAPABILITY_OPTIONS
+                .map((option) => option.value)
+                .filter((item) => current.has(item));
+            const applyState = (active: boolean) => {
+                chip.classList.toggle("is-active", active);
+                chip.setAttribute("aria-pressed", active ? "true" : "false");
+            };
+            applyState(!wasActive);
+            const success = await aiPlatformManager.updatePlatformConfig(platform.platform, platform);
+            if (!success) {
+                platform.capabilities = previous;
+                applyState(wasActive);
+                showNotification(platformT("platform.card.capability_failed", "更新平台用途失败"), "error");
+                return;
+            }
+            showNotification(
+                platformT("platform.card.capability_saved", "平台用途已保存"),
+                "success",
+            );
+        });
     });
 
     return card;

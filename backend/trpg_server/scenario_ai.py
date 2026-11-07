@@ -12,6 +12,11 @@ import re
 from flask import current_app
 
 from trpg_server.ai_platform_config import load_platform_config, ordered_platform_paths
+from trpg_server.ai_platform_resolver import (
+    CAPABILITY_CHAT,
+    is_platform_available,
+    platform_supports,
+)
 from trpg_server.role_config import MODULE_SUMMARIZER_ROLE_ID, load_roles
 from trpg_server.settings import AI_PLATFORM_SECRET_DIR, CONFIG_DIR
 
@@ -38,12 +43,14 @@ def role_config_file():
     return current_app.config.get("ROLE_CONFIG_FILE", config_dir() / "roles" / "roles.json")
 
 
-def load_enabled_platform(provider_id=None):
+def load_enabled_platforms(provider_id=None, purpose=CAPABILITY_CHAT):
+    """按 ``order`` 返回所有「已启用 + 用途匹配 + 近期可用」的候选平台。"""
     platform_dir = ai_platform_dir()
     secret_dir = ai_platform_secret_dir()
     if not platform_dir.exists():
-        return None, None
+        return []
 
+    platforms = []
     for path in ordered_platform_paths(platform_dir):
         if provider_id and path.stem != provider_id:
             continue
@@ -52,9 +59,23 @@ def load_enabled_platform(provider_id=None):
         except (json.JSONDecodeError, OSError):
             logger.exception("Failed to read AI platform config: %s", path.name)
             continue
-        if config.get("enabled", False):
-            return path.stem, config
-    return None, None
+        if not config.get("enabled", False):
+            continue
+        if not platform_supports(config, purpose):
+            continue
+        if not is_platform_available(path.stem, purpose):
+            continue
+        platforms.append((path.stem, config))
+    return platforms
+
+
+def load_enabled_platform(provider_id=None, purpose=CAPABILITY_CHAT):
+    """按 ``order`` 返回第一个「已启用 + 用途匹配 + 近期可用」的平台。
+
+    默认用途是对话；剧本摘要/导入等调用点显式传 ``CAPABILITY_SCENARIO``。
+    """
+    platforms = load_enabled_platforms(provider_id, purpose)
+    return platforms[0] if platforms else (None, None)
 
 
 def select_model(platform_config):

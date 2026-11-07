@@ -13,7 +13,12 @@ from trpg_server.media_defaults import normalize_cover
 from trpg_server.logging_config import log_user_action, redact_sensitive, user_action_text
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, server_error, success_response
-from trpg_server.scenario_ai import load_enabled_platform, select_model, summary_role
+from trpg_server.ai_platform_resolver import (
+    CAPABILITY_SCENARIO,
+    mark_platform_failure,
+    mark_platform_success,
+)
+from trpg_server.scenario_ai import load_enabled_platforms, select_model, summary_role
 from trpg_server.scenario_store import (
     delete_scenario_draft_file,
     delete_scenario_record,
@@ -425,91 +430,100 @@ def import_script():
         # available. The local converter remains the safe fallback.
         result = None
         role = summary_role()
-        selected_platform, platform_config = load_enabled_platform(role.get("provider"))
-        if platform_config:
+        candidates = load_enabled_platforms(role.get("provider"), CAPABILITY_SCENARIO)
+        last_error = None
+        for selected_platform, platform_config in candidates:
             api_key = platform_config.get("config", {}).get("api_key")
             base_url = platform_config.get("config", {}).get("base_url")
             if selected_platform == "lmstudio" and not api_key: api_key = "lm-studio"
             base_url = chat_completions_endpoint(base_url)
-            if base_url and api_key:
-                headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-                model = select_model(platform_config)
-                # Conversion prompts contain the full source document and ask
-                # for structured JSON. They legitimately take longer than a
-                # short chat completion; never reuse the 20s chat timeout.
-                configured_timeout = int(platform_config.get("config", {}).get("timeout", 60) or 60)
-                timeout = max(120, configured_timeout)
-                runtime_config = load_ai_runtime_config(current_app.config.get("CONFIG_DIR"))
-                def request_ai(ai_payload):
-                    # 完整的请求/响应体会包含整段提示词与模型输出，只有开启调试模式
-                    # 才写日志；正常导入时保持安静，避免日志被大剧本刷满。
-                    debug = ai_debug_enabled(current_app.config.get("CONFIG_DIR"))
-                    if debug:
-                        request_log = {
-                            "url": base_url,
-                            "timeout": timeout,
-                            "headers": redact_sensitive(headers),
-                            "json": redact_sensitive(ai_payload),
-                        }
-                        logger.info(
-                            "scenario_import.ai_http_request_full=%s",
-                            json.dumps(request_log, ensure_ascii=False, default=str),
-                        )
-                    started_at = time.monotonic()
-                    try:
-                        response = post_with_retry(
-                            base_url,
-                            headers=headers,
-                            payload=ai_payload,
-                            timeout=timeout,
-                            max_retries=runtime_config.ai_request_max_retries,
-                            post=requests.post,
-                            label="scenario_import",
-                        )
-                    except (requests.exceptions.RequestException, RuntimeError):
-                        logger.exception(
-                            "scenario_import.ai_http_transport_error elapsed_seconds=%.3f",
-                            time.monotonic() - started_at,
-                        )
-                        raise
-                    try:
-                        response_data = response.json()
-                    except ValueError:
-                        logger.exception(
-                            "scenario_import.ai_http_invalid_response status=%s elapsed_seconds=%.3f body=%s",
-                            response.status_code,
-                            time.monotonic() - started_at,
-                            response.text,
-                        )
-                        raise
-                    if debug:
-                        logger.info(
-                            "scenario_import.ai_http_response_full=%s",
-                            json.dumps(
-                                redact_sensitive({
-                                    "status": response.status_code,
-                                    "elapsed_seconds": round(time.monotonic() - started_at, 3),
-                                    "headers": dict(response.headers),
-                                    "json": response_data,
-                                }),
-                                ensure_ascii=False,
-                                default=str,
-                            ),
-                        )
-                    if response.status_code != 200: raise ValueError(str(response_data.get("error") or f"AI request failed: {response.status_code}"))
-                    return response_data
-                try:
-                    result = convert_with_ai(request_ai, text, model=model, metadata=metadata)
-                except (requests.exceptions.RequestException, RuntimeError, ValueError) as exc:
-                    # AI enrichment is optional; a transient provider timeout
-                    # must not discard the user's document. Return the local
-                    # section-preserving conversion and keep the exact cause
-                    # in the log for diagnosis.
-                    logger.warning("scenario_import.ai_failed_fallback error_type=%s error=%s", type(exc).__name__, exc)
-                    result = convert_script_to_scenario(text, metadata)
-                    result.setdefault("conversion", {})["ai"] = {"status": "fallback", "error": str(exc)}
-            else:
+            if not (base_url and api_key):
+                mark_platform_failure(selected_platform, CAPABILITY_SCENARIO)
                 logger.warning("scenario_import.ai_unavailable provider=%s reason=incomplete_config", selected_platform)
+                continue
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+            model = select_model(platform_config)
+            # Conversion prompts contain the full source document and ask
+            # for structured JSON. They legitimately take longer than a
+            # short chat completion; never reuse the 20s chat timeout.
+            configured_timeout = int(platform_config.get("config", {}).get("timeout", 60) or 60)
+            timeout = max(120, configured_timeout)
+            runtime_config = load_ai_runtime_config(current_app.config.get("CONFIG_DIR"))
+            def request_ai(ai_payload):
+                # 完整的请求/响应体会包含整段提示词与模型输出，只有开启调试模式
+                # 才写日志；正常导入时保持安静，避免日志被大剧本刷满。
+                debug = ai_debug_enabled(current_app.config.get("CONFIG_DIR"))
+                if debug:
+                    request_log = {
+                        "url": base_url,
+                        "timeout": timeout,
+                        "headers": redact_sensitive(headers),
+                        "json": redact_sensitive(ai_payload),
+                    }
+                    logger.info(
+                        "scenario_import.ai_http_request_full=%s",
+                        json.dumps(request_log, ensure_ascii=False, default=str),
+                    )
+                started_at = time.monotonic()
+                try:
+                    response = post_with_retry(
+                        base_url,
+                        headers=headers,
+                        payload=ai_payload,
+                        timeout=timeout,
+                        max_retries=runtime_config.ai_request_max_retries,
+                        post=requests.post,
+                        label="scenario_import",
+                    )
+                except (requests.exceptions.RequestException, RuntimeError):
+                    logger.exception(
+                        "scenario_import.ai_http_transport_error elapsed_seconds=%.3f",
+                        time.monotonic() - started_at,
+                    )
+                    raise
+                try:
+                    response_data = response.json()
+                except ValueError:
+                    logger.exception(
+                        "scenario_import.ai_http_invalid_response status=%s elapsed_seconds=%.3f body=%s",
+                        response.status_code,
+                        time.monotonic() - started_at,
+                        response.text,
+                    )
+                    raise
+                if debug:
+                    logger.info(
+                        "scenario_import.ai_http_response_full=%s",
+                        json.dumps(
+                            redact_sensitive({
+                                "status": response.status_code,
+                                "elapsed_seconds": round(time.monotonic() - started_at, 3),
+                                "headers": dict(response.headers),
+                                "json": response_data,
+                            }),
+                            ensure_ascii=False,
+                            default=str,
+                        ),
+                    )
+                if response.status_code != 200: raise ValueError(str(response_data.get("error") or f"AI request failed: {response.status_code}"))
+                return response_data
+            try:
+                result = convert_with_ai(request_ai, text, model=model, metadata=metadata)
+            except (requests.exceptions.RequestException, RuntimeError, ValueError) as exc:
+                # AI enrichment is optional; a transient provider timeout
+                # must not discard the user's document. Try the next platform,
+                # then fall back to the local section-preserving conversion and
+                # keep the exact cause in the log for diagnosis.
+                last_error = exc
+                result = None
+                mark_platform_failure(selected_platform, CAPABILITY_SCENARIO)
+                logger.warning("scenario_import.ai_failed_fallback platform=%s error_type=%s error=%s", selected_platform, type(exc).__name__, exc)
+                continue
+            mark_platform_success(selected_platform, CAPABILITY_SCENARIO)
+            break
+        if result is None and last_error is not None:
+            result = convert_script_to_scenario(text, metadata)
+            result.setdefault("conversion", {})["ai"] = {"status": "fallback", "error": str(last_error)}
         if result is None:
             result = convert_script_to_scenario(text, metadata)
             logger.info("scenario_import.local_conversion modules=%d", len(result.get("modules", [])))

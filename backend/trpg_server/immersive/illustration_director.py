@@ -25,7 +25,14 @@ from typing import Any, Callable
 
 from trpg_server.agents.ai_request import build_request_payload
 from trpg_server.agents.http_retry import post_with_retry
-from trpg_server.immersive.director import recent_context, resolve_ai_target
+from trpg_server.ai_platform_resolver import (
+    CAPABILITY_ILLUSTRATION,
+    PlatformUpstreamError,
+    mark_platform_failure,
+    mark_platform_success,
+    resolve_platform_targets,
+)
+from trpg_server.immersive.director import recent_context
 from trpg_server.immersive.illustration import build_prompt_for_scene
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.settings import RUNTIME_DIR
@@ -180,10 +187,13 @@ def request_decision(
     secret_dir_override: Any = None,
     post: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
-    """真实调用一次 KP；失败抛异常，由 :func:`run` 统一回退。"""
-    # 平台/模型统一取「模型设置」中按顺序第一个启用的 AI 平台。
-    target = resolve_ai_target(config_dir, secret_dir_override=secret_dir_override)
-    if target is None:
+    """按平台顺序调用 KP；单个平台失败会顺延到下一个，全部失败才抛异常。"""
+    targets = resolve_platform_targets(
+        config_dir,
+        CAPABILITY_ILLUSTRATION,
+        secret_dir_override=secret_dir_override,
+    )
+    if not targets:
         raise RuntimeError("no_enabled_ai_platform")
     payload_context = {
         "scene": str(analysis.get("scene") or "")[:120],
@@ -203,45 +213,66 @@ def request_decision(
             ),
         },
     ]
-    body = build_request_payload(
-        target["platform"],
-        target["model"],
-        messages,
-        config_dir=config_dir,
-        params={"temperature": 0.4},
-    )
-    headers = dict(target["headers"])
-    headers.setdefault("Content-Type", "application/json")
-    if target["api_key"]:
-        headers["Authorization"] = f"Bearer {target['api_key']}"
-    timeout = max(10, min(300, int(settings.get("illustration_kp_timeout") or target["timeout"] or 45)))
-    started = time.monotonic()
-    response = post_with_retry(
-        target["endpoint"],
-        headers=headers,
-        payload=body,
-        timeout=timeout,
-        max_retries=1,
-        post=post,
-        label="immersive_illustration_kp",
-    )
-    elapsed_ms = round((time.monotonic() - started) * 1000, 1)
-    if response.status_code >= 400:
-        raise RuntimeError(f"upstream_http_{response.status_code}:{response.text[:160]}")
-    data = response.json()
-    choices = data.get("choices") if isinstance(data, dict) else None
-    message = choices[0].get("message") if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
-    content = str(message.get("content") or "")
-    if not content.strip():
-        content = str(message.get("reasoning_content") or "")
-    if not content.strip():
-        raise RuntimeError("empty_kp_content")
-    return {
-        "raw": _extract_json(content),
-        "model": target["model"],
-        "platform": target["platform"],
-        "elapsed_ms": elapsed_ms,
-    }
+    last_error: Exception | None = None
+    for target in targets:
+        try:
+            body = build_request_payload(
+                target["platform"],
+                target["model"],
+                messages,
+                config_dir=config_dir,
+                params={"temperature": 0.4},
+            )
+            headers = dict(target["headers"])
+            headers.setdefault("Content-Type", "application/json")
+            if target["api_key"]:
+                headers["Authorization"] = f"Bearer {target['api_key']}"
+            timeout = max(10, min(300, int(settings.get("illustration_kp_timeout") or target["timeout"] or 45)))
+            started = time.monotonic()
+            response = post_with_retry(
+                target["endpoint"],
+                headers=headers,
+                payload=body,
+                timeout=timeout,
+                max_retries=1,
+                post=post,
+                label="immersive_illustration_kp",
+            )
+            elapsed_ms = round((time.monotonic() - started) * 1000, 1)
+            if response.status_code >= 400:
+                raise PlatformUpstreamError(
+                    f"upstream_http_{response.status_code}:{response.text[:160]}",
+                    status_code=response.status_code,
+                )
+            data = response.json()
+            choices = data.get("choices") if isinstance(data, dict) else None
+            message = choices[0].get("message") if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+            content = str(message.get("content") or "")
+            if not content.strip():
+                content = str(message.get("reasoning_content") or "")
+            if not content.strip():
+                raise RuntimeError("empty_kp_content")
+            mark_platform_success(target["platform"], CAPABILITY_ILLUSTRATION)
+            return {
+                "raw": _extract_json(content),
+                "model": target["model"],
+                "platform": target["platform"],
+                "elapsed_ms": elapsed_ms,
+            }
+        except Exception as exc:  # noqa: BLE001 - 单个平台失败必须顺延到下一个
+            last_error = exc
+            ttl = mark_platform_failure(
+                target["platform"],
+                CAPABILITY_ILLUSTRATION,
+                status_code=getattr(exc, "status_code", None),
+            )
+            logger.warning(
+                "配图判断平台 %s 调用失败，%s 秒内跳过：%s",
+                target["platform"],
+                int(ttl),
+                exc,
+            )
+    raise last_error or RuntimeError("no_enabled_ai_platform")
 
 
 def run(

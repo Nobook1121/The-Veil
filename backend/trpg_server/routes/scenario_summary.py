@@ -7,12 +7,17 @@ from trpg_server.agents.ai_request import build_request_payload
 from trpg_server.agents.config import load_ai_runtime_config
 from trpg_server.agents.http_retry import post_with_retry
 from trpg_server.ai_capabilities import chat_completions_endpoint
+from trpg_server.ai_platform_resolver import (
+    CAPABILITY_SCENARIO,
+    mark_platform_failure,
+    mark_platform_success,
+)
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.responses import error_response, server_error, success_response
 from trpg_server.scenario_ai import (
     clean_module_summary,
     extract_ai_response,
-    load_enabled_platform,
+    load_enabled_platforms,
     module_summary_user_prompt,
     select_model,
     summary_role,
@@ -42,82 +47,109 @@ def summarize_scenario_module():
             return error_response("Module data is required", 400)
 
         role = summary_role()
-        selected_platform, platform_config = load_enabled_platform(role.get("provider"))
-        if not platform_config:
+        candidates = load_enabled_platforms(role.get("provider"), CAPABILITY_SCENARIO)
+        if not candidates:
             return error_response("No enabled AI platform", 400, "No enabled platform")
 
-        api_key = platform_config.get("config", {}).get("api_key")
-        base_url = chat_completions_endpoint(platform_config.get("config", {}).get("base_url"))
-        if not base_url:
-            return error_response("AI platform config is incomplete", 400, "Incomplete platform config")
-        if not api_key and selected_platform == "lmstudio":
-            api_key = "lm-studio"
-        elif not api_key:
-            return error_response("AI platform config is incomplete", 400, "Incomplete platform config")
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        }
-        model = select_model(platform_config)
+        model = select_model(candidates[0][1])
         config_dir = current_app.config.get("CONFIG_DIR", CONFIG_DIR)
         runtime_config = load_ai_runtime_config(config_dir)
-        payload = build_request_payload(
-            selected_platform,
-            model,
-            [
-                {"role": "system", "content": str(role.get("prompt") or "")},
-                {"role": "user", "content": module_summary_user_prompt(request_data.get("scenario_title"), module)},
-            ],
-            runtime_config=runtime_config,
-            config_dir=config_dir,
-            params={"temperature": 0.2, "top_p": 0.8},
-        )
-        logger.info(
-            "module_summary_request platform=%s model=%s max_tokens=%s constrain=%s token_count_target=%s",
-            selected_platform,
-            model,
-            payload.get("max_tokens"),
-            runtime_config.constrain_max_tokens,
-            module.get("token_count"),
-        )
-        try:
-            timeout = int(platform_config.get("config", {}).get("timeout", 30))
-        except (TypeError, ValueError):
-            timeout = 30
-        response = post_with_retry(
-            base_url,
-            headers=headers,
-            payload=payload,
-            timeout=max(15, min(timeout, 60)),
-            max_retries=runtime_config.ai_request_max_retries,
-            post=requests.post,
-            label="module_summary",
-        )
-        response_data = response.json()
-        if not isinstance(response_data, dict):
-            return error_response("AI 平台返回的数据格式无效", 502, "Response must be a JSON object")
-        if response.status_code != 200:
-            error_message = response_data.get("error", {}).get("message", f"API request failed: {response.status_code}")
-            return error_response(None, response.status_code, error_message)
+        last_error: Exception | None = None
+        for selected_platform, platform_config in candidates:
+            api_key = platform_config.get("config", {}).get("api_key")
+            base_url = chat_completions_endpoint(platform_config.get("config", {}).get("base_url"))
+            if not base_url:
+                mark_platform_failure(selected_platform, CAPABILITY_SCENARIO)
+                continue
+            if not api_key and selected_platform == "lmstudio":
+                api_key = "lm-studio"
+            elif not api_key:
+                mark_platform_failure(selected_platform, CAPABILITY_SCENARIO)
+                continue
 
-        summary, token_count = extract_ai_response(response_data)
-        summary = clean_module_summary(summary)
-        if not summary:
-            return error_response("AI platform did not return a module summary", 500, "No summary")
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            }
+            model = select_model(platform_config)
+            payload = build_request_payload(
+                selected_platform,
+                model,
+                [
+                    {"role": "system", "content": str(role.get("prompt") or "")},
+                    {"role": "user", "content": module_summary_user_prompt(request_data.get("scenario_title"), module)},
+                ],
+                runtime_config=runtime_config,
+                config_dir=config_dir,
+                params={"temperature": 0.2, "top_p": 0.8},
+            )
+            logger.info(
+                "module_summary_request platform=%s model=%s max_tokens=%s constrain=%s token_count_target=%s",
+                selected_platform,
+                model,
+                payload.get("max_tokens"),
+                runtime_config.constrain_max_tokens,
+                module.get("token_count"),
+            )
+            try:
+                timeout = int(platform_config.get("config", {}).get("timeout", 30))
+            except (TypeError, ValueError):
+                timeout = 30
+            try:
+                response = post_with_retry(
+                    base_url,
+                    headers=headers,
+                    payload=payload,
+                    timeout=max(15, min(timeout, 60)),
+                    max_retries=runtime_config.ai_request_max_retries,
+                    post=requests.post,
+                    label="module_summary",
+                )
+            except Exception as exc:  # noqa: BLE001 - 单个平台失败顺延到下一个
+                last_error = exc
+                mark_platform_failure(selected_platform, CAPABILITY_SCENARIO)
+                continue
+            response_data = response.json()
+            if response.status_code != 200:
+                error_message = (
+                    response_data.get("error", {}).get("message", f"API request failed: {response.status_code}")
+                    if isinstance(response_data, dict)
+                    else f"API request failed: {response.status_code}"
+                )
+                last_error = RuntimeError(error_message)
+                mark_platform_failure(
+                    selected_platform, CAPABILITY_SCENARIO, status_code=response.status_code
+                )
+                continue
+            if not isinstance(response_data, dict):
+                last_error = ValueError("Response must be a JSON object")
+                mark_platform_failure(selected_platform, CAPABILITY_SCENARIO)
+                continue
 
-        log_user_action(
-            logger,
-            user_action_text(session.get("username"), "生成了剧本模块摘要"),
-            用户ID=session.get("user_id"),
-            模块类型=str(module.get("module_type") or ""),
-            模块标题=str(module.get("title") or ""),
-            token_count=token_count,
-        )
-        return success_response(
-            data={"summary": summary, "token_count": token_count, "role_id": role.get("id"), "model": model},
-            message="Module summary generated successfully",
-        )
+            summary, token_count = extract_ai_response(response_data)
+            summary = clean_module_summary(summary)
+            if not summary:
+                last_error = RuntimeError("AI platform did not return a module summary")
+                mark_platform_failure(selected_platform, CAPABILITY_SCENARIO)
+                continue
+
+            mark_platform_success(selected_platform, CAPABILITY_SCENARIO)
+            log_user_action(
+                logger,
+                user_action_text(session.get("username"), "生成了剧本模块摘要"),
+                用户ID=session.get("user_id"),
+                模块类型=str(module.get("module_type") or ""),
+                模块标题=str(module.get("title") or ""),
+                token_count=token_count,
+            )
+            return success_response(
+                data={"summary": summary, "token_count": token_count, "role_id": role.get("id"), "model": model},
+                message="Module summary generated successfully",
+            )
+
+        if last_error is not None:
+            raise last_error
+        return error_response("AI platform config is incomplete", 400, "Incomplete platform config")
     except RuntimeError as exc:
         # post_with_retry 统一把「超时/连接失败/手动终止」抛为 RuntimeError，按文案分类。
         message = str(exc)

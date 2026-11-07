@@ -105,18 +105,20 @@ def test_module_summary_endpoint_returns_clean_summary_and_token_count(tmp_path:
     )
     monkeypatch.setattr(
         scenario_summary,
-        "load_enabled_platform",
-        lambda provider_id=None: (
-            "deepseek",
-            {
-                "config": {
-                    "api_key": "test-secret",
-                    "base_url": "https://example.test/chat",
-                    "timeout": 30,
+        "load_enabled_platforms",
+        lambda provider_id=None, purpose=None: [
+            (
+                "deepseek",
+                {
+                    "config": {
+                        "api_key": "test-secret",
+                        "base_url": "https://example.test/chat",
+                        "timeout": 30,
+                    },
+                    "models": [{"id": "deepseek-chat", "name": "DeepSeek Chat", "enabled": True}],
                 },
-                "models": [{"id": "deepseek-chat", "name": "DeepSeek Chat", "enabled": True}],
-            },
-        ),
+            )
+        ],
     )
 
     captured = {}

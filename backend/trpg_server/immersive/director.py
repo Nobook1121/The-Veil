@@ -26,11 +26,17 @@ from typing import Any, Callable
 
 from trpg_server.agents.ai_request import build_request_payload
 from trpg_server.agents.http_retry import post_with_retry
-from trpg_server.ai_capabilities import chat_completions_endpoint
-from trpg_server.ai_platform_config import load_platform_config, ordered_platform_paths
+from trpg_server.ai_platform_resolver import (
+    CAPABILITY_MUSIC_DIRECTOR,
+    PlatformUpstreamError,
+    mark_platform_failure,
+    mark_platform_success,
+    resolve_platform_target,
+    resolve_platform_targets,
+)
 from trpg_server.immersive.director_schema import validate_score
 from trpg_server.json_store import read_json, write_json_atomic
-from trpg_server.settings import AI_PLATFORM_SECRET_DIR, RUNTIME_DIR
+from trpg_server.settings import RUNTIME_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -293,44 +299,14 @@ def resolve_ai_target(
     model_id: str = "",
     secret_dir_override: Any = None,
 ) -> dict[str, Any] | None:
-    """从 ``config_dir/aiplatform`` 解析一个启用的聊天平台（不依赖 Flask）。"""
-    root = _root(config_dir)
-    platform_dir = root / "aiplatform"
-    secret_dir = Path(secret_dir_override) if secret_dir_override else AI_PLATFORM_SECRET_DIR
-    for path in ordered_platform_paths(platform_dir):
-        if platform_id and path.stem != platform_id:
-            continue
-        try:
-            config = load_platform_config(path, secret_dir / path.name)
-        except (OSError, ValueError):
-            logger.exception("Failed to read AI platform config for director: %s", path.name)
-            continue
-        if not config.get("enabled", False):
-            continue
-        section = config.get("config") if isinstance(config.get("config"), dict) else {}
-        base_url = str(section.get("base_url") or "").strip()
-        if not base_url:
-            continue
-        model = model_id or str(section.get("default_model") or "").strip()
-        if not model:
-            models = config.get("models") if isinstance(config.get("models"), list) else []
-            for item in models:
-                if isinstance(item, dict) and item.get("enabled", True):
-                    model = str(item.get("id") or "").strip()
-                    if model:
-                        break
-        if not model:
-            model = "local-model"
-        headers = section.get("headers") if isinstance(section.get("headers"), dict) else {}
-        return {
-            "platform": path.stem,
-            "model": model,
-            "endpoint": chat_completions_endpoint(base_url),
-            "headers": {str(key): str(value) for key, value in headers.items()},
-            "api_key": str(section.get("api_key") or ""),
-            "timeout": int(section.get("timeout") or 60),
-        }
-    return None
+    """从 ``config_dir/aiplatform`` 解析第一个可用且声明「音乐导演」用途的平台。"""
+    return resolve_platform_target(
+        _root(config_dir),
+        CAPABILITY_MUSIC_DIRECTOR,
+        platform_id=platform_id,
+        model_id=model_id,
+        secret_dir_override=secret_dir_override,
+    )
 
 
 def request_score(
@@ -343,10 +319,13 @@ def request_score(
     secret_dir_override: Any = None,
     post: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
-    """真实调用一次 LLM；失败抛异常，由 :func:`run` 统一回退。"""
-    # 平台/模型统一取「模型设置」中按顺序第一个启用的 AI 平台。
-    target = resolve_ai_target(config_dir, secret_dir_override=secret_dir_override)
-    if target is None:
+    """按平台顺序调用 LLM；单个平台失败会顺延到下一个，全部失败才抛异常。"""
+    targets = resolve_platform_targets(
+        _root(config_dir),
+        CAPABILITY_MUSIC_DIRECTOR,
+        secret_dir_override=secret_dir_override,
+    )
+    if not targets:
         raise RuntimeError("no_enabled_ai_platform")
     payload_context = {
         "scene": str(analysis.get("scene") or "")[:120],
@@ -369,47 +348,68 @@ def request_score(
             ),
         },
     ]
-    body = build_request_payload(
-        target["platform"],
-        target["model"],
-        messages,
-        config_dir=config_dir,
-        params={"temperature": 0.55},
-    )
-    headers = dict(target["headers"])
-    headers.setdefault("Content-Type", "application/json")
-    if target["api_key"]:
-        headers["Authorization"] = f"Bearer {target['api_key']}"
-    timeout = max(20, min(300, int(settings.get("music_director_timeout") or target["timeout"] or 45)))
-    started = time.monotonic()
-    response = post_with_retry(
-        target["endpoint"],
-        headers=headers,
-        payload=body,
-        timeout=timeout,
-        max_retries=1,
-        post=post,
-        label="immersive_music_director",
-    )
-    elapsed_ms = round((time.monotonic() - started) * 1000, 1)
-    if response.status_code >= 400:
-        raise RuntimeError(f"upstream_http_{response.status_code}:{response.text[:160]}")
-    data = response.json()
-    choices = data.get("choices") if isinstance(data, dict) else None
-    message = choices[0].get("message") if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
-    content = str(message.get("content") or "")
-    if not content.strip():
-        # 部分推理模型把正文放在 reasoning_content；与项目其他调用一致，回退读取。
-        content = str(message.get("reasoning_content") or "")
-    if not content.strip():
-        raise RuntimeError("empty_director_content")
-    raw = _extract_json(content)
-    return {
-        "raw": raw,
-        "model": target["model"],
-        "platform": target["platform"],
-        "elapsed_ms": elapsed_ms,
-    }
+    last_error: Exception | None = None
+    for target in targets:
+        try:
+            body = build_request_payload(
+                target["platform"],
+                target["model"],
+                messages,
+                config_dir=config_dir,
+                params={"temperature": 0.55},
+            )
+            headers = dict(target["headers"])
+            headers.setdefault("Content-Type", "application/json")
+            if target["api_key"]:
+                headers["Authorization"] = f"Bearer {target['api_key']}"
+            timeout = max(20, min(300, int(settings.get("music_director_timeout") or target["timeout"] or 45)))
+            started = time.monotonic()
+            response = post_with_retry(
+                target["endpoint"],
+                headers=headers,
+                payload=body,
+                timeout=timeout,
+                max_retries=1,
+                post=post,
+                label="immersive_music_director",
+            )
+            elapsed_ms = round((time.monotonic() - started) * 1000, 1)
+            if response.status_code >= 400:
+                raise PlatformUpstreamError(
+                    f"upstream_http_{response.status_code}:{response.text[:160]}",
+                    status_code=response.status_code,
+                )
+            data = response.json()
+            choices = data.get("choices") if isinstance(data, dict) else None
+            message = choices[0].get("message") if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+            content = str(message.get("content") or "")
+            if not content.strip():
+                # 部分推理模型把正文放在 reasoning_content；与项目其他调用一致，回退读取。
+                content = str(message.get("reasoning_content") or "")
+            if not content.strip():
+                raise RuntimeError("empty_director_content")
+            raw = _extract_json(content)
+            mark_platform_success(target["platform"], CAPABILITY_MUSIC_DIRECTOR)
+            return {
+                "raw": raw,
+                "model": target["model"],
+                "platform": target["platform"],
+                "elapsed_ms": elapsed_ms,
+            }
+        except Exception as exc:  # noqa: BLE001 - 单个平台失败必须顺延到下一个
+            last_error = exc
+            ttl = mark_platform_failure(
+                target["platform"],
+                CAPABILITY_MUSIC_DIRECTOR,
+                status_code=getattr(exc, "status_code", None),
+            )
+            logger.warning(
+                "音乐导演平台 %s 调用失败，%s 秒内跳过：%s",
+                target["platform"],
+                int(ttl),
+                exc,
+            )
+    raise last_error or RuntimeError("no_enabled_ai_platform")
 
 
 def run(

@@ -1610,74 +1610,110 @@ def build_ai_requester() -> Requester:
     from trpg_server.agents.config import load_ai_runtime_config
     from trpg_server.agents.http_retry import post_with_retry
     from trpg_server.ai_capabilities import chat_completions_endpoint
+    from trpg_server.ai_platform_resolver import (
+        CAPABILITY_SCENARIO,
+        mark_platform_failure,
+        mark_platform_success,
+    )
     from trpg_server.role_config import resolve_task_model
-    from trpg_server.scenario_ai import load_enabled_platform, select_model, summary_role
+    from trpg_server.scenario_ai import load_enabled_platforms, select_model, summary_role
 
     role = summary_role()
-    platform, platform_config = load_enabled_platform(role.get("provider"))
-    if not platform_config:
-        raise RuntimeError("没有启用的 AI 平台，无法执行 AI 剧本导入")
-    config = platform_config.get("config") or {}
-    api_key = config.get("api_key")
-    base_url = chat_completions_endpoint(config.get("base_url"))
-    if not base_url or (not api_key and platform != "lmstudio"):
-        raise RuntimeError("AI 平台配置不完整，无法执行 AI 剧本导入")
     config_dir = current_app.config.get("CONFIG_DIR")
     runtime_config = load_ai_runtime_config(config_dir)
-    model = resolve_task_model(runtime_config, platform_config, "scenario_import", select_model(platform_config))
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key or 'lm-studio'}"}
-    try:
-        timeout = int(config.get("timeout", 60))
-    except (TypeError, ValueError):
-        timeout = 60
-    # 导入阶段提示词包含整篇剧本，且要连续跑多个阶段；平台默认 60 秒很容易在
-    # 推理模型上超时。这里给导入单独抬高下限，上限仍保持 300 秒。
-    timeout = max(240, min(timeout, 300))
-    logger.info("scenario_ai_import.configured platform=%s model=%s timeout=%ss", platform, model, timeout)
+    candidates: list[dict[str, Any]] = []
+    for platform, platform_config in load_enabled_platforms(role.get("provider"), CAPABILITY_SCENARIO):
+        config = platform_config.get("config") or {}
+        api_key = config.get("api_key")
+        base_url = chat_completions_endpoint(config.get("base_url"))
+        if not base_url or (not api_key and platform != "lmstudio"):
+            continue
+        try:
+            timeout = int(config.get("timeout", 60))
+        except (TypeError, ValueError):
+            timeout = 60
+        # 导入阶段提示词包含整篇剧本，且要连续跑多个阶段；平台默认 60 秒很容易在
+        # 推理模型上超时。这里给导入单独抬高下限，上限仍保持 300 秒。
+        timeout = max(240, min(timeout, 300))
+        candidates.append(
+            {
+                "platform": platform,
+                "base_url": base_url,
+                "headers": {"Content-Type": "application/json", "Authorization": f"Bearer {api_key or 'lm-studio'}"},
+                "timeout": timeout,
+                "model": resolve_task_model(
+                    runtime_config,
+                    platform_config,
+                    "scenario_import",
+                    select_model(platform_config),
+                ),
+            }
+        )
+    if not candidates:
+        raise RuntimeError("没有可用的 AI 平台，无法执行 AI 剧本导入（需启用且勾选「剧本创建」用途）")
+    logger.info(
+        "scenario_ai_import.configured platforms=%s",
+        ",".join(f"{candidate['platform']}/{candidate['model']}" for candidate in candidates),
+    )
 
     def request(prompt: str) -> str:
-        payload = build_request_payload(
-            platform,
-            model,
-            [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            runtime_config=runtime_config,
-            config_dir=config_dir,
-            params={"temperature": 0.2, "top_p": 0.85, "max_tokens": 8192},
-        )
-        response = post_with_retry(
-            base_url,
-            headers=headers,
-            payload=payload,
-            timeout=timeout,
-            max_retries=2,
-            post=requests.post,
-            label="scenario_ai_import",
-        )
-        if response.status_code != 200:
-            raise RuntimeError(
-                f"AI 平台返回 {response.status_code}：{str(response.text or '')[:160]}"
+        errors: list[str] = []
+        for candidate in candidates:
+            platform = candidate["platform"]
+            payload = build_request_payload(
+                platform,
+                candidate["model"],
+                [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                runtime_config=runtime_config,
+                config_dir=config_dir,
+                params={"temperature": 0.2, "top_p": 0.85, "max_tokens": 8192},
             )
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            raise RuntimeError(f"AI 平台返回的不是 JSON：{str(response.text or '')[:160]}") from exc
-        content, finish_reason, usage = response_content(payload)
-        if not str(content or "").strip():
-            logger.warning(
-                "scenario_ai_import.empty_response finish_reason=%s completion_tokens=%s prompt_tokens=%s choices=%s",
-                finish_reason or "unknown",
-                usage.get("completion_tokens"),
-                usage.get("prompt_tokens"),
-                len(payload.get("choices") or []) if isinstance(payload, dict) else 0,
-            )
-        if not str(content or "").strip():
-            raise EmptyAIResponse(
-                f"AI 平台未返回正文（finish_reason={finish_reason or 'unknown'}，"
-                f"completion_tokens={usage.get('completion_tokens')}）"
-            )
-        return str(content)
+            try:
+                response = post_with_retry(
+                    candidate["base_url"],
+                    headers=candidate["headers"],
+                    payload=payload,
+                    timeout=candidate["timeout"],
+                    max_retries=2,
+                    post=requests.post,
+                    label="scenario_ai_import",
+                )
+                if response.status_code != 200:
+                    mark_platform_failure(platform, CAPABILITY_SCENARIO, status_code=response.status_code)
+                    raise RuntimeError(
+                        f"AI 平台返回 {response.status_code}：{str(response.text or '')[:160]}"
+                    )
+                try:
+                    response_payload = response.json()
+                except ValueError as exc:
+                    mark_platform_failure(platform, CAPABILITY_SCENARIO)
+                    raise RuntimeError(f"AI 平台返回的不是 JSON：{str(response.text or '')[:160]}") from exc
+                content, finish_reason, usage = response_content(response_payload)
+                if not str(content or "").strip():
+                    logger.warning(
+                        "scenario_ai_import.empty_response platform=%s finish_reason=%s completion_tokens=%s prompt_tokens=%s choices=%s",
+                        platform,
+                        finish_reason or "unknown",
+                        usage.get("completion_tokens"),
+                        usage.get("prompt_tokens"),
+                        len(response_payload.get("choices") or []) if isinstance(response_payload, dict) else 0,
+                    )
+                if not str(content or "").strip():
+                    mark_platform_failure(platform, CAPABILITY_SCENARIO)
+                    raise EmptyAIResponse(
+                        f"AI 平台未返回正文（finish_reason={finish_reason or 'unknown'}，"
+                        f"completion_tokens={usage.get('completion_tokens')}）"
+                    )
+                mark_platform_success(platform, CAPABILITY_SCENARIO)
+                return str(content)
+            except Exception as exc:  # noqa: BLE001 - 单个平台失败顺延到下一个
+                errors.append(f"{platform}: {exc}")
+                logger.warning("scenario_ai_import.platform_failed platform=%s error=%s", platform, exc)
+                if not isinstance(exc, (RuntimeError, EmptyAIResponse)):
+                    mark_platform_failure(platform, CAPABILITY_SCENARIO)
+        raise RuntimeError("所有可用 AI 平台均请求失败：" + "；".join(errors[-2:]))
 
     return request

@@ -430,6 +430,9 @@ function normalizeAIPlatformConfig(value: unknown): AIPlatformConfig | null {
         icon: typeof value.icon === "string" ? value.icon : "",
         enabled: value.enabled === true,
         order: typeof value.order === "number" && Number.isFinite(value.order) ? value.order : undefined,
+        capabilities: Array.isArray(value.capabilities)
+            ? value.capabilities.filter((item): item is string => typeof item === "string")
+            : undefined,
         config,
         models,
     } as AIPlatformConfig;

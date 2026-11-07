@@ -42,6 +42,9 @@ interface AIPlatformConfig {
     enabled: boolean;
     // 管理员拖动排序后写入的加载顺序：数值越小越先加载、越靠前展示。
     order?: number | undefined;
+    // 用途多选：chat / illustration / music_director / scenario / agent / voice。
+    // 缺省时后端按旧平台默认值（除语音外的全部用途）解析。
+    capabilities?: string[] | undefined;
     config: {
         api_key?: string;
         base_url: string;

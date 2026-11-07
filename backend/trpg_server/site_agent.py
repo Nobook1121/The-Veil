@@ -95,10 +95,11 @@ def _room_context(actor: Actor, room_id: str | None) -> dict[str, Any] | None:
 
 
 def _platform_candidates(provider_id: Any = None) -> list[dict[str, Any]]:
+    from trpg_server.ai_platform_resolver import CAPABILITY_AGENT
     from trpg_server.routes.chat_helpers import _load_enabled_platforms
 
     candidates: list[dict[str, Any]] = []
-    for platform_id, platform_config in _load_enabled_platforms(provider_id):
+    for platform_id, platform_config in _load_enabled_platforms(provider_id, purpose=CAPABILITY_AGENT):
         section = platform_config.get("config") if isinstance(platform_config, dict) else {}
         section = section if isinstance(section, dict) else {}
         api_key = section.get("api_key")
@@ -125,6 +126,12 @@ def _platform_candidates(provider_id: Any = None) -> list[dict[str, Any]]:
 
 def _build_requester(candidates: list[dict[str, Any]], runtime_config: Any) -> Callable[[dict[str, Any]], dict[str, Any]]:
     from trpg_server.agents.http_retry import post_with_retry
+    from trpg_server.ai_platform_resolver import (
+        CAPABILITY_AGENT,
+        PlatformUpstreamError,
+        mark_platform_failure,
+        mark_platform_success,
+    )
 
     def requester(payload: dict[str, Any]) -> dict[str, Any]:
         errors: list[str] = []
@@ -141,13 +148,19 @@ def _build_requester(candidates: list[dict[str, Any]], runtime_config: Any) -> C
                 )
                 if not response.ok:
                     detail = str(getattr(response, "text", ""))[:500]
-                    raise RuntimeError(f"HTTP {response.status_code}: {detail}")
+                    raise PlatformUpstreamError(
+                        f"HTTP {response.status_code}: {detail}",
+                        status_code=response.status_code,
+                    )
                 data = response.json()
                 if not isinstance(data, dict):
                     raise RuntimeError("AI 平台返回的数据格式无效")
+                mark_platform_success(candidate["platform"], CAPABILITY_AGENT)
                 return data
             except Exception as exc:
                 errors.append(f"{candidate['platform']}: {exc}")
+                status_code = getattr(exc, "status_code", None)
+                mark_platform_failure(candidate["platform"], CAPABILITY_AGENT, status_code=status_code)
                 logger.warning("Site agent platform %s failed: %s", candidate["platform"], exc)
         raise RuntimeError("所有已启用 AI 平台均请求失败：" + "；".join(errors[-2:]))
 
@@ -285,7 +298,7 @@ def _run_turn_locked(
 
     candidates = _platform_candidates()
     if not candidates:
-        raise SiteAgentError("no_platform", "没有已启用的 AI 平台，请联系管理员配置", 503)
+        raise SiteAgentError("no_platform", "没有可用于站点 Agent 的 AI 平台，请联系管理员在「模型设置」中勾选该用途", 503)
     runtime_config = load_ai_runtime_config(current_app.config.get("CONFIG_DIR", CONFIG_DIR))
     requester = _build_requester(candidates, runtime_config)
 
