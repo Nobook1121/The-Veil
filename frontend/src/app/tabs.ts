@@ -196,6 +196,10 @@ function switchSettingsTab(tabName: string): void {
         void loadScenarioKnowledge();
         void loadEmbeddingHealth();
     }
+    if (tabName === "model") {
+        // 生图平台表已并入「模型设置」，AI 平台/模型/密钥统一在这里维护。
+        window.TrpgImmersive?.renderModelSettings?.();
+    }
     if (tabName === "immersive") {
         window.TrpgImmersive?.renderSettings?.();
         // 音乐库已并入「实时沉浸」标签卡，切换到这里时按需加载列表。
@@ -317,8 +321,6 @@ function initSettingsTabs(): void {
     bindGeneralNumberSetting("immersiveMusicHysteresis", "immersive", "music_hysteresis_turns", 0, 10);
     bindGeneralTextSetting("immersiveMusicSeed", "immersive", "music_seed");
     bindGeneralCheckboxSetting("immersiveDirectorEnabled", "immersive", "music_director_enabled");
-    bindGeneralTextSetting("immersiveDirectorPlatform", "immersive", "music_director_platform");
-    bindGeneralTextSetting("immersiveDirectorModel", "immersive", "music_director_model");
     bindGeneralNumberSetting("immersiveDirectorInterval", "immersive", "music_director_interval_turns", 1, 20);
     bindGeneralNumberSetting("immersiveDirectorBudget", "immersive", "music_director_daily_budget", 0, 100000);
     bindGeneralNumberSetting("immersiveDirectorTimeout", "immersive", "music_director_timeout", 20, 300);

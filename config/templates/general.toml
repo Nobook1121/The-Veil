@@ -207,9 +207,8 @@ illustration_min_turns = 4
 illustration_trigger = "important"
 # 允许个人覆盖的触发档位（逗号分隔）；off 始终允许，作为个人收紧项。
 illustration_trigger_allowed = "important,turn_interval,frequent"
-# AI KP 配图判断：留空时使用默认启用的聊天平台与模型；复用既有重试/超时链路。
-illustration_kp_platform = ""
-illustration_kp_model = ""
+# AI KP 配图判断：平台/模型统一使用「模型设置」中启用的聊天平台，不再单独配置；
+# 这里只保留超时与预算，复用既有重试链路。
 illustration_kp_timeout = 45
 illustration_kp_daily_budget = 200
 illustration_kp_max_context_chars = 1600
@@ -241,10 +240,7 @@ illustration_scenario_max_image_mb = 8
 illustration_scenario_overflow = "lru"
 # LLM 音乐导演：读取最近叙事上下文输出结构化乐谱；关闭时仅用规则分析器。
 music_director_enabled = false
-# 导演使用的 AI 平台 ID（留空取默认平台）。
-music_director_platform = ""
-# 导演模型（留空取平台默认模型）。
-music_director_model = ""
+# 导演使用的平台/模型统一取「模型设置」中启用的 AI 平台，不再单独配置。
 # 触发频率：每 N 个叙事回合尝试一次（阶段/情绪事件会额外提前触发）。
 music_director_interval_turns = 2
 # 站点级每日导演调用预算（次，0 表示不限制；房间只能收紧）。
@@ -285,10 +281,10 @@ voice_ducking = true
 voice_ducking_level = 35
 # 单房间每小时配音回合上限（0 表示不限制；房间只能调低）。
 voice_room_hourly_cap = 120
-# 云端引擎占位配置：本阶段不调用；密钥仅管理员可见并按掩码展示。
+# 云端引擎占位配置：本阶段不调用；如需凭据，统一使用「模型设置」里的 AI 平台，
+# 语音配置不再单独保存 API Key（旧配置残留字段读取时忽略）。
 voice_cloud_base_url = ""
 voice_cloud_model = ""
-voice_cloud_api_key = ""
 # 本地多音色引擎：sherpa-onnx + Kokoro-82M-v1.1-zh（Apache-2.0，24kHz，103 个说话人）。
 # 默认关闭；启用前需用 `voice local install` 下载权重（不会随仓库分发）。
 voice_local_enabled = false

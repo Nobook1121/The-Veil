@@ -53,7 +53,6 @@ def _mask_key(value: str) -> str:
 
 def _redacted(settings: dict[str, Any]) -> dict[str, Any]:
     view = dict(settings)
-    view["cloud_api_key"] = _mask_key(settings.get("cloud_api_key"))
     view["engine_health"] = engine_health(settings)
     return view
 
@@ -166,7 +165,7 @@ def handle_voice_command(
             f"  房间小时上限: {settings['room_hourly_cap'] if settings['room_hourly_cap'] else '不限'}",
             f"  个人覆盖: {'允许' if settings['allow_personal'] else '禁止'}",
             f"  云端占位: {settings['cloud_base_url'] or '未配置'} · {settings['cloud_model'] or '未配置'} "
-            f"· 密钥 {_mask_key(settings['cloud_api_key'])}",
+            f"· 凭据复用「模型设置」中的 AI 平台",
         ]
         return True, "\n".join(lines)
 

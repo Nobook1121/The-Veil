@@ -81,8 +81,6 @@ def _music_settings(**overrides):
         "music_seed": "",
         "music_duck_bgm": True,
         "music_director_enabled": True,
-        "music_director_platform": "",
-        "music_director_model": "",
         "music_director_interval_turns": 2,
         "music_director_daily_budget": 0,
         "music_director_timeout": 45,

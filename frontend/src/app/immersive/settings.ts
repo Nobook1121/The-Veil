@@ -47,7 +47,6 @@ namespace TrpgImmersiveSettingsModule {
         const provider = byId<HTMLSelectElement>("immersiveIllustrationProvider");
         if (!provider) return;
         initialized = true;
-        provider.addEventListener("change", syncPanel);
         byId<HTMLButtonElement>("immersiveRefreshUsage")?.addEventListener("click", () => {
             void refreshUsage();
         });
@@ -104,17 +103,22 @@ namespace TrpgImmersiveSettingsModule {
 
     export function render(): void {
         init();
-        syncPanel();
         void refreshMeta();
     }
 
-    function syncPanel(): void {
-        const provider = byId<HTMLSelectElement>("immersiveIllustrationProvider");
-        const panel = byId<HTMLElement>("immersivePlatformPanel");
-        if (panel) panel.hidden = (provider?.value || "procedural") !== "platform";
+    /** 「模型设置」标签页：生图平台的唯一管理入口，只加载平台表与预设。 */
+    export function renderModelSettings(): void {
+        init();
+        void refreshPlatformMeta();
     }
 
     async function refreshMeta(): Promise<void> {
+        await refreshPlatformMeta();
+        void refreshUsage();
+        void refreshDirectorStatus();
+    }
+
+    async function refreshPlatformMeta(): Promise<void> {
         if (metaLoading) return;
         metaLoading = true;
         try {
@@ -138,8 +142,6 @@ namespace TrpgImmersiveSettingsModule {
         } finally {
             metaLoading = false;
         }
-        void refreshUsage();
-        void refreshDirectorStatus();
     }
 
     async function refreshPlatforms(): Promise<void> {

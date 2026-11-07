@@ -154,10 +154,8 @@ class ConfigManager {
         configSetSelectValue("immersiveMusicSource", this.get("general", "immersive", "music_source", "hybrid"));
         configSetInputValue("immersiveMusicSourceAllowed", this.get("general", "immersive", "music_source_allowed", "realtime,bgm,hybrid"));
         configSetCheckboxValue("immersiveMusicSourceAllowPersonal", this.get("general", "immersive", "music_source_allow_personal", true));
-        // AI 音乐导演（LLM 只做后台精修；平台/模型留空即用默认）
+        // AI 音乐导演（LLM 只做后台精修；平台/模型统一取「模型设置」中启用的 AI 平台）
         configSetCheckboxValue("immersiveDirectorEnabled", this.get("general", "immersive", "music_director_enabled", false));
-        configSetInputValue("immersiveDirectorPlatform", this.get("general", "immersive", "music_director_platform", ""));
-        configSetInputValue("immersiveDirectorModel", this.get("general", "immersive", "music_director_model", ""));
         configSetInputValue("immersiveDirectorInterval", this.get("general", "immersive", "music_director_interval_turns", 2));
         configSetInputValue("immersiveDirectorBudget", this.get("general", "immersive", "music_director_daily_budget", 0));
         configSetInputValue("immersiveDirectorTimeout", this.get("general", "immersive", "music_director_timeout", 45));

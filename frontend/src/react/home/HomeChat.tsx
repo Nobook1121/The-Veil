@@ -66,6 +66,7 @@ export function HomeChat() {
 
     const toggleSidebar = (): void => setSidebarCollapsed((value) => !value);
     const toggleRailMusic = (): void => window.TrpgImmersive?.toggleMusic?.();
+    const toggleRoomAmbient = (): void => window.TrpgImmersive?.toggleAmbient?.();
 
     const notify = (message: string, type?: string): void => {
         const bridge = window as unknown as HomeChatBridge;
@@ -233,6 +234,30 @@ export function HomeChat() {
                             >
                                 <i className="fa fa-bolt" aria-hidden="true" />
                             </button>
+                            <button
+                                className="btn btn-outline-secondary immersive-audio-toggle"
+                                id="homeRoomMusicToggle"
+                                type="button"
+                                title="配乐：仅切换自己的实时配乐"
+                                aria-label="切换实时配乐"
+                                aria-pressed="true"
+                                data-enabled="true"
+                                onClick={toggleRailMusic}
+                            >
+                                <i className="fa fa-music" aria-hidden="true" />
+                            </button>
+                            <button
+                                className="btn btn-outline-secondary immersive-audio-toggle"
+                                id="homeRoomAmbientToggle"
+                                type="button"
+                                title="环境音：仅切换自己的环境音"
+                                aria-label="切换环境音"
+                                aria-pressed="true"
+                                data-enabled="true"
+                                onClick={toggleRoomAmbient}
+                            >
+                                <i className="fa fa-volume-up" aria-hidden="true" />
+                            </button>
                             <button className="btn btn-primary" id="sendButton" type="button">
                                 <i className="fa fa-paper-plane" aria-hidden="true" />{" "}
                                 <span data-i18n="chat.action.send">发送</span>
@@ -305,6 +330,16 @@ export function HomeChat() {
                             onClick={toggleRailMusic}
                         >
                             <i className="fa fa-music" aria-hidden="true" />
+                        </button>
+                        <button
+                            type="button"
+                            className="home-room-members-rail-btn"
+                            id="homeRoomMembersRailAmbient"
+                            title="开启 / 关闭环境音（仅影响自己）"
+                            aria-label="开启 / 关闭环境音"
+                            onClick={toggleRoomAmbient}
+                        >
+                            <i className="fa fa-volume-up" aria-hidden="true" />
                         </button>
                     </div>
                 </aside>

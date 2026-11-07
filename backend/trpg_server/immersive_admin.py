@@ -474,8 +474,7 @@ def handle_immersive_command(
         return True, (
             f"AI KP 配图判断：今日调用 {usage.get('calls') or 0} 次 · "
             f"预算 {settings.get('illustration_kp_daily_budget')} 次/日 · "
-            f"平台 {settings.get('illustration_kp_platform') or '默认启用平台'} · "
-            f"模型 {settings.get('illustration_kp_model') or '平台默认'}"
+            f"平台/模型取自「模型设置」中启用的 AI 平台"
         )
     if sub == "usage":
         return True, _usage_text()
@@ -584,8 +583,6 @@ def immersive_help_text() -> str:
             "  immersive platform migrate [--yes]               （把旧单条配置迁移为平台条目）",
             "  immersive director                               （AI 音乐导演概览）",
             "  immersive director on|off [--yes]                （导演开关）",
-            "  immersive director platform <id>|clear [--yes]   （导演使用的 AI 平台）",
-            "  immersive director model <name>|clear [--yes]    （导演模型；空=平台默认）",
             "  immersive director interval <1-20> [--yes]       （每 N 回合尝试一次）",
             "  immersive director budget <n> [--yes]            （每日调用预算，0=不限）",
             "  immersive director ttl <0-86400> [--yes]         （乐谱缓存 TTL 秒，0=不复用）",
@@ -669,11 +666,8 @@ def _default_platform_text(settings: dict[str, Any], config_dir: Any) -> str:
 def _director_status_line(settings: dict[str, Any], config_dir: Any) -> str:
     usage = director.usage_snapshot()
     cache = director.cache_stats(ttl=int(settings.get("music_director_cache_ttl") or 0))
-    target = director.resolve_ai_target(
-        config_dir,
-        platform_id=str(settings.get("music_director_platform") or ""),
-        model_id=str(settings.get("music_director_model") or ""),
-    )
+    # 平台/模型统一取「模型设置」中按顺序第一个启用的 AI 平台。
+    target = director.resolve_ai_target(config_dir)
     model_text = f"{target['platform']}/{target['model']}" if target else "（无可用 AI 平台）"
     return (
         f"  音乐导演: {_bool_label(settings.get('music_director_enabled'))} · 平台 {model_text} "
@@ -883,22 +877,10 @@ def _handle_director_command(
             prompt="确认修改导演开关?",
         )
 
-    if action == "platform" and len(positionals) > 1:
-        value = positionals[1].strip()
-        return _set_value(
-            "music_director_platform",
-            "" if value.lower() == "clear" else value[:64],
-            f"导演 AI 平台已设为 {value or '（默认平台）'}",
-            config_dir, assume_yes, confirm,
-            "平台 ID 来自「AI 平台配置」；留空表示取第一个启用的平台。",
-        )
-    if action == "model" and len(positionals) > 1:
-        value = positionals[1].strip()
-        return _set_value(
-            "music_director_model",
-            "" if value.lower() == "clear" else value[:120],
-            f"导演模型已设为 {value or '（平台默认）'}",
-            config_dir, assume_yes, confirm,
+    if action in {"platform", "model"}:
+        return False, (
+            "导演的平台/模型统一使用「模型设置」中启用的 AI 平台，"
+            "不再单独配置；请改用 `ai` 系列命令维护平台。"
         )
     if action == "interval" and len(positionals) > 1:
         return _set_int("music_director_interval_turns", positionals[1], 1, 20, "导演触发间隔（回合）",
@@ -977,8 +959,7 @@ def _director_summary(settings: dict[str, Any], config_dir: Any) -> str:
     return "\n".join(
         [
             "AI 音乐导演：",
-            f"  开关: {_bool_label(settings.get('music_director_enabled'))} · 平台/模型: "
-            f"{settings.get('music_director_platform') or '（默认）'}/{settings.get('music_director_model') or '（平台默认）'}",
+            f"  开关: {_bool_label(settings.get('music_director_enabled'))} · 平台/模型: 取自「模型设置」中启用的 AI 平台",
             f"  触发: 每 {settings.get('music_director_interval_turns')} 回合，或档位变化时立即触发",
             f"  预算: {settings.get('music_director_daily_budget') or '不限'} 次/日 · 超时 {settings.get('music_director_timeout')}s "
             f"· 上下文 {settings.get('music_director_max_context_chars')} 字符",
@@ -1026,7 +1007,7 @@ def _illustration_summary(settings: dict[str, Any], config_dir: Any = None) -> s
         f"触发档位: {settings.get('illustration_trigger')} · 个人可选 {', '.join(settings.get('illustration_trigger_allowed') or [])}\n"
         f"AI KP: 预算 {settings.get('illustration_kp_daily_budget') or '不限'} 次/日 · "
         f"超时 {settings.get('illustration_kp_timeout')}s · "
-        f"平台 {settings.get('illustration_kp_platform') or '默认启用平台'}\n"
+        f"平台/模型取自「模型设置」中启用的 AI 平台\n"
         f"NPC 头像: {_bool_label(settings.get('illustration_npc_enabled'))} · 尺寸 {settings.get('illustration_npc_size')} · "
         f"每回合最多 {settings.get('illustration_npc_max_per_turn')} 张\n"
         f"剧本缓存: 记录新图 {_bool_label(settings.get('illustration_scenario_record'))} · "

@@ -61,7 +61,6 @@ def _rooms_dir() -> Path:
 
 def _public_settings(settings: dict[str, object], room_id: str = "") -> dict[str, object]:
     view = dict(settings)
-    view["cloud_api_key"] = ""
     room_dir = _rooms_dir() / room_id if room_id else None
     if room_id and room_dir and room_dir.is_dir():
         room_info_path = room_dir / "info.json"

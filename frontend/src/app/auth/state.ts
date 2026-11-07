@@ -37,6 +37,8 @@ namespace AuthModule {
 
     export function setCurrentUser(user: CurrentUser | null): void {
         window.currentUser = user;
+        // 通知依赖账号身份的模块（如按用户隔离的配乐/环境音开关）重新校准。
+        window.dispatchEvent(new CustomEvent("trpg:user-changed", { detail: user }));
         const name = document.getElementById("userName");
         const avatar = document.querySelector<HTMLImageElement>(".user-avatar img");
         const cardName = document.getElementById("userCardName");

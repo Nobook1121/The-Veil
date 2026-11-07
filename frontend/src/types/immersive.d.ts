@@ -141,8 +141,6 @@ interface ImmersiveSettings {
     music_seed: string;
     music_duck_bgm: boolean;
     music_director_enabled: boolean;
-    music_director_platform: string;
-    music_director_model: string;
     music_director_interval_turns: number;
     music_director_daily_budget: number;
     music_director_timeout: number;
@@ -164,8 +162,6 @@ interface ImmersiveSettings {
     music_source_allow_personal: boolean;
     illustration_trigger: "off" | "important" | "turn_interval" | "frequent";
     illustration_trigger_allowed: string;
-    illustration_kp_platform: string;
-    illustration_kp_model: string;
     illustration_kp_timeout: number;
     illustration_kp_daily_budget: number;
     illustration_kp_max_context_chars: number;
@@ -371,8 +367,11 @@ interface TrpgImmersiveApi {
     onMusicEvent: (plan: ImmersiveMusicPlan) => void;
     onIllustrationEvent: (payload: ImmersiveIllustrationEvent) => void;
     renderSettings: () => void;
+    renderModelSettings: () => void;
     requestIllustration: () => void;
     toggleMusic: () => void;
+    toggleAmbient: () => void;
+    isAmbientEnabled: () => boolean;
     syncMusicButton: () => void;
     getPersonalPreferences: () => { music_source?: string | undefined; illustration_trigger?: string | undefined };
     getMusicSource: () => "realtime" | "bgm" | "hybrid";

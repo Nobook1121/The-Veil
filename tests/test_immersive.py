@@ -291,6 +291,32 @@ def test_public_settings_redacts_api_key():
     assert "locked" not in view
 
 
+def test_legacy_immersive_ai_fields_are_ignored(tmp_path):
+    """旧配置里残留的 AI 平台/模型/密钥字段不应报错，也不应再被读取。"""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "general.toml").write_text(
+        "[immersive]\n"
+        'music_director_platform = "legacy-platform"\n'
+        'music_director_model = "legacy-model"\n'
+        'illustration_kp_platform = "legacy-platform"\n'
+        'illustration_kp_model = "legacy-model"\n'
+        'voice_cloud_api_key = "sk-legacy"\n'
+        "music_director_interval_turns = 3\n",
+        encoding="utf-8",
+    )
+    settings = load_immersive_settings(config_dir)
+    for legacy in (
+        "music_director_platform",
+        "music_director_model",
+        "illustration_kp_platform",
+        "illustration_kp_model",
+        "voice_cloud_api_key",
+    ):
+        assert legacy not in settings
+    assert settings["music_director_interval_turns"] == 3
+
+
 def test_budget_and_room_cap(monkeypatch, tmp_path):
     monkeypatch.setattr(illus, "IMAGE_CACHE_DIR", tmp_path / "images")
     monkeypatch.setattr(illus, "USAGE_PATH", tmp_path / "usage.json")

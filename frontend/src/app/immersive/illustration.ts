@@ -100,6 +100,7 @@ namespace TrpgImmersiveIllustrationModule {
                     <span class="immersive-stage-scene" id="immersiveStageScene">实时场景</span>
                     <div class="immersive-stage-actions">
                         <button type="button" id="immersiveMusicToggle" title="静音 / 恢复实时配乐">配乐开</button>
+                        <button type="button" id="immersiveAmbientToggle" title="开启 / 关闭环境音（仅影响自己）">环境音开</button>
                         <button type="button" id="immersiveDownloadBtn" title="下载当前场景图" hidden>下载</button>
                         <button type="button" id="immersiveRegenerateBtn" title="按当前场景立即生成一张配图" hidden>重新配图</button>
                         <button type="button" id="immersiveHistoryBtn" hidden>历史 0</button>
@@ -615,13 +616,34 @@ namespace TrpgImmersiveIllustrationModule {
                 musicButton.title = muted ? "点击恢复实时配乐" : "点击静音实时配乐";
             }
         }
-        // 右侧栏收起后只剩窄条，配乐开关仍需随手可及。
-        const railMusic = byId<HTMLButtonElement>("homeRoomMembersRailMusic");
-        if (railMusic) {
-            const muted = Boolean(window.TrpgImmersiveMusic?.isMuted());
-            railMusic.dataset.muted = muted ? "true" : "false";
-            railMusic.setAttribute("aria-pressed", muted ? "true" : "false");
-            railMusic.title = muted ? "点击恢复实时配乐" : "点击静音实时配乐";
+        const ambientButton = byId<HTMLButtonElement>("immersiveAmbientToggle");
+        if (ambientButton) {
+            const enabled = Boolean(window.TrpgImmersiveAmbient?.isEnabled());
+            ambientButton.textContent = enabled ? "环境音开" : "环境音关";
+            ambientButton.dataset.enabled = enabled ? "true" : "false";
+            ambientButton.title = enabled ? "点击关闭环境音（仅影响自己）" : "点击开启环境音（仅影响自己）";
+        }
+        // 输入区与右侧栏窄条上的两个开关：配乐 / 环境音各自独立。
+        const musicMuted = Boolean(window.TrpgImmersiveMusic?.isMuted());
+        const musicSource = window.TrpgImmersive?.getMusicSource?.() || "hybrid";
+        const ambientEnabled = Boolean(window.TrpgImmersiveAmbient?.isEnabled());
+        for (const id of ["homeRoomMusicToggle", "homeRoomMembersRailMusic"]) {
+            const button = byId<HTMLButtonElement>(id);
+            if (!button) continue;
+            button.dataset.muted = musicMuted ? "true" : "false";
+            button.dataset.enabled = musicMuted ? "false" : "true";
+            button.setAttribute("aria-pressed", musicMuted ? "false" : "true");
+            button.disabled = musicSource === "bgm";
+            button.title = musicSource === "bgm"
+                ? "当前音乐来源为「仅 BGM」，实时配乐未启用"
+                : musicMuted ? "点击恢复实时配乐（仅影响自己）" : "点击静音实时配乐（仅影响自己）";
+        }
+        for (const id of ["homeRoomAmbientToggle", "homeRoomMembersRailAmbient"]) {
+            const button = byId<HTMLButtonElement>(id);
+            if (!button) continue;
+            button.dataset.enabled = ambientEnabled ? "true" : "false";
+            button.setAttribute("aria-pressed", ambientEnabled ? "true" : "false");
+            button.title = ambientEnabled ? "点击关闭环境音（仅影响自己）" : "点击开启环境音（仅影响自己）";
         }
     }
 

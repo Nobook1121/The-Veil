@@ -7,9 +7,16 @@
  */
 namespace TrpgImmersiveModule {
     const PERSONAL_PREF_KEY = "trpg_immersive_personal";
+    /** 配乐/环境音开关按账号隔离，避免同浏览器切换账号时串用彼此偏好。 */
+    const AUDIO_PREF_PREFIX = "trpg_immersive_audio:";
 
     type MusicSource = "realtime" | "bgm" | "hybrid";
     type IllustrationTrigger = "off" | "important" | "turn_interval" | "frequent";
+
+    interface UserAudioPrefs {
+        music_muted?: boolean | undefined;
+        ambient_enabled?: boolean | undefined;
+    }
 
     interface PersonalImmersivePrefs {
         music_source?: MusicSource | undefined;
@@ -81,6 +88,64 @@ namespace TrpgImmersiveModule {
             console.warn("保存个人沉浸偏好失败", error);
         }
         applyMusicSource(resolveMusicSource(lastState), lastState);
+    }
+
+    function audioPrefKey(): string {
+        const userId = String(window.currentUser?.user_id || "");
+        return `${AUDIO_PREF_PREFIX}${userId || "guest"}`;
+    }
+
+    function getUserAudioPrefs(): UserAudioPrefs {
+        try {
+            const parsed: unknown = JSON.parse(window.localStorage.getItem(audioPrefKey()) || "{}");
+            if (!parsed || typeof parsed !== "object") return {};
+            const record = parsed as UserAudioPrefs;
+            return {
+                music_muted: typeof record.music_muted === "boolean" ? record.music_muted : undefined,
+                ambient_enabled: typeof record.ambient_enabled === "boolean" ? record.ambient_enabled : undefined,
+            };
+        } catch {
+            return {};
+        }
+    }
+
+    function saveUserAudioPrefs(patch: UserAudioPrefs): void {
+        const next = { ...getUserAudioPrefs(), ...patch };
+        try {
+            window.localStorage.setItem(audioPrefKey(), JSON.stringify(next));
+        } catch (error) {
+            console.warn("保存配乐/环境音偏好失败", error);
+        }
+        TrpgImmersiveIllustrationModule.syncMusicButton();
+    }
+
+    /**
+     * 把当前账号的配乐/环境音偏好应用到引擎。
+     *
+     * 优先级：账号级偏好 > 引擎默认值（配乐不静音、环境音开启）。不读取引擎里
+     * 浏览器级的旧值，避免同一浏览器切换账号时把上一个账号的开关带给新账号。
+     */
+    function applyUserAudioPrefs(): void {
+        // 未登录时账号未知，等 trpg:user-changed 后再应用，避免写入 guest 键。
+        if (!window.currentUser?.user_id) return;
+        const stored = getUserAudioPrefs();
+        const musicMuted = typeof stored.music_muted === "boolean" ? stored.music_muted : false;
+        const ambientEnabled = typeof stored.ambient_enabled === "boolean" ? stored.ambient_enabled : true;
+        if (typeof stored.music_muted !== "boolean" || typeof stored.ambient_enabled !== "boolean") {
+            try {
+                window.localStorage.setItem(
+                    audioPrefKey(),
+                    JSON.stringify({ ...stored, music_muted: musicMuted, ambient_enabled: ambientEnabled }),
+                );
+            } catch (error) {
+                console.warn("保存配乐/环境音偏好失败", error);
+            }
+        }
+        const music = window.TrpgImmersiveMusic;
+        if (music && music.isMuted() !== musicMuted) music.setMuted(musicMuted);
+        const ambient = window.TrpgImmersiveAmbient;
+        if (ambient && ambient.isEnabled() !== ambientEnabled) ambient.setEnabled(ambientEnabled);
+        TrpgImmersiveIllustrationModule.syncMusicButton();
     }
 
     /** 站点默认 < 个人（仅当站点允许）< 房间收紧（配乐关闭时强制仅 BGM）。 */
@@ -279,7 +344,21 @@ namespace TrpgImmersiveModule {
         if (currentSource === "bgm") return;
         const muted = Boolean(window.TrpgImmersiveMusic?.toggleMuted());
         if (!muted) window.TrpgImmersiveMusic?.unlock();
-        TrpgImmersiveIllustrationModule.syncMusicButton();
+        saveUserAudioPrefs({ music_muted: muted });
+    }
+
+    /** 只切换当前账号的环境音，不写房规、不影响同房间其他人。 */
+    export function toggleAmbient(): void {
+        const ambient = window.TrpgImmersiveAmbient;
+        if (!ambient) return;
+        const enabled = !ambient.isEnabled();
+        ambient.setEnabled(enabled);
+        if (enabled) ambient.resume();
+        saveUserAudioPrefs({ ambient_enabled: enabled });
+    }
+
+    export function isAmbientEnabled(): boolean {
+        return Boolean(window.TrpgImmersiveAmbient?.isEnabled());
     }
 
     export function init(): void {
@@ -289,6 +368,10 @@ namespace TrpgImmersiveModule {
         TrpgImmersiveSettingsModule.init();
         bindPersonalControls();
         byId<HTMLButtonElement>("immersiveMusicToggle")?.addEventListener("click", toggleMusicPlayback);
+        byId<HTMLButtonElement>("immersiveAmbientToggle")?.addEventListener("click", toggleAmbient);
+        // 账号信息异步就绪（/api/auth/me 或登录）后再灌回该账号的偏好。
+        window.addEventListener("trpg:user-changed", applyUserAudioPrefs);
+        applyUserAudioPrefs();
         // 右侧栏可能因刷新时处于收起状态而没有主按钮，初始化时同步一次窄条图标。
         TrpgImmersiveIllustrationModule.syncMusicButton();
     }
@@ -299,6 +382,8 @@ namespace TrpgImmersiveModule {
 
     export function setRoom(room: Room | null): void {
         currentRoom = room;
+        // 进入房间时账号信息已就绪，按当前账号再校准一次配乐/环境音开关。
+        applyUserAudioPrefs();
         const roomId = roomIdOf(room);
         TrpgImmersiveIllustrationModule.setRoom(room);
         if (!roomId) {
@@ -387,6 +472,10 @@ namespace TrpgImmersiveModule {
         TrpgImmersiveSettingsModule.render();
     }
 
+    export function renderModelSettings(): void {
+        TrpgImmersiveSettingsModule.renderModelSettings();
+    }
+
     export function requestIllustration(): void {
         TrpgImmersiveIllustrationModule.requestNow();
     }
@@ -406,8 +495,11 @@ window.TrpgImmersive = {
     onMusicEvent: TrpgImmersiveModule.onMusicEvent,
     onIllustrationEvent: TrpgImmersiveModule.onIllustrationEvent,
     renderSettings: TrpgImmersiveModule.renderSettings,
+    renderModelSettings: TrpgImmersiveModule.renderModelSettings,
     requestIllustration: TrpgImmersiveModule.requestIllustration,
     toggleMusic: TrpgImmersiveModule.toggleMusic,
+    toggleAmbient: TrpgImmersiveModule.toggleAmbient,
+    isAmbientEnabled: TrpgImmersiveModule.isAmbientEnabled,
     syncMusicButton: TrpgImmersiveIllustrationModule.syncMusicButton,
     getPersonalPreferences: TrpgImmersiveModule.getPersonalPreferences,
     getMusicSource: TrpgImmersiveModule.getMusicSource,

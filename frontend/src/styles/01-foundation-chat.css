@@ -725,6 +725,20 @@ h1, h2, h3, h4, h5, h6 {
     background-color: var(--color-panel);
 }
 
+/* 输入区右侧的配乐 / 环境音开关：两个按钮独立开关，关闭态降低不透明度。 */
+.chat-input .immersive-audio-toggle {
+    flex: 0 0 auto;
+    padding-inline: 0.65rem;
+}
+
+.chat-input .immersive-audio-toggle[data-enabled="false"] {
+    opacity: 0.55;
+}
+
+.chat-input .immersive-audio-toggle:disabled {
+    opacity: 0.4;
+}
+
 .chat-suggestions {
     display: flex;
     flex: 0 0 auto;

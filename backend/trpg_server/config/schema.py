@@ -329,9 +329,7 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
         as_text,
         "important,turn_interval,frequent",
     ),
-    # AI KP 判断与提示词链路：复用既有聊天平台、重试、超时与独立每日预算。
-    FieldSpec("illustration_kp_platform", "immersive", ("illustration_kp_platform",), as_text, ""),
-    FieldSpec("illustration_kp_model", "immersive", ("illustration_kp_model",), as_text, ""),
+    # AI KP 判断：平台/模型统一取「模型设置」中启用的 AI 平台，这里只保留超时与预算。
     FieldSpec("illustration_kp_timeout", "immersive", ("illustration_kp_timeout",), clamped_int(minimum=10, maximum=300), 45),
     FieldSpec("illustration_kp_daily_budget", "immersive", ("illustration_kp_daily_budget",), clamped_int(minimum=0, maximum=10000), 200),
     FieldSpec(
@@ -376,9 +374,7 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     ),
     # [immersive] LLM 音乐导演：规则分析器先行，LLM 只在后台精修乐谱，失败一律回退。
     FieldSpec("music_director_enabled", "immersive", ("music_director_enabled",), as_bool, False),
-    # 导演使用的 AI 平台 ID（留空取默认平台）；模型留空取平台默认模型。
-    FieldSpec("music_director_platform", "immersive", ("music_director_platform",), as_text, ""),
-    FieldSpec("music_director_model", "immersive", ("music_director_model",), as_text, ""),
+    # 导演使用的平台/模型统一取「模型设置」中启用的 AI 平台，不再单独配置。
     # 触发频率：每 N 个叙事回合尝试一次（阶段/情绪事件会额外提前触发）。
     FieldSpec("music_director_interval_turns", "immersive", ("music_director_interval_turns",), clamped_int(minimum=1, maximum=20), 2),
     # 站点级每日导演调用预算（次，0 表示不限制；房间只能收紧）。
@@ -422,10 +418,10 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec("voice_ducking", "immersive", ("voice_ducking",), as_bool, True),
     FieldSpec("voice_ducking_level", "immersive", ("voice_ducking_level",), clamped_int(minimum=0, maximum=90), 35),
     FieldSpec("voice_room_hourly_cap", "immersive", ("voice_room_hourly_cap",), clamped_int(minimum=0, maximum=10000), 120),
-    # 云端引擎占位：本阶段不发起请求，密钥只在管理员可见范围内掩码展示。
+    # 云端引擎占位：本阶段不发起请求；如需凭据，统一使用「模型设置」里的 AI 平台，
+    # 不再在语音配置中单独保存 API Key（旧配置残留字段读取时直接忽略）。
     FieldSpec("voice_cloud_base_url", "immersive", ("voice_cloud_base_url",), as_text, ""),
     FieldSpec("voice_cloud_model", "immersive", ("voice_cloud_model",), as_text, ""),
-    FieldSpec("voice_cloud_api_key", "immersive", ("voice_cloud_api_key",), as_text, ""),
     # 本地多音色引擎（sherpa-onnx + Kokoro v1.1-zh）；默认关闭，需管理员显式开启并安装权重。
     FieldSpec("voice_local_enabled", "immersive", ("voice_local_enabled",), as_bool, False),
     # 留空表示由主进程托管本地子服务；填写后连接管理员自托管的回环服务。

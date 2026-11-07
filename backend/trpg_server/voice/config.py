@@ -113,7 +113,6 @@ def load_voice_settings(config_dir: Path | str | None = None) -> dict[str, Any]:
         "room_hourly_cap": _as_int(raw.get("voice_room_hourly_cap"), 120, 0, 10000),
         "cloud_base_url": str(raw.get("voice_cloud_base_url") or "").strip()[:500],
         "cloud_model": str(raw.get("voice_cloud_model") or "").strip()[:120],
-        "cloud_api_key": str(raw.get("voice_cloud_api_key") or "").strip(),
         # 本地引擎（子进程回环服务 + 磁盘缓存）。
         "local_enabled": _as_bool(raw.get("voice_local_enabled"), False),
         "local_base_url": str(raw.get("voice_local_base_url") or "").strip()[:500],

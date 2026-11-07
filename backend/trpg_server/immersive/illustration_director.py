@@ -181,12 +181,8 @@ def request_decision(
     post: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """真实调用一次 KP；失败抛异常，由 :func:`run` 统一回退。"""
-    target = resolve_ai_target(
-        config_dir,
-        platform_id=str(settings.get("illustration_kp_platform") or ""),
-        model_id=str(settings.get("illustration_kp_model") or ""),
-        secret_dir_override=secret_dir_override,
-    )
+    # 平台/模型统一取「模型设置」中按顺序第一个启用的 AI 平台。
+    target = resolve_ai_target(config_dir, secret_dir_override=secret_dir_override)
     if target is None:
         raise RuntimeError("no_enabled_ai_platform")
     payload_context = {
