@@ -489,7 +489,11 @@ interface TrpgAudioBlocksApi {
         containerId: string,
         options: ImmersiveAudioBlockOption[],
         selected: string[],
-        renderOptions?: { mode?: "allow" | "select"; onChange?: (blocks: string[]) => void },
+        renderOptions?: {
+            mode?: "allow" | "select";
+            allowed?: string[];
+            onChange?: (blocks: string[]) => void;
+        },
     ) => void;
     getSelection: (containerId: string) => string[];
     setSelection: (containerId: string, blocks: string[]) => void;

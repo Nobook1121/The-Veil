@@ -1233,8 +1233,10 @@ function setHouseRuleNullableBoolean(elementId: string, value: boolean | null | 
 
 /** 房间音频块：环境音可叠加，配乐四选一；服务端再做一次「管理员子集」校验。 */
 function readHouseRuleAudioBlocks(): string[] | null {
-    const blocks = window.TrpgAudioBlocks?.getSelection("roomAudioBlocksPicker") || [];
-    return blocks.length ? blocks : null;
+    const picker = document.getElementById("roomAudioBlocksPicker");
+    // 选择器没渲染成功时返回 null（沿用默认组合），避免把「未初始化」误存成空清单。
+    if (!picker || !picker.querySelector("[data-audio-tags-control]")) return null;
+    return window.TrpgAudioBlocks?.getSelection("roomAudioBlocksPicker") || [];
 }
 
 function legacyAudioBlocks(legacyEngine: string | null | undefined): string[] | null {
@@ -1248,11 +1250,15 @@ function setHouseRuleAudioBlocks(
     legacyEngine: string | null | undefined,
     fallback: string[],
     options: ImmersiveAudioBlockOption[] | undefined,
+    allowed: string[] | undefined,
 ): void {
     const selected = Array.isArray(value) && value.length
         ? value.map((item) => String(item))
         : (legacyAudioBlocks(legacyEngine) || fallback || []);
-    window.TrpgAudioBlocks?.render("roomAudioBlocksPicker", options || [], selected, { mode: "select" });
+    window.TrpgAudioBlocks?.render("roomAudioBlocksPicker", options || [], selected, {
+        mode: "select",
+        allowed: Array.isArray(allowed) ? allowed : [],
+    });
 }
 
 /** 房规弹窗里的世界意志白名单：列出房间内所有成员，按 user_id 预选。 */
@@ -1354,6 +1360,7 @@ async function openHouseRulesModal(): Promise<void> {
             houseRules?.immersive_music_engine,
             Array.isArray(blockState?.blocks) ? blockState.blocks : [],
             blockMeta?.options,
+            blockMeta?.allowed,
         );
         const audioBlocksHint = document.getElementById("roomAudioBlocksHint") as HTMLElement | null;
         if (audioBlocksHint) {
