@@ -1231,6 +1231,20 @@ function setHouseRuleNullableBoolean(elementId: string, value: boolean | null | 
     select.value = value === null || value === undefined ? "" : value ? "on" : "off";
 }
 
+/** 房间音乐的引擎选择：空串表示跟随管理员；其余值由服务端再做一次降级校验。 */
+function readHouseRuleNullableMusicEngine(): "external" | "procedural" | "off" | null {
+    const select = document.getElementById("houseRuleImmersiveMusicEngine") as HTMLSelectElement | null;
+    const value = select?.value || "";
+    if (value === "external" || value === "procedural" || value === "off") return value;
+    return null;
+}
+
+function setHouseRuleNullableMusicEngine(value: "external" | "procedural" | "off" | null | undefined): void {
+    const select = document.getElementById("houseRuleImmersiveMusicEngine") as HTMLSelectElement | null;
+    if (!select) return;
+    select.value = value === "external" || value === "procedural" || value === "off" ? value : "";
+}
+
 /** 房规弹窗里的世界意志白名单：列出房间内所有成员，按 user_id 预选。 */
 function renderHouseRuleWorldOverrideMembers(selectedIds: string[]): void {
     const select = document.getElementById("houseRuleWorldOverrideUsers") as HTMLSelectElement | null;
@@ -1316,6 +1330,7 @@ async function openHouseRulesModal(): Promise<void> {
         // 沉浸房规：三态选择，留空跟随管理员设置；房间只能收紧开关，不能越过站点总开关。
         setHouseRuleNullableBoolean("houseRuleImmersiveMusic", response.data.house_rules?.immersive_music_enabled);
         setHouseRuleNullableBoolean("houseRuleImmersiveMusicAuto", response.data.house_rules?.immersive_music_auto_switch);
+        setHouseRuleNullableMusicEngine(response.data.house_rules?.immersive_music_engine);
         setHouseRuleNullableBoolean("houseRuleImmersiveIllustration", response.data.house_rules?.immersive_illustration_enabled);
         setHouseRuleNullableBoolean("houseRuleImmersiveIllustrationAuto", response.data.house_rules?.immersive_illustration_auto);
         setHouseRuleNullableBoolean("houseRuleImmersiveScenarioRecord", response.data.house_rules?.immersive_scenario_record);
@@ -1370,6 +1385,7 @@ async function saveHouseRules(): Promise<void> {
                 // 沉浸房规：null 表示跟随管理员设置；房间级关闭始终优先。
                 immersive_music_enabled: readHouseRuleNullableBoolean("houseRuleImmersiveMusic"),
                 immersive_music_auto_switch: readHouseRuleNullableBoolean("houseRuleImmersiveMusicAuto"),
+                immersive_music_engine: readHouseRuleNullableMusicEngine(),
                 immersive_illustration_enabled: readHouseRuleNullableBoolean("houseRuleImmersiveIllustration"),
                 immersive_illustration_auto: readHouseRuleNullableBoolean("houseRuleImmersiveIllustrationAuto"),
                 immersive_scenario_record: readHouseRuleNullableBoolean("houseRuleImmersiveScenarioRecord"),

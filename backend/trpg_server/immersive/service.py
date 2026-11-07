@@ -11,7 +11,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-from trpg_server.immersive import broadcast, director, illustration_director, image_platforms
+from trpg_server.immersive import (
+    broadcast,
+    director,
+    external_music,
+    illustration_director,
+    image_platforms,
+)
 from trpg_server.immersive.analyzer import analyze_narrative
 from trpg_server.immersive.config import (
     load_immersive_settings,
@@ -425,6 +431,19 @@ def on_narrative_turn(
             settings, house_rules, (personal_override or {}).get("music_source")
         )
         result["music_source"] = music_source
+        # 引擎矩阵：外部曲库只是「叠在程序化底床之上」，底床逻辑保持不变。
+        engine, engine_reason = external_music.resolve_engine(settings, house_rules)
+        result["music_engine"] = engine
+        result["music_engine_reason"] = engine_reason
+        external_music.notify_engine(
+            room_id,
+            engine,
+            fade_ms=int(
+                settings.get("music_external_fade_ms")
+                if engine == external_music.ENGINE_EXTERNAL
+                else settings.get("music_crossfade_ms") or 3000
+            ),
+        )
 
         analysis = analyze_narrative(
             text,
@@ -435,7 +454,7 @@ def on_narrative_turn(
         )
         result["analysis"] = analysis
 
-        if switches["music"]:
+        if switches["music"] and engine != external_music.ENGINE_OFF:
             room_settings = dict(settings)
             # 房间级自动切换开关只能覆盖「关闭」，不会越过站点总开关。
             room_settings["music_auto_switch"] = bool(switches.get("music_auto"))
@@ -507,6 +526,24 @@ def on_narrative_turn(
                 plan["reason"], analysis.get("scene"), director_result.get("validation") if director_result else trigger,
             )
             result["director"] = director_result
+
+            # 外链检索：服务端按剧情自动触发（主要路径），KP 工具只做显式请求。
+            # 只有段落真的变化时才发起，避免每回合都重复广播同一首。
+            if engine == external_music.ENGINE_EXTERNAL and (
+                plan.get("changed") or int(plan.get("turns") or 0) <= 1
+            ):
+                external_music.submit(
+                    room_dir=room_dir,
+                    room_id=room_id,
+                    scenario_id=scenario_id,
+                    profile=str(plan.get("profile") or "daily"),
+                    intensity=str(plan.get("intensity") or "medium"),
+                    scene=str(analysis.get("scene") or ""),
+                    settings=settings,
+                    config_dir=config_dir,
+                    house_rules=house_rules,
+                    trigger="auto",
+                )
 
             if director_due and director_result is None and director.in_flight(room_id) is False:
                 future = director.submit(
@@ -764,11 +801,19 @@ def immersive_status(
     music = load_music_state(room_dir)
     live = live_music_payload(room_dir)
     illustration = load_room_state(room_dir)
+    engine, engine_reason = external_music.resolve_engine(settings, house_rules)
     return {
         "room_id": room_id,
         "switches": switches,
         # 站点 + 房间收紧后的生效值；个人覆盖由前端在允许范围内再解析一次。
         "music_source": resolve_music_source(settings, house_rules),
+        "music_engine": engine,
+        "music_engine_reason": engine_reason,
+        "external_music": {
+            "providers": str(settings.get("music_external_providers") or ""),
+            "license_allow": str(settings.get("music_external_license_allow") or ""),
+            "in_flight": external_music.in_flight(room_id),
+        },
         "illustration_trigger": resolve_illustration_trigger(settings, house_rules),
         "music": {
             "profile": music.get("profile"),

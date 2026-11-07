@@ -316,6 +316,18 @@ function initSettingsTabs(): void {
     bindGeneralSelectSetting("immersiveMusicSource", "immersive", "music_source");
     bindGeneralTextSetting("immersiveMusicSourceAllowed", "immersive", "music_source_allowed");
     bindGeneralCheckboxSetting("immersiveMusicSourceAllowPersonal", "immersive", "music_source_allow_personal");
+    bindGeneralSelectSetting("immersiveMusicEngine", "immersive", "music_engine");
+    bindGeneralTextSetting("immersiveExternalProviders", "immersive", "music_external_providers");
+    bindGeneralTextSetting("immersiveExternalLicenseAllow", "immersive", "music_external_license_allow");
+    bindGeneralNumberSetting("immersiveExternalTimeout", "immersive", "music_external_timeout", 2, 30);
+    bindGeneralNumberSetting("immersiveExternalFade", "immersive", "music_external_fade_ms", 1500, 12000);
+    bindGeneralNumberSetting("immersiveExternalPhraseBars", "immersive", "music_external_phrase_bars", 1, 16);
+    bindGeneralNumberSetting("immersiveExternalSearchTtl", "immersive", "music_external_search_ttl", 0, 604800);
+    bindGeneralTextSetting("immersiveExternalJamendoId", "immersive", "music_external_jamendo_client_id");
+    bindGeneralNumberSetting("immersiveExternalDailyBudget", "immersive", "music_external_daily_budget", 0, 100000);
+    bindGeneralNumberSetting("immersiveExternalHourlyCap", "immersive", "music_external_room_hourly_cap", 0, 10000);
+    bindGeneralCheckboxSetting("immersiveExternalInstrumental", "immersive", "music_external_instrumental_only");
+    bindGeneralCheckboxSetting("immersiveExternalCacheAudio", "immersive", "music_external_cache_audio");
     bindGeneralNumberSetting("immersiveMusicVolume", "immersive", "music_volume", 0, 100);
     bindGeneralNumberSetting("immersiveMusicCrossfade", "immersive", "music_crossfade_ms", 500, 10000);
     bindGeneralNumberSetting("immersiveMusicHysteresis", "immersive", "music_hysteresis_turns", 0, 10);

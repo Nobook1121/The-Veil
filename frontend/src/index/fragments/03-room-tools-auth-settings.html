@@ -123,6 +123,16 @@
                                     </select>
                                 </div>
                                 <div class="form-group mt-2">
+                                    <label for="houseRuleImmersiveMusicEngine">音乐引擎（只能降级）</label>
+                                    <select class="form-select" id="houseRuleImmersiveMusicEngine">
+                                        <option value="">跟随管理员设置</option>
+                                        <option value="external">外链曲库 + 底床（需管理员已开启）</option>
+                                        <option value="procedural">程序化底床</option>
+                                        <option value="off">关闭实时音乐</option>
+                                    </select>
+                                    <small class="form-text text-muted">房间请求外链时，若管理员未开启外链引擎会自动退回程序化底床，不会升级。</small>
+                                </div>
+                                <div class="form-group mt-2">
                                     <label for="houseRuleImmersiveIllustration">实时配图</label>
                                     <select class="form-select" id="houseRuleImmersiveIllustration">
                                         <option value="">跟随管理员设置</option>
@@ -1453,6 +1463,15 @@
                                     <small class="form-text text-muted">默认「混合」：维持既有的实时配乐 + BGM 压低行为。切到「仅 BGM」会销毁实时引擎的 AudioContext。</small>
                                 </div>
                                 <div class="form-group mt-2">
+                                    <label for="immersiveMusicEngine">音乐引擎</label>
+                                    <select class="form-select" id="immersiveMusicEngine">
+                                        <option value="procedural">程序化实时配乐（默认）</option>
+                                        <option value="external">外链免费曲库 + 程序化底床</option>
+                                        <option value="off">关闭实时音乐（保留房间 BGM）</option>
+                                    </select>
+                                    <small class="form-text text-muted">外链模式始终以程序化底床托底，曲库失败时自动退回底床；房间只能在此基础下降级（external → procedural → off），切换时平滑交叉淡化。</small>
+                                </div>
+                                <div class="form-group mt-2">
                                     <label for="immersiveMusicSourceAllowed">个人可选来源（逗号分隔）</label>
                                     <input type="text" class="form-control" id="immersiveMusicSourceAllowed" maxlength="120" placeholder="realtime,bgm,hybrid">
                                     <small class="form-text text-muted">个人设置只能在此集合内覆盖；房间关闭配乐时强制回到仅 BGM。</small>
@@ -1538,6 +1557,62 @@
                                     <button type="button" class="btn btn-outline-danger btn-sm" id="immersiveDirectorClearCache">清理乐谱缓存</button>
                                 </div>
                                 <p class="text-muted small mt-2" id="immersiveDirectorStatus">导演用量与缓存尚未加载。</p>
+
+                                <h5 class="mt-4">外链曲库（Jamendo / Openverse）</h5>
+                                <small class="form-text text-muted d-block mt-2">仅检索许可为 CC0 / CC BY / CC BY-SA 且署名信息完整的曲目；缺署名的结果不会播放。外部曲目叠在程序化底床之上，底床永不停。</small>
+                                <div class="form-row">
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveExternalProviders">曲库顺序（逗号分隔）</label>
+                                        <input type="text" class="form-control" id="immersiveExternalProviders" maxlength="64" placeholder="jamendo,openverse">
+                                    </div>
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveExternalLicenseAllow">许可白名单</label>
+                                        <input type="text" class="form-control" id="immersiveExternalLicenseAllow" maxlength="64" placeholder="cc0,by,by-sa">
+                                    </div>
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveExternalTimeout">单次请求超时（秒）</label>
+                                        <input type="number" class="form-control" id="immersiveExternalTimeout" min="2" max="30">
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveExternalFade">交叉淡化（毫秒）</label>
+                                        <input type="number" class="form-control" id="immersiveExternalFade" min="1500" max="12000">
+                                    </div>
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveExternalPhraseBars">乐句对齐（小节）</label>
+                                        <input type="number" class="form-control" id="immersiveExternalPhraseBars" min="1" max="16">
+                                    </div>
+                                    <div class="form-group col-md-4 mt-2">
+                                        <label for="immersiveExternalSearchTtl">元数据缓存 TTL（秒）</label>
+                                        <input type="number" class="form-control" id="immersiveExternalSearchTtl" min="0" max="604800">
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group col-md-6 mt-2">
+                                        <label for="immersiveExternalJamendoId">Jamendo client_id</label>
+                                        <input type="text" class="form-control" id="immersiveExternalJamendoId" maxlength="128" placeholder="留空则仅使用 Openverse">
+                                        <small class="form-text text-muted">也可用环境变量 TRPG_JAMENDO_CLIENT_ID；本页不会回显已保存的值。</small>
+                                    </div>
+                                    <div class="form-group col-md-3 mt-2">
+                                        <label for="immersiveExternalDailyBudget">每日检索预算</label>
+                                        <input type="number" class="form-control" id="immersiveExternalDailyBudget" min="0" max="100000">
+                                    </div>
+                                    <div class="form-group col-md-3 mt-2">
+                                        <label for="immersiveExternalHourlyCap">单房间每小时上限</label>
+                                        <input type="number" class="form-control" id="immersiveExternalHourlyCap" min="0" max="10000">
+                                    </div>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="immersiveExternalInstrumental">
+                                        <label class="form-check-label" for="immersiveExternalInstrumental">仅接受器乐（推荐）</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="immersiveExternalCacheAudio">
+                                        <label class="form-check-label" for="immersiveExternalCacheAudio">缓存音频本体（默认只缓存元数据与 URL）</label>
+                                    </div>
+                                </div>
 
                                 <h5 class="mt-4">实时配图</h5>
                                 <div class="form-group mt-2">

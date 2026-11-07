@@ -154,6 +154,19 @@ class ConfigManager {
         configSetSelectValue("immersiveMusicSource", this.get("general", "immersive", "music_source", "hybrid"));
         configSetInputValue("immersiveMusicSourceAllowed", this.get("general", "immersive", "music_source_allowed", "realtime,bgm,hybrid"));
         configSetCheckboxValue("immersiveMusicSourceAllowPersonal", this.get("general", "immersive", "music_source_allow_personal", true));
+        // 音乐引擎与外链曲库（P4 管理员开关 + P3 调参）
+        configSetSelectValue("immersiveMusicEngine", this.get("general", "immersive", "music_engine", "procedural"));
+        configSetInputValue("immersiveExternalProviders", this.get("general", "immersive", "music_external_providers", "jamendo,openverse"));
+        configSetInputValue("immersiveExternalLicenseAllow", this.get("general", "immersive", "music_external_license_allow", "cc0,by,by-sa"));
+        configSetInputValue("immersiveExternalTimeout", this.get("general", "immersive", "music_external_timeout", 6));
+        configSetInputValue("immersiveExternalFade", this.get("general", "immersive", "music_external_fade_ms", 4200));
+        configSetInputValue("immersiveExternalPhraseBars", this.get("general", "immersive", "music_external_phrase_bars", 8));
+        configSetInputValue("immersiveExternalSearchTtl", this.get("general", "immersive", "music_external_search_ttl", 86400));
+        configSetInputValue("immersiveExternalJamendoId", "");
+        configSetInputValue("immersiveExternalDailyBudget", this.get("general", "immersive", "music_external_daily_budget", 200));
+        configSetInputValue("immersiveExternalHourlyCap", this.get("general", "immersive", "music_external_room_hourly_cap", 30));
+        configSetCheckboxValue("immersiveExternalInstrumental", this.get("general", "immersive", "music_external_instrumental_only", true));
+        configSetCheckboxValue("immersiveExternalCacheAudio", this.get("general", "immersive", "music_external_cache_audio", false));
         // AI 音乐导演（LLM 只做后台精修；平台/模型统一取「模型设置」中启用的 AI 平台）
         configSetCheckboxValue("immersiveDirectorEnabled", this.get("general", "immersive", "music_director_enabled", false));
         configSetInputValue("immersiveDirectorInterval", this.get("general", "immersive", "music_director_interval_turns", 2));

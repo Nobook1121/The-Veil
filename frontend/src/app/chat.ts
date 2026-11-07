@@ -1623,6 +1623,20 @@ function initWebSocket(): void {
         socket.on("immersive_illustration", (data) => {
             window.TrpgImmersive?.onIllustrationEvent(data as ImmersiveIllustrationEvent);
         });
+        // 引擎开关（P4）：off/procedural/external 都平滑过渡；房间不匹配直接忽略。
+        socket.on("immersive_music_engine", (data) => {
+            const event = data as ImmersiveMusicEngineEvent;
+            const room = getCurrentRoom();
+            if (event.room_id && room?.id !== event.room_id) return;
+            window.TrpgImmersiveExternal?.applyEngine(event);
+        });
+        // 外链曲目（P3）：服务端检索完成/降级都会下发；失败时前端继续留在底床。
+        socket.on("immersive_music_external", (data) => {
+            const event = data as ImmersiveExternalEvent;
+            const room = getCurrentRoom();
+            if (event.room_id && room?.id !== event.room_id) return;
+            window.TrpgImmersiveExternal?.applyEvent(event);
+        });
     } catch (error) {
         console.warn("WebSocket 连接失败，消息同步不可用:", error);
     }

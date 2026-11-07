@@ -16,9 +16,9 @@ import time
 from urllib.parse import quote, urlparse
 
 import requests
-from flask import Blueprint, Response, current_app, request, send_file, session
+from flask import Blueprint, Response, current_app, request, send_file, session, stream_with_context
 
-from trpg_server.immersive import audit, director, image_platforms
+from trpg_server.immersive import audit, director, external_music, image_platforms
 from trpg_server.immersive.config import (
     DIRECTOR_FALLBACKS,
     INTENSITIES,
@@ -126,6 +126,9 @@ def get_immersive_config():
         if room_dir:
             rules = info.get("house_rules") if isinstance(info.get("house_rules"), dict) else {}
             payload["switches"] = resolve_room_switches(settings, rules)
+            engine, engine_reason = external_music.resolve_engine(settings, rules)
+            payload["music_engine"] = engine
+            payload["music_engine_reason"] = engine_reason
             payload["room_id"] = info.get("id") or room_id
     return success_response(payload, "Immersive config loaded")
 
@@ -377,6 +380,193 @@ def post_room_music(room_id):
     )
     logger.info("immersive music manual room=%s user_id=%s profile=%s intensity=%s", room_id, session.get("user_id"), plan.get("profile"), plan.get("intensity"))
     return success_response(plan, "Music directive applied")
+
+
+# ---------------------------------------------------------------- 外链曲库（P3）
+
+MAX_AUDIO_BYTES = 12 * 1024 * 1024
+_AUDIO_SUFFIX_BY_TYPE = {
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/ogg": "ogg",
+    "audio/opus": "opus",
+    "audio/mp4": "m4a",
+    "audio/aac": "m4a",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/webm": "webm",
+    "audio/flac": "flac",
+    "application/octet-stream": "mp3",
+}
+
+
+def _room_payload_params(payload: dict) -> tuple[str, str, str, list[str], bool]:
+    profile = str(payload.get("profile") or "").strip().lower()
+    intensity = str(payload.get("intensity") or "").strip().lower()
+    if profile and profile not in PROFILES:
+        profile = ""
+    if intensity and intensity not in INTENSITIES:
+        intensity = ""
+    tags_raw = payload.get("tags")
+    if isinstance(tags_raw, str):
+        tags = [item.strip() for item in tags_raw.split(",") if item.strip()]
+    elif isinstance(tags_raw, (list, tuple)):
+        tags = [str(item).strip() for item in tags_raw if str(item).strip()]
+    else:
+        tags = []
+    return profile, intensity, str(payload.get("scene") or "").strip()[:120], tags[:8], bool(payload.get("force"))
+
+
+@bp.route("/api/immersive/rooms/<room_id>/music/external/search", methods=["POST"])
+def post_external_music_search(room_id):
+    """显式检索（KP 工具 / 管理员手动）；自动路径由叙事回合在服务端触发。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    room_dir, info, error = _room_or_error(room_id)
+    if error:
+        return error
+    settings = _settings()
+    rules = info.get("house_rules") if isinstance(info.get("house_rules"), dict) else {}
+    payload = request.get_json(silent=True) or {}
+    profile, intensity, scene, tags, force = _room_payload_params(payload)
+    result = external_music.search_and_select(
+        room_dir=room_dir,
+        room_id=str(info.get("id") or room_id),
+        scenario_id=str(info.get("scenario_id") or ""),
+        profile=profile or str(settings.get("music_default_profile") or "daily"),
+        intensity=intensity or str(settings.get("music_default_intensity") or "medium"),
+        scene=scene,
+        extra_tags=tags,
+        settings=settings,
+        house_rules=rules,
+        trigger=str(payload.get("trigger") or "manual")[:24],
+        request_id=str(payload.get("request_id") or "")[:64],
+        force=force,
+    )
+    if result.get("status") == "selected":
+        payload_out = _external_broadcast_payload(result, str(info.get("id") or room_id), settings)
+        from trpg_server.immersive import broadcast as immersive_broadcast
+
+        immersive_broadcast.emit("immersive_music_external", payload_out)
+    status_code = 200 if result.get("ok") else 409
+    return success_response(result, "External music searched") if status_code == 200 else error_response(
+        str(result.get("reason") or "No playable track"), 409, "External music unavailable"
+    )
+
+
+def _external_broadcast_payload(result: dict, room_id: str, settings: dict) -> dict:
+    payload = dict(result)
+    payload["room_id"] = room_id
+    payload["fade_ms"] = int(settings.get("music_external_fade_ms") or 4200)
+    payload["phrase_bars"] = int(settings.get("music_external_phrase_bars") or 8)
+    payload["crossfade_ms"] = payload["fade_ms"]
+    return payload
+
+
+@bp.route("/api/immersive/rooms/<room_id>/music/external/audio/<track_key>", methods=["GET"])
+def get_external_music_audio(room_id, track_key):
+    """同源音频代理：浏览器不直连曲库，避免混合内容、CORS 与追踪。
+
+    只允许房间成员访问；上游必须是 https 公网地址，内容需为 audio/* 或
+    ``application/octet-stream``，单曲上限 12MB；支持 Range 便于浏览器拖动/续播。
+    """
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    room_dir, info = _find_room(room_id)
+    if not room_dir:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_access(info):
+        return error_response("Permission denied", 403, "Permission denied")
+    settings = _settings()
+    target = external_music.audio_target(
+        room_dir=room_dir,
+        room_id=str(info.get("id") or room_id),
+        track_key=track_key,
+        scenario_id=str(info.get("scenario_id") or ""),
+        settings=settings,
+    )
+    if not target.get("ok"):
+        return error_response("Track unavailable", 404, str(target.get("reason") or "not_found"))
+    if target.get("local"):
+        path = target["local"]
+        response = send_file(
+            path,
+            mimetype=_AUDIO_SUFFIX_BY_TYPE.get(f"audio/{path.suffix.lstrip('.')}", "audio/mpeg"),
+            conditional=True,
+            max_age=600,
+        )
+        response.headers["Cache-Control"] = "private, max-age=600"
+        return response
+
+    upstream = target.get("url") or ""
+    headers = {"User-Agent": "TheVeil/1.0 (+https://github.com/the-veil)"}
+    range_header = request.headers.get("Range")
+    if range_header:
+        headers["Range"] = range_header
+    try:
+        remote = requests.get(
+            upstream, headers=headers, stream=True, timeout=(5, 20), allow_redirects=True
+        )
+    except requests.RequestException as exc:
+        logger.info("external_music proxy failed room=%s key=%s: %s", room_id, track_key, exc)
+        return error_response("Upstream unavailable", 502, "Upstream unavailable")
+    if remote.status_code not in (200, 206):
+        remote.close()
+        return error_response("Upstream rejected", 502, f"HTTP {remote.status_code}")
+
+    content_type = str(remote.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+    if content_type and not (content_type.startswith("audio/") or content_type == "application/octet-stream"):
+        remote.close()
+        return error_response("Unsupported media type", 502, "Unsupported media type")
+    try:
+        content_length = int(remote.headers.get("Content-Length") or 0)
+    except (TypeError, ValueError):
+        content_length = 0
+    if content_length > MAX_AUDIO_BYTES:
+        remote.close()
+        return error_response("Track too large", 502, "Track too large")
+
+    cache_enabled = bool(settings.get("music_external_cache_audio")) and not range_header
+    cache_buffer = bytearray() if cache_enabled else None
+    suffix = _AUDIO_SUFFIX_BY_TYPE.get(content_type or "", "mp3")
+
+    def _stream():
+        try:
+            for chunk in remote.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                if cache_buffer is not None and len(cache_buffer) < MAX_AUDIO_BYTES:
+                    cache_buffer.extend(chunk[: MAX_AUDIO_BYTES - len(cache_buffer)])
+                yield chunk
+        finally:
+            remote.close()
+            if cache_buffer:
+                try:
+                    external_music.cache_audio_bytes(
+                        room_dir=room_dir,
+                        track_key=track_key,
+                        content=bytes(cache_buffer),
+                        suffix=suffix,
+                        settings=settings,
+                        scenario_id=str(info.get("scenario_id") or ""),
+                    )
+                except Exception:  # noqa: BLE001 - 缓存失败不影响已经播出的音频
+                    logger.debug("external_music audio cache write failed", exc_info=True)
+
+    response = Response(
+        stream_with_context(_stream()),
+        status=remote.status_code,
+        content_type=content_type or "audio/mpeg",
+        direct_passthrough=True,
+    )
+    for header in ("Content-Length", "Content-Range", "Accept-Ranges"):
+        value = remote.headers.get(header)
+        if value:
+            response.headers[header] = value
+    response.headers["Cache-Control"] = "private, max-age=600"
+    return response
 
 
 @bp.route("/api/immersive/rooms/<room_id>/illustration", methods=["POST"])

@@ -62,6 +62,13 @@ HOUSE_RULE_DEFINITIONS = {
     # 实时沉浸：房间级开关。null 表示跟随管理员默认；房间只能「关」，不能越过站点总开关重开。
     "immersive_music_enabled": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
     "immersive_music_auto_switch": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
+    # 音乐引擎：null 跟随管理员；房间只能降级（external → procedural → off），不能升级。
+    "immersive_music_engine": {
+        "type": "nullable_enum",
+        "default": None,
+        "values": ["external", "procedural", "off"],
+        "ai_prompt": False,
+    },
     "immersive_illustration_enabled": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
     "immersive_illustration_auto": {"type": "nullable_boolean", "default": None, "ai_prompt": False},
     # 房间只能把配图触发档位收得更紧：important（仅重要场景）/ off；null 表示跟随。

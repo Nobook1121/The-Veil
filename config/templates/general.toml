@@ -228,6 +228,46 @@ music_source = "hybrid"
 music_source_allowed = "realtime,bgm,hybrid"
 # 关闭后个人设置中的音乐来源不可覆盖，只能跟随站点默认。
 music_source_allow_personal = true
+# 音乐引擎：procedural（默认，程序化实时配乐）/ external（外链免费曲库 + 程序化底床）/
+# off（关闭实时音乐，房间 BGM 不受影响）。房间只能在此基础上降级，不能升级。
+music_engine = "procedural"
+# 管理员允许的引擎档位；个人/房间只能取其中更低的一档。
+music_engine_allowed = "procedural,external"
+# 外链曲库（主源 Jamendo，次源 Openverse）。两者都不可达时自动停留在程序化底床。
+music_external_providers = "jamendo,openverse"
+# 许可白名单：只有 cc0 / by / by-sa 可播放；缺署名信息的曲目一律不播。
+music_external_license_allow = "cc0,by,by-sa"
+# 只接受器乐（避免歌词与 KP 旁白抢注意力）。
+music_external_instrumental_only = true
+# 单次曲库请求超时（秒，2-30）。
+music_external_timeout = 6
+# 单次检索取回候选数量（3-20），用于打分与去重。
+music_external_result_limit = 10
+# 检索结果缓存 TTL（秒，24h）；URL 有效期单独计算（10min），过期前才重解析。
+music_external_search_ttl = 86400
+music_external_url_ttl = 600
+# 站点每日检索预算与单房间每小时上限（0 表示不限制）。
+music_external_daily_budget = 200
+music_external_room_hourly_cap = 30
+# 是否缓存音频本体（默认关闭，只缓存元数据与 URL）。开启后按单曲/总量/条目数 LRU。
+music_external_cache_audio = false
+music_external_cache_quota_mb = 256
+music_external_cache_max_entries = 60
+music_external_cache_max_track_mb = 12
+music_external_cache_overflow = "lru"
+# 剧本级缓存：默认不写入剧本目录，但优先复用剧本里已有的外链曲目元数据。
+music_external_scenario_record = false
+music_external_scenario_prefer = true
+# 熔断：连续失败 N 次后暂停该源 M 秒，避免每回合都等超时。
+music_external_circuit_failures = 3
+music_external_circuit_cooldown_s = 600
+# Jamendo client_id（可留空；也可用环境变量 TRPG_JAMENDO_CLIENT_ID）。
+music_external_jamendo_client_id = ""
+# 音频代理主机白名单（逗号分隔，留空表示仅做公网/私网校验，不额外限制域名）。
+music_external_allowed_hosts = ""
+# 外链与程序化底床的衔接：交叉淡化时长（毫秒）与乐句对齐小节数。
+music_external_fade_ms = 4200
+music_external_phrase_bars = 8
 # 剧本配图缓存：是否把新生成的配图写入剧本目录（默认关闭，避免无声修改剧本与磁盘增长）。
 illustration_scenario_record = false
 # 游玩时是否优先复用剧本目录里的同 key 配图（默认开启，可省去重复生图与预算）。

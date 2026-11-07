@@ -223,6 +223,22 @@
     display: none;
 }
 
+/* 外链曲目署名：许可要求可追溯，点击可打开来源页。 */
+#immersiveStage .immersive-stage-track {
+    padding: 0 12px 8px;
+    font-size: 0.72rem;
+    color: rgba(174, 200, 228, 0.82);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#immersiveStage .immersive-stage-track:hover {
+    color: rgba(214, 232, 250, 0.96);
+    text-decoration: underline;
+}
+
 #immersiveStage .immersive-history {
     display: flex;
     gap: 8px;

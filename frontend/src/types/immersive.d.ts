@@ -278,7 +278,59 @@ interface ImmersiveRoomState {
     can_manage?: boolean;
     /** 站点 + 房间收紧后的生效值；个人覆盖由前端再解析。 */
     music_source?: "realtime" | "bgm" | "hybrid";
+    /** 生效音乐引擎（P4）：站点默认与房间降级之后的结果。 */
+    music_engine?: "procedural" | "external" | "off";
+    music_engine_reason?: string;
     illustration_trigger?: "off" | "important" | "turn_interval" | "frequent";
+}
+
+/** 外链曲目：地址只给同源代理路径，上游 URL 不出服务端。 */
+interface ImmersiveExternalTrack {
+    track_key: string;
+    provider: string;
+    title: string;
+    artist: string;
+    license: string;
+    license_label: string;
+    license_url: string;
+    source_url: string;
+    attribution: string;
+    duration_ms: number;
+    tags: string[];
+    instrumental: boolean | null;
+    stream_path: string;
+    url_expires_at: number;
+    elapsed_ms?: number;
+    license_allowed?: boolean;
+}
+
+/** 服务端下发的外链检索结果；失败时 track 为 null，前端应留在底床。 */
+interface ImmersiveExternalEvent {
+    ok: boolean;
+    status: "selected" | "empty" | "degraded" | "disabled" | "throttled";
+    engine: "procedural" | "external" | "off";
+    engine_reason?: string;
+    fallback: "procedural" | "off";
+    track: ImmersiveExternalTrack | null;
+    alternatives?: ImmersiveExternalTrack[];
+    provider?: string;
+    reason?: string;
+    room_id?: string;
+    request_id?: string;
+    trigger?: string;
+    cached?: boolean;
+    fade_ms?: number;
+    crossfade_ms?: number;
+    phrase_bars?: number;
+    elapsed_ms?: number;
+}
+
+/** 引擎切换事件：off 时要平滑淡出，不能硬切。 */
+interface ImmersiveMusicEngineEvent {
+    room_id?: string;
+    engine: "procedural" | "external" | "off";
+    fade_ms?: number;
+    fallback?: string;
 }
 
 interface TrpgImmersiveMusicApi {
@@ -296,6 +348,17 @@ interface TrpgImmersiveMusicApi {
     isRunning: () => boolean;
     /** 运行时诊断：当前 AudioContext 状态、每条总线的进度与下一小节时间。 */
     diagnostics: () => ImmersiveMusicDiagnostics;
+    /** 引擎切换（P4）：off 平滑淡出并停止补发；恢复时按共享位置重建。 */
+    setEngineMode: (mode: "procedural" | "external" | "off", fadeMs?: number) => void;
+    currentEngineMode: () => "procedural" | "external" | "off";
+    /** 底床等功率斜变（外链淡入/淡出时配对使用）。 */
+    rampBedLevel: (target: number, seconds: number, rising: boolean) => void;
+    bedDuckLevel: () => number;
+    /** 外链播放器汇入点（引擎总增益，不经过底床增益）。 */
+    externalInput: () => GainNode | null;
+    /** 当前小节时基，用于把切换点对齐到小节/乐句边界。 */
+    barTiming: () => { barSeconds: number; nextBarIn: number; positionBars: number } | null;
+    audioClock: () => number;
 }
 
 interface ImmersiveMusicBusDiagnostics {
@@ -377,8 +440,16 @@ interface TrpgImmersiveApi {
     getMusicSource: () => "realtime" | "bgm" | "hybrid";
 }
 
+interface TrpgImmersiveExternalApi {
+    applyEvent: (payload: ImmersiveExternalEvent | null | undefined) => void;
+    applyEngine: (event: ImmersiveMusicEngineEvent | null | undefined) => void;
+    stop: (fadeMs?: number) => void;
+    state: () => Record<string, unknown>;
+}
+
 interface Window {
     TrpgImmersiveMusic?: TrpgImmersiveMusicApi;
     TrpgImmersiveAmbient?: TrpgImmersiveAmbientApi;
+    TrpgImmersiveExternal?: TrpgImmersiveExternalApi;
     TrpgImmersive?: TrpgImmersiveApi;
 }

@@ -18,6 +18,7 @@ from trpg_server.agents.tools.narrative_triggers import (
 from trpg_server.agents.tools.knowledge import SEARCH_RULESET_KNOWLEDGE_TOOL
 from trpg_server.agents.tools.suggest import SUGGEST_ACTIONS_TOOL
 from trpg_server.agents.tools.combat import COMBAT_TOOLS, COMBAT_TOOL_NAMES
+from trpg_server.agents.tools.music import MUSIC_REQUEST_TOOL
 
 
 def default_tool_registry() -> ToolRegistry:
@@ -41,6 +42,7 @@ def default_tool_registry() -> ToolRegistry:
             REVEAL_SCENARIO_TRIGGER_TOOL,
             SEARCH_RULESET_KNOWLEDGE_TOOL,
             SUGGEST_ACTIONS_TOOL,
+            MUSIC_REQUEST_TOOL,
             *COMBAT_TOOLS,
             *NARRATIVE_TOOLS,
             *TRIGGER_RUNTIME_TOOLS,

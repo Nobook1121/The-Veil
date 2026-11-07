@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,8 @@ INTENSITIES = ("low", "medium", "high")
 PROVIDERS = ("procedural", "platform", "openai_compatible")
 DIRECTOR_FALLBACKS = ("rule", "hold")
 MUSIC_SOURCES = ("realtime", "bgm", "hybrid")
+MUSIC_ENGINES = ("procedural", "external", "off")
+EXTERNAL_PROVIDERS = ("jamendo", "openverse")
 ILLUSTRATION_TRIGGERS = ("off", "important", "turn_interval", "frequent")
 # 档位越低越「收紧」：房间只能把触发档位往下压，不能抬高。
 _TRIGGER_RANK = {"off": 0, "important": 1, "turn_interval": 2, "frequent": 3}
@@ -28,6 +31,18 @@ _MUSIC_KEYS = (
     "music_default_intensity", "music_volume", "music_crossfade_ms",
     "music_hysteresis_turns", "music_seed", "music_duck_bgm", "music_source",
     "music_source_allowed", "music_source_allow_personal",
+    "music_engine", "music_engine_allowed",
+    "music_external_providers", "music_external_license_allow",
+    "music_external_instrumental_only", "music_external_timeout",
+    "music_external_search_ttl", "music_external_url_ttl",
+    "music_external_daily_budget", "music_external_room_hourly_cap",
+    "music_external_cache_audio", "music_external_cache_quota_mb",
+    "music_external_cache_max_entries", "music_external_cache_max_track_mb",
+    "music_external_cache_overflow",
+    "music_external_scenario_record", "music_external_scenario_prefer",
+    "music_external_circuit_failures", "music_external_circuit_cooldown_s",
+    "music_external_jamendo_client_id", "music_external_allowed_hosts",
+    "music_external_phrase_bars", "music_external_fade_ms",
     "music_director_enabled",
     "music_director_interval_turns", "music_director_daily_budget", "music_director_timeout",
     "music_director_cache_ttl", "music_director_min_confidence", "music_director_fallback",
@@ -106,6 +121,47 @@ def load_immersive_settings(config_dir: Path | str | None = None) -> dict[str, A
             raw.get("music_source_allowed"), MUSIC_SOURCES, MUSIC_SOURCES
         ),
         "music_source_allow_personal": _as_bool(raw.get("music_source_allow_personal"), True),
+        # 引擎矩阵：站点默认 < 房间只能降级；invalid 值在运行时回落到 procedural（并 WARN）。
+        "music_engine": _as_choice(raw.get("music_engine"), "procedural", MUSIC_ENGINES),
+        "music_engine_allowed": _as_mode_list(
+            raw.get("music_engine_allowed"), ("procedural", "external"), MUSIC_ENGINES
+        ),
+        "music_external_providers": ",".join(
+            _as_mode_list(raw.get("music_external_providers"), EXTERNAL_PROVIDERS, EXTERNAL_PROVIDERS)
+        ),
+        "music_external_license_allow": ",".join(
+            _as_mode_list(
+                raw.get("music_external_license_allow"),
+                ("cc0", "by", "by-sa"),
+                ("cc0", "by", "by-sa", "by-nc", "by-nd", "by-nc-sa", "by-nc-nd"),
+            )
+        ),
+        "music_external_instrumental_only": _as_bool(raw.get("music_external_instrumental_only"), True),
+        "music_external_timeout": _as_int(raw.get("music_external_timeout"), 6, 2, 30),
+        "music_external_result_limit": _as_int(raw.get("music_external_result_limit"), 10, 3, 20),
+        # 元数据 TTL 24h；URL 10min；两者都只影响缓存新鲜度，不影响是否播放。
+        "music_external_search_ttl": _as_int(raw.get("music_external_search_ttl"), 86400, 0, 604800),
+        "music_external_url_ttl": _as_int(raw.get("music_external_url_ttl"), 600, 60, 86400),
+        "music_external_daily_budget": _as_int(raw.get("music_external_daily_budget"), 200, 0, 100000),
+        "music_external_room_hourly_cap": _as_int(raw.get("music_external_room_hourly_cap"), 30, 0, 10000),
+        # 默认不缓存音频本体；打开后按单曲/总量/条目数做 LRU。
+        "music_external_cache_audio": _as_bool(raw.get("music_external_cache_audio"), False),
+        "music_external_cache_quota_mb": _as_int(raw.get("music_external_cache_quota_mb"), 256, 0, 102400),
+        "music_external_cache_max_entries": _as_int(raw.get("music_external_cache_max_entries"), 60, 0, 1000),
+        "music_external_cache_max_track_mb": _as_int(raw.get("music_external_cache_max_track_mb"), 12, 1, 64),
+        "music_external_cache_overflow": _as_choice(
+            raw.get("music_external_cache_overflow"), "lru", ("lru", "reject")
+        ),
+        "music_external_scenario_record": _as_bool(raw.get("music_external_scenario_record"), False),
+        "music_external_scenario_prefer": _as_bool(raw.get("music_external_scenario_prefer"), True),
+        "music_external_circuit_failures": _as_int(raw.get("music_external_circuit_failures"), 3, 1, 20),
+        "music_external_circuit_cooldown_s": _as_int(
+            raw.get("music_external_circuit_cooldown_s"), 600, 30, 7200
+        ),
+        "music_external_jamendo_client_id": str(raw.get("music_external_jamendo_client_id") or "").strip()[:128],
+        "music_external_allowed_hosts": str(raw.get("music_external_allowed_hosts") or "").strip()[:512],
+        "music_external_phrase_bars": _as_int(raw.get("music_external_phrase_bars"), 8, 1, 16),
+        "music_external_fade_ms": _as_int(raw.get("music_external_fade_ms"), 4200, 1500, 12000),
         "music_director_enabled": _as_bool(raw.get("music_director_enabled"), False),
         "music_director_interval_turns": _as_int(raw.get("music_director_interval_turns"), 2, 1, 20),
         "music_director_daily_budget": _as_int(raw.get("music_director_daily_budget"), 0, 0, 100000),
@@ -172,8 +228,14 @@ def load_immersive_settings(config_dir: Path | str | None = None) -> dict[str, A
 
 def public_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """发给前端的配置：去掉密钥，仅暴露是否已配置。"""
-    data = {key: value for key, value in settings.items() if key not in {"api_key", "locked"}}
+    secret_keys = {"api_key", "locked", "music_external_jamendo_client_id"}
+    data = {key: value for key, value in settings.items() if key not in secret_keys}
+    available = bool(settings.get("music_external_jamendo_client_id"))
     data["has_api_key"] = bool(settings.get("api_key"))
+    data["has_jamendo_client_id"] = available
+    # 环境变量提供 client_id 时同样视为可用，但不回显具体值。
+    if not available:
+        data["has_jamendo_client_id"] = bool(os.environ.get("TRPG_JAMENDO_CLIENT_ID"))
     return data
 
 

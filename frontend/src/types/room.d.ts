@@ -105,6 +105,8 @@ interface RoomHouseRules {
     // 实时沉浸系统：null 表示跟随管理员设置；房间只能收紧（关闭），不能越过站点总开关。
     immersive_music_enabled?: boolean | null;
     immersive_music_auto_switch?: boolean | null;
+    // 音乐引擎：null 跟随管理员；房间只能降级（external → procedural → off）。
+    immersive_music_engine?: "external" | "procedural" | "off" | null;
     immersive_illustration_enabled?: boolean | null;
     immersive_illustration_auto?: boolean | null;
     // 剧本配图缓存：房间只能关闭/不优先，不能越过站点开关重新开启。

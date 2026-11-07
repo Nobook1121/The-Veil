@@ -108,6 +108,7 @@ namespace TrpgImmersiveIllustrationModule {
                 </div>
             </div>
             <div class="immersive-stage-caption" id="immersiveStageCaption"></div>
+            <div class="immersive-stage-track" id="immersiveStageTrack" hidden></div>
             <div class="immersive-history" id="immersiveHistory" hidden></div>
         `;
         // 先挂在 body 上保证 init 时按钮可绑定；随后 mountStage 会移入宿主。

@@ -36,6 +36,11 @@ namespace TrpgImmersiveMusicModule {
     const SUSTAIN_OVERLAP_RATIO = 0.16;
     const SUSTAIN_OVERLAP_MIN = 0.3;
     const SUSTAIN_OVERLAP_MAX = 0.75;
+    /**
+     * 外链曲目播放时底床压到的电平（约 -8.5dB）。不压到 0：
+     * 曲库加载失败/缓冲卡顿时，底床必须已经在那儿，而不是「先静音再补救」。
+     */
+    const BED_DUCK_LEVEL = 0.38;
 
     const INTENSITY_SPECS: Record<ImmersiveIntensity, { gain: number; tempo: number; density: number }> = {
         low: { gain: 0.82, tempo: 0.92, density: 0.72 },
@@ -61,6 +66,18 @@ namespace TrpgImmersiveMusicModule {
     let mixInput: GainNode | null = null;
     /** 只作用于配乐的静音增益；环境音走自己的总线，因此「配乐静音」不会连环境音一起关掉。 */
     let musicMuteGain: GainNode | null = null;
+    /**
+     * 底床增益：外链曲目播放时把程序化底床压到 `BED_DUCK_LEVEL`，但**永不停止**。
+     * 外链退出/失败时再抬回 1，保证任何时刻都有声音托底。
+     */
+    let bedGain: GainNode | null = null;
+    /**
+     * 引擎总增益：`music_engine=off` 时整体淡出到静音（含外链轨道），
+     * 但仍保留 AudioContext，避免重新开启时重建整张图。
+     */
+    let engineGain: GainNode | null = null;
+    /** 当前生效引擎（procedural / external / off），由服务端事件驱动。 */
+    let engineMode: "procedural" | "external" | "off" = "procedural";
     let masterReverb: ConvolverNode | null = null;
     let masterReverbFar: ConvolverNode | null = null;
     let masterFarInput: DelayNode | null = null;
@@ -313,6 +330,12 @@ namespace TrpgImmersiveMusicModule {
             mixInput.gain.value = 0.9;
             musicMuteGain = context.createGain();
             musicMuteGain.gain.value = muted ? 0 : 1;
+            // 引擎总增益：off 时整体淡出；外链轨道也挂在它下面，所以 off 一定安静。
+            engineGain = context.createGain();
+            engineGain.gain.value = engineMode === "off" ? 0.0001 : 1;
+            bedGain = context.createGain();
+            bedGain.gain.value = 1;
+            bedGain.connect(engineGain);
 
             // 安全限幅：多声部叠加时优先保护听力，避免高潮段削波。
             // 干声与环境音都必须经过这里，否则限幅器只保护混响、保护不了主输出。
@@ -341,6 +364,7 @@ namespace TrpgImmersiveMusicModule {
             shaper.connect(master);
             master.connect(context.destination);
             // 配乐先过独立静音增益，再进入共享混音汇入点。
+            engineGain.connect(musicMuteGain);
             musicMuteGain.connect(mixInput);
             mixInput.connect(limiter);
 
@@ -350,7 +374,7 @@ namespace TrpgImmersiveMusicModule {
             const reverbGain = context.createGain();
             reverbGain.gain.value = 0.42;
             masterReverb.connect(reverbGain);
-            reverbGain.connect(mixInput);
+            reverbGain.connect(engineGain);
 
             masterReverbFar = context.createConvolver();
             masterReverbFar.buffer = createReverbBuffer(context, qualityTier >= 2 ? 1.8 : 3.2);
@@ -360,7 +384,7 @@ namespace TrpgImmersiveMusicModule {
             farGain.gain.value = 0.34;
             masterFarInput.connect(masterReverbFar);
             masterReverbFar.connect(farGain);
-            farGain.connect(mixInput);
+            farGain.connect(engineGain);
 
             // 短延迟用做「回声 cue」，只在关键动机上发送，避免整首都在浴室里。
             masterDelay = context.createDelay(1.2);
@@ -376,7 +400,7 @@ namespace TrpgImmersiveMusicModule {
             const delayOut = context.createGain();
             delayOut.gain.value = 0.35;
             masterDelay.connect(delayOut);
-            delayOut.connect(mixInput);
+            delayOut.connect(engineGain);
 
             noiseBuffer = createNoiseBuffer(context, 2);
             return context;
@@ -620,6 +644,15 @@ namespace TrpgImmersiveMusicModule {
         /** 本条总线接下来要演奏的绝对小节序号（跨循环连续）。 */
         positionBars(): number {
             return this.cycle * this.timeline.totalBars + this.barIndex;
+        }
+
+        /** 外链衔接用：当前小节长度、距下一个小节线的秒数、当前小节位置。 */
+        barTiming(): { barSeconds: number; nextBarIn: number; positionBars: number } {
+            return {
+                barSeconds: Math.max(0.1, this.timeline.barDuration),
+                nextBarIn: Math.max(0, this.nextBarTime - this.ctx.currentTime),
+                positionBars: this.positionBars(),
+            };
         }
 
         epoch(): number {
@@ -1246,13 +1279,13 @@ namespace TrpgImmersiveMusicModule {
         startPosition: number | null = null,
     ): void {
         const ctx = ensureContext();
-        if (!ctx || !musicMuteGain || !masterReverb || !masterReverbFar || !masterFarInput || !masterDelay || !noiseBuffer) return;
+        if (!ctx || !bedGain || !engineGain || !masterReverb || !masterReverbFar || !masterFarInput || !masterDelay || !noiseBuffer) return;
         const spec = TrpgImmersiveMusicArranger.resolveSpec(plan);
         const bus = new MusicBus(
             ctx,
             plan,
             spec,
-            musicMuteGain,
+            bedGain,
             masterReverb,
             masterReverbFar,
             masterFarInput,
@@ -1296,7 +1329,7 @@ namespace TrpgImmersiveMusicModule {
         if (!liveBuses.length) {
             // 所有总线都已结束但仍有活动 plan：说明被异常清空过（例如上下文被打断），
             // 重建一条总线，而不是让调度器静默退出。
-            if (activePlan && !muted && context.state === "running") {
+            if (activePlan && !muted && context.state === "running" && engineMode !== "off") {
                 activeSignature = "";
                 switchBus(activePlan);
                 return;
@@ -1330,7 +1363,7 @@ namespace TrpgImmersiveMusicModule {
     }
 
     function applyDuck(): void {
-        const audible = Boolean(activePlan) && !muted && Boolean(context) && liveBuses.length > 0;
+        const audible = Boolean(activePlan) && !muted && Boolean(context) && liveBuses.length > 0 && engineMode !== "off";
         const shouldDuck = audible && activePlan?.duck_bgm !== false;
         try {
             window.TrpgBgm?.setDuck?.(shouldDuck);
@@ -1357,6 +1390,13 @@ namespace TrpgImmersiveMusicModule {
         if (!plan || !plan.profile) return;
         const normalized = normalizePlan(plan);
         activePlan = normalized;
+        // 引擎关闭：只记住最新谱面，等重新开启时再重建；期间不补发任何事件。
+        if (engineMode === "off") {
+            queuedPlan = normalized;
+            const signature = contentSignature(normalized);
+            activeSignature = signature;
+            return;
+        }
         const signature = contentSignature(normalized);
         const anchor = anchorFromPlan(normalized);
         // 每次消息都刷新共享位置；但忽略明显过期的状态快照（例如页面加载时缓存的
@@ -1474,6 +1514,8 @@ namespace TrpgImmersiveMusicModule {
         master = null;
         mixInput = null;
         musicMuteGain = null;
+        bedGain = null;
+        engineGain = null;
         masterReverb = null;
         masterReverbFar = null;
         masterFarInput = null;
@@ -1498,7 +1540,7 @@ namespace TrpgImmersiveMusicModule {
         if (musicMuteGain && context) {
             musicMuteGain.gain.setTargetAtTime(muted ? 0 : 1, context.currentTime, 0.12);
         }
-        if (!muted && activePlan) {
+        if (!muted && activePlan && engineMode !== "off") {
             if (!liveBuses.length) {
                 const ctx = ensureContext();
                 if (ctx && ctx.state === "running") {
@@ -1540,13 +1582,13 @@ namespace TrpgImmersiveMusicModule {
         if (!ctx) return false;
         if (ctx.state === "suspended") {
             void ctx.resume().then(() => {
-                if (ctx.state === "running" && activePlan && !liveBuses.length && !muted) {
+                if (ctx.state === "running" && activePlan && !liveBuses.length && !muted && engineMode !== "off") {
                     activeSignature = "";
                     switchBus(activePlan, null, startPositionBars(null, syncAnchor));
                 }
             }).catch(() => undefined);
         }
-        if (ctx.state === "running" && activePlan && !liveBuses.length && !muted) {
+        if (ctx.state === "running" && activePlan && !liveBuses.length && !muted && engineMode !== "off") {
             activeSignature = "";
             switchBus(activePlan, null, startPositionBars(null, syncAnchor));
         }
@@ -1555,7 +1597,7 @@ namespace TrpgImmersiveMusicModule {
     }
 
     export function isRunning(): boolean {
-        return Boolean(activePlan) && Boolean(context) && liveBuses.length > 0 && !muted;
+        return Boolean(activePlan) && Boolean(context) && liveBuses.length > 0 && !muted && engineMode !== "off";
     }
 
     export function currentPlan(): ImmersiveMusicPlan | null {
@@ -1564,6 +1606,99 @@ namespace TrpgImmersiveMusicModule {
 
     export function quality(): number {
         return qualityTier;
+    }
+
+    /**
+     * 引擎切换（P4）：`off` 时用指数淡化在 `fadeMs` 内把整体压到静音，
+     * 并清空总线停止补发；`procedural`/`external` 时把总增益抬回 1，
+     * 若此前没有总线则按共享位置重建，保证不是硬切。
+     */
+    export function setEngineMode(mode: string, fadeMs = 2200): void {
+        const next = mode === "external" || mode === "off" ? mode : "procedural";
+        const previous = engineMode;
+        engineMode = next;
+        const ctx = ensureContext();
+        if (!ctx || !engineGain) return;
+        const seconds = Math.max(0.35, Math.min(12, Number(fadeMs || 2200) / 1000));
+        const now = ctx.currentTime;
+        const gain = engineGain.gain;
+        gain.cancelScheduledValues(now);
+        if (next === "off") {
+            gain.setValueAtTime(Math.max(0.0001, gain.value), now);
+            gain.exponentialRampToValueAtTime(0.0001, now + seconds);
+            window.setTimeout(() => {
+                if (engineMode !== "off") return;
+                activeSignature = "";
+                for (const bus of liveBuses.slice()) bus.fadeOut(context?.currentTime ?? now, 0.25);
+                liveBuses = [];
+                stopScheduler();
+                applyDuck();
+            }, Math.round(seconds * 1000) + 80);
+            return;
+        }
+        gain.setValueAtTime(Math.max(0.0001, gain.value), now);
+        gain.exponentialRampToValueAtTime(1, now + Math.min(seconds, 3));
+        if (previous === "off" && activePlan && !muted && ctx.state === "running" && !liveBuses.length) {
+            activeSignature = "";
+            switchBus(activePlan, null, startPositionBars(null, syncAnchor));
+        }
+    }
+
+    export function currentEngineMode(): "procedural" | "external" | "off" {
+        return engineMode;
+    }
+
+    /**
+     * 底床电平的等功率斜变：外链淡入时底床按 cos 曲线压下、外链淡出时按 cos 抬起，
+     * 与外部轨道的 sin 曲线配对，功率之和恒定，不会在中点掉 3dB。
+     */
+    export function rampBedLevel(target: number, seconds: number, rising: boolean): void {
+        const ctx = context;
+        if (!ctx || !bedGain) return;
+        const gain = bedGain.gain;
+        const now = ctx.currentTime;
+        const from = Math.max(0.0001, gain.value);
+        const to = clamp(Number(target), 0.0001, 1);
+        const duration = Math.max(0.08, Number(seconds) || 0.08);
+        const samples = 64;
+        const curve = new Float32Array(samples);
+        for (let index = 0; index < samples; index += 1) {
+            const progress = samples <= 1 ? 1 : index / (samples - 1);
+            const shape = rising
+                ? Math.sin((progress * Math.PI) / 2)
+                : Math.cos((progress * Math.PI) / 2);
+            curve[index] = Math.max(0.0001, from + (to - from) * shape);
+        }
+        gain.cancelScheduledValues(now);
+        gain.setValueAtTime(from, now);
+        try {
+            gain.setValueCurveAtTime(curve, now, duration);
+        } catch {
+            gain.exponentialRampToValueAtTime(to, now + duration);
+        }
+    }
+
+    export function bedDuckLevel(): number {
+        return BED_DUCK_LEVEL;
+    }
+
+    /**
+     * 外链播放器的汇入点：引擎总增益（受 off / 静音 / 语音 ducking 控制），
+     * 不经过底床增益，所以压低底床不会连带压低外链曲目。
+     */
+    export function externalInput(): GainNode | null {
+        const ctx = ensureContext();
+        return ctx && engineGain ? engineGain : null;
+    }
+
+    export function barTiming(): { barSeconds: number; nextBarIn: number; positionBars: number } | null {
+        const live = liveBuses[liveBuses.length - 1];
+        if (!live || !context) return null;
+        return live.barTiming();
+    }
+
+    export function audioClock(): number {
+        return context ? context.currentTime : 0;
     }
 
     export function diagnostics(): ImmersiveMusicDiagnostics {
@@ -1603,4 +1738,12 @@ window.TrpgImmersiveMusic = {
     unlock: TrpgImmersiveMusicModule.unlock,
     isRunning: TrpgImmersiveMusicModule.isRunning,
     diagnostics: TrpgImmersiveMusicModule.diagnostics,
+    // P3/P4 接入点：引擎总增益、底床等功率斜变、外链汇入点与小节时基。
+    setEngineMode: TrpgImmersiveMusicModule.setEngineMode,
+    currentEngineMode: TrpgImmersiveMusicModule.currentEngineMode,
+    rampBedLevel: TrpgImmersiveMusicModule.rampBedLevel,
+    bedDuckLevel: TrpgImmersiveMusicModule.bedDuckLevel,
+    externalInput: TrpgImmersiveMusicModule.externalInput,
+    barTiming: TrpgImmersiveMusicModule.barTiming,
+    audioClock: TrpgImmersiveMusicModule.audioClock,
 };
