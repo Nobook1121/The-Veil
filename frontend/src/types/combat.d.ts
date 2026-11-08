@@ -14,6 +14,12 @@ interface CombatParticipantState {
     used_dodge?: boolean;
     used_counter?: boolean;
     surprised?: boolean;
+    actions_remaining?: number;
+    actions_per_round?: number;
+    reactions_this_round?: number;
+    ready_weapon?: boolean;
+    disengaged?: boolean;
+    dying?: boolean;
 }
 
 interface CombatWeaponOption {
@@ -55,7 +61,17 @@ interface CombatStatePayload {
     summary?: string;
 }
 
-type CombatActionKind = "attack" | "shoot" | "maneuver" | "next" | "end";
+type CombatActionKind =
+    | "attack"
+    | "shoot"
+    | "maneuver"
+    | "next"
+    | "end"
+    | "delay"
+    | "disengage"
+    | "reload"
+    | "ready"
+    | "cast";
 
 interface CombatActionRequest {
     action: CombatActionKind;
@@ -67,6 +83,10 @@ interface CombatActionRequest {
     bonus_dice?: number;
     penalty_dice?: number;
     reason?: string;
+    spell?: string;
+    cast_time?: "instant" | "one_round" | "two_rounds";
+    mp_cost?: number;
+    san_cost?: number;
 }
 
 interface CombatActionResponse {

@@ -102,6 +102,52 @@ HOUSE_RULE_DEFINITIONS = {
     # 房主与房管默认可用；user_ids 里的普通成员额外获得权限。
     "world_override_enabled": {"type": "boolean", "default": True, "ai_prompt": False},
     "world_override_user_ids": {"type": "user_ids", "default": [], "max_items": 50, "ai_prompt": False},
+    # 战斗规则留白配置（报告 §9）。这些都不是 CoC7 核心规则，默认值取最保守解释。
+    # 突袭：bonus_die = 未准备目标近战给攻击者 1 奖励骰；auto_success = 自动成功（除大失败）。
+    "combat_surprise_model": {
+        "type": "enum",
+        "default": "bonus_die",
+        "values": ["bonus_die", "auto_success"],
+        "ai_prompt": False,
+    },
+    # 准备武器耗时：规则书未规定（p96 只说已准备武器 DEX+50）。
+    "combat_ready_weapon_cost": {
+        "type": "enum",
+        "default": "free",
+        "values": ["free", "action", "round"],
+        "ai_prompt": False,
+    },
+    # 施法打断：keeper = KP 裁定（规则书原文 p206）；any_damage = 当轮受伤即打断；never = 不打断。
+    "combat_cast_interrupt": {
+        "type": "enum",
+        "default": "keeper",
+        "values": ["keeper", "any_damage", "never"],
+        "ai_prompt": False,
+    },
+    "combat_cast_defense_allowed": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 重伤是否限制行动：规则书未规定，默认不额外惩罚。
+    "combat_major_wound_penalty": {
+        "type": "enum",
+        "default": "none",
+        "values": ["none", "cannot_act"],
+        "ai_prompt": False,
+    },
+    # 盾牌：核心无盾牌条目（p371-374），默认禁用独立格挡；counter_alias 仅把盾牌视为反击描述。
+    "combat_shield_action": {
+        "type": "enum",
+        "default": "disabled",
+        "values": ["disabled", "counter_alias"],
+        "ai_prompt": False,
+    },
+    # 房规：DEX 达到阈值给 1 次额外行动。默认关闭；核心规则没有此条（p86）。
+    "combat_dex_extra_action_threshold": {
+        "type": "nullable_integer",
+        "default": None,
+        "min": 1,
+        "max": 100,
+        "ai_prompt": False,
+    },
+    "combat_dying_check": {"type": "boolean", "default": True, "ai_prompt": False},
 }
 DEFAULT_ROOM_HOUSE_RULES = {key: spec["default"] for key, spec in HOUSE_RULE_DEFINITIONS.items()}
 

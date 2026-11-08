@@ -94,6 +94,12 @@
                 if (status !== "active") tags.push(`<span class="combat-tag is-status">${escapeHtml(statusLabel(status))}</span>`);
                 if (item.major_wound) tags.push('<span class="combat-tag is-wound">重伤</span>');
                 if (item.surprised) tags.push('<span class="combat-tag">被突袭</span>');
+                if (safeNum(item.actions_per_round, 1) > 1) {
+                    tags.push(`<span class="combat-tag">行动 ${safeNum(item.actions_remaining, 0)}/${safeNum(item.actions_per_round, 1)}</span>`);
+                }
+                if (item.ready_weapon) tags.push('<span class="combat-tag">已准备武器</span>');
+                if (item.disengaged) tags.push('<span class="combat-tag">已脱离</span>');
+                if (item.dying) tags.push('<span class="combat-tag is-status">濒死</span>');
                 if (item.used_dodge) tags.push('<span class="combat-tag">已闪避</span>');
                 if (item.used_counter) tags.push('<span class="combat-tag">已反击</span>');
                 return `
@@ -124,7 +130,7 @@
         const round = safeNum(state.round, 1);
         const current = String(state.current || "");
         const surprised = (state.surprised || []).length > 0 && round === 1
-            ? '<span class="combat-current-note">突袭轮：被突袭者暂不能行动</span>'
+            ? '<span class="combat-current-note">首轮突袭：仅修正攻击检定，不跳过行动</span>'
             : "";
         container.innerHTML = `
             <div class="combat-current-round">第 ${round} 轮</div>
@@ -157,6 +163,10 @@
             '<button type="button" class="combat-action-btn" data-combat-action="attack"><i class="fa fa-crosshairs" aria-hidden="true"></i><span>攻击</span></button>',
             '<button type="button" class="combat-action-btn" data-combat-action="shoot"><i class="fa fa-bullseye" aria-hidden="true"></i><span>射击</span></button>',
             '<button type="button" class="combat-action-btn" data-combat-action="maneuver"><i class="fa fa-hand-paper-o" aria-hidden="true"></i><span>战技</span></button>',
+            '<button type="button" class="combat-action-btn is-ghost" data-combat-action="delay"><i class="fa fa-hourglass-half" aria-hidden="true"></i><span>延迟</span></button>',
+            '<button type="button" class="combat-action-btn is-ghost" data-combat-action="disengage"><i class="fa fa-sign-out" aria-hidden="true"></i><span>脱离</span></button>',
+            '<button type="button" class="combat-action-btn is-ghost" data-combat-action="reload"><i class="fa fa-refresh" aria-hidden="true"></i><span>装填</span></button>',
+            '<button type="button" class="combat-action-btn is-ghost" data-combat-action="ready"><i class="fa fa-flag" aria-hidden="true"></i><span>准备武器</span></button>',
             state.can_advance
                 ? `<button type="button" class="combat-action-btn is-ghost" data-combat-action="next"><i class="fa fa-forward" aria-hidden="true"></i><span>${escapeHtml(nextLabel)}</span></button>`
                 : "",
@@ -388,6 +398,10 @@
             });
             if (!confirmed) return;
             await submitAction({ action: "end" });
+            return;
+        }
+        if (action === "delay" || action === "disengage" || action === "reload" || action === "ready") {
+            await submitAction({ action: action as CombatActionRequest["action"] });
             return;
         }
         if (action === "attack" || action === "shoot" || action === "maneuver") {

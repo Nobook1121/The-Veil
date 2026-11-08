@@ -36,7 +36,19 @@ bp = Blueprint("combat", __name__)
 logger = logging.getLogger(__name__)
 
 MELEE_MODES = {"attack", "maneuver"}
-SUPPORTED_ACTIONS = {"attack", "shoot", "maneuver", "next", "end"}
+SUPPORTED_ACTIONS = {
+    "attack",
+    "shoot",
+    "maneuver",
+    "next",
+    "end",
+    "delay",
+    "disengage",
+    "reload",
+    "ready",
+    "cast",
+}
+UTILITY_ACTIONS = {"delay", "disengage", "reload", "ready", "cast"}
 
 
 class CombatRoomContext:
@@ -236,7 +248,35 @@ def _action_arguments(payload: dict[str, Any], prepared: dict[str, Any]) -> dict
     }
 
 
+def _run_utility_action(action: str, payload: dict[str, Any], context: CombatRoomContext) -> dict[str, Any]:
+    """不经过玩家掷骰的辅助动作：延迟、脱离、装填、准备武器、施法。"""
+    actor = str(payload.get("actor") or "").strip()
+    if action == "delay":
+        return combat.delay_combatant({}, context)
+    if action == "disengage":
+        return combat.disengage_combatant({"actor": actor}, context)
+    if action == "ready":
+        return combat.ready_combatant({"actor": actor}, context)
+    if action == "reload":
+        return combat.reload_combatant(
+            {"actor": actor, "weapon": str(payload.get("weapon") or "").strip()},
+            context,
+        )
+    return combat.cast_spell(
+        {
+            "caster": actor,
+            "spell": str(payload.get("spell") or "").strip(),
+            "cast_time": str(payload.get("cast_time") or "instant"),
+            "mp_cost": payload.get("mp_cost") or 0,
+            "san_cost": payload.get("san_cost") or 0,
+        },
+        context,
+    )
+
+
 def _run_action(action: str, payload: dict[str, Any], context: CombatRoomContext) -> dict[str, Any]:
+    if action in UTILITY_ACTIONS:
+        return _run_utility_action(action, payload, context)
     prepared = _prepare_check(context, action, payload)
     if prepared.get("error"):
         return prepared

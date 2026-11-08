@@ -28,10 +28,16 @@ from trpg_server.agents.tools.dice import (
     _result_message,
     _success_level,
 )
+from trpg_server.combat.registry import get_ruleset
+from trpg_server.combat.rulesets.coc7 import (
+    LEVEL_RANK,
+    SKIPPED_STATUS,
+    build_and_damage_bonus,
+)
+from trpg_server.combat.scheduler import TurnScheduler
+from trpg_server.combat.settings import CombatSettings, resolve_settings
 from trpg_server.json_store import write_json_atomic
 
-LEVEL_RANK = {"fumble": -1, "failure": 0, "regular": 1, "hard": 2, "extreme": 3, "critical": 4}
-SKIPPED_STATUS = {"unconscious", "dying", "dead"}
 MAX_BURST = 10
 
 UNARMED_WEAPON = {
@@ -143,6 +149,36 @@ def _percentile_meta(
     )
 
 
+def _combat_settings(context: Any) -> CombatSettings:
+    info = context.room_info() if hasattr(context, "room_info") else None
+    return resolve_settings(info)
+
+
+def _combat_ruleset(combat: dict[str, Any], settings: CombatSettings):
+    return get_ruleset(str(combat.get("ruleset") or settings.ruleset_id or "coc7"))
+
+
+def _is_casting(combat: dict[str, Any], name: str) -> bool:
+    round_no = int(combat.get("round") or 1)
+    for record in combat.get("casting") or []:
+        if not isinstance(record, dict) or record.get("caster") != name:
+            continue
+        if int(record.get("resolve_round") or 0) >= round_no:
+            return True
+    return False
+
+
+def _scheduler(combat: dict[str, Any], context: Any) -> TurnScheduler:
+    settings = _combat_settings(context)
+    thresholds = _context_thresholds(context) if context is not None else (1, 96)
+    return TurnScheduler(
+        _combat_ruleset(combat, settings),
+        settings,
+        roll_d100=lambda: _percentile_roll(_roller)[0],
+        thresholds=thresholds,
+    )
+
+
 def _save_combat(context: Any, combat: dict[str, Any]) -> None:
     room_dir = getattr(context, "room_dir", None)
     if not room_dir:
@@ -175,6 +211,12 @@ def _combat_summary_state(combat: dict[str, Any]) -> dict[str, Any]:
                 "major_wound": bool(combatant.get("major_wound")),
                 "used_dodge": bool(combatant.get("used_dodge")),
                 "used_counter": bool(combatant.get("used_counter")),
+                "actions_remaining": int(combatant.get("actions_remaining") or 0),
+                "actions_per_round": int(combatant.get("actions_per_round") or 1),
+                "reactions_this_round": int(combatant.get("reactions_this_round") or 0),
+                "ready_weapon": bool(combatant.get("ready_weapon")),
+                "disengaged": bool(combatant.get("disengaged")),
+                "dying": bool(combatant.get("dying")),
                 "surprised": _is_surprised(combat, combatant),
             }
         )
@@ -185,6 +227,7 @@ def _combat_summary_state(combat: dict[str, Any]) -> dict[str, Any]:
         "current": current,
         "order": participants,
         "surprised": combat.get("surprised") or [],
+        "ruleset": combat.get("ruleset") or "coc7",
     }
 
 
@@ -200,23 +243,6 @@ def _append_log(combat: dict[str, Any], text: str) -> None:
 # ---------------------------------------------------------------------------
 # 角色数值
 # ---------------------------------------------------------------------------
-def build_and_damage_bonus(str_value: int, siz_value: int) -> tuple[int, str, list[tuple[int, int]]]:
-    """按 COC7 体格表由 STR+SIZ 推导（体格, 伤害加值文本, DB 骰点）。"""
-    total = max(0, str_value) + max(0, siz_value)
-    if total <= 64:
-        return -2, "-2", []
-    if total <= 84:
-        return -1, "-1", []
-    if total <= 124:
-        return 0, "0", []
-    if total <= 164:
-        return 1, "+1D4", [(1, 4)]
-    if total <= 204:
-        return 2, "+1D6", [(1, 6)]
-    extra = max(0, (total - 205) // 80)
-    return 3 + extra, f"+{2 + extra}D6", [(2 + extra, 6)]
-
-
 def _card_attributes(card: dict[str, Any]) -> dict[str, Any]:
     attributes = card.get("attributes")
     return attributes if isinstance(attributes, dict) else {}
@@ -248,6 +274,7 @@ def _combatant_from_member(member: dict[str, Any]) -> dict[str, Any]:
     strength = max(0, _as_int(attrs.get("STR"), _as_int(card.get("str"), 0)))
     size = max(0, _as_int(attrs.get("SIZ"), _as_int(card.get("siz"), 0)))
     constitution = max(0, _as_int(attrs.get("CON"), _as_int(card.get("con"), 50)))
+    power = max(0, _as_int(attrs.get("POW"), _as_int(card.get("pow"), 50)))
     build, damage_bonus, db_terms = build_and_damage_bonus(strength, size)
     state = member.get("character_state") if isinstance(member.get("character_state"), dict) else {}
     hp, max_hp = _card_hp(card, state)
@@ -271,6 +298,9 @@ def _combatant_from_member(member: dict[str, Any]) -> dict[str, Any]:
         "str": strength,
         "siz": size,
         "con": constitution,
+        "pow": power,
+        "mp": max(0, _as_int(state.get("magic_points", state.get("mp")), power // 5)),
+        "san": max(0, _as_int(state.get("sanity", state.get("san")), card.get("sanity", 0))),
         "build": build,
         "damage_bonus": damage_bonus,
         "db_terms": [list(term) for term in db_terms],
@@ -282,12 +312,33 @@ def _combatant_from_member(member: dict[str, Any]) -> dict[str, Any]:
         "dying": status == "dying",
         "unconscious": status == "unconscious",
         "dead": status == "dead",
+        "actions_base": 1,
+        "actions_remaining": 1,
+        "actions_per_round": 1,
+        "reactions_this_round": 0,
+        "ready_weapon": bool(state.get("ready_weapon")),
+        "fighting": 0,
         "used_dodge": False,
         "used_counter": False,
         "first_aid_used": bool(state.get("first_aid_used")),
         "ammo": {},
         "conditions": [],
     }
+
+
+def _spec_actions_base(spec: dict[str, Any], weapons: list[dict[str, Any]]) -> int:
+    """NPC 每轮行动次数：显式字段优先，其次取武器表里的攻击次数。"""
+    explicit = spec.get("actions_per_round", spec.get("attacks"))
+    if explicit not in (None, ""):
+        match = re.search(r"\d+", str(explicit))
+        if match:
+            return max(1, int(match.group(0)))
+    counts = [
+        weapon_catalog.parse_attacks(weapon.get("attacks"))["count"]
+        for weapon in weapons
+        if isinstance(weapon, dict)
+    ]
+    return max([1, *counts])
 
 
 def _combatant_from_spec(spec: dict[str, Any]) -> dict[str, Any]:
@@ -298,6 +349,7 @@ def _combatant_from_spec(spec: dict[str, Any]) -> dict[str, Any]:
     strength = max(0, _as_int(spec.get("str"), 50))
     size = max(0, _as_int(spec.get("siz"), 50))
     constitution = max(0, _as_int(spec.get("con"), 50))
+    power = max(0, _as_int(spec.get("pow"), 50))
     build_value = spec.get("build")
     if build_value in (None, ""):
         build, damage_bonus, db_terms = build_and_damage_bonus(strength, size)
@@ -324,6 +376,9 @@ def _combatant_from_spec(spec: dict[str, Any]) -> dict[str, Any]:
         "str": strength,
         "siz": size,
         "con": constitution,
+        "pow": power,
+        "mp": max(0, _as_int(spec.get("mp"), power // 5)),
+        "san": max(0, _as_int(spec.get("san"), power)),
         "build": build,
         "damage_bonus": damage_bonus,
         "db_terms": [list(term) for term in db_terms],
@@ -335,6 +390,12 @@ def _combatant_from_spec(spec: dict[str, Any]) -> dict[str, Any]:
         "dying": status == "dying",
         "unconscious": status == "unconscious",
         "dead": status == "dead",
+        "actions_base": _spec_actions_base(spec, weapons),
+        "actions_remaining": _spec_actions_base(spec, weapons),
+        "actions_per_round": _spec_actions_base(spec, weapons),
+        "reactions_this_round": 0,
+        "ready_weapon": bool(spec.get("ready_weapon")),
+        "fighting": 0,
         "used_dodge": False,
         "used_counter": False,
         "first_aid_used": False,
@@ -584,6 +645,7 @@ def _compute_damage(
     extreme: bool,
     melee: bool,
     segment_index: int = 0,
+    allow_impale: bool = True,
 ) -> tuple[int, str]:
     """按武器伤害、伤害加值与极限成功/贯穿规则计算伤害。"""
     rules = weapon_catalog.weapon_rules(weapon)
@@ -602,10 +664,10 @@ def _compute_damage(
     if not add_db and not half_db:
         db = []
 
-    if extreme and not impale:
+    if extreme and not (impale and allow_impale):
         total = _max_roll(terms) + fixed + _max_roll(db)
         return max(0, total), f"极限成功·满伤害（{parsed.get('raw')}{' +DB' if db else ''}）"
-    if extreme and impale:
+    if extreme and impale and allow_impale:
         extra, _ = _damage_roller(terms)
         total = _max_roll(terms) + fixed + extra + _max_roll(db)
         return max(0, total), f"极限成功·贯穿满伤害并追加一次武器伤害骰 {terms}"
@@ -662,67 +724,31 @@ def _apply_damage(
     armor: int | None = None,
     ignore_armor: bool = False,
 ) -> dict[str, Any]:
-    """结算一次伤害：护甲、重伤、昏迷、濒死与死亡。"""
-    damage = max(0, int(amount))
-    armor_value = max(0, int(armor if armor is not None else combatant.get("armor") or 0))
-    effective = damage if ignore_armor else max(0, damage - armor_value)
-    before = int(combatant.get("hp") or 0)
-    max_hp = max(1, int(combatant.get("max_hp") or 1))
-    result: dict[str, Any] = {
-        "damage": damage,
-        "armor": 0 if ignore_armor else armor_value,
-        "effective": effective,
-        "hp_before": before,
-        "major_wound": bool(combatant.get("major_wound")),
-    }
-    if combatant.get("dead"):
-        combatant["hp"] = 0
-        result.update({"hp_after": 0, "dead": True, "dying": bool(combatant.get("dying")), "unconscious": True})
-        result["note"] = "目标已经死亡，伤害不再改变状态"
-        return result
-    if effective > max_hp:
-        combatant.update({"hp": 0, "dead": True, "dying": False, "unconscious": True})
-        result.update({"hp_after": 0, "dead": True, "dying": False, "unconscious": True, "major_wound": True})
-        result["note"] = "单次伤害超过最大生命值，目标死亡"
-        _persist_player_state(context, combatant)
-        return result
-
-    after = max(0, before - effective)
-    combatant["hp"] = after
-    major = effective >= max_hp / 2 and effective > 0
-    if major:
-        combatant["major_wound"] = True
-    dying = unconscious = False
-    con_roll = con_level = None
-    if after <= 0:
-        if major or combatant.get("major_wound"):
-            dying = True
-        else:
-            unconscious = True
-    elif major:
-        con_value = max(1, min(99, int(combatant.get("con") or 50)))
-        con_roll, _ = _percentile_roll(_roller)
-        critical, fumble = _context_thresholds(context)
-        con_level = _success_level(con_roll, con_value, critical, fumble)
-        if LEVEL_RANK.get(con_level, 0) <= 0:
-            unconscious = True
-    if dying:
-        combatant["dying"] = True
-        combatant["unconscious"] = True
-    elif unconscious:
-        combatant["unconscious"] = True
-    result.update(
-        {
-            "hp_after": after,
-            "major_wound": bool(combatant.get("major_wound")),
-            "dying": bool(combatant.get("dying")),
-            "unconscious": bool(combatant.get("unconscious")),
-            "dead": bool(combatant.get("dead")),
-            "con_check": None
-            if con_roll is None
-            else {"roll": con_roll, "value": combatant.get("con"), "level": con_level},
-        }
+    """结算一次伤害；具体阈值由规则书插件决定。"""
+    settings = _combat_settings(context)
+    ruleset = get_ruleset(str(combatant.get("ruleset") or settings.ruleset_id or "coc7"))
+    outcome = ruleset.resolve_damage(
+        combatant,
+        amount,
+        armor=max(0, int(armor if armor is not None else combatant.get("armor") or 0)),
+        ignore_armor=ignore_armor,
+        roll_d100=lambda: _percentile_roll(_roller)[0],
+        thresholds=_context_thresholds(context),
+        settings=settings,
     )
+    result: dict[str, Any] = {
+        "damage": outcome.damage,
+        "armor": outcome.armor,
+        "effective": outcome.effective,
+        "hp_before": outcome.hp_before,
+        "hp_after": outcome.hp_after,
+        "major_wound": outcome.major_wound,
+        "dying": outcome.dying,
+        "unconscious": outcome.unconscious,
+        "dead": outcome.dead,
+        "note": outcome.note,
+        "con_check": outcome.extra.get("con_check"),
+    }
     _persist_player_state(context, combatant)
     return result
 
@@ -821,20 +847,37 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     if not combatants:
         return {"error": "没有可加入战斗的参与者（请传入 participants 或确保房间成员已绑定角色卡）"}
 
+    settings = _combat_settings(context)
+    ruleset = get_ruleset(settings.ruleset_id)
+    for combatant in combatants.values():
+        combatant["ruleset"] = ruleset.ruleset_id
+        combatant["fighting"] = _resolve_skill_value(
+            combatant,
+            _player_card(combatant, context),
+            names=MELEE_SKILL_NAMES,
+            default=25,
+        )[0]
+        combatant["initiative"] = ruleset.roll_initiative(combatant, _roller, settings)
+
     if arguments.get("initiative_check"):
+        # 可选先攻检定（p105）：大成功首次攻击 1 奖励骰，大失败失去首次攻击。
         critical, fumble = _context_thresholds(context)
         for combatant in combatants.values():
             roll, _ = _percentile_roll(_roller)
             level = _success_level(roll, max(1, int(combatant.get("dex") or 1)), critical, fumble)
             combatant["initiative"] = LEVEL_RANK.get(level, 0) * 1000 + int(combatant.get("dex") or 0)
             combatant["initiative_roll"] = roll
+            if level == "critical":
+                combatant["first_attack_bonus"] = 1
+            elif level == "fumble":
+                combatant["lost_first_action"] = True
 
     order = sorted(
         combatants.keys(),
         key=lambda name: (
             -int(combatants[name].get("initiative") or 0),
+            -int(ruleset.initiative_tiebreak(combatants[name]) or 0),
             -int(combatants[name].get("dex") or 0),
-            -int((_resolve_skill_value(combatants[name], _player_card(combatants[name], context), names=MELEE_SKILL_NAMES)[0]) or 0),
         ),
     )
     combat = {
@@ -844,9 +887,11 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         "order": order,
         "combatants": combatants,
         "surprised": [str(name) for name in arguments.get("surprised") or [] if str(name).strip()],
+        "ruleset": ruleset.ruleset_id,
         "started_at": _timestamp(),
         "log": [],
     }
+    _scheduler(combat, context).begin_round(combat)
     _append_log(combat, "战斗开始：" + " → ".join(order))
     _save_combat(context, combat)
     state = _combat_summary_state(combat)
@@ -880,7 +925,11 @@ def _surprised_set(combat: dict[str, Any]) -> set[str]:
 
 
 def _is_surprised(combat: dict[str, Any], combatant: dict[str, Any]) -> bool:
-    """被突袭者在第 1 轮不能行动，也不能闪避/反击。"""
+    """第 1 轮内该角色是否处于被突袭状态。
+
+    突袭是攻击修正，不是“突袭轮”：被突袭者仍然正常行动，只是首轮近战攻击
+    对其自动成功或给攻击者奖励骰（p90-91，报告 §2.5）。
+    """
     if int(combat.get("round") or 1) != 1:
         return False
     names = {str(combatant.get("name") or "").casefold()}
@@ -888,27 +937,14 @@ def _is_surprised(combat: dict[str, Any], combatant: dict[str, Any]) -> bool:
     return bool(names & _surprised_set(combat))
 
 
-def _advance(combat: dict[str, Any]) -> dict[str, Any]:
-    order = combat.get("order") or []
-    if not order:
+def _advance(
+    combat: dict[str, Any], context: Any = None, *, consume_all: bool = False
+) -> dict[str, Any]:
+    if not (combat.get("order") or []):
         return combat
-    turn = int(combat.get("turn") or 0)
-    for _ in range(len(order)):
-        turn += 1
-        if turn >= len(order):
-            turn = 0
-            combat["round"] = int(combat.get("round") or 1) + 1
-            for combatant in (combat.get("combatants") or {}).values():
-                combatant["used_dodge"] = False
-                combatant["used_counter"] = False
-        current = (combat.get("combatants") or {}).get(order[turn]) or {}
-        if str(current.get("status") or "active") in SKIPPED_STATUS:
-            continue
-        if _is_surprised(combat, current):
-            # 突袭轮：被突袭者失去本次行动，进入下一位或下一轮。
-            continue
-        break
-    combat["turn"] = turn
+    scheduler = _scheduler(combat, context)
+    for text in scheduler.advance(combat, consume_all=consume_all):
+        _append_log(combat, text)
     return combat
 
 
@@ -916,11 +952,201 @@ def next_turn(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     combat = _load_combat(context)
     if not combat:
         return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
-    combat = _advance(combat)
+    combat = _advance(combat, context, consume_all=True)
     _save_combat(context, combat)
     state = _combat_summary_state(combat)
     summary = f"进入第 {state['round']} 轮，当前行动者：{state['current']}。"
     return {**state, "summary": summary}
+
+
+def _blocked_by_major_wound(context: Any, actor: dict[str, Any]) -> str | None:
+    """房规把重伤设为“无法行动”时，所有显著行动都要被拦住。"""
+    settings = _combat_settings(context)
+    if settings.major_wound_penalty == "cannot_act" and actor.get("major_wound"):
+        return f"{actor.get('name')} 身负重伤，按房规无法行动"
+    return None
+
+
+def delay_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """延迟到本轮末尾行动；若已经是本轮最后一人，则本轮不再行动（p86）。"""
+    combat = _load_combat(context)
+    if not combat:
+        return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
+    order = combat.get("order") or []
+    turn = int(combat.get("turn") or 0)
+    if not order or not 0 <= turn < len(order):
+        return {"error": "当前没有可延迟的行动者"}
+    actor = (combat.get("combatants") or {}).get(order[turn]) or {}
+    blocked = _blocked_by_major_wound(context, actor)
+    if blocked:
+        return {"error": blocked}
+    if turn >= len(order) - 1:
+        _append_log(combat, f"{actor.get('name')} 已无更晚的顺位，本轮放弃行动。")
+        actor["actions_remaining"] = 0
+        _advance(combat, context, consume_all=True)
+    else:
+        name = order.pop(turn)
+        order.append(name)
+        combat["order"] = order
+        combat["turn"] = turn
+        _append_log(combat, f"{actor.get('name')} 延迟到本轮末尾。")
+    _save_combat(context, combat)
+    state = _combat_summary_state(combat)
+    return {**state, "summary": f"{actor.get('name')} 延迟行动，当前行动者：{state['current']}。"}
+
+
+def disengage_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """脱离近战：本轮标记为已脱离，不再被近战缠住（p91）。"""
+    combat = _load_combat(context)
+    if not combat:
+        return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
+    actor_name = _as_text(arguments.get("actor")) or str((combat.get("order") or [""])[int(combat.get("turn") or 0)])
+    actor = _resolve_combatant(combat, actor_name)
+    if not actor:
+        return {"error": f"actor {actor_name} 不在当前战斗中"}
+    blocked = _blocked_by_major_wound(context, actor)
+    if blocked:
+        return {"error": blocked}
+    actor["disengaged"] = True
+    _append_log(combat, f"{actor.get('name')} 脱离近战。")
+    _advance(combat, context, consume_all=True)
+    _save_combat(context, combat)
+    state = _combat_summary_state(combat)
+    return {**state, "summary": f"{actor.get('name')} 脱离近战，当前行动者：{state['current']}。"}
+
+
+def reload_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """装填/换弹：把指定武器弹药补满，消耗本轮行动（p97）。"""
+    combat = _load_combat(context)
+    if not combat:
+        return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
+    actor_name = _as_text(arguments.get("actor")) or str((combat.get("order") or [""])[int(combat.get("turn") or 0)])
+    actor = _resolve_combatant(combat, actor_name)
+    if not actor:
+        return {"error": f"actor {actor_name} 不在当前战斗中"}
+    blocked = _blocked_by_major_wound(context, actor)
+    if blocked:
+        return {"error": blocked}
+    card = _player_card(actor, context)
+    weapon_name = _as_text(arguments.get("weapon"))
+    weapon = _find_weapon(actor, card, weapon_name) if weapon_name else None
+    if weapon is None:
+        for row in _weapon_rows(actor, card):
+            rules = weapon_catalog.weapon_rules(row)
+            if rules.get("ammoCapacity"):
+                weapon = row
+                break
+    if weapon is None:
+        return {"error": "没有可装填的远程武器"}
+    rules = weapon_catalog.weapon_rules(weapon)
+    capacity = rules.get("ammoCapacity")
+    if not capacity:
+        return {"error": f"{weapon.get('name')} 没有弹匣容量"}
+    key = str(weapon.get("name") or "")
+    ammo = actor.get("ammo") if isinstance(actor.get("ammo"), dict) else {}
+    actor["ammo"] = {**ammo, key: int(capacity)}
+    _append_log(combat, f"{actor.get('name')} 为{key}装填（{capacity} 发）。")
+    _advance(combat, context, consume_all=True)
+    _save_combat(context, combat)
+    state = _combat_summary_state(combat)
+    return {**state, "summary": f"{key} 已装填，当前行动者：{state['current']}。"}
+
+
+def ready_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """准备武器：按房规决定是否消耗行动；准备后射击先攻按 DEX+50（p96）。"""
+    combat = _load_combat(context)
+    if not combat:
+        return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
+    actor_name = _as_text(arguments.get("actor")) or str((combat.get("order") or [""])[int(combat.get("turn") or 0)])
+    actor = _resolve_combatant(combat, actor_name)
+    if not actor:
+        return {"error": f"actor {actor_name} 不在当前战斗中"}
+    blocked = _blocked_by_major_wound(context, actor)
+    if blocked:
+        return {"error": blocked}
+    actor["ready_weapon"] = True
+    settings = _combat_settings(context)
+    cost = settings.ready_weapon_cost
+    if cost in {"action", "round"}:
+        _advance(combat, context, consume_all=True)
+    _append_log(combat, f"{actor.get('name')} 准备武器（耗时：{cost}）。")
+    _save_combat(context, combat)
+    state = _combat_summary_state(combat)
+    return {**state, "summary": f"{actor.get('name')} 已准备武器，当前行动者：{state['current']}。"}
+
+
+def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """战斗内施法：结算时序、MP/SAN 消耗与打断状态，具体效果交给 KP/内容层。"""
+    combat = _load_combat(context)
+    if not combat:
+        return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
+    caster_name = _as_text(arguments.get("caster")) or str((combat.get("order") or [""])[int(combat.get("turn") or 0)])
+    caster = _resolve_combatant(combat, caster_name)
+    if not caster:
+        return {"error": f"caster {caster_name} 不在当前战斗中"}
+    blocked = _blocked_by_major_wound(context, caster)
+    if blocked:
+        return {"error": blocked}
+    spell = _as_text(arguments.get("spell")) or "未命名法术"
+    cast_time = _as_text(arguments.get("cast_time"), "instant").lower()
+    if cast_time not in {"instant", "one_round", "two_rounds"}:
+        return {"error": "cast_time 只能是 instant、one_round 或 two_rounds"}
+    mp_cost = max(0, _as_int(arguments.get("mp_cost"), 0))
+    san_cost = max(0, _as_int(arguments.get("san_cost"), 0))
+    settings = _combat_settings(context)
+    ruleset = _combat_ruleset(combat, settings)
+
+    # 先付费：即使被打断，MP 与 SAN 也不退（p206）。资源扣除交给插件，
+    # 这样换规则书时法术位/职业资源可以按各自的语义处理。
+    mp_result = ruleset.spend_resource(caster, "mp", mp_cost)
+    ruleset.spend_resource(caster, "san", san_cost)
+    overflow = int(mp_result.get("overflow") or 0)
+    overflow_result = None
+    if overflow:
+        overflow_result = _apply_damage(context, caster, overflow, ignore_armor=True)
+    timing = ruleset.spell_timing(cast_time, int(caster.get("dex") or 0))
+    resolve_round = int(combat.get("round") or 1) + int(timing.get("round_offset") or 0)
+    interrupted = False
+    if settings.cast_interrupt == "any_damage" and int(caster.get("damage_taken_this_round") or 0) > 0:
+        interrupted = True
+    elif settings.cast_interrupt == "never":
+        interrupted = False
+    needs_keeper_decision = settings.cast_interrupt == "keeper"
+    record = {
+        "caster": caster.get("name"),
+        "spell": spell,
+        "cast_time": cast_time,
+        "resolve_round": resolve_round,
+        "resolve_dex": timing.get("dex"),
+        "mp_cost": mp_cost,
+        "san_cost": san_cost,
+        "interrupted": interrupted,
+    }
+    combat.setdefault("casting", []).append(record)
+    _append_log(
+        combat,
+        f"{caster.get('name')} 施放{spell}（{cast_time}，MP {mp_cost}，SAN {san_cost}），"
+        f"预计第 {resolve_round} 轮 DEX {timing.get('dex')} 生效。",
+    )
+    _advance(combat, context, consume_all=True)
+    _save_combat(context, combat)
+    state = _combat_summary_state(combat)
+    parts = [f"{caster.get('name')} 施放{spell}"]
+    if interrupted:
+        parts.append("施法被打断，但 MP/SAN 已消耗")
+    elif needs_keeper_decision:
+        parts.append("是否被打断由 KP 裁定")
+    if overflow_result:
+        parts.append(f"MP 不足，溢出 {overflow} 点直接扣除 HP")
+    parts.append(f"当前行动者：{state['current']}")
+    return {
+        **state,
+        "spell": record,
+        "interrupted": interrupted,
+        "needs_keeper_decision": needs_keeper_decision,
+        "mp_overflow_damage": overflow_result,
+        "summary": "；".join(parts) + "。",
+    }
 
 
 def _opposed_rolls(
@@ -947,7 +1173,7 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     combat = _load_combat(context)
     if not combat:
         return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
-    attacker = _resolve_combatant(combat, arguments.get("attacker"))
+    attacker = _resolve_combatant(combat, arguments.get("attacker") or arguments.get("actor"))
     target = _resolve_combatant(combat, arguments.get("target"))
     if not attacker or not target:
         return {"error": "attacker 或 target 不在当前战斗中"}
@@ -955,6 +1181,9 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         return {"error": "attacker 与 target 不能是同一个人"}
     if attacker.get("dead") or attacker.get("unconscious") or attacker.get("dying"):
         return {"error": f"{attacker.get('name')} 当前无法行动（{attacker.get('status')}）"}
+    settings = _combat_settings(context)
+    if settings.major_wound_penalty == "cannot_act" and attacker.get("major_wound"):
+        return {"error": f"{attacker.get('name')} 身负重伤，按房规无法行动"}
     card = _player_card(attacker, context)
     weapon_name = _as_text(arguments.get("weapon"))
     weapon = _find_weapon(attacker, card, weapon_name) if weapon_name else None
@@ -981,19 +1210,53 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         return {"error": "远程攻击请使用 combat.shoot，combat.attack 只处理近战与战技"}
 
     maneuver = _as_text(arguments.get("maneuver")).lower()
-    defense = _as_text(arguments.get("defense"), "dodge").lower() or "dodge"
+    # NPC 默认反击，除非正在撤退；玩家默认闪避（p87）。
+    default_defense = "dodge" if target.get("is_player") else "counter"
+    defense = _as_text(arguments.get("defense"), default_defense).lower() or default_defense
+    if defense == "block":
+        # 核心没有独立格挡；房规开启时把盾牌描述映射为反击（挡开+还击）。
+        if settings.shield_action != "counter_alias":
+            return {"error": "核心规则没有独立格挡动作，请使用 dodge 或 counter（反击含招架）"}
+        defense = "counter"
     if defense not in {"dodge", "counter", "none"}:
         return {"error": "defense 只能是 dodge、counter 或 none"}
 
-    surprised_target = _is_surprised(combat, target)
-    if surprised_target and defense != "none":
-        # 突袭轮不能闪避或反击，视为不防御。
+    # 施法当轮能否闪避/反击，规则书未规定，由房规决定（报告 §9）。
+    if defense != "none" and _is_casting(combat, str(target.get("name") or "")) and not settings.cast_defense_allowed:
         defense = "none"
 
-    # 寡不敌众：目标本轮已经防御过一次，后续近战攻击获得奖励骰。
+    ruleset = _combat_ruleset(combat, settings)
+
+    # 先攻检定大失败：失去本轮第一次攻击（p105，可选规则）。
+    if attacker.get("lost_first_action"):
+        attacker["lost_first_action"] = False
+        _append_log(combat, f"{attacker.get('name')} 因先攻检定大失败，失去本轮第一次攻击。")
+        _advance(combat, context)
+        _save_combat(context, combat)
+        state = _combat_summary_state(combat)
+        return {**state, "summary": f"{attacker.get('name')} 失去第一次攻击，当前行动者：{state['current']}。"}
+
     bonus = _dice_count(arguments, "bonus_dice", "bonus")
     penalty = _dice_count(arguments, "penalty_dice", "penalty")
-    if defense != "none" and (target.get("used_dodge") or target.get("used_counter")):
+
+    # 突袭是攻击修正，不是“突袭轮”（p90-91，报告 §2.5）。
+    forced_surprise_hit = False
+    surprised_target = _is_surprised(combat, target)
+    if surprised_target:
+        if settings.surprise_model == "auto_success":
+            defense = "none"
+            forced_surprise_hit = True
+        else:
+            bonus = min(2, bonus + 1)
+
+    # 可选先攻检定大成功：首次攻击 1 奖励骰（p105）。
+    if attacker.get("first_attack_bonus"):
+        attacker["first_attack_bonus"] = 0
+        bonus = min(2, bonus + 1)
+
+    # 寡不敌众：目标本轮已用掉可用的反应次数后，后续近战攻击获得奖励骰（p91）。
+    reaction_limit = ruleset.reaction_limit(target, settings)
+    if defense != "none" and int(target.get("reactions_this_round") or 0) >= reaction_limit:
         bonus = min(2, bonus + 1)
     if bonus and penalty:
         return {"error": "bonus_dice 与 penalty_dice 不能同时使用"}
@@ -1021,12 +1284,11 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             return {"error": "bonus_dice 与 penalty_dice 不能同时使用"}
 
     rolled = _opposed_rolls(context, skill_value, defense_value if defense != "none" else 0)
-    if defense != "none":
-        rolled["attack_roll"], rolled["attack_candidates"] = _percentile_roll(_roller, bonus, penalty)
-        critical, fumble = _context_thresholds(context)
-        rolled["attack_level"] = _success_level(
-            rolled["attack_roll"], max(1, skill_value), critical, fumble
-        )
+    rolled["attack_roll"], rolled["attack_candidates"] = _percentile_roll(_roller, bonus, penalty)
+    critical, fumble = _context_thresholds(context)
+    rolled["attack_level"] = _success_level(
+        rolled["attack_roll"], max(1, skill_value), critical, fumble
+    )
     # 战斗 UI：玩家自己掷出的攻击骰面以 attack_roll 传入，覆盖服务端随机结果。
     if arguments.get("attack_roll") not in (None, ""):
         try:
@@ -1040,27 +1302,28 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     attack_rank = LEVEL_RANK.get(rolled["attack_level"], 0)
     defense_rank = LEVEL_RANK.get(rolled["defense_level"], 0)
 
-    hit = False
-    counter_hit = False
-    if defense == "none":
-        hit = attack_rank > 0
-    elif attack_rank > defense_rank:
-        hit = True
-    elif attack_rank < defense_rank:
-        counter_hit = defense == "counter" and defense_rank > 0
+    if forced_surprise_hit:
+        # 规则书选项：未准备目标近战自动成功，除非攻击者大失败（p90-91）。
+        hit = rolled["attack_level"] != "fumble"
+        counter_hit = False
     else:
-        if defense == "counter":
-            hit = attack_rank > 0
-        else:
-            hit = False
+        outcome = ruleset.resolve_melee(
+            rolled["attack_level"],
+            rolled["defense_level"],
+            defense,
+        )
+        hit = outcome == "hit"
+        counter_hit = outcome == "counter_hit"
 
     target_status = []
-    if attack_rank <= 0 and not counter_hit:
+    if not hit and not counter_hit:
         target_status.append("本次攻击未命中")
     if defense != "none" and defense_rank > 0:
         target_status.append(f"目标{('闪避' if defense == 'dodge' else '反击')}成功")
     target.setdefault("used_dodge", False)
     target.setdefault("used_counter", False)
+    if defense != "none":
+        target["reactions_this_round"] = int(target.get("reactions_this_round") or 0) + 1
     if defense == "dodge":
         target["used_dodge"] = True
     elif defense == "counter":
@@ -1100,8 +1363,8 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             conditions.append(effect)
         target["used_dodge"] = True
 
-    # 攻击即消耗本回合：自动推进到下一行动者，避免手动「推进回合」被反复点击。
-    _advance(combat)
+    # 攻击即消耗一次显著行动：还有剩余行动则留在当前行动者，否则推进。
+    _advance(combat, context)
 
     parts = [
         f"{attacker.get('name')} 使用{weapon.get('name')}攻击 {target.get('name')}",
@@ -1182,12 +1445,15 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     combat = _load_combat(context)
     if not combat:
         return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
-    attacker = _resolve_combatant(combat, arguments.get("attacker"))
+    attacker = _resolve_combatant(combat, arguments.get("attacker") or arguments.get("actor"))
     target = _resolve_combatant(combat, arguments.get("target"))
     if not attacker or not target:
         return {"error": "attacker 或 target 不在当前战斗中"}
     if attacker.get("dead") or attacker.get("unconscious") or attacker.get("dying"):
         return {"error": f"{attacker.get('name')} 当前无法行动（{attacker.get('status')}）"}
+    settings = _combat_settings(context)
+    if settings.major_wound_penalty == "cannot_act" and attacker.get("major_wound"):
+        return {"error": f"{attacker.get('name')} 身负重伤，按房规无法行动"}
     card = _player_card(attacker, context)
     weapon = _find_weapon(attacker, card, _as_text(arguments.get("weapon")))
     if weapon is None:
@@ -1200,6 +1466,7 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     range_text = _as_text(arguments.get("range"))
     difficulty = ""
     distance = None
+    beyond_range = False
     if range_text in {"regular", "normal", "hard", "extreme", "普通", "困难", "极难"}:
         difficulty = {"normal": "regular", "普通": "regular"}.get(range_text, range_text)
     elif range_text:
@@ -1217,7 +1484,9 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         elif distance <= base_range * 4:
             difficulty = "extreme"
         else:
-            return {"error": f"距离 {distance} 码超出 {weapon.get('name')} 的四倍射程"}
+            # 超出四倍射程：只有大成功（01）的贯穿能命中（p95）。
+            beyond_range = True
+            difficulty = "extreme"
     else:
         difficulty = "regular"
 
@@ -1252,14 +1521,14 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     if penalty > 2:
         penalty = 2
 
-    bursts = _as_int(arguments.get("burst"), 1)
-    bursts = max(1, min(MAX_BURST, bursts))
+    requested = max(1, min(MAX_BURST, _as_int(arguments.get("burst"), 1)))
+    allowance = int((rules.get("attacks") or {}).get("burst") or 1)
+    if requested > 1 and allowance <= 1:
+        return {"error": f"{weapon.get('name')} 不支持连发或全自动"}
+    if 1 < requested <= 3 and requested > allowance:
+        return {"error": f"{weapon.get('name')} 每轮最多连发 {allowance} 发"}
+
     critical, fumble = _context_thresholds(context)
-    threshold = skill_value
-    if difficulty == "hard":
-        threshold = skill_value // 2
-    elif difficulty == "extreme":
-        threshold = skill_value // 5
     malfunction = rules.get("malfunction")
     ammo_tracker = attacker.get("ammo") if isinstance(attacker.get("ammo"), dict) else {}
     ammo_key = str(weapon.get("name") or "")
@@ -1267,61 +1536,89 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     current_ammo = ammo_tracker.get(ammo_key)
     if current_ammo is None:
         current_ammo = capacity
-    shots = []
+    shots: list[dict[str, Any]] = []
     total_damage = 0
     malfunctioned = False
-    for index in range(bursts):
-        if isinstance(current_ammo, int) and current_ammo <= 0:
-            shots.append({"shot": index + 1, "error": "弹药耗尽，需要装填"})
-            break
-        shot_bonus = bonus
-        shot_penalty = penalty
-        if index > 0:
-            if shot_penalty < 2:
-                shot_penalty += 1
-                shot_bonus = 0
-            else:
-                if difficulty == "regular":
-                    threshold = skill_value // 2
-                    difficulty = "hard"
-                elif difficulty == "hard":
-                    threshold = skill_value // 5
-                    difficulty = "extreme"
+    difficulty_order = ("regular", "hard", "extreme")
+    base_rank = difficulty_order.index(difficulty) if difficulty in difficulty_order else 0
+
+    def _threshold_for(rank: int) -> int:
+        if rank >= 2:
+            return skill_value // 5
+        if rank == 1:
+            return skill_value // 2
+        return skill_value
+
+    threshold = 1 if beyond_range else _threshold_for(base_rank)
+
+    def _resolve_shot(
+        shot_no: int,
+        bullets: int,
+        shot_bonus: int,
+        shot_penalty: int,
+        diff_rank: int,
+        *,
+        group_no: int | None = None,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        nonlocal current_ammo, malfunctioned
+        usable = bullets
+        if isinstance(current_ammo, int):
+            usable = min(usable, max(0, current_ammo))
+        if usable <= 0:
+            return {"shot": shot_no, "error": "弹药耗尽，需要装填"}, []
         roll, candidates = _percentile_roll(_roller, shot_bonus, shot_penalty)
         # 第一发可由玩家自己掷骰（战斗 UI 单发射击）。
-        if index == 0 and arguments.get("attack_roll") not in (None, ""):
+        if shot_no == 1 and arguments.get("attack_roll") not in (None, ""):
             try:
                 roll = max(1, min(100, int(arguments.get("attack_roll"))))
-                candidates = []
-            except (TypeError, ValueError):
-                return {"error": "attack_roll 必须是 1-100 的整数"}
+            except (TypeError, ValueError) as exc:
+                raise ValueError("attack_roll 必须是 1-100 的整数") from exc
+            candidates = []
         if isinstance(current_ammo, int):
-            current_ammo -= 1
+            current_ammo -= usable
         level = _success_level(roll, max(1, skill_value), critical, fumble)
-        shot: dict[str, Any] = {
-            "shot": index + 1,
+        record: dict[str, Any] = {
+            "shot": shot_no,
+            "bullets": usable,
             "roll": roll,
             "candidates": candidates,
             "level": level,
             "bonus_dice": shot_bonus,
             "penalty_dice": shot_penalty,
+            "difficulty": difficulty_order[diff_rank],
         }
+        if group_no is not None:
+            record["group"] = group_no
         if malfunction and roll >= malfunction:
-            shot["malfunction"] = True
+            record["malfunction"] = True
             malfunctioned = True
-            shots.append(shot)
-            break
-        success = (roll <= threshold or level == "critical") and level != "fumble"
-        shot["hit"] = success
-        if success:
-            extreme = level in {"extreme", "critical"}
-            segment_index = 0 if difficulty == "regular" else 1 if difficulty == "hard" else 2
+            return record, []
+        success = (roll <= _threshold_for(diff_rank) or level == "critical") and level != "fumble"
+        if beyond_range:
+            # 超四倍射程只有 01 能贯穿（p95）。
+            success = level == "critical"
+        record["hit"] = success
+        if not success:
+            return record, []
+        extreme = level in {"extreme", "critical"}
+        if group_no is None:
+            hits = 1
+            impale_count = 0
+        else:
+            # 全自动：常规成功一半命中，极难成功全中且前半贯穿（p97-98）。
+            hits = usable if extreme else max(1, usable // 2)
+            impale_count = usable // 2 if extreme and diff_rank < 2 else 0
+        record["hits"] = hits
+        applied_list: list[dict[str, Any]] = []
+        detail = ""
+        for bullet_index in range(hits):
             value, detail = _compute_damage(
                 weapon,
                 attacker.get("db_terms") or [],
                 extreme=extreme,
                 melee=False,
-                segment_index=segment_index,
+                segment_index=diff_rank,
+                allow_impale=(group_no is None) or bullet_index < impale_count,
             )
             applied = _apply_damage(
                 context,
@@ -1330,15 +1627,65 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                 armor=target.get("armor") or 0,
                 ignore_armor=bool(arguments.get("ignore_armor")),
             )
-            total_damage += applied["effective"]
-            shot["damage"] = applied
-            shot["damage_detail"] = detail
-        shots.append(shot)
+            applied_list.append(applied)
+        if applied_list:
+            record["damage"] = applied_list[-1]
+            record["damage_detail"] = detail
+            record["effective_total"] = sum(item.get("effective", 0) for item in applied_list)
+            record["hp_before"] = applied_list[0]["hp_before"]
+            record["hp_after"] = applied_list[-1]["hp_after"]
+            record["dead"] = any(item.get("dead") for item in applied_list)
+            record["dying"] = any(item.get("dying") for item in applied_list)
+            record["unconscious"] = any(item.get("unconscious") for item in applied_list)
+        return record, applied_list
+
+    try:
+        if requested <= 3:
+            for index in range(requested):
+                shot_bonus = bonus
+                shot_penalty = penalty
+                if index > 0:
+                    if shot_penalty < 2:
+                        shot_penalty += 1
+                        shot_bonus = 0
+                shot, applied = _resolve_shot(
+                    index + 1, 1, shot_bonus, shot_penalty, base_rank
+                )
+                total_damage += sum(item.get("effective", 0) for item in applied)
+                shots.append(shot)
+                if shot.get("error") or shot.get("malfunction"):
+                    break
+        else:
+            group_size = max(3, skill_value // 10)
+            remaining = requested
+            group_index = 0
+            while remaining > 0:
+                bullets = min(group_size, remaining)
+                penalty_rank = max(0, group_index - max(0, 2 - penalty))
+                shot_penalty = min(2, penalty + group_index)
+                shot_bonus = 0 if shot_penalty > 0 else bonus
+                shot, applied = _resolve_shot(
+                    len(shots) + 1,
+                    bullets,
+                    shot_bonus,
+                    shot_penalty,
+                    min(2, base_rank + penalty_rank),
+                    group_no=group_index + 1,
+                )
+                total_damage += sum(item.get("effective", 0) for item in applied)
+                shots.append(shot)
+                if shot.get("error") or shot.get("malfunction"):
+                    break
+                remaining -= bullets
+                group_index += 1
+    except ValueError as exc:
+        return {"error": str(exc)}
+
     if isinstance(current_ammo, int):
         attacker["ammo"] = {**ammo_tracker, ammo_key: current_ammo}
 
-    # 一次射击消耗本回合，自动推进到下一位行动者。
-    _advance(combat)
+    # 一次射击消耗一次显著行动；全自动分组在射击函数内部结算。
+    _advance(combat, context)
 
     parts = [
         f"{attacker.get('name')} 使用{weapon.get('name')}射击 {target.get('name')}",
@@ -1346,23 +1693,29 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         f"射击技能 {skill_label} {skill_value}",
     ]
     for shot in shots:
+        label = f"第 {shot.get('group')} 组（{shot.get('bullets', 1)} 发）" if shot.get("group") else f"第 {shot['shot']} 发"
         if shot.get("error"):
-            parts.append(f"第 {shot['shot']} 发：{shot['error']}")
+            parts.append(f"{label}：{shot['error']}")
             continue
         if shot.get("malfunction"):
-            parts.append(f"第 {shot['shot']} 发：d100={shot['roll']} ≥ 故障值 {malfunction}，武器故障")
+            parts.append(f"{label}：d100={shot['roll']} ≥ 故障值 {malfunction}，武器故障")
             continue
-        text = f"第 {shot['shot']} 发：d100={shot['roll']}（{shot['level']}）"
+        text = f"{label}：d100={shot['roll']}（{shot['level']}）"
         if shot["candidates"]:
             text += f" 取 {shot['roll']}"
         if shot.get("hit"):
-            applied = shot["damage"]
-            text += f" 命中，伤害 {applied['effective']}（{shot['damage_detail']}），HP {applied['hp_before']}→{applied['hp_after']}"
-            if applied.get("dead"):
+            effective_total = shot.get("effective_total")
+            if effective_total is None:
+                effective_total = shot["damage"]["effective"]
+            text += (
+                f" 命中 {shot.get('hits', 1)} 发，伤害 {effective_total}"
+                f"（{shot['damage_detail']}），HP {shot['hp_before']}→{shot['hp_after']}"
+            )
+            if shot.get("dead"):
                 text += "，死亡"
-            elif applied.get("dying"):
+            elif shot.get("dying"):
                 text += "，濒死"
-            elif applied.get("unconscious"):
+            elif shot.get("unconscious"):
                 text += "，昏迷"
         else:
             text += " 未命中"
@@ -1473,6 +1826,7 @@ def treat_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     if method == "医学":
         method = "medicine"
     within_hour = arguments.get("within_hour") is not False
+    same_day = arguments.get("same_day") is not False
     if method == "first_aid" and not within_hour:
         return {"error": "急救必须在受伤后 1 小时内进行"}
     if method == "first_aid" and target.get("first_aid_used"):
@@ -1500,7 +1854,8 @@ def treat_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     else:
         critical, fumble = _context_thresholds(context)
         difficulty = "regular"
-        if method == "medicine" and not within_hour:
+        if method == "medicine" and not same_day:
+            # 医学治疗非当天的伤势才是困难（p101）。
             difficulty = "hard"
         threshold = skill_value // 2 if difficulty == "hard" else skill_value
         roll, candidates = _percentile_roll(_roller)
@@ -1723,6 +2078,70 @@ COMBAT_TREAT_TOOL = AgentTool(
     handler=treat_combatant,
 )
 
+COMBAT_DELAY_TOOL = AgentTool(
+    name="combat.delay",
+    description="延迟行动：把自己的回合挪到本轮末尾；若已经是最后一人，则本轮放弃行动。",
+    parameters={"type": "object", "properties": {}},
+    handler=delay_combatant,
+)
+
+COMBAT_DISENGAGE_TOOL = AgentTool(
+    name="combat.disengage",
+    description="脱离近战：标记本轮已脱离，消耗本次行动。核心规则无借机攻击。",
+    parameters={
+        "type": "object",
+        "properties": {"actor": {"type": "string", "description": "省略则使用当前行动者"}},
+    },
+    handler=disengage_combatant,
+)
+
+COMBAT_RELOAD_TOOL = AgentTool(
+    name="combat.reload",
+    description="装填/换弹：把指定武器弹药补满，消耗本轮行动。",
+    parameters={
+        "type": "object",
+        "properties": {
+            "actor": {"type": "string", "description": "省略则使用当前行动者"},
+            "weapon": {"type": "string", "description": "省略则装填第一把有弹匣的远程武器"},
+        },
+    },
+    handler=reload_combatant,
+)
+
+COMBAT_READY_TOOL = AgentTool(
+    name="combat.ready",
+    description="准备武器：准备后射击先攻按 DEX+50；耗时由房规 combat_ready_weapon_cost 决定。",
+    parameters={
+        "type": "object",
+        "properties": {"actor": {"type": "string", "description": "省略则使用当前行动者"}},
+    },
+    handler=ready_combatant,
+)
+
+COMBAT_CAST_TOOL = AgentTool(
+    name="combat.cast",
+    description=(
+        "战斗内施法：按 instant / one_round / two_rounds 计算生效时序，扣除 MP 与 SAN，"
+        "MP 不足溢出扣 HP；打断按房规 combat_cast_interrupt 处理。具体法术效果由 KP/内容层结算。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "caster": {"type": "string", "description": "省略则使用当前行动者"},
+            "spell": {"type": "string"},
+            "cast_time": {
+                "type": "string",
+                "enum": ["instant", "one_round", "two_rounds"],
+                "description": "即时 = DEX+50；1 轮 = 本轮 DEX；2 轮 = 次轮 DEX",
+            },
+            "mp_cost": {"type": "integer", "minimum": 0},
+            "san_cost": {"type": "integer", "minimum": 0},
+        },
+        "required": ["spell"],
+    },
+    handler=cast_spell,
+)
+
 COMBAT_END_TOOL = AgentTool(
     name="combat.end",
     description="结束当前战斗轮并保存战斗记录。",
@@ -1734,6 +2153,11 @@ COMBAT_TOOLS = [
     COMBAT_START_TOOL,
     COMBAT_STATE_TOOL,
     COMBAT_NEXT_TOOL,
+    COMBAT_DELAY_TOOL,
+    COMBAT_DISENGAGE_TOOL,
+    COMBAT_RELOAD_TOOL,
+    COMBAT_READY_TOOL,
+    COMBAT_CAST_TOOL,
     COMBAT_ATTACK_TOOL,
     COMBAT_SHOOT_TOOL,
     COMBAT_DAMAGE_TOOL,
