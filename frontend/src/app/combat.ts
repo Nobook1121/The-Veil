@@ -14,6 +14,8 @@
     let awaitingActor = "";
     let busy = false;
     let initialized = false;
+    // 轮询去重：状态没变时不重绘 DOM，避免每 3 秒整块 innerHTML 重建。
+    let lastPayloadKey = "";
 
     function byId<T extends HTMLElement>(id: string): T | null {
         return document.getElementById(id) as T | null;
@@ -69,6 +71,7 @@
     function hidePanel(): void {
         formAction = null;
         awaitingActor = "";
+        lastPayloadKey = "";
         const panel = byId("combatPanel");
         if (panel) panel.hidden = true;
         renderForm();
@@ -417,6 +420,7 @@
             state = null;
             formAction = null;
             awaitingRoll = false;
+            lastPayloadKey = "";
         }
         if (!roomId || window.currentRoom?.invisible_view) {
             hidePanel();
@@ -430,6 +434,10 @@
             if (requested !== roomId) return;
             if (!response.success || !response.data) return;
             if (response.data.active) {
+                // 状态未变化时跳过重绘（轮询最常见的路径）。
+                const payloadKey = JSON.stringify(response.data);
+                if (payloadKey === lastPayloadKey) return;
+                lastPayloadKey = payloadKey;
                 const pending = response.data.pending_roll;
                 // 只有仍在等玩家投掷（pending）时才显示「请完成骰桌上的战斗检定」。
                 // 已经掷出（rolled/awaiting_confirm）时战斗结算已完成，面板不应继续等待。

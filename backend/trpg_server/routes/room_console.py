@@ -50,6 +50,21 @@ _DESTRUCTIVE_AFTER_ARCHIVE = {
     ("narrative", "rebuild-state"),
     ("narrative", "insert"),
     ("narrative", "say"),
+    # 战斗轮：任何推进/改变战斗状态的命令都会改写房间持久化状态。
+    ("combat", "start"),
+    ("combat", "join"),
+    ("combat", "next"),
+    ("combat", "end-turn"),
+    ("combat", "endturn"),
+    ("combat", "delay"),
+    ("combat", "disengage"),
+    ("combat", "reload"),
+    ("combat", "ready"),
+    ("combat", "cast"),
+    ("combat", "damage"),
+    ("combat", "heal"),
+    ("combat", "treat"),
+    ("combat", "end"),
 }
 
 

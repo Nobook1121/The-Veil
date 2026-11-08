@@ -101,23 +101,33 @@ def _is_manager(info: dict[str, Any]) -> bool:
     return _room_permission(member, info) in {ROOM_ROLE_OWNER, ROOM_ROLE_ADMIN}
 
 
-def _state_payload(state: dict[str, Any], info: dict[str, Any], context: CombatRoomContext) -> dict[str, Any]:
-    """补充前端渲染动作按钮所需的信息。"""
+def _state_payload(
+    state: dict[str, Any],
+    info: dict[str, Any],
+    context: CombatRoomContext,
+    *,
+    combat_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """补充前端渲染动作按钮所需的信息。
+
+    ``combat_data`` 由调用方传入时复用同一次磁盘读取，避免轮询反复解析 state.json。
+    """
     current = state.get("current")
     actor_user_id = _owner_user_id(info, current) if current else ""
+    elevated = _is_elevated()
+    manager = elevated or _is_manager(info)
+    user_id = str(session.get("user_id") or "")
     my_name = ""
     for item in state.get("order") or []:
-        if item.get("is_player") and str(item.get("user_id") or "") == str(session.get("user_id") or ""):
+        if item.get("is_player") and str(item.get("user_id") or "") == user_id:
             my_name = str(item.get("name") or "")
             break
-    can_act = bool(current) and (
-        str(actor_user_id) == str(session.get("user_id") or "") or _is_elevated()
-    )
+    can_act = bool(current) and (str(actor_user_id) == user_id or elevated)
     # 推进回合：自己的回合可跳过；房管可推进 NPC 回合，防止替别人跳完整轮。
     can_advance = bool(current) and (
-        (not actor_user_id and _is_manager(info))
-        or (bool(actor_user_id) and str(actor_user_id) == str(session.get("user_id") or ""))
-        or _is_elevated()
+        (not actor_user_id and manager)
+        or (bool(actor_user_id) and str(actor_user_id) == user_id)
+        or elevated
     )
     # 玩家操作自己的角色；管理员代打时操作当前行动者（可能是 NPC）。
     focus_name = (my_name if (can_act and my_name) else str(current or "")) if can_act else ""
@@ -128,12 +138,13 @@ def _state_payload(state: dict[str, Any], info: dict[str, Any], context: CombatR
         # 当前回合属于自己（或管理员代打）时才能选动作。
         "can_act": can_act,
         "can_advance": can_advance,
-        "is_manager": _is_manager(info),
+        "is_manager": manager,
         "pending_roll": player_roll.active_pending_info(context.room_id),
     }
     if focus_name:
-        combat_state = combat._load_combat(context)
-        payload["weapons"] = _weapon_options(combat_state, focus_name, info)
+        if combat_data is None:
+            combat_data = combat._load_combat(context)
+        payload["weapons"] = _weapon_options(combat_data, focus_name, info)
         payload["targets"] = [
             {"name": item.get("name"), "hp": item.get("hp"), "status": item.get("status"), "side": item.get("side")}
             for item in state.get("order") or []
@@ -175,9 +186,15 @@ def _member_card(info: dict[str, Any], name: str) -> dict[str, Any] | None:
     return card if isinstance(card, dict) else None
 
 
-def _prepare_check(context: CombatRoomContext, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _prepare_check(
+    context: CombatRoomContext,
+    action: str,
+    payload: dict[str, Any],
+    combat_state_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """在掷骰前计算技能值与检定计划；返回 ``{error}`` 或计划信息。"""
-    combat_state_data = combat._load_combat(context)
+    if combat_state_data is None:
+        combat_state_data = combat._load_combat(context)
     if not combat_state_data:
         return {"error": "当前没有进行中的战斗"}
     actor = str(payload.get("actor") or "").strip()
@@ -262,6 +279,8 @@ def _run_utility_action(action: str, payload: dict[str, Any], context: CombatRoo
             {"actor": actor, "weapon": str(payload.get("weapon") or "").strip()},
             context,
         )
+    if not str(payload.get("spell") or "").strip():
+        return {"error": "施法需要填写法术名称"}
     return combat.cast_spell(
         {
             "caster": actor,
@@ -274,10 +293,15 @@ def _run_utility_action(action: str, payload: dict[str, Any], context: CombatRoo
     )
 
 
-def _run_action(action: str, payload: dict[str, Any], context: CombatRoomContext) -> dict[str, Any]:
+def _run_action(
+    action: str,
+    payload: dict[str, Any],
+    context: CombatRoomContext,
+    combat_state_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if action in UTILITY_ACTIONS:
         return _run_utility_action(action, payload, context)
-    prepared = _prepare_check(context, action, payload)
+    prepared = _prepare_check(context, action, payload, combat_state_data)
     if prepared.get("error"):
         return prepared
     arguments = _action_arguments(payload, prepared)
@@ -335,11 +359,14 @@ def get_combat(room_id):
     if not _can_access(info):
         return _denied(room_id)
     context = _context(room_dir, room_id)
-    state = combat.combat_state({}, context)
-    if not state.get("active"):
+    combat_data = combat._load_combat(context)
+    if not combat_data:
         return success_response({"active": False, "order": [], "log": [], "can_act": False}, "No active combat")
-    state["log"] = (combat._load_combat(context) or {}).get("log") or []
-    return success_response(_state_payload(state, info, context), "Combat state loaded")
+    state = combat._combat_summary_state(combat_data)
+    state["log"] = combat_data.get("log") or []
+    return success_response(
+        _state_payload(state, info, context, combat_data=combat_data), "Combat state loaded"
+    )
 
 
 @bp.route("/api/rooms/<room_id>/combat/action", methods=["POST"])
@@ -357,9 +384,10 @@ def post_combat_action(room_id):
     if action not in SUPPORTED_ACTIONS:
         return error_response("Unsupported combat action", 400, "Unsupported action")
     context = _context(room_dir, room_id)
-    state = combat.combat_state({}, context)
-    if not state.get("active"):
+    combat_data = combat._load_combat(context)
+    if not combat_data:
         return error_response("No active combat", 409, "No active combat")
+    state = combat._combat_summary_state(combat_data)
     current = str(state.get("current") or "")
     if action == "end":
         if not _is_manager(info):
@@ -375,7 +403,10 @@ def post_combat_action(room_id):
         if not (is_own_turn or (_is_manager(info) and is_npc_turn) or _is_elevated()):
             return error_response("Not your turn", 403, "Not your turn")
         result = combat.next_turn({}, context)
-        return success_response(_state_payload(result, info, context), "Combat advanced")
+        updated = combat._load_combat(context)
+        return success_response(
+            _state_payload(result, info, context, combat_data=updated), "Combat advanced"
+        )
     # 攻击类动作：必须是当前行动者本人（管理员可代打）。
     actor = str(payload.get("actor") or current).strip()
     if actor != current:
@@ -383,7 +414,15 @@ def post_combat_action(room_id):
     actor_owner = _owner_user_id(info, actor)
     if not _is_elevated() and str(actor_owner) != str(session.get("user_id") or ""):
         return error_response("Not your turn", 403, "Not your turn")
-    result = _run_action(action, {**payload, "actor": actor}, context)
+    result = _run_action(action, {**payload, "actor": actor}, context, combat_data)
     if result.get("error"):
         return error_response(result["error"], 400, "Combat action failed")
+    if action in UTILITY_ACTIONS:
+        # 辅助动作直接改变回合状态：返回完整面板数据，避免前端先渲染半份状态再轮询。
+        updated = combat._load_combat(context)
+        if updated:
+            return success_response(
+                _state_payload(combat._combat_summary_state(updated), info, context, combat_data=updated),
+                "Combat action accepted",
+            )
     return success_response(result, "Combat action accepted")

@@ -16,6 +16,7 @@ from typing import Any, Callable
 from trpg_server import room_admin
 from trpg_server.agents import room_state
 from trpg_server.json_store import read_json
+from trpg_server.room_combat_commands import ROOM_COMBAT_HELP, handle_room_combat_command
 from trpg_server.room_log import clear_room_log, log_room_event, read_room_log
 from trpg_server.room_narrative_commands import ROOM_NARRATIVE_HELP, handle_room_narrative_command
 from trpg_server.settings import ROOMS_DIR
@@ -46,6 +47,11 @@ ROOM_COMMAND_WHITELIST: dict[str, set[str]] = {
     },
     "immersive": {"status", "music", "illustration", "history", "director"},
     "voice": {"status", "on", "off", "map", "mute", "usage", "cache"},
+    "combat": {
+        "status", "state", "order", "start", "join", "next", "end-turn", "endturn",
+        "delay", "disengage", "reload", "ready", "cast",
+        "damage", "heal", "treat", "end",
+    },
 }
 
 # 不带子命令时默认执行的子命令（例如 `members` 等价于 `members list`）。
@@ -55,6 +61,7 @@ DEFAULT_SUBS: dict[str, str] = {
     "narrative": "status",
     "immersive": "status",
     "voice": "status",
+    "combat": "status",
 }
 
 
@@ -147,6 +154,7 @@ def room_command_help_text() -> str:
             "  voice cache stats            （本房间语音缓存条数/体积/命中次数，只读）",
             "  voice cache clear [--yes]    （删除本房间语音缓存，默认预演）",
             "  voice cache prune [--yes]    （按站点/房间配额 LRU 清理本房间缓存，默认预演）",
+            *ROOM_COMBAT_HELP.splitlines(),
             "  说明：破坏性命令缺省为「预演」，加 --yes 或在交互确认时输入 y 才会真正执行。",
             "  说明：成员命令只调整房间内角色（房主/管理员/成员），不会授予网站级权限。",
         ]
@@ -248,6 +256,20 @@ def execute_room_command(
         return _immersive_command(room_dir, room_id, sub, rest, flags, confirm)
     if domain == "voice":
         return _voice_command(room_dir, room_id, sub, rest, flags, confirm)
+    if domain == "combat":
+        ok, message = handle_room_combat_command(
+            parts[1:],
+            room_id=room_id,
+            room_dir=room_dir,
+            rooms_dir=resolved_rooms_dir,
+            scenarios_dir=app.config.get("SCENARIOS_DIR") if app is not None else None,
+            config_dir=app.config.get("CONFIG_DIR") if app is not None else None,
+            actor=actor,
+            actor_id=actor_id,
+            actor_rank=actor_rank,
+            confirm=confirm,
+        )
+        return RoomCommandResult(ok, message)
     if domain == "narrative":
         ok, message = handle_room_narrative_command(
             parts[1:],

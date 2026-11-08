@@ -214,6 +214,39 @@ def test_archived_room_blocks_destructive_commands(tmp_path):
     assert cleared.status_code == 409
 
 
+def test_archived_room_blocks_destructive_combat_commands(tmp_path):
+    _write_room(tmp_path, archived=True)
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client)
+
+    for command in (
+        "combat start",
+        "combat next",
+        "combat delay",
+        "combat disengage alice",
+        "combat reload alice",
+        "combat ready alice",
+        "combat cast Curse --mp=1",
+        "combat damage alice 3",
+        "combat end --yes",
+    ):
+        response = client.post(
+            "/api/rooms/r-1/console/command",
+            json={"command": command},
+            headers={"X-CSRF-Token": "csrf"},
+        )
+        assert response.status_code == 409, command
+
+    # 只读查询仍然可用。
+    status = client.post(
+        "/api/rooms/r-1/console/command",
+        json={"command": "combat"},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert status.status_code == 200
+
+
 def test_command_requires_body(tmp_path):
     _write_room(tmp_path)
     app = _app(tmp_path)

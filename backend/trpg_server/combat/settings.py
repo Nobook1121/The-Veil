@@ -52,6 +52,12 @@ class CombatSettings:
             value = str(rules.get(key, default) or default).strip().lower()
             return value if value in allowed else default
 
+        def _flag(key: str, default: bool) -> bool:
+            value = rules.get(key, default)
+            if isinstance(value, str):
+                return value.strip().lower() in {"1", "true", "yes", "on"}
+            return bool(value)
+
         threshold = rules.get("combat_dex_extra_action_threshold")
         try:
             threshold = int(threshold) if threshold is not None else None
@@ -65,13 +71,13 @@ class CombatSettings:
             surprise_model=_choice("combat_surprise_model", "bonus_die", SURPRISE_MODELS),
             ready_weapon_cost=_choice("combat_ready_weapon_cost", "free", READY_WEAPON_COSTS),
             cast_interrupt=_choice("combat_cast_interrupt", "keeper", CAST_INTERRUPTS),
-            cast_defense_allowed=bool(rules.get("combat_cast_defense_allowed", False)),
+            cast_defense_allowed=_flag("combat_cast_defense_allowed", False),
             major_wound_penalty=_choice(
                 "combat_major_wound_penalty", "none", MAJOR_WOUND_PENALTIES
             ),
             shield_action=_choice("combat_shield_action", "disabled", SHIELD_ACTIONS),
             dex_extra_action_threshold=threshold,
-            dying_check=bool(rules.get("combat_dying_check", True)),
+            dying_check=_flag("combat_dying_check", True),
         )
 
 

@@ -436,3 +436,92 @@ def test_major_wound_cannot_act_house_rule_blocks_utility_actions(tmp_path):
     assert "error" in combat.cast_spell(
         {"caster": "Hurt", "spell": "Anything", "mp_cost": 0, "san_cost": 0}, context
     )
+
+
+def test_join_combat_inserts_by_initiative_and_keeps_current_turn(tmp_path):
+    context = FakeContext(tmp_path)
+    combat.start_combat(
+        {"participants": [_spec("Fast", dex=80), _spec("Slow", dex=30)]}, context
+    )
+
+    result = combat.join_combat({"participant": _spec("Middle", dex=50)}, context)
+
+    assert "error" not in result, result
+    state = combat.combat_state({}, context)
+    assert [item["name"] for item in state["order"]] == ["Fast", "Middle", "Slow"]
+    # 加入者不能打断当前行动者。
+    assert state["current"] == "Fast"
+
+
+def test_heal_combatant_clears_dying(tmp_path):
+    context = FakeContext(tmp_path)
+    combat.start_combat(
+        {
+            "participants": [
+                _spec("Hurt", dex=60, hp=0, max_hp=10),
+                _spec("Other", dex=40),
+            ]
+        },
+        context,
+    )
+    hurt = combat._load_combat(context)["combatants"]["Hurt"]
+    hurt["dying"] = True
+    hurt["status"] = "dying"
+
+    result = combat.heal_combatant({"target": "Hurt", "amount": 3}, context)
+
+    assert "error" not in result, result
+    assert result["hp"] == 3
+    healed = combat._load_combat(context)["combatants"]["Hurt"]
+    assert healed["dying"] is False
+    assert healed["status"] == "active"
+
+
+def test_cast_is_interrupted_after_damage_house_rule(tmp_path):
+    context = FakeContext(tmp_path, {"combat_cast_interrupt": "any_damage"})
+    combat.start_combat(
+        {
+            "participants": [
+                _spec("Caster", dex=60, mp=10, san=50),
+                _spec("Target", dex=40),
+            ]
+        },
+        context,
+    )
+    state = combat._load_combat(context)
+    caster = state["combatants"]["Caster"]
+    caster["damage_taken_this_round"] = 2
+    # 直接改内存对象不会被 cast_spell 读到，需写回房间状态。
+    combat._save_combat(context, state)
+
+    result = combat.cast_spell(
+        {"caster": "Caster", "spell": "Curse", "mp_cost": 2, "san_cost": 0}, context
+    )
+
+    assert "error" not in result, result
+    assert result["interrupted"] is True
+    # 打断后 MP 已支付，且不会安排在后续轮次生效。
+    caster = combat._load_combat(context)["combatants"]["Caster"]
+    assert caster["mp"] == 8
+
+
+def test_cast_self_mp_overflow_does_not_interrupt(tmp_path):
+    context = FakeContext(tmp_path, {"combat_cast_interrupt": "any_damage"})
+    combat.start_combat(
+        {
+            "participants": [
+                _spec("Caster", dex=60, mp=1, san=50, hp=10, max_hp=10),
+                _spec("Target", dex=40),
+            ]
+        },
+        context,
+    )
+
+    result = combat.cast_spell(
+        {"caster": "Caster", "spell": "Curse", "mp_cost": 3, "san_cost": 0}, context
+    )
+
+    assert "error" not in result, result
+    # MP 不足扣 HP 是自己的代价，不按“被打断”处理。
+    assert result["interrupted"] is False
+    assert result["mp_overflow_damage"]["effective"] == 2
