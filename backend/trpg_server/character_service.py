@@ -19,6 +19,7 @@ from flask import current_app
 from trpg_server import weapon_catalog
 from trpg_server.config import load_settings
 from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.ruleset import get_plugin
 from trpg_server.settings import CHARACTERS_DIR, CONFIG_DIR, ROOMS_DIR, WEAPONS_DIR
 
 CHARACTER_WRITE_FIELDS = (
@@ -334,12 +335,231 @@ def apply_save(actor: Any, character_id: str, payload: dict[str, Any]) -> dict[s
     character = _normalize_payload(actor, raw_payload, existing or {})
     character = _sync_weapon_payload(character, raw_payload)
     character = _persist_avatar(character)
-    write_json_atomic(character_json_path(character["id"]), _runtime_to_test_character(character))
+    # 规则集信封由插件统一补齐，核心不硬编码 CoC 字段；旧顶层字段继续保留为镜像。
+    ruleset = get_plugin(character.get("rulesetId"))
+    character["rulesetId"] = ruleset.id
+    stored = ruleset.schema.pack(_runtime_to_test_character(character))
+    write_json_atomic(character_json_path(character["id"]), stored)
+    # 前端按 schema 渲染：保存响应也带回 sheet，避免再依赖固定顶层字段。
+    character["sheet"] = dict(stored.get("sheet") or {})
     legacy_path = legacy_character_path(character["id"])
     if legacy_path.exists():
         legacy_path.unlink(missing_ok=True)
     _sync_room_character_snapshots(character)
     return character
+
+
+def _schema_for_card(card: dict[str, Any]):
+    try:
+        return get_plugin((card or {}).get("rulesetId")).schema
+    except Exception:  # noqa: BLE001 - 规则插件异常时按无派生能力处理
+        return None
+
+
+def apply_room_changes(actor: Any, character_id: str, changes: list[dict[str, Any]]) -> dict[str, Any]:
+    """按房间内实际发生的变更写回持久卡，只覆盖被修改的字段。
+
+    与 :func:`apply_save` 共用同一套校验 / 打包 / 房间镜像同步逻辑；区别是先读取
+    持久卡的当前值，再把技能、属性、物品等变更合并进去，避免玩家在卡面编辑器里
+    的其它修改被整卡覆盖。
+    """
+    existing = _load_stored(character_id)
+    if not existing:
+        raise CharacterServiceError("character_not_found", "角色卡不存在", 404)
+
+    schema = _schema_for_card(existing)
+    skill_cap = 100
+    if schema is not None and hasattr(schema, "derive"):
+        skill_cap = _bounded_int(schema.derive(existing).get("skillCap"), 0, 999, 100)
+
+    payload: dict[str, Any] = {}
+    for change in changes or []:
+        if not isinstance(change, dict):
+            continue
+        kind = str(change.get("type") or "").strip().lower()
+        if kind == "san":
+            payload["currentSan"] = _bounded_int(change.get("value"), 0, 999, 0)
+        elif kind in {"hp", "mp"}:
+            key = "currentHp" if kind == "hp" else "currentMp"
+            payload[key] = _bounded_int(change.get("value"), 0, 999, 0)
+        elif kind == "armor":
+            payload["armor"] = _bounded_int(change.get("value"), 0, 99, 0)
+        elif kind == "skill":
+            skills = payload.get("skills")
+            if skills is None:
+                skills = [
+                    dict(row) if isinstance(row, dict) else row
+                    for row in (existing.get("skills") or [])
+                ]
+            _apply_skill_change(skills, str(change.get("name") or ""), _bounded_int(change.get("value"), 0, skill_cap, 0))
+            payload["skills"] = skills
+        elif kind == "attr":
+            attributes = payload.get("attributes")
+            if attributes is None:
+                attributes = dict(existing.get("attributes") or {})
+            _apply_attribute_change(attributes, str(change.get("key") or ""), _bounded_int(change.get("value"), 0, 999, 0))
+            payload["attributes"] = attributes
+        elif kind in {"item", "weapon", "item_remove", "weapon_remove"}:
+            _apply_item_change(payload, existing, change)
+        elif kind == "status":
+            status = dict(payload.get("status") or existing.get("status") or {})
+            value = change.get("value")
+            if isinstance(value, dict):
+                status.update(value)
+            payload["status"] = status
+        elif kind == "background":
+            background = dict(payload.get("background") or existing.get("background") or {})
+            value = change.get("value")
+            if isinstance(value, dict):
+                background.update(value)
+            payload["background"] = background
+        elif kind == "credit":
+            payload["creditRating"] = _bounded_int(change.get("value"), 0, 99, 0)
+        elif kind == "assets":
+            assets = dict(payload.get("assets") or existing.get("assets") or {})
+            value = change.get("value")
+            if isinstance(value, dict):
+                for key in ("cash", "spendingLevel", "assets"):
+                    if key in value:
+                        assets[key] = _bounded_int(value.get(key), 0, 999_999_999, 0)
+            payload["assets"] = assets
+
+    if not payload:
+        return existing
+    # 属性 / 神话值变化后统一重算派生值，并写入被夹紧的 HP / MP / SAN 与上限。
+    if schema is not None and hasattr(schema, "derive"):
+        merged = dict(existing)
+        merged.update(payload)
+        derived = schema.derive(merged)
+        for key in ("maxHp", "currentHp", "maxSan", "initialSan", "currentSan", "maxMp", "currentMp", "armor", "mov", "build", "damageBonus"):
+            if key in derived:
+                payload[key] = derived[key]
+    payload["id"] = character_id
+    return apply_save(actor, character_id, payload)
+
+
+def _bounded_int(value: Any, minimum: int, maximum: int, fallback: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(minimum, min(maximum, number))
+
+
+def _apply_skill_change(skills: list[Any], name: str, value: int) -> None:
+    target = name.strip()
+    if not target:
+        return
+    for row in skills:
+        if isinstance(row, dict) and str(row.get("name") or "").strip().casefold() == target.casefold():
+            _rebalance_skill_value(row, value)
+            return
+    skills.append({"name": target, "base": value, "value": value})
+
+
+def _rebalance_skill_value(row: dict[str, Any], value: int) -> None:
+    """技能卡按 base + 职业/兴趣/成长点存储，修改总值时同步调整点数拆分。"""
+    row["value"] = value
+    keys = ("occupationPoints", "interestPoints", "growthPoints")
+    total = _bounded_int(row.get("base"), 0, 999, 0) + sum(_bounded_int(row.get(key), 0, 999, 0) for key in keys)
+    diff = value - total
+    if diff >= 0:
+        row["interestPoints"] = _bounded_int(row.get("interestPoints"), 0, 999, 0) + diff
+        return
+    remaining = -diff
+    for key in ("interestPoints", "growthPoints", "occupationPoints", "base"):
+        current = _bounded_int(row.get(key), 0, 999, 0)
+        take = min(remaining, current)
+        row[key] = current - take
+        remaining -= take
+        if remaining <= 0:
+            return
+
+
+def _apply_attribute_change(attributes: dict[str, Any], key: str, value: int) -> None:
+    target = key.strip()
+    if not target:
+        return
+    for existing_key in list(attributes):
+        if str(existing_key).strip().casefold() == target.casefold():
+            attributes[existing_key] = value
+            return
+    attributes[target.upper()] = value
+
+
+def _apply_item_change(payload: dict[str, Any], existing: dict[str, Any], change: dict[str, Any]) -> None:
+    from trpg_server import weapon_catalog
+
+    name = str(change.get("name") or "").strip()
+    if not name:
+        return
+    change_type = str(change.get("type")).lower()
+    if change_type in {"weapon_remove", "item_remove"}:
+        key = "weapons" if change_type == "weapon_remove" else "equipment"
+        rows = payload.get(key)
+        if rows is None:
+            rows = [
+                dict(row) if isinstance(row, dict) else row
+                for row in (existing.get(key) or [])
+            ]
+        amount = max(1, min(999, _bounded_int(change.get("amount"), 1, 999, 1)))
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict) or str(row.get("name") or "").strip().casefold() != name.casefold():
+                continue
+            current = max(1, min(999, _bounded_int(row.get("quantity"), 1, 999, 1)))
+            if key == "equipment" and current > amount:
+                row["quantity"] = current - amount
+            else:
+                rows.pop(index)
+            break
+        payload[key] = weapon_catalog.sanitize_character_weapons(rows) if key == "weapons" else rows
+        return
+    if change_type == "weapon":
+        weapons = payload.get("weapons")
+        if weapons is None:
+            weapons = [
+                dict(row) if isinstance(row, dict) else row
+                for row in (existing.get("weapons") or [])
+            ]
+        fields = change.get("fields") if isinstance(change.get("fields"), dict) else {}
+        row = next(
+            (
+                item
+                for item in weapons
+                if isinstance(item, dict) and str(item.get("name") or "").strip().casefold() == name.casefold()
+            ),
+            None,
+        )
+        if row is None:
+            weapons.append(weapon_catalog.sanitize_character_weapons([{"name": name, **fields}])[0])
+        else:
+            row.update({key: value for key, value in fields.items() if value not in (None, "", 0)})
+        payload["weapons"] = weapon_catalog.sanitize_character_weapons(weapons)
+        return
+
+    equipment = payload.get("equipment")
+    if equipment is None:
+        equipment = [
+            dict(row) if isinstance(row, dict) else row
+            for row in (existing.get("equipment") or [])
+        ]
+    amount = max(1, min(999, _bounded_int(change.get("amount"), 1, 999, 1)))
+    note = str(change.get("note") or "").strip()[:200]
+    row = next(
+        (
+            item
+            for item in equipment
+            if isinstance(item, dict) and str(item.get("name") or "").strip().casefold() == name.casefold()
+        ),
+        None,
+    )
+    if row is None:
+        equipment.append({"name": name, "quantity": amount, "weight": "", "volume": "", "notes": note})
+    else:
+        row["quantity"] = max(1, min(999, _bounded_int(row.get("quantity"), 1, 999, 1) + amount))
+        if note and not str(row.get("notes") or "").strip():
+            row["notes"] = note
+    payload["equipment"] = equipment
 
 
 def get_custom_weapons(actor: Any, character_id: str) -> list[dict[str, Any]]:

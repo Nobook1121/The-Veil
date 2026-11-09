@@ -19,6 +19,13 @@ from trpg_server.agents.tools.knowledge import SEARCH_RULESET_KNOWLEDGE_TOOL
 from trpg_server.agents.tools.suggest import SUGGEST_ACTIONS_TOOL
 from trpg_server.agents.tools.combat import COMBAT_TOOLS, COMBAT_TOOL_NAMES
 from trpg_server.agents.tools.music import MUSIC_REQUEST_TOOL
+from trpg_server.agents.tools.character_items import ADD_CHARACTER_ITEM_TOOL
+from trpg_server.agents.tools.coc7 import COC7_EXTRA_TOOL_NAMES, COC7_EXTRA_TOOLS
+from trpg_server.agents.tools.character_stats import (
+    SET_CHARACTER_ATTRIBUTE_TOOL,
+    SET_CHARACTER_SKILL_TOOL,
+)
+from trpg_server.agents.tools.interlude import INTERLUDE_TOOLS, INTERLUDE_TOOL_NAMES
 
 
 def default_tool_registry() -> ToolRegistry:
@@ -43,16 +50,25 @@ def default_tool_registry() -> ToolRegistry:
             SEARCH_RULESET_KNOWLEDGE_TOOL,
             SUGGEST_ACTIONS_TOOL,
             MUSIC_REQUEST_TOOL,
+            ADD_CHARACTER_ITEM_TOOL,
+            SET_CHARACTER_SKILL_TOOL,
+            SET_CHARACTER_ATTRIBUTE_TOOL,
             *COMBAT_TOOLS,
             *NARRATIVE_TOOLS,
             *TRIGGER_RUNTIME_TOOLS,
+            *COC7_EXTRA_TOOLS,
+            *INTERLUDE_TOOLS,
         ]
     )
 
 
 __all__ = [
+    "COC7_EXTRA_TOOL_NAMES",
+    "COC7_EXTRA_TOOLS",
     "COMBAT_TOOLS",
     "COMBAT_TOOL_NAMES",
+    "INTERLUDE_TOOLS",
+    "INTERLUDE_TOOL_NAMES",
     "NARRATIVE_TOOLS",
     "NARRATIVE_TOOL_NAMES",
     "TRIGGER_RUNTIME_TOOL_NAMES",

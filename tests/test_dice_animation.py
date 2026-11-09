@@ -110,10 +110,10 @@ def test_percentile_from_physical_faces_matches_rules():
     roll, candidates = _percentile_from_faces([4, 7, 8], penalty=1)
     assert roll == 87
     assert candidates == [47, 87]
-    # 重复十位只保留一次，不足时按 0-9 补齐。
+    # 十位独立采样，重复的十位是合法结果，不能去重（书中按每颗奖励/惩罚骰独立取十位）。
     roll, candidates = _percentile_from_faces([4, 7, 4], bonus=1)
-    assert candidates[0] == 47
-    assert roll == 7
+    assert candidates == [47, 47]
+    assert roll == 47
     assert len(candidates) == 2
 
 

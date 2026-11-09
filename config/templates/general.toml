@@ -31,6 +31,12 @@ max_entries = 500
 view_role = "admin"
 execute_role = "admin"
 
+[world_override]
+# 世界意志频率限制（站点默认）。0 表示不限制。
+# 房间可在房规里收紧（更长的冷却 / 更少的每小时次数），不能放宽。
+cooldown_seconds = 20
+hourly_limit = 30
+
 [chat]
 show_timestamp = true
 message_font_size = 14
@@ -111,6 +117,13 @@ keyword_channel_enabled = true
 recursive_scanning = true
 max_recursion_depth = 3
 lorebook_token_budget = 0
+
+[ai.memory]
+# 长期记忆巩固：把事件日志/关键节点/早期对话归档按相关性注入少量回顾，
+# 避免长剧本后期遗忘玩家最初的行动与承诺；不注入全量历史。
+enabled = true
+inject_budget_chars = 800
+inject_max_items = 6
 
 [character_rules]
 attribute_ratio_percent = 20

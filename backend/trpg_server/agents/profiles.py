@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from trpg_server.ruleset import DEFAULT_RULESET_ID, builtin_registry
+
 
 # 图谱模式：隐藏 redundant 场景模块工具，追加叙事运行工具（§5.6）。
 GRAPH_EXCLUDED_TOOLS = {
@@ -23,7 +25,7 @@ GRAPH_TOOL_NAMES = [
     "trigger.request",
 ]
 
-DEFAULT_KP_TOOLS = [
+CORE_KP_TOOL_NAMES = [
     "room.get_room_snapshot",
     "room.get_scenario_context",
     "room.get_scenario_module",
@@ -31,18 +33,17 @@ DEFAULT_KP_TOOLS = [
     "room.get_character_cards",
     "room.get_memory",
     "room.remember_fact",
-    "dice.roll_coc_check",
+    "room.request_interlude",
+    "room.save_interlude_review",
     "dice.roll",
     "dice.roll_dice",
-    "check.roll_room_check",
-    "san.roll_sanity_check",
-    "sanity.roll_sanity_check",
-    "san.roll_madness",
-    "sanity.roll_madness",
     "trigger.reveal_scenario_trigger",
     "knowledge.search_ruleset",
     "room.suggest_actions",
     "music.request_track",
+    "character.add_item",
+    "character.set_skill",
+    "character.set_attribute",
     "combat.start",
     "combat.state",
     "combat.next",
@@ -52,6 +53,28 @@ DEFAULT_KP_TOOLS = [
     "combat.treat",
     "combat.end",
 ]
+
+
+def ruleset_tool_names(ruleset_id: str | None = None) -> list[str]:
+    """当前规则集声明的专属工具（如 CoC7 的检定 / SAN 工具）。"""
+    plugin = builtin_registry().resolve(ruleset_id)
+    provider = getattr(plugin, "tools", None)
+    if provider is None:
+        return []
+    return [str(name) for name in provider.tool_names() if str(name).strip()]
+
+
+def build_kp_tool_names(ruleset_id: str | None = None) -> list[str]:
+    """按规则集组装 KP 工具：核心工具 + 插件声明的规则专属工具。"""
+    names = list(CORE_KP_TOOL_NAMES)
+    index = names.index("room.remember_fact") + 1
+    extra = [name for name in ruleset_tool_names(ruleset_id) if name not in names]
+    names[index:index] = extra
+    return names
+
+
+DEFAULT_KP_TOOLS = build_kp_tool_names(DEFAULT_RULESET_ID)
+
 
 
 @dataclass(frozen=True)
@@ -89,6 +112,7 @@ def resolve_agent_profile(
     prompt_file: Path,
     *,
     prefer_prompt_file: bool = False,
+    ruleset_id: str | None = None,
 ) -> AgentProfile:
     role_id = str(role.get("id") or "kp")
     prompt = str(role.get("prompt") or "")
@@ -99,7 +123,7 @@ def resolve_agent_profile(
     if isinstance(configured_tools, list):
         tool_names = [str(name) for name in configured_tools if str(name).strip()]
     elif role_id == "kp":
-        tool_names = DEFAULT_KP_TOOLS.copy()
+        tool_names = build_kp_tool_names(ruleset_id)
     else:
         tool_names = []
 

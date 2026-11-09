@@ -14,6 +14,14 @@ from pathlib import Path
 from typing import Any
 
 from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.room_mode import (
+    MODE_PRESETS,
+    ROOM_MODE_FREEFORM,
+    ROOM_MODE_SCRIPTED,
+    ROOM_MODES,
+    SCENARIO_BINDING_REQUIRED,
+    normalize_room_mode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +90,7 @@ def list_rooms_summary(rooms_dir: Any, search: str = "") -> list[dict[str, Any]]
         ).casefold()
         if needle and needle not in haystack:
             continue
+        mode = normalize_room_mode(info)
         rooms.append(
             {
                 "id": room_id,
@@ -89,6 +98,8 @@ def list_rooms_summary(rooms_dir: Any, search: str = "") -> list[dict[str, Any]]
                 "room_code": info.get("room_code"),
                 "scenario_id": info.get("scenario_id"),
                 "scenario_title": info.get("scenario_title"),
+                "room_mode": mode["room_mode"],
+                "ai_kp_enabled": mode["ai_kp_enabled"],
                 "members": len(_active_members(info)),
                 "archived": bool(info.get("archived")),
                 "created_at": info.get("created_at"),
@@ -149,10 +160,15 @@ def archive_room(rooms_dir: Any, room_id: Any, *, app: Any = None) -> dict[str, 
         raise ValueError("房间已经归档，无需重复操作")
     state = read_json(room_dir / "state.json", default={})
     state = state if isinstance(state, dict) else {}
-    if not _is_finished(info, state):
+    # 只有 scripted 房间需要「到达结局」；freeform 与 manual 无剧本结局可判定。
+    if normalize_room_mode(info)["scenario_binding"] == SCENARIO_BINDING_REQUIRED and not _is_finished(info, state):
         raise ValueError("房间尚未到达结局，无法归档（网页规则一致）")
 
     now = _timestamp()
+    # 房规在归档后会被移除，写回持久角色卡必须发生在这一步之前。
+    from trpg_server import room_rules
+
+    room_rules.persist_room_items_on_archive(room_dir, info, app=app)
     info["completed_at"] = info.get("completed_at") or now
     info["archived_at"] = now
     info["archived"] = True
@@ -183,6 +199,61 @@ def archive_room(rooms_dir: Any, room_id: Any, *, app: Any = None) -> dict[str, 
         "name": info.get("name"),
         "archived_at": now,
         "snapshot": snapshot_built,
+    }
+
+
+def migrate_room_mode(rooms_dir: Any, room_id: Any, room_mode: str) -> dict[str, Any]:
+    """显式迁移房间模式（默认预演，调用方负责确认与 --yes）。
+
+    模式创建后默认不可变；这是唯一的变更入口。迁移规则：
+    - 目标 freeform：清空剧本绑定与场景指针（无剧本房间禁止再写剧本）；
+    - 目标 scripted：必须已有剧本，否则拒绝；
+    - 目标 manual：保留已有剧本作为自查资料，关闭 AI。
+    """
+    target = str(room_mode or "").strip().lower()
+    if target not in ROOM_MODES:
+        raise ValueError(f"未知房间模式：{room_mode}（可选 {'/'.join(ROOM_MODES)}）")
+    room_dir = _find_room_dir(rooms_dir, room_id)
+    if room_dir is None:
+        raise LookupError(f"room not found: {room_id}")
+    info = _read_info(room_dir)
+    if info.get("archived"):
+        raise ValueError("已归档房间不能迁移模式")
+    current = normalize_room_mode(info)
+    if current["room_mode"] == target:
+        return {"changed": False, "from": current["room_mode"], "to": target, "removed_scenario": False}
+    if target == ROOM_MODE_SCRIPTED and not info.get("scenario_id"):
+        raise ValueError("目标模式需要剧本，请先用房间剧本接口绑定剧本")
+    preset = MODE_PRESETS[target]
+    removed_scenario = False
+    if target == ROOM_MODE_FREEFORM:
+        for key in (
+            "scenario_id",
+            "scenario_title",
+            "scenario_version",
+            "active_scene_id",
+            "active_scene_title",
+            "scenario_started_at",
+        ):
+            if info.pop(key, None) is not None:
+                removed_scenario = removed_scenario or key == "scenario_id"
+    info["room_mode"] = target
+    info["ai_kp_enabled"] = preset["ai_kp_enabled"]
+    info["scenario_binding"] = preset["scenario_binding"]
+    info["updated_at"] = _timestamp()
+    write_json_atomic(room_dir / "info.json", info)
+    logger.info(
+        "room.mode.migrated room=%s from=%s to=%s removed_scenario=%s",
+        info.get("id") or room_id,
+        current["room_mode"],
+        target,
+        removed_scenario,
+    )
+    return {
+        "changed": True,
+        "from": current["room_mode"],
+        "to": target,
+        "removed_scenario": removed_scenario,
     }
 
 

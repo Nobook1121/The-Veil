@@ -15,18 +15,13 @@ SKIPPED_STATUS = {"unconscious", "dying", "dead"}
 
 
 def _success_level(roll: int, target: int, critical: int = 1, fumble: int = 96) -> str:
-    """CoC7 成功等级，和 dice 模块保持同一套阈值语义。"""
-    if roll <= critical:
-        return "critical"
-    if roll <= target // 5:
-        return "extreme"
-    if roll <= target // 2:
-        return "hard"
-    if roll <= target:
-        return "regular"
-    if roll >= fumble:
-        return "fumble"
-    return "failure"
+    """CoC7 成功等级：统一复用骰子模块的判定数学，避免出现第三份阈值口径。
+
+    所需值 ≥50 且未显式收紧阈值（默认 96）时，只有 100 算大失败。
+    """
+    from trpg_server.agents.tools import dice
+
+    return dice._success_level(int(roll), int(target), int(critical), int(fumble))
 
 
 def build_and_damage_bonus(str_value: int, siz_value: int) -> tuple[int, str, list[tuple[int, int]]]:

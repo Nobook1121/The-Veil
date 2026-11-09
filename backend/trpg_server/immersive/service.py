@@ -417,9 +417,16 @@ def on_narrative_turn(
     scenario_id: str = "",
     config_dir: Path | str | None = None,
     personal_override: dict[str, Any] | None = None,
+    ai_kp_enabled: bool = True,
 ) -> dict[str, Any]:
-    """处理一个叙事回合；返回本次触发的摘要（失败时为空结构）。"""
+    """处理一个叙事回合；返回本次触发的摘要（失败时为空结构）。
+
+    ``ai_kp_enabled`` 为 false（manual 房间）时直接短路：不触发配音、配图、
+    LLM 配乐导演，也不写任何房间级缓存。
+    """
     result: dict[str, Any] = {"music": None, "illustration": None}
+    if not ai_kp_enabled:
+        return result
     try:
         _ensure_legacy_migrated(config_dir)
         settings = load_immersive_settings(config_dir)

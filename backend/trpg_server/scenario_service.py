@@ -14,6 +14,7 @@ from flask import current_app
 
 from trpg_server.agents.versioning import normalize_semver, scenario_content_changed, next_scenario_version
 from trpg_server.media_defaults import normalize_cover
+from trpg_server.ruleset import DEFAULT_RULESET_ID, RulesetSelectionError, builtin_registry
 from trpg_server.scenario_store import (
     generate_public_id,
     load_scenario_record,
@@ -24,7 +25,18 @@ from trpg_server.scenario_store import (
 )
 from trpg_server.settings import SCENARIOS_DIR
 
-BASIC_FIELDS = ("title", "author", "description", "recommended_players", "cover", "tags")
+BASIC_FIELDS = ("title", "author", "description", "recommended_players", "cover", "tags", "ruleset_id")
+
+
+def _normalize_ruleset_id(value: Any) -> str:
+    """规则与剧本绑定：只接受注册表中可选的规则集，否则 400。"""
+    candidate = str(value or "").strip() or DEFAULT_RULESET_ID
+    try:
+        return builtin_registry().assert_selectable(candidate).id
+    except RulesetSelectionError as exc:
+        raise ScenarioServiceError(exc.reason_code, exc.message, 400) from exc
+
+
 HEADER_FIELDS = ("title", "author", "description", "recommended_players")
 
 
@@ -178,6 +190,7 @@ def apply_create(actor: Any, payload: dict[str, Any]) -> dict[str, Any]:
     data["createdAt"] = _timestamp()
     data["updatedAt"] = data["createdAt"]
     data["cover"] = normalize_cover(data.get("cover"))
+    data["ruleset_id"] = _normalize_ruleset_id(data.get("ruleset_id"))
 
     file_path = save_scenario_record(_scenarios_dir(), data, trigger_max_file_size=_trigger_size_limit())
     saved = load_scenario_record(file_path, _scenarios_dir())
@@ -255,6 +268,7 @@ def apply_update(actor: Any, scenario_id: Any, payload: dict[str, Any]) -> dict[
     )
     data["updatedAt"] = _timestamp()
     data.setdefault("createdAt", existing.get("createdAt", _timestamp()))
+    data["ruleset_id"] = _normalize_ruleset_id(data.get("ruleset_id"))
 
     file_path = save_scenario_record(
         _scenarios_dir(),

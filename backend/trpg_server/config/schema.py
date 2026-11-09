@@ -108,6 +108,11 @@ class AIRuntimeConfig:
     # 默认值只是兜底，实际取值以 general.toml 的 [ai] 段为准；引导页会把该值显示给
     # 用户，因此前端文案里不要重复写死仓库名。
     local_embedding_repo: str = "BAAI/bge-small-zh-v1.5"
+    # 长期记忆巩固：从房间事件日志/AI 记忆/关键节点/对话归档中按相关性挑选少量回顾，
+    # 每轮注入受字符预算约束，不注入全量历史。预算为 0 表示关闭注入。
+    memory_enabled: bool = True
+    memory_inject_budget_chars: int = 800
+    memory_inject_max_items: int = 6
 
 
 _AI_DEFAULTS = AIRuntimeConfig()
@@ -162,6 +167,10 @@ AI_SPECS: tuple[FieldSpec, ...] = (
     _ai("ai.knowledge", "recursive_scanning", ("recursive_scanning",), as_bool),
     _ai("ai.knowledge", "max_recursion_depth", ("max_recursion_depth",), clamped_int(minimum=0, maximum=10)),
     _ai("ai.knowledge", "lorebook_token_budget", ("lorebook_token_budget",), clamped_int(minimum=0, maximum=200000)),
+    # [ai.memory]
+    _ai("ai.memory", "memory_enabled", ("enabled",), as_bool),
+    _ai("ai.memory", "memory_inject_budget_chars", ("inject_budget_chars",), clamped_int(minimum=0, maximum=4000)),
+    _ai("ai.memory", "memory_inject_max_items", ("inject_max_items",), clamped_int(minimum=1, maximum=20)),
 )
 
 # 小模型任务映射：[ai.small_models] 的键是动态任务名，值为模型 id（字符串）。
@@ -192,6 +201,11 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec("max_entries", "room_console", ("max_entries",), clamped_int(minimum=50, maximum=5000), 500),
     FieldSpec("view_role", "room_console", ("view_role",), as_text, "admin"),
     FieldSpec("execute_role", "room_console", ("execute_role",), as_text, "admin"),
+    # [world_override]
+    # 世界意志频率限制（站点默认）。房间只能在此基础上收紧，不能放宽。
+    # 0 表示不限制；房间级配置见房规 world_override_*。
+    FieldSpec("cooldown_seconds", "world_override", ("cooldown_seconds",), clamped_int(minimum=0, maximum=3600), 20),
+    FieldSpec("hourly_limit", "world_override", ("hourly_limit",), clamped_int(minimum=0, maximum=10000), 30),
     # [chat]
     FieldSpec("show_timestamp", "chat", ("show_timestamp",), as_bool, True),
     FieldSpec("message_font_size", "chat", ("message_font_size",), clamped_int(minimum=10, maximum=24), 14),

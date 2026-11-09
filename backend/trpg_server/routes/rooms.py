@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from flask import Blueprint, current_app, request, session
 
-from trpg_server import weapon_catalog
+from trpg_server import room_interlude, weapon_catalog
 from trpg_server.config import load_settings
 from trpg_server.immersive.config import AUDIO_BLOCKS, MUSIC_BLOCKS, MUSIC_BLOCK_PRIORITY
 from trpg_server.json_store import read_json, write_json_atomic
@@ -15,9 +15,21 @@ from trpg_server.media_defaults import normalize_avatar
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
 from trpg_server.room_log import ARCHIVE_LOG_LIMIT, load_room_log, log_room_event
 from trpg_server.responses import error_response, success_response
+from trpg_server.ruleset import DEFAULT_RULESET_ID, RulesetSelectionError, builtin_registry
 from trpg_server.room_access import can_access, find_room, is_elevated
+from trpg_server.room_mode import (
+    MODE_PRESETS,
+    ROOM_MODE_FREEFORM,
+    ROOM_MODE_SCRIPTED,
+    ROOM_MODES,
+    SCENARIO_BINDING_REQUIRED,
+    accepts_scenario,
+    has_bound_scenario,
+    normalize_room_mode,
+)
 from trpg_server.room_usage import load_room_usage
 from trpg_server.role_config import load_roles
+from trpg_server.world_override import evidence_entries, rate_limit_snapshot, resolve_policy
 from trpg_server.security import get_user_manager, is_socket_user_online, is_user_in_room, safe_join
 from trpg_server.settings import CONFIG_DIR, ROOMS_DIR, SCENARIOS_DIR, ROOM_ARCHIVES_DIR, CHARACTERS_DIR, HISTORY_DIR
 from trpg_server.agents.config import load_ai_runtime_config
@@ -102,6 +114,25 @@ HOUSE_RULE_DEFINITIONS = {
     # 房主与房管默认可用；user_ids 里的普通成员额外获得权限。
     "world_override_enabled": {"type": "boolean", "default": True, "ai_prompt": False},
     "world_override_user_ids": {"type": "user_ids", "default": [], "max_items": 50, "ai_prompt": False},
+    # 世界意志限频的房间级收紧（null 表示沿用站点 [world_override] 设置）。
+    # 房间只能比站点更严格：冷却取较大值，每小时次数取较小值。
+    "world_override_cooldown_seconds": {"type": "nullable_integer", "default": None, "min": 0, "max": 3600, "ai_prompt": False},
+    "world_override_hourly_limit": {"type": "nullable_integer", "default": None, "min": 0, "max": 10000, "ai_prompt": False},
+    # 归档时是否把本房间内获得的物品 / 武器写回持久角色卡（默认开启）。
+    "rule_persist_on_archive": {"type": "boolean", "default": True, "ai_prompt": False},
+    # CoC7 章节级规则开关（默认全部关闭，关闭时任何既有行为都不变）。
+    # 社交技能难度：按对方社交/心理学与态度建议难度，见 ruleset/coc7/social.py。
+    "coc7_social_difficulty": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 组合技能：一次掷骰对多个技能比较（全部成功 / 任一成功）。
+    "coc7_combined_checks": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 团体幸运：由在场幸运最低者代掷。
+    "coc7_group_luck": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 信用评级开支：消费水平、现金/资产扣减与幕间 CR 变动。
+    "coc7_economy": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 熟人：创建熟人与熟人协助（房规 1 奖励骰）。
+    "coc7_contacts": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 年龄调整：建卡年龄修正与老化 / EDU 增强检定。
+    "coc7_age_adjustments": {"type": "boolean", "default": False, "ai_prompt": False},
     # 战斗规则留白配置（报告 §9）。这些都不是 CoC7 核心规则，默认值取最保守解释。
     # 突袭：bonus_die = 未准备目标近战给攻击者 1 奖励骰；auto_success = 自动成功（除大失败）。
     "combat_surprise_model": {
@@ -289,6 +320,10 @@ def _normalize_user_ids(value, max_items=50):
 
 def world_override_allowed(info, user_id=None, role=None):
     """世界意志直执行权限：站点管理员恒可用，房主/房管按房规开关，白名单成员额外放行。"""
+    mode = normalize_room_mode(info)
+    # 世界意志只依赖 AI KP：无 AI 的房间不可用，无剧本房间（freeform）同样可用。
+    if not mode["ai_kp_enabled"]:
+        return False
     role_value = str(role or session.get("role") or "USER").upper()
     if role_value in {"ADMIN", "OWNER"} or _is_elevated():
         return True
@@ -582,19 +617,25 @@ def _sanitize_character_card(character_card):
     attributes = character_card.get("attributes") if isinstance(character_card.get("attributes"), dict) else {}
     max_hp = _bounded_int(character_card.get("maxHp", character_card.get("max_hp")), 1, 999, 1)
     max_san = _bounded_int(character_card.get("maxSan", character_card.get("max_san")), 0, 999, 0)
+    max_mp = _bounded_int(character_card.get("maxMp", character_card.get("max_mp")), 0, 999, 0)
     status = character_card.get("status") if isinstance(character_card.get("status"), dict) else {}
     sanitized = {
         "id": card_id[:80],
         "name": name[:80],
+        "rulesetId": str(character_card.get("rulesetId") or "coc7")[:40],
         "occupationId": str(character_card.get("occupationId", character_card.get("occupation_id", "")))[:80],
         "attributes": attributes,
         "maxHp": max_hp,
         "currentHp": _bounded_int(character_card.get("currentHp", character_card.get("current_hp")), 0, max_hp, max_hp),
         "maxSan": max_san,
+        "initialSan": _bounded_int(character_card.get("initialSan"), 0, 999, max_san),
         "currentSan": _bounded_int(character_card.get("currentSan", character_card.get("current_san")), 0, max_san, max_san),
+        "maxMp": max_mp,
+        "currentMp": _bounded_int(character_card.get("currentMp", character_card.get("magicPoints")), 0, max_mp, max_mp),
         "mov": _bounded_int(character_card.get("mov"), 0, 99, 0),
         "build": _bounded_int(character_card.get("build"), -2, 99, 0),
         "damageBonus": str(character_card.get("damageBonus") or "")[:20],
+        "armor": _bounded_int(character_card.get("armor"), 0, 99, 0),
         "skills": character_card.get("skills", []) if isinstance(character_card.get("skills", []), list) else [],
         "weapons": weapon_catalog.sanitize_character_weapons(character_card.get("weapons")),
         "customWeapons": weapon_catalog.sanitize_character_weapons(character_card.get("customWeapons")),
@@ -602,7 +643,20 @@ def _sanitize_character_card(character_card):
         "background": character_card.get("background", {}) if isinstance(character_card.get("background", {}), dict) else {},
         "status": status,
     }
-    return sanitized
+    return _derive_character_card(sanitized)
+
+
+def _derive_character_card(character_card):
+    """调用当前规则集插件重算派生值；插件不可用时原样返回。"""
+    if not isinstance(character_card, dict):
+        return character_card
+    try:
+        from trpg_server.ruleset import get_plugin
+
+        plugin = get_plugin(character_card.get("rulesetId"))
+        return dict(plugin.schema.derive(character_card))
+    except Exception:  # noqa: BLE001 - 插件异常不应阻断房间读取
+        return dict(character_card)
 
 
 def _bounded_int(value, minimum, maximum, fallback):
@@ -614,13 +668,20 @@ def _bounded_int(value, minimum, maximum, fallback):
 
 
 def _initial_character_state(character_card):
-    max_hp = _bounded_int(character_card.get("maxHp"), 1, 999, 1)
-    max_san = _bounded_int(character_card.get("maxSan"), 0, 999, 0)
+    """按规则集派生的上限初始化状态；理智从「初始值 = POW」开始，而不是直接拉满上限。"""
+    card = _derive_character_card(character_card or {})
+    max_hp = _bounded_int(card.get("maxHp"), 1, 999, 1)
+    max_san = _bounded_int(card.get("maxSan"), 0, 999, 0)
+    initial_san = _bounded_int(card.get("initialSan"), 0, max_san, max_san)
+    max_mp = _bounded_int(card.get("maxMp"), 0, 999, 0)
     return {
         "max_hp": max_hp,
-        "current_hp": max_hp,
+        "current_hp": _bounded_int(card.get("currentHp"), 0, max_hp, max_hp),
         "max_san": max_san,
-        "current_san": max_san,
+        "current_san": _bounded_int(card.get("currentSan"), 0, max_san, min(max_san, initial_san)),
+        "initial_san": min(max_san, initial_san),
+        "max_mp": max_mp,
+        "current_mp": _bounded_int(card.get("currentMp", card.get("magicPoints")), 0, max_mp, max_mp),
         "injury_records": [],
         "sanity_records": [],
         "skill_changes": [],
@@ -646,10 +707,29 @@ def _ensure_character_state(member):
     state.setdefault("dying", False)
     state.setdefault("dead", False)
     state.setdefault("first_aid_used", False)
+    # 上限以规则集派生结果为准（理智上限 = 99 − 克苏鲁神话值），旧房间读取时同步修正。
+    card = _derive_character_card(member.get("character_card") or {})
+    if card:
+        state["max_hp"] = _bounded_int(card.get("maxHp"), 1, 999, _bounded_int(state.get("max_hp"), 1, 999, 1))
+        state["max_san"] = _bounded_int(card.get("maxSan"), 0, 999, _bounded_int(state.get("max_san"), 0, 999, 0))
+        state["max_mp"] = _bounded_int(card.get("maxMp"), 0, 999, _bounded_int(state.get("max_mp"), 0, 999, 0))
+        snapshot = member.get("character_card")
+        if isinstance(snapshot, dict):
+            for key in ("maxHp", "maxSan", "initialSan", "maxMp", "mov", "build", "damageBonus", "armor"):
+                if key in card:
+                    snapshot[key] = card[key]
     state["max_hp"] = _bounded_int(state.get("max_hp"), 1, 999, 1)
     state["current_hp"] = _bounded_int(state.get("current_hp"), 0, state["max_hp"], state["max_hp"])
     state["max_san"] = _bounded_int(state.get("max_san"), 0, 999, 0)
     state["current_san"] = _bounded_int(state.get("current_san"), 0, state["max_san"], state["max_san"])
+    state["initial_san"] = _bounded_int(
+        state.get("initial_san"),
+        0,
+        state["max_san"],
+        _bounded_int(card.get("initialSan"), 0, state["max_san"], state["max_san"]),
+    )
+    state["max_mp"] = _bounded_int(state.get("max_mp"), 0, 999, 0)
+    state["current_mp"] = _bounded_int(state.get("current_mp"), 0, state["max_mp"], state["max_mp"])
     return state
 
 
@@ -720,7 +800,9 @@ def _recalculate_character_state(state):
     damage = sum(_bounded_int(record.get("value", record.get("damage")), 0, 999, 0) for record in state.get("injury_records", []))
     san_loss = sum(_bounded_int(record.get("value", record.get("loss")), 0, 999, 0) for record in state.get("sanity_records", []))
     state["current_hp"] = max(0, state["max_hp"] - damage)
-    state["current_san"] = max(0, state["max_san"] - san_loss)
+    # 理智从「初始值 = POW」起算，而不是从上限（99 − 克苏鲁神话）起算。
+    san_base = _bounded_int(state.get("initial_san"), 0, state["max_san"], state["max_san"])
+    state["current_san"] = max(0, min(state["max_san"], san_base - san_loss))
 
 
 def _messages_file(room_dir):
@@ -744,10 +826,11 @@ def _character_delta(member):
     state = member.get("character_state") if isinstance(member, dict) else {}
     state = state if isinstance(state, dict) else {}
     max_san = int(state.get("max_san") or 0)
-    current_san = int(state.get("current_san") if state.get("current_san") is not None else max_san)
     max_hp = int(state.get("max_hp") or 0)
     current_hp = int(state.get("current_hp") if state.get("current_hp") is not None else max_hp)
-    san_change = current_san - max_san
+    san_base = int(state.get("initial_san") if state.get("initial_san") is not None else max_san)
+    current_san = int(state.get("current_san") if state.get("current_san") is not None else san_base)
+    san_change = current_san - san_base
     other = []
     if current_hp != max_hp:
         other.append(f"HP {max_hp}->{current_hp}")
@@ -841,12 +924,13 @@ def _build_room_archive(room_dir, info):
     for dice and history) rather than deleted/moved; the archive JSON is retained
     as an immutable history copy and participating players' character cards are
     updated with a three-line "参与过的模组" record."""
+    mode = normalize_room_mode(info)
     archive = {
         "id": info.get("id"),
         "name": info.get("name"),
-        "scenario_id": info.get("scenario_id"),
-        "scenario_title": info.get("scenario_title"),
-        "scenario_version": info.get("scenario_version"),
+        "room_mode": mode["room_mode"],
+        "ai_kp_enabled": mode["ai_kp_enabled"],
+        "scenario_binding": mode["scenario_binding"],
         "created_at": info.get("created_at"),
         "completed_at": info.get("completed_at") or _timestamp(),
         "archived_at": info.get("archived_at") or _timestamp(),
@@ -856,6 +940,26 @@ def _build_room_archive(room_dir, info):
         "messages": _read_messages(room_dir),
         "console_log": load_room_log(room_dir, limit=ARCHIVE_LOG_LIMIT),
     }
+    interlude_state = room_interlude.interlude_state(info)
+    if interlude_state.get("startedAt") or interlude_state.get("reviews") or interlude_state.get("settlement"):
+        archive["interlude"] = room_interlude.snapshot(info)
+        archive["interlude_settlement"] = interlude_state.get("settlement") or {}
+        archive["interlude_reviews"] = interlude_state.get("reviews") or []
+    # 世界意志留痕：把已拍定的既定事实随归档快照一并保存，便于事后核对。
+    state = read_json(room_dir / "state.json", default={})
+    facts = evidence_entries(state) if isinstance(state, dict) else []
+    if facts:
+        archive["world_override_facts"] = facts
+    # 无剧本房间（freeform / 未绑定资料的 manual）跳过剧本字段与角色卡模组记录，
+    # 避免生成一条空白的「参与过的模组」。
+    if has_bound_scenario(info):
+        archive.update(
+            {
+                "scenario_id": info.get("scenario_id"),
+                "scenario_title": info.get("scenario_title"),
+                "scenario_version": info.get("scenario_version"),
+            }
+        )
     history_dir = current_app.config.get("HISTORY_DIR", HISTORY_DIR)
     if history_dir:
         history_file = Path(history_dir) / f"room-{info.get('id')}-kp.json"
@@ -864,7 +968,8 @@ def _build_room_archive(room_dir, info):
     archive_dir.mkdir(parents=True, exist_ok=True)
     archive_path = archive_dir / f"{info.get('id')}.json"
     write_json_atomic(archive_path, archive)
-    _append_character_archive_records(info)
+    if has_bound_scenario(info):
+        _append_character_archive_records(info)
     return archive
 
 
@@ -944,8 +1049,31 @@ def _room_visibility(info):
     return value if value in ROOM_VISIBILITIES else ROOM_VISIBILITY_PRIVATE
 
 
+def _room_ruleset_id(info):
+    """解析房间规则集：显式字段优先，旧房间按剧本推断，最后回退 coc7。"""
+    data = info or {}
+    explicit = str(data.get("ruleset_id") or "").strip()
+    if explicit:
+        return builtin_registry().resolve(explicit).id
+    scenario_id = str(data.get("scenario_id") or "").strip()
+    if scenario_id:
+        try:
+            _, scenario = load_scenario_by_id(
+                _get_scenarios_dir(),
+                scenario_id,
+                scenario_version=data.get("scenario_version"),
+            )
+            inferred = str((scenario or {}).get("ruleset_id") or "").strip()
+            if inferred:
+                return builtin_registry().resolve(inferred).id
+        except Exception:  # pragma: no cover - 剧本缺失时按默认规则集处理
+            logger.debug("Failed to infer ruleset for room %s", data.get("id"), exc_info=True)
+    return builtin_registry().resolve("").id
+
+
 def _room_summary(info):
     _normalize_members(info)
+    mode = normalize_room_mode(info)
 
     def _member_view(member):
         # 角色以账号数据库为准，避免降级后成员仍显示为管理员配色/标签。
@@ -963,12 +1091,20 @@ def _room_summary(info):
         "scenario_id": info.get("scenario_id"),
         "scenario_version": info.get("scenario_version"),
         "scenario_title": info.get("scenario_title"),
+        # 房间级唯一规则集：剧本侧已持久化，旧房间在读取时按剧本推断。
+        "ruleset_id": _room_ruleset_id(info),
+        # 房间模式的两个正交能力位：AI KP 是否参与、剧本绑定强度。
+        # 旧房间在读取时补默认值，不写回 info.json。
+        "room_mode": mode["room_mode"],
+        "ai_kp_enabled": mode["ai_kp_enabled"],
+        "scenario_binding": mode["scenario_binding"],
         "visibility": _room_visibility(info),
         "scenario_started_at": info.get("scenario_started_at"),
         "scenario_started_by": info.get("scenario_started_by"),
         "archived": bool(info.get("archived")),
         "archived_at": info.get("archived_at"),
         "completed_at": info.get("completed_at"),
+        "interlude": room_interlude.snapshot(info),
         "creator_id": info.get("creator_id"),
         "creator_name": info.get("creator_name"),
         "members": [_member_view(member) for member in info.get("members", [])],
@@ -1022,15 +1158,31 @@ def create_room():
 
     data = request.get_json(silent=True) or {}
     name = str(data.get("name", "")).strip()
+    # 房间模式预设：scripted（剧本 + AI）/ freeform（无剧本 + AI）/ manual（无 AI）。
+    # 默认 scripted，旧客户端不传该字段时行为不变。
+    room_mode = str(data.get("room_mode") or ROOM_MODE_SCRIPTED).strip().lower()
+    if room_mode not in ROOM_MODES:
+        return error_response("Unknown room mode", 400, "Unknown room mode")
     scenario_id = data.get("scenario_id")
+    if scenario_id in (None, ""):
+        scenario_id = None
     scenario_title = str(data.get("scenario_title", "")).strip()
+    # 规则集在创建时固化：显式请求必须可选择（dnd5e 等开发中规则集会在此被拒绝），
+    # 未指定时用默认规则集；剧本房间随后以剧本的 ruleset_id 为准。
+    requested_ruleset = str(data.get("ruleset_id") or data.get("rulesetId") or "").strip()
+    try:
+        ruleset_id = builtin_registry().assert_selectable(requested_ruleset or DEFAULT_RULESET_ID).id
+    except RulesetSelectionError as exc:
+        return error_response(exc.message, 400, exc.reason_code)
     # 房间可见性默认为私人房间（仅能通过房间码加入）；公开房间会展示给所有玩家。
     visibility = str(data.get("visibility", ROOM_VISIBILITY_PRIVATE)).strip().lower()
     if visibility not in {ROOM_VISIBILITY_PUBLIC, ROOM_VISIBILITY_PRIVATE}:
         visibility = ROOM_VISIBILITY_PRIVATE
     if not name:
         return error_response("Please enter room name", 400, "Room name is required")
-    if scenario_id is None:
+    if room_mode == ROOM_MODE_FREEFORM and scenario_id is not None:
+        return error_response("Freeform room cannot bind a scenario", 400, "Scenario binding is not allowed")
+    if room_mode == ROOM_MODE_SCRIPTED and scenario_id is None:
         return error_response("Please choose a scenario", 400, "Scenario is required")
     if _room_name_exists(name):
         return error_response("Room name already exists", 409, "Room name already exists")
@@ -1045,14 +1197,18 @@ def create_room():
     member = _current_member(data.get("character_card"))
     member["room_role"] = ROOM_ROLE_OWNER
     now = _timestamp()
+    preset = MODE_PRESETS[room_mode]
     info = {
         "id": room_id,
         "name": name,
         "room_code": _new_room_code(),
         # 可轮换的邀请令牌：邀请链接/二维码用它生成，刷新后旧链接立即失效。
         "invite_token": _new_invite_token(),
-        "scenario_id": scenario_id,
-        "scenario_title": scenario_title,
+        # 模式能力位：room_mode 负责展示与预设，两个布尔/枚举位负责实际校验。
+        "room_mode": room_mode,
+        "ai_kp_enabled": preset["ai_kp_enabled"],
+        "scenario_binding": preset["scenario_binding"],
+        "ruleset_id": ruleset_id,
         "visibility": visibility,
         "creator_id": session["user_id"],
         "creator_name": session.get("username", "user"),
@@ -1060,22 +1216,39 @@ def create_room():
         "created_at": now,
         "updated_at": now,
     }
+    if scenario_id is not None:
+        # manual 下剧本只作玩家自查资料，不驱动任何 AI 能力。
+        info["scenario_id"] = scenario_id
+        info["scenario_title"] = scenario_title
     # Pin a deterministic starting scene in room state. The KP receives this
     # pointer and can only move it via room.activate_scenario_scene.
-    try:
-        from trpg_server.scenario_store import load_scenario_by_id
-        _, bound_scenario = load_scenario_by_id(
-            current_app.config.get("SCENARIOS_DIR", SCENARIOS_DIR), scenario_id
-        )
-        if bound_scenario:
-            info["scenario_version"] = str(bound_scenario.get("scenario_version") or bound_scenario.get("version") or "1")
-            scene = next((m for m in bound_scenario.get("modules", [])
-                          if isinstance(m, dict) and str(m.get("module_type")) == "scene"), None)
-            if scene:
-                info["active_scene_id"] = str(scene.get("scene_id") or scene.get("id"))
-                info["active_scene_title"] = scene.get("title")
-    except Exception:
-        logger.exception("Failed to initialize room active scene")
+    # 只有 scripted 房间需要场景指针；freeform 无剧本，manual 不跑 AI 流程。
+    if room_mode == ROOM_MODE_SCRIPTED:
+        try:
+            from trpg_server.scenario_store import load_scenario_by_id
+            _, bound_scenario = load_scenario_by_id(
+                current_app.config.get("SCENARIOS_DIR", SCENARIOS_DIR), scenario_id
+            )
+            if bound_scenario:
+                scenario_ruleset = str(bound_scenario.get("ruleset_id") or "").strip()
+                if scenario_ruleset:
+                    scenario_plugin = builtin_registry().resolve(scenario_ruleset)
+                    if requested_ruleset and scenario_plugin.id != ruleset_id:
+                        return error_response(
+                            "房间规则集必须与剧本一致",
+                            400,
+                            "ruleset_mismatch",
+                        )
+                    ruleset_id = scenario_plugin.id
+                    info["ruleset_id"] = ruleset_id
+                info["scenario_version"] = str(bound_scenario.get("scenario_version") or bound_scenario.get("version") or "1")
+                scene = next((m for m in bound_scenario.get("modules", [])
+                              if isinstance(m, dict) and str(m.get("module_type")) == "scene"), None)
+                if scene:
+                    info["active_scene_id"] = str(scene.get("scene_id") or scene.get("id"))
+                    info["active_scene_title"] = scene.get("title")
+        except Exception:
+            logger.exception("Failed to initialize room active scene")
     write_json_atomic(room_dir / "info.json", info)
     _write_messages(room_dir, [])
     write_json_atomic(room_dir / "autosave.json", {"updated_at": now, "messages": []})
@@ -1089,6 +1262,7 @@ def create_room():
         用户ID=session.get("user_id"),
         房间码=info["room_code"],
         房间名=name,
+        模式=room_mode,
         剧本=scenario_title,
     )
     data = _room_summary(info)
@@ -1110,6 +1284,37 @@ def spectate_room_by_code():
     if not room_dir:
         return error_response("Room not found", 404, "Room not found")
     return success_response(_invisible_room_view(room_dir, info), "Room spectated successfully")
+
+
+@bp.route("/api/rooms/lookup", methods=["GET"])
+def lookup_room_by_code():
+    """按房间码/邀请令牌查询最小的房间信息。
+
+    加入房间前需要知道房间模式（无 AI 房间允许不绑定角色卡进入），
+    但不能泄露成员列表与角色卡，因此只返回模式、名称与剧本标题。
+    """
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    invite_token = str(request.args.get("invite_token") or "").strip()
+    if invite_token:
+        room_dir, info = _find_room_by_invite_token(invite_token)
+    else:
+        room_dir, info = _find_room_by_code(request.args.get("code"))
+    if not room_dir:
+        return error_response("Room not found", 404, "Room not found")
+    mode = normalize_room_mode(info)
+    return success_response(
+        {
+            "id": info.get("id"),
+            "name": info.get("name"),
+            "room_mode": mode["room_mode"],
+            "ai_kp_enabled": mode["ai_kp_enabled"],
+            "scenario_binding": mode["scenario_binding"],
+            "scenario_title": info.get("scenario_title"),
+            "archived": bool(info.get("archived")),
+        }
+    )
 
 
 @bp.route("/api/rooms/join", methods=["POST"])
@@ -1383,6 +1588,8 @@ def migrate_room_scenario(room_id):
         return error_response("Room not found", 404, "Room not found")
     if not _can_manage(info):
         return _denied(room_id)
+    if not accepts_scenario(info):
+        return error_response("Freeform room has no scenario to migrate", 400, "Scenario binding is not allowed")
     payload = request.get_json(silent=True) or {}
     target_version = payload.get("scenario_version")
     _, target = load_scenario_by_id(
@@ -1404,6 +1611,9 @@ def migrate_room_scenario(room_id):
         updated = migrate_room_binding(info, target, payload.get("mapping") or {}, old_entities, new_entities)
     except ValueError as exc:
         return error_response(str(exc), 400, "Scenario migration rejected")
+    updated["ruleset_id"] = builtin_registry().resolve(
+        str(target.get("ruleset_id") or updated.get("ruleset_id") or "")
+    ).id
     write_json_atomic(room_dir / "info.json", updated)
     return success_response(_room_summary(updated), "Room migrated to scenario version")
 
@@ -1435,6 +1645,8 @@ def switch_room_scenario(room_id):
         return _denied(room_id)
     if info.get("archived"):
         return error_response("Archived room cannot switch scenario", 409, "Room archived")
+    if not accepts_scenario(info):
+        return error_response("Freeform room cannot bind a scenario", 400, "Scenario binding is not allowed")
 
     payload = request.get_json(silent=True) or {}
     target_id = payload.get("scenario_id")
@@ -1454,6 +1666,7 @@ def switch_room_scenario(room_id):
     updated["scenario_id"] = target_id
     updated["scenario_version"] = str(target.get("scenario_version") or target.get("version") or "1")
     updated["scenario_title"] = str(target.get("title") or payload.get("scenario_title") or "").strip() or f"剧本 {target_id}"
+    updated["ruleset_id"] = builtin_registry().resolve(str(target.get("ruleset_id") or "")).id
     # 场景指针：继承进度时，只要旧场景在新剧本中仍存在就保留，避免打断当前场景；
     # 否则回退到新剧本的第一个场景。
     target_scene_ids = {
@@ -1566,9 +1779,15 @@ def archive_room(room_id):
     if info.get("archived"):
         return error_response("Room already archived", 409, "Room already archived")
     state = read_json(room_dir / "state.json", default={})
-    if not _scenario_finished(info, state):
+    # 只有 scripted 房间需要「到达结局」；freeform 与 manual 没有剧本结局可判定，
+    # 房主/房管显式归档即视为结束。
+    if normalize_room_mode(info)["scenario_binding"] == SCENARIO_BINDING_REQUIRED and not _scenario_finished(info, state):
         return error_response("Room is not finished", 409, "Room must reach an ending before archiving")
     now = _timestamp()
+    # 房规在归档后会被移除，写回持久角色卡必须发生在这一步之前。
+    from trpg_server import room_rules
+
+    room_rules.persist_room_items_on_archive(room_dir, info, app=current_app._get_current_object())
     info["completed_at"] = info.get("completed_at") or now
     info["archived_at"] = now
     info["archived"] = True
@@ -1595,12 +1814,21 @@ def get_world_override_status(room_id):
     login_error = _require_login()
     if login_error:
         return login_error
-    _path, info = _find_room(room_id)
+    room_dir, info = _find_room(room_id)
     if not info:
         return error_response("Room not found", 404, "Room not found")
     if not _can_access(info):
         return _denied(room_id)
     rules = _room_house_rules(info)
+    mode = normalize_room_mode(info)
+    # 世界意志只依赖 AI KP：scripted 与 freeform 都可用，manual 不提供（前端据此隐藏入口）。
+    supported = bool(mode["ai_kp_enabled"])
+    state = read_json(room_dir / "state.json", default={}) if room_dir else {}
+    rate = rate_limit_snapshot(
+        state,
+        session.get("user_id"),
+        policy=resolve_policy(_get_config_dir(), rules),
+    )
     members = []
     for member in info.get("members") or []:
         if not isinstance(member, dict) or not _is_active_member(member):
@@ -1615,10 +1843,12 @@ def get_world_override_status(room_id):
         )
     return success_response(
         {
-            "allowed": world_override_allowed(info),
-            "enabled": bool(rules.get("world_override_enabled", True)),
+            "supported": supported,
+            "allowed": supported and world_override_allowed(info),
+            "enabled": supported and bool(rules.get("world_override_enabled", True)),
             "user_ids": rules.get("world_override_user_ids") or [],
-            "can_configure": _can_manage(info),
+            "can_configure": supported and _can_manage(info),
+            "rate": rate,
             "members": members,
         },
         "World override status loaded successfully",
@@ -2266,6 +2496,8 @@ def restore_room_node(room_id, node_filename):
         return error_response("Room not found", 404, "Room not found")
     if not _can_access(info):
         return _denied(room_id)
+    if room_interlude.is_active(info):
+        return error_response("Interlude is active", 409, "幕间期间不能回溯存档节点")
 
     node_file = safe_join(room_dir / "nodes", node_filename)
     if not node_file.exists():
@@ -2478,3 +2710,196 @@ def load_room_autosave(room_id):
 
     autosave = read_json(room_dir / "autosave.json", default={"messages": []})
     return success_response(autosave, "Room autosave loaded successfully")
+
+
+# ---------------------------------------------------------------------------
+# 幕间：显式房间阶段。旧房间没有 interlude 字段时快照返回 active=False。
+# ---------------------------------------------------------------------------
+
+def _interlude_payload(info):
+    state = room_interlude.interlude_state(info)
+    return {
+        "state": room_interlude.snapshot(info),
+        "settlement": state.get("settlement") or {},
+        "reviews": state.get("reviews") or [],
+        "can_manage": _can_manage(info),
+    }
+
+
+def _emit_interlude_updated(room_id, info):
+    socketio = current_app.extensions.get("socketio")
+    if socketio is not None:
+        socketio.emit(
+            "room_interlude_updated",
+            {"room_id": room_id, "interlude": room_interlude.snapshot(info)},
+            room=str(room_id),
+        )
+
+
+@bp.route("/api/rooms/<room_id>/interlude", methods=["GET"])
+def get_room_interlude(room_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    room_dir, info = _find_room(room_id)
+    if not room_dir:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_access(info):
+        return _denied(room_id)
+    return success_response(_interlude_payload(info), "Interlude loaded")
+
+
+@bp.route("/api/rooms/<room_id>/interlude/request", methods=["POST"])
+def request_room_interlude(room_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    room_dir, info = _find_room(room_id)
+    if not room_dir:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_access(info):
+        return _denied(room_id)
+    data = request.get_json(silent=True) or {}
+    try:
+        record = room_interlude.request_interlude(
+            room_dir,
+            info,
+            actor=session.get("username"),
+            actor_id=session.get("user_id"),
+            source=str(data.get("source") or "player"),
+            reason=str(data.get("reason") or ""),
+        )
+    except room_interlude.InterludeError as exc:
+        return error_response("Interlude request failed", exc.status, exc.message)
+    _emit_interlude_updated(room_id, info)
+    return success_response(_interlude_payload(info) | {"request": record}, "Interlude requested")
+
+
+@bp.route("/api/rooms/<room_id>/interlude/start", methods=["POST"])
+def start_room_interlude(room_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    room_dir, info = _find_room(room_id)
+    if not room_dir:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_manage(info):
+        return _denied(room_id)
+    data = request.get_json(silent=True) or {}
+    credit_events = data.get("credit_events") if isinstance(data.get("credit_events"), list) else []
+    try:
+        outcome = room_interlude.start_interlude(
+            room_dir,
+            info,
+            actor=session.get("username"),
+            actor_id=session.get("user_id"),
+            credit_events=credit_events,
+        )
+    except room_interlude.InterludeError as exc:
+        return error_response("Interlude start failed", exc.status, exc.message)
+    _emit_interlude_updated(room_id, info)
+    return success_response(
+        {
+            **_interlude_payload(info),
+            "settlement": outcome.get("settlement") or {},
+            "kp_prompt": "（系统）房间已进入幕间。请只做复盘与点评：先给一段简短的点评和结语，不要推进剧情。",
+        },
+        "Interlude started",
+    )
+
+
+@bp.route("/api/rooms/<room_id>/interlude/settle", methods=["POST"])
+def settle_room_interlude(room_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    room_dir, info = _find_room(room_id)
+    if not room_dir:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_manage(info):
+        return _denied(room_id)
+    data = request.get_json(silent=True) or {}
+    credit_events = data.get("credit_events") if isinstance(data.get("credit_events"), list) else []
+    try:
+        settlement = room_interlude.settle_interlude(
+            room_dir,
+            info,
+            actor=session.get("username"),
+            actor_id=session.get("user_id"),
+            credit_events=credit_events,
+        )
+    except room_interlude.InterludeError as exc:
+        return error_response("Interlude settle failed", exc.status, exc.message)
+    _emit_interlude_updated(room_id, info)
+    return success_response(
+        {**_interlude_payload(info), "settlement": settlement},
+        "Interlude settled",
+    )
+
+
+@bp.route("/api/rooms/<room_id>/interlude/review", methods=["POST"])
+def add_room_interlude_review(room_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    room_dir, info = _find_room(room_id)
+    if not room_dir:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_access(info):
+        return _denied(room_id)
+    data = request.get_json(silent=True) or {}
+    try:
+        record = room_interlude.add_review(
+            room_dir,
+            info,
+            content=str(data.get("content") or ""),
+            topic=str(data.get("topic") or ""),
+            actor=session.get("username"),
+            actor_id=session.get("user_id"),
+            source=str(data.get("source") or "player"),
+        )
+    except room_interlude.InterludeError as exc:
+        return error_response("Interlude review failed", exc.status, exc.message)
+    _emit_interlude_updated(room_id, info)
+    return success_response({**_interlude_payload(info), "review": record}, "Interlude review saved")
+
+
+@bp.route("/api/rooms/<room_id>/interlude/end", methods=["POST"])
+def end_room_interlude(room_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    room_dir, info = _find_room(room_id)
+    if not room_dir:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_manage(info):
+        return _denied(room_id)
+    data = request.get_json(silent=True) or {}
+    confirmed = bool(data.get("confirm")) or request.args.get("confirm") in {"1", "true", "yes"}
+    if not confirmed:
+        return error_response(
+            "Confirmation required",
+            409,
+            "结束幕间会自动归档房间。确认后请再次提交，并带上 confirm=true。",
+        )
+    try:
+        room_interlude.end_interlude(
+            room_dir,
+            info,
+            actor=session.get("username"),
+            actor_id=session.get("user_id"),
+        )
+    except room_interlude.InterludeError as exc:
+        return error_response("Interlude end failed", exc.status, exc.message)
+    _emit_interlude_updated(room_id, info)
+    from trpg_server import room_admin
+
+    try:
+        archive = room_admin.archive_room(_get_rooms_dir(), room_id, app=current_app._get_current_object())
+    except Exception as exc:  # noqa: BLE001 - 幕间已结束，归档失败需明确上报
+        logger.exception("Failed to archive room %s after interlude", room_id)
+        return error_response("Room archive failed", 500, f"幕间已结束，但自动归档失败：{exc}")
+    return success_response(
+        {**_interlude_payload(info), "archive": {"archived_at": archive.get("archived_at")}},
+        "Interlude ended and room archived",
+    )

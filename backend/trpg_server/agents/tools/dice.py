@@ -1,6 +1,7 @@
 import logging
 import random
 import re
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -54,19 +55,33 @@ def _dice_count(arguments: dict[str, Any], key: str, alias: str) -> int:
     if isinstance(value, str) and value.strip().lower() in {"true", "yes", "on"}: return 1
     try: return max(0, min(10, int(value or 0)))
     except (TypeError, ValueError): return 0
+MAX_BONUS_PENALTY = 2
+
+
+def _normalize_bonus_penalty(bonus: Any, penalty: Any) -> tuple[int, int]:
+    """奖励 / 惩罚骰净额：两者同时存在先相互抵消，净额最多 2 颗。
+
+    通用检定、战斗检定与对抗检定都走这里，保证口径一致。
+    """
+    try:
+        b = max(0, int(bonus or 0))
+    except (TypeError, ValueError):
+        b = 0
+    try:
+        p = max(0, int(penalty or 0))
+    except (TypeError, ValueError):
+        p = 0
+    net = max(-MAX_BONUS_PENALTY, min(MAX_BONUS_PENALTY, b - p))
+    return (net, 0) if net > 0 else (0, -net)
+
+
 def _percentile_roll(roller: Callable[[int], int], bonus: int = 0, penalty: int = 0) -> tuple[int, list[int]]:
+    bonus, penalty = _normalize_bonus_penalty(bonus, penalty)
     if not bonus and not penalty: return max(1, min(100, int(roller(100)))), []
-    units = int(roller(10)) % 10; needed = (bonus or penalty) + 1; tens: list[int] = []
-    attempts = 0
-    while len(tens) < needed and attempts < 100:
-        attempts += 1
-        value = (int(roller(10)) - 1) % 10
-        if value not in tens: tens.append(value)
-    # A deterministic test/random source may return the same tens forever;
-    # still honour the rule by selecting the next distinct tens value.
-    for value in range(10):
-        if len(tens) >= needed: break
-        if value not in tens: tens.append(value)
+    # 个位固定，十位按奖励 / 惩罚颗数「独立」采样；重复的十位是合法结果，不能去重。
+    units = int(roller(10)) % 10
+    needed = (bonus or penalty) + 1
+    tens = [(int(roller(10)) - 1) % 10 for _ in range(needed)]
     candidates = [100 if ten == 0 and units == 0 else ten * 10 + units for ten in tens]
     return (min(candidates) if bonus else max(candidates)), candidates
 def _active_members(context: Any) -> list[dict[str, Any]]:
@@ -267,7 +282,13 @@ def _success_level(roll: int, target: int, critical_threshold: int = DEFAULT_CRI
     if roll <= target // 5: return "extreme"
     if roll <= target // 2: return "hard"
     if roll <= target: return "regular"
-    if roll >= fumble_threshold: return "fumble"
+    # 大失败：默认（96）时启用 7 版派生规则「所需值 ≥50 只有 100 才算大失败」；
+    # 房规 / 管理员显式配置的更严格阈值优先（例如 90），便于桌内自定义。
+    if int(target) >= 50 and int(fumble_threshold) >= DEFAULT_FUMBLE_THRESHOLD:
+        effective_fumble = 100
+    else:
+        effective_fumble = fumble_threshold
+    if roll >= effective_fumble: return "fumble"
     return "failure"
 def _level_suffix(level: str) -> str:
     """为大成功/大失败追加明确的文字标注，供聊天与 AI 上下文直接读取。"""
@@ -303,28 +324,24 @@ def _percentile_from_faces(
     bonus: int = 0,
     penalty: int = 0,
 ) -> tuple[int, list[int]]:
-    """由物理 d10 骰面（十位/个位/候选十位）推导百分骰结果。
+    """由物理 d10 骰面（个位/十位/候选十位）推导百分骰结果。
 
-    与 :func:`_percentile_roll` 使用同一套规则：个位固定，奖励骰取最小的
-    十位组合，惩罚骰取最大的；重复的十位只保留一次，不足时按 0-9 顺序补齐。
+    与 :func:`_percentile_roll` 完全同一口径：十位独立计数、允许重复；奖励取
+    最小、惩罚取最大；奖励与惩罚先抵消，净额最多 2 颗。
     """
+    bonus, penalty = _normalize_bonus_penalty(bonus, penalty)
     values = [int(value) for value in faces]
     if len(values) < 2:
         raise ValueError("percentile roll requires at least two d10 faces")
     units = values[1] % 10
     if not bonus and not penalty:
         return (100 if values[0] % 10 == 0 and units == 0 else (values[0] % 10) * 10 + units), []
-    needed = int(bonus) + int(penalty) + 1
-    tens: list[int] = []
-    for value in [values[0], *values[2:]]:
-        value %= 10
-        if value not in tens:
-            tens.append(value)
-    for value in range(10):
-        if len(tens) >= needed:
-            break
-        if value not in tens:
-            tens.append(value)
+    needed = (bonus or penalty) + 1
+    faces_tens = [values[0] % 10, *[value % 10 for value in values[2:]]]
+    # 物理模式通常已提供足够骰面；不足时用首颗十位补齐（重复十位本身合法）。
+    while len(faces_tens) < needed:
+        faces_tens.append(faces_tens[0])
+    tens = faces_tens[:needed]
     candidates = [100 if ten == 0 and units == 0 else ten * 10 + units for ten in tens]
     return (min(candidates) if bonus else max(candidates)), candidates
 
@@ -617,6 +634,7 @@ def _should_wait_for_player(context: Any, arguments: dict[str, Any], roller_user
 
 
 def _plan_percentile(*, check_name: str | None, difficulty: str | None, target: int | None, bonus: int, penalty: int) -> dict[str, Any]:
+    bonus, penalty = _normalize_bonus_penalty(bonus, penalty)
     groups: list[dict[str, Any]] = [
         {"role": "tens", "type": "d10", "count": 1, "labels": []},
         {"role": "ones", "type": "d10", "count": 1, "labels": []},
@@ -677,13 +695,20 @@ def _sanity_check_plan(arguments: dict[str, Any], context: Any) -> dict[str, Any
         member = _find_member(player_name, context)
         card = member.get("character_card") if member else None
         if isinstance(card, dict):
-            sanity = card.get("sanity") if isinstance(card.get("sanity"), dict) else {}
+            # 房间快照的当前理智字段是 current_san；旧代码读 sanity 字典导致目标恒为 0。
+            schema = _plugin_schema(card)
+            derived = schema.derive(card) if schema is not None and hasattr(schema, "derive") else dict(card)
             state = member.get("character_state") if isinstance(member, dict) else {}
             state = state if isinstance(state, dict) else {}
-            current = _as_int(state.get("current_san", card.get("currentSan", sanity.get("current", card.get("maxSan", 0)))), 0)
+            current = _as_int(state.get("current_san"), _as_int(derived.get("currentSan"), 0))
+            current = max(0, min(_as_int(derived.get("maxSan"), current), current))
     except Exception:  # noqa: BLE001
         current = None
-    return _plan_percentile(check_name="理智", difficulty=None, target=current, bonus=0, penalty=0)
+    bonus, penalty = _normalize_bonus_penalty(
+        _dice_count(arguments, "bonus_dice", "bonus"),
+        _dice_count(arguments, "penalty_dice", "penalty"),
+    )
+    return _plan_percentile(check_name="理智", difficulty=None, target=current, bonus=bonus, penalty=penalty)
 
 
 _DICE_TERM_RE = re.compile(r"(\d+)d(\d+)", re.IGNORECASE)
@@ -839,7 +864,8 @@ def roll_coc_check(
     difficulty = _normalize_difficulty(arguments.get("difficulty"))
     if not difficulty: return {"error": "difficulty must be regular, hard, extreme, 普通, 困难, or 极难"}
     bonus_dice = _dice_count(arguments, "bonus_dice", "bonus"); penalty_dice = _dice_count(arguments, "penalty_dice", "penalty")
-    if bonus_dice and penalty_dice: return {"error": "bonus_dice and penalty_dice cannot both be used"}
+    # 奖励与惩罚同时存在时互相抵消，只有净额生效（上限 2 颗）。
+    bonus_dice, penalty_dice = _normalize_bonus_penalty(bonus_dice, penalty_dice)
     try: threshold = _adjust_threshold(_threshold(target, difficulty), arguments.get("adjustment", arguments.get("correction")))
     except ValueError as exc: return {"error": str(exc)}
     critical_threshold = _threshold_arg(arguments, "critical_threshold", DEFAULT_CRITICAL_THRESHOLD)
@@ -906,61 +932,47 @@ def roll_room_check(
     rng: Callable[[int], int] | None = None,
     faces: list[int] | tuple[int, ...] | None = None,
 ) -> dict[str, Any]:
-    """房间成员检定。``faces`` 提供时使用物理骰面，不再调用随机数生成器。"""
-    player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip(); check_name = _resolve_check_name(arguments)
-    if not player_name: return {"error": "player_name is required"}
-    if not check_name: return {"error": "name is required"}
+    """房间成员检定。``faces`` 提供时使用物理骰面，不再调用随机数生成器。
+
+    数值判定统一交给 ``check_service`` 与当前房间规则集插件；本函数只保留
+    AI 工具侧的参数解析、成员定位和物理骰等待流程。
+    """
+    from trpg_server import check_service
+
+    player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip()
+    check_name = _resolve_check_name(arguments)
+    if not player_name:
+        return {"error": "player_name is required"}
+    if not check_name:
+        return {"error": "name is required"}
     difficulty = _normalize_difficulty(arguments.get("difficulty"))
-    if not difficulty: return {"error": "difficulty must be regular, hard, extreme, 普通, 困难, or 极难"}
+    if not difficulty:
+        return {"error": "difficulty must be regular, hard, extreme, 普通, 困难, or 极难"}
+    member = _find_member(player_name, context)
+    if not member:
+        return {"error": f"player {player_name} was not found in current room"}
+    room_info = context.room_info() if hasattr(context, "room_info") else {}
+    ruleset_id = str((room_info or {}).get("ruleset_id") or "").strip() or None
     try:
-        member = _find_member(player_name, context)
-        if not member: return {"error": f"player {player_name} was not found in current room"}
-        card = member.get("character_card")
-        if not isinstance(card, dict): return {"error": f"player {player_name} has no bound character card"}
-        base_target = _lookup_check_value(card, check_name)
-        if base_target is None or base_target < 0:
-            if check_name.casefold() in _member_names(member):
-                return {"error": f"“{check_name}”是玩家/角色名，不是技能名；name 参数应填写要检定的技能或属性（如 力量/敏捷/侦察/聆听/心理学/理智）。"}
-            if not _is_known_check_name(check_name):
-                return {"error": f"“{check_name}”不是 COC7 标准属性或技能目录中的技能，已拒绝该检定；请改用标准检定名（如 侦察/聆听/心理学/力量/敏捷）或角色卡上已有的技能。"}
-            return {"error": f"{check_name} was not found on player {player_name}'s character card"}
-        if base_target > 100: return {"error": f"{check_name} value must be between 0 and 100"}
-        threshold = _adjust_threshold(_threshold(base_target, difficulty), arguments.get("adjustment", arguments.get("correction")))
-        display_name = _resolve_check_display_name(card, check_name)
-    except ValueError as exc: return {"error": str(exc)}
-    bonus_dice = _dice_count(arguments, "bonus_dice", "bonus"); penalty_dice = _dice_count(arguments, "penalty_dice", "penalty")
-    if bonus_dice and penalty_dice: return {"error": "bonus_dice and penalty_dice cannot both be used"}
-    default_critical, default_fumble = _context_thresholds(context)
-    critical_threshold = _threshold_arg(arguments, "critical_threshold", default_critical)
-    fumble_threshold = _threshold_arg(arguments, "fumble_threshold", default_fumble)
-    roll, candidates = (
-        _percentile_from_faces(faces, bonus_dice, penalty_dice)
-        if faces is not None
-        else _percentile_roll(rng or (lambda sides: random.randint(1, sides)), bonus_dice, penalty_dice)
-    )
-    level = _success_level(roll, base_target, critical_threshold, fumble_threshold); success = (roll <= threshold or level == "critical") and level != "fumble"
-    summary = _format_room_check_summary(display_name, difficulty, roll, threshold, success) + _level_suffix(level)
-    modifier = str(arguments.get("adjustment", arguments.get("correction")) or "").strip()
-    if candidates: summary += f" {'奖励骰' if bonus_dice else '惩罚骰'}（{', '.join(map(str, candidates))}），取{roll}。"
-    result = {"player_name": player_name, "character_name": card.get("name"), "name": display_name, "roll": roll, "rolls": candidates or [roll], "base_target": base_target, "target": threshold, "difficulty": difficulty, "difficulty_label": DIFFICULTY_LABELS[difficulty], "adjustment": modifier, "bonus_dice": bonus_dice, "penalty_dice": penalty_dice, "success": success, "success_level": level if success else "failure", "raw_success_level": level, "critical": level == "critical", "fumble": level == "fumble", "critical_threshold": critical_threshold, "fumble_threshold": fumble_threshold, "summary": summary}
-    result["visible_message"] = _result_message(
-        summary,
-        "check.roll_room_check",
-        check_type="room",
-        player_name=player_name,
-        name=display_name,
-        extra_metadata={
-            "dice_roll": _dice_roll_metadata(
-                result,
-                mode="percentile",
-                check_name=display_name,
-                difficulty=difficulty,
-                target=threshold,
-                roller=player_name,
-            )
-        },
-    )
-    return result
+        return check_service.run_room_check(
+            member,
+            context=context,
+            player_name=player_name,
+            name=check_name,
+            difficulty=difficulty,
+            adjustment=arguments.get("adjustment", arguments.get("correction")),
+            bonus=_dice_count(arguments, "bonus_dice", "bonus"),
+            penalty=_dice_count(arguments, "penalty_dice", "penalty"),
+            critical_threshold=arguments.get("critical_threshold"),
+            fumble_threshold=arguments.get("fumble_threshold"),
+            ruleset_id=ruleset_id,
+            rng=rng,
+            faces=faces,
+        )
+    except check_service.CheckServiceError as exc:
+        return {"error": str(exc)}
+
+
 def execute_roll_room_check(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip()
     member = _find_member(player_name, context)
@@ -985,8 +997,25 @@ def execute_roll_room_check(arguments: dict[str, Any], context: Any) -> dict[str
         result = roll_room_check(arguments, context)
         result = _finalize_dice_metadata(result, context)
     result = _attach_trigger_reveal(result, arguments, context)
+    _record_growth_mark(result, context, member)
     _log_roll_result(result, context, tool_name="check.roll_room_check", actor=player_name)
     return result
+
+
+def _record_growth_mark(result: dict[str, Any], context: Any, member: dict[str, Any] | None) -> None:
+    """AI KP 发起的技能检定成功后，同样立刻打成长标记。"""
+    if not isinstance(result, dict) or not isinstance(member, dict):
+        return
+    room_dir = getattr(context, "room_dir", None)
+    if room_dir is None or not hasattr(context, "room_info"):
+        return
+    try:
+        from trpg_server import room_rules
+
+        room_rules.record_growth_mark_for_check(room_dir, context.room_info(), member, result)
+    except Exception:  # noqa: BLE001 - 成长标记失败不影响检定结果
+        pass
+
 
 def _roll_sanity_value(expression: Any, roller: Callable[[int], int]) -> tuple[int, list[int]]:
     text = str(expression or "0").strip()
@@ -1000,6 +1029,27 @@ def _roll_sanity_value(expression: Any, roller: Callable[[int], int]) -> tuple[i
         return sign * sum(rolls), rolls
     if not re.fullmatch(r"\d+", text): raise ValueError("SAN change must be a number or dice expression such as 1d6")
     return sign * int(text), [int(text)]
+
+def _plugin_schema(card: Any):
+    """取角色卡所属规则集的 schema；失败返回 None（通用层只做调度）。"""
+    try:
+        from trpg_server.ruleset import get_plugin
+
+        return get_plugin((card or {}).get("rulesetId")).schema
+    except Exception:  # noqa: BLE001 - 插件缺失时按旧行为兜底
+        return None
+
+
+def _sanity_day_key(arguments: dict[str, Any], context: Any) -> str:
+    """游戏内日期键：调用方可显式给 game_date / game_day，否则回退本地日期。"""
+    explicit = (arguments or {}).get("game_date") or (arguments or {}).get("game_day")
+    if not explicit and context is not None and hasattr(context, "room_info"):
+        info = context.room_info()
+        if isinstance(info, dict):
+            explicit = info.get("game_date") or info.get("game_day")
+    text = str(explicit or "").strip()
+    return text[:32] or time.strftime("%Y-%m-%d")
+
 
 def roll_sanity_check(
     arguments: dict[str, Any],
@@ -1018,44 +1068,91 @@ def roll_sanity_check(
     card = member.get("character_card")
     if not isinstance(card, dict): return {"error": f"player {player_name} has no bound character card"}
     state = member.setdefault("character_state", {})
-    sanity = card.get("sanity") if isinstance(card.get("sanity"), dict) else {}
-    current = _as_int(state.get("current_san", card.get("currentSan", card.get("current_san", sanity.get("current", card.get("maxSan", card.get("max_san", 0)))))), 0)
-    maximum = _as_int(state.get("max_san", card.get("maxSan", card.get("max_san", sanity.get("max", current)))), current)
+    schema = _plugin_schema(card)
+    derived = schema.derive(card) if schema is not None and hasattr(schema, "derive") else dict(card)
+    # 理智上限 = 99 − 克苏鲁神话值；当前值优先取房间状态，其次持久卡派生值。
+    maximum = _as_int(derived.get("maxSan", state.get("max_san", card.get("maxSan", card.get("max_san", 0)))), 0)
+    current = _as_int(
+        state.get("current_san", derived.get("currentSan", derived.get("initialSan", maximum))),
+        maximum,
+    )
+    current = max(0, min(maximum, current))
     roller = rng or (lambda sides: random.randint(1, sides))
+    bonus_dice, penalty_dice = _normalize_bonus_penalty(
+        _dice_count(arguments, "bonus_dice", "bonus"),
+        _dice_count(arguments, "penalty_dice", "penalty"),
+    )
     try:
         if faces is not None:
-            roll, _candidates = _percentile_from_faces(faces)
-            roll = max(1, min(100, int(roll)))
+            roll, _candidates = _percentile_from_faces(faces, bonus_dice, penalty_dice)
         else:
-            roll = int(roller(100))
+            roll, _candidates = _percentile_roll(roller, bonus_dice, penalty_dice)
+        roll = max(1, min(100, int(roll)))
+        critical_threshold, fumble_threshold = _context_thresholds(context)
+        level = _success_level(roll, current, critical_threshold, fumble_threshold)
         success = roll <= current
         selected_expr = success_expr if success else failure_expr
-        delta, detail_rolls = _roll_sanity_value(selected_expr, roller)
+        if roll == 100 and not success and schema is not None and hasattr(schema, "max_san_loss"):
+            # 7 版：理智检定掷出 100 时取该次判定的最大损失。
+            delta, detail_rolls = -int(schema.max_san_loss(failure_expr)), []
+        else:
+            delta, detail_rolls = _roll_sanity_value(selected_expr, roller)
     except ValueError as exc: return {"error": str(exc)}
     new_san = max(0, min(maximum, current + delta))
-    loss = max(0, -delta)
+    loss = max(0, current - new_san)
     flags = state.setdefault("mental_status", {})
     if not isinstance(flags, dict): flags = {}; state["mental_status"] = flags
     # CoC7：一次损失 ≥5 点进入「临时疯狂」判定，但必须由 KP 再调用
     # san.roll_madness 进行 INT 检定并抽取疯狂表现，不能在这里直接置位。
     madness_check_required = loss >= 5
-    if current > 0 and loss * 5 >= current and loss > 0: flags["indefiniteInsanity"] = flags["indefinite_insanity"] = True
+    daily: dict[str, Any] = {}
+    if schema is not None and hasattr(schema, "record_san_loss") and loss > 0:
+        daily = schema.record_san_loss(
+            state,
+            day=_sanity_day_key(arguments, context),
+            before=current,
+            loss=loss,
+        )
+    # 单次阈值（损失达到当前 SAN 的 1/5）与同一游戏日累计阈值同时生效。
+    if loss > 0 and (loss * 5 >= current or daily.get("threshold_met")):
+        flags["indefiniteInsanity"] = flags["indefinite_insanity"] = True
     if new_san <= 0: flags["permanentInsanity"] = flags["permanent_insanity"] = True
     state["current_san"] = new_san; state["max_san"] = maximum
     state["last_san_loss"] = loss; state["last_san_before"] = current
-    card["currentSan"] = new_san; card["current_san"] = new_san; card["mental_status"] = flags; card["status"] = flags
+    # 房间快照里的 SAN 变化需要由归档流程写回持久角色卡，见 room_rules。
+    state["pending_persist"] = True
+    card["currentSan"] = new_san; card["current_san"] = new_san; card["maxSan"] = maximum; card["mental_status"] = flags; card["status"] = flags
     card["temporary_insanity"] = bool(flags.get("temporaryInsanity")); card["indefinite_insanity"] = bool(flags.get("indefiniteInsanity")); card["permanent_insanity"] = bool(flags.get("permanentInsanity"))
+    try:
+        from trpg_server import room_rules as _room_rules
+
+        change_list = [
+            {"type": "san", "value": new_san, "source": "ai_tool", "reason": "理智检定"},
+        ]
+        if new_san <= 0:
+            change_list.append({"type": "status", "value": dict(flags), "source": "ai_tool", "reason": "理智归零"})
+        _room_rules.record_room_changes(member, change_list)
+    except Exception:  # noqa: BLE001 - 待写回登记失败不应中断检定
+        pass
     if context.room_dir:
         room_info = context.room_info()
         for room_member in room_info.get("members", []) if isinstance(room_info.get("members"), list) else []:
             if isinstance(room_member, dict) and room_member.get("user_id") == member.get("user_id"):
-                room_member.clear(); room_member.update(member); break
+                # 若调用方持有同一个 dict（如房间命令的内存上下文），clear 会先清空再自更新，
+                # 反而丢掉角色卡；同对象时无需回写。
+                if room_member is not member:
+                    room_member.clear(); room_member.update(member)
+                break
         write_json_atomic(context.room_dir / "info.json", room_info)
     result_text = "成功" if success else "失败"
     summary = f"{player_name} 理智检定：1d100=[{roll}] / 当前 SAN {current}，{result_text}；理智变化 {selected_expr} = {delta:+d}，SAN {current}→{new_san}。"
+    if roll == 100 and not success:
+        summary += " 掷出 100，本次按最大损失结算。"
     if madness_check_required:
         summary += " 一次损失≥5点：请继续调用 san.roll_madness 做智力检定并抽取疯狂表现。"
-    result = {"player_name": player_name, "roll": roll, "san": current, "current_san": new_san, "max_san": maximum, "success": success, "change": delta, "change_expression": selected_expr, "change_rolls": detail_rolls, "san_change": change, "madness_check_required": madness_check_required, "madness_note": "一次损失≥5点，请调用 san.roll_madness 进行智力检定并抽取疯狂表现" if madness_check_required else "", "temporary_insanity": bool(flags.get("temporaryInsanity")), "indefinite_insanity": bool(flags.get("indefiniteInsanity")), "permanent_insanity": bool(flags.get("permanentInsanity")), "summary": summary}
+    if daily.get("threshold_met"):
+        summary += " 同一游戏日累计理智损失已达当日起始理智的 1/5，判定不定性疯狂。"
+    result = {"player_name": player_name, "roll": roll, "san": current, "current_san": new_san, "max_san": maximum, "success": success, "success_level": level, "change": delta, "change_expression": selected_expr, "change_rolls": detail_rolls, "san_change": change, "bonus_dice": bonus_dice, "penalty_dice": penalty_dice, "daily_san_loss": daily.get("loss", loss), "daily_san_base": daily.get("base"), "daily_san_date": daily.get("date"), "daily_threshold_met": bool(daily.get("threshold_met")), "madness_check_required": madness_check_required, "madness_note": "一次损失≥5点，请调用 san.roll_madness 进行智力检定并抽取疯狂表现" if madness_check_required else "", "temporary_insanity": bool(flags.get("temporaryInsanity")), "indefinite_insanity": bool(flags.get("indefiniteInsanity")), "permanent_insanity": bool(flags.get("permanentInsanity")), "summary": summary}
     result["visible_message"] = _result_message(
         summary,
         "san.roll_sanity_check",
@@ -1180,7 +1277,8 @@ def roll_madness(
         }
 
     before = _as_int(state.get("last_san_before", current_san + loss), current_san + loss)
-    indefinite = (before > 0 and loss * 5 >= before) or bool(
+    daily = state.get("san_daily") if isinstance(state.get("san_daily"), dict) else {}
+    indefinite = (before > 0 and loss * 5 >= before) or bool(daily.get("threshold_met")) or bool(
         (state.get("mental_status") or {}).get("indefiniteInsanity")
         if isinstance(state.get("mental_status"), dict) else False
     )
@@ -1188,7 +1286,15 @@ def roll_madness(
 
     roller = rng or (lambda sides: random.randint(1, sides))
     int_target = _madness_int_value(card)
-    int_roll = max(1, min(100, int(roller(100))))
+    bonus_dice, penalty_dice = _normalize_bonus_penalty(
+        _dice_count(arguments, "bonus_dice", "bonus"),
+        _dice_count(arguments, "penalty_dice", "penalty"),
+    )
+    int_roll, _int_candidates = _percentile_roll(roller, bonus_dice, penalty_dice)
+    int_roll = max(1, min(100, int(int_roll)))
+    # 疯狂 INT 检定同样读取房规大成功 / 大失败阈值（≥50 时只有 100 是大失败）。
+    critical_threshold, fumble_threshold = _context_thresholds(context)
+    int_level = _success_level(int_roll, int_target, critical_threshold, fumble_threshold)
     int_success = int_target > 0 and int_roll <= int_target
 
     insane = permanent or indefinite or (loss >= 5 and int_success)
@@ -1219,6 +1325,7 @@ def roll_madness(
             "int_roll": int_roll,
             "int_target": int_target,
             "int_success": int_success,
+            "int_level": int_level,
             "bout_roll": bout_roll,
             "bout_name": bout["name"],
             "bout_description": bout["description"],
@@ -1247,12 +1354,28 @@ def roll_madness(
         card["status"] = flags
 
     state["last_san_loss"] = 0
+    if insane:
+        # 疯狂状态与恐惧症/躁狂症同样需要随归档写回持久角色卡。
+        state["pending_persist"] = True
+        try:
+            from trpg_server import room_rules as _room_rules
+
+            change_list = [{"type": "status", "value": dict(flags), "source": "ai_tool", "reason": "疯狂表现"}]
+            background = card.get("background")
+            if isinstance(background, dict):
+                change_list.append(
+                    {"type": "background", "value": dict(background), "source": "ai_tool", "reason": "疯狂表现"}
+                )
+            _room_rules.record_room_changes(member, change_list)
+        except Exception:  # noqa: BLE001 - 待写回登记失败不应中断疯狂判定
+            pass
     if context.room_dir:
         room_info = context.room_info()
         for room_member in room_info.get("members", []) if isinstance(room_info.get("members"), list) else []:
             if isinstance(room_member, dict) and room_member.get("user_id") == member.get("user_id"):
-                room_member.clear()
-                room_member.update(member)
+                if room_member is not member:
+                    room_member.clear()
+                    room_member.update(member)
                 break
         write_json_atomic(context.room_dir / "info.json", room_info)
 
@@ -1260,7 +1383,8 @@ def roll_madness(
         if permanent:
             summary = f"{player_name} 永久性疯狂：SAN 归零。"
         elif indefinite:
-            summary = f"{player_name} 不定性疯狂：本日累计损失 {loss} 点（≥当前理智 1/5），需接受治疗才能恢复。"
+            daily_total = _as_int(daily.get("loss"), loss)
+            summary = f"{player_name} 不定性疯狂：本游戏日累计理智损失 {daily_total} 点（达到当日起始理智的 1/5），需接受治疗才能恢复。"
         else:
             summary = f"{player_name} 触发临时性疯狂：智力检定 1d100={int_roll} ≤ INT {int_target}，持续 1d10={duration_hours} 小时。"
         summary += f" 疯狂表现（1d10={bout_roll}）：{bout['name']}——{bout['description']}"
@@ -1275,7 +1399,7 @@ def roll_madness(
         "player_name": player_name,
         "roll": int_roll,
         "success": int_success,
-        "success_level": "success" if int_success else "failure",
+        "success_level": int_level,
         "loss": loss,
         "int_roll": int_roll,
         "int_target": int_target,

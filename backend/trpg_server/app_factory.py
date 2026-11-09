@@ -319,6 +319,7 @@ def register_blueprints(app):
     from trpg_server.routes.bgm import bp as bgm_bp
     from trpg_server.routes.characters import bp as characters_bp
     from trpg_server.routes.character_ai import bp as character_ai_bp
+    from trpg_server.routes.rulesets import bp as rulesets_bp
     from trpg_server.routes.config import bp as config_bp
     from trpg_server.routes.network import bp as network_bp
     from trpg_server.routes.narrative import bp as narrative_bp
@@ -327,6 +328,7 @@ def register_blueprints(app):
     from trpg_server.routes.rooms import bp as rooms_bp
     from trpg_server.routes.room_narrative import bp as room_narrative_bp
     from trpg_server.routes.room_console import bp as room_console_bp
+    from trpg_server.routes.room_rules import bp as room_rules_bp
     from trpg_server.routes.dice_rolls import bp as dice_rolls_bp
     from trpg_server.routes.dice_textures import bp as dice_textures_bp
     from trpg_server.routes.combat import bp as combat_bp
@@ -351,6 +353,7 @@ def register_blueprints(app):
     app.register_blueprint(vector_health_bp)
     app.register_blueprint(characters_bp)
     app.register_blueprint(character_ai_bp)
+    app.register_blueprint(rulesets_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
     app.register_blueprint(site_agent_bp)
@@ -360,6 +363,7 @@ def register_blueprints(app):
     app.register_blueprint(rooms_bp)
     app.register_blueprint(room_narrative_bp)
     app.register_blueprint(room_console_bp)
+    app.register_blueprint(room_rules_bp)
     app.register_blueprint(dice_rolls_bp)
     app.register_blueprint(dice_textures_bp)
     app.register_blueprint(combat_bp)

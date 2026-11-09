@@ -9,10 +9,11 @@ from pathlib import Path
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.json_store import read_json, write_json_atomic
-from trpg_server import character_service, weapon_catalog
+from trpg_server import character_card_io, character_service, weapon_catalog
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, success_response
+from trpg_server.ruleset import builtin_registry, get_plugin
 from trpg_server.security import normalize_filename, safe_join
 from trpg_server.settings import CHARACTER_GALLERY_DIR, CHARACTER_SKILLS_FILE, CHARACTERS_DIR, OCCUPATIONS_DIR, ROOMS_DIR, WEAPONS_DIR
 
@@ -369,6 +370,7 @@ def _runtime_to_test_character(character):
     now_text = _as_text(character.get("updatedAt") or character.get("createdAt"))
     return {
         "id": _as_text(character.get("id")),
+        "rulesetId": _as_text(character.get("rulesetId"), "coc7"),
         "public_id": _as_text(character.get("public_id")),
         "publisher_id": character.get("publisher_id"),
         "publisher_name": _as_text(character.get("publisher_name")),
@@ -483,6 +485,7 @@ def _test_character_to_runtime(character, fallback_id=""):
     age = _as_int(character.get("age"), _as_int(attributes.get("age"), 25))
     return {
         "id": _as_text(character.get("id") or fallback_id),
+        "rulesetId": _as_text(character.get("rulesetId"), "coc7"),
         "public_id": _as_text(character.get("public_id")),
         "publisher_id": character.get("publisher_id"),
         "publisher_name": _as_text(character.get("publisher_name")),
@@ -569,6 +572,8 @@ def _test_character_to_runtime(character, fallback_id=""):
         ],
         "createdAt": _as_text(character.get("createdAt")),
         "updatedAt": _as_text(character.get("updatedAt")),
+        # 规则自有卡面快照；前端优先按 sheet 渲染，顶层字段仅作镜像兜底。
+        "sheet": _as_dict(character.get("sheet")),
     }
 
 
@@ -576,7 +581,13 @@ def _character_from_storage(raw, fallback_id=""):
     if not isinstance(raw, dict):
         return None
     if _is_test_character_shape(raw):
-        return _test_character_to_runtime(raw, fallback_id)
+        character = _test_character_to_runtime(raw, fallback_id)
+        plugin = get_plugin(character.get("rulesetId"))
+        character["rulesetId"] = plugin.id
+        # 旧卡没有 sheet：读取时由插件按 schema 现算一份，前端无需回退到固定字段。
+        if not character.get("sheet"):
+            character["sheet"] = dict(plugin.schema.pack(raw).get("sheet") or {})
+        return character
     character = dict(raw)
     character.setdefault("id", fallback_id)
     return character
@@ -724,18 +735,24 @@ def _sanitize_room_character_card(character):
     attributes = character.get("attributes") if isinstance(character.get("attributes"), dict) else {}
     max_hp = _bounded_int(character.get("maxHp", character.get("max_hp")), 1, 999, 1)
     max_san = _bounded_int(character.get("maxSan", character.get("max_san")), 0, 999, 0)
-    return {
+    max_mp = _bounded_int(character.get("maxMp", character.get("max_mp")), 0, 999, 0)
+    sanitized = {
         "id": str(character.get("id", ""))[:80],
         "name": str(character.get("name", ""))[:80],
+        "rulesetId": str(character.get("rulesetId") or "coc7")[:40],
         "occupationId": str(character.get("occupationId", character.get("occupation_id", "")))[:80],
         "attributes": attributes,
         "maxHp": max_hp,
         "currentHp": _bounded_int(character.get("currentHp", character.get("current_hp")), 0, max_hp, max_hp),
         "maxSan": max_san,
+        "initialSan": _bounded_int(character.get("initialSan"), 0, 999, max_san),
         "currentSan": _bounded_int(character.get("currentSan", character.get("current_san")), 0, max_san, max_san),
+        "maxMp": max_mp,
+        "currentMp": _bounded_int(character.get("currentMp", character.get("magicPoints")), 0, max_mp, max_mp),
         "mov": _bounded_int(character.get("mov"), 0, 99, 0),
         "build": _bounded_int(character.get("build"), -2, 99, 0),
         "damageBonus": str(character.get("damageBonus") or "")[:20],
+        "armor": _bounded_int(character.get("armor"), 0, 99, 0),
         "skills": character.get("skills", []) if isinstance(character.get("skills", []), list) else [],
         "weapons": weapon_catalog.sanitize_character_weapons(character.get("weapons")),
         "customWeapons": weapon_catalog.sanitize_character_weapons(character.get("customWeapons")),
@@ -743,6 +760,10 @@ def _sanitize_room_character_card(character):
         "background": character.get("background", {}) if isinstance(character.get("background", {}), dict) else {},
         "status": character.get("status") if isinstance(character.get("status"), dict) else {},
     }
+    try:
+        return dict(get_plugin(sanitized["rulesetId"]).schema.derive(sanitized))
+    except Exception:  # noqa: BLE001 - 插件异常时按未派生结果写入
+        return sanitized
 
 
 def _sync_room_character_snapshots(character):
@@ -767,6 +788,13 @@ def _sync_room_character_snapshots(character):
                 state["current_hp"] = _bounded_int(state.get("current_hp"), 0, sanitized["maxHp"], sanitized["maxHp"])
                 state["max_san"] = sanitized["maxSan"]
                 state["current_san"] = _bounded_int(state.get("current_san"), 0, sanitized["maxSan"], sanitized["maxSan"])
+                state["initial_san"] = _bounded_int(
+                    state.get("initial_san"), 0, sanitized["maxSan"], sanitized.get("initialSan", sanitized["maxSan"])
+                )
+                state["max_mp"] = sanitized.get("maxMp", 0)
+                state["current_mp"] = _bounded_int(
+                    state.get("current_mp"), 0, sanitized.get("maxMp", 0), sanitized.get("maxMp", 0)
+                )
             changed = True
         if changed:
             info["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -797,18 +825,18 @@ def _unbind_deleted_character_from_rooms(character_id):
             write_json_atomic(info_path, info)
 
 
+def _request_ruleset():
+    """目录接口按 ?ruleset= 选择插件；缺省用站点默认。"""
+    return builtin_registry().resolve(str(request.args.get("ruleset") or "").strip())
+
+
 @bp.route("/api/character-catalogs/occupations", methods=["GET"])
 def list_builtin_occupations():
     login_error = _require_login()
     if login_error:
         return login_error
 
-    occupations = []
-    for path in _iter_builtin_occupation_files():
-        occupation = read_json(path, default=None)
-        if isinstance(occupation, dict):
-            occupations.append(occupation)
-    occupations.sort(key=lambda item: str(item.get("id") or item.get("nameKey") or ""))
+    occupations = _request_ruleset().catalogs.occupations()
     return success_response(occupations, "Occupation catalogs loaded successfully")
 
 
@@ -818,17 +846,7 @@ def list_character_skills():
     if login_error:
         return login_error
 
-    catalog = read_json(_skill_catalog_path(), default={})
-    if not isinstance(catalog, dict):
-        catalog = {}
-    skills = catalog.get("skills")
-    if not isinstance(skills, list):
-        catalog["skills"] = []
-    locales = catalog.get("locales")
-    if not isinstance(locales, dict):
-        catalog["locales"] = {}
-    catalog.setdefault("version", 1)
-    catalog.setdefault("defaultLocale", "zh-CN")
+    catalog = _request_ruleset().catalogs.skills()
     return success_response(catalog, "Skill catalog loaded successfully")
 
 
@@ -838,8 +856,76 @@ def list_builtin_weapons():
     if login_error:
         return login_error
 
-    weapons = weapon_catalog.load_preset_weapons(_get_weapons_dir())
+    weapons = _request_ruleset().catalogs.weapons()
     return success_response(weapons, "Weapon catalogs loaded successfully")
+
+
+def _age_adjustment_checks():
+    """取当前规则集的建卡年龄计算能力；不支持时返回错误响应。"""
+    plugin = _request_ruleset()
+    checks = getattr(plugin, "checks", None)
+    if checks is None or not callable(getattr(checks, "age_adjustment_preview", None)):
+        return None, error_response("当前规则集不支持建卡年龄调整", 400)
+    return checks, None
+
+
+@bp.route("/api/characters/age-adjustment/preview", methods=["POST"])
+def preview_age_adjustment():
+    """按年龄返回建卡修正，只读、不写角色卡。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+
+    checks, error = _age_adjustment_checks()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    try:
+        effects = checks.age_adjustment_preview(payload.get("age"))
+    except (TypeError, ValueError) as exc:
+        return error_response(str(exc), 400)
+    return success_response(effects, "Age adjustment preview loaded")
+
+
+@bp.route("/api/characters/age-adjustment/edu-roll", methods=["POST"])
+def roll_age_adjustment_edu():
+    """EDU 增强检定：一次只掷一次，由玩家逐次触发。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+
+    checks, error = _age_adjustment_checks()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    try:
+        result = checks.edu_enhancement_step(payload.get("edu"))
+    except (TypeError, ValueError) as exc:
+        return error_response(str(exc), 400)
+    return success_response(result, "EDU enhancement roll resolved")
+
+
+@bp.route("/api/characters/age-adjustment/apply", methods=["POST"])
+def apply_age_adjustment():
+    """校验玩家分配并返回属性增量；实际写入仍走原有角色卡保存流程。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+
+    checks, error = _age_adjustment_checks()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    try:
+        result = checks.apply_age_adjustment(
+            payload.get("age"),
+            str_siz_allocation=payload.get("str_siz_allocation"),
+            str_con_dex_allocation=payload.get("str_con_dex_allocation"),
+            edu_gain=payload.get("edu_gain") or 0,
+        )
+    except (TypeError, ValueError) as exc:
+        return error_response(str(exc), 400)
+    return success_response(result, "Age adjustment applied")
 
 
 @bp.route("/api/characters", methods=["GET"])
@@ -1070,3 +1156,97 @@ def save_character_weapons(character_id):
         武器数量=len(saved),
     )
     return success_response({"weapons": saved, "count": len(saved)}, "Custom weapons saved successfully")
+
+
+@bp.route("/api/characters/<character_id>/export", methods=["GET"])
+def export_character(character_id):
+    """导出角色卡的完整持久化数据；仅有查看权限的本人/管理员可取。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    try:
+        character = character_service.get_for_actor(character_service_actor(), character_id)
+    except character_service.CharacterServiceError as exc:
+        return error_response(exc.message, exc.status, exc.message)
+
+    bundle = character_card_io.build_export_bundle(character)
+    log_user_action(
+        logger,
+        user_action_text(session.get("username"), "导出了角色卡"),
+        用户ID=session.get("user_id"),
+        角色卡ID=character.get("id"),
+        角色名=character.get("name"),
+    )
+    return success_response(bundle, "Character exported successfully")
+
+
+@bp.route("/api/characters/import", methods=["POST"])
+def import_character():
+    """从 JSON 文本或 zlib + base64 分享串导入一张新角色卡，不覆盖已有卡。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    request_length = request.content_length or 0
+    if request_length > character_card_io.MAX_IMPORT_REQUEST_BYTES:
+        return error_response("导入内容过大，超过请求体上限。", 413, "import_too_large")
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return error_response("请求体必须是 JSON 对象。", 400, "invalid_import_payload")
+    text = payload.get("payload")
+    if not isinstance(text, str) or not text.strip():
+        return error_response("导入内容为空。", 400, "empty_import_payload")
+
+    actor = character_service_actor()
+    try:
+        parsed = character_card_io.parse_import_text(text, str(payload.get("mode") or "auto"))
+        merged = character_card_io.merge_sheet_fields(parsed)
+        if _is_test_character_shape(merged):
+            merged = _test_character_to_runtime(merged)
+        card = character_card_io.validate_import_payload(merged)
+
+        own_names = {
+            str(item.get("name") or "")
+            for item in character_service.list_for_actor(actor, limit=50)
+            if str(item.get("playerId") or "") == str(getattr(actor, "user_id", ""))
+        }
+        desired_name = str(card.get("name") or "")
+        card["name"] = character_card_io.unique_character_name(desired_name, own_names)
+
+        character_id = character_card_io.new_unique_character_id()
+        card["id"] = character_id
+        # 导入的卡固定归当前登录用户，忽略来源里的归属与发布信息。
+        card["playerId"] = str(getattr(actor, "user_id", ""))
+        card["playerName"] = str(getattr(actor, "username", "") or "")
+        card["public_id"] = ""
+        card["publisher_id"] = None
+        card["publisher_name"] = ""
+        avatar_data = card.pop("avatarData", "")
+        if avatar_data:
+            card["avatar"] = avatar_data
+        saved = character_service.apply_save(actor, character_id, card)
+    except character_card_io.CharacterCardIOError as exc:
+        log_user_action(
+            logger,
+            user_action_text(session.get("username"), "导入角色卡失败"),
+            用户ID=session.get("user_id"),
+            失败原因=exc.code,
+        )
+        return error_response(exc.message, exc.status, exc.code)
+    except character_service.CharacterServiceError as exc:
+        return error_response(exc.message, exc.status, exc.message)
+
+    renamed = str(saved.get("name") or "") != desired_name
+    log_user_action(
+        logger,
+        user_action_text(session.get("username"), "导入了角色卡"),
+        用户ID=session.get("user_id"),
+        角色卡ID=saved.get("id"),
+        角色名=saved.get("name"),
+        是否重命名=renamed,
+    )
+    return success_response(
+        {"character": saved, "renamed": renamed},
+        "Character imported successfully",
+        201,
+    )
+

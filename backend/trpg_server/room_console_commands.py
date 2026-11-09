@@ -13,12 +13,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from trpg_server import room_admin
+from trpg_server import room_admin, room_interlude
 from trpg_server.agents import room_state
 from trpg_server.json_store import read_json
 from trpg_server.room_combat_commands import ROOM_COMBAT_HELP, handle_room_combat_command
 from trpg_server.room_log import clear_room_log, log_room_event, read_room_log
+from trpg_server.room_mode import SCENARIO_BINDING_NONE, normalize_room_mode
 from trpg_server.room_narrative_commands import ROOM_NARRATIVE_HELP, handle_room_narrative_command
+from trpg_server.room_rule_commands import ROOM_RULE_HELP, handle_room_rule_command
 from trpg_server.settings import ROOMS_DIR
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,8 @@ ROOM_COMMAND_WHITELIST: dict[str, set[str]] = {
         "delay", "disengage", "reload", "ready", "cast",
         "damage", "heal", "treat", "end",
     },
+    "rule": {"status", "check", "san", "item", "skill", "attr", "limits"},
+    "interlude": {"status", "request", "start", "settle", "review", "end"},
 }
 
 # 不带子命令时默认执行的子命令（例如 `members` 等价于 `members list`）。
@@ -62,6 +66,8 @@ DEFAULT_SUBS: dict[str, str] = {
     "immersive": "status",
     "voice": "status",
     "combat": "status",
+    "rule": "status",
+    "interlude": "status",
 }
 
 
@@ -113,7 +119,7 @@ def room_command_help_text() -> str:
             "  log tail [n]                （查看本房间最近 n 条日志，默认 50）",
             "  log clear [--yes]           （清空本房间日志，破坏性）",
             "  autosave                    （立即为本房间保存一次自动存档）",
-            "  archive [--yes]             （归档本房间，需已到达结局）",
+            "  archive [--yes]             （归档本房间；有剧本时需已到达结局，无剧本可直接归档）",
             "  dice                        （本房间骰子动画档位、玩家投掷、重投配置与待投掷请求）",
             "  dice animation show         （查看本房间生效的动画档位）",
             "  dice animation set <text|simple|3d|inherit> [--yes]（设置动画档位，inherit 跟随管理员默认）",
@@ -155,6 +161,13 @@ def room_command_help_text() -> str:
             "  voice cache clear [--yes]    （删除本房间语音缓存，默认预演）",
             "  voice cache prune [--yes]    （按站点/房间配额 LRU 清理本房间缓存，默认预演）",
             *ROOM_COMBAT_HELP.splitlines(),
+            *ROOM_RULE_HELP.splitlines(),
+            "  interlude                   （查看幕间状态、结算与复盘记录）",
+            "  interlude request [理由]    （登记进入幕间的提议，等待房主 / 管理员确认）",
+            "  interlude start [--credit=玩家:事件,...]（进入幕间并立即结算成长 / SAN / CR）",
+            "  interlude settle [--credit=玩家:事件,...]（补算信用评级等经济项）",
+            "  interlude review <内容> [--topic=...]（保存一条复盘记录）",
+            "  interlude end [--yes]       （结束幕间并自动归档；必须二次确认）",
             "  说明：破坏性命令缺省为「预演」，加 --yes 或在交互确认时输入 y 才会真正执行。",
             "  说明：成员命令只调整房间内角色（房主/管理员/成员），不会授予网站级权限。",
         ]
@@ -217,6 +230,20 @@ def execute_room_command(
         return RoomCommandResult(False, "房间目录不可用，无法执行房间命令")
     room_dir = Path(room_dir)
     resolved_rooms_dir = _resolve_rooms_dir(rooms_dir)
+    room_capabilities = normalize_room_mode(_load_room_info(room_dir))
+
+    # 降级矩阵：manual 房间没有 AI，narrative/immersive/voice 一律明确拒绝；
+    # freeform 房间没有剧本开场。
+    if domain in {"narrative", "immersive", "voice"} and not room_capabilities["ai_kp_enabled"]:
+        return RoomCommandResult(False, "当前房间模式未启用 AI KP，该命令不可用")
+    if domain == "narrative" and room_capabilities["scenario_binding"] == SCENARIO_BINDING_NONE and sub == "opening":
+        return RoomCommandResult(False, "无剧本房间没有剧本开场；直接发送消息即可开始自由叙事")
+
+    # 幕间期间锁住剧情推进：只放行只读查询，避免控制台绕过聊天侧的禁令。
+    if domain in {"narrative", "combat"} and room_interlude.is_active(_load_room_info(room_dir)):
+        read_only = {"status", "state", "map", "exits", "ledger", "facts", "clocks", "trace", "summary", "profile"}
+        if sub not in read_only:
+            return RoomCommandResult(False, "幕间期间不推进剧情；该命令已锁定")
 
     if domain == "info":
         return _info_command(room_dir, room_id, resolved_rooms_dir)
@@ -270,6 +297,31 @@ def execute_room_command(
             confirm=confirm,
         )
         return RoomCommandResult(ok, message)
+    if domain == "rule":
+        ok, message = handle_room_rule_command(
+            parts[1:],
+            room_id=room_id,
+            room_dir=room_dir,
+            actor=actor,
+            actor_id=actor_id,
+            actor_rank=actor_rank,
+            confirm=confirm,
+            app=app,
+        )
+        return RoomCommandResult(ok, message)
+    if domain == "interlude":
+        ok, message = room_interlude.handle_console_command(
+            parts[1:],
+            room_id=room_id,
+            room_dir=room_dir,
+            rooms_dir=resolved_rooms_dir,
+            app=app,
+            actor=actor,
+            actor_id=actor_id,
+            actor_rank=actor_rank,
+            confirm=confirm,
+        )
+        return RoomCommandResult(ok, message)
     if domain == "narrative":
         ok, message = handle_room_narrative_command(
             parts[1:],
@@ -292,9 +344,16 @@ def _info_command(room_dir: Path, room_id: Any, rooms_dir: Path) -> RoomCommandR
         info = {}
     members = info.get("members") or []
     active = [m for m in members if isinstance(m, dict) and m.get("is_active", True) is not False and m.get("status", "active") != "removed"]
+    mode = normalize_room_mode(info)
+    mode_label = {
+        "scripted": "剧本 + AI KP",
+        "freeform": "无剧本 + AI KP",
+        "manual": "无 AI KP",
+    }.get(mode["room_mode"], mode["room_mode"])
     lines = [
         f"房间「{info.get('name') or room_id}」{' [已归档]' if info.get('archived') else ''}",
         f"  房间码: {info.get('room_code') or '-'}",
+        f"  模式: {mode_label}",
         f"  剧本: {info.get('scenario_title') or info.get('scenario_id') or '-'}",
         f"  成员: {len(active)} 人（共 {len(members)}）",
         f"  创建时间: {info.get('created_at') or '-'}",

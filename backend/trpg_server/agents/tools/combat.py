@@ -331,14 +331,16 @@ def _combatant_from_member(member: dict[str, Any]) -> dict[str, Any]:
         "siz": size,
         "con": constitution,
         "pow": power,
-        "mp": max(0, _as_int(state.get("magic_points", state.get("mp")), power // 5)),
-        "san": max(0, _as_int(state.get("sanity", state.get("san")), card.get("sanity", 0))),
+        "mp": max(0, _as_int(state.get("current_mp", state.get("magic_points", state.get("mp"))), _as_int(card.get("currentMp", card.get("maxMp")), power // 5))),
+        "max_mp": max(0, _as_int(state.get("max_mp"), _as_int(card.get("maxMp"), power // 5))),
+        # 房间快照里的当前理智字段是 current_san；旧代码读 sanity/san 导致战斗中恒为 0。
+        "san": max(0, _as_int(state.get("current_san"), _as_int(card.get("currentSan", card.get("current_san")), 0))),
+        "armor": max(0, min(99, _as_int(card.get("armor"), 0))),
         "build": build,
         "damage_bonus": damage_bonus,
         "db_terms": [list(term) for term in db_terms],
         "hp": hp,
         "max_hp": max_hp,
-        "armor": 0,
         "status": status,
         "major_wound": bool(state.get("major_wound")),
         "dying": status == "dying",
@@ -727,8 +729,16 @@ def _persist_player_state(context: Any, combatant: dict[str, Any]) -> None:
         if not isinstance(state, dict):
             state = {}
             member["character_state"] = state
+        before = {
+            "hp": state.get("current_hp"),
+            "mp": state.get("current_mp"),
+            "san": state.get("current_san"),
+        }
         state["max_hp"] = combatant.get("max_hp")
-        state["current_hp"] = combatant.get("hp")
+        state["current_hp"] = max(0, _as_int(combatant.get("hp"), 0))
+        state["max_mp"] = max(0, _as_int(combatant.get("max_mp"), _as_int(state.get("max_mp"), 0)))
+        state["current_mp"] = max(0, min(state["max_mp"], _as_int(combatant.get("mp"), state["max_mp"])))
+        state["current_san"] = max(0, _as_int(combatant.get("san"), _as_int(state.get("current_san"), 0)))
         state["major_wound"] = bool(combatant.get("major_wound"))
         state["dying"] = bool(combatant.get("dying"))
         state["unconscious"] = bool(combatant.get("unconscious"))
@@ -736,14 +746,37 @@ def _persist_player_state(context: Any, combatant: dict[str, Any]) -> None:
         state["first_aid_used"] = bool(combatant.get("first_aid_used"))
         card = member.get("character_card")
         if isinstance(card, dict):
-            card["currentHp"] = combatant.get("hp")
-            card["current_hp"] = combatant.get("hp")
-            card["maxHp"] = combatant.get("max_hp")
+            card["currentHp"] = state["current_hp"]
+            card["current_hp"] = state["current_hp"]
+            card["maxHp"] = state["max_hp"]
+            card["currentMp"] = state["current_mp"]
+            card["maxMp"] = state["max_mp"]
+            card["magicPoints"] = state["current_mp"]
+            card["currentSan"] = state["current_san"]
+            card["current_san"] = state["current_san"]
             status = card.get("status") if isinstance(card.get("status"), dict) else {}
             status["majorWound"] = bool(combatant.get("major_wound"))
             status["unconscious"] = bool(combatant.get("unconscious"))
             status["dead"] = bool(combatant.get("dead"))
             card["status"] = status
+        # HP / MP 变化并入统一待写回队列，归档时写回持久卡并清标记。
+        pending = []
+        for kind, value in (("hp", state["current_hp"]), ("mp", state["current_mp"])):
+            if before.get(kind) != value:
+                pending.append({"type": kind, "value": value, "source": "combat", "reason": "战斗结算"})
+        if before.get("san") != state["current_san"]:
+            pending.append({"type": "san", "value": state["current_san"], "source": "combat", "reason": "战斗结算"})
+        armor = max(0, min(99, _as_int(combatant.get("armor"), 0)))
+        if isinstance(card, dict) and _as_int(card.get("armor"), 0) != armor:
+            card["armor"] = armor
+            pending.append({"type": "armor", "value": armor, "source": "combat", "reason": "战斗护甲"})
+        if pending:
+            try:
+                from trpg_server import room_rules as _room_rules
+
+                _room_rules.record_room_changes(member, pending)
+            except Exception:  # noqa: BLE001 - 登记失败不应中断战斗
+                pass
         break
     write_json_atomic(Path(context.room_dir) / "info.json", info)
 
@@ -1242,6 +1275,8 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     # 这样换规则书时法术位/职业资源可以按各自的语义处理。
     mp_result = ruleset.spend_resource(caster, "mp", mp_cost)
     ruleset.spend_resource(caster, "san", san_cost)
+    # 法术消耗（MP/SAN）同样要进入房间快照与统一写回链，不能只改战斗内对象。
+    _persist_player_state(context, caster)
     overflow = int(mp_result.get("overflow") or 0)
     overflow_result = None
     overflow_applied = 0

@@ -269,6 +269,8 @@ def execute_console_command(
             return _log_result(_room_members_command(args[1:], rooms_dir))
         if subcommand == "archive":
             return _log_result(_room_archive_command(args[1:], rooms_dir, app, confirm=confirm))
+        if subcommand == "mode":
+            return _log_result(_room_mode_command(args[1:], rooms_dir, confirm=confirm))
         if subcommand == "prune":
             return _log_result(_room_prune_command(args[1:], rooms_dir, confirm=confirm))
 
@@ -379,7 +381,9 @@ def command_help_text() -> str:
             "  knowledge reindex [ruleset] [--yes]              （重建规则集索引，省略则全部）",
             "  room list [search]                               （列出房间）",
             "  room members <room_id>                           （查看房间成员）",
-            "  room archive <room_id> [--yes]                   （归档房间）",
+            "  room archive <room_id> [--yes]                   （归档房间；无剧本房间可直接归档）",
+            "  room mode <room_id> <scripted|freeform|manual> [--yes]",
+            "                                                   （迁移房间模式；缺省预演）",
             "  room prune [--days N] [--yes]                    （清理僵尸房间，默认 30 天）",
             "  dice animation show                             （查看管理员默认骰子动画档位）",
             "  dice animation set <text|simple|3d> [--yes]      （设置默认动画档位）",
@@ -1554,9 +1558,15 @@ def _room_list_command(args: list[str], rooms_dir: Any) -> ConsoleCommandResult:
     lines = [f"房间共 {len(rooms)} 个:"]
     for room in rooms:
         archived = " [已归档]" if room["archived"] else ""
+        mode_label = {
+            "scripted": "剧本+AI",
+            "freeform": "无剧本+AI",
+            "manual": "无AI",
+        }.get(room.get("room_mode") or "", room.get("room_mode") or "-")
         lines.append(
             f"  {room['id']} {room['name']} · 码={room['room_code'] or '-'} · "
-            f"剧本={room['scenario_title'] or room['scenario_id'] or '-'} · 成员={room['members']}{archived}"
+            f"模式={mode_label} · 剧本={room['scenario_title'] or room['scenario_id'] or '-'} · "
+            f"成员={room['members']}{archived}"
         )
     return ConsoleCommandResult(True, "\n".join(lines))
 
@@ -1605,11 +1615,57 @@ def _room_archive_command(
         return ConsoleCommandResult(True, f"房间 {result['id']}「{result['name']}」已归档{snapshot}")
 
     return _confirm_action(
-        preview=f"将归档房间 {room_id}（要求已到达结局，与网页规则一致）。",
+        preview=f"将归档房间 {room_id}（有剧本时要求已到达结局；无剧本房间可直接归档）。",
         apply=_apply,
         assume_yes=assume_yes,
         confirm=confirm,
         prompt=f"确认归档房间 {room_id}?",
+    )
+
+
+def _room_mode_command(
+    args: list[str], rooms_dir: Any, *, confirm: Callable[[str], bool] | None = None
+) -> ConsoleCommandResult:
+    positionals, flags = _split_args(args)
+    assume_yes = _assume_yes(flags)
+    unknown = _reject_unknown_flags(flags - YES_FLAGS, set())
+    if unknown:
+        return ConsoleCommandResult(False, unknown)
+    if len(positionals) != 2:
+        return ConsoleCommandResult(False, "Usage: room mode <room-id> <scripted|freeform|manual> [--yes]")
+    room_ref, target = positionals
+
+    def _apply() -> ConsoleCommandResult:
+        try:
+            result = room_admin.migrate_room_mode(_resolve_rooms_dir(rooms_dir), room_ref, target)
+        except LookupError as exc:
+            return ConsoleCommandResult(False, str(exc))
+        except ValueError as exc:
+            return ConsoleCommandResult(False, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to migrate room mode")
+            return ConsoleCommandResult(False, f"Failed to migrate room mode: {exc}")
+        if not result["changed"]:
+            return ConsoleCommandResult(True, f"房间 {room_ref} 已是 {result['to']} 模式，未做变更")
+        note = "（已清空剧本绑定与场景指针）" if result["removed_scenario"] else "（已有消息与存档保留）"
+        log_user_action(
+            logger,
+            user_action_text(CONSOLE_ACTOR, "迁移了房间模式"),
+            房间ID=room_ref,
+            原模式=result["from"],
+            新模式=result["to"],
+        )
+        return ConsoleCommandResult(True, f"房间 {room_ref} 模式已迁移：{result['from']} → {result['to']}{note}")
+
+    return _confirm_action(
+        preview=(
+            f"将把房间 {room_ref} 的模式迁移为 {target}：能力位立即生效，已有消息与存档保留；"
+            "迁移到 freeform 会清空剧本绑定与场景指针。"
+        ),
+        apply=_apply,
+        assume_yes=assume_yes,
+        confirm=confirm,
+        prompt=f"确认迁移房间 {room_ref} 的模式?",
     )
 
 
