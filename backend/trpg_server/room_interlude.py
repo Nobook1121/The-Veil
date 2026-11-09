@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import random
 import time
 from pathlib import Path
@@ -23,6 +25,7 @@ from trpg_server.room_log import load_room_log, log_room_event
 INTERLUDE_KEY = "interlude"
 MAX_REVIEWS = 20
 MAX_MARKERS = 50
+MAX_CREDIT_BATCHES = 20
 
 OPERATOR_RANK = 2
 
@@ -207,6 +210,40 @@ def _active_members(info: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _credit_event_key(entry: dict[str, Any]) -> str:
+    """为单条信用事件生成稳定的幂等键。
+
+    优先使用调用方显式提供的 ``id``；否则用参与结算的字段做规范化哈希，保证同一
+    批次重试（例如 HTTP 重试、控制台二次执行）得到相同的键。
+    """
+    explicit = str(entry.get("id") or "").strip()
+    if explicit:
+        return f"id:{explicit}"
+    payload = {
+        "player": str(entry.get("player") or "").strip(),
+        "event": str(entry.get("event") or "").strip().lower(),
+        "era": entry.get("era"),
+        "target_assets": entry.get("target_assets"),
+        "has_social_security": bool(entry.get("has_social_security")),
+    }
+    return "evt:" + json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _credit_event_keys(events: list[dict[str, Any]]) -> list[str]:
+    """按出现顺序生成事件键；同批次重复事件追加序号，保持可重复计算。"""
+    seen: dict[str, int] = {}
+    keys: list[str] = []
+    for entry in events:
+        base = _credit_event_key(entry)
+        seen[base] = seen.get(base, 0) + 1
+        keys.append(base if seen[base] == 1 else f"{base}#{seen[base]}")
+    return keys
+
+
+def _credit_batch_fingerprint(keys: list[str]) -> str:
+    return hashlib.sha1("\n".join(keys).encode("utf-8")).hexdigest()[:16]
+
+
 def _apply_credit_events(
     room_dir: Any,
     info: dict[str, Any],
@@ -216,13 +253,29 @@ def _apply_credit_events(
     rng: Callable[[int], int],
     actor: Any,
     actor_id: Any,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """结算一批信用事件，返回 ``(本次结果, 被跳过的重复事件键)``。
+
+    已应用的事件键保存在 ``settlement["applied_credit"]``，历史批次保存在
+    ``settlement["credit_batches"]``。同一批次重试只处理尚未应用的事件，全部重复
+    时直接跳过，避免重复加钱，同时保留上一次的结算明细。
+    """
     from trpg_server.ruleset.coc7 import economy
 
+    entries = [entry for entry in (events or []) if isinstance(entry, dict)]
+    keys = _credit_event_keys(entries)
+    settlement = state.get("settlement") if isinstance(state.get("settlement"), dict) else {}
+    state["settlement"] = settlement
+    applied = [str(key) for key in (settlement.get("applied_credit") or []) if key]
+    applied_set = set(applied)
+    pending = [(key, entry) for key, entry in zip(keys, entries) if key not in applied_set]
+    skipped = [key for key in keys if key in applied_set]
+    if not pending:
+        return [], skipped
+
     results: list[dict[str, Any]] = []
-    for entry in events or []:
-        if not isinstance(entry, dict):
-            continue
+    new_keys: list[str] = []
+    for key, entry in pending:
         player = str(entry.get("player") or "").strip()
         event = str(entry.get("event") or "").strip().lower()
         if not player or not event:
@@ -296,11 +349,32 @@ def _apply_credit_events(
             "spending": refresh["spending"],
         }
         results.append(result)
-        state.setdefault("settlement", {})
-        settlement = state["settlement"]
         settlement.setdefault("credit", []).append(result)
+        applied.append(key)
+        applied_set.add(key)
+        new_keys.append(key)
+
+    # 只记录实际应用的键与批次；已应用事件重试时不会再进入上面的循环。
+    settlement["applied_credit"] = applied[-500:]
+    if new_keys:
+        batches = settlement.get("credit_batches")
+        if not isinstance(batches, list):
+            batches = []
+        batches.insert(
+            0,
+            {
+                "id": _new_id("itl-credit"),
+                "at": _now(),
+                "by": str(actor or ""),
+                "fingerprint": _credit_batch_fingerprint(keys),
+                "applied": list(new_keys),
+                "results": [dict(row) for row in results],
+            },
+        )
+        del batches[MAX_CREDIT_BATCHES:]
+        settlement["credit_batches"] = batches
     room_rules.save_room_info(room_dir, info)
-    return results
+    return results, skipped
 
 
 def settle_interlude(
@@ -399,7 +473,7 @@ def settle_interlude(
         )
 
     if credit_events:
-        _apply_credit_events(
+        _, skipped = _apply_credit_events(
             room_dir,
             info,
             state,
@@ -408,6 +482,15 @@ def settle_interlude(
             actor=actor,
             actor_id=actor_id,
         )
+        if skipped:
+            _log(
+                room_dir,
+                info,
+                f"信用事件批次已结算，跳过 {len(skipped)} 条重复事件",
+                actor=actor,
+                actor_id=actor_id,
+                source="interlude",
+            )
 
     room_rules.save_room_info(room_dir, info)
     _log(room_dir, info, "幕间结算完成", actor=actor, actor_id=actor_id, source="interlude")

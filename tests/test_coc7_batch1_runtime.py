@@ -249,6 +249,84 @@ def test_interlude_opening_prompt_limits_context_and_stops_plot():
     assert "不要推进剧情" in prompt
 
 
+def test_interlude_credit_settlement_is_idempotent(tmp_path):
+    """同一批信用事件重复结算不得二次加钱，且历史明细保留。"""
+    from trpg_server import room_interlude, room_rules
+
+    member = _member()
+    info = {"room_id": "r1", "members": [member]}
+    save_room_info(tmp_path, info)
+    event = {"player": "玩家甲", "event": "promotion"}
+
+    room_interlude.start_interlude(
+        tmp_path, info, actor="房主", actor_id="owner-id", rng=_rng(3), credit_events=[event]
+    )
+    first = room_rules.load_room_info(tmp_path)
+    first_card = first["members"][0]["character_card"]
+    first_settlement = first["interlude"]["settlement"]
+    assert first_card["creditRating"] == 44
+    assert len(first_settlement["credit"]) == 1
+    assert len(first_settlement["credit_batches"]) == 1
+    assert len(first_settlement["applied_credit"]) == 1
+
+    # 模拟 HTTP 重试 / 控制台二次执行。
+    room_interlude.settle_interlude(
+        tmp_path, info, actor="房主", actor_id="owner-id", rng=_rng(3), credit_events=[event]
+    )
+    room_interlude.settle_interlude(
+        tmp_path, info, actor="房主", actor_id="owner-id", rng=_rng(3), credit_events=[event]
+    )
+
+    saved = room_rules.load_room_info(tmp_path)
+    saved_card = saved["members"][0]["character_card"]
+    settlement = saved["interlude"]["settlement"]
+    assert saved_card["creditRating"] == 44
+    assert saved_card["assets"]["cash"] == first_card["assets"]["cash"]
+    assert len(settlement["credit"]) == 1
+    assert len(settlement["credit_batches"]) == 1
+    assert len(settlement["applied_credit"]) == 1
+
+
+def test_difficulty_normal_alias_maps_to_regular():
+    checks = Coc7Checks()
+    assert checks.normalize_difficulty("normal") == "regular"
+    assert checks.normalize_difficulty("常规") == "regular"
+    assert checks.normalize_difficulty("hard") == "hard"
+
+
+def test_rule_skill_preview_uses_plugin_skill_cap(tmp_path):
+    member = _member()
+    info = {"room_id": "r1", "members": [member]}
+    save_room_info(tmp_path, info)
+
+    ok, text = handle_room_rule_command(
+        ["skill", "玩家甲", "说服", "120"],
+        room_id="r1",
+        room_dir=tmp_path,
+        actor="房主",
+        actor_id="owner-id",
+        actor_rank=3,
+    )
+    assert ok is True
+    assert "调整为 99" in text
+    assert "调整为 100" not in text
+
+
+def test_item_records_get_unique_ids(tmp_path):
+    from trpg_server import room_rules
+
+    member = _member()
+    info = {"room_id": "r1", "members": [member]}
+    save_room_info(tmp_path, info)
+
+    first = room_rules.add_item(tmp_path, info, member, name="手电筒")
+    second = room_rules.add_item(tmp_path, info, member, name="绳索")
+
+    assert first["record"]["id"] != second["record"]["id"]
+    pending = member["character_state"]["pending_changes"]
+    assert len(pending) == 2
+
+
 
 def test_rule_subcommands_are_absent_when_switch_is_off(tmp_path):
     info = {"room_id": "r1", "house_rules": {}, "members": [_member()]}

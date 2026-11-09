@@ -156,7 +156,8 @@ def execute_economy(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                 amount=_number(arguments.get("amount")),
                 era=str(arguments.get("era") or "1920s"),
                 reason=str(arguments.get("reason") or ""),
-                **_common(context),
+                actor=getattr(context, "username", None) or "AI KP",
+                actor_id=getattr(context, "user_id", None),
             )
         else:
             result = room_rules.economy_summary(

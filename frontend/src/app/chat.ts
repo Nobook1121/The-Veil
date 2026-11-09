@@ -285,18 +285,10 @@ function initChat(): void {
                 void sendVisibleMessage(commandType, commandResult);
             }, 300);
             if (interludePrompt) {
-                const kpRole = aiRoles.find((role) => role.id === "kp") || aiRoles[0];
-                if (kpRole) {
-                    pendingMessages.push({
-                        sender: getCurrentUsername(),
-                        content: interludePrompt,
-                        role: kpRole,
-                        time: new Date().toLocaleTimeString(),
-                    });
-                    window.setTimeout(() => {
-                        if (!isAIThinking) void sendToAI(activeChatInput, activeSendButton);
-                    }, 700);
-                }
+                // 与控制台入口复用同一实现，统一 AI KP / 只读 / 忙碌守卫。
+                window.setTimeout(() => {
+                    window.triggerInterludeKpOpening?.(interludePrompt);
+                }, 300);
             }
             return;
         }

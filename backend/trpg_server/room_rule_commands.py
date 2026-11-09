@@ -362,8 +362,6 @@ def handle_room_rule_command(
                     reason=str(options.get("reason") or ""),
                     actor=actor or ROOM_RULE_ACTOR,
                     actor_id=actor_id,
-                    config_dir=config_dir,
-                    room_id=room_id,
                 )
             else:
                 result = room_rules.economy_summary(
@@ -379,7 +377,7 @@ def handle_room_rule_command(
 
     if sub == "check":
         if len(rest) < 2:
-            return False, "用法：rule check <玩家> <技能/属性> [difficulty hard|extreme]"
+            return False, "用法：rule check <玩家> <技能/属性> [difficulty normal|hard|extreme]"
         try:
             member = room_rules.resolve_member(info, rest[0], actor_id=actor_id, actor_rank=actor_rank)
             result = room_rules.roll_check(
@@ -505,8 +503,10 @@ def _stat_command(
         row = room_rules._find_skill_row(card, target_name)
         if row is None:
             return False, f"角色卡上没有技能「{target_name}」"
-        before = max(0, min(100, room_rules._as_int(row.get("value"), 0)))
-        after = max(0, min(100, before + amount if relative else amount))
+        # 预览与写回共用插件给的技能上限，避免预览显示 100、落盘却是 99。
+        skill_cap = room_rules._as_int(room_rules.derive_card(card).get("skillCap"), 100)
+        before = max(0, min(skill_cap, room_rules._as_int(row.get("value"), 0)))
+        after = max(0, min(skill_cap, before + amount if relative else amount))
     else:
         attribute = room_rules._normalize_attribute_key(target_name, room_rules.resolve_rule_id(info))
         if not attribute:

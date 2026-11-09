@@ -5102,27 +5102,61 @@ interface Window {
 
     async function exportCharacterCardsAsJson(cards: COC7CharacterCard[], scope: CharacterExportScope): Promise<void> {
         const failures: string[] = [];
-        let exported = 0;
+        const files: Array<{ name: string; text: string }> = [];
+        const usedNames = new Set<string>();
         for (const card of cards) {
             try {
                 const bundle = await fetchCharacterExportBundle(card, scope);
                 const jsonText = bundle.jsonText || "";
                 if (!jsonText) throw new Error("导出内容为空");
-                downloadCharacterExportFile(bundle.filename || `${card.name || card.id}.json`, jsonText);
-                exported += 1;
+                const baseName = bundle.filename || `${card.name || card.id}.json`;
+                files.push({ name: uniqueExportName(baseName, usedNames), text: jsonText });
             } catch (error) {
                 failures.push(`${card.name || card.id}（${characterErrorMessage(error)}）`);
             }
         }
-        if (!exported) {
+        if (!files.length) {
             notify(`导出失败：${failures.join("、") || "没有可导出的角色卡"}`, "error");
             return;
         }
-        if (failures.length) {
-            notify(`已下载 ${exported} 张，${failures.length} 张失败：${failures.join("、")}`, "error");
+        // 多张角色卡打包成一个 zip：连续触发多个下载会被浏览器拦截，计数也会失真。
+        if (files.length === 1) {
+            const only = files[0];
+            if (only) downloadCharacterExportFile(only.name, only.text);
+            notify(
+                failures.length
+                    ? `已导出 1 张，${failures.length} 张失败：${failures.join("、")}`
+                    : "角色卡 JSON 已下载。",
+                failures.length ? "error" : "success"
+            );
             return;
         }
-        notify(exported === 1 ? "角色卡 JSON 已下载。" : `已下载 ${exported} 个角色卡 JSON 文件。`, "success");
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+        downloadCharacterExportZip(files, `character-cards-${stamp}.zip`);
+        notify(
+            failures.length
+                ? `已打包 ${files.length} 张，${failures.length} 张失败：${failures.join("、")}`
+                : `已打包下载 ${files.length} 张角色卡（ZIP）。`,
+            failures.length ? "error" : "success"
+        );
+    }
+
+    function uniqueExportName(name: string, used: Set<string>): string {
+        if (!used.has(name)) {
+            used.add(name);
+            return name;
+        }
+        const dot = name.lastIndexOf(".");
+        const stem = dot > 0 ? name.slice(0, dot) : name;
+        const extension = dot > 0 ? name.slice(dot) : "";
+        let index = 2;
+        let candidate = `${stem}-${index}${extension}`;
+        while (used.has(candidate)) {
+            index += 1;
+            candidate = `${stem}-${index}${extension}`;
+        }
+        used.add(candidate);
+        return candidate;
     }
 
     async function exportCharacterCardAsText(card: COC7CharacterCard, scope: CharacterExportScope): Promise<void> {
@@ -5142,7 +5176,14 @@ interface Window {
     }
 
     function downloadCharacterExportFile(filename: string, text: string): void {
-        const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+        downloadBlob(filename, new Blob([text], { type: "application/json;charset=utf-8" }));
+    }
+
+    function downloadCharacterExportZip(files: Array<{ name: string; text: string }>, filename: string): void {
+        downloadBlob(filename, createStoredZip(files));
+    }
+
+    function downloadBlob(filename: string, blob: Blob): void {
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
@@ -5151,6 +5192,78 @@ interface Window {
         link.click();
         link.remove();
         window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+
+    // 仅存储（不压缩）的 ZIP 写入：多张角色卡一次下载，避免浏览器拦截连续下载。
+    function createStoredZip(files: Array<{ name: string; text: string }>): Blob {
+        const encoder = new TextEncoder();
+        const parts: BlobPart[] = [];
+        const central: Uint8Array<ArrayBuffer>[] = [];
+        let offset = 0;
+        for (const file of files) {
+            const name = encoder.encode(file.name);
+            const data = encoder.encode(file.text);
+            const crc = crc32(data);
+            const local = new Uint8Array(30 + name.length + data.length);
+            const localView = new DataView(local.buffer);
+            localView.setUint32(0, 0x04034b50, true);
+            localView.setUint16(4, 20, true);
+            localView.setUint16(6, 0x0800, true); // 文件名使用 UTF-8
+            localView.setUint16(8, 0, true); // 0 = 仅存储
+            localView.setUint16(10, 0, true);
+            localView.setUint16(12, 0, true);
+            localView.setUint32(14, crc, true);
+            localView.setUint32(18, data.length, true);
+            localView.setUint32(22, data.length, true);
+            localView.setUint16(26, name.length, true);
+            localView.setUint16(28, 0, true);
+            local.set(name, 30);
+            local.set(data, 30 + name.length);
+            parts.push(local);
+            const directory = new Uint8Array(46 + name.length);
+            const directoryView = new DataView(directory.buffer);
+            directoryView.setUint32(0, 0x02014b50, true);
+            directoryView.setUint16(4, 20, true);
+            directoryView.setUint16(6, 20, true);
+            directoryView.setUint16(8, 0x0800, true);
+            directoryView.setUint16(10, 0, true);
+            directoryView.setUint16(12, 0, true);
+            directoryView.setUint16(14, 0, true);
+            directoryView.setUint32(16, crc, true);
+            directoryView.setUint32(20, data.length, true);
+            directoryView.setUint32(24, data.length, true);
+            directoryView.setUint16(28, name.length, true);
+            directoryView.setUint16(30, 0, true);
+            directoryView.setUint16(32, 0, true);
+            directoryView.setUint16(34, 0, true);
+            directoryView.setUint16(36, 0, true);
+            directoryView.setUint32(38, 0, true);
+            directoryView.setUint32(42, offset, true);
+            directory.set(name, 46);
+            central.push(directory);
+            offset += local.length;
+        }
+        const centralSize = central.reduce((sum, part) => sum + part.length, 0);
+        const end = new Uint8Array(22);
+        const endView = new DataView(end.buffer);
+        endView.setUint32(0, 0x06054b50, true);
+        endView.setUint16(8, files.length, true);
+        endView.setUint16(10, files.length, true);
+        endView.setUint32(12, centralSize, true);
+        endView.setUint32(16, offset, true);
+        parts.push(...central, end);
+        return new Blob(parts, { type: "application/zip" });
+    }
+
+    function crc32(bytes: Uint8Array): number {
+        let crc = 0xffffffff;
+        for (const byte of bytes) {
+            crc ^= byte;
+            for (let bit = 0; bit < 8; bit += 1) {
+                crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+            }
+        }
+        return (crc ^ 0xffffffff) >>> 0;
     }
 
     async function copyTextToClipboard(text: string): Promise<boolean> {
@@ -5248,6 +5361,7 @@ interface Window {
     global.clearCharacterManagement = clearCharacterSheetState;
     global.reloadCharacterManagement = reloadCharacterSheet;
     global.TrpgCharacterSheetRegistry?.register?.("coc7", {
+        ...api,
         id: "coc7",
         initCharacterSheet,
         clearCharacterManagement: clearCharacterSheetState,

@@ -16,6 +16,7 @@ import logging
 import time
 from pathlib import Path
 from typing import Any, Callable
+from uuid import uuid4
 
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.room_log import log_room_event
@@ -823,9 +824,9 @@ def roll_check(
     return result
 
 
-def _normalize_san_change(value: Any) -> str:
+def _normalize_san_change(value: Any, card: dict[str, Any]) -> str:
     """玩家命令默认把「1d4/1d10」视为损失；显式带 ``+`` 才表示恢复。"""
-    sanity = _sanity_or_none({})
+    sanity = _sanity_or_none(card)
     if sanity is None:
         raise RuleOperationError("当前规则集不支持理智值", code="sanity_unsupported")
     try:
@@ -851,7 +852,7 @@ def roll_sanity(
     """理智检定 + SAN 结算；一次损失 ≥5 时自动接 INT 检定与疯狂表现。"""
     from trpg_server.agents.tools import dice
 
-    member_card(member)
+    card = member_card(member)
     context = RoomRuleContext(
         room_dir,
         info,
@@ -862,7 +863,7 @@ def roll_sanity(
     )
     before_snapshot = san_snapshot(member)
     result = dice.roll_sanity_check(
-        {"player_name": member_ref(member), "san_change": _normalize_san_change(san_change)},
+        {"player_name": member_ref(member), "san_change": _normalize_san_change(san_change, card)},
         context,
         rng=rng,
     )
@@ -1024,7 +1025,7 @@ def add_item(
         card["equipment"] = equipment
 
     record = {
-        "id": f"item-{int(time.time() * 1000)}",
+        "id": f"item-{uuid4().hex}",
         "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
         "type": "item",
         "target": item_name,
@@ -1164,7 +1165,7 @@ def remove_item(
         item = dict(row)
 
     record = {
-        "id": f"item-{int(time.time() * 1000)}",
+        "id": f"item-{uuid4().hex}",
         "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
         "type": "item",
         "target": item_name,
@@ -1643,8 +1644,6 @@ def apply_economy_expense(
     actor: Any = None,
     actor_id: Any = None,
     source: str = "rule",
-    config_dir: Any = None,
-    room_id: Any = None,
 ) -> dict[str, Any]:
     """结算一次信用评级消费，并把现金变化登记到统一待写回队列。
 
