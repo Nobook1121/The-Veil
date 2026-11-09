@@ -44,6 +44,29 @@ def read_room_memory(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             for item in memory
             if query in str(item.get("content", "")) or query in str(item.get("kind", ""))
         ]
+    # 合并长期记忆账本：早期对话/关键节点即使被移出滚动摘要，也能按查询召回。
+    # 每条都带 source，模型可据此说明"来自哪条记录"，避免凭空补写。
+    try:
+        from trpg_server.agents.memory_consolidation import memory_recall
+
+        seen = {str(item.get("content") or "").strip() for item in memory}
+        for record in memory_recall(context.room_dir, query, limit):
+            content = str(record.get("text") or "").strip()
+            if not content or content in seen:
+                continue
+            seen.add(content)
+            memory.append(
+                {
+                    "id": record.get("id"),
+                    "kind": record.get("kind") or "fact",
+                    "content": content,
+                    "importance": record.get("importance") or 1,
+                    "created_at": record.get("created_at") or "",
+                    "source": record.get("source") or {},
+                }
+            )
+    except Exception:  # noqa: BLE001 - 记忆账本不可用时不影响原有记忆读取
+        pass
     memory.sort(
         key=lambda item: (int(item.get("importance") or 1), item.get("created_at", "")),
         reverse=True,

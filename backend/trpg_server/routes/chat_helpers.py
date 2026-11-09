@@ -604,6 +604,8 @@ _KEY_FACT_LABELS = {
     "npc_status": "NPC",
     "item_acquired": "物品",
     "decision_made": "决策",
+    "promise_made": "承诺",
+    "player_decision": "决策",
 }
 
 
@@ -680,8 +682,10 @@ def _compact_history_with_ai(requester, model, history, latex_settings=None):
                     "你在维护跑团房间的滚动记忆。请把「已有滚动摘要」与「新增对话」融合成一份更新的摘要，"
                     "不要编造未发生的内容。只输出 JSON，不要输出多余文字，格式："
                     '{"narrative": "不超过250字的叙事摘要，保留当前场景、未解决的线索与检定结果", '
-                    '"key_facts": [{"type": "location_discovered|npc_status|item_acquired|decision_made", '
+                    '"key_facts": [{"type": "location_discovered|npc_status|item_acquired|decision_made|promise_made|player_decision", '
                     '"text": "一句话事实"}]}'
+                    "关键事实必须来自对话原文；玩家答应过谁什么、对谁做过承诺，一律记为 promise_made，"
+                    "并写明对象与内容；玩家做过的关键行动记为 player_decision。没有发生的事实不要补写。"
                 ),
             },
             {"role": "user", "content": "\n\n".join(sections)},

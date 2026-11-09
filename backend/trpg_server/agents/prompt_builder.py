@@ -93,6 +93,7 @@ def build_prompt_layers(
     narrative_summary: str | None = None,
     opening_pack: str | None = None,
     system_directive: str | None = None,
+    memory_context: str | None = None,
     cache_variant: str = "",
 ) -> PromptLayers:
     scenario_static = _scenario_static_content(scenario)
@@ -162,6 +163,11 @@ def build_prompt_layers(
     if narrative_summary:
         dynamic_messages.append({"role": "system", "content": str(narrative_summary)})
         dynamic_segments.append("narrative_state")
+    # 长期记忆回顾：由房间已记录的日志/关键节点按相关度挑选，受字符预算约束；
+    # 位于易变快照之前，避免每轮注入全量历史。无命中时不产生任何注入。
+    if memory_context:
+        dynamic_messages.append({"role": "system", "content": str(memory_context)})
+        dynamic_segments.append("memory")
     # 房间快照（成员、HP/SAN、场景清单）每轮都变，放在动态块的最末尾、历史之前。
     # 易变内容后移，前面的静态层与检索卡片才能组成跨请求共享的可缓存前缀。
     if room_snapshot_message:
