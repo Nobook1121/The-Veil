@@ -158,9 +158,11 @@ def _build_snapshot() -> dict:
     snapshot["normalize_difficulty"] = {
         str(value): dice._normalize_difficulty(value) for value in DIFFICULTY_VALUES
     }
-    snapshot["difficulty_labels"] = {key: dice.DIFFICULTY_LABELS[key] for key in ("regular", "hard", "extreme")}
+    snapshot["difficulty_labels"] = {
+        key: dice._difficulty_label(key) for key in ("regular", "hard", "extreme")
+    }
     snapshot["level_labels"] = {
-        key: dice.LEVEL_LABELS[key]
+        key: dice._level_label(key)
         for key in ("critical", "extreme", "hard", "regular", "failure", "fumble")
     }
     snapshot["default_thresholds"] = list(dice._context_thresholds(context))

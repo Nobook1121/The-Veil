@@ -12,21 +12,35 @@ from trpg_server.dice_policy import DEFAULT_ROLL_POLICY, faces_with_policy, roll
 from trpg_server.json_store import write_json_atomic
 
 logger = logging.getLogger(__name__)
-DIFFICULTY_ALIASES = {"regular": "regular", "普通": "regular", "hard": "hard", "困难": "hard", "extreme": "extreme", "极难": "extreme"}
-DIFFICULTY_LABELS = {"regular": "", "hard": "困难", "extreme": "极难"}
-LEVEL_LABELS = {"critical": "大成功", "extreme": "极难成功", "hard": "困难成功", "regular": "成功", "failure": "失败", "fumble": "大失败"}
-# 大成功/大失败阈值默认值，保持 COC7 习惯：1 为大成功，96-100 为大失败。
-DEFAULT_CRITICAL_THRESHOLD = 1
-DEFAULT_FUMBLE_THRESHOLD = 96
-
 def _as_int(value: Any, fallback: int = 0) -> int:
     try: return int(value)
     except (TypeError, ValueError): return fallback
 def _threshold(target: int, difficulty: str) -> int:
-    return target // 2 if difficulty == "hard" else target // 5 if difficulty == "extreme" else target
+    checks = _checks_capability()
+    threshold = getattr(checks, "threshold", None)
+    return threshold(int(target), difficulty) if callable(threshold) else int(target)
 def _normalize_difficulty(value: Any) -> str:
-    text = str(value or "regular").strip()
-    return DIFFICULTY_ALIASES.get(text, DIFFICULTY_ALIASES.get(text.lower(), ""))
+    checks = _checks_capability()
+    normalize = getattr(checks, "normalize_difficulty", None)
+    if callable(normalize):
+        return normalize(value)
+    text = str(value or "regular").strip().lower()
+    return "regular" if text in {"", "regular", "普通"} else ""
+def _default_thresholds() -> tuple[int, int]:
+    """当前规则集的大成功 / 大失败默认阈值；未声明时返回中性值（不额外判定）。"""
+    checks = _checks_capability()
+    provider = getattr(checks, "default_thresholds", None)
+    if callable(provider):
+        return provider()
+    return 0, 101
+def _difficulty_label(difficulty: str) -> str:
+    checks = _checks_capability()
+    label = getattr(checks, "difficulty_label", None)
+    return label(difficulty) if callable(label) else ""
+def _level_label(level: str) -> str:
+    checks = _checks_capability()
+    label = getattr(checks, "level_label", None)
+    return label(level) if callable(label) else str(level or "")
 def _adjust_threshold(threshold: int, adjustment: Any) -> int:
     if isinstance(adjustment, (int, float)) and not isinstance(adjustment, bool):
         return threshold + int(adjustment)
@@ -153,7 +167,7 @@ def _lookup_check_value(card: dict[str, Any], check_name: str) -> int | None:
     lookup = getattr(checks, "lookup_target", None)
     return lookup(card, check_name) if callable(lookup) else None
 def _format_room_check_summary(name: str, difficulty: str, roll: int, threshold: int, success: bool) -> str:
-    return f"{DIFFICULTY_LABELS[difficulty]}{name} d%: [{roll}] = {roll} / {threshold} {'成功' if success else '失败'}"
+    return f"{_difficulty_label(difficulty)}{name} d%: [{roll}] = {roll} / {threshold} {'成功' if success else '失败'}"
 def _threshold_arg(arguments: dict[str, Any], key: str, fallback: int) -> int:
     """读取可配置的大成功/大失败阈值，做范围保护后返回。"""
     value = _as_int(arguments.get(key), fallback)
@@ -190,9 +204,9 @@ def _nullable_int(value: Any) -> int | None:
 
 
 def _admin_thresholds(config_dir: Any) -> tuple[int, int]:
-    """读取管理员设置页配置的骰娘默认阈值，读取失败时回退到 COC7 默认值。"""
+    """读取管理员设置页配置的骰娘默认阈值，读取失败时回退到规则集默认值。"""
     if not config_dir:
-        return DEFAULT_CRITICAL_THRESHOLD, DEFAULT_FUMBLE_THRESHOLD
+        return _default_thresholds()
     try:
         from trpg_server.agents.config import load_ai_runtime_config
 
@@ -202,7 +216,7 @@ def _admin_thresholds(config_dir: Any) -> tuple[int, int]:
             max(0, min(100, int(config.dice_fumble_threshold))),
         )
     except Exception:  # 配置缺失或损坏时不影响检定
-        return DEFAULT_CRITICAL_THRESHOLD, DEFAULT_FUMBLE_THRESHOLD
+        return _default_thresholds()
 
 
 def _merge_context_thresholds(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -214,23 +228,23 @@ def _merge_context_thresholds(arguments: dict[str, Any], context: Any) -> dict[s
     merged.setdefault("critical_threshold", critical)
     merged.setdefault("fumble_threshold", fumble)
     return merged
-def _success_level(roll: int, target: int, critical_threshold: int = DEFAULT_CRITICAL_THRESHOLD, fumble_threshold: int = DEFAULT_FUMBLE_THRESHOLD) -> str:
-    # 大成功优先；大失败仍要求本次检定失败（roll > target），与原 COC7 行为保持兼容。
-    if roll <= critical_threshold: return "critical"
-    if roll <= target // 5: return "extreme"
-    if roll <= target // 2: return "hard"
-    if roll <= target: return "regular"
-    # 大失败：默认（96）时启用 7 版派生规则「所需值 ≥50 只有 100 才算大失败」；
-    # 房规 / 管理员显式配置的更严格阈值优先（例如 90），便于桌内自定义。
-    if int(target) >= 50 and int(fumble_threshold) >= DEFAULT_FUMBLE_THRESHOLD:
-        effective_fumble = 100
-    else:
-        effective_fumble = fumble_threshold
-    if roll >= effective_fumble: return "fumble"
-    return "failure"
+def _success_level(
+    roll: int,
+    target: int,
+    critical_threshold: int | None = None,
+    fumble_threshold: int | None = None,
+) -> str:
+    """成功等级由规则集插件决定；未声明时返回中性的成功 / 失败。"""
+    checks = _checks_capability()
+    resolve = getattr(checks, "success_level", None)
+    if callable(resolve):
+        return resolve(roll, target, critical_threshold, fumble_threshold)
+    return "regular" if int(roll) <= int(target) else "failure"
 def _level_suffix(level: str) -> str:
     """为大成功/大失败追加明确的文字标注，供聊天与 AI 上下文直接读取。"""
-    return "（大成功）" if level == "critical" else "（大失败）" if level == "fumble" else ""
+    checks = _checks_capability()
+    suffix = getattr(checks, "level_suffix", None)
+    return suffix(level) if callable(suffix) else ""
 def _localize_check_label(name: str) -> str:
     """把英文键形式的属性/技能名转换为当前规则集的展示名。"""
     checks = _checks_capability()
@@ -791,8 +805,9 @@ def roll_coc_check(
     bonus_dice, penalty_dice = _normalize_bonus_penalty(bonus_dice, penalty_dice)
     try: threshold = _adjust_threshold(_threshold(target, difficulty), arguments.get("adjustment", arguments.get("correction")))
     except ValueError as exc: return {"error": str(exc)}
-    critical_threshold = _threshold_arg(arguments, "critical_threshold", DEFAULT_CRITICAL_THRESHOLD)
-    fumble_threshold = _threshold_arg(arguments, "fumble_threshold", DEFAULT_FUMBLE_THRESHOLD)
+    default_critical, default_fumble = _default_thresholds()
+    critical_threshold = _threshold_arg(arguments, "critical_threshold", default_critical)
+    fumble_threshold = _threshold_arg(arguments, "fumble_threshold", default_fumble)
     roll, candidates = (
         _percentile_from_faces(faces, bonus_dice, penalty_dice)
         if faces is not None
@@ -800,7 +815,7 @@ def roll_coc_check(
     )
     level = _success_level(roll, target, critical_threshold, fumble_threshold); success = (roll <= threshold or level == "critical") and level != "fumble"
     skill = _localize_check_label(arguments.get("skill") or "检定"); reason = str(arguments.get("reason") or ""); modifier = str(arguments.get("adjustment", arguments.get("correction")) or "").strip()
-    summary = f"{skill}检定：1d100={roll}，目标{target}，{DIFFICULTY_LABELS[difficulty] or '普通'}难度阈值{threshold}，结果：{LEVEL_LABELS.get(level, level)}。"
+    summary = f"{skill}检定：1d100={roll}，目标{target}，{_difficulty_label(difficulty) or '普通'}难度阈值{threshold}，结果：{_level_label(level)}。"
     # Keep the compact /check-compatible summary stable; adjustment is exposed
     # in the structured result while bonus/penalty candidates are expanded.
     if candidates: summary += f" {'奖励骰' if bonus_dice else '惩罚骰'}（{', '.join(map(str, candidates))}），取{roll}。"

@@ -133,6 +133,13 @@ CHECK_NAME_ALIASES = {
 }
 
 
+DIFFICULTY_ALIASES = {"regular": "regular", "普通": "regular", "hard": "hard", "困难": "hard", "extreme": "extreme", "极难": "extreme"}
+DIFFICULTY_LABELS = {"regular": "", "hard": "困难", "extreme": "极难"}
+LEVEL_LABELS = {"critical": "大成功", "extreme": "极难成功", "hard": "困难成功", "regular": "成功", "failure": "失败", "fumble": "大失败"}
+DEFAULT_CRITICAL_THRESHOLD = 1
+DEFAULT_FUMBLE_THRESHOLD = 96
+
+
 def _as_int(value: Any, fallback: int = 0) -> int:
     try:
         return int(value)
@@ -248,17 +255,57 @@ class Coc7Checks:
                 return str(skill.get("name") or "").strip() or localized
         return localized
 
-    def success_level(self, roll: int, target: int) -> str:
-        dice = _dice_module()
-        return dice._success_level(
-            int(roll),
-            int(target),
-            dice.DEFAULT_CRITICAL_THRESHOLD,
-            dice.DEFAULT_FUMBLE_THRESHOLD,
-        )
+    def normalize_difficulty(self, value: Any) -> str:
+        """难度别名归一；无法识别时返回空串，由调用方决定报错或回退。"""
+        text = str(value or "regular").strip()
+        return DIFFICULTY_ALIASES.get(text, DIFFICULTY_ALIASES.get(text.lower(), ""))
+
+    def difficulty_label(self, difficulty: str) -> str:
+        return DIFFICULTY_LABELS.get(str(difficulty or ""), "")
+
+    def level_label(self, level: str) -> str:
+        return LEVEL_LABELS.get(str(level or ""), str(level or ""))
+
+    def level_suffix(self, level: str) -> str:
+        """为大成功/大失败追加明确的文字标注，供聊天与 AI 上下文直接读取。"""
+        return "（大成功）" if level == "critical" else "（大失败）" if level == "fumble" else ""
+
+    def default_thresholds(self) -> tuple[int, int]:
+        return DEFAULT_CRITICAL_THRESHOLD, DEFAULT_FUMBLE_THRESHOLD
 
     def threshold(self, target: int, difficulty: str = "regular") -> int:
-        return _dice_module()._threshold(int(target), difficulty)
+        return int(target) // 2 if difficulty == "hard" else int(target) // 5 if difficulty == "extreme" else int(target)
+
+    def success_level(
+        self,
+        roll: int,
+        target: int,
+        critical_threshold: int | None = None,
+        fumble_threshold: int | None = None,
+    ) -> str:
+        critical_threshold = DEFAULT_CRITICAL_THRESHOLD if critical_threshold is None else int(critical_threshold)
+        fumble_threshold = DEFAULT_FUMBLE_THRESHOLD if fumble_threshold is None else int(fumble_threshold)
+        # 大成功优先；大失败仍要求本次检定失败（roll > target），与原 COC7 行为保持兼容。
+        if roll <= critical_threshold:
+            return "critical"
+        if roll <= target // 5:
+            return "extreme"
+        if roll <= target // 2:
+            return "hard"
+        if roll <= target:
+            return "regular"
+        # 大失败：默认（96）时启用 7 版派生规则「所需值 ≥50 只有 100 才算大失败」；
+        # 房规 / 管理员显式配置的更严格阈值优先（例如 90），便于桌内自定义。
+        if int(target) >= 50 and int(fumble_threshold) >= DEFAULT_FUMBLE_THRESHOLD:
+            effective_fumble = 100
+        else:
+            effective_fumble = fumble_threshold
+        if roll >= effective_fumble:
+            return "fumble"
+        return "failure"
+
+    def format_room_check_summary(self, name: str, difficulty: str, roll: int, threshold: int, success: bool) -> str:
+        return f"{self.difficulty_label(difficulty)}{name} d%: [{roll}] = {roll} / {threshold} {'成功' if success else '失败'}"
 
     def list_check_names(self, card: Mapping[str, Any]) -> list[str]:
         """属性 + 卡上技能名；优先级与 ``dice._resolve_check_name`` 保持一致。"""
@@ -308,15 +355,16 @@ class Coc7Checks:
         if base_target is None:
             raise ValueError(f"{request.name} was not found on character card")
         base_target = max(1, min(100, int(base_target)))
-        difficulty = dice._normalize_difficulty(request.difficulty) or "regular"
+        difficulty = self.normalize_difficulty(request.difficulty) or "regular"
         threshold = self.threshold(base_target, difficulty)
         extra = request.extra if isinstance(request.extra, Mapping) else {}
         threshold = dice._adjust_threshold(threshold, extra.get("adjustment"))
 
+        default_critical, default_fumble = self.default_thresholds()
         critical = extra.get("critical_threshold")
-        critical = dice.DEFAULT_CRITICAL_THRESHOLD if critical is None else int(critical)
+        critical = default_critical if critical is None else int(critical)
         fumble = extra.get("fumble_threshold")
-        fumble = dice.DEFAULT_FUMBLE_THRESHOLD if fumble is None else int(fumble)
+        fumble = default_fumble if fumble is None else int(fumble)
 
         bonus = max(0, min(10, int(request.bonus or 0)))
         penalty = max(0, min(10, int(request.penalty or 0)))
@@ -327,7 +375,7 @@ class Coc7Checks:
         else:
             roll, candidates = dice._percentile_roll(rng, bonus, penalty)
 
-        level = dice._success_level(int(roll), base_target, critical, fumble)
+        level = self.success_level(int(roll), base_target, critical, fumble)
         success = (int(roll) <= int(threshold) or level == "critical") and level != "fumble"
         return CheckResolution(
             roll=int(roll),
@@ -342,7 +390,7 @@ class Coc7Checks:
                 "difficulty": difficulty,
                 "bonus_dice": bonus,
                 "penalty_dice": penalty,
-                "display_name": dice._resolve_check_display_name(dict(card or {}), request.name),
+                "display_name": self.display_name(dict(card or {}), request.name),
             },
         )
 

@@ -104,7 +104,7 @@ def run_room_check(
     if context is not None and hasattr(dice, "_context_thresholds"):
         default_critical, default_fumble = dice._context_thresholds(context)
     else:
-        default_critical, default_fumble = dice.DEFAULT_CRITICAL_THRESHOLD, dice.DEFAULT_FUMBLE_THRESHOLD
+        default_critical, default_fumble = dice._default_thresholds()
     critical_value = dice._threshold_arg(
         {"critical_threshold": critical_threshold}, "critical_threshold", default_critical
     )
@@ -154,7 +154,7 @@ def run_room_check(
         "base_target": int(detail.get("base_target", base_target)),
         "target": threshold,
         "difficulty": difficulty_key,
-        "difficulty_label": dice.DIFFICULTY_LABELS[difficulty_key],
+        "difficulty_label": dice._difficulty_label(difficulty_key),
         "adjustment": modifier,
         "bonus_dice": bonus_dice,
         "penalty_dice": penalty_dice,
@@ -352,7 +352,7 @@ def run_room_combined_check(
         "rolls": [int(value) for value in (resolution.get("candidates") or [int(resolution["roll"])])],
         "target": None,
         "difficulty": difficulty_key,
-        "difficulty_label": dice.DIFFICULTY_LABELS[difficulty_key],
+        "difficulty_label": dice._difficulty_label(difficulty_key),
         "bonus_dice": int(resolution.get("bonus_dice") or 0),
         "penalty_dice": int(resolution.get("penalty_dice") or 0),
         "success": success,
