@@ -8,11 +8,11 @@
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any, Callable
 
 from trpg_server import room_rules, world_override
+from trpg_server.console_args import ConsoleArgSpec, parse_console_args
 
 ROOM_RULE_ACTOR = "房间控制台"
 
@@ -45,6 +45,12 @@ RULE_VALUE_OPTIONS = {
 }
 # 尾部选项：reason / note 之后的全部内容都算它的值。
 RULE_TRAILING_OPTIONS = {"reason", "note"}
+
+RULE_ARG_SPEC = ConsoleArgSpec.of(
+    flags=RULE_FLAG_WORDS,
+    values=RULE_VALUE_OPTIONS,
+    trailing=RULE_TRAILING_OPTIONS,
+)
 
 ROOM_RULE_HELP = "\n".join(
     [
@@ -85,37 +91,14 @@ RULE_SUBS = {
 
 
 def _parse(args: list[str]) -> tuple[list[str], set[str], dict[str, str]]:
-    """纯词参数解析。
+    """纯词参数解析（共享实现）。
 
     ``rule item 玩家 手电筒 qty 2 weapon persist`` 与旧的
     ``rule item 玩家 手电筒 --qty=2 --weapon --persist`` 等价；
     ``-5`` 这类带符号数值始终按位置参数处理。
     """
-    positionals: list[str] = []
-    flags: set[str] = set()
-    options: dict[str, str] = {}
-    index = 0
-    while index < len(args):
-        token = args[index]
-        lowered = token.lower()
-        if token.startswith("--") and "=" in token:
-            key, _, value = token.partition("=")
-            options[key[2:].lower()] = value
-        elif token.startswith("-") and not re.fullmatch(r"-\d+(?:\.\d+)?", token):
-            flags.add(token.lower())
-        elif lowered in RULE_FLAG_WORDS:
-            flags.add(RULE_FLAG_WORDS[lowered])
-        elif lowered in RULE_VALUE_OPTIONS:
-            if index + 1 < len(args):
-                options[lowered] = args[index + 1]
-                index += 1
-        elif lowered in RULE_TRAILING_OPTIONS:
-            options[lowered] = " ".join(args[index + 1:])
-            break
-        else:
-            positionals.append(token)
-        index += 1
-    return positionals, flags, options
+    parsed = parse_console_args(args, RULE_ARG_SPEC)
+    return parsed.positionals, parsed.flags, parsed.options
 
 
 def _as_int(value: Any, fallback: int) -> int:

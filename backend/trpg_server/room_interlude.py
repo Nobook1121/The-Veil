@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from trpg_server import room_rules
+from trpg_server.console_args import ConsoleArgSpec, first_positional, parse_console_args
 from trpg_server.json_store import read_json
 from trpg_server.room_log import load_room_log, log_room_event
 
@@ -769,19 +770,18 @@ def _format_state(info: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+INTERLUDE_ARG_SPECS = {
+    "start": ConsoleArgSpec.of(values={"credit"}),
+    "settle": ConsoleArgSpec.of(values={"credit"}),
+    "review": ConsoleArgSpec.of(values={"text"}, trailing={"topic"}),
+    "end": ConsoleArgSpec.of(flags={"yes"}),
+}
+
+
 def _parse_flags(args: list[str]) -> tuple[list[str], set[str], dict[str, str]]:
-    positionals: list[str] = []
-    flags: set[str] = set()
-    options: dict[str, str] = {}
-    for token in args:
-        if token.startswith("--") and "=" in token:
-            key, _, value = token.partition("=")
-            options[key[2:].lower()] = value
-        elif token.startswith("-"):
-            flags.add(token.lower())
-        else:
-            positionals.append(token)
-    return positionals, flags, options
+    spec = INTERLUDE_ARG_SPECS.get(first_positional(args).lower(), ConsoleArgSpec.of())
+    parsed = parse_console_args(args, spec)
+    return parsed.positionals, parsed.flags, parsed.options
 
 
 def _parse_credit_events(raw: str) -> list[dict[str, Any]]:
@@ -889,7 +889,7 @@ def handle_console_command(
         if confirm is not None and confirm("结束幕间并自动归档？(y/N)"):
             pass
         else:
-            return True, "结束幕间会立即归档房间。确认后请输入：interlude end --yes"
+            return True, "结束幕间会立即归档房间。确认后请输入：interlude end yes（旧 --yes 仍兼容）"
     try:
         end_interlude(room_dir, info, actor=actor, actor_id=actor_id)
     except InterludeError as exc:

@@ -296,6 +296,16 @@ def test_log_clear_executes_with_yes(tmp_path):
     assert room_log.read_room_log(rooms_dir / "r-1")["entries"] == []
 
 
+def test_log_clear_executes_with_pure_word_yes(tmp_path):
+    rooms_dir = _rooms_dir(tmp_path, "r-1")
+    room_log.append_room_log(rooms_dir / "r-1", "创建了房间", room_id="r-1", max_entries=50)
+
+    result = _run(rooms_dir, "r-1", "log clear yes")
+
+    assert result.ok is True
+    assert room_log.read_room_log(rooms_dir / "r-1")["entries"] == []
+
+
 def test_log_clear_confirms_then_executes(tmp_path):
     rooms_dir = _rooms_dir(tmp_path, "r-1")
     room_log.append_room_log(rooms_dir / "r-1", "创建了房间", room_id="r-1", max_entries=50)

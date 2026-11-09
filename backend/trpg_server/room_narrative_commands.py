@@ -1,7 +1,7 @@
 """房间控制台的 `narrative` 命令实现（设计文档 §11.2）。
 
 只操作当前房间：读取房间绑定的 `narrative.json` 运行态、账本、事实与轨迹，
-破坏性命令默认预演，需 `--yes` 或交互确认。模块不依赖 Flask，依赖由
+破坏性命令默认预演，需 `yes` 或交互确认。模块不依赖 Flask，依赖由
 ``execute_room_command`` 注入，避免与 ``room_console_commands`` 形成循环导入。
 """
 from __future__ import annotations
@@ -18,6 +18,7 @@ from trpg_server.agents.narrative.runtime import NarrativeRuntime, NarrativeRunt
 from trpg_server.agents.narrative.runtime_settings import resolve_narrative_settings
 from trpg_server.agents.narrative.state_store import load_narrative_state, rebuild_narrative_state, save_narrative_state
 from trpg_server.agents.narrative.trace import read_trace
+from trpg_server.console_args import ConsoleArgSpec, first_positional, parse_console_args
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.room_log import log_room_event
 
@@ -25,35 +26,33 @@ logger = logging.getLogger(__name__)
 
 ROOM_NARRATIVE_ACTOR = "房间控制台"
 MAX_NARRATIVE_CHARS = 4000
-VALUE_OPTIONS = {"depth", "limit", "search", "turn", "entity", "status", "location", "object", "mode"}
+
+# 各子命令认识的纯词参数；按子命令收敛，避免 status 这类同名子命令被当成值选项。
+NARRATIVE_ARG_SPECS = {
+    "state": ConsoleArgSpec.of(flags={"json"}),
+    "map": ConsoleArgSpec.of(values={"depth"}),
+    "ledger": ConsoleArgSpec.of(flags={"key-only", "json"}, values={"limit", "search"}),
+    "facts": ConsoleArgSpec.of(values={"entity", "status"}),
+    "triggers": ConsoleArgSpec.of(flags={"fired", "json"}, values={"location", "object"}),
+    "trigger": ConsoleArgSpec.of(flags={"yes"}),
+    "media": ConsoleArgSpec.of(flags={"missing", "json"}),
+    "opening": ConsoleArgSpec.of(flags={"publish", "repair", "yes", "json"}, values={"mode"}),
+    "trace": ConsoleArgSpec.of(flags={"json"}, values={"turn", "limit"}),
+    "summary": ConsoleArgSpec.of(flags={"rebuild", "yes"}),
+    "reset": ConsoleArgSpec.of(flags={"yes"}),
+    "unlock": ConsoleArgSpec.of(flags={"yes"}),
+    "guard": ConsoleArgSpec.of(flags={"yes"}),
+    "profile": ConsoleArgSpec.of(flags={"yes"}),
+    "rebuild-state": ConsoleArgSpec.of(flags={"yes"}),
+}
 
 
-def _parse(args: list[str]) -> tuple[list[str], set[str], dict[str, str]]:
-    positionals: list[str] = []
-    flags: set[str] = set()
-    options: dict[str, str] = {}
-    index = 0
-    while index < len(args):
-        item = str(args[index])
-        if item.startswith("-"):
-            name = item.lstrip("-").lower()
-            if "=" in name:
-                key, value = name.split("=", 1)
-                options[key] = value
-                flags.add(key)
-                index += 1
-                continue
-            if name in VALUE_OPTIONS and index + 1 < len(args) and not str(args[index + 1]).startswith("-"):
-                options[name] = str(args[index + 1])
-                flags.add(name)
-                index += 2
-                continue
-            flags.add(name)
-            index += 1
-            continue
-        positionals.append(item)
-        index += 1
-    return positionals, flags, options
+def _parse(args: list[str]) -> tuple[list[str], set[str], dict[str, str], list[str]]:
+    """解析纯词参数，并把开关还原成旧实现使用的裸名形式。"""
+    spec = NARRATIVE_ARG_SPECS.get(first_positional(args).lower(), ConsoleArgSpec.of())
+    parsed = parse_console_args(args, spec)
+    flags = {token.lstrip("-").split("=", 1)[0].lower() for token in parsed.flags}
+    return parsed.positionals, flags, parsed.options, parsed.legacy_args
 
 
 def _int_option(options: Mapping[str, str], name: str, default: int) -> int:
@@ -89,7 +88,7 @@ def _confirm(
     if flags & {"yes", "y"}:
         return apply()
     if confirm is None:
-        return True, preview + "\n（预演模式：确认无误后加 --yes 执行）"
+        return True, preview + "\n（预演模式：确认无误后加 yes 执行；旧 --yes 仍兼容）"
     if confirm(f"{prompt} (y/N)"):
         return apply()
     return True, preview + "\n（已取消，未执行）"
@@ -398,7 +397,7 @@ def _trigger_fire(
     actor_id: Any,
 ) -> tuple[bool, str]:
     if not rest:
-        return False, "用法：narrative trigger fire <trigger_id> [--yes]"
+        return False, "用法：narrative trigger fire <trigger_id> [yes]"
     runtime, error = _runtime(room_id, room_dir, rooms_dir, scenarios_dir)
     if runtime is None:
         return False, error
@@ -523,7 +522,7 @@ def _reset(
     confirm: Callable[[str], bool] | None,
 ) -> tuple[bool, str]:
     if not rest:
-        return False, "用法：narrative reset <location_id> [--yes]"
+        return False, "用法：narrative reset <location_id> [yes]"
     runtime, error = _runtime(room_id, room_dir, rooms_dir, scenarios_dir)
     if runtime is None:
         return False, error
@@ -566,7 +565,7 @@ def _unlock(
     confirm: Callable[[str], bool] | None,
 ) -> tuple[bool, str]:
     if not rest:
-        return False, "用法：narrative unlock <edge_id|location_id> [--yes]"
+        return False, "用法：narrative unlock <edge_id|location_id> [yes]"
     runtime, error = _runtime(room_id, room_dir, rooms_dir, scenarios_dir)
     if runtime is None:
         return False, error
@@ -800,7 +799,7 @@ def handle_room_narrative_command(
     confirm: Callable[[str], bool] | None = None,
 ) -> tuple[bool, str]:
     """执行 `narrative <subcommand>` 房间命令；返回 (ok, 文本)。"""
-    positionals, flags, options = _parse(args)
+    positionals, flags, options, legacy_args = _parse(args)
     room_dir = Path(room_dir)
     scenarios_dir = scenarios_dir or (app.config.get("SCENARIOS_DIR") if app is not None else None)
     if not positionals:
@@ -828,7 +827,7 @@ def handle_room_narrative_command(
         return _triggers(room_id, room_dir, rooms_dir, scenarios_dir, flags, options)
     if sub == "trigger":
         if not rest or rest[0].lower() != "fire":
-            return False, "用法：narrative trigger fire <trigger_id> [--yes]"
+            return False, "用法：narrative trigger fire <trigger_id> [yes]"
         return _trigger_fire(room_id, room_dir, rooms_dir, scenarios_dir, rest[1:], flags, confirm, actor_id)
     if sub == "media":
         return _media(room_dir, flags)
@@ -837,7 +836,7 @@ def handle_room_narrative_command(
             return False, "剧本目录未配置，无法读取开场配置。"
         from trpg_server.narrative_admin import handle_narrative_command
 
-        passthrough = list(args[1:])
+        passthrough = list(legacy_args[1:])
         return handle_narrative_command(
             ["opening", str(room_id), *passthrough],
             scenarios_dir,
@@ -884,26 +883,26 @@ def _help_text() -> str:
             "房间世界树命令（仅作用于本房间）：",
             "  narrative insert <文本>              （房主/管理员手动插入叙事块，直接广播且写入后续上下文）",
             "  narrative status                     （能力档、拓扑、位置、版本与护栏状态）",
-            "  narrative state [--json]             （位置、旗标、时钟、线索与触发记录）",
-            "  narrative map [--depth N]            （当前可达地图：已访问/未揭示/门控）",
+            "  narrative state [json]               （位置、旗标、时钟、线索与触发记录）",
+            "  narrative map [depth N]              （当前可达地图：已访问/未揭示/门控）",
             "  narrative exits                      （当前地点出口与缺失条件）",
-            "  narrative ledger [--limit N] [--key-only] [--search <text>]",
+            "  narrative ledger [limit N] [key-only] [search <text>]",
             "                                       （查看账本，默认最近 20 条）",
-            "  narrative facts [--entity <id>] [--status <s>]（事实三元组）",
+            "  narrative facts [entity <id>] [status <s>]（事实三元组）",
             "  narrative clocks                     （全局时钟与阈值）",
-            "  narrative triggers [--location <id>] [--object <id>] [--fired]",
+            "  narrative triggers [location <id>] [object <id>] [fired]",
             "                                       （触发器与触发次数，只显示名称）",
-            "  narrative trigger fire <id> [--yes]  （手动触发，房主/管理员）",
-            "  narrative media [--missing]          （本房间已发媒体与缺失素材）",
-            "  narrative opening [--publish|--repair] [--yes]（预览/补发开场）",
-            "  narrative trace [--turn N] [--limit N]（JEV/检索/护栏轨迹）",
-            "  narrative summary [--rebuild] [--yes]（查看或重建摘要）",
-            "  narrative reset <location_id> [--yes]（重置位置，救场）",
-            "  narrative unlock <edge|location> [--yes]（手动解锁通道/地点）",
-            "  narrative guard <off|shadow|enforce> [--yes]（切换护栏模式）",
-            "  narrative profile <graph|degraded> [--yes]（切换能力档）",
-            "  narrative rebuild-state [--yes]      （从关键帧+账本重放恢复状态）",
-            "  说明：破坏性命令缺省为「预演」，加 --yes 或在交互确认时输入 y 才会执行。",
+            "  narrative trigger fire <id> [yes]    （手动触发，房主/管理员）",
+            "  narrative media [missing]            （本房间已发媒体与缺失素材）",
+            "  narrative opening [publish|repair] [yes]（预览/补发开场）",
+            "  narrative trace [turn N] [limit N]   （JEV/检索/护栏轨迹）",
+            "  narrative summary [rebuild] [yes]    （查看或重建摘要）",
+            "  narrative reset <location_id> [yes]  （重置位置，救场）",
+            "  narrative unlock <edge|location> [yes]（手动解锁通道/地点）",
+            "  narrative guard <off|shadow|enforce> [yes]（切换护栏模式）",
+            "  narrative profile <graph|degraded> [yes]（切换能力档）",
+            "  narrative rebuild-state [yes]        （从关键帧+账本重放恢复状态）",
+            "  说明：破坏性命令缺省为「预演」，加 yes 或在交互确认时输入 y 才会执行；旧的 --xxx 写法仍兼容。",
         ]
     )
 

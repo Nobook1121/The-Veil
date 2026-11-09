@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from trpg_server.agents.tools import combat
+from trpg_server.console_args import ConsoleArgSpec, first_positional, parse_console_args
 from trpg_server.json_store import read_json
 
 ROOM_COMBAT_ACTOR = "房间控制台"
@@ -35,21 +36,33 @@ ROOM_COMBAT_HELP = "\n".join(
     [
         "  combat                       （查看当前战斗：轮次、顺序、耐久与状态）",
         "  combat status                （同上，只读）",
-        "  combat start [成员...] [--module=id] [--initiative-check] [--yes]（开战；缺省取所有已绑定角色卡的成员）",
-        "  combat join <成员|module=id> [--initiative-check] [--yes]（战斗中追加先攻）",
+        "  combat start [成员...] [module id] [initiative-check] [yes]（开战；缺省取所有已绑定角色卡的成员）",
+        "  combat join <成员> [initiative-check] [yes]（战斗中追加先攻；也可写 combat join module <id>）",
         "  combat next                  （推进到下一位行动者/下一轮）",
         "  combat end-turn              （同 combat next）",
         "  combat delay [成员]          （把当前行动者延迟到本轮末尾；已是最后一人则放弃行动）",
         "  combat disengage [成员]      （脱离近战，消耗本次行动）",
         "  combat reload [成员] [武器]  （装填/换弹，消耗本次行动）",
         "  combat ready [成员]          （准备武器；耗时由房规 combat_ready_weapon_cost 决定）",
-        "  combat cast <法术> [--caster=名字] [--time=instant|one_round|two_rounds] [--mp=n] [--san=n]（战斗内施法）",
-        "  combat damage <目标> <数值|XdY+N> [--ignore-armor] [--yes]（手动伤害）",
-        "  combat heal <目标> <数值> [--yes]（手动恢复耐久）",
-        "  combat treat <目标> [first-aid|medicine] [--healer=名字] [--yes]（急救/医学检定）",
-        "  combat end [--reason=...] [--yes]（结束战斗，破坏性）",
+        "  combat cast <法术> [caster 名字] [time instant|one_round|two_rounds] [mp n] [san n]（战斗内施法）",
+        "  combat damage <目标> <数值|XdY+N> [ignore-armor] [yes]（手动伤害）",
+        "  combat heal <目标> <数值> [yes]（手动恢复耐久）",
+        "  combat treat <目标> [first-aid|medicine] [healer 名字] [yes]（急救/医学检定）",
+        "  combat end [reason 原因] [yes]（结束战斗，破坏性）",
+        "  参数用空格分隔的纯词；旧的 --xxx / --key=value 写法仍然可用。",
     ]
 )
+
+# 各子命令认识的纯词参数。
+COMBAT_ARG_SPECS = {
+    "start": ConsoleArgSpec.of(flags={"initiative-check", "yes"}, values={"module"}),
+    "join": ConsoleArgSpec.of(flags={"initiative-check", "yes"}, values={"module"}),
+    "cast": ConsoleArgSpec.of(values={"caster", "time", "mp", "san"}),
+    "damage": ConsoleArgSpec.of(flags={"ignore-armor", "ignore-armour", "yes"}),
+    "heal": ConsoleArgSpec.of(flags={"yes"}),
+    "treat": ConsoleArgSpec.of(flags={"yes"}, values={"healer"}),
+    "end": ConsoleArgSpec.of(flags={"yes"}, trailing={"reason"}),
+}
 
 
 @dataclass
@@ -97,18 +110,9 @@ def _actor_rank(room_dir: Path, actor_id: Any, actor_rank: Any) -> int:
 
 
 def _parse(args: list[str]) -> tuple[list[str], set[str], dict[str, str]]:
-    positionals: list[str] = []
-    flags: set[str] = set()
-    options: dict[str, str] = {}
-    for token in args:
-        if token.startswith("--") and "=" in token:
-            key, _, value = token.partition("=")
-            options[key[2:].lower()] = value
-        elif token.startswith("-"):
-            flags.add(token.lower())
-        else:
-            positionals.append(token)
-    return positionals, flags, options
+    spec = COMBAT_ARG_SPECS.get(first_positional(args).lower(), ConsoleArgSpec.of())
+    parsed = parse_console_args(args, spec)
+    return parsed.positionals, parsed.flags, parsed.options
 
 
 def _roll_amount(text: str) -> tuple[int, str]:
@@ -228,7 +232,7 @@ def handle_room_combat_command(
             return False, "当前没有进行中的战斗，请先 combat start"
         spell = rest[0] if rest else options.get("spell", "")
         if not spell:
-            return False, "用法：combat cast <法术> [--caster=名字] [--time=instant|one_round|two_rounds] [--mp=n] [--san=n]"
+            return False, "用法：combat cast <法术> [caster 名字] [time instant|one_round|two_rounds] [mp n] [san n]"
         payload = {
             "spell": spell,
             "cast_time": options.get("time") or options.get("cast_time") or "instant",
@@ -256,7 +260,7 @@ def handle_room_combat_command(
             return False, "当前没有进行中的战斗，请先 combat start"
         raw_target = rest[0] if rest else options.get("module", "")
         if not raw_target:
-            return False, "用法：combat join <成员> 或 combat join --module=<id>"
+            return False, "用法：combat join <成员> 或 combat join module <id>"
         payload = {"initiative_check": bool(flags & {"--initiative-check", "--initiative"})}
         if options.get("module"):
             payload["module_id"] = options["module"]
@@ -267,7 +271,7 @@ def handle_room_combat_command(
         if not active:
             return False, "当前没有进行中的战斗，请先 combat start"
         if len(rest) < 2:
-            return False, "用法：combat damage <目标> <数值|XdY+N> [--ignore-armor]"
+            return False, "用法：combat damage <目标> <数值|XdY+N> [ignore-armor]"
         amount, detail = _roll_amount(rest[1])
         if amount <= 0 and detail:
             return False, detail
@@ -291,7 +295,7 @@ def handle_room_combat_command(
         if not active:
             return False, "当前没有进行中的战斗，请先 combat start"
         if not rest:
-            return False, "用法：combat treat <目标> [first-aid|medicine] [--healer=名字]"
+            return False, "用法：combat treat <目标> [first-aid|medicine] [healer 名字]"
         mode = rest[1].lower() if len(rest) > 1 else "first-aid"
         mode = "first_aid" if mode in {"first-aid", "firstaid", "急救"} else "medicine"
         payload = {"target": rest[0], "method": mode}
@@ -303,7 +307,7 @@ def handle_room_combat_command(
             return False, "当前没有进行中的战斗"
         if not (flags & {"--yes", "-y"}):
             if confirm is None:
-                return True, "将结束当前战斗（保留角色最终耐久）。确认无误后加 --yes 执行。"
+                return True, "将结束当前战斗（保留角色最终耐久）。确认无误后加 yes 执行（旧 --yes 仍兼容）。"
             if not confirm("结束当前战斗？(y/N)"):
                 return True, "已取消，未结束战斗。"
         result = combat.end_combat({"reason": options.get("reason", "")}, context)

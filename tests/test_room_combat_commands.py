@@ -97,6 +97,19 @@ def test_combat_console_full_flow(tmp_path):
     assert "战斗已结束" in result.message
 
 
+def test_combat_accepts_pure_word_options(tmp_path):
+    room_dir = _room(tmp_path)
+    assert _run(room_dir, "combat start alice initiative-check").ok is True
+
+    result = _run(room_dir, "combat damage alice 3 ignore-armor")
+    assert result.ok is True, result.message
+    assert "alice" in result.message
+
+    result = _run(room_dir, "combat end reason 撤退 yes")
+    assert result.ok is True, result.message
+    assert "战斗已结束" in result.message
+
+
 def test_combat_start_requires_admin(tmp_path):
     room_dir = _room(tmp_path)
     result = execute_room_command(
@@ -117,6 +130,7 @@ def test_combat_end_previews_without_yes(tmp_path):
 
     result = _run(room_dir, "combat end")
     assert result.ok is True
+    assert "yes" in result.message
     assert "--yes" in result.message
 
     assert _run(room_dir, "combat").ok is True

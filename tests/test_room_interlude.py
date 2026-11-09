@@ -188,6 +188,33 @@ def test_end_requires_confirmation_and_archives(tmp_path):
     assert list((tmp_path / "room-archives").iterdir())
 
 
+def test_console_end_accepts_pure_word_yes(tmp_path):
+    room_dir, info = _write_room(tmp_path)
+    room_interlude.start_interlude(room_dir, info, actor="tester", actor_id=1, rng=_queue_rng([60, 5, 3, 4]))
+
+    ok, preview = room_interlude.handle_console_command(
+        ["end"],
+        room_id="r-1",
+        room_dir=room_dir,
+        actor="tester",
+        actor_id=1,
+        actor_rank=3,
+    )
+    assert ok is True
+    assert "yes" in preview
+
+    ok, message = room_interlude.handle_console_command(
+        ["end", "yes"],
+        room_id="r-1",
+        room_dir=room_dir,
+        actor="tester",
+        actor_id=1,
+        actor_rank=3,
+    )
+    assert ok is True, message
+    assert "幕间已结束" in message
+
+
 def test_restore_node_blocked_during_interlude(tmp_path):
     room_dir, info = _write_room(tmp_path)
     room_interlude.start_interlude(room_dir, info, rng=_queue_rng([1, 1, 1, 1]))

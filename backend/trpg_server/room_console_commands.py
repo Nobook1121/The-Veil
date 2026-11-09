@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from trpg_server import room_admin, room_interlude
 from trpg_server.agents import room_state
+from trpg_server.console_args import ConsoleArgSpec, first_positional, parse_console_args
 from trpg_server.json_store import read_json
 from trpg_server.room_combat_commands import ROOM_COMBAT_HELP, handle_room_combat_command
 from trpg_server.room_log import clear_room_log, log_room_event, read_room_log
@@ -77,10 +78,27 @@ class RoomCommandResult:
     message: str
 
 
-def _split_args(args: list[str]) -> tuple[list[str], set[str]]:
-    positionals = [item for item in args if not item.startswith("-")]
-    flags = {item.lower() for item in args if item.startswith("-")}
-    return positionals, flags
+def _core_arg_spec(domain: str, sub: str) -> ConsoleArgSpec:
+    """房间控制台各域的纯词参数表；不确定时返回空表。"""
+    if domain == "immersive":
+        if sub == "music":
+            return ConsoleArgSpec.of(
+                flags={"yes", "cache"}, values={"tags", "profile", "intensity"}
+            )
+        return ConsoleArgSpec.of(flags={"yes"})
+    if domain in {"voice", "dice", "archive"}:
+        return ConsoleArgSpec.of(flags={"yes"})
+    if domain == "members" and sub in {"kick", "promote"}:
+        return ConsoleArgSpec.of(flags={"yes"})
+    if domain == "log" and sub == "clear":
+        return ConsoleArgSpec.of(flags={"yes"})
+    return ConsoleArgSpec.of()
+
+
+def _split_args(domain: str, args: list[str]) -> tuple[list[str], set[str]]:
+    sub = first_positional(args).lower()
+    parsed = parse_console_args(args, _core_arg_spec(domain, sub))
+    return parsed.positionals, parsed.flags
 
 
 def _assume_yes(flags: set[str]) -> bool:
@@ -99,7 +117,7 @@ def _confirm_action(
     if assume_yes:
         return apply()
     if confirm is None:
-        return RoomCommandResult(True, preview + "\n（预演模式：确认无误后加 --yes 执行）")
+        return RoomCommandResult(True, preview + "\n（预演模式：确认无误后加 yes 执行；旧 --yes 仍兼容）")
     if confirm(f"{prompt} (y/N)"):
         return apply()
     return RoomCommandResult(True, preview + "\n（已取消，未执行）")
@@ -112,63 +130,64 @@ def room_command_help_text() -> str:
             "  help                        （显示本帮助）",
             "  info                        （房间信息：房间码/剧本/成员数）",
             "  members                     （成员及其房间角色）",
-            "  members kick <user> [--yes] （将成员移出本房间，破坏性）",
-            "  members promote <user> [--yes]（将成员提升为房间管理员，破坏性）",
+            "  members kick <user> [yes]   （将成员移出本房间，破坏性）",
+            "  members promote <user> [yes]（将成员提升为房间管理员，破坏性）",
             "  state                       （房间状态：场景/线索/任务/触发器）",
             "  event add <kind> <content>  （记录一条房间事件）",
             "  log tail [n]                （查看本房间最近 n 条日志，默认 50）",
-            "  log clear [--yes]           （清空本房间日志，破坏性）",
+            "  log clear [yes]             （清空本房间日志，破坏性）",
             "  autosave                    （立即为本房间保存一次自动存档）",
-            "  archive [--yes]             （归档本房间；有剧本时需已到达结局，无剧本可直接归档）",
+            "  archive [yes]               （归档本房间；有剧本时需已到达结局，无剧本可直接归档）",
             "  dice                        （本房间骰子动画档位、玩家投掷、重投配置与待投掷请求）",
             "  dice animation show         （查看本房间生效的动画档位）",
-            "  dice animation set <text|simple|3d|inherit> [--yes]（设置动画档位，inherit 跟随管理员默认）",
+            "  dice animation set <text|simple|3d|inherit> [yes]（设置动画档位，inherit 跟随管理员默认）",
             "  dice player-roll show       （查看本房间生效的玩家投掷开关）",
-            "  dice player-roll <on|off|inherit> [--yes]（设置玩家投掷开关）",
+            "  dice player-roll <on|off|inherit> [yes]（设置玩家投掷开关）",
             "  dice reroll show            （查看本房间生效的重投模式与上限）",
-            "  dice reroll <off|limited|unlimited|inherit> [--yes]（设置重投模式）",
-            "  dice reroll-limit <1-20|inherit> [--yes]（设置指定次数模式的上限）",
+            "  dice reroll <off|limited|unlimited|inherit> [yes]（设置重投模式）",
+            "  dice reroll-limit <1-20|inherit> [yes]（设置指定次数模式的上限）",
             "  dice pending                （列出本房间等待玩家投掷的请求）",
-            "  dice cancel [request_id] [--yes]（取消本房间待投掷请求，缺省取消最早的一条）",
+            "  dice cancel [request_id] [yes]（取消本房间待投掷请求，缺省取消最早的一条）",
             *ROOM_NARRATIVE_HELP().splitlines(),
             "  immersive                    （本房间配乐/配图状态与开关）",
             "  immersive music show         （查看配乐引擎、档位、当前外链曲目与底床状态）",
-            "  immersive music set <profile> <intensity> [--yes]（手动指定配乐，档位见站点设置）",
-            "  immersive music auto <on|off> [--yes]（本房间自动切歌开关）",
-            "  immersive music <on|off> [--yes]（本房间配乐总开关；房间级，与个人本地开关无关）",
-            "  immersive music search [场景] [--tags=a,b] [--profile=x] [--intensity=y]（重新检索外链 BGM）",
+            "  immersive music set <profile> <intensity> [yes]（手动指定配乐，档位见站点设置）",
+            "  immersive music auto <on|off> [yes]（本房间自动切歌开关）",
+            "  immersive music <on|off> [yes]（本房间配乐总开关；房间级，与个人本地开关无关）",
+            "  immersive music search [场景] [tags a,b] [profile x] [intensity y] [cache]（重新检索外链 BGM；默认绕过缓存，加 cache 允许命中）",
             "  immersive music switch [序号|track_key|标题]（在最近检索结果中切换曲目；省略参数=换一首）",
             "  immersive illustration show  （查看本房间配图开关与最近历史）",
-            "  immersive illustration <on|off> [--yes]（本房间配图总开关）",
-            "  immersive illustration auto <on|off> [--yes]（本房间自动配图开关）",
+            "  immersive illustration <on|off> [yes]（本房间配图总开关）",
+            "  immersive illustration auto <on|off> [yes]（本房间自动配图开关）",
             "  immersive illustration trigger show（查看生效配图触发档位与来源）",
-            "  immersive illustration trigger <inherit|important|off> [--yes]（房间收紧配图档位，只能更紧）",
-            "  immersive illustration now [场景描述] [--yes]（立即生成一张图，可能产生费用）",
+            "  immersive illustration trigger <inherit|important|off> [yes]（房间收紧配图档位，只能更紧）",
+            "  immersive illustration now [场景描述] [yes]（立即生成一张图，可能产生费用）",
             "  immersive cache room show         （查看本房间缓存条数/体积/命中次数）",
-            "  immersive cache room clear [--yes]（清空本房间目录缓存，默认预演）",
+            "  immersive cache room clear [yes]（清空本房间目录缓存，默认预演）",
             "  immersive cache show|stats      （只读：本房间缓存 + 本剧本缓存统计）",
             "  immersive cache record|prefer <on|off|inherit> （房间级收紧剧本缓存；无法越过站点开关）",
-            "  immersive cache prune [--yes]   （按单房间配额 LRU 清理本房间缓存，默认预演）",
-            "  immersive cache clear [--yes]   （删除本房间目录缓存，默认预演；剧本缓存需站点控制台）",
+            "  immersive cache prune [yes]   （按单房间配额 LRU 清理本房间缓存，默认预演）",
+            "  immersive cache clear [yes]   （删除本房间目录缓存，默认预演；剧本缓存需站点控制台）",
             "  immersive history            （查看本房间配乐/配图历史）",
             "  immersive director           （只读查看 AI 音乐导演最近采用的乐谱与段落；站点配置不可在房间内修改）",
             "  voice status                 （本房间语音配音生效值、映射、静音名单与小时用量）",
-            "  voice on|off [--yes]         （本房间语音开关；无法越过站点总开关）",
-            "  voice map set <speaker> <profile> [--yes]（绑定 NPC 音色，只能使用内置 NPC 人设）",
-            "  voice mute <speaker>|list|clear [--yes]（本房间 NPC 静音名单）",
+            "  voice on|off [yes]         （本房间语音开关；无法越过站点总开关）",
+            "  voice map set <speaker> <profile> [yes]（绑定 NPC 音色，只能使用内置 NPC 人设）",
+            "  voice mute <speaker>|list|clear [yes]（本房间 NPC 静音名单）",
             "  voice usage                  （本房间小时用量与最近语音事件）",
             "  voice cache stats            （本房间语音缓存条数/体积/命中次数，只读）",
-            "  voice cache clear [--yes]    （删除本房间语音缓存，默认预演）",
-            "  voice cache prune [--yes]    （按站点/房间配额 LRU 清理本房间缓存，默认预演）",
+            "  voice cache clear [yes]    （删除本房间语音缓存，默认预演）",
+            "  voice cache prune [yes]    （按站点/房间配额 LRU 清理本房间缓存，默认预演）",
             *ROOM_COMBAT_HELP.splitlines(),
             *ROOM_RULE_HELP.splitlines(),
             "  interlude                   （查看幕间状态、结算与复盘记录）",
             "  interlude request [理由]    （登记进入幕间的提议，等待房主 / 管理员确认）",
-            "  interlude start [--credit=玩家:事件,...]（进入幕间并立即结算成长 / SAN / CR）",
-            "  interlude settle [--credit=玩家:事件,...]（补算信用评级等经济项）",
-            "  interlude review <内容> [--topic=...]（保存一条复盘记录）",
-            "  interlude end [--yes]       （结束幕间并自动归档；必须二次确认）",
-            "  说明：破坏性命令缺省为「预演」，加 --yes 或在交互确认时输入 y 才会真正执行。",
+            "  interlude start [credit 玩家:事件,...]（进入幕间并立即结算成长 / SAN / CR）",
+            "  interlude settle [credit 玩家:事件,...]（补算信用评级等经济项）",
+            "  interlude review <内容> [topic 话题]（保存一条复盘记录）",
+            "  interlude end [yes]         （结束幕间并自动归档；必须二次确认）",
+            "  说明：破坏性命令缺省为「预演」，加 yes 或在交互确认时输入 y 才会真正执行。",
+            "  说明：参数用空格分隔的纯词；旧的 --xxx / --key=value 写法仍然可用。",
             "  说明：成员命令只调整房间内角色（房主/管理员/成员），不会授予网站级权限。",
         ]
     )
@@ -216,7 +235,7 @@ def execute_room_command(
             False, f"命令「{parts[0]}」不属于房间范围；房间控制台只允许房间相关命令"
         )
 
-    positionals, flags = _split_args(parts[1:])
+    positionals, flags = _split_args(domain, parts[1:])
     sub = positionals[0].lower() if positionals else DEFAULT_SUBS.get(domain, "")
     rest = positionals[1:]
     allowed_subs = ROOM_COMMAND_WHITELIST[domain]
@@ -407,7 +426,7 @@ def _members_kick_command(
 ) -> RoomCommandResult:
     """将普通成员移出本房间（不可移出房间所有者）。"""
     if not rest:
-        return RoomCommandResult(False, "Usage: members kick <user_id|username> [--yes]")
+        return RoomCommandResult(False, "Usage: members kick <user_id|username> [yes]")
 
     from trpg_server.routes.rooms import (
         ROOM_MEMBER_REMOVED,
@@ -465,7 +484,7 @@ def _members_promote_command(
     ADMIN / OWNER 权限，也不与网站控制台的 ``user promote`` 共用任何实现。
     """
     if not rest:
-        return RoomCommandResult(False, "Usage: members promote <user_id|username> [admin] [--yes]")
+        return RoomCommandResult(False, "Usage: members promote <user_id|username> [admin] [yes]")
     desired = (rest[1].lower() if len(rest) > 1 else "admin")
     if desired != "admin":
         return RoomCommandResult(
@@ -648,7 +667,7 @@ def _immersive_command(
         return RoomCommandResult(
             False,
             "Usage: immersive music show|on|off|auto <on|off>|set <profile> <intensity>|"
-            "search [场景] [--tags=a,b] [--profile=x] [--intensity=y]|switch [序号|track_key|标题]",
+            "search [场景] [tags a,b] [profile x] [intensity y]|switch [序号|track_key|标题]",
         )
 
     if sub == "illustration":
@@ -701,7 +720,7 @@ def _immersive_command(
                 target = raw
             else:
                 return RoomCommandResult(
-                    False, "Usage: immersive illustration trigger <inherit|important|off> [--yes]"
+                    False, "Usage: immersive illustration trigger <inherit|important|off> [yes]"
                 )
 
             def _apply_trigger() -> RoomCommandResult:
@@ -795,7 +814,7 @@ def _immersive_command(
                     confirm=confirm,
                     prompt="确认清空本房间配图缓存?",
                 )
-            return RoomCommandResult(False, "Usage: immersive cache room show|clear [--yes]")
+            return RoomCommandResult(False, "Usage: immersive cache room show|clear [yes]")
         if action in {"show", "stats"}:
             room_stats = room_cache_stats(room_dir)
             room_text = (
@@ -957,7 +976,7 @@ def _music_external_search(
         return RoomCommandResult(
             False,
             f"外链检索未命中（{reason}），{note}；可换场景/标签重试："
-            "immersive music search 雨夜街道 --tags=dark,ambient",
+            "immersive music search 雨夜街道 tags dark,ambient",
         )
     external_music.publish_selection(
         result, room_dir=room_dir, room_id=str(info.get("id") or room_id), settings=settings
@@ -1235,7 +1254,7 @@ def _dice_animation_command(
     elif len(rest) == 2 and rest[0] == "set":
         value = rest[1].lower()
     else:
-        return RoomCommandResult(False, "Usage: dice animation show | dice animation set <text|simple|3d|inherit> [--yes]")
+        return RoomCommandResult(False, "Usage: dice animation show | dice animation set <text|simple|3d|inherit> [yes]")
     if value not in {"text", "simple", "3d", "inherit"}:
         return RoomCommandResult(False, "动画档位只能是 text / simple / 3d / inherit")
     target = None if value == "inherit" else value
@@ -1269,7 +1288,7 @@ def _dice_player_roll_command(
     elif len(rest) == 1:
         value = rest[0].lower()
     else:
-        return RoomCommandResult(False, "Usage: dice player-roll show | dice player-roll <on|off|inherit> [--yes]")
+        return RoomCommandResult(False, "Usage: dice player-roll show | dice player-roll <on|off|inherit> [yes]")
     if value not in {"on", "off", "inherit"}:
         return RoomCommandResult(False, "玩家投掷只能是 on / off / inherit")
     target = None if value == "inherit" else value == "on"
@@ -1299,7 +1318,7 @@ def _dice_reroll_command(
     if rest == ["show"]:
         return RoomCommandResult(True, _dice_show(room_dir, "reroll"))
     if len(rest) != 1 or rest[0].lower() not in {*DICE_REROLL_MODES, "inherit"}:
-        return RoomCommandResult(False, "Usage: dice reroll show | dice reroll <off|limited|unlimited|inherit> [--yes]")
+        return RoomCommandResult(False, "Usage: dice reroll show | dice reroll <off|limited|unlimited|inherit> [yes]")
     value = rest[0].lower()
     target = None if value == "inherit" else value
     label = "跟随管理员默认" if target is None else value
@@ -1324,7 +1343,7 @@ def _dice_reroll_limit_command(
     confirm: Callable[[str], bool] | None,
 ) -> RoomCommandResult:
     if len(rest) != 1:
-        return RoomCommandResult(False, "Usage: dice reroll-limit <1-20|inherit> [--yes]")
+        return RoomCommandResult(False, "Usage: dice reroll-limit <1-20|inherit> [yes]")
     raw = rest[0].lower()
     if raw == "inherit":
         target: int | None = None
@@ -1531,7 +1550,7 @@ def _voice_command(
             return _voice_command(room_dir, room_id, "status", [], flags, confirm)
         if action == "set":
             if len(rest) < 3:
-                return RoomCommandResult(False, "Usage: voice map set <speaker> <profile> [--yes]")
+                return RoomCommandResult(False, "Usage: voice map set <speaker> <profile> [yes]")
             speaker = rest[1]
             profile_id = rest[2].lower()
             if profile_id not in PROFILE_MAP or PROFILE_MAP[profile_id].kind != "npc":
@@ -1662,7 +1681,7 @@ def _voice_command(
                 prompt="确认清理本房间语音缓存?",
             )
 
-        return RoomCommandResult(False, "Usage: voice cache stats|clear|prune [--yes]")
+        return RoomCommandResult(False, "Usage: voice cache stats|clear|prune [yes]")
 
     if sub == "usage":
         recent = [item for item in events.recent(50) if str(item.get("room_id") or "") == str(room_id)]
