@@ -14,7 +14,7 @@ from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, success_response
 from trpg_server.ruleset import builtin_registry, default_ruleset_id, get_plugin
-from trpg_server.ruleset.capabilities import catalog_items, catalog_value, derive_card, pack_card
+from trpg_server.ruleset.capabilities import catalog_items, catalog_value, clamp_resource_state, derive_card, pack_card
 from trpg_server.security import normalize_filename, safe_join
 from trpg_server.settings import CHARACTER_GALLERY_DIR, CHARACTER_SKILLS_FILE, CHARACTERS_DIR, OCCUPATIONS_DIR, ROOMS_DIR, WEAPONS_DIR
 
@@ -785,17 +785,8 @@ def _sync_room_character_snapshots(character):
             member["character_card"] = dict(sanitized)
             state = member.setdefault("character_state", {})
             if isinstance(state, dict):
-                state["max_hp"] = sanitized["maxHp"]
-                state["current_hp"] = _bounded_int(state.get("current_hp"), 0, sanitized["maxHp"], sanitized["maxHp"])
-                state["max_san"] = sanitized["maxSan"]
-                state["current_san"] = _bounded_int(state.get("current_san"), 0, sanitized["maxSan"], sanitized["maxSan"])
-                state["initial_san"] = _bounded_int(
-                    state.get("initial_san"), 0, sanitized["maxSan"], sanitized.get("initialSan", sanitized["maxSan"])
-                )
-                state["max_mp"] = sanitized.get("maxMp", 0)
-                state["current_mp"] = _bounded_int(
-                    state.get("current_mp"), 0, sanitized.get("maxMp", 0), sanitized.get("maxMp", 0)
-                )
+                # 资源键与上限由卡所属规则集声明，核心不写死 HP / SAN / MP 字段名。
+                clamp_resource_state(get_plugin(sanitized.get("rulesetId")), sanitized, state)
             changed = True
         if changed:
             info["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")

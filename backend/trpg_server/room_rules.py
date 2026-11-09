@@ -331,6 +331,16 @@ def _sanity_or_none(card: dict[str, Any]):
     return sanity_of(_plugin_for(card))
 
 
+def _resource_slot(card: dict[str, Any], kind: str) -> dict[str, Any]:
+    """取卡所属规则集声明的资源槽位；未声明时抛「不支持」而不是写死字段名。"""
+    from trpg_server.ruleset.capabilities import resource_slot
+
+    slot = resource_slot(_plugin_for(card), kind)
+    if slot is None:
+        raise RuleOperationError(f"当前规则集不支持{kind}", code=f"{kind}_unsupported")
+    return slot
+
+
 def san_snapshot(member: dict[str, Any]) -> dict[str, int]:
     """SAN 快照；上下限与镜像由规则集声明，本函数只负责调度。"""
     card = member_card(member)
@@ -479,6 +489,7 @@ def apply_san_change(
 ) -> dict[str, Any]:
     """直接修改 SAN（房间控制台专用）：夹紧范围、写镜像、留结构化记录。"""
     card = member_card(member)
+    slot = _resource_slot(card, "san")
     snapshot = san_snapshot(member)
     before, maximum = snapshot["current"], snapshot["max"]
     target = value if value is not None else before + int(delta or 0)
@@ -486,10 +497,11 @@ def apply_san_change(
     applied = after - before
     state = member["character_state"]
 
-    state["current_san"] = after
+    # 快照键与卡面镜像键均来自插件声明；旧卡同时保留同名字段，避免读取断档。
+    state[str(slot["state"])] = after
     state["pending_persist"] = True
-    card["currentSan"] = after
-    card["current_san"] = after
+    card[str(slot["mirror"])] = after
+    card[str(slot["state"])] = after
     loss = max(0, -applied)
     sanity = _sanity_or_none(card)
     if sanity is None:

@@ -54,10 +54,37 @@ STATUS_MENTAL_KEYS = ("indefiniteInsanity", "permanentInsanity", "temporaryInsan
 # 派生值写回卡的键；核心按此列表同步，不再写死 CoC 派生字段。
 CARD_DERIVED_KEYS = ("maxHp", "maxSan", "initialSan", "maxMp", "mov", "build", "damageBonus", "armor")
 # 运行时资源槽位：快照键 / 卡面镜像键 / 上限来源，由本插件声明。
+# ``mirror_aliases`` 兼容旧卡的蛇形 / 历史字段；``initial_*`` 表示理智从 POW 起算。
 RESOURCE_SLOTS = (
-    {"kind": "hp", "state": "current_hp", "mirror": "currentHp", "cap_state": "max_hp", "cap_derived": "maxHp", "cap_min": 1},
-    {"kind": "san", "state": "current_san", "mirror": "currentSan", "cap_state": "max_san", "cap_derived": "maxSan", "cap_min": 0},
-    {"kind": "mp", "state": "current_mp", "mirror": "currentMp", "cap_state": "max_mp", "cap_derived": "maxMp", "cap_min": 0},
+    {
+        "kind": "hp",
+        "state": "current_hp",
+        "mirror": "currentHp",
+        "mirror_aliases": ("current_hp",),
+        "cap_state": "max_hp",
+        "cap_derived": "maxHp",
+        "cap_min": 1,
+    },
+    {
+        "kind": "san",
+        "state": "current_san",
+        "mirror": "currentSan",
+        "mirror_aliases": ("current_san",),
+        "cap_state": "max_san",
+        "cap_derived": "maxSan",
+        "cap_min": 0,
+        "initial_state": "initial_san",
+        "initial_mirror": "initialSan",
+    },
+    {
+        "kind": "mp",
+        "state": "current_mp",
+        "mirror": "currentMp",
+        "mirror_aliases": ("magicPoints",),
+        "cap_state": "max_mp",
+        "cap_derived": "maxMp",
+        "cap_min": 0,
+    },
 )
 
 

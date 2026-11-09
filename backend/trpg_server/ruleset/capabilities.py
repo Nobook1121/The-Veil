@@ -27,11 +27,14 @@ DEFAULT_DERIVED_CARD_KEYS: tuple[str, ...] = (
     "armor",
 )
 # 默认运行时资源槽位：kind → 快照键 / 卡面镜像键 / 上限来源。
+# ``mirror_aliases`` 兼容旧卡的蛇形 / 历史字段；``initial_*`` 表示该资源另有
+# 「初始值」概念（如理智从 POW 起算），由插件声明，核心不判断具体规则。
 DEFAULT_RESOURCE_SLOTS: tuple[dict[str, Any], ...] = (
     {
         "kind": "hp",
         "state": "current_hp",
         "mirror": "currentHp",
+        "mirror_aliases": ("current_hp",),
         "cap_state": "max_hp",
         "cap_derived": "maxHp",
         "cap_min": 1,
@@ -40,14 +43,18 @@ DEFAULT_RESOURCE_SLOTS: tuple[dict[str, Any], ...] = (
         "kind": "san",
         "state": "current_san",
         "mirror": "currentSan",
+        "mirror_aliases": ("current_san",),
         "cap_state": "max_san",
         "cap_derived": "maxSan",
         "cap_min": 0,
+        "initial_state": "initial_san",
+        "initial_mirror": "initialSan",
     },
     {
         "kind": "mp",
         "state": "current_mp",
         "mirror": "currentMp",
+        "mirror_aliases": ("magicPoints",),
         "cap_state": "max_mp",
         "cap_derived": "maxMp",
         "cap_min": 0,
@@ -124,3 +131,83 @@ def resource_slots(plugin: Any) -> tuple[dict[str, Any], ...]:
         if slots:
             return slots
     return DEFAULT_RESOURCE_SLOTS
+
+
+def resource_slot(plugin: Any, kind: str) -> dict[str, Any] | None:
+    """按资源种类取槽位声明；未声明该种类时返回 ``None``。"""
+    target = str(kind or "").strip().lower()
+    for slot in resource_slots(plugin):
+        if str(slot.get("kind") or "").strip().lower() == target:
+            return slot
+    return None
+
+
+def _as_int(value: Any, fallback: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _bounded(value: Any, minimum: int, maximum: int, fallback: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(minimum, min(maximum, parsed))
+
+
+def _card_mirror_value(card: Mapping[str, Any], slot: Mapping[str, Any]) -> Any:
+    """按「主镜像键 → 历史别名」顺序读卡面值；键存在即返回（含 None）。"""
+    keys = [str(slot.get("mirror") or "")]
+    keys.extend(str(alias) for alias in slot.get("mirror_aliases") or ())
+    for key in keys:
+        if key and key in card:
+            return card[key]
+    return None
+
+
+def resource_state_defaults(plugin: Any, card: Mapping[str, Any] | None) -> dict[str, Any]:
+    """按插件声明的资源槽位生成房间状态初始值。
+
+    产出 ``{上限键: N, 当前键: N, 初始键: N}``；核心只使用槽位声明，
+    不假设任何具体规则的资源名称或上限公式。
+    """
+    data = card if isinstance(card, Mapping) else {}
+    result: dict[str, Any] = {}
+    for slot in resource_slots(plugin):
+        cap_min = _as_int(slot.get("cap_min"), 0)
+        cap = _bounded(data.get(str(slot["cap_derived"])), cap_min, 999, cap_min)
+        initial_key = str(slot.get("initial_state") or "")
+        initial_value = None
+        current_fallback = cap
+        if initial_key:
+            initial_value = _bounded(data.get(str(slot.get("initial_mirror") or "")), 0, cap, cap)
+            current_fallback = min(cap, initial_value)
+        result[str(slot["cap_state"])] = cap
+        result[str(slot["state"])] = _bounded(_card_mirror_value(data, slot), 0, cap, current_fallback)
+        if initial_key:
+            result[initial_key] = initial_value
+    return result
+
+
+def clamp_resource_state(plugin: Any, card: Mapping[str, Any] | None, state: dict[str, Any]) -> dict[str, Any]:
+    """按插件声明的资源槽位夹紧房间状态快照（原地修改并返回）。
+
+    上限优先取卡面派生值，读不到时沿用快照已有上限；当前值与初始值夹在
+    ``[0, 上限]`` 内。槽位未声明时使用核心默认槽位，保持旧房间行为不变。
+    """
+    data = card if isinstance(card, Mapping) else {}
+    snapshot = state if isinstance(state, dict) else {}
+    for slot in resource_slots(plugin):
+        cap_key = str(slot["cap_state"])
+        cap_min = _as_int(slot.get("cap_min"), 0)
+        existing_cap = _bounded(snapshot.get(cap_key), cap_min, 999, cap_min)
+        cap = _bounded(data.get(str(slot["cap_derived"])), cap_min, 999, existing_cap)
+        snapshot[cap_key] = cap
+        snapshot[str(slot["state"])] = _bounded(snapshot.get(str(slot["state"])), 0, cap, cap)
+        initial_key = str(slot.get("initial_state") or "")
+        if initial_key:
+            fallback = _bounded(data.get(str(slot.get("initial_mirror") or "")), 0, cap, cap)
+            snapshot[initial_key] = _bounded(snapshot.get(initial_key), 0, cap, fallback)
+    return snapshot

@@ -668,6 +668,18 @@ def _derive_character_card(character_card):
         return dict(character_card)
 
 
+def _ruleset_plugin(character_card):
+    """卡所属规则集插件；缺失 / 不可用时返回 ``None``（回落到核心默认槽位）。"""
+    if not isinstance(character_card, dict):
+        return None
+    try:
+        from trpg_server.ruleset import get_plugin
+
+        return get_plugin(character_card.get("rulesetId"))
+    except Exception:  # noqa: BLE001 - 插件异常按默认槽位处理
+        return None
+
+
 def _bounded_int(value, minimum, maximum, fallback):
     try:
         parsed = int(value)
@@ -677,33 +689,34 @@ def _bounded_int(value, minimum, maximum, fallback):
 
 
 def _initial_character_state(character_card):
-    """按规则集派生的上限初始化状态；理智从「初始值 = POW」开始，而不是直接拉满上限。"""
+    """按规则集派生的上限初始化状态。
+
+    资源键（上限 / 当前值 / 初始值）由插件 ``resource_slots`` 声明，核心不写死
+    HP / SAN / MP 字段名；理智从「初始值 = POW」开始，而不是直接拉满上限。
+    """
+    from trpg_server.ruleset.capabilities import resource_state_defaults
+
     card = _derive_character_card(character_card or {})
-    max_hp = _bounded_int(card.get("maxHp"), 1, 999, 1)
-    max_san = _bounded_int(card.get("maxSan"), 0, 999, 0)
-    initial_san = _bounded_int(card.get("initialSan"), 0, max_san, max_san)
-    max_mp = _bounded_int(card.get("maxMp"), 0, 999, 0)
-    return {
-        "max_hp": max_hp,
-        "current_hp": _bounded_int(card.get("currentHp"), 0, max_hp, max_hp),
-        "max_san": max_san,
-        "current_san": _bounded_int(card.get("currentSan"), 0, max_san, min(max_san, initial_san)),
-        "initial_san": min(max_san, initial_san),
-        "max_mp": max_mp,
-        "current_mp": _bounded_int(card.get("currentMp", card.get("magicPoints")), 0, max_mp, max_mp),
-        "injury_records": [],
-        "sanity_records": [],
-        "skill_changes": [],
-        "item_changes": [],
-        "major_wound": False,
-        "unconscious": False,
-        "dying": False,
-        "dead": False,
-        "first_aid_used": False,
-    }
+    state = dict(resource_state_defaults(_ruleset_plugin(card), card))
+    state.update(
+        {
+            "injury_records": [],
+            "sanity_records": [],
+            "skill_changes": [],
+            "item_changes": [],
+            "major_wound": False,
+            "unconscious": False,
+            "dying": False,
+            "dead": False,
+            "first_aid_used": False,
+        }
+    )
+    return state
 
 
 def _ensure_character_state(member):
+    from trpg_server.ruleset.capabilities import clamp_resource_state, derived_card_keys
+
     if not member.get("character_state"):
         member["character_state"] = _initial_character_state(member.get("character_card") or {})
     state = member["character_state"]
@@ -716,29 +729,15 @@ def _ensure_character_state(member):
     state.setdefault("dying", False)
     state.setdefault("dead", False)
     state.setdefault("first_aid_used", False)
-    # 上限以规则集派生结果为准（理智上限 = 99 − 克苏鲁神话值），旧房间读取时同步修正。
+    # 上限与当前值以规则集派生结果为准，旧房间读取时同步修正。
     card = _derive_character_card(member.get("character_card") or {})
-    if card:
-        state["max_hp"] = _bounded_int(card.get("maxHp"), 1, 999, _bounded_int(state.get("max_hp"), 1, 999, 1))
-        state["max_san"] = _bounded_int(card.get("maxSan"), 0, 999, _bounded_int(state.get("max_san"), 0, 999, 0))
-        state["max_mp"] = _bounded_int(card.get("maxMp"), 0, 999, _bounded_int(state.get("max_mp"), 0, 999, 0))
-        snapshot = member.get("character_card")
-        if isinstance(snapshot, dict):
-            for key in ("maxHp", "maxSan", "initialSan", "maxMp", "mov", "build", "damageBonus", "armor"):
-                if key in card:
-                    snapshot[key] = card[key]
-    state["max_hp"] = _bounded_int(state.get("max_hp"), 1, 999, 1)
-    state["current_hp"] = _bounded_int(state.get("current_hp"), 0, state["max_hp"], state["max_hp"])
-    state["max_san"] = _bounded_int(state.get("max_san"), 0, 999, 0)
-    state["current_san"] = _bounded_int(state.get("current_san"), 0, state["max_san"], state["max_san"])
-    state["initial_san"] = _bounded_int(
-        state.get("initial_san"),
-        0,
-        state["max_san"],
-        _bounded_int(card.get("initialSan"), 0, state["max_san"], state["max_san"]),
-    )
-    state["max_mp"] = _bounded_int(state.get("max_mp"), 0, 999, 0)
-    state["current_mp"] = _bounded_int(state.get("current_mp"), 0, state["max_mp"], state["max_mp"])
+    plugin = _ruleset_plugin(card)
+    snapshot = member.get("character_card")
+    if card and isinstance(snapshot, dict):
+        for key in derived_card_keys(plugin):
+            if key in card:
+                snapshot[key] = card[key]
+    clamp_resource_state(plugin, card, state)
     return state
 
 

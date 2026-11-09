@@ -237,6 +237,84 @@ def test_legacy_card_without_ruleset_id_reads_and_exports_as_default_plugin(tmp_
     assert exported["rulesetId"] == default_ruleset_id()
 
 
+class _SlotSchema:
+    """只声明自定义资源槽位的插件 schema（用于验证核心不写死字段名）。"""
+
+    def resource_slots(self):
+        return [
+            {
+                "kind": "focus",
+                "state": "current_focus",
+                "mirror": "currentFocus",
+                "cap_state": "max_focus",
+                "cap_derived": "maxFocus",
+                "cap_min": 0,
+            }
+        ]
+
+
+def test_room_state_keys_follow_plugin_resource_slots():
+    from trpg_server.ruleset.capabilities import clamp_resource_state, resource_state_defaults
+
+    plugin = _FakePlugin("custom")
+    plugin.schema = _SlotSchema()
+    defaults = resource_state_defaults(plugin, {"maxFocus": 5, "currentFocus": 3})
+    assert defaults == {"max_focus": 5, "current_focus": 3}
+    state = {"max_focus": 9, "current_focus": 20}
+    clamp_resource_state(plugin, {"maxFocus": 4}, state)
+    assert state == {"max_focus": 4, "current_focus": 4}
+
+
+def test_room_state_defaults_fall_back_to_core_slots_without_ruleset_id():
+    """缺 rulesetId / 插件缺失时使用核心默认槽位，而不是"没有状态键"。"""
+    from trpg_server.ruleset.capabilities import resource_state_defaults
+
+    state = resource_state_defaults(
+        None,
+        {"maxHp": 10, "currentHp": 7, "maxSan": 60, "initialSan": 50, "currentSan": 45, "maxMp": 10, "currentMp": 8},
+    )
+    assert state == {
+        "max_hp": 10,
+        "current_hp": 7,
+        "max_san": 60,
+        "current_san": 45,
+        "initial_san": 50,
+        "max_mp": 10,
+        "current_mp": 8,
+    }
+
+
+def test_room_character_state_initializes_and_clamps_from_coc_defaults():
+    from trpg_server.routes import rooms as rooms_route
+
+    card = {
+        "id": "c-1",
+        "name": "旧卡",
+        "attributes": {"con": 50, "siz": 60, "pow": 50},
+        "maxHp": 11,
+        "currentHp": 7,
+        "maxSan": 60,
+        "initialSan": 50,
+        "currentSan": 45,
+        "maxMp": 10,
+        "currentMp": 8,
+    }
+    state = rooms_route._initial_character_state(card)
+    assert state["max_hp"] == 11
+    assert state["current_hp"] == 7
+    assert state["max_san"] == 99
+    assert state["initial_san"] == 50
+    assert state["current_san"] == 45
+    assert state["max_mp"] == 10
+    assert state["current_mp"] == 8
+
+    state["current_hp"] = 20
+    state["current_san"] = 200
+    rooms_route._ensure_character_state({"character_card": card, "character_state": state})
+    assert state["current_hp"] == 11
+    assert state["current_san"] == 99
+
+
 def test_combat_registry_forwards_to_ruleset_plugin():
     from trpg_server.combat import registry as combat_registry
 
