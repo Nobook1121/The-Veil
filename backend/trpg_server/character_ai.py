@@ -21,7 +21,6 @@ from trpg_server.agents.ai_request import build_request_payload
 from trpg_server.agents.config import load_ai_runtime_config
 from trpg_server.agents.http_retry import post_with_retry
 from trpg_server.ai_capabilities import chat_completions_endpoint
-from trpg_server.json_store import read_json
 from trpg_server.role_config import CHARACTER_GENERATOR_ROLE_ID, load_roles
 from trpg_server.scenario_ai import (
     ai_platform_dir,
@@ -31,7 +30,7 @@ from trpg_server.scenario_ai import (
     role_config_file,
     select_model,
 )
-from trpg_server.settings import CHARACTER_SKILLS_FILE, CONFIG_DIR, OCCUPATIONS_DIR, SCENARIOS_DIR, WEAPONS_DIR
+from trpg_server.settings import CONFIG_DIR, SCENARIOS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -55,33 +54,34 @@ def _clip(value: Any, limit: int = MAX_SCENARIO_TEXT_LENGTH) -> str:
     return text[:limit]
 
 
-def _read_builtin_catalog(config_key: str, default_dir: Path) -> list[dict[str, Any]]:
-    directory = Path(current_app.config.get(config_key, default_dir)) / "builtin"
-    if not directory.exists():
-        return []
-    items: list[dict[str, Any]] = []
-    for path in sorted(directory.glob("*.json")):
-        entry = read_json(path, default=None)
-        if isinstance(entry, dict):
-            items.append(entry)
-    return items
+def _default_catalog_plugin():
+    """角色生成使用当前默认规则集的目录；插件不可用时返回 ``None``（按空目录处理）。"""
+    from trpg_server.ruleset import builtin_registry
+
+    try:
+        return builtin_registry().resolve("")
+    except Exception:  # noqa: BLE001 - 无可用插件时不阻断角色生成
+        return None
 
 
 def load_occupation_catalog() -> list[dict[str, Any]]:
-    occupations = _read_builtin_catalog("OCCUPATIONS_DIR", OCCUPATIONS_DIR)
+    from trpg_server.ruleset.capabilities import catalog_items
+
+    occupations = list(catalog_items(_default_catalog_plugin(), "occupations"))
     occupations.sort(key=lambda item: str(item.get("id") or item.get("nameKey") or ""))
     return occupations
 
 
 def load_weapon_catalog() -> list[dict[str, Any]]:
-    from trpg_server import weapon_catalog
+    from trpg_server.ruleset.capabilities import catalog_items
 
-    return weapon_catalog.load_preset_weapons(Path(current_app.config.get("WEAPONS_DIR", WEAPONS_DIR)))
+    return list(catalog_items(_default_catalog_plugin(), "weapons"))
 
 
 def load_skill_catalog() -> list[dict[str, str]]:
-    skills_file = Path(current_app.config.get("CHARACTER_SKILLS_FILE", CHARACTER_SKILLS_FILE))
-    catalog = read_json(skills_file, default={})
+    from trpg_server.ruleset.capabilities import catalog_value
+
+    catalog = catalog_value(_default_catalog_plugin(), "skills", {})
     if not isinstance(catalog, dict):
         return []
     skills = catalog.get("skills") if isinstance(catalog.get("skills"), list) else []

@@ -16,7 +16,7 @@ from trpg_server.responses import error_response, success_response
 from trpg_server.ruleset import builtin_registry, default_ruleset_id, get_plugin
 from trpg_server.ruleset.capabilities import catalog_items, catalog_value, clamp_resource_state, derive_card, pack_card
 from trpg_server.security import normalize_filename, safe_join
-from trpg_server.settings import CHARACTER_GALLERY_DIR, CHARACTER_SKILLS_FILE, CHARACTERS_DIR, OCCUPATIONS_DIR, ROOMS_DIR, WEAPONS_DIR
+from trpg_server.settings import CHARACTER_GALLERY_DIR, CHARACTERS_DIR, ROOMS_DIR
 
 bp = Blueprint("characters", __name__)
 logger = logging.getLogger(__name__)
@@ -52,14 +52,6 @@ def _get_characters_dir():
 
 def _get_character_gallery_dir():
     return current_app.config.get("CHARACTER_GALLERY_DIR", CHARACTER_GALLERY_DIR)
-
-
-def _get_occupations_dir():
-    return current_app.config.get("OCCUPATIONS_DIR", OCCUPATIONS_DIR)
-
-
-def _get_weapons_dir():
-    return current_app.config.get("WEAPONS_DIR", WEAPONS_DIR)
 
 
 def _get_rooms_dir():
@@ -594,23 +586,14 @@ def _character_from_storage(raw, fallback_id=""):
     return character
 
 
-def _iter_builtin_occupation_files():
-    occupations_dir = _get_occupations_dir() / "builtin"
-    if not occupations_dir.exists():
-        return []
-    return sorted(occupations_dir.glob("*.json"))
-
-
-def _skill_catalog_path():
-    # 技能目录是随包发布的参考数据（data/character_skills.json），允许 app.config 覆盖便于测试注入。
-    try:
-        return Path(current_app.config.get("CHARACTER_SKILLS_FILE", CHARACTER_SKILLS_FILE))
-    except RuntimeError:
-        return CHARACTER_SKILLS_FILE
-
-
 def _skill_key_from_name(name, fallback=""):
-    catalog = read_json(_skill_catalog_path(), default={})
+    """技能名 → 技能键；目录由规则集插件提供，核心不直接读全局数据文件。"""
+    from trpg_server.ruleset.capabilities import catalog_value
+
+    try:
+        catalog = catalog_value(get_plugin(None), "skills", {})
+    except Exception:  # noqa: BLE001 - 插件缺失时保留调用方兜底值
+        return fallback
     if not isinstance(catalog, dict):
         return fallback
     skills = catalog.get("skills")

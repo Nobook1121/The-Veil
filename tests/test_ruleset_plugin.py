@@ -315,6 +315,32 @@ def test_room_character_state_initializes_and_clamps_from_coc_defaults():
     assert state["current_san"] == 99
 
 
+def test_catalog_loaders_and_skill_lookup_use_plugin_directory():
+    """目录读取统一走插件能力：技能 / 武器 / 职业与技能键查询不再直读全局数据文件。"""
+    from trpg_server import character_ai
+    from trpg_server.routes.characters import _skill_key_from_name
+    from trpg_server.ruleset.capabilities import catalog_items, catalog_value
+
+    plugin = builtin_registry().resolve("")
+    skills = character_ai.load_skill_catalog()
+    raw_skills = catalog_value(plugin, "skills", {})
+    assert len(skills) == len(raw_skills.get("skills") or [])
+    assert character_ai.load_weapon_catalog() == list(catalog_items(plugin, "weapons"))
+    assert character_ai.load_occupation_catalog() == list(catalog_items(plugin, "occupations"))
+    assert _skill_key_from_name("侦察") == "spotHidden"
+    assert _skill_key_from_name("不存在的技能", "fallback") == "fallback"
+
+
+def test_catalogs_without_plugin_capability_are_empty():
+    """插件未提供目录时返回空结果，而不是 AttributeError / 500。"""
+    from trpg_server.ruleset.capabilities import catalog_items, catalog_value
+
+    bare = _FakePlugin("bare")
+    assert catalog_items(bare, "skills") == []
+    assert catalog_items(bare, "occupations") == []
+    assert catalog_value(bare, "skills", {}) == {}
+
+
 def test_combat_registry_forwards_to_ruleset_plugin():
     from trpg_server.combat import registry as combat_registry
 
