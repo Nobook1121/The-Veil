@@ -156,6 +156,24 @@ interface RoomHouseRules {
     coc7_economy?: boolean;
     coc7_contacts?: boolean;
     coc7_age_adjustments?: boolean;
+    // 战斗规则房规：默认值与核心规则一致；新增细节开关默认关闭。
+    combat_surprise_model?: "bonus_die" | "auto_success";
+    combat_ready_weapon_cost?: "free" | "action" | "round";
+    combat_cast_interrupt?: "keeper" | "any_damage" | "never";
+    combat_cast_defense_allowed?: boolean;
+    combat_major_wound_penalty?: "none" | "cannot_act";
+    combat_shield_action?: "disabled" | "counter_alias";
+    combat_dex_extra_action_threshold?: number | null;
+    combat_dying_check?: boolean;
+    // CoC7 批次 4 战斗细节开关：默认关闭。
+    coc7_combat_aim_tracking?: boolean;
+    coc7_combat_cover_dodge?: boolean;
+    coc7_combat_friendly_fire?: boolean;
+    coc7_combat_knockout?: boolean;
+    coc7_combat_hit_locations?: boolean;
+    coc7_combat_poison?: boolean;
+    coc7_healing_natural?: boolean;
+    coc7_healing_require_rest?: boolean;
 }
 
 interface RoomConsoleEntry {

@@ -75,6 +75,11 @@ def sanity_of(plugin: Any) -> Any | None:
     return getattr(plugin, "sanity", None)
 
 
+def combat_rules_of(plugin: Any) -> Any | None:
+    """插件的战斗细节纯规则模块；未声明时返回 None。"""
+    return getattr(plugin, "combat_rules", None)
+
+
 def catalogs_of(plugin: Any) -> Any | None:
     return getattr(plugin, "catalogs", None)
 

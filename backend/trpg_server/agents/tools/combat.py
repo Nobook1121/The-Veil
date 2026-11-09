@@ -39,6 +39,8 @@ from trpg_server.combat.scheduler import TurnScheduler
 from trpg_server.combat.settings import CombatSettings, resolve_settings
 from trpg_server.json_store import write_json_atomic
 from trpg_server.room_log import log_room_event
+from trpg_server.ruleset.capabilities import combat_rules_of
+from trpg_server.ruleset.registry import get_plugin
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +172,26 @@ def _combat_settings(context: Any, info: dict[str, Any] | None = None) -> Combat
     if info is None:
         info = context.room_info() if hasattr(context, "room_info") else None
     return resolve_settings(info)
+
+
+def _coc7_room_options(context: Any, info: dict[str, Any] | None = None):
+    """读取 CoC7 房规开关；旧房间或读取失败时按全部关闭处理（核心只搬运）。"""
+    if info is None:
+        info = context.room_info() if hasattr(context, "room_info") else None
+    try:
+        from trpg_server.ruleset.coc7.options import resolve_options
+
+        return resolve_options(info)
+    except Exception:  # pragma: no cover - 仅在规则包损坏时触发
+        return None
+
+
+def _combat_detail_rules(settings: CombatSettings):
+    """按当前规则集取战斗细节纯规则；规则集未声明该能力时返回 None。"""
+    try:
+        return combat_rules_of(get_plugin(settings.ruleset_id))
+    except Exception:  # pragma: no cover - 仅在注册表为空时触发
+        return None
 
 
 def _combat_ruleset(combat: dict[str, Any], settings: CombatSettings):
@@ -320,6 +342,7 @@ def _combatant_from_member(member: dict[str, Any]) -> dict[str, Any]:
     size = max(0, _as_int(attrs.get("SIZ"), _as_int(card.get("siz"), 0)))
     constitution = max(0, _as_int(attrs.get("CON"), _as_int(card.get("con"), 50)))
     power = max(0, _as_int(attrs.get("POW"), _as_int(card.get("pow"), 50)))
+    luck = max(0, _as_int(attrs.get("LUCK"), _as_int(card.get("luck"), 50)))
     build, damage_bonus, db_terms = build_and_damage_bonus(strength, size)
     state = member.get("character_state") if isinstance(member.get("character_state"), dict) else {}
     hp, max_hp = _card_hp(card, state)
@@ -344,6 +367,7 @@ def _combatant_from_member(member: dict[str, Any]) -> dict[str, Any]:
         "siz": size,
         "con": constitution,
         "pow": power,
+        "luck": luck,
         "mp": max(0, _as_int(state.get("current_mp", state.get("magic_points", state.get("mp"))), _as_int(card.get("currentMp", card.get("maxMp")), power // 5))),
         "max_mp": max(0, _as_int(state.get("max_mp"), _as_int(card.get("maxMp"), power // 5))),
         # 房间快照里的当前理智字段是 current_san；旧代码读 sanity/san 导致战斗中恒为 0。
@@ -424,6 +448,7 @@ def _combatant_from_spec(spec: dict[str, Any]) -> dict[str, Any]:
         "siz": size,
         "con": constitution,
         "pow": power,
+        "luck": max(0, _as_int(spec.get("luck"), 50)),
         "mp": max(0, _as_int(spec.get("mp"), power // 5)),
         "san": max(0, _as_int(spec.get("san"), power)),
         "build": build,
@@ -828,6 +853,11 @@ def _apply_damage(
         "note": outcome.note,
         "con_check": outcome.extra.get("con_check"),
     }
+    # 瞄准跟踪：受伤即失去瞄准，不需要判断房规是否开启（未开启时字段本就不存在）。
+    if outcome.effective > 0 and combatant.get("aiming"):
+        combatant["aiming"] = False
+        combatant["aim_declared_round"] = 0
+        combatant["aim_lost_reason"] = "受伤"
     _persist_player_state(context, combatant)
     return result
 
@@ -1194,6 +1224,11 @@ def disengage_combatant(arguments: dict[str, Any], context: Any) -> dict[str, An
     if actor.get("disengaged"):
         return {"error": f"{actor.get('name')} 本轮已经脱离近战"}
     actor["disengaged"] = True
+    # 瞄准跟踪：移动（脱离近战）会失去瞄准。
+    if actor.get("aiming"):
+        actor["aiming"] = False
+        actor["aim_declared_round"] = 0
+        actor["aim_lost_reason"] = "移动"
     _append_log(combat, f"{actor.get('name')} 脱离近战。", context)
     _advance(combat, context, consume_all=True, settings=settings)
     _save_combat(context, combat)
@@ -1386,6 +1421,10 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     settings = _combat_settings(context)
     if settings.major_wound_penalty == "cannot_act" and attacker.get("major_wound"):
         return {"error": f"{attacker.get('name')} 身负重伤，按房规无法行动"}
+    room_options = _coc7_room_options(context)
+    detail_rules = _combat_detail_rules(settings)
+    knockout_rule = bool(room_options and room_options.combat_knockout and detail_rules)
+    hit_locations = bool(room_options and room_options.combat_hit_locations and detail_rules)
     card = _player_card(attacker, context)
     weapon_name = _as_text(arguments.get("weapon"))
     weapon = _find_weapon(attacker, card, weapon_name) if weapon_name else None
@@ -1535,7 +1574,17 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     damage_result = None
     if hit:
         extreme = rolled["attack_level"] == "extreme" or rolled["attack_level"] == "critical"
-        value, detail = _compute_damage(weapon, attacker.get("db_terms") or [], extreme=extreme, melee=melee)
+        knockout_applied = None
+        if (
+            knockout_rule
+            and maneuver in {"knockout", "knock-out", "stun", "击晕"}
+            and detail_rules.is_blunt_weapon(weapon)
+        ):
+            # 击晕房规：钝器战技成功只造成 1 点伤害，并让目标昏迷 1D10 轮（p.106）。
+            value, detail = detail_rules.KNOCKOUT_DAMAGE, "击晕攻击（钝器战技）"
+            knockout_applied = detail_rules.knockout_result(_roller(10))
+        else:
+            value, detail = _compute_damage(weapon, attacker.get("db_terms") or [], extreme=extreme, melee=melee)
         damage_result = _apply_damage(
             context,
             target,
@@ -1548,6 +1597,18 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         )
         damage_result["damage_detail"] = detail
         damage_result["weapon"] = weapon.get("name")
+        if knockout_applied:
+            target["unconscious"] = True
+            target["status"] = "unconscious"
+            target["knockout_rounds"] = knockout_applied["rounds"]
+            damage_result["knockout"] = knockout_applied
+        if hit_locations:
+            location = detail_rules.hit_location(_roller(20))
+            damage_result["hit_location"] = location
+            if damage_result.get("major_wound"):
+                effect = detail_rules.major_wound_effect(location.get("location"))
+                if effect:
+                    damage_result["major_wound_effect"] = effect
     elif counter_hit:
         counter_weapon = _first_melee_weapon(target, target_card) or UNARMED_WEAPON
         value, detail = _compute_damage(
@@ -1590,6 +1651,13 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             parts.append(f"{target.get('name')} 反击命中，{attacker.get('name')} 受到伤害")
         parts.append(_format_damage_result(str(target.get('name') if not counter_hit else attacker.get('name')), damage_result))
         parts.append(f"伤害明细：{damage_result.get('damage_detail')}")
+        if damage_result.get("knockout"):
+            parts.append(f"{target.get('name')} 被击晕，昏迷 {damage_result['knockout']['rounds']} 轮")
+        location = damage_result.get("hit_location")
+        if location:
+            parts.append(f"命中部位：{location.get('location')}")
+            if damage_result.get("major_wound_effect"):
+                parts.append(damage_result["major_wound_effect"])
     elif attack_rank <= 0 and defense_rank <= 0:
         parts.append("双方均失败，本回合没有伤害")
     elif not hit and not counter_hit:
@@ -1663,6 +1731,31 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     settings = _combat_settings(context)
     if settings.major_wound_penalty == "cannot_act" and attacker.get("major_wound"):
         return {"error": f"{attacker.get('name')} 身负重伤，按房规无法行动"}
+    room_options = _coc7_room_options(context)
+    detail_rules = _combat_detail_rules(settings)
+    # 掩体闪避的后续代价：失去下一次攻击（由该房规在上一次射击时写入）。
+    if attacker.get("lost_next_attack"):
+        attacker["lost_next_attack"] = False
+        _append_log(combat, f"{attacker.get('name')} 因上次攻击被掩体闪避，失去本次攻击。", context)
+        _advance(combat, context)
+        _save_combat(context, combat)
+        state = _combat_summary_state(combat)
+        return {**state, "summary": f"{attacker.get('name')} 失去下一次攻击，当前行动者：{state['current']}。"}
+    # 瞄准跟踪：本轮声明瞄准，消耗一次显著行动，下一轮射击才享受奖励骰。
+    if room_options and room_options.combat_aim_tracking and detail_rules and arguments.get("aim_action"):
+        allowed, reason = detail_rules.can_declare_aim(attacker)
+        if not allowed:
+            return {"error": reason}
+        attacker.update(detail_rules.declare_aim(combat.get("round")))
+        _append_log(combat, f"{attacker.get('name')} 声明瞄准，下一次射击获得奖励骰。", context)
+        _advance(combat, context)
+        _save_combat(context, combat)
+        state = _combat_summary_state(combat)
+        return {
+            **state,
+            "aiming": True,
+            "summary": f"{attacker.get('name')} 正在瞄准，下一次射击获得奖励骰；当前行动者：{state['current']}。",
+        }
     card = _player_card(attacker, context)
     weapon = _find_weapon(attacker, card, _as_text(arguments.get("weapon")))
     if weapon is None:
@@ -1710,14 +1803,24 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     )
     bonus = _dice_count(arguments, "bonus_dice", "bonus")
     penalty = _dice_count(arguments, "penalty_dice", "penalty")
-    if arguments.get("aim"):
+    aim_tracking = bool(room_options and room_options.combat_aim_tracking and detail_rules)
+    cover_dodge = bool(room_options and room_options.combat_cover_dodge and detail_rules)
+    friendly_fire = bool(room_options and room_options.combat_friendly_fire and detail_rules)
+    hit_locations = bool(room_options and room_options.combat_hit_locations and detail_rules)
+    if aim_tracking:
+        # 开启瞄准跟踪后，只有上一轮声明过瞄准才享受奖励骰。
+        bonus += detail_rules.aim_bonus(attacker.get("aiming"))
+    elif arguments.get("aim"):
         bonus += 1
     if arguments.get("point_blank"):
         bonus += 1
     if arguments.get("target_moving"):
         penalty += 1
     if arguments.get("cover"):
-        penalty += 1
+        penalty += detail_rules.cover_penalty(True) if detail_rules else 1
+    in_melee = bool(arguments.get("in_melee"))
+    if friendly_fire and in_melee:
+        penalty += detail_rules.friendly_fire_penalty(True)
     build_value = int(attacker.get("build") or 0)
     if build_value <= -2:
         penalty += 1
@@ -1738,6 +1841,27 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         return {"error": f"{weapon.get('name')} 每轮最多连发 {allowance} 发"}
 
     critical, fumble = _context_thresholds(context)
+    cover_dodge_note = ""
+    if cover_dodge and arguments.get("cover"):
+        target_card = _player_card(target, context)
+        dodge_value, dodge_label = _resolve_skill_value(
+            target,
+            target_card,
+            names=DODGE_SKILL_NAMES,
+            default=max(1, int(target.get("dex") or 0) // 2),
+        )
+        dodge_roll, _ = _percentile_roll(_roller)
+        dodge_level = _success_level(dodge_roll, max(1, dodge_value), critical, fumble)
+        if detail_rules.attacker_loses_next_attack(dodge_level):
+            attacker["lost_next_attack"] = True
+            cover_dodge_note = (
+                f"{target.get('name')} 借掩体闪避成功（{dodge_label} d100={dodge_roll} / {dodge_value}，{dodge_level}），"
+                f"{attacker.get('name')} 失去下一次攻击"
+            )
+        else:
+            cover_dodge_note = (
+                f"{target.get('name')} 借掩体闪避失败（{dodge_label} d100={dodge_roll} / {dodge_value}，{dodge_level}）"
+            )
     malfunction = rules.get("malfunction")
     ammo_tracker = attacker.get("ammo") if isinstance(attacker.get("ammo"), dict) else {}
     ammo_key = str(weapon.get("name") or "")
@@ -1802,6 +1926,32 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             record["malfunction"] = True
             malfunctioned = True
             return record, []
+        # 射击入近战大失败：误伤同方幸运最低的同伴（房规）。
+        if level == "fumble" and friendly_fire and in_melee:
+            victim_name = detail_rules.friendly_fire_victim(
+                combat.get("combatants") or {},
+                attacker=str(attacker.get("name") or ""),
+                target=str(target.get("name") or ""),
+                side=attacker.get("side"),
+            )
+            victim = _resolve_combatant(combat, victim_name) if victim_name else None
+            if victim:
+                value, detail = _compute_damage(
+                    weapon,
+                    attacker.get("db_terms") or [],
+                    extreme=False,
+                    melee=False,
+                    segment_index=diff_rank,
+                )
+                applied = _apply_damage(
+                    context,
+                    victim,
+                    value,
+                    armor=victim.get("armor") or 0,
+                    settings=settings,
+                )
+                record["friendly_fire"] = {"victim": victim.get("name"), **applied}
+                record["friendly_fire_detail"] = detail
         success = (roll <= _threshold_for(diff_rank) or level == "critical") and level != "fumble"
         if beyond_range:
             # 超四倍射程只有 01 能贯穿（p95）。
@@ -1838,6 +1988,13 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                 settings=settings,
             )
             applied_list.append(applied)
+        if hit_locations and applied_list:
+            location = detail_rules.hit_location(_roller(20))
+            record["hit_location"] = location
+            if any(item.get("major_wound") for item in applied_list):
+                effect = detail_rules.major_wound_effect(location.get("location"))
+                if effect:
+                    record["major_wound_effect"] = effect
         if applied_list:
             record["damage"] = applied_list[-1]
             record["damage_detail"] = detail
@@ -1894,6 +2051,10 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     if isinstance(current_ammo, int):
         attacker["ammo"] = {**ammo_tracker, ammo_key: current_ammo}
 
+    # 瞄准只服务一次射击：无论命中与否，射击后清除瞄准状态。
+    if aim_tracking and attacker.get("aiming"):
+        attacker.update(detail_rules.aim_consumed_patch())
+
     # 一次射击消耗一次显著行动；全自动分组在射击函数内部结算。
     _advance(combat, context)
 
@@ -1902,6 +2063,8 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         f"距离 {distance if distance is not None else '未指定'} 码，{ { 'regular': '普通', 'hard': '困难', 'extreme': '极难' }.get(difficulty, difficulty) }难度，阈值 {threshold}",
         f"射击技能 {skill_label} {skill_value}",
     ]
+    if cover_dodge_note:
+        parts.append(cover_dodge_note)
     for shot in shots:
         label = f"第 {shot.get('group')} 组（{shot.get('bullets', 1)} 发）" if shot.get("group") else f"第 {shot['shot']} 发"
         if shot.get("error"):
@@ -1927,8 +2090,19 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                 text += "，濒死"
             elif shot.get("unconscious"):
                 text += "，昏迷"
+            location = shot.get("hit_location")
+            if location:
+                text += f"，命中{location.get('location')}"
+                if shot.get("major_wound_effect"):
+                    text += f"（{shot['major_wound_effect']}）"
         else:
             text += " 未命中"
+        if shot.get("friendly_fire"):
+            friendly = shot["friendly_fire"]
+            text += (
+                f"；误伤 {friendly.get('victim')}，伤害 {friendly.get('effective')}"
+                f"（{shot.get('friendly_fire_detail')}），HP {friendly.get('hp_before')}→{friendly.get('hp_after')}"
+            )
         parts.append(text)
     if malfunctioned:
         parts.append("武器已故障，需要维修或更换")
@@ -2156,6 +2330,73 @@ def heal_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     }
 
 
+def poison_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """毒剂结算：体质抵抗成功伤害减半；发作轮数大于 0 时只登记，不自动调度。"""
+    combat = _load_combat(context)
+    if not combat:
+        return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
+    room_options = _coc7_room_options(context)
+    settings = _combat_settings(context)
+    detail_rules = _combat_detail_rules(settings)
+    if not (room_options and room_options.combat_poison and detail_rules):
+        return {"error": "毒剂房规未开启，请先在房规中开启「毒剂」"}
+    target = _resolve_combatant(combat, arguments.get("target"))
+    if not target:
+        return {"error": f"target {arguments.get('target')} 不在当前战斗中"}
+    if target.get("dead"):
+        return {"error": f"{target.get('name')} 已死亡，无法结算毒剂"}
+
+    onset = max(0, _as_int(arguments.get("onset_rounds"), 0))
+    if onset > 0:
+        summary = (
+            f"{target.get('name')} 中毒：{onset} 轮后发作。"
+            "当前不做延迟调度，请在到期后再次调用 combat.poison 并令 onset_rounds=0 结算。"
+        )
+        _append_log(combat, summary, context)
+        _save_combat(context, combat)
+        return {
+            **_combat_summary_state(combat),
+            "target": target.get("name"),
+            "pending": True,
+            "onset_rounds": onset,
+            "summary": summary,
+        }
+
+    potency = detail_rules.poison_penalty_dice(arguments.get("potency"))
+    doses = max(1, _as_int(arguments.get("doses"), 1))
+    expression = _as_text(arguments.get("damage"), "1D6") or "1D6"
+    con = detail_rules.poison_check_target(target.get("con"))
+    critical, fumble = _context_thresholds(context)
+    roll, candidates = _percentile_roll(_roller, 0, potency)
+    level = _success_level(roll, con, critical, fumble)
+    resisted = detail_rules.poison_resisted(level)
+
+    parsed = weapon_catalog.parse_damage(expression)
+    terms = [tuple(term) for term in parsed["segments"][0]["terms"]]
+    amount, detail = _damage_roller(terms)
+    amount += _as_int(parsed["segments"][0].get("fixed"), 0)
+    total = max(0, amount) * doses
+    applied_amount = detail_rules.poison_damage(total, resisted=resisted)
+    applied = _apply_damage(context, target, applied_amount, settings=settings)
+
+    verdict = f"抵抗成功，伤害减半 {total}→{applied_amount}" if resisted else f"抵抗失败，承受 {applied_amount} 点伤害"
+    summary = (
+        f"{target.get('name')} 中毒（毒性 {potency}，CON {con}，d100={roll}，{level}）："
+        f"{verdict}，耐久 {applied.get('hp_before')}→{applied.get('hp_after')}。"
+    )
+    _append_log(combat, summary, context)
+    _save_combat(context, combat)
+    return {
+        **_combat_summary_state(combat),
+        "target": target.get("name"),
+        "check": {"roll": roll, "candidates": candidates, "level": level, "target": con},
+        "potency": potency,
+        "poison_damage": {"expression": expression, "detail": detail, "total": total, "applied": applied_amount},
+        **applied,
+        "summary": summary,
+    }
+
+
 def end_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     combat = _load_combat(context)
     if not combat:
@@ -2248,7 +2489,7 @@ COMBAT_ATTACK_TOOL = AgentTool(
             "defense": {"type": "string", "enum": ["dodge", "counter", "none"]},
             "maneuver": {
                 "type": "string",
-                "description": "战技类型，如 disarm/trip/pin/escape（缴械/推倒/压制/脱离）",
+                "description": "战技类型，如 disarm/trip/pin/escape/knockout（缴械/推倒/压制/脱离/击晕）",
             },
             "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 2},
             "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 2},
@@ -2272,9 +2513,11 @@ COMBAT_SHOOT_TOOL = AgentTool(
             "target": {"type": "string"},
             "weapon": {"type": "string"},
             "range": {"type": "string", "description": "距离（码）或普通/困难/极难"},
-            "aim": {"type": "boolean", "description": "上一轮已瞄准"},
+            "aim": {"type": "boolean", "description": "上一轮已瞄准（未开启瞄准跟踪房规时直接给奖励骰）"},
+            "aim_action": {"type": "boolean", "description": "本轮声明瞄准并消耗行动；瞄准跟踪房规开启时使用"},
             "point_blank": {"type": "boolean", "description": "抵近射击（DEX/5 英尺内）"},
             "cover": {"type": "boolean", "description": "目标处于掩体/部分遮蔽"},
+            "in_melee": {"type": "boolean", "description": "目标正与同伴近战（射击入近战房规）"},
             "target_moving": {"type": "boolean", "description": "目标 MOV 8+ 高速移动"},
             "burst": {"type": "integer", "minimum": 1, "maximum": 10},
             "skill": {"type": "string"},
@@ -2353,6 +2596,27 @@ COMBAT_HEAL_TOOL = AgentTool(
         "required": ["target", "amount"],
     },
     handler=heal_combatant,
+)
+
+COMBAT_POISON_TOOL = AgentTool(
+    name="combat.poison",
+    description="毒剂结算：体质抵抗成功伤害减半。onset_rounds 大于 0 时只登记发作时间，不自动调度。",
+    parameters={
+        "type": "object",
+        "properties": {
+            "target": {"type": "string"},
+            "damage": {"type": "string", "description": "伤害表达式，如 1D6 或 2D10+2"},
+            "potency": {"type": "integer", "minimum": 0, "maximum": 2, "description": "毒性：CON 检定的惩罚骰数"},
+            "doses": {"type": "integer", "minimum": 1, "description": "剂量倍数，默认 1"},
+            "onset_rounds": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "发作轮数；大于 0 时本次只登记，到期后再次调用并传 0 结算",
+            },
+        },
+        "required": ["target", "damage"],
+    },
+    handler=poison_combatant,
 )
 
 COMBAT_DELAY_TOOL = AgentTool(
@@ -2440,6 +2704,7 @@ COMBAT_TOOLS = [
     COMBAT_SHOOT_TOOL,
     COMBAT_DAMAGE_TOOL,
     COMBAT_HEAL_TOOL,
+    COMBAT_POISON_TOOL,
     COMBAT_TREAT_TOOL,
     COMBAT_END_TOOL,
 ]

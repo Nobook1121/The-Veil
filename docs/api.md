@@ -210,7 +210,7 @@
 - `POST /api/rooms/<room_id>/scenario-switch`：切换剧本。
 - `GET /api/rooms/<room_id>/world-override`：读取世界意志权限、房间开关与频率配额（`rate.cooldown_seconds` / `rate.hourly_limit` / `rate.hourly_remaining`）。`scripted` 与 `freeform` 房间可用；`manual` 返回 `supported=false`，前端隐藏入口。
 - `POST /api/rooms/<room_id>/scenario-migration`：在换剧本时迁移剧情进度。
-- `GET|PUT /api/rooms/<room_id>/house-rules`：读取 / 保存房间规则（含技能基础值覆盖）。
+- `GET|PUT /api/rooms/<room_id>/house-rules`：读取 / 保存房间规则（含技能基础值覆盖）。战斗细节与恢复类开关默认关闭：`coc7_combat_aim_tracking`、`coc7_combat_cover_dodge`、`coc7_combat_friendly_fire`、`coc7_combat_knockout`、`coc7_combat_hit_locations`、`coc7_combat_poison`、`coc7_healing_natural`、`coc7_healing_require_rest`。
 - `GET /api/rooms/<room_id>/console/log`：读取本房间控制台日志（可按 `level` / `search` / `limit` 过滤）。
 - `GET /api/rooms/<room_id>/console/commands`：读取房间控制台命令白名单与帮助文本。
 - `POST /api/rooms/<room_id>/console/command`：执行一条房间范围内命令（body: `{command}`）。当命令是 `interlude start` 且执行成功时，响应 `data` 额外带 `kp_prompt`，供前端复用聊天主链路触发一次 AI KP 幕间开场点评；AI 不可用不影响幕间状态。

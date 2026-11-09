@@ -190,6 +190,23 @@ HOUSE_RULE_DEFINITIONS = {
         "ai_prompt": False,
     },
     "combat_dying_check": {"type": "boolean", "default": True, "ai_prompt": False},
+    # 批次 4 战斗细节（默认全部关闭；关闭时射击/近战流程与旧版本完全一致）。
+    # 瞄准跟踪：须上一轮声明，下一轮射击获得 1 奖励骰；受伤或移动后失效。
+    "coc7_combat_aim_tracking": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 掩体与闪避：目标借掩体闪避成功后，攻击者失去下一次攻击。
+    "coc7_combat_cover_dodge": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 射击入近战：额外 1 惩罚骰；大失败命中同方幸运最低的同伴。
+    "coc7_combat_friendly_fire": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 击晕：钝器战技成功改为造成 1 点伤害并击晕（1D10 轮）。
+    "coc7_combat_knockout": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 部位命中：每次伤害掷 1D20 定位，用于部位重伤描述。
+    "coc7_combat_hit_locations": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 毒剂：KP 给毒性/伤害/发作轮数，系统做 CON 抵抗与伤害结算。
+    "coc7_combat_poison": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 自然恢复：开放 rule heal natural，必须显式给出休养天数。
+    "coc7_healing_natural": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 自然恢复必须声明休养；关闭时不强制 rest。
+    "coc7_healing_require_rest": {"type": "boolean", "default": False, "ai_prompt": False},
 }
 DEFAULT_ROOM_HOUSE_RULES = {key: spec["default"] for key, spec in HOUSE_RULE_DEFINITIONS.items()}
 

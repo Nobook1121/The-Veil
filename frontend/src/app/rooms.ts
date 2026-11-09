@@ -1465,6 +1465,15 @@ function readHouseRuleDiceThreshold(elementId: string): number | null {
     return Math.max(0, Math.min(100, value));
 }
 
+/** 战斗房规：DEX 额外行动阈值，留空表示关闭（核心规则没有额外行动）。 */
+function readCombatDexExtraAction(): number | null {
+    const raw = (document.getElementById("houseRuleCombatDexExtraAction") as HTMLInputElement | null)?.value.trim() || "";
+    if (!raw) return null;
+    const value = Number.parseInt(raw, 10);
+    if (!Number.isFinite(value)) return null;
+    return Math.max(1, Math.min(100, value));
+}
+
 /** 沉浸房规三态布尔：留空（""）表示跟随管理员设置，on/off 为房间显式覆盖。 */
 function readHouseRuleNullableBoolean(elementId: string): boolean | null {
     const select = document.getElementById(elementId) as HTMLSelectElement | null;
@@ -1539,6 +1548,27 @@ const COC7_HOUSE_RULE_FIELDS: Array<[string, keyof RoomHouseRules]> = [
     ["houseRuleCoc7Contacts", "coc7_contacts"],
     ["houseRuleCoc7Economy", "coc7_economy"],
     ["houseRuleCoc7AgeAdjustments", "coc7_age_adjustments"],
+];
+
+// 战斗房规：布尔项与枚举项分开映射；枚举为空时由后端回落到默认值。
+const COMBAT_BOOL_FIELDS: Array<[string, keyof RoomHouseRules]> = [
+    ["houseRuleCombatCastDefenseAllowed", "combat_cast_defense_allowed"],
+    ["houseRuleCombatDyingCheck", "combat_dying_check"],
+    ["houseRuleCoc7CombatAimTracking", "coc7_combat_aim_tracking"],
+    ["houseRuleCoc7CombatCoverDodge", "coc7_combat_cover_dodge"],
+    ["houseRuleCoc7CombatFriendlyFire", "coc7_combat_friendly_fire"],
+    ["houseRuleCoc7CombatKnockout", "coc7_combat_knockout"],
+    ["houseRuleCoc7CombatHitLocations", "coc7_combat_hit_locations"],
+    ["houseRuleCoc7CombatPoison", "coc7_combat_poison"],
+    ["houseRuleCoc7HealingNatural", "coc7_healing_natural"],
+    ["houseRuleCoc7HealingRequireRest", "coc7_healing_require_rest"],
+];
+const COMBAT_SELECT_FIELDS: Array<[string, keyof RoomHouseRules]> = [
+    ["houseRuleCombatSurpriseModel", "combat_surprise_model"],
+    ["houseRuleCombatReadyWeaponCost", "combat_ready_weapon_cost"],
+    ["houseRuleCombatCastInterrupt", "combat_cast_interrupt"],
+    ["houseRuleCombatMajorWoundPenalty", "combat_major_wound_penalty"],
+    ["houseRuleCombatShieldAction", "combat_shield_action"],
 ];
 
 async function openHouseRulesModal(): Promise<void> {
@@ -1622,6 +1652,21 @@ async function openHouseRulesModal(): Promise<void> {
             const input = document.getElementById(elementId) as HTMLInputElement | null;
             if (input) input.checked = Boolean(response.data?.house_rules?.[field]);
         });
+        // 战斗房规：布尔 / 枚举 / 可空整数三类控件分别回填。
+        COMBAT_BOOL_FIELDS.forEach(([elementId, field]) => {
+            const input = document.getElementById(elementId) as HTMLInputElement | null;
+            if (input) input.checked = Boolean(response.data?.house_rules?.[field]);
+        });
+        COMBAT_SELECT_FIELDS.forEach(([elementId, field]) => {
+            const select = document.getElementById(elementId) as HTMLSelectElement | null;
+            const value = response.data?.house_rules?.[field];
+            if (select && typeof value === "string" && value) select.value = value;
+        });
+        const dexExtraInput = document.getElementById("houseRuleCombatDexExtraAction") as HTMLInputElement | null;
+        if (dexExtraInput) {
+            const value = response.data?.house_rules?.combat_dex_extra_action_threshold;
+            dexExtraInput.value = value === null || value === undefined ? "" : String(value);
+        }
         // 沉浸房规：三态选择，留空跟随管理员设置；房间只能收紧开关，不能越过站点总开关。
         setHouseRuleNullableBoolean("houseRuleImmersiveMusic", response.data.house_rules?.immersive_music_enabled);
         setHouseRuleNullableBoolean("houseRuleImmersiveMusicAuto", response.data.house_rules?.immersive_music_auto_switch);
@@ -1711,6 +1756,19 @@ async function saveHouseRules(): Promise<void> {
                         Boolean((document.getElementById(elementId) as HTMLInputElement | null)?.checked),
                     ]),
                 ),
+                ...Object.fromEntries(
+                    COMBAT_BOOL_FIELDS.map(([elementId, field]) => [
+                        field,
+                        Boolean((document.getElementById(elementId) as HTMLInputElement | null)?.checked),
+                    ]),
+                ),
+                ...Object.fromEntries(
+                    COMBAT_SELECT_FIELDS.map(([elementId, field]) => [
+                        field,
+                        (document.getElementById(elementId) as HTMLSelectElement | null)?.value || undefined,
+                    ]).filter(([, value]) => value !== undefined),
+                ),
+                combat_dex_extra_action_threshold: readCombatDexExtraAction(),
             },
             visibility: visibilitySelect?.value || "private",
         });

@@ -240,6 +240,94 @@
                                 </div>
                                 </div>
                                 <hr class="my-3">
+                                <div id="roomCombatHouseRules">
+                                <h6>战斗规则</h6>
+                                <p class="form-text mt-2">默认值与核心规则一致；「细节」开关默认关闭，关闭时射击与近战流程不变。</p>
+                                <div class="form-group">
+                                    <label for="houseRuleCombatSurpriseModel">突袭模型</label>
+                                    <select class="form-select" id="houseRuleCombatSurpriseModel">
+                                        <option value="bonus_die">奖励骰（核心，未准备目标近战 1 奖励骰）</option>
+                                        <option value="auto_success">自动成功（除大失败）</option>
+                                    </select>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleCombatReadyWeaponCost">准备武器耗时</label>
+                                    <select class="form-select" id="houseRuleCombatReadyWeaponCost">
+                                        <option value="free">免费（核心）</option>
+                                        <option value="action">消耗一次行动</option>
+                                        <option value="round">消耗一整轮</option>
+                                    </select>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleCombatCastInterrupt">施法打断</label>
+                                    <select class="form-select" id="houseRuleCombatCastInterrupt">
+                                        <option value="keeper">KP 裁定（核心）</option>
+                                        <option value="any_damage">当轮受伤即打断</option>
+                                        <option value="never">不打断</option>
+                                    </select>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleCombatMajorWoundPenalty">重伤限制</label>
+                                    <select class="form-select" id="houseRuleCombatMajorWoundPenalty">
+                                        <option value="none">不额外惩罚（核心）</option>
+                                        <option value="cannot_act">重伤无法行动</option>
+                                    </select>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleCombatShieldAction">盾牌</label>
+                                    <select class="form-select" id="houseRuleCombatShieldAction">
+                                        <option value="disabled">禁用独立格挡（核心）</option>
+                                        <option value="counter_alias">视为反击描述</option>
+                                    </select>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="houseRuleCombatDexExtraAction">DEX 额外行动阈值</label>
+                                    <input class="form-control" type="number" id="houseRuleCombatDexExtraAction" min="1" max="100" placeholder="留空关闭（核心）">
+                                </div>
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCombatCastDefenseAllowed">
+                                    <label class="form-check-label" for="houseRuleCombatCastDefenseAllowed">施法当轮仍可闪避 / 反击</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCombatDyingCheck">
+                                    <label class="form-check-label" for="houseRuleCombatDyingCheck">濒死每轮体质检定</label>
+                                </div>
+                                <h6 class="mt-3">战斗细节</h6>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7CombatAimTracking">
+                                    <label class="form-check-label" for="houseRuleCoc7CombatAimTracking">瞄准跟踪（须上轮声明，受伤或移动后失效）</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7CombatCoverDodge">
+                                    <label class="form-check-label" for="houseRuleCoc7CombatCoverDodge">掩体闪避（闪避成功者令攻击者失去下次攻击）</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7CombatFriendlyFire">
+                                    <label class="form-check-label" for="houseRuleCoc7CombatFriendlyFire">射击入近战（额外惩罚骰，大失败误伤同伴）</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7CombatKnockout">
+                                    <label class="form-check-label" for="houseRuleCoc7CombatKnockout">击晕（钝器战技只造成 1 点伤害并击晕）</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7CombatHitLocations">
+                                    <label class="form-check-label" for="houseRuleCoc7CombatHitLocations">部位命中（1D20 定位与部位重伤描述）</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7CombatPoison">
+                                    <label class="form-check-label" for="houseRuleCoc7CombatPoison">毒剂（CON 抵抗，成功伤害减半；发作轮数需 KP 到期再结算）</label>
+                                </div>
+                                <h6 class="mt-3">恢复</h6>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7HealingNatural">
+                                    <label class="form-check-label" for="houseRuleCoc7HealingNatural">开放自然恢复命令（rule heal natural，显式给出天数）</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7HealingRequireRest">
+                                    <label class="form-check-label" for="houseRuleCoc7HealingRequireRest">自然恢复必须声明休养（rest）</label>
+                                </div>
+                                </div>
+                                <hr class="my-3">
                                 <h6 data-i18n="room.house_rules.skill_bases">技能基础值</h6>
                                 <p class="form-text" data-i18n="room.house_rules.skill_bases_hint">房间规则优先级最高，进入房间后覆盖用户个性化与管理员默认值。</p>
                                 <button type="button" class="btn btn-outline-secondary btn-sm" id="openRoomSkillBaseSettings" data-i18n="room.house_rules.skill_bases_button">设置技能基础值</button>

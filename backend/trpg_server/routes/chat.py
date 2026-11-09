@@ -837,6 +837,7 @@ def chat():
                 (coc7_options.group_luck, "coc7.group_luck"),
                 (coc7_options.contacts, "coc7.contact_check"),
                 (coc7_options.economy, "coc7.economy"),
+                (coc7_options.combat_poison, "combat.poison"),
             ):
                 if not enabled:
                     excluded_tool_names.add(tool_name)

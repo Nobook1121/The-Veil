@@ -14,6 +14,7 @@ from trpg_server.ruleset.contracts import RULESET_API_VERSION
 from trpg_server.ruleset.coc7.catalogs import Coc7Catalogs
 from trpg_server.ruleset.coc7.checks import Coc7Checks
 from trpg_server.ruleset.coc7 import growth as coc7_growth
+from trpg_server.ruleset.coc7 import combat_rules as coc7_combat_rules
 from trpg_server.ruleset.coc7.sanity import SANITY
 from trpg_server.ruleset.coc7.schema import Coc7CharacterSchema
 from trpg_server.ruleset.coc7.tools import Coc7Tools
@@ -40,7 +41,7 @@ class Coc7Plugin:
     schema_version = 1
     supported_locales = ("zh-CN", "en-US")
     capabilities = frozenset(
-        {"character_schema", "catalogs", "checks", "combat", "sanity", "items", "migration"}
+        {"character_schema", "catalogs", "checks", "combat", "sanity", "items", "migration", "combat_rules"}
     )
 
     def __init__(self) -> None:
@@ -54,6 +55,8 @@ class Coc7Plugin:
         self.roll_policy = PercentileRollPolicy()
         # 理智 / 疯狂：上限、1/5 阈值、INT 检定与疯狂表现表都在插件内。
         self.sanity = SANITY
+        # 战斗细节（批次 4）：瞄准、掩体闪避、误伤、击晕、部位命中的纯规则。
+        self.combat_rules = coc7_combat_rules
         self.combat = _load_combat_ruleset()
         if self.combat is None:
             self.capabilities = self.capabilities - {"combat"}

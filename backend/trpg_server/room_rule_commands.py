@@ -27,6 +27,7 @@ RULE_FLAG_WORDS = {
     "persist": "--persist",
     "apply": "--apply",
     "yes": "--yes",
+    "rest": "--rest",
 }
 # 带值选项：写成 key value。
 RULE_VALUE_OPTIONS = {
@@ -67,6 +68,7 @@ ROOM_RULE_HELP = "\n".join(
         "  rule item <玩家> <物品名> [qty N] [weapon] [persist] [reason 原因]（追加物品/武器；persist 才写回持久卡）",
         "  rule skill <玩家> <技能名> <值|±N> [persist] [reason 原因] [yes]（修改技能；默认预演）",
         "  rule attr <玩家> <属性> <值|±N> [persist] [reason 原因] [yes]（修改 STR/DEX/INT 等基础属性；默认预演）",
+        "  rule heal natural <玩家> <天数> [rest]（房规：按休养天数自然恢复，重伤每周 1 点）",
         "  rule limits                 （查看世界意志的生效频率限制）",
         "  rule limits cooldown <秒|inherit>（房间只能比站点更严格）",
         "  rule limits hourly <次数|inherit>（房间只能比站点更严格）",
@@ -86,6 +88,7 @@ RULE_SUBS = {
     "item",
     "skill",
     "attr",
+    "heal",
     "limits",
 }
 
@@ -205,6 +208,7 @@ def handle_room_rule_command(
         "groupluck": coc7_options.group_luck,
         "contact": coc7_options.contacts,
         "economy": coc7_options.economy,
+        "heal": coc7_options.healing_natural,
     }
     if sub in optional_subs and not optional_subs[sub]:
         return False, f"未知的规则命令：rule {sub}\n{ROOM_RULE_HELP}"
@@ -431,6 +435,17 @@ def handle_room_rule_command(
             return False, exc.message
         return True, message
 
+    if sub == "heal":
+        return _heal_command(
+            room_dir,
+            info,
+            rest,
+            flags,
+            coc7_options=coc7_options,
+            actor_id=actor_id,
+            actor_rank=actor_rank,
+        )
+
     if sub in {"skill", "attr"}:
         return _stat_command(
             room_dir,
@@ -446,6 +461,94 @@ def handle_room_rule_command(
         )
 
     return _limits_command(room_dir, info, rest, flags, options, config_dir=config_dir)
+
+
+def _heal_command(
+    room_dir: Path,
+    info: dict[str, Any],
+    rest: list[str],
+    flags: set[str],
+    *,
+    coc7_options: Any,
+    actor_id: Any,
+    actor_rank: Any,
+) -> tuple[bool, str]:
+    """房规：按休养天数自然恢复；时间由调用方显式给出，不读房间时钟。"""
+    usage = "用法：rule heal natural <玩家> <天数> [rest]"
+    if len(rest) < 3 or str(rest[0]).strip().lower() not in {"natural", "自然"}:
+        return False, usage
+    try:
+        days = int(rest[2])
+    except (TypeError, ValueError):
+        return False, "天数必须是正整数"
+    if days <= 0:
+        return False, "天数必须是正整数"
+    resting = "--rest" in flags
+    if coc7_options.healing_require_rest and not resting:
+        return False, "本房规要求声明休养：请在命令末尾加 rest"
+
+    from trpg_server.ruleset import get_plugin
+    from trpg_server.ruleset.capabilities import combat_rules_of
+
+    try:
+        rules = combat_rules_of(get_plugin(room_rules.resolve_rule_id(info)))
+        member = room_rules.resolve_member(info, rest[1], actor_id=actor_id, actor_rank=actor_rank)
+    except room_rules.RuleOperationError as exc:
+        return False, exc.message
+    if rules is None:
+        return False, "当前规则集未提供自然恢复能力"
+
+    try:
+        card = room_rules.member_card(member)
+    except room_rules.RuleOperationError as exc:
+        return False, exc.message
+    state = member.get("character_state")
+    if not isinstance(state, dict):
+        state = {}
+        member["character_state"] = state
+    max_hp = (
+        room_rules._as_int(state.get("max_hp"), 0)
+        or room_rules._as_int(card.get("maxHp"), 0)
+        or room_rules._as_int(card.get("max_hp"), 0)
+        or room_rules._as_int(card.get("hp"), 1)
+    )
+    max_hp = max(1, max_hp)
+    current = room_rules._as_int(
+        state.get("current_hp"), room_rules._as_int(card.get("currentHp"), max_hp)
+    )
+    before = max(0, min(max_hp, current))
+    status = card.get("status") if isinstance(card.get("status"), dict) else {}
+    major_wound = bool(state.get("major_wound") or status.get("majorWound"))
+    amount = rules.natural_healing(days, major_wound=major_wound)
+    after = min(max_hp, before + amount)
+    name = room_rules.member_display_name(member)
+    if after == before:
+        return True, f"{name} 休养 {days} 天，未获得恢复（耐久 {before}/{max_hp}）。"
+
+    state["max_hp"] = max_hp
+    state["current_hp"] = after
+    card["currentHp"] = after
+    card["current_hp"] = after
+    if after > 0:
+        state["dying"] = False
+        state["stable"] = True
+    room_rules.record_room_changes(
+        member,
+        [
+            {
+                "type": "hp",
+                "value": after,
+                "source": "rule_command",
+                "reason": f"自然恢复 {days} 天" + ("（休养）" if resting else ""),
+            }
+        ],
+    )
+    room_rules.save_room_info(room_dir, info)
+    return (
+        True,
+        f"{name} 自然恢复（{days} 天，{'含休养' if resting else '未声明休养'}）："
+        f"{before} → {after}/{max_hp}（+{after - before}）。",
+    )
 
 
 def _stat_command(

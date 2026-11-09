@@ -510,6 +510,7 @@ rule san set <玩家> <N> [reason 原因] [yes]（设为指定 SAN；默认预�
 rule item <玩家> <物品名> [qty N] [weapon] [persist] [reason 原因]
 rule skill <玩家> <技能名> <值|±N> [persist] [reason 原因] [yes]
 rule attr <玩家> <属性> <值|±N> [persist] [reason 原因] [yes]
+rule heal natural <玩家> <天数> [rest]（房规：按休养天数自然恢复；重伤每周 1 点）
 rule limits                 （查看世界意志生效冷却与每小时次数）
 rule limits cooldown <秒|inherit>（房间只能比站点更严格）
 rule limits hourly <次数|inherit>（房间只能比站点更严格）
@@ -547,6 +548,11 @@ AI KP 的写卡工具（`character_stats` 的 `character.set_skill` / `character
 团体幸运由最低幸运者代掷，熟人检定复用普通检定再附后果。`rule economy` 默认只读展示信用评级与开支
 预览；加 `apply` 时按开支扣减角色卡现金，并登记一条 `assets` 待写回项，归档时与 SAN / 技能 / 属性
 共用 `apply_room_changes` 合并进角色卡。其他资产在卡面是自由文本，不做数值扣减。
+
+`rule heal natural` 受房规 `coc7_healing_natural` 控制，默认关闭；开启后按命令里显式给出的
+天数结算，不读取房间 `game_date`，也不自动推进时间。常规恢复为每天 1 点，处于重伤时为每 7 天
+1 点。房规 `coc7_healing_require_rest` 开启时必须在命令末尾加 `rest`，否则拒绝结算。恢复量
+与 SAN / 技能写回链路一致，登记一条 `hp` 待写回项并同步房间快照。
 
 玩家侧还可以在聊天框直接使用斜杠命令（不依赖 AI KP）：
 
