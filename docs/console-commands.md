@@ -18,7 +18,8 @@
 2. **交互确认**：若当前是交互式控制台，会弹出 `是否执行(y/N)` 提示，输入 `y` 才真正执行；
 3. **`--yes` / `-y`**：跳过提示直接执行，适合脚本化批处理。
 
-> 房间控制台的 `rule` 域统一使用纯词参数，预演确认写 `yes`（旧 `--yes` 仍兼容），见下方「规则命令」。
+> 房间控制台的所有命令域统一使用纯词参数，预演确认写 `yes`（旧 `--yes` 仍兼容），
+> 详见下方「房间内嵌控制台」。
 
 ```text
 user delete alice            # 预演：只打印将要删除什么
@@ -428,69 +429,69 @@ dice skin delete <skin-id> [--yes]               删除骰子皮肤（破坏性�
 help                        （显示本帮助）
 info                        （房间信息：房间码/模式/剧本/成员数）
 members                     （成员及其房间角色）
-members kick <user> [--yes] （将成员移出本房间，破坏性）
-members promote <user> [--yes]（将成员提升为房间管理员，破坏性）
+members kick <user> [yes] （将成员移出本房间，破坏性）
+members promote <user> [yes]（将成员提升为房间管理员，破坏性）
 state                       （房间状态：场景/线索/任务/触发器）
 event add <kind> <content>  （记录一条房间事件）
 log tail [n]                （查看本房间最近 n 条日志，默认 50）
-log clear [--yes]           （清空本房间日志，破坏性）
+log clear [yes]           （清空本房间日志，破坏性）
 autosave                    （立即为本房间保存一次自动存档）
-archive [--yes]             （归档本房间；有剧本时需已到达结局，无剧本可直接归档）
+archive [yes]             （归档本房间；有剧本时需已到达结局，无剧本可直接归档）
 dice                        （本房间骰子动画档位、玩家投掷、重投配置与待投掷请求）
 dice animation show         （查看本房间生效的动画档位）
-dice animation set <text|simple|3d|inherit> [--yes]（设置动画档位，inherit 跟随管理员默认）
+dice animation set <text|simple|3d|inherit> [yes]（设置动画档位，inherit 跟随管理员默认）
 dice player-roll show       （查看本房间生效的玩家投掷开关）
-dice player-roll <on|off|inherit> [--yes]（设置玩家投掷开关）
+dice player-roll <on|off|inherit> [yes]（设置玩家投掷开关）
 dice reroll show            （查看本房间生效的重投模式与上限）
-dice reroll <off|limited|unlimited|inherit> [--yes]（设置重投模式）
-dice reroll-limit <1-20|inherit> [--yes]（设置「指定次数」模式的上限）
+dice reroll <off|limited|unlimited|inherit> [yes]（设置重投模式）
+dice reroll-limit <1-20|inherit> [yes]（设置「指定次数」模式的上限）
 dice pending                （列出本房间等待玩家投掷的请求）
-dice cancel [request-id] [--yes]（取消待投掷请求，缺省取消最早一条）
+dice cancel [request-id] [yes]（取消待投掷请求，缺省取消最早一条）
 narrative                   （等同 narrative status：能力档、拓扑、位置与护栏）
 narrative status            （世界树开关、能力档、拓扑、版本、位置、回合与指标）
-narrative state [--json]    （位置、旗标、时钟、地点状态、线索与触发记录）
-narrative map [--depth N]   （当前可达地图，标记已访问/未揭示/门控）
+narrative state [json]    （位置、旗标、时钟、地点状态、线索与触发记录）
+narrative map [depth N]   （当前可达地图，标记已访问/未揭示/门控）
 narrative exits             （当前地点出口与缺失条件）
-narrative ledger [--limit N] [--key-only] [--search <text>]（账本事件）
-narrative facts [--entity <id>] [--status <s>]（事实三元组）
+narrative ledger [limit N] [key-only] [search <text>]（账本事件）
+narrative facts [entity <id>] [status <s>]（事实三元组）
 narrative clocks            （全局时钟与阈值）
-narrative triggers [--location <id>] [--object <id>] [--fired]（触发器与触发次数）
-narrative trigger fire <id> [--yes]（手动触发触发器，破坏性）
-narrative media [--missing] （本房间已发媒体与缺失素材）
-narrative opening [--publish|--repair] [--yes]（预览/补发开场）
-narrative trace [--turn N] [--limit N]（JEV/检索/护栏轨迹）
-narrative summary [--rebuild] [--yes]（查看或重建摘要）
-narrative reset <location-id> [--yes]（重置队伍位置，破坏性）
-narrative unlock <edge|location> [--yes]（手动跳过条件门控，破坏性）
-narrative guard <off|shadow|enforce> [--yes]（切换本房间护栏模式）
-narrative profile <graph|degraded> [--yes]（切换本房间能力档）
-narrative rebuild-state [--yes]（从关键帧+账本重放恢复运行态，破坏性）
+narrative triggers [location <id>] [object <id>] [fired]（触发器与触发次数）
+narrative trigger fire <id> [yes]（手动触发触发器，破坏性）
+narrative media [missing] （本房间已发媒体与缺失素材）
+narrative opening [publish|repair] [yes]（预览/补发开场）
+narrative trace [turn N] [limit N]（JEV/检索/护栏轨迹）
+narrative summary [rebuild] [yes]（查看或重建摘要）
+narrative reset <location-id> [yes]（重置队伍位置，破坏性）
+narrative unlock <edge|location> [yes]（手动跳过条件门控，破坏性）
+narrative guard <off|shadow|enforce> [yes]（切换本房间护栏模式）
+narrative profile <graph|degraded> [yes]（切换本房间能力档）
+narrative rebuild-state [yes]（从关键帧+账本重放恢复运行态，破坏性）
 immersive                   （等同 immersive status：本房间配乐/配图状态与历史）
 immersive status            （本房间生效的开关、当前档位/段落与最近配图）
-immersive music show|on|off [--yes]（查看或收紧本房间配乐开关；show 同时显示生效音乐来源）
-immersive music auto <on|off> [--yes]（本房间是否随剧情自动切歌）
-immersive music set <profile> <intensity> [--yes]（手动切到指定档位/强度）
-immersive illustration show|on|off [--yes]（查看或收紧本房间配图开关）
-immersive illustration auto <on|off> [--yes]（本房间是否随剧情自动配图）
+immersive music show|on|off [yes]（查看或收紧本房间配乐开关；show 同时显示生效音乐来源）
+immersive music auto <on|off> [yes]（本房间是否随剧情自动切歌）
+immersive music set <profile> <intensity> [yes]（手动切到指定档位/强度）
+immersive illustration show|on|off [yes]（查看或收紧本房间配图开关）
+immersive illustration auto <on|off> [yes]（本房间是否随剧情自动配图）
 immersive illustration trigger show（查看生效配图触发档位与来源）
-immersive illustration trigger <inherit|important|off> [--yes]（房间收紧配图档位，只能更紧）
-immersive illustration now [场景描述] [--yes]（立即生成本房间配图，可能产生费用）
+immersive illustration trigger <inherit|important|off> [yes]（房间收紧配图档位，只能更紧）
+immersive illustration now [场景描述] [yes]（立即生成本房间配图，可能产生费用）
 immersive cache show|stats  （只读：本房间缓存 + 本剧本缓存条数/体积/命中次数）
 immersive cache room show  （本房间缓存条数、文件数、体积、累计命中与目录）
-immersive cache room clear [--yes]（清空本房间目录缓存，默认预演）
-immersive cache record|prefer <on|off|inherit> [--yes]（房间级收紧剧本缓存，不能越过站点开关）
-immersive cache prune [--yes]（按单房间配额 LRU 清理本房间缓存，默认预演）
-immersive cache clear [--yes]（删除本房间目录缓存，默认预演；剧本缓存需站点控制台清理）
+immersive cache room clear [yes]（清空本房间目录缓存，默认预演）
+immersive cache record|prefer <on|off|inherit> [yes]（房间级收紧剧本缓存，不能越过站点开关）
+immersive cache prune [yes]（按单房间配额 LRU 清理本房间缓存，默认预演）
+immersive cache clear [yes]（删除本房间目录缓存，默认预演；剧本缓存需站点控制台清理）
 immersive history           （本房间配乐切换与配图历史）
 immersive director          （只读查看 AI 音乐导演最近采用的乐谱、指纹与段落；不可在房间内修改）
 voice status                （本房间语音生效值、NPC 映射、静音名单与小时用量）
-voice on|off [--yes]        （本房间语音开关；无法越过站点总开关）
-voice map set <speaker> <profile> [--yes]（绑定 NPC 音色，仅限内置 NPC 人设）
-voice mute <speaker>|list|clear [--yes]（本房间 NPC 静音名单）
+voice on|off [yes]        （本房间语音开关；无法越过站点总开关）
+voice map set <speaker> <profile> [yes]（绑定 NPC 音色，仅限内置 NPC 人设）
+voice mute <speaker>|list|clear [yes]（本房间 NPC 静音名单）
 voice usage                 （本房间小时用量与最近 voice_* 事件）
 voice cache stats           （本房间语音缓存条数/体积/命中次数，只读）
-voice cache clear [--yes]   （删除本房间语音缓存，默认预演）
-voice cache prune [--yes]   （按配额 LRU 清理本房间缓存，默认预演）
+voice cache clear [yes]   （删除本房间语音缓存，默认预演）
+voice cache prune [yes]   （按配额 LRU 清理本房间缓存，默认预演）
 rule                        （本房间规则集、世界意志限频与成员 SAN 概览）
 rule check <玩家> <技能/属性> [difficulty normal|hard|extreme] [adjustment ±N] [bonus N] [penalty N]
 rule social <玩家> <技能> [attitude supportive|neutral|opposed|hostile] [leverage] [target-skill N]（房规：社交难度）
@@ -507,6 +508,11 @@ rule limits                 （查看世界意志生效冷却与每小时次数�
 rule limits cooldown <秒|inherit>（房间只能比站点更严格）
 rule limits hourly <次数|inherit>（房间只能比站点更严格）
 ```
+
+房间控制台的参数统一使用空格分隔的纯词：开关直接写词（`yes`、`persist`、`weapon`、
+`publish`），带值的写 `key value`（`depth 2`、`limit 20`、`reason 原因`）。负数值
+（如 `-5`、`-12.5`）仍按位置参数处理，不会被误判成开关。旧的 `--yes` / `--json` /
+`--key=value` 写法继续兼容，无需改动已有脚本。
 
 `difficulty` 支持 `normal|hard|extreme`，也接受 `regular`（`normal` 与 `regular` 等价）及中文
 `普通|困难|极难`。
@@ -557,7 +563,7 @@ rule limits hourly <次数|inherit>（房间只能比站点更严格）
 
 破坏性命令（`log clear`、`archive`、`narrative reset` / `unlock` / `trigger fire` /
 `rebuild-state`）同样遵循「缺省预演、确认后执行」的约定：网页控制台先返回预演文本，
-再由交互确认框决定是否真正执行（服务器控制台则用 `--yes` / `-y` 跳过确认）。
+再由交互确认框决定是否真正执行；加 `yes` 可跳过确认（旧的 `--yes` / `-y` 仍兼容）。
 
 房间 `narrative` 命令只读写本房间的运行态、账本、轨迹与房规：
 `trace` 读取房间目录下的 `narrative_trace.jsonl`（最近 2000 条）；`media` 只列本房间
