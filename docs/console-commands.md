@@ -18,6 +18,8 @@
 2. **交互确认**：若当前是交互式控制台，会弹出 `是否执行(y/N)` 提示，输入 `y` 才真正执行；
 3. **`--yes` / `-y`**：跳过提示直接执行，适合脚本化批处理。
 
+> 房间控制台的 `rule` 域统一使用纯词参数，预演确认写 `yes`（旧 `--yes` 仍兼容），见下方「规则命令」。
+
 ```text
 user delete alice            # 预演：只打印将要删除什么
 user delete alice --yes      # 直接执行
@@ -490,17 +492,17 @@ voice cache stats           （本房间语音缓存条数/体积/命中次数�
 voice cache clear [--yes]   （删除本房间语音缓存，默认预演）
 voice cache prune [--yes]   （按配额 LRU 清理本房间缓存，默认预演）
 rule                        （本房间规则集、世界意志限频与成员 SAN 概览）
-rule check <玩家> <技能/属性> [--difficulty=hard|extreme] [--adjustment=±N] [--bonus=N] [--penalty=N]
-rule social <玩家> <技能> [--attitude=supportive|neutral|opposed|hostile] [--leverage] [--target-skill=N]（房规：社交难度）
-rule combined <玩家> <技能1> <技能2> [...] [--mode=all|any] [--difficulty=normal|hard|extreme] [--bonus=N] [--penalty=N]（房规：组合检定只掷一次）
+rule check <玩家> <技能/属性> [difficulty normal|hard|extreme] [adjustment ±N] [bonus N] [penalty N]
+rule social <玩家> <技能> [attitude supportive|neutral|opposed|hostile] [leverage] [target-skill N]（房规：社交难度）
+rule combined <玩家> <技能1> <技能2> [...] [mode all|any] [difficulty normal|hard|extreme] [bonus N] [penalty N]（房规：组合检定只掷一次）
 rule groupluck              （房规：由在场最低幸运者代掷团体幸运）
-rule contact <玩家> <技能> [--hometown] [--remote] [--profession] [--push] [--difficulty=normal|hard|extreme]（房规：建立熟人）
-rule economy <玩家> [金额] [--era=1920s|modern] [--assets=N]（房规：信用评级与开支预览，只读）
-rule san add <玩家> <±N> [--reason=...] [--yes]（调整 SAN；默认预演，--yes 落盘）
-rule san set <玩家> <N> [--reason=...] [--yes]（设为指定 SAN；默认预演）
-rule item <玩家> <物品名> [--qty=N] [--weapon] [--persist] [--reason=...]
-rule skill <玩家> <技能名> <值|±N> [--persist] [--reason=...] [--yes]
-rule attr <玩家> <属性> <值|±N> [--persist] [--reason=...] [--yes]
+rule contact <玩家> <技能> [hometown] [remote] [profession] [push] [difficulty normal|hard|extreme]（房规：建立熟人）
+rule economy <玩家> [金额] [era 1920s|modern] [assets N] [apply] [reason 原因]（房规：信用评级与开支；默认只读预览，apply 登记现金写回）
+rule san add <玩家> <±N> [reason 原因] [yes]（调整 SAN；默认预演，yes 落盘）
+rule san set <玩家> <N> [reason 原因] [yes]（设为指定 SAN；默认预演）
+rule item <玩家> <物品名> [qty N] [weapon] [persist] [reason 原因]
+rule skill <玩家> <技能名> <值|±N> [persist] [reason 原因] [yes]
+rule attr <玩家> <属性> <值|±N> [persist] [reason 原因] [yes]
 rule limits                 （查看世界意志生效冷却与每小时次数）
 rule limits cooldown <秒|inherit>（房间只能比站点更严格）
 rule limits hourly <次数|inherit>（房间只能比站点更严格）
@@ -508,9 +510,9 @@ rule limits hourly <次数|inherit>（房间只能比站点更严格）
 
 `rule` 域不需要 AI KP，`manual` 房间同样可用；所有数值变更都会写入房间日志，并在
 `character_state.sanity_records` / `skill_changes` / `attr_changes` / `item_changes`
-留下操作者、前后值与原因。`rule skill` / `rule attr` 默认预演，`--yes`（或网页控制台确认框）
+留下操作者、前后值与原因。`rule skill` / `rule attr` 默认预演，`yes`（或网页控制台确认框）
 才写盘；属性名支持 `STR/DEX/CON/APP/POW/SIZ/EDU/INT/LUC` 与中文名。
-`rule item` / `rule skill` / `rule attr` 默认只写本房间快照，`--persist` 才立即写回持久角色卡；
+`rule item` / `rule skill` / `rule attr` 默认只写本房间快照，`persist` 才立即写回持久角色卡；
 房间归档时按房规 `rule_persist_on_archive`（默认开启）把 SAN、技能、属性、物品统一写回，
 只覆盖实际变更的字段，不会整卡覆盖玩家在卡面编辑器里的其它修改。
 
@@ -518,8 +520,9 @@ rule limits hourly <次数|inherit>（房间只能比站点更严格）
 `coc7_social_difficulty` / `coc7_combined_checks` / `coc7_group_luck` / `coc7_contacts` / `coc7_economy`
 控制，默认关闭。开关关闭时这些子命令按「未知的规则命令」处理，与旧版本完全一致；开启后统一走
 `check_service` 的检定入口：社交先按态度与把柄折算难度，组合检定只掷一次并与全部技能比较，
-团体幸运由最低幸运者代掷，熟人检定复用普通检定再附后果。`rule economy` 只读展示信用评级与开支
-预览，不修改角色卡。
+团体幸运由最低幸运者代掷，熟人检定复用普通检定再附后果。`rule economy` 默认只读展示信用评级与开支
+预览；加 `apply` 时按开支扣减角色卡现金，并登记一条 `assets` 待写回项，归档时与 SAN / 技能 / 属性
+共用 `apply_room_changes` 合并进角色卡。其他资产在卡面是自由文本，不做数值扣减。
 
 玩家侧还可以在聊天框直接使用斜杠命令（不依赖 AI KP）：
 
