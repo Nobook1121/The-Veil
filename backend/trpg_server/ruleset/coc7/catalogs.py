@@ -45,6 +45,10 @@ class Coc7Catalogs:
         self.catalogs_dir = Path(catalogs_dir) if catalogs_dir else RULESET_CATALOG_DIR
 
     # -- 路径解析 ---------------------------------------------------------
+    def skills_path(self) -> Path:
+        """技能目录文件路径；判定层按 mtime 缓存解析结果。"""
+        return self._skills_path()
+
     def _skills_path(self) -> Path:
         plugin_path = self.catalogs_dir / "skills.json"
         if plugin_path.exists():

@@ -437,7 +437,7 @@ def _stat_command(
         before = max(0, min(100, room_rules._as_int(row.get("value"), 0)))
         after = max(0, min(100, before + amount if relative else amount))
     else:
-        attribute = room_rules._normalize_attribute_key(target_name)
+        attribute = room_rules._normalize_attribute_key(target_name, room_rules.resolve_rule_id(info))
         if not attribute:
             return False, "属性名必须是 STR/DEX/CON/APP/POW/SIZ/EDU/INT/LUC 或对应的中文名"
         attributes = card.get("attributes") if isinstance(card.get("attributes"), dict) else {}

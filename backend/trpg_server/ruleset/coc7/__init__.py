@@ -46,7 +46,7 @@ class Coc7Plugin:
     def __init__(self) -> None:
         self.schema = Coc7CharacterSchema()
         self.catalogs = Coc7Catalogs()
-        self.checks = Coc7Checks()
+        self.checks = Coc7Checks(self.catalogs)
         self.tools = Coc7Tools()
         # 成长能力：纯计算模块，供通用层按规则集能力访问，不进入注册表结构。
         self.growth = coc7_growth

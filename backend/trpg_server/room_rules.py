@@ -39,20 +39,6 @@ OPERATOR_ROLES = {"owner", "admin", "sysadmin", "system"}
 
 # 统一的待写回队列：SAN / 技能 / 属性 / 物品都追加到这里，归档时只判断这一处。
 PENDING_CHANGES_KEY = "pending_changes"
-ROOM_ATTRIBUTE_KEYS = ("STR", "DEX", "CON", "APP", "POW", "SIZ", "EDU", "INT", "LUC")
-ATTRIBUTE_ALIASES = {
-    "力量": "STR",
-    "敏捷": "DEX",
-    "体质": "CON",
-    "外貌": "APP",
-    "意志": "POW",
-    "体型": "SIZ",
-    "教育": "EDU",
-    "智力": "INT",
-    "灵感": "INT",
-    "幸运": "LUC",
-    "luck": "LUC",
-}
 
 
 class RuleOperationError(Exception):
@@ -591,14 +577,16 @@ def apply_san_change(
     }
 
 
-def _normalize_attribute_key(value: Any) -> str:
-    raw = str(value or "").strip()
-    if not raw:
+def _normalize_attribute_key(value: Any, ruleset_id: str = "") -> str:
+    """属性名 → 规范键；属性集合与别名由规则集插件声明。"""
+    from trpg_server.ruleset import get_plugin
+
+    try:
+        checks = getattr(get_plugin(ruleset_id or None), "checks", None)
+    except Exception:  # noqa: BLE001 - 插件异常按无法识别处理
         return ""
-    upper = raw.upper()
-    if upper in ROOM_ATTRIBUTE_KEYS:
-        return upper
-    return ATTRIBUTE_ALIASES.get(raw.casefold(), ATTRIBUTE_ALIASES.get(raw, ""))
+    normalize = getattr(checks, "attribute_key", None)
+    return normalize(value) if callable(normalize) else ""
 
 
 def _skill_rows(card: dict[str, Any]) -> list[Any]:
@@ -709,7 +697,7 @@ def apply_attribute_change(
 ) -> dict[str, Any]:
     """修改房间快照里的基础属性，登记到统一待写回队列。"""
     card = member_card(member)
-    attribute = _normalize_attribute_key(key)
+    attribute = _normalize_attribute_key(key, resolve_rule_id(info))
     if not attribute:
         raise RuleOperationError(
             "属性名必须是 STR/DEX/CON/APP/POW/SIZ/EDU/INT/LUC 或对应的中文名",

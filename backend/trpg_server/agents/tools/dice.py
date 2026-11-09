@@ -9,27 +9,11 @@ from typing import Any
 from trpg_server.agents.tools.base import AgentTool
 from trpg_server.agents.tools.trigger import reveal_trigger_after_check
 from trpg_server.dice_policy import DEFAULT_ROLL_POLICY, faces_with_policy, roll_with_policy
-from trpg_server.json_store import read_json, write_json_atomic
-from trpg_server.settings import CHARACTER_SKILLS_FILE
+from trpg_server.json_store import write_json_atomic
 
 logger = logging.getLogger(__name__)
 DIFFICULTY_ALIASES = {"regular": "regular", "普通": "regular", "hard": "hard", "困难": "hard", "extreme": "extreme", "极难": "extreme"}
 DIFFICULTY_LABELS = {"regular": "", "hard": "困难", "extreme": "极难"}
-ATTRIBUTE_ALIASES = {"STR": "STR", "力量": "STR", "CON": "CON", "体质": "CON", "SIZ": "SIZ", "体型": "SIZ", "DEX": "DEX", "敏捷": "DEX", "APP": "APP", "外貌": "APP", "INT": "INT", "智力": "INT", "灵感": "INT", "灵感检定": "INT", "智力检定": "INT", "POW": "POW", "意志": "POW", "EDU": "EDU", "教育": "EDU", "LUC": "LUC", "幸运": "LUC", "AGE": "AGE", "年龄": "AGE"}
-# 属性英文键到中文展示名的映射，用于把本地化展示写回检定结果。
-ATTRIBUTE_LABELS = {"STR": "力量", "CON": "体质", "SIZ": "体型", "DEX": "敏捷", "APP": "外貌", "INT": "智力", "POW": "意志", "EDU": "教育", "LUC": "幸运", "AGE": "年龄"}
-# 常见 COC7 技能英文键到中文名的回退映射（键统一小写）。
-# 角色卡上若带有本地化名称则优先使用角色卡名称，这里仅处理传入英文键的情况。
-SKILL_KEY_LABELS = {
-    "stealth": "潜行", "spothidden": "侦察", "listen": "聆听", "track": "追踪", "lipread": "读唇", "libraryuse": "图书馆使用",
-    "navigate": "导航", "computeruse": "计算机使用", "charm": "取悦", "fasttalk": "话术", "intimidate": "恐吓", "persuade": "说服",
-    "psychology": "心理学", "languageown": "母语", "languageother": "外语", "fighting": "格斗", "firearms": "射击", "dodge": "闪避",
-    "throw": "投掷", "demolitions": "爆破", "artillery": "炮术", "firstaid": "急救", "medicine": "医学", "psychoanalysis": "精神分析",
-    "hypnosis": "催眠", "climb": "攀爬", "jump": "跳跃", "swim": "游泳", "diving": "潜水", "appraise": "估价", "anthropology": "人类学",
-    "accounting": "会计", "law": "法律", "history": "历史", "archaeology": "考古学", "naturalworld": "博物学", "occult": "神秘学",
-    "electronics": "电子学", "science": "科学", "disguise": "乔装", "survival": "生存", "artcraft": "技艺", "creditrating": "信用评级",
-    "cthulhumythos": "克苏鲁神话", "locksmith": "开锁", "sleightofhand": "妙手", "driveauto": "汽车驾驶", "ride": "骑术",
-}
 LEVEL_LABELS = {"critical": "大成功", "extreme": "极难成功", "hard": "困难成功", "regular": "成功", "failure": "失败", "fumble": "大失败"}
 # 大成功/大失败阈值默认值，保持 COC7 习惯：1 为大成功，96-100 为大失败。
 DEFAULT_CRITICAL_THRESHOLD = 1
@@ -126,73 +110,24 @@ def _find_member(player_name: str, context: Any) -> dict[str, Any] | None:
         ),
         None,
     )
-# 常见的中文技能名变体 -> 技能目录中的正式名称（大小写/字形差异的兼容）。
-CHECK_NAME_ALIASES = {
-    "侦查": "侦察", "观察": "侦察", "搜索": "侦察", "调查": "侦察",
-    "倾听": "聆听", "图书馆": "图书馆使用", "驾驶": "汽车驾驶", "驾车": "汽车驾驶",
-    "隐藏": "潜行", "躲藏": "潜行", "电脑使用": "计算机使用",
-}
-# COC7 技能目录缓存：(配置文件路径, mtime, 技能名集合)。
-_CHECK_NAME_CACHE: tuple[str, float, set[str]] | None = None
 
 
-def _skill_catalog_names() -> set[str]:
-    """加载 COC7 技能目录，返回可接受的技能名集合（英文键 + 本地化中文名 + 专精）。
-
-    技能目录是随包发布的参考数据（``data/character_skills.json``），结果按文件
-    mtime 缓存，避免每次检定都读盘。
-    """
-    global _CHECK_NAME_CACHE
-    path = CHARACTER_SKILLS_FILE
+def _checks_capability(ruleset_id: str | None = None):
+    """当前规则集的判定能力；插件未提供时返回 ``None``（按不识别处理）。"""
     try:
-        mtime = path.stat().st_mtime
-    except OSError:
-        return set()
-    if _CHECK_NAME_CACHE is not None and _CHECK_NAME_CACHE[0] == str(path) and _CHECK_NAME_CACHE[1] == mtime:
-        return _CHECK_NAME_CACHE[2]
-    catalog = read_json(path, default={})
-    names: set[str] = set()
-    if isinstance(catalog, dict):
-        locales = catalog.get("locales") if isinstance(catalog.get("locales"), dict) else {}
-        locale = str(catalog.get("defaultLocale") or "zh-CN")
-        labels = locales.get(locale) if isinstance(locales.get(locale), dict) else {}
-        skills = catalog.get("skills") if isinstance(catalog.get("skills"), list) else []
-        for item in skills:
-            if not isinstance(item, dict):
-                continue
-            key = str(item.get("key") or "").strip()
-            if key:
-                names.add(key.casefold())
-            label = labels.get(str(item.get("labelKey") or ""))
-            if label:
-                names.add(str(label).casefold())
-            specialties = item.get("specialties") if isinstance(item.get("specialties"), list) else []
-            for specialty in specialties:
-                if not isinstance(specialty, dict):
-                    continue
-                specialty_key = str(specialty.get("key") or "").strip()
-                if specialty_key:
-                    names.add(specialty_key.casefold())
-                specialty_label = labels.get(str(specialty.get("labelKey") or ""))
-                if specialty_label:
-                    names.add(str(specialty_label).casefold())
-    names.update(name.casefold() for name in SKILL_KEY_LABELS)
-    names.update(label.casefold() for label in SKILL_KEY_LABELS.values())
-    _CHECK_NAME_CACHE = (str(path), mtime, names)
-    return names
+        from trpg_server.ruleset import get_plugin
+
+        return getattr(get_plugin(ruleset_id), "checks", None)
+    except Exception:  # noqa: BLE001 - 插件缺失不应阻断工具注册
+        logger.debug("Falling back to no checks capability", exc_info=True)
+        return None
 
 
 def _is_known_check_name(check_name: str) -> bool:
-    """判断检定名是否为 COC7 认可的属性、技能或专精（接受常见中文变体）。"""
-    text = str(check_name or "").strip()
-    if not text:
-        return False
-    if text.endswith("检定"):
-        text = text[:-2].strip()
-    if ATTRIBUTE_ALIASES.get(text) or ATTRIBUTE_ALIASES.get(text.upper()):
-        return True
-    text = CHECK_NAME_ALIASES.get(text, text)
-    return text.casefold() in _skill_catalog_names()
+    """判断检定名是否为当前规则集认可的属性、技能或专精。"""
+    checks = _checks_capability()
+    known = getattr(checks, "is_known_check_name", None)
+    return bool(known(check_name)) if callable(known) else False
 
 
 def _resolve_check_name(arguments: dict[str, Any]) -> str:
@@ -213,19 +148,10 @@ def _resolve_check_name(arguments: dict[str, Any]) -> str:
 
 
 def _lookup_check_value(card: dict[str, Any], check_name: str) -> int | None:
-    normalized_name = str(check_name or "").strip()
-    key = ATTRIBUTE_ALIASES.get(normalized_name) or ATTRIBUTE_ALIASES.get(normalized_name.upper())
-    if not key and normalized_name.endswith("检定"):
-        base_name = normalized_name[:-2].strip()
-        key = ATTRIBUTE_ALIASES.get(base_name) or ATTRIBUTE_ALIASES.get(base_name.upper())
-    attrs = card.get("attributes")
-    if isinstance(attrs, dict) and key and attrs.get(key) is not None: return _as_int(attrs.get(key), -1)
-    # 技能匹配同时接受原始名称、英文键与其本地化中文名（例如 stealth / 潜行）。
-    localized = SKILL_KEY_LABELS.get(normalized_name.casefold(), normalized_name)
-    expected = {normalized_name.casefold(), localized.casefold()}
-    for skill in card.get("skills", []) if isinstance(card.get("skills"), list) else []:
-        if isinstance(skill, dict) and any(str(skill.get(k) or "").casefold() in expected for k in ("name", "skillKey", "id")): return _as_int(skill.get("value"), -1)
-    return None
+    ruleset_id = card.get("rulesetId") if isinstance(card, dict) else None
+    checks = _checks_capability(ruleset_id)
+    lookup = getattr(checks, "lookup_target", None)
+    return lookup(card, check_name) if callable(lookup) else None
 def _format_room_check_summary(name: str, difficulty: str, roll: int, threshold: int, success: bool) -> str:
     return f"{DIFFICULTY_LABELS[difficulty]}{name} d%: [{roll}] = {roll} / {threshold} {'成功' if success else '失败'}"
 def _threshold_arg(arguments: dict[str, Any], key: str, fallback: int) -> int:
@@ -306,24 +232,20 @@ def _level_suffix(level: str) -> str:
     """为大成功/大失败追加明确的文字标注，供聊天与 AI 上下文直接读取。"""
     return "（大成功）" if level == "critical" else "（大失败）" if level == "fumble" else ""
 def _localize_check_label(name: str) -> str:
-    """把英文键形式的属性/技能名转换为中文展示名。"""
-    raw = str(name or "").strip()
-    key = ATTRIBUTE_ALIASES.get(raw) or ATTRIBUTE_ALIASES.get(raw.upper())
-    if key: return ATTRIBUTE_LABELS.get(key, raw)
-    return SKILL_KEY_LABELS.get(raw.casefold(), raw)
+    """把英文键形式的属性/技能名转换为当前规则集的展示名。"""
+    checks = _checks_capability()
+    localize = getattr(checks, "localize_label", None)
+    return localize(name) if callable(localize) else str(name or "").strip()
+
+
 def _resolve_check_display_name(card: dict[str, Any], check_name: str) -> str:
     """优先使用角色卡上的本地化技能名，避免检定结果里出现英文键。"""
-    raw = str(check_name or "").strip()
-    key = ATTRIBUTE_ALIASES.get(raw) or ATTRIBUTE_ALIASES.get(raw.upper())
-    if key: return ATTRIBUTE_LABELS.get(key, raw)
-    localized = SKILL_KEY_LABELS.get(raw.casefold(), raw)
-    expected = {raw.casefold(), localized.casefold()}
-    for skill in card.get("skills", []) if isinstance(card.get("skills"), list) else []:
-        if not isinstance(skill, dict): continue
-        candidates = {str(skill.get(field) or "").casefold() for field in ("name", "skillKey", "id")}
-        if candidates & expected:
-            return str(skill.get("name") or "").strip() or localized
-    return localized
+    ruleset_id = card.get("rulesetId") if isinstance(card, dict) else None
+    checks = _checks_capability(ruleset_id)
+    display = getattr(checks, "display_name", None)
+    if callable(display):
+        return display(card, check_name)
+    return str(check_name or "").strip()
 def _result_message(summary: str, tool_name: str, extra_metadata: dict[str, Any] | None = None, **metadata: Any) -> dict[str, Any]:
     merged: dict[str, Any] = {"tool_name": tool_name, **metadata}
     if isinstance(extra_metadata, dict):
