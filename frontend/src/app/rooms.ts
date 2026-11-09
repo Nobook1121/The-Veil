@@ -675,6 +675,20 @@ async function createRoomUnlocked(): Promise<void> {
     }
 }
 
+/**
+ * 角色卡已被其它活跃房间占用时，返回一条能指导下一步的提示。
+ *
+ * 后端在 409 里带了占用房间与角色卡名，这里拼成「哪张卡、在哪个房间、
+ * 该换卡还是该退出」，避免用户只看到一句无法处理的通用错误。
+ */
+function characterCardConflictMessage(response: ApiResponse<unknown>): string {
+    const conflict = (response as { conflict?: { room_id?: string; room_name?: string; card_name?: string } }).conflict;
+    if (response.error !== "character_card_in_use" || !conflict) return "";
+    const roomName = conflict.room_name || conflict.room_id || "另一个房间";
+    const cardName = conflict.card_name ? `角色卡「${conflict.card_name}」` : "这张角色卡";
+    return `${cardName}正在《${roomName}》中使用：换一张角色卡再进入，或先让房主把你移出那个房间。`;
+}
+
 async function joinRoomByCode(): Promise<void> {
     return runRoomAction("join-room", "joinRoom", async () => {
         await joinRoomByCodeUnlocked();
@@ -702,25 +716,37 @@ async function joinRoomByCodeUnlocked(): Promise<void> {
         return;
     }
 
-    const roomEntrySelection = await promptRoomEntryCharacterSelection("join", null, {}, { allowCardless });
+    let roomEntrySelection = await promptRoomEntryCharacterSelection("join", null, {}, { allowCardless });
     if (!roomEntrySelection) return;
     if (roomEntrySelection.createCharacter || roomEntrySelection.action === "create") return;
 
     try {
-        const endpoint = roomEntrySelection.action === "invisible" ? "/api/rooms/spectate" : "/api/rooms/join";
-        const data = await TrpgApi.post<ApiResponse<Room>>(endpoint, {
-            room_code: roomCode,
-            ...(roomEntrySelection.action === "invisible" || !roomEntrySelection.characterCard
-                ? {}
-                : { character_card: roomEntrySelection.characterCard }),
-        });
-        if (!data.success || !data.data) {
-            showNotification(`加入房间失败：${data.message || data.error || "未知错误"}`, "error");
-            return;
+        // 角色卡冲突时重新打开选卡弹窗，让用户当场换卡；每次重试都由用户确认，不会空转。
+        while (true) {
+            const endpoint = roomEntrySelection.action === "invisible" ? "/api/rooms/spectate" : "/api/rooms/join";
+            const data = await TrpgApi.post<ApiResponse<Room>>(endpoint, {
+                room_code: roomCode,
+                ...(roomEntrySelection.action === "invisible" || !roomEntrySelection.characterCard
+                    ? {}
+                    : { character_card: roomEntrySelection.characterCard }),
+            });
+            if (data.success && data.data) {
+                const wasInvisible = roomEntrySelection.action === "invisible";
+                await enterRoom(data.data);
+                await loadRoomsList();
+                showNotification(wasInvisible ? "已隐身进入房间" : "已加入房间", "success");
+                return;
+            }
+            const conflictMessage = characterCardConflictMessage(data);
+            if (!conflictMessage) {
+                showNotification(`加入房间失败：${data.message || data.error || "未知错误"}`, "error");
+                return;
+            }
+            showNotification(conflictMessage, "error");
+            const retry = await promptRoomEntryCharacterSelection("join", null, {}, { allowCardless });
+            if (!retry || retry.createCharacter || retry.action === "create" || retry.action === "invisible") return;
+            roomEntrySelection = retry;
         }
-        await enterRoom(data.data);
-        await loadRoomsList();
-        showNotification(roomEntrySelection.action === "invisible" ? "已隐身进入房间" : "已加入房间", "success");
     } catch (error) {
         showNotification(`加入房间失败：${roomErrorMessage(error)}`, "error");
     }
@@ -851,7 +877,10 @@ async function openRoomDetail(roomId: string): Promise<void> {
                     room_code: data.data.room_code || data.data.code,
                 });
                 if (!joinResponse.success || !joinResponse.data) {
-                    showNotification(joinResponse.message || joinResponse.error || "加入房间失败", "error");
+                    showNotification(
+                        characterCardConflictMessage(joinResponse) || joinResponse.message || joinResponse.error || "加入房间失败",
+                        "error"
+                    );
                     return;
                 }
                 await enterRoom(joinResponse.data);
@@ -868,7 +897,10 @@ async function openRoomDetail(roomId: string): Promise<void> {
                 character_card: roomEntrySelection.characterCard,
             });
             if (!joinResponse.success || !joinResponse.data) {
-                showNotification(joinResponse.message || joinResponse.error || "加入房间失败", "error");
+                showNotification(
+                    characterCardConflictMessage(joinResponse) || joinResponse.message || joinResponse.error || "加入房间失败",
+                    "error"
+                );
                 return;
             }
             await enterRoom(joinResponse.data);
@@ -881,7 +913,10 @@ async function openRoomDetail(roomId: string): Promise<void> {
             { character_card: roomEntrySelection.characterCard },
         );
         if (!bindResponse.success || !bindResponse.data) {
-            showNotification(bindResponse.message || bindResponse.error || "绑定角色卡失败", "error");
+            showNotification(
+                characterCardConflictMessage(bindResponse) || bindResponse.message || bindResponse.error || "绑定角色卡失败",
+                "error"
+            );
             return;
         }
         await enterRoom(bindResponse.data);

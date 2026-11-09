@@ -13,6 +13,7 @@ from trpg_server.immersive.config import AUDIO_BLOCKS, MUSIC_BLOCKS, MUSIC_BLOCK
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.media_defaults import normalize_avatar
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
+from trpg_server.room_card_occupancy import card_binding_lock, card_id_of, find_card_occupancy
 from trpg_server.room_log import ARCHIVE_LOG_LIMIT, load_room_log, log_room_event
 from trpg_server.responses import error_response, success_response
 from trpg_server.ruleset import RulesetSelectionError, builtin_registry, default_ruleset_id
@@ -265,6 +266,30 @@ def _read_room(room_dir):
 def _write_room(room_dir, info):
     info["updated_at"] = _timestamp()
     write_json_atomic(room_dir / "info.json", info)
+
+
+def _card_in_use_response(conflict):
+    """角色卡已被其它活跃房间占用时的统一拒绝响应。
+
+    带上占用房间与角色卡名，前端据此给出「换卡 / 去那个房间退出」的具体提示，
+    而不是只显示一句通用失败。
+    """
+    room_name = conflict.get("room_name") or conflict.get("room_id") or "另一个房间"
+    card_name = conflict.get("card_name") or "该角色卡"
+    return error_response(
+        f"{card_name}正在《{room_name}》中使用，请更换角色卡或先退出那个房间",
+        409,
+        "character_card_in_use",
+        conflict=conflict,
+    )
+
+
+def _find_card_conflict(character_card, *, exclude_room_id=None):
+    return find_card_occupancy(
+        _get_rooms_dir(),
+        card_id_of(character_card),
+        exclude_room_id=exclude_room_id,
+    )
 
 
 def _global_hints_enabled():
@@ -1257,8 +1282,16 @@ def create_room():
                     info["active_scene_title"] = scene.get("title")
         except Exception:
             logger.exception("Failed to initialize room active scene")
-    write_json_atomic(room_dir / "info.json", info)
+    # 与加入房间共用同一把占用锁：建房也会绑定角色卡，同一张卡不能同时存在于两个房间。
+    conflict = None
+    with card_binding_lock():
+        conflict = _find_card_conflict(member.get("character_card"))
+        if not conflict:
+            write_json_atomic(room_dir / "info.json", info)
+    if conflict:
+        return _card_in_use_response(conflict)
     _write_messages(room_dir, [])
+
     write_json_atomic(room_dir / "autosave.json", {"updated_at": now, "messages": []})
 
     log_room_event(
@@ -1349,28 +1382,42 @@ def join_room_by_code():
 
     user_id = session["user_id"]
     character_card = data.get("character_card")
-    member = _find_member(info, user_id=user_id)
-    if not member:
-        info.setdefault("members", []).append(_current_member(character_card))
-        _write_room(room_dir, info)
-    elif not _is_active_member(member):
-        current_member = _current_member(character_card)
-        member.update(
-            {
-                "username": current_member["username"],
-                "role": current_member["role"],
-                "avatar": current_member["avatar"],
-                "status": ROOM_MEMBER_ACTIVE,
-                "is_active": True,
-                "rejoined_at": _timestamp(),
-            }
+    # 「查占用 + 落盘」放在同一把锁里：同一张卡并发加入两个房间时只有一个能成功，
+    # 同时也避免两个请求基于同一份旧快照互相覆盖。已在房间里的重复加入不算冲突。
+    with card_binding_lock():
+        info = _read_room(room_dir)
+        member = _find_member(info, user_id=user_id)
+        will_bind_card = bool(character_card) and (
+            member is None or not _is_active_member(member) or not member.get("character_card")
         )
-        if character_card:
+        if will_bind_card:
+            conflict = _find_card_conflict(character_card, exclude_room_id=info.get("id") or room_dir.name)
+            if conflict:
+                return _card_in_use_response(conflict)
+        changed = True
+        if not member:
+            info.setdefault("members", []).append(_current_member(character_card))
+        elif not _is_active_member(member):
+            current_member = _current_member(character_card)
+            member.update(
+                {
+                    "username": current_member["username"],
+                    "role": current_member["role"],
+                    "avatar": current_member["avatar"],
+                    "status": ROOM_MEMBER_ACTIVE,
+                    "is_active": True,
+                    "rejoined_at": _timestamp(),
+                }
+            )
+            if character_card:
+                _bind_character(member, character_card)
+        elif character_card and not member.get("character_card"):
             _bind_character(member, character_card)
-        _write_room(room_dir, info)
-    elif character_card and not member.get("character_card"):
-        _bind_character(member, character_card)
-        _write_room(room_dir, info)
+        else:
+            # 已在房间里且无需绑卡：重复加入保持幂等，不写盘也不报冲突。
+            changed = False
+        if changed:
+            _write_room(room_dir, info)
 
     log_room_event(
         room_dir,
@@ -1463,7 +1510,12 @@ def bind_room_member_character(room_id, user_id):
         return _denied(room_id)
     if not _bind_character(target, character_card):
         return error_response("Character card is required", 400, "Character card is required")
-    _write_room(room_dir, info)
+    # 换卡同样是「绑定」，要在同一把占用锁里校验并落盘，否则先换卡再加入别的房间会绕过校验。
+    with card_binding_lock():
+        conflict = _find_card_conflict(target.get("character_card"), exclude_room_id=room_id)
+        if conflict:
+            return _card_in_use_response(conflict)
+        _write_room(room_dir, info)
     log_room_event(
         room_dir,
         user_action_text(session.get("username"), "绑定了房间角色卡"),
