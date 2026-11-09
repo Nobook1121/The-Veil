@@ -81,7 +81,8 @@ async function loadAndApplyConfigs(): Promise<void> {
 }
 
 function initCharacterManagement(): void {
-    window.COC7CharacterSheet?.initCharacterSheet();
+    // 角色卡由规则集模块登记，外壳负责选择模块或明确阻断（不再直连 CoC 全局）。
+    window.TrpgCharacterSheetHost?.init();
 }
 
 function initSidebarToggle(): void {

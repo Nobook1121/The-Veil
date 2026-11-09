@@ -10,6 +10,7 @@
   },
   "include": [
     "frontend/src/app/**/*.ts",
+    "frontend/src/rulesets/**/*.ts",
     "frontend/src/tools/**/*.ts",
     "frontend/src/types/**/*.d.ts"
   ],
