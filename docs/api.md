@@ -194,14 +194,15 @@
 来源：`routes/rooms.py`
 
 - `GET /api/rooms`：列出当前用户可访问的房间；`ADMIN` 与 `OWNER` 可查看全部。
-- `POST /api/rooms`：创建房间并生成唯一房间码；body 支持 `room_mode`（`scripted` / `freeform` / `manual`，默认 `scripted`）：`scripted` 必须提供 `scenario_id`，`freeform` 禁止提供，`manual` 可选（仅作资料）。普通 `USER` 默认最多创建 3 个房间，`ADMIN` / `OWNER` 不限。
+- `POST /api/rooms`：创建房间并生成唯一房间码；body 支持 `room_mode`（`scripted` / `freeform` / `manual`，默认 `scripted`）：`scripted` 必须提供 `scenario_id`，`freeform` 禁止提供，`manual` 可选（仅作资料）。普通 `USER` 默认最多创建 3 个房间，`ADMIN` / `OWNER` 不限。建房时绑定的角色卡同样受「一张卡只在一个活跃房间」约束，冲突返回 `409 character_card_in_use`。
 - `GET /api/rooms/lookup?code=<room_code>`：加入前查询房间模式与名称（只返回模式、名称、剧本标题，不含成员与角色卡）；也接受 `invite_token`。
-- `POST /api/rooms/join`：通过房间码加入房间；`character_card` 可选，`manual` 房间允许无卡加入。
+- `POST /api/rooms/join`：通过房间码加入房间；`character_card` 可选，`manual` 房间允许无卡加入。一张角色卡同一时刻只能绑定一个活跃房间：若该卡已被其它未归档房间的在场成员使用，返回 `409`，`error` 为 `character_card_in_use`，并带 `conflict`（`room_id` / `room_name` / `card_id` / `card_name`）供前端提示换卡或先退出该房间。已在房间内的重复加入是幂等的，不会误报冲突；同一用户可在不同房间使用不同的卡。
 - `POST /api/rooms/spectate`：以旁观身份加入房间。
 - `GET /api/rooms/<room_id>`：读取房间详情、成员与当前消息。
 - `DELETE /api/rooms/<room_id>`：删除房间；仅房主、`ADMIN` 或 `OWNER` 可操作。
 - `GET /api/rooms/<room_id>/spectate`：读取旁观信息。
-- `PUT /api/rooms/<room_id>/members/<user_id>/character`：为成员绑定角色卡。
+- `GET /api/rooms/<room_id>/members/<user_id>/character-diff`：读取该成员「房间快照 vs 持久角色卡」的差异，用于卡面标记「房间内临时」。只返回实际变化的字段（属性、技能、HP/SAN/MP、现金、物品与武器数量），每项为 `{ "current": 当前值, "saved": 保存值 }`；未绑定持久卡时 `diff` 为空对象。仅房间成员或具备 `characters.manage_all` 的管理员可读。
+- `PUT /api/rooms/<room_id>/members/<user_id>/character`：为成员绑定角色卡；换卡同样校验占用（`409 character_card_in_use`）。
 - `PUT /api/rooms/<room_id>/members/<user_id>/role`：调整成员在房间内的角色。
 - `DELETE /api/rooms/<room_id>/members/<user_id>`：移除成员。
 - `POST /api/rooms/<room_id>/scenario-switch`：切换剧本。
@@ -211,6 +212,8 @@
 - `GET /api/rooms/<room_id>/console/log`：读取本房间控制台日志（可按 `level` / `search` / `limit` 过滤）。
 - `GET /api/rooms/<room_id>/console/commands`：读取房间控制台命令白名单与帮助文本。
 - `POST /api/rooms/<room_id>/console/command`：执行一条房间范围内命令（body: `{command}`）。当命令是 `interlude start` 且执行成功时，响应 `data` 额外带 `kp_prompt`，供前端复用聊天主链路触发一次 AI KP 幕间开场点评；AI 不可用不影响幕间状态。
+- `GET /api/rooms/<room_id>/console/ai-changes`：读取本房间的 AI 写卡记录（操作者、目标玩家、字段、旧值 → 新值、工具、时间、`record_id` 与回滚状态）。仅房主 / 房间管理员 / 系统管理员可读。
+- `POST /api/rooms/<room_id>/console/ai-changes/<record_id>/rollback`：回滚一条 AI 写卡记录：把字段恢复为变更前的值、撤销对应的 `pending_changes` 项、同步房间快照，并把条目标记为「已回滚」（保留记录）。重复回滚幂等；已归档房间返回 409。成功后广播 `room_members_changed`，其他客户端会刷新成员与记录。
 - `DELETE /api/rooms/<room_id>/console/log`：清空本房间控制台日志（破坏性，已归档房间拒绝）。
 - `POST /api/rooms/<room_id>/archive`：归档房间。
 - `GET /api/rooms/<room_id>/archive`：读取归档房间内容（别名 `GET /api/room-archives/<room_id>`）。

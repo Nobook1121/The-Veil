@@ -4063,3 +4063,33 @@ body.is-guest .guest-login-hint {
     }
 }
 
+
+/* 房间内临时值：只依赖主题 token，深浅 / 赛博 / 深渊主题共用。 */
+.room-temp-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border: 1px solid var(--theme-warning);
+    border-radius: 999px;
+    background: var(--theme-warning-soft);
+    color: color-mix(in srgb, var(--theme-warning) 55%, var(--theme-text-primary));
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1.4;
+    vertical-align: middle;
+    white-space: nowrap;
+    cursor: help;
+}
+
+.character-stat-card.is-room-temp,
+.attribute-chip.is-room-temp,
+.background-note.is-room-temp {
+    border-color: var(--theme-warning);
+    box-shadow: inset 0 0 0 1px var(--theme-warning-soft);
+}
+
+.character-stat-card.is-room-temp strong,
+.attribute-chip.is-room-temp strong {
+    color: color-mix(in srgb, var(--theme-warning) 55%, var(--theme-text-primary));
+}

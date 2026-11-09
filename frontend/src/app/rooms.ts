@@ -1747,7 +1747,10 @@ function renderRoomCharacterBindings(room: Room): void {
         button.addEventListener("click", () => void promoteRoomMember(button.dataset.promoteUserId || ""));
     });
     container.querySelectorAll<HTMLButtonElement>("[data-room-character-preview]").forEach((button) => {
-        button.addEventListener("click", () => previewRoomCharacter(button.dataset.roomCharacterPreview || ""));
+        button.addEventListener("click", () => previewRoomCharacter(
+            button.dataset.roomCharacterPreview || "",
+            button.dataset.roomUserId || "",
+        ));
     });
 }
 
@@ -1761,7 +1764,7 @@ function renderRoomMemberBindingRow(room: Room, member: RoomMember): string {
     const canRemove = isActive && canManage && String(member.user_id) !== String(room.creator_id);
     const canPromote = isActive && canManage && String(member.user_id) !== String(room.creator_id) && member.room_role !== "admin";
     const cardPreviewHtml = card
-        ? `<button type="button" class="btn btn-link p-0 room-character-preview" data-room-character-preview="${encodeURIComponent(JSON.stringify(card))}">${escapeRoomHtml(card.name || "未命名角色卡")}</button>`
+        ? `<button type="button" class="btn btn-link p-0 room-character-preview" data-room-character-preview="${encodeURIComponent(JSON.stringify(card))}" data-room-user-id="${escapeRoomHtml(member.user_id)}">${escapeRoomHtml(card.name || "未命名角色卡")}</button>`
         : "未绑定";
     return window.TrpgTemplates.render("room-character-binding-row", {
         userId: member.user_id || "",
@@ -2153,7 +2156,7 @@ function clearCurrentRoom(): void {
     showRoomListView();
 }
 
-function previewRoomCharacter(encodedCard: string): void {
+function previewRoomCharacter(encodedCard: string, userId = ""): void {
     try {
         const rawCard = JSON.parse(decodeURIComponent(encodedCard)) as Partial<COC7CharacterCard>;
         const sheet = characterSheetForCard(rawCard);
@@ -2170,9 +2173,26 @@ function previewRoomCharacter(encodedCard: string): void {
         const instance = new bootstrap.Modal(modalElement);
         instance.show();
         modalElement.addEventListener("hidden.bs.modal", () => modalElement.remove());
+
+        // 房间内临时值标记：拉取快照与持久卡的差异后再渲染一次。
+        const roomId = String(currentRoom?.id || "");
+        if (!roomId || !userId) return;
+        void loadRoomCardDiff(roomId, userId).then((diff) => {
+            if (!diff || !Object.keys(diff).length) return;
+            const body = modalElement.querySelector<HTMLElement>(".modal-body");
+            if (!body) return;
+            body.innerHTML = sheet.renderCharacterDetail?.(card, diff) || body.innerHTML;
+        }).catch(() => { /* 差异只是增强展示，失败不影响预览 */ });
     } catch {
         showNotification("角色卡预览失败", "error");
     }
+}
+
+async function loadRoomCardDiff(roomId: string, userId: string): Promise<RoomCardDiff | null> {
+    const response = await TrpgApi.get<ApiResponse<{ diff?: RoomCardDiff }>>(
+        `/api/rooms/${encodeURIComponent(roomId)}/members/${encodeURIComponent(userId)}/character-diff`,
+    );
+    return response.success ? response.data?.diff || null : null;
 }
 
 function formatRoomOnlineCount(room: Room): string {

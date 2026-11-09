@@ -387,7 +387,7 @@ interface CharacterApi {
     createCharacterCard: (input?: COC7CharacterCardInput) => COC7CharacterCard;
     listCharacterCards: () => COC7CharacterCard[];
     getCharacterCardSnapshot: (cardId: string) => Partial<COC7CharacterCard> | null;
-    renderCharacterDetail: (card: COC7CharacterCard) => string;
+    renderCharacterDetail: (card: COC7CharacterCard, roomDiff?: RoomCardDiff) => string;
     clearCharacterManagement: () => void;
     reloadCharacterManagement: () => Promise<void>;
     initCharacterSheet: () => void;
@@ -4079,7 +4079,7 @@ interface Window {
         document.querySelectorAll(".character-card").forEach((item) => item.classList.remove("active"));
     }
 
-    function renderCharacterDetail(card: COC7CharacterCard): string {
+    function renderCharacterDetail(card: COC7CharacterCard, roomDiff?: RoomCardDiff): string {
         if (!supportsCard(card)) {
             return `
                 <header class="character-inspector-header">
@@ -4111,22 +4111,31 @@ interface Window {
                             <strong>${calculateAttributeBaseTotal(card.attributes)}</strong>
                         </div>
                     </div>
-                    <div class="character-attribute-grid">${ATTRIBUTE_KEYS.map((key) => renderAttributeChip(key, card.attributes[key])).join("")}</div>
+                    <div class="character-attribute-grid">${ATTRIBUTE_KEYS.map((key) => renderAttributeChip(key, card.attributes[key], roomDiff?.attributes?.[key])).join("")}</div>
                 </section>
-                ${renderCharacterVitals(card)}
+                ${renderCharacterVitals(card, roomDiff)}
                 ${renderCharacterStatusSection(card)}
-                ${renderCharacterSkillSection(card)}
-                ${renderCharacterWeaponsSection(card)}
+                ${renderCharacterSkillSection(card, roomDiff)}
+                ${renderCharacterWeaponsSection(card, roomDiff)}
                 ${renderCharacterCombatSection(card)}
-                ${renderCharacterPossessionsSection(card)}
-                ${renderCharacterAssetsSection(card)}
+                ${renderCharacterPossessionsSection(card, roomDiff)}
+                ${renderCharacterAssetsSection(card, roomDiff)}
                 ${renderCharacterBackgroundSections(card)}
             </div>
         `;
     }
 
-    function statCard(label: string, value: unknown): string {
-        return `<div class="character-stat-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
+    /** 房间内临时值徽标：悬停可以看到「当前 X / 保存值 Y」。 */
+    function roomTempBadge(entry?: RoomCardDiffEntry | null): string {
+        if (!entry) return "";
+        const saved = entry.saved === null || entry.saved === undefined ? "未保存" : entry.saved;
+        const tip = `房间内临时：当前 ${entry.current} / 保存值 ${saved}`;
+        return `<span class="room-temp-badge" title="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}">房间内临时</span>`;
+    }
+
+    function statCard(label: string, value: unknown, temp?: RoomCardDiffEntry | null): string {
+        const className = temp ? "character-stat-card is-room-temp" : "character-stat-card";
+        return `<div class="${className}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}${roomTempBadge(temp)}</strong></div>`;
     }
 
     function renderCharacterBasicInfo(card: COC7CharacterCard): string {
@@ -4150,18 +4159,18 @@ interface Window {
         `;
     }
 
-    function renderCharacterVitals(card: COC7CharacterCard): string {
-        const fields: Array<[string, unknown]> = [
-            ["生命值", `${card.currentHp} / ${card.maxHp}`],
-            ["理智值", `${card.currentSan} / ${card.initialSan} / ${card.maxSan}`],
-            ["魔法值", `${card.currentMp} / ${card.maxMp}`],
-            ["幸运", card.attributes.LUC],
-            ["移动速度", card.mov]
+    function renderCharacterVitals(card: COC7CharacterCard, roomDiff?: RoomCardDiff): string {
+        const fields: Array<[string, unknown, RoomCardDiffEntry | null | undefined]> = [
+            ["生命值", `${card.currentHp} / ${card.maxHp}`, roomDiff?.vitals?.hp],
+            ["理智值", `${card.currentSan} / ${card.initialSan} / ${card.maxSan}`, roomDiff?.vitals?.san],
+            ["魔法值", `${card.currentMp} / ${card.maxMp}`, roomDiff?.vitals?.mp],
+            ["幸运", card.attributes.LUC, null],
+            ["移动速度", card.mov, null]
         ];
         return `
             <section class="character-detail-band character-detail-band-vitals">
                 <h4>生命（HP）</h4>
-                <div class="character-vital-grid">${fields.map(([label, value]) => statCard(label, value)).join("")}</div>
+                <div class="character-vital-grid">${fields.map(([label, value, temp]) => statCard(label, value, temp)).join("")}</div>
             </section>
         `;
     }
@@ -4175,12 +4184,13 @@ interface Window {
         `;
     }
 
-    function renderCharacterSkillSection(card: COC7CharacterCard): string {
+    function renderCharacterSkillSection(card: COC7CharacterCard, roomDiff?: RoomCardDiff): string {
         const rows = card.skills.map((skill) => {
             const occupationPoints = skill.occupationPoints || 0;
             const interestPoints = skill.interestPoints || 0;
             const growthPoints = skill.growthPoints || 0;
             const success = clampNumber(skill.value, 0, 99, skill.base);
+            const temp = roomDiff?.skills?.[skill.name];
             return `
                 <tr>
                     <td>${skill.occupation ? "是" : "否"}</td>
@@ -4189,7 +4199,7 @@ interface Window {
                     <td>${occupationPoints}</td>
                     <td>${interestPoints}</td>
                     <td>${growthPoints}</td>
-                    <td>${success}</td>
+                    <td>${success}${roomTempBadge(temp)}</td>
                     <td>${Math.floor(success / 2)}</td>
                     <td>${Math.floor(success / 5)}</td>
                 </tr>
@@ -4220,13 +4230,14 @@ interface Window {
         `;
     }
 
-    function renderCharacterWeaponsSection(card: COC7CharacterCard): string {
+    function renderCharacterWeaponsSection(card: COC7CharacterCard, roomDiff?: RoomCardDiff): string {
         const rows = card.weapons.map((weapon) => {
             const success = findSkillSuccessByWeaponSkill(weapon);
             const impale = weapon.impale === null ? "-" : weapon.impale ? "是" : "否";
+            const temp = roomDiff?.weapons?.[weapon.name];
             return `
                 <tr>
-                    <td>${escapeHtml(weapon.name)}</td>
+                    <td>${escapeHtml(weapon.name)}${roomTempBadge(temp)}</td>
                     <td>${escapeHtml(weapon.skill)}</td>
                     <td>${success}</td>
                     <td>${escapeHtml(weapon.damage)}</td>
@@ -4278,25 +4289,25 @@ interface Window {
         `;
     }
 
-    function renderCharacterPossessionsSection(card: COC7CharacterCard): string {
+    function renderCharacterPossessionsSection(card: COC7CharacterCard, roomDiff?: RoomCardDiff): string {
         return `
             <section class="character-detail-band">
                 <h4>物品与装备</h4>
-                <div class="background-grid">${card.equipment.map(renderEquipmentDetail).join("") || `<div class="background-note">未填写</div>`}</div>
+                <div class="background-grid">${card.equipment.map((item) => renderEquipmentDetail(item, roomDiff?.items?.[item.name])).join("") || `<div class="background-note">未填写</div>`}</div>
             </section>
         `;
     }
 
-    function renderCharacterAssetsSection(card: COC7CharacterCard): string {
-        const fields: Array<[string, unknown]> = [
-            ["信用评级", card.creditRating],
-            ["现金", card.assets.cash],
-            ["消费水平", card.assets.spendingLevel]
+    function renderCharacterAssetsSection(card: COC7CharacterCard, roomDiff?: RoomCardDiff): string {
+        const fields: Array<[string, unknown, RoomCardDiffEntry | null | undefined]> = [
+            ["信用评级", card.creditRating, null],
+            ["现金", card.assets.cash, roomDiff?.cash],
+            ["消费水平", card.assets.spendingLevel, null]
         ];
         return `
             <section class="character-detail-band">
                 <h4>资产</h4>
-                <div class="character-vital-grid">${fields.map(([label, value]) => statCard(label, value)).join("")}</div>
+                <div class="character-vital-grid">${fields.map(([label, value, temp]) => statCard(label, value, temp)).join("")}</div>
                 <div class="background-grid background-grid-single">${backgroundNote("资产", card.assets.assetsText)}</div>
             </section>
         `;
@@ -4324,18 +4335,20 @@ interface Window {
         return active.length ? active.join("、") : "正常";
     }
 
-    function renderAttributeChip(key: COC7CoreAttributeKey, value: number): string {
+    function renderAttributeChip(key: COC7CoreAttributeKey, value: number, temp?: RoomCardDiffEntry | null): string {
         const derived = calculateAttributeDisplayValues(value);
-        return `<div class="attribute-chip"><span>${ATTRIBUTE_LABELS[key]} (${key})</span><strong>${value}</strong><small>半 ${derived.half} / 比 ${derived.ratio}</small></div>`;
+        const className = temp ? "attribute-chip is-room-temp" : "attribute-chip";
+        return `<div class="${className}"><span>${ATTRIBUTE_LABELS[key]} (${key})</span><strong>${value}${roomTempBadge(temp)}</strong><small>半 ${derived.half} / 比 ${derived.ratio}</small></div>`;
     }
 
-    function renderEquipmentDetail(item: COC7EquipmentItem): string {
+    function renderEquipmentDetail(item: COC7EquipmentItem, temp?: RoomCardDiffEntry | null): string {
         const details = [`数量 ${item.quantity}`, `重量 ${item.weight} kg`, item.notes || ""].filter(Boolean).join("；");
-        return backgroundNote(item.name || "未命名物品", details);
+        return backgroundNote(item.name || "未命名物品", details, temp);
     }
 
-    function backgroundNote(label: string, value: string): string {
-        return `<div class="background-note"><strong>${escapeHtml(label)}</strong><p>${escapeHtml(value || "未填写")}</p></div>`;
+    function backgroundNote(label: string, value: string, temp?: RoomCardDiffEntry | null): string {
+        const className = temp ? "background-note is-room-temp" : "background-note";
+        return `<div class="${className}"><strong>${escapeHtml(label)}${roomTempBadge(temp)}</strong><p>${escapeHtml(value || "未填写")}</p></div>`;
     }
 
     function renderRelationshipDetail(item: COC7Relationship): string {

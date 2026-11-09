@@ -1784,7 +1784,10 @@ function initWebSocket(): void {
         });
         socket.on("room_messages_changed", () => { void window.reloadRoomMessages?.(); });
         socket.on("user_typing", (data) => handleUserTyping(data));
-        socket.on("room_members_changed", () => { void window.refreshCurrentRoomMembers?.(); });
+        socket.on("room_members_changed", () => {
+            void window.refreshCurrentRoomMembers?.();
+            window.refreshRoomAiChanges?.();
+        });
         socket.on("room_interlude_updated", (data) => {
             const payload = data as { room_id?: string; interlude?: RoomInterludeState };
             if (window.currentRoom && payload?.room_id === window.currentRoom.id && payload.interlude) {

@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import time
 from pathlib import Path
@@ -994,6 +995,7 @@ def add_item(
             (row for row in weapons if isinstance(row, dict) and str(row.get("name") or "").casefold() == item_name.casefold()),
             None,
         )
+        before_row = copy.deepcopy(existing) if isinstance(existing, dict) else None
         if existing is None:
             weapons.append(sanitized)
         else:
@@ -1007,6 +1009,7 @@ def add_item(
             (row for row in equipment if isinstance(row, dict) and str(row.get("name") or "").casefold() == item_name.casefold()),
             None,
         )
+        before_row = copy.deepcopy(existing) if isinstance(existing, dict) else None
         if existing is None:
             item = {
                 "name": item_name,
@@ -1037,6 +1040,7 @@ def add_item(
         "created_by_id": str(actor_id or ""),
         "source": source,
         "persisted": False,
+        "before_row": before_row,
     }
     _append_record(state, "item_changes", record)
     _add_pending_change(
@@ -1683,6 +1687,19 @@ def apply_economy_expense(
     assets = dict(current_assets)
     assets["cash"] = after
     card["assets"] = assets
+    state = member.setdefault("character_state", {})
+    record = {
+        "id": f"cash-{uuid4().hex}",
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "type": "cash",
+        "before": before,
+        "after": after,
+        "reason": str(reason or "信用评级消费").strip()[:200],
+        "created_by": str(actor or ""),
+        "created_by_id": str(actor_id or ""),
+        "source": source,
+    }
+    _append_record(state, "economy_changes", record)
     record_room_changes(
         member,
         [
@@ -1690,7 +1707,8 @@ def apply_economy_expense(
                 "type": "assets",
                 "value": {"cash": after},
                 "source": source,
-                "reason": str(reason or "信用评级消费").strip()[:200],
+                "reason": record["reason"],
+                "record_id": record["id"],
             }
         ],
     )
@@ -1706,6 +1724,7 @@ def apply_economy_expense(
         reason=reason,
     )
     result["applied"] = True
+    result["record"] = record
     result["summary"] = (
         f"{result.get('summary') or ''} 已登记现金写回：{before} → {after}"
         "（归档时合并进角色卡）。"

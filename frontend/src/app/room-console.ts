@@ -14,9 +14,15 @@
     let canExecute = false;
     let bound = false;
     let entries: RoomConsoleEntry[] = [];
+    let aiRecords: RoomAiChangeRecord[] = [];
+    let loadedAiRecordsRoomId = "";
 
     function byId<T extends HTMLElement>(id: string): T | null {
         return document.getElementById(id) as T | null;
+    }
+
+    function t(key: string, fallback: string): string {
+        return global.TrpgI18n?.t(key, fallback) || fallback;
     }
 
     function levelClass(level?: string): string {
@@ -118,6 +124,84 @@
         if (hint) hint.hidden = canExecute;
     }
 
+    function renderAiRecords(): void {
+        const section = byId("roomAiRecordsSection");
+        const list = byId("roomAiRecordsList");
+        const empty = byId("roomAiRecordsEmpty");
+        if (!section || !list) return;
+        section.hidden = !canExecute;
+        list.innerHTML = "";
+        if (!canExecute) return;
+        if (empty) empty.hidden = aiRecords.length > 0;
+        for (const record of aiRecords) {
+            const item = document.createElement("div");
+            item.className = "list-group-item d-flex justify-content-between align-items-center gap-2 px-0";
+            const info = document.createElement("div");
+            info.className = "small";
+            const status = record.rolled_back ? ` · ${t("room.aiRecords.rolledBack", "已回滚")}` : "";
+            const before = record.before === null || record.before === undefined ? "—" : String(record.before);
+            const after = record.after === null || record.after === undefined ? "—" : String(record.after);
+            info.textContent = `${record.at || ""} ${record.player_name || ""} · `
+                + `${record.label || record.field || ""}「${record.name || ""}」`
+                + `${before} → ${after} · ${record.tool || ""}${status}`;
+            item.appendChild(info);
+            if (!record.rolled_back) {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = "btn btn-sm btn-outline-warning";
+                button.textContent = t("room.aiRecords.rollback", "回滚");
+                button.addEventListener("click", () => { void rollbackAiRecord(record.id); });
+                item.appendChild(button);
+            }
+            list.appendChild(item);
+        }
+    }
+
+    async function loadAiRecords(roomId: string): Promise<void> {
+        if (!roomId || !canExecute) {
+            aiRecords = [];
+            renderAiRecords();
+            return;
+        }
+        try {
+            const response = await TrpgApi.get<ApiResponse<{ records?: RoomAiChangeRecord[] }>>(
+                `/api/rooms/${encodeURIComponent(roomId)}/console/ai-changes`
+            );
+            aiRecords = response.success && response.data?.records ? response.data.records : [];
+        } catch {
+            aiRecords = [];
+        }
+        renderAiRecords();
+    }
+
+    async function rollbackAiRecord(recordId: string): Promise<void> {
+        if (!activeRoomId || !canExecute || !recordId) return;
+        const confirmed = await global.TrpgDialog?.confirm({
+            title: t("room.aiRecords.rollback", "回滚"),
+            message: t("room.aiRecords.rollbackConfirm", "确认把这条 AI 写卡改动回滚到变更前的值？"),
+            confirmText: t("room.aiRecords.rollback", "回滚"),
+            danger: true,
+        });
+        if (!confirmed) return;
+        let response: ApiResponse<{ ok: boolean; message?: string }>;
+        try {
+            response = await TrpgApi.post<ApiResponse<{ ok: boolean; message?: string }>>(
+                `/api/rooms/${encodeURIComponent(activeRoomId)}/console/ai-changes/${encodeURIComponent(recordId)}/rollback`,
+                {}
+            );
+        } catch (error) {
+            appendLocal((error as Error).message || "回滚失败", "error");
+            return;
+        }
+        if (!response.success) {
+            appendLocal(response.message || "回滚失败", "error");
+            return;
+        }
+        appendLocal(response.message || "已回滚该 AI 写卡改动", "info");
+        await loadAiRecords(activeRoomId);
+        void global.refreshCurrentRoomMembers?.();
+    }
+
     async function loadLog(roomId: string): Promise<void> {
         try {
             const response = await TrpgApi.get<ApiResponse<{ entries?: RoomConsoleEntry[] }>>(
@@ -197,6 +281,9 @@
         bound = true;
         byId("roomConsoleSend")?.addEventListener("click", () => { void handleSend(); });
         byId("roomConsoleClear")?.addEventListener("click", () => { void handleClear(); });
+        byId("roomAiRecordsRefresh")?.addEventListener("click", () => {
+            if (activeRoomId) void loadAiRecords(activeRoomId);
+        });
         byId<HTMLInputElement>("roomConsoleInput")?.addEventListener("keydown", (event) => {
             if (event.key === "Enter") {
                 event.preventDefault();
@@ -217,9 +304,19 @@
         if (activeRoomId !== roomId) {
             activeRoomId = roomId;
             entries = [];
+            loadedAiRecordsRoomId = "";
             renderAll();
             void loadLog(roomId);
         }
+        if (canExecute && loadedAiRecordsRoomId !== roomId) {
+            loadedAiRecordsRoomId = roomId;
+            void loadAiRecords(roomId);
+        }
+        renderAiRecords();
+    };
+
+    global.refreshRoomAiChanges = (): void => {
+        if (activeRoomId) void loadAiRecords(activeRoomId);
     };
 
     global.appendRoomConsoleEntry = (payload?: RoomConsoleSocketPayload): void => {
@@ -236,7 +333,10 @@
     global.closeRoomConsole = (): void => {
         activeRoomId = "";
         entries = [];
+        aiRecords = [];
+        loadedAiRecordsRoomId = "";
         renderAll();
+        renderAiRecords();
         const panel = byId("roomConsolePanel");
         if (panel) panel.hidden = false;
     };

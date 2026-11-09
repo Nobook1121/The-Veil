@@ -223,3 +223,122 @@ def test_concurrent_joins_only_one_succeeds(tmp_path):
         thread.join(timeout=10)
 
     assert sorted(results.values()) == [200, 409]
+
+
+def _write_persistent_card(tmp_path, card, card_id=None, user_id=2):
+    card_id = card_id or card["id"]
+    directory = tmp_path / "characters" / card_id
+    directory.mkdir(parents=True, exist_ok=True)
+    payload = dict(card)
+    payload.setdefault("id", card_id)
+    payload.setdefault("playerId", str(user_id))
+    (directory / "character.json").write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def _snapshot_card():
+    return {
+        "id": "card-1",
+        "name": "调查员",
+        "attributes": {"STR": 60, "CON": 50, "SIZ": 50},
+        "skills": [{"name": "侦查", "value": 60}],
+        "assets": {"cash": 42},
+        "currentHp": 8,
+        "maxHp": 10,
+        "currentSan": 40,
+        "maxSan": 50,
+        "currentMp": 10,
+        "maxMp": 10,
+        "equipment": [{"name": "手电筒", "quantity": 3, "weight": 0}],
+        "weapons": [{"name": "撬棍"}],
+    }
+
+
+def _persistent_card():
+    return {
+        "id": "card-1",
+        "name": "调查员",
+        "attributes": {"STR": 50, "CON": 50, "SIZ": 50},
+        "skills": [{"name": "侦查", "value": 50}],
+        "assets": {"cash": 82},
+        "currentHp": 10,
+        "maxHp": 10,
+        "currentSan": 50,
+        "maxSan": 50,
+        "currentMp": 10,
+        "maxMp": 10,
+        "equipment": [{"name": "手电筒", "quantity": 1, "weight": 0}],
+        "weapons": [],
+    }
+
+
+def test_room_character_diff_reports_only_changed_fields(tmp_path):
+    app, rooms_dir = _make_app(tmp_path)
+    _make_room(rooms_dir, "r-a", code="CODE-A")
+    client = _client(app, 2)
+    assert _join(client, "CODE-A", _snapshot_card()).status_code == 200
+    # 加入房间时不会复制资产字段；经济写回会在快照卡上补出 assets.cash。
+    room_info = json.loads((rooms_dir / "r-a" / "info.json").read_text(encoding="utf-8"))
+    room_info["members"][0]["character_card"]["assets"] = {"cash": 42}
+    (rooms_dir / "r-a" / "info.json").write_text(
+        json.dumps(room_info, ensure_ascii=False), encoding="utf-8"
+    )
+    _write_persistent_card(tmp_path, _persistent_card())
+
+    response = client.get(
+        "/api/rooms/r-a/members/2/character-diff", headers={"X-CSRF-Token": "csrf"}
+    )
+
+    assert response.status_code == 200
+    diff = response.get_json()["data"]["diff"]
+    assert diff["attributes"] == {"STR": {"current": 60, "saved": 50}}
+    assert diff["skills"] == {"侦查": {"current": 60, "saved": 50}}
+    assert diff["vitals"]["hp"] == {"current": 8, "saved": 10}
+    assert diff["vitals"]["san"] == {"current": 40, "saved": 50}
+    assert "mp" not in diff["vitals"]
+    assert diff["cash"] == {"current": 42, "saved": 82}
+    assert diff["items"] == {"手电筒": {"current": 3, "saved": 1}}
+    assert diff["weapons"] == {"撬棍": {"current": 1, "saved": 0}}
+
+
+def test_room_character_diff_without_persistent_card_is_empty(tmp_path):
+    app, rooms_dir = _make_app(tmp_path)
+    _make_room(rooms_dir, "r-a", code="CODE-A")
+    client = _client(app, 2)
+    assert _join(client, "CODE-A", _snapshot_card()).status_code == 200
+
+    response = client.get(
+        "/api/rooms/r-a/members/2/character-diff", headers={"X-CSRF-Token": "csrf"}
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["diff"] == {}
+
+
+def test_room_character_diff_requires_membership(tmp_path):
+    app, rooms_dir = _make_app(tmp_path)
+    _make_room(rooms_dir, "r-a", code="CODE-A")
+    assert _join(_client(app, 2), "CODE-A", _snapshot_card()).status_code == 200
+    _write_persistent_card(tmp_path, _persistent_card())
+
+    outsider = _client(app, 3)
+    denied = outsider.get(
+        "/api/rooms/r-a/members/2/character-diff", headers={"X-CSRF-Token": "csrf"}
+    )
+    assert denied.status_code == 403
+
+    admin = app.test_client()
+    with admin.session_transaction() as session:
+        session.update(
+            user_id=9,
+            username="admin",
+            role="ADMIN",
+            session_token="token",
+            csrf_token="csrf",
+        )
+    allowed = admin.get(
+        "/api/rooms/r-a/members/2/character-diff", headers={"X-CSRF-Token": "csrf"}
+    )
+    assert allowed.status_code == 200
+    assert allowed.get_json()["data"]["diff"]["skills"]["侦查"]["saved"] == 50

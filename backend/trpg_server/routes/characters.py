@@ -9,7 +9,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.json_store import read_json, write_json_atomic
-from trpg_server import character_card_io, character_service, weapon_catalog
+from trpg_server import character_card_io, character_service, room_ai_changes, weapon_catalog
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, success_response
@@ -1188,6 +1188,78 @@ def export_character(character_id):
         角色名=character.get("name"),
     )
     return success_response(bundle, "Character exported successfully")
+
+
+@bp.route("/api/rooms/<room_id>/members/<user_id>/character-diff", methods=["GET"])
+def room_member_character_diff(room_id, user_id):
+    """房间快照与持久角色卡的差异；仅房间成员或管理员可读。
+
+    用于卡面标记「房间内临时」：只返回实际变化的字段（当前值 / 保存值），
+    不返回整张持久卡，避免扩大可见范围。房间未绑定持久卡时返回空差异。
+    """
+    login_error = _require_login()
+    if login_error:
+        return login_error
+
+    room_dir = safe_join(_get_rooms_dir(), room_id)
+    info = read_json(room_dir / "info.json", default=None)
+    if not isinstance(info, dict):
+        return error_response("房间不存在", 404, "room_not_found")
+    members = info.get("members") if isinstance(info.get("members"), list) else []
+    member = next(
+        (
+            row
+            for row in members
+            if isinstance(row, dict) and str(row.get("user_id")) == str(user_id)
+        ),
+        None,
+    )
+    if member is None:
+        return error_response("房间成员不存在", 404, "member_not_found")
+    if not _is_elevated():
+        viewer = str(session.get("user_id") or "")
+        is_room_member = any(
+            isinstance(row, dict)
+            and str(row.get("user_id")) == viewer
+            and row.get("status") != "removed"
+            for row in members
+        )
+        if not is_room_member:
+            return error_response("无权查看该房间角色卡", 403, "permission_denied")
+
+    current = member.get("character_card") if isinstance(member.get("character_card"), dict) else None
+    diff = {}
+    if current:
+        persistent = _load_room_member_card(member, current)
+        diff = room_ai_changes.diff_room_card(persistent, current)
+    return success_response(
+        {"room_id": str(room_id), "user_id": str(user_id), "diff": diff},
+        "Room character diff loaded",
+    )
+
+
+def _load_room_member_card(member, current):
+    """读取房间成员绑定的持久卡；无绑定或读取失败时返回 None。"""
+    from trpg_server.site_agent_auth import Actor
+
+    card_id = str(current.get("id") or "")
+    if not card_id:
+        return None
+    try:
+        user_id = int(str(member.get("user_id") or "0"))
+    except (TypeError, ValueError):
+        user_id = 0
+    actor = Actor(
+        user_id=user_id,
+        username=str(member.get("username") or ""),
+        role="USER",
+        permissions=frozenset(),
+        room_ids=frozenset(),
+    )
+    try:
+        return character_service.get_for_actor(actor, card_id)
+    except character_service.CharacterServiceError:
+        return None
 
 
 @bp.route("/api/characters/import", methods=["POST"])

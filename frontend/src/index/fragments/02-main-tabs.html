@@ -404,6 +404,14 @@
                                     <button type="button" class="btn btn-sm btn-outline-danger" id="roomConsoleClear" data-i18n="room.console.clear">清空</button>
                                 </div>
                                 <div class="card-body">
+                                    <div id="roomAiRecordsSection" class="mb-3" hidden>
+                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                            <span data-i18n="room.aiRecords.title">AI 写卡记录</span>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" id="roomAiRecordsRefresh" data-i18n="room.aiRecords.refresh">刷新</button>
+                                        </div>
+                                        <div id="roomAiRecordsList" class="list-group list-group-flush" style="max-height: 220px; overflow-y: auto;"></div>
+                                        <div id="roomAiRecordsEmpty" class="text-muted small" data-i18n="room.aiRecords.empty" hidden>暂无 AI 写卡记录。</div>
+                                    </div>
                                     <div id="roomConsoleOutput" class="room-console-output" style="max-height: 240px; overflow-y: auto; font-family: monospace; font-size: 12px; background: #1e1e1e; color: #d4d4d4; padding: 8px; border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;"></div>
                                     <div id="roomConsoleEmpty" class="text-muted small mt-2" data-i18n="room.console.empty">本房间暂无日志。</div>
                                     <div class="input-group mt-2">

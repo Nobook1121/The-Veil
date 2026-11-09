@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from trpg_server import room_rules
+from trpg_server import room_ai_changes, room_rules
 from trpg_server.agents.tools.base import AgentTool
 
 
@@ -149,16 +149,51 @@ def execute_economy(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     try:
         member = _member(info, arguments, context)
         if bool(arguments.get("apply")):
+            amount = _number(arguments.get("amount"))
+            card = room_rules.member_card(member)
+            assets = card.get("assets") if isinstance(card.get("assets"), dict) else {}
+            current_cash = room_rules._as_int(assets.get("cash"), 0)
+            predicted_after = max(0, current_cash - int(amount or 0))
+            conflict = room_ai_changes.rollback_conflict(
+                info, member, field="cash", name="现金", value=predicted_after
+            )
+            if conflict is not None:
+                return {
+                    "ok": True,
+                    "skipped": True,
+                    "rolled_back": True,
+                    "current": current_cash,
+                    "summary": (
+                        f"房主已回滚该笔现金改动，当前现金为 {current_cash}，"
+                        "以当前角色卡为准，不要重试。"
+                    ),
+                }
             result = room_rules.apply_economy_expense(
                 context.room_dir,
                 info,
                 member,
-                amount=_number(arguments.get("amount")),
+                amount=amount,
                 era=str(arguments.get("era") or "1920s"),
                 reason=str(arguments.get("reason") or ""),
                 actor=getattr(context, "username", None) or "AI KP",
                 actor_id=getattr(context, "user_id", None),
             )
+            if result.get("applied"):
+                record = result.get("record") if isinstance(result.get("record"), dict) else {}
+                room_ai_changes.record_change(
+                    context.room_dir,
+                    info,
+                    member,
+                    tool="coc7.economy",
+                    field="cash",
+                    name="现金",
+                    before=result.get("before_cash"),
+                    after=result.get("after_cash"),
+                    record_id=str(record.get("id") or ""),
+                    reason=str(arguments.get("reason") or ""),
+                    actor=getattr(context, "username", None) or "AI KP",
+                    actor_id=getattr(context, "user_id", None),
+                )
         else:
             result = room_rules.economy_summary(
                 member,

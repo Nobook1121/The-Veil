@@ -54,7 +54,7 @@ from trpg_server.scenario_store import load_scenario_by_id
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
 from trpg_server.room_log import log_room_event
-from trpg_server import room_interlude, room_rules
+from trpg_server import room_ai_changes, room_interlude, room_rules
 from trpg_server.room_mode import (
     SCENARIO_BINDING_NONE,
     SCENARIO_BINDING_REQUIRED,
@@ -811,6 +811,10 @@ def chat():
             override_facts = facts_from_state(agent_context.room_state())
             if override_facts:
                 system_prompt += format_facts_block(override_facts)
+            # 房主回滚过的 AI 改卡事实：模型必须按回滚后的真实值思考，不要重试。
+            rollback_facts = room_ai_changes.format_rollback_context(agent_context.room_info())
+            if rollback_facts:
+                system_prompt += "\n\n" + rollback_facts
         excluded_tool_names: set[str] = set()
         if freeform_room:
             excluded_tool_names |= set(FREEFORM_EXCLUDED_TOOLS)

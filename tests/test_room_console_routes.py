@@ -299,3 +299,131 @@ def test_unauthenticated_request_is_rejected(tmp_path):
     response = client.get("/api/rooms/r-1/console/log", headers={"X-CSRF-Token": "csrf"})
 
     assert response.status_code == 401
+
+
+def _seed_ai_change(room_dir, info):
+    """给房间写入一条 AI 改卡记录与对应的待写回项。"""
+    member = info["members"][1]
+    member["character_card"] = {
+        "name": "调查员",
+        "skills": [{"name": "侦查", "value": 60}],
+        "assets": {"cash": 30},
+    }
+    member["character_state"] = {
+        "pending_changes": [
+            {
+                "id": "chg-1",
+                "type": "skill",
+                "name": "侦查",
+                "value": 60,
+                "record_id": "rec-ai-1",
+            }
+        ]
+    }
+    info["ai_change_records"] = [
+        {
+            "id": "rec-ai-1",
+            "at": "2026-01-01 00:00:00",
+            "actor": "AI KP",
+            "tool": "character.set_skill",
+            "target_user_id": "2",
+            "player_name": "player",
+            "field": "skill",
+            "label": "技能",
+            "name": "侦查",
+            "before": 50,
+            "after": 60,
+            "rolled_back": False,
+            "rolled_back_at": None,
+            "rolled_back_by": None,
+        }
+    ]
+    (room_dir / "info.json").write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+
+
+def test_owner_can_list_and_rollback_ai_changes(tmp_path):
+    room_dir, info = _write_room(tmp_path)
+    _seed_ai_change(room_dir, info)
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client)
+
+    listed = client.get("/api/rooms/r-1/console/ai-changes", headers={"X-CSRF-Token": "csrf"})
+    assert listed.status_code == 200
+    records = listed.get_json()["data"]["records"]
+    assert [row["id"] for row in records] == ["rec-ai-1"]
+
+    rolled = client.post(
+        "/api/rooms/r-1/console/ai-changes/rec-ai-1/rollback",
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert rolled.status_code == 200
+    data = rolled.get_json()["data"]
+    assert data["ok"] is True
+    assert data["already_rolled_back"] is False
+    assert data["removed_changes"] == 1
+    assert data["record"]["rolled_back"] is True
+
+    saved = json.loads((room_dir / "info.json").read_text(encoding="utf-8"))
+    member = saved["members"][1]
+    assert member["character_card"]["skills"][0]["value"] == 50
+    assert member["character_state"]["pending_changes"] == []
+    assert saved["ai_change_records"][0]["rolled_back_by"] == "tester"
+
+    # 二次回滚幂等，不报错也不重复改动。
+    again = client.post(
+        "/api/rooms/r-1/console/ai-changes/rec-ai-1/rollback",
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert again.status_code == 200
+    assert again.get_json()["data"]["already_rolled_back"] is True
+
+
+def test_member_cannot_list_or_rollback_ai_changes(tmp_path):
+    room_dir, info = _write_room(tmp_path)
+    _seed_ai_change(room_dir, info)
+    app = _app(tmp_path, role="USER")
+    client = app.test_client()
+    _login(client, role="USER", user_id=2, username="player")
+
+    assert client.get(
+        "/api/rooms/r-1/console/ai-changes", headers={"X-CSRF-Token": "csrf"}
+    ).status_code == 403
+    assert client.post(
+        "/api/rooms/r-1/console/ai-changes/rec-ai-1/rollback",
+        headers={"X-CSRF-Token": "csrf"},
+    ).status_code == 403
+
+    saved = json.loads((room_dir / "info.json").read_text(encoding="utf-8"))
+    assert saved["members"][1]["character_card"]["skills"][0]["value"] == 60
+
+
+def test_archived_room_cannot_rollback_ai_changes(tmp_path):
+    room_dir, info = _write_room(tmp_path, archived=True)
+    _seed_ai_change(room_dir, info)
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client)
+
+    response = client.post(
+        "/api/rooms/r-1/console/ai-changes/rec-ai-1/rollback",
+        headers={"X-CSRF-Token": "csrf"},
+    )
+
+    assert response.status_code == 409
+
+
+def test_rollback_unknown_ai_change_returns_400(tmp_path):
+    room_dir, info = _write_room(tmp_path)
+    _seed_ai_change(room_dir, info)
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client)
+
+    response = client.post(
+        "/api/rooms/r-1/console/ai-changes/rec-missing/rollback",
+        headers={"X-CSRF-Token": "csrf"},
+    )
+
+    assert response.status_code == 400
+

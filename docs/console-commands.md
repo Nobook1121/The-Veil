@@ -525,6 +525,15 @@ rule limits hourly <次数|inherit>（房间只能比站点更严格）
 房间归档时按房规 `rule_persist_on_archive`（默认开启）把 SAN、技能、属性、物品统一写回，
 只覆盖实际变更的字段，不会整卡覆盖玩家在卡面编辑器里的其它修改。
 
+AI KP 的写卡工具（`character_stats` 的 `character.set_skill` / `character.set_attribute`、
+`character_items` 的 `character.add_item`、以及 `coc7.economy` 的 `apply`）没有 `persist`
+开关：它们只写本房间快照并登记统一待写回项，持久角色卡只在房间归档时由
+`apply_room_changes` 合并。每次 AI 写卡会在房间控制台上方的「AI 写卡记录」区留下一条记录
+（操作者、目标玩家、字段、旧值 → 新值、工具、时间与 `record_id`），房主 / 房间管理员 /
+系统管理员可点条目旁的「回滚」把该字段恢复为变更前的值，同时撤销对应待写回项；
+记录保留并标记「已回滚」，不删除。回滚后 AI 再提交同一目标值会被直接跳过，KP 系统提示
+也会注入最近的回滚事实，要求以当前角色卡为准、不要重试。
+
 `rule social` / `rule combined` / `rule groupluck` / `rule contact` / `rule economy` 受房间房规开关
 `coc7_social_difficulty` / `coc7_combined_checks` / `coc7_group_luck` / `coc7_contacts` / `coc7_economy`
 控制，默认关闭。开关关闭时这些子命令按「未知的规则命令」处理，与旧版本完全一致；开启后统一走

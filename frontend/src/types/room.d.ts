@@ -168,10 +168,46 @@ interface RoomConsoleEntry {
     details?: Record<string, unknown>;
 }
 
+interface RoomAiChangeRecord {
+    id: string;
+    at?: string;
+    actor?: string;
+    tool?: string;
+    player_name?: string;
+    field?: string;
+    label?: string;
+    name?: string;
+    before?: unknown;
+    after?: unknown;
+    reason?: string;
+    rolled_back?: boolean;
+    rolled_back_at?: string | null;
+    rolled_back_by?: string | null;
+}
+
 interface RoomConsoleSocketPayload {
     room_id?: string;
     type?: string;
     entry?: RoomConsoleEntry;
+}
+
+/** 房间快照相对持久卡的一处差异（用于卡面「房间内临时」标记）。 */
+interface RoomCardDiffEntry {
+    current: number;
+    saved: number | null;
+}
+
+interface RoomCardDiff {
+    attributes?: Record<string, RoomCardDiffEntry>;
+    skills?: Record<string, RoomCardDiffEntry>;
+    vitals?: {
+        hp?: RoomCardDiffEntry;
+        san?: RoomCardDiffEntry;
+        mp?: RoomCardDiffEntry;
+    };
+    cash?: RoomCardDiffEntry;
+    items?: Record<string, RoomCardDiffEntry>;
+    weapons?: Record<string, RoomCardDiffEntry>;
 }
 
 interface RoomConsoleOpenOptions {

@@ -10,7 +10,7 @@ import logging
 
 from flask import Blueprint, current_app, request, session
 
-from trpg_server import room_interlude
+from trpg_server import room_ai_changes, room_interlude, room_rules
 from trpg_server.responses import error_response, success_response
 from trpg_server.room_console_commands import (
     ROOM_COMMAND_WHITELIST,
@@ -218,6 +218,80 @@ def run_room_console_command(room_id):
         extra["kp_prompt"] = room_interlude.interlude_opening_prompt()
     return success_response(
         {"ok": result.ok, "message": result.message, **extra}, "Room command executed"
+    )
+
+
+@bp.route("/api/rooms/<room_id>/console/ai-changes", methods=["GET"])
+def list_room_ai_changes(room_id):
+    """AI 写卡记录只对房主 / 房间管理员 / 系统管理员可见。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    room_dir, info, error = _load_room_or_error(room_id)
+    if error:
+        return error
+    settings = _settings()
+    if not settings["enabled"]:
+        return error_response("Room console is disabled", 403, "Room console disabled")
+    if _current_rank(info) < _required_rank(settings["execute_role"], "admin"):
+        return _denied(room_id)
+    return success_response(
+        {"records": room_ai_changes.list_records(info)},
+        "Room AI change records loaded successfully",
+    )
+
+
+@bp.route(
+    "/api/rooms/<room_id>/console/ai-changes/<record_id>/rollback",
+    methods=["POST"],
+)
+def rollback_room_ai_change(room_id, record_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    room_dir, info, error = _load_room_or_error(room_id)
+    if error:
+        return error
+    settings = _settings()
+    if not settings["enabled"]:
+        return error_response("Room console is disabled", 403, "Room console disabled")
+    if _current_rank(info) < _required_rank(settings["execute_role"], "admin"):
+        return _denied(room_id)
+    if info.get("archived"):
+        return error_response(
+            "Archived room cannot roll back character changes", 409, "Room archived"
+        )
+    try:
+        result = room_ai_changes.rollback(
+            room_dir,
+            info,
+            record_id,
+            actor=session.get("username"),
+            actor_id=session.get("user_id"),
+        )
+    except room_rules.RuleOperationError as exc:
+        return error_response(exc.message, 400, exc.code)
+    resolved_room_id = info.get("id") or room_id
+    socketio = current_app.extensions.get("socketio")
+    if socketio is not None:
+        socketio.emit(
+            "room_members_changed",
+            {"room_id": resolved_room_id},
+            room=resolved_room_id,
+        )
+    record = result.get("record") or {}
+    return success_response(
+        {
+            "ok": True,
+            "already_rolled_back": bool(result.get("already_rolled_back")),
+            "removed_changes": result.get("removed_changes") or 0,
+            "record": record,
+        },
+        (
+            "该改动已回滚过"
+            if result.get("already_rolled_back")
+            else "已回滚 AI 写卡改动"
+        ),
     )
 
 
