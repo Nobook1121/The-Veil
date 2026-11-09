@@ -218,6 +218,7 @@
 - `POST /api/rooms/<room_id>/console/ai-changes/<record_id>/rollback`：回滚一条 AI 写卡记录：把字段恢复为变更前的值、撤销对应的 `pending_changes` 项、同步房间快照，并把条目标记为「已回滚」（保留记录）。重复回滚幂等；已归档房间返回 409。成功后广播 `room_members_changed`，其他客户端会刷新成员与记录。
 - `DELETE /api/rooms/<room_id>/console/log`：清空本房间控制台日志（破坏性，已归档房间拒绝）。
 - `POST /api/rooms/<room_id>/archive`：归档房间。
+- `POST /api/rooms/<room_id>/interlude/end`：结束幕间并归档（房主 / 房间管理员 / 站点管理员），body 需带 `{ "confirm": true }`，否则返回 `409`。成功后先结束幕间（保留成长 / SAN 结算结果），再复用 `room_admin.archive_room` 写入结局记录与不可变归档快照。房间操作区的「归档房间」按钮在幕间中调用本接口，确保「结束幕间 + 归档」两步都执行，不会只归档而不收尾；命令入口 `/interlude end` 与控制台 `interlude end` 行为不变。
 - `GET /api/rooms/<room_id>/archive`：读取归档房间内容（别名 `GET /api/room-archives/<room_id>`）。
 - `GET /api/room-archives`：列出归档房间（别名 `GET /api/rooms/archives`）。
 - `GET /api/rooms/<room_id>/messages`：读取房间聊天记录。

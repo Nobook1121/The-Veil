@@ -1067,9 +1067,15 @@ function updateRoomDetail(room: Room): void {
     const archiveButton = document.getElementById("archiveRoom") as HTMLButtonElement | null;
     if (archiveButton) {
         // 仅 scripted 房间需要先到达结局；无剧本 / 无 AI 房间可显式归档。
+        // 幕间中即使 completed_at 缺失也允许归档（走「结束幕间 + 归档」链路）。
         const requiresEnding = room.scenario_binding === "required";
-        archiveButton.hidden = Boolean(room.archived || !canManageRoom(room) || (requiresEnding && !room.completed_at));
-        archiveButton.textContent = "归档房间";
+        const interludeActive = room.interlude?.active === true;
+        archiveButton.hidden = Boolean(
+            room.archived
+                || !canManageRoom(room)
+                || (requiresEnding && !room.completed_at && !interludeActive)
+        );
+        archiveButton.textContent = roomText("room.action.archive", "归档房间");
     }
     const houseRulesButton = document.getElementById("editHouseRules") as HTMLButtonElement | null;
     if (houseRulesButton) houseRulesButton.hidden = Boolean(room.archived) || !canManageRoom(room);
@@ -1248,25 +1254,54 @@ window.reloadRoomMessages = reloadRoomMessages;
 
 async function archiveCurrentRoom(): Promise<void> {
     if (!currentRoom?.id || currentRoom.archived) return;
-    const confirmed = await window.TrpgDialog?.confirm({
-        title: "归档房间",
-        message: "归档后房间将关闭 AI，但仍保留在房间管理列表中，可继续使用骰娘等工具并查看历史记录。",
-        confirmText: "归档",
-    });
+    // 幕间中必须走「结束幕间 + 归档」接口：它内部复用 room_admin.archive_room，
+    // 只调用 /archive 会归档房间但把幕间状态留在进行中。
+    const interludeActive = currentRoom.interlude?.active === true;
+    const confirmed = await window.TrpgDialog?.confirm(
+        interludeActive
+            ? {
+                  title: roomText("room.archive.interlude_title", "结束幕间并归档房间"),
+                  message: roomText(
+                      "room.archive.interlude_confirm",
+                      "房间仍在幕间。归档会先结束幕间（含成长 / SAN 结算结果），再关闭房间并写入结局记录与不可变归档快照；房间仍保留在房间管理列表中，可查看历史并使用骰娘。确定结束幕间并归档吗？"
+                  ),
+                  confirmText: roomText("room.archive.interlude_submit", "结束幕间并归档"),
+                  danger: true,
+              }
+            : {
+                  title: roomText("room.archive.title", "归档房间"),
+                  message: roomText(
+                      "room.archive.confirm",
+                      "归档后房间将关闭 AI，但仍保留在房间管理列表中，可继续使用骰娘等工具并查看历史记录。"
+                  ),
+                  confirmText: roomText("room.archive.submit", "归档"),
+                  danger: true,
+              }
+    );
     if (!confirmed) return;
     try {
-        const response = await TrpgApi.post<ApiResponse<{ archived_at?: string }>>(`/api/rooms/${encodeURIComponent(currentRoom.id)}/archive`, {});
-        if (!response.success) throw new Error(response.message || response.error || "归档失败");
+        const endpoint = interludeActive ? "interlude/end" : "archive";
+        const response = await TrpgApi.post<ApiResponse<{ archived_at?: string; archive?: { archived_at?: string } }>>(
+            `/api/rooms/${encodeURIComponent(currentRoom.id)}/${endpoint}`,
+            interludeActive ? { confirm: true } : {}
+        );
+        if (!response.success) throw new Error(response.message || response.error || roomText("room.archive.failed", "归档失败"));
         currentRoom.archived = true;
-        const archivedAt = response.data?.archived_at;
+        const archivedAt = response.data?.archived_at || response.data?.archive?.archived_at;
         if (archivedAt) currentRoom.archived_at = archivedAt;
+        if (currentRoom.interlude) currentRoom.interlude.active = false;
         currentRoom.completed_at = currentRoom.completed_at || currentRoom.archived_at || new Date().toISOString();
         updateRoomDetail(currentRoom);
         applyInvisibleRoomView(false);
         await loadRoomsList();
-        showNotification("房间已归档，仍停留在房间内；AI 已关闭，骰娘等工具可继续使用", "success");
+        showNotification(
+            interludeActive
+                ? roomText("room.archive.interlude_done", "幕间已结束，房间已归档；仍停留在房间内，可查看历史并使用骰娘")
+                : roomText("room.archive.done", "房间已归档，仍停留在房间内；AI 已关闭，骰娘等工具可继续使用"),
+            "success"
+        );
     } catch (error) {
-        showNotification(`归档失败：${roomErrorMessage(error)}`, "error");
+        showNotification(`${roomText("room.archive.failed", "归档失败")}：${roomErrorMessage(error)}`, "error");
     }
 }
 

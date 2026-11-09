@@ -1792,6 +1792,8 @@ function initWebSocket(): void {
             const payload = data as { room_id?: string; interlude?: RoomInterludeState };
             if (window.currentRoom && payload?.room_id === window.currentRoom.id && payload.interlude) {
                 window.currentRoom.interlude = payload.interlude;
+                // 幕间开始/结束时立即刷新房间操作区，归档按钮的可见性随之更新。
+                window.refreshRoomArchiveUi?.();
             }
         });
         socket.on("room_autosave_created", () => { void window.refreshRoomNodes?.(); });
