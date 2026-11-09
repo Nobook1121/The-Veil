@@ -369,14 +369,22 @@ voice cache prune [--room <room-id>] [--yes]   按配额 LRU 裁剪本房间缓�
 ## 房间管理
 
 ```text
-room list [search]              列出房间：ID/名称/房间码/剧本/成员数/是否归档
+room list [search]              列出房间：ID/名称/房间码/模式/剧本/成员数/是否归档
 room members <room-id>          查看房间成员（账号角色 + 房间角色）
-room archive <room-id> [--yes]  归档房间（要求已到达结局，与网页规则一致）
+room archive <room-id> [--yes]  归档房间（有剧本时要求已到达结局；无剧本房间可直接归档）
+room mode <room-id> <scripted|freeform|manual> [--yes]
+                                迁移房间模式（缺省预演；freeform 会清空剧本绑定与场景指针）
 room prune [--days N] [--yes]   清理僵尸房间：未归档、无有效成员、且 >N 天（默认 30）无活动
 ```
 
-`room archive` 会生成与网页一致的不可变归档快照（需要运行体注入的 Flask app 上下文；
+`room archive` 会生成与网页一致的不可变归档快照（需要运行体注入的 Flask 上下文；
 若未注入则只落盘归档标记）。
+
+`room mode` 是房间模式唯一的变更入口（创建后默认锁定）。三种模式对应两个能力位：
+
+- `scripted`：AI KP 开启、剧本必填（等同于旧房间）；
+- `freeform`：AI KP 开启、禁止绑定剧本；
+- `manual`：AI KP 关闭、剧本可选（保留的剧本只作玩家自查资料）。
 
 ### 骰子动画与贴图
 
@@ -416,7 +424,7 @@ dice skin delete <skin-id> [--yes]               删除骰子皮肤（破坏性�
 
 ```text
 help                        （显示本帮助）
-info                        （房间信息：房间码/剧本/成员数）
+info                        （房间信息：房间码/模式/剧本/成员数）
 members                     （成员及其房间角色）
 members kick <user> [--yes] （将成员移出本房间，破坏性）
 members promote <user> [--yes]（将成员提升为房间管理员，破坏性）
@@ -425,7 +433,7 @@ event add <kind> <content>  （记录一条房间事件）
 log tail [n]                （查看本房间最近 n 条日志，默认 50）
 log clear [--yes]           （清空本房间日志，破坏性）
 autosave                    （立即为本房间保存一次自动存档）
-archive [--yes]             （归档本房间，需已到达结局）
+archive [--yes]             （归档本房间；有剧本时需已到达结局，无剧本可直接归档）
 dice                        （本房间骰子动画档位、玩家投掷、重投配置与待投掷请求）
 dice animation show         （查看本房间生效的动画档位）
 dice animation set <text|simple|3d|inherit> [--yes]（设置动画档位，inherit 跟随管理员默认）
@@ -481,7 +489,61 @@ voice usage                 （本房间小时用量与最近 voice_* 事件）
 voice cache stats           （本房间语音缓存条数/体积/命中次数，只读）
 voice cache clear [--yes]   （删除本房间语音缓存，默认预演）
 voice cache prune [--yes]   （按配额 LRU 清理本房间缓存，默认预演）
+rule                        （本房间规则集、世界意志限频与成员 SAN 概览）
+rule check <玩家> <技能/属性> [--difficulty=hard|extreme] [--adjustment=±N] [--bonus=N] [--penalty=N]
+rule social <玩家> <技能> [--attitude=supportive|neutral|opposed|hostile] [--leverage] [--target-skill=N]（房规：社交难度）
+rule combined <玩家> <技能1> <技能2> [...] [--mode=all|any] [--difficulty=normal|hard|extreme] [--bonus=N] [--penalty=N]（房规：组合检定只掷一次）
+rule groupluck              （房规：由在场最低幸运者代掷团体幸运）
+rule contact <玩家> <技能> [--hometown] [--remote] [--profession] [--push] [--difficulty=normal|hard|extreme]（房规：建立熟人）
+rule economy <玩家> [金额] [--era=1920s|modern] [--assets=N]（房规：信用评级与开支预览，只读）
+rule san add <玩家> <±N> [--reason=...] [--yes]（调整 SAN；默认预演，--yes 落盘）
+rule san set <玩家> <N> [--reason=...] [--yes]（设为指定 SAN；默认预演）
+rule item <玩家> <物品名> [--qty=N] [--weapon] [--persist] [--reason=...]
+rule skill <玩家> <技能名> <值|±N> [--persist] [--reason=...] [--yes]
+rule attr <玩家> <属性> <值|±N> [--persist] [--reason=...] [--yes]
+rule limits                 （查看世界意志生效冷却与每小时次数）
+rule limits cooldown <秒|inherit>（房间只能比站点更严格）
+rule limits hourly <次数|inherit>（房间只能比站点更严格）
 ```
+
+`rule` 域不需要 AI KP，`manual` 房间同样可用；所有数值变更都会写入房间日志，并在
+`character_state.sanity_records` / `skill_changes` / `attr_changes` / `item_changes`
+留下操作者、前后值与原因。`rule skill` / `rule attr` 默认预演，`--yes`（或网页控制台确认框）
+才写盘；属性名支持 `STR/DEX/CON/APP/POW/SIZ/EDU/INT/LUC` 与中文名。
+`rule item` / `rule skill` / `rule attr` 默认只写本房间快照，`--persist` 才立即写回持久角色卡；
+房间归档时按房规 `rule_persist_on_archive`（默认开启）把 SAN、技能、属性、物品统一写回，
+只覆盖实际变更的字段，不会整卡覆盖玩家在卡面编辑器里的其它修改。
+
+`rule social` / `rule combined` / `rule groupluck` / `rule contact` / `rule economy` 受房间房规开关
+`coc7_social_difficulty` / `coc7_combined_checks` / `coc7_group_luck` / `coc7_contacts` / `coc7_economy`
+控制，默认关闭。开关关闭时这些子命令按「未知的规则命令」处理，与旧版本完全一致；开启后统一走
+`check_service` 的检定入口：社交先按态度与把柄折算难度，组合检定只掷一次并与全部技能比较，
+团体幸运由最低幸运者代掷，熟人检定复用普通检定再附后果。`rule economy` 只读展示信用评级与开支
+预览，不修改角色卡。
+
+玩家侧还可以在聊天框直接使用斜杠命令（不依赖 AI KP）：
+
+```text
+/help                                            列出全部聊天命令与用法
+/check <玩家> <技能/属性> [困难/极难] [±N]        属性或技能检定
+/sc <玩家> <成功变化/失败变化> [no-madness] [reason 原因]     理智检定并结算 SAN；一次损失 ≥5 自动接疯狂判定
+/skill [玩家名] <技能名> [值|±N] [persist] [reason 原因]      查看或修改技能值（技能封顶 99）
+/attr [玩家名] <属性> [值|±N] [persist] [reason 原因]         查看或修改 STR/DEX/CON/APP/POW/SIZ/EDU/INT/LUC
+/item [list] [玩家名]                            查看物品与武器
+/item rm [玩家名] <物品名> [qty N] [weapon] [persist] [reason 原因]   移除物品/武器
+/item [玩家名] <物品名> [qty N] [weapon] [persist] [note 备注]        追加物品/武器
+```
+
+聊天命令的参数统一使用空格分隔的纯词（`persist`、`weapon`、`qty 3`、`reason 原因`），
+不再使用 `--` 前缀；`/attr STR -5` 里的 `-5` 仍按数值处理。输入 `/` 会在聊天框上方弹出
+逐格候选提示，支持上下键切换与 Tab 补全。
+
+`/skill`、`/attr`、`/item` 与房间控制台的 `rule skill` / `rule attr` / `rule item` 走同一套
+服务入口（`room_rules.apply_*` / `remove_item`），数值规则、留痕与写回队列完全一致；默认只改
+本房间快照，`persist` 才立即写回持久角色卡。
+
+本人只能操作自己的角色卡，省略玩家名即操作自己；指定其他玩家需要房间所有者 / 房间管理员
+（聊天命令）或系统管理员权限。`/sc`、`/check`、`/item`、`/skill`、`/attr` 直接执行，不再二次确认。
 
 `dice animation set` / `dice player-roll` / `dice reroll` / `dice reroll-limit` 只写入本房间的房规
 字段（`inherit` 或 `null` 表示继承管理员默认），不会修改站点级配置；`dice level` / `dice player`
@@ -496,6 +558,10 @@ voice cache prune [--yes]   （按配额 LRU 清理本房间缓存，默认预�
 消息附件；`opening` 固定作用于当前房间；`guard` / `profile` 写入房规
 `narrative_guard` / `narrative_profile`，下次请求生效；`rebuild-state` 用最近关键帧 +
 账本重放覆盖当前状态。任何跨房间或站点级操作都会被拒绝。
+
+房间模式会影响可用命令：`manual`（无 AI KP）房间的 `narrative` / `immersive` / `voice`
+一律返回「当前房间模式未启用 AI KP」；`freeform`（无剧本）房间的 `narrative opening`
+会被拒绝，直接发送消息即可开始自由叙事。
 
 成员的 `kick` / `promote` 只调整**房间内角色**（`owner` / `admin` / `member`）：不能提升为房间
 所有者，也不会授予网站级 `ADMIN` / `OWNER`，更不复用网站控制台的 `user promote` 实现。

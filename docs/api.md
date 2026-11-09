@@ -100,6 +100,11 @@
 - `GET /api/characters`：列出当前用户的角色卡。
 - `PUT /api/characters/<character_id>`：更新角色卡。
 - `DELETE /api/characters/<character_id>`：删除角色卡。
+- `GET /api/characters/<character_id>/export`：导出角色卡的完整数据，返回 `filename`（建议文件名）、`jsonText`（JSON 文件正文）与 `encoded`（JSON 文本经 zlib 压缩再 base64 编码的裸文本串）；仅角色卡本人或具备 `characters.manage_all` 的管理员可取。字段范围与排除项见 [character-export.md](./character-export.md)。
+- `POST /api/characters/import`：从 JSON 或分享文本串导入一张新角色卡。请求体 `{ "payload": "...", "mode": "auto|json|text" }`，`auto` 按首字符自动识别；成功后返回 `{ "character": {...}, "renamed": bool }`。导入固定归当前登录用户，不覆盖已有卡，重名自动追加序号；带 8MB/12MB 体积与解压上限，字段校验与导出共用同一套定义。详见 [character-export.md](./character-export.md)。
+- `POST /api/characters/age-adjustment/preview`：按 `{ "age": 25 }` 返回建卡年龄修正（年龄段、STR/SIZ 与 STR/CON/DEX 合计扣减、APP/MOV/EDU 增减、EDU 检定次数），只读、不写角色卡。
+- `POST /api/characters/age-adjustment/edu-roll`：请求体 `{ "edu": 60 }`，执行**一次** EDU 增强检定并返回 `roll` / `gain`；由玩家逐次点击触发，不由后端连续掷。
+- `POST /api/characters/age-adjustment/apply`：请求体 `{ "age": 45, "str_siz_allocation": {"STR": 0, "SIZ": 0}, "str_con_dex_allocation": {"STR": 1, "CON": 2, "DEX": 2}, "edu_gain": 0 }`，校验两个分配池必须恰好用完，返回属性增量 `deltas`；实际写入仍走角色卡保存流程。以上接口仅当当前规则集提供建卡年龄能力时可用。
 - `GET /api/character-gallery`：浏览角色卡广场。
 - `POST /api/character-gallery`：发布角色卡到广场。
 - `PUT /api/character-gallery/<public_id>`：更新已发布的角色卡。
@@ -189,8 +194,9 @@
 来源：`routes/rooms.py`
 
 - `GET /api/rooms`：列出当前用户可访问的房间；`ADMIN` 与 `OWNER` 可查看全部。
-- `POST /api/rooms`：创建房间并生成唯一房间码；普通 `USER` 默认最多创建 3 个房间，`ADMIN` / `OWNER` 不限。
-- `POST /api/rooms/join`：通过房间码加入房间。
+- `POST /api/rooms`：创建房间并生成唯一房间码；body 支持 `room_mode`（`scripted` / `freeform` / `manual`，默认 `scripted`）：`scripted` 必须提供 `scenario_id`，`freeform` 禁止提供，`manual` 可选（仅作资料）。普通 `USER` 默认最多创建 3 个房间，`ADMIN` / `OWNER` 不限。
+- `GET /api/rooms/lookup?code=<room_code>`：加入前查询房间模式与名称（只返回模式、名称、剧本标题，不含成员与角色卡）；也接受 `invite_token`。
+- `POST /api/rooms/join`：通过房间码加入房间；`character_card` 可选，`manual` 房间允许无卡加入。
 - `POST /api/rooms/spectate`：以旁观身份加入房间。
 - `GET /api/rooms/<room_id>`：读取房间详情、成员与当前消息。
 - `DELETE /api/rooms/<room_id>`：删除房间；仅房主、`ADMIN` 或 `OWNER` 可操作。
@@ -199,6 +205,7 @@
 - `PUT /api/rooms/<room_id>/members/<user_id>/role`：调整成员在房间内的角色。
 - `DELETE /api/rooms/<room_id>/members/<user_id>`：移除成员。
 - `POST /api/rooms/<room_id>/scenario-switch`：切换剧本。
+- `GET /api/rooms/<room_id>/world-override`：读取世界意志权限、房间开关与频率配额（`rate.cooldown_seconds` / `rate.hourly_limit` / `rate.hourly_remaining`）。`scripted` 与 `freeform` 房间可用；`manual` 返回 `supported=false`，前端隐藏入口。
 - `POST /api/rooms/<room_id>/scenario-migration`：在换剧本时迁移剧情进度。
 - `GET|PUT /api/rooms/<room_id>/house-rules`：读取 / 保存房间规则（含技能基础值覆盖）。
 - `GET /api/rooms/<room_id>/console/log`：读取本房间控制台日志（可按 `level` / `search` / `limit` 过滤）。
@@ -246,7 +253,7 @@
 
 投掷元数据（`metadata.dice_roll`）同时返回 `groups`（`{role, type, count, faces, labels}`，如 `tens` / `ones` / `candidate` / `normal`，d100 展开为两枚 d10）、`selected`（`{group, index}`，奖励/惩罚骰选中的骰子；普通检定与无候选时为 `null`，前端不高亮任何骰子）、`reroll`（`{enabled, mode, limit, used, remaining}`）与 `confirmed`，供前端按真实骰型渲染并高亮选中骰。
 
-前端本地召桌命令 `/dice <表达式> --table` 不经过 AI，但会把结果以 `type=dice` 的消息写入房间历史，`metadata.dice_roll` 同样包含 `show_table`、`request_id`、`mode`、`expression`、`count`、`sides`、`groups`、`faces`、`labels`、`selected`、`roll` / `rolls`、`total`、`candidates` 与 `roller`，使刷新或重连后可以静态还原同一张骰桌；没有 `groups` 的旧消息保持纯文本展示。
+前端本地召桌命令 `/dice <表达式> table` 不经过 AI，但会把结果以 `type=dice` 的消息写入房间历史，`metadata.dice_roll` 同样包含 `show_table`、`request_id`、`mode`、`expression`、`count`、`sides`、`groups`、`faces`、`labels`、`selected`、`roll` / `rolls`、`total`、`candidates` 与 `roller`，使刷新或重连后可以静态还原同一张骰桌；没有 `groups` 的旧消息保持纯文本展示。
 
 ### 骰子贴图库
 
@@ -266,7 +273,8 @@
 
 来源：`routes/chat.py`
 
-- `POST /api/chat`：向 AI 发送请求，返回 AI 内容与 Token 统计（前端仅在 AI 消息上展示耗时与 Token）。
+- `POST /api/chat`：向 AI 发送请求，返回 AI 内容与 Token 统计（前端仅在 AI 消息上展示耗时与 Token）。`manual`（`ai_kp_enabled=false`）房间在入口返回 `403 AI KP disabled`，不解析平台、不产生任何 AI 调用；归档房间同样返回 403。
+- `POST /api/chat` 携带 `world_override: true` 时进入世界意志直执行：校验房间权限后把声明写入 `state.json` 的 `world_override.facts`，后续回合持续注入；执行回合不再下发 `combat.*` / `check.roll_room_check` / `dice.roll_coc_check`。超出频率限制返回 `429`，`message` 内含剩余等待秒数。
 - `POST /api/messages`：发送主页消息。
 - `POST /api/scenarios/<int:script_id>/messages`：发送剧本消息。
 
