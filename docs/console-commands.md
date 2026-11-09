@@ -508,6 +508,9 @@ rule limits cooldown <秒|inherit>（房间只能比站点更严格）
 rule limits hourly <次数|inherit>（房间只能比站点更严格）
 ```
 
+`difficulty` 支持 `normal|hard|extreme`，也接受 `regular`（`normal` 与 `regular` 等价）及中文
+`普通|困难|极难`。
+
 `rule` 域不需要 AI KP，`manual` 房间同样可用；所有数值变更都会写入房间日志，并在
 `character_state.sanity_records` / `skill_changes` / `attr_changes` / `item_changes`
 留下操作者、前后值与原因。`rule skill` / `rule attr` 默认预演，`yes`（或网页控制台确认框）

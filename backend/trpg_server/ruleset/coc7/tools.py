@@ -24,11 +24,26 @@ COC7_TOOL_NAMES = (
 )
 
 
+# 通用检定流程（社交 / 组合 / 团体幸运等）引用的工具 id 由插件声明，
+# 核心不再拼接 ``coc7.xxx`` 或硬编码具体工具名。
+CHECK_TOOL_KEYS = {
+    "social": "coc7.social_check",
+    "combined": "coc7.combined_check",
+    "group_luck": "coc7.group_luck",
+    "contact": "coc7.contact_check",
+    "economy": "coc7.economy",
+}
+
+
 class Coc7Tools:
     ruleset_id = "coc7"
 
     def tool_names(self) -> tuple[str, ...]:
         return COC7_TOOL_NAMES
+
+    def check_tool_key(self, kind: str) -> str:
+        """通用检定流程使用的工具 id；未声明的类型回退到本规则集命名空间。"""
+        return CHECK_TOOL_KEYS.get(str(kind or "").strip().lower(), f"coc7.{kind}")
 
     def prompt_fragments(self) -> list[str]:
         # 现有 KP 提示词已包含 CoC7 判定口径，本期不额外注入，避免重复占 token。

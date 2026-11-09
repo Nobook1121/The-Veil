@@ -24,12 +24,59 @@ def _dice_module():
 
 
 def _lookup_target(checks: Any, card: Mapping[str, Any], name: str) -> int | None:
-    """优先走插件的目标值查询；旧插件没有该方法时退回骰子工具的兼容实现。"""
+    """目标值查询只走当前规则集的插件，不再回落到默认插件。"""
     lookup = getattr(checks, "lookup_target", None)
-    if callable(lookup):
-        return lookup(card, name)
-    dice = _dice_module()
-    return dice._lookup_check_value(dict(card or {}), name)
+    return lookup(card, name) if callable(lookup) else None
+
+
+def _normalize_difficulty(checks: Any, value: Any) -> str:
+    normalize = getattr(checks, "normalize_difficulty", None)
+    if callable(normalize):
+        return normalize(value)
+    text = str(value or "regular").strip().lower()
+    return "regular" if text in {"", "regular", "普通"} else ""
+
+
+def _is_known_check_name(checks: Any, check_name: str) -> bool:
+    known = getattr(checks, "is_known_check_name", None)
+    return bool(known(check_name)) if callable(known) else False
+
+
+def _check_message(checks: Any, method: str, check_name: str, fallback: str) -> str:
+    message = getattr(checks, method, None)
+    return str(message(check_name)) if callable(message) else fallback
+
+
+def _check_tool_key(plugin: Any, kind: str) -> str:
+    tools = getattr(plugin, "tools", None)
+    resolver = getattr(tools, "check_tool_key", None)
+    if callable(resolver):
+        return str(resolver(kind))
+    return f"{getattr(plugin, 'id', 'ruleset')}.{kind}"
+
+
+def _display_name(checks: Any, card: Mapping[str, Any], check_name: str) -> str:
+    display = getattr(checks, "display_name", None)
+    return str(display(card, check_name)) if callable(display) else str(check_name or "")
+
+
+def _difficulty_label(checks: Any, difficulty: str) -> str:
+    label = getattr(checks, "difficulty_label", None)
+    return str(label(difficulty)) if callable(label) else ""
+
+
+def _level_suffix(checks: Any, level: str) -> str:
+    suffix = getattr(checks, "level_suffix", None)
+    return str(suffix(level)) if callable(suffix) else ""
+
+
+def _room_check_summary(
+    checks: Any, name: str, difficulty: str, roll: int, threshold: int, success: bool
+) -> str:
+    formatter = getattr(checks, "format_room_check_summary", None)
+    if callable(formatter):
+        return str(formatter(name, difficulty, roll, threshold, success))
+    return f"{name} d%: [{roll}] = {roll} / {threshold} {'成功' if success else '失败'}"
 
 
 def run_room_check(
@@ -67,7 +114,10 @@ def run_room_check(
     if not check_name:
         raise CheckServiceError("name is required")
 
-    difficulty_key = dice._normalize_difficulty(difficulty)
+    plugin = get_plugin(ruleset_id)
+    checks = getattr(plugin, "checks", None)
+
+    difficulty_key = _normalize_difficulty(checks, difficulty)
     if not difficulty_key:
         raise CheckServiceError("difficulty must be regular, hard, extreme, 普通, 困难, or 极难")
 
@@ -75,8 +125,6 @@ def run_room_check(
     if not isinstance(card, Mapping):
         raise CheckServiceError(f"player {resolved_name} has no bound character card")
 
-    plugin = get_plugin(ruleset_id)
-    checks = getattr(plugin, "checks", None)
     if checks is None:
         raise CheckServiceError(f"规则集 {plugin.id} 不支持检定")
 
@@ -84,13 +132,21 @@ def run_room_check(
     if base_target is None or base_target < 0:
         if check_name.casefold() in dice._member_names(dict(member)):
             raise CheckServiceError(
-                f"“{check_name}”是玩家/角色名，不是技能名；name 参数应填写要检定的技能或属性"
-                "（如 力量/敏捷/侦察/聆听/心理学/理智）。"
+                _check_message(
+                    checks,
+                    "player_name_check_message",
+                    check_name,
+                    f"“{check_name}”是玩家/角色名，不是检定名。",
+                )
             )
-        if not dice._is_known_check_name(check_name):
+        if not _is_known_check_name(checks, check_name):
             raise CheckServiceError(
-                f"“{check_name}”不是 COC7 标准属性或技能目录中的技能，已拒绝该检定；"
-                "请改用标准检定名（如 侦察/聆听/心理学/力量/敏捷）或角色卡上已有的技能。"
+                _check_message(
+                    checks,
+                    "unknown_check_message",
+                    check_name,
+                    f"“{check_name}”不是规则集认可的检定名。",
+                )
             )
         raise CheckServiceError(f"{check_name} was not found on player {resolved_name}'s character card")
     if base_target > 100:
@@ -102,9 +158,9 @@ def run_room_check(
     bonus_dice, penalty_dice = dice._normalize_bonus_penalty(bonus_dice, penalty_dice)
 
     if context is not None and hasattr(dice, "_context_thresholds"):
-        default_critical, default_fumble = dice._context_thresholds(context)
+        default_critical, default_fumble = dice._context_thresholds(context, ruleset_id)
     else:
-        default_critical, default_fumble = dice._default_thresholds()
+        default_critical, default_fumble = dice._default_thresholds(ruleset_id)
     critical_value = dice._threshold_arg(
         {"critical_threshold": critical_threshold}, "critical_threshold", default_critical
     )
@@ -134,13 +190,12 @@ def run_room_check(
     threshold = int(resolution.target)
     level = str(resolution.level or "failure")
     success = bool(resolution.success)
-    display_name = str(detail.get("display_name") or dice._resolve_check_display_name(dict(card), check_name))
+    display_name = str(detail.get("display_name") or _display_name(checks, card, check_name))
     candidates = [int(value) for value in (detail.get("candidates") or [])]
 
-    summary = (
-        dice._format_room_check_summary(display_name, difficulty_key, int(resolution.roll), threshold, success)
-        + dice._level_suffix(level)
-    )
+    summary = _room_check_summary(
+        checks, display_name, difficulty_key, int(resolution.roll), threshold, success
+    ) + _level_suffix(checks, level)
     modifier = str(adjustment or "").strip()
     if candidates:
         summary += f" {'奖励骰' if bonus_dice else '惩罚骰'}（{', '.join(map(str, candidates))}），取{int(resolution.roll)}。"
@@ -154,7 +209,7 @@ def run_room_check(
         "base_target": int(detail.get("base_target", base_target)),
         "target": threshold,
         "difficulty": difficulty_key,
-        "difficulty_label": dice._difficulty_label(difficulty_key),
+        "difficulty_label": _difficulty_label(checks, difficulty_key),
         "adjustment": modifier,
         "bonus_dice": bonus_dice,
         "penalty_dice": penalty_dice,
@@ -268,7 +323,7 @@ def run_room_social_check(
         }
         result["visible_message"] = dice._result_message(
             summary,
-            "coc7.social_check",
+            _check_tool_key(plugin, "social"),
             check_type="social",
             player_name=resolved_name,
             name=check_name,
@@ -311,12 +366,12 @@ def run_room_combined_check(
     skill_names = [str(item or "").strip() for item in (names or []) if str(item or "").strip()]
     if not skill_names:
         raise CheckServiceError("at least one skill is required")
-    difficulty_key = dice._normalize_difficulty(difficulty)
-    if not difficulty_key:
-        raise CheckServiceError("difficulty must be regular, hard, extreme, 普通, 困难, or 极难")
 
     plugin = get_plugin(ruleset_id)
     checks = getattr(plugin, "checks", None)
+    difficulty_key = _normalize_difficulty(checks, difficulty)
+    if not difficulty_key:
+        raise CheckServiceError("difficulty must be regular, hard, extreme, 普通, 困难, or 极难")
     if checks is None:
         raise CheckServiceError(f"规则集 {plugin.id} 不支持检定")
     resolver = _capability(checks, "combined_check", plugin)
@@ -336,7 +391,7 @@ def run_room_combined_check(
 
     rows = []
     for row in resolution.get("skills") or []:
-        display = dice._resolve_check_display_name(dict(card), str(row.get("name") or ""))
+        display = _display_name(checks, card, str(row.get("name") or ""))
         rows.append({**row, "display_name": display})
     labels = "、".join(
         f"{row['display_name']}{'成功' if row.get('success') else '失败'}" for row in rows
@@ -352,7 +407,7 @@ def run_room_combined_check(
         "rolls": [int(value) for value in (resolution.get("candidates") or [int(resolution["roll"])])],
         "target": None,
         "difficulty": difficulty_key,
-        "difficulty_label": dice._difficulty_label(difficulty_key),
+        "difficulty_label": _difficulty_label(checks, difficulty_key),
         "bonus_dice": int(resolution.get("bonus_dice") or 0),
         "penalty_dice": int(resolution.get("penalty_dice") or 0),
         "success": success,
@@ -366,7 +421,7 @@ def run_room_combined_check(
     }
     result["visible_message"] = dice._result_message(
         summary,
-        "coc7.combined_check",
+        _check_tool_key(plugin, "combined"),
         check_type="combined",
         player_name=resolved_name,
         name="组合检定",
@@ -408,7 +463,7 @@ def run_room_group_luck(
     success = bool(resolution.get("success"))
     summary = (
         f"团体幸运检定：由 {resolution.get('player_name') or '未知成员'}（幸运 {luck}）代掷 {roll}，"
-        f"{'成功' if success else '失败'}{dice._level_suffix(level)}。"
+        f"{'成功' if success else '失败'}{_level_suffix(checks, level)}。"
     )
     result: dict[str, Any] = {
         "player_name": str(resolution.get("player_name") or ""),
@@ -427,7 +482,7 @@ def run_room_group_luck(
     }
     result["visible_message"] = dice._result_message(
         summary,
-        "coc7.group_luck",
+        _check_tool_key(plugin, "group_luck"),
         check_type="group_luck",
         player_name=result["player_name"],
         name="团体幸运",
@@ -511,7 +566,7 @@ def run_room_economy(
     assets: Any = None,
     ruleset_id: str | None = None,
 ) -> dict[str, Any]:
-    """5.12 信用评级与开支计算（只读，不写回角色卡）。"""
+    """5.12 信用技能与开支计算（只读，不写回角色卡）。"""
     card, resolved_name = _resolve_member(member, player_name)
 
     plugin = get_plugin(ruleset_id)
@@ -520,12 +575,14 @@ def run_room_economy(
         raise CheckServiceError(f"规则集 {plugin.id} 不支持经济规则")
     profile_fn = _capability(checks, "economy_profile", plugin)
 
-    credit = _lookup_target(checks, card, "信用评级")
+    credit_skill = str(getattr(checks, "credit_skill_name", "") or "").strip()
+    credit = _lookup_target(checks, card, credit_skill) if credit_skill else None
     if credit is None:
         credit = card.get("creditRating")
     if credit is None:
         card_assets = card.get("assets")
         credit = card_assets.get("spendingLevel") if isinstance(card_assets, Mapping) else None
+    credit_label = credit_skill or "信用"
     try:
         credit = max(0, min(99, int(credit or 0)))
         profile = profile_fn(credit, era)
@@ -539,7 +596,7 @@ def run_room_economy(
         "era": profile.get("era", era),
         "profile": profile,
         "summary": (
-            f"{card.get('name') or resolved_name} 信用评级 {credit}（{profile.get('label')}）："
+            f"{card.get('name') or resolved_name} {credit_label} {credit}（{profile.get('label')}）："
             f"现金 {profile.get('cash')} / 其他资产 {profile.get('assets')} / 每日消费水平 {profile.get('spending')}。"
         ),
     }

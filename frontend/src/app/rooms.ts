@@ -100,7 +100,12 @@ function initRoomManagement(): void {
         void saveHouseRules();
     });
     document.getElementById("openRoomSkillBaseSettings")?.addEventListener("click", () => {
-        window.COC7CharacterSheet?.openSkillBaseSettings?.("room");
+        const sheet = defaultRoomCharacterSheet();
+        if (!sheet?.openSkillBaseSettings) {
+            blockMissingCharacterSheet(null);
+            return;
+        }
+        sheet.openSkillBaseSettings("room");
     });
     document.getElementById("startScenario")?.addEventListener("click", () => {
         void window.startScenario?.();
@@ -191,6 +196,25 @@ function roomSkillBaseOverrides(room: Room | null | undefined): Record<string, n
     return bases && typeof bases === "object" ? bases : {};
 }
 
+type RoomCharacterSheet = NonNullable<Window["COC7CharacterSheet"]>;
+
+/** 按角色卡的 rulesetId 从注册表取模块；缺省 / 空值走默认模块（历史卡兼容）。 */
+function characterSheetForCard(
+    card?: { rulesetId?: string | null } | null
+): RoomCharacterSheet | undefined {
+    return window.TrpgCharacterSheetRegistry?.forRuleset?.(card?.rulesetId) as unknown as RoomCharacterSheet | undefined;
+}
+
+function defaultRoomCharacterSheet(): RoomCharacterSheet | undefined {
+    return window.TrpgCharacterSheetRegistry?.defaultModule?.() as unknown as RoomCharacterSheet | undefined;
+}
+
+/** 明确阻断：规则集模块缺失时不静默返回空列表或空卡面。 */
+function blockMissingCharacterSheet(rulesetId?: string | null): void {
+    const label = String(rulesetId || "").trim() || "默认规则集";
+    showNotification(`规则集「${label}」没有已注册的角色卡模块，已阻断操作。`, "error");
+}
+
 /**
  * 校验角色卡技能基础值是否超过房规上限：超上限时提示，用户确认后返回按上限裁剪后的卡片。
  * 返回 null 表示用户放弃使用该角色卡；无上限或无超限时原样返回。
@@ -203,7 +227,12 @@ async function enforceSkillBaseLimits(
     if (!characterCard) return null;
     if (!Object.keys(overrides).length) return characterCard;
     const card = characterCard as COC7CharacterCard;
-    const overflows = window.COC7CharacterSheet?.collectCardSkillBaseOverflows?.(card, overrides) || [];
+    const sheet = characterSheetForCard(card);
+    if (!sheet) {
+        blockMissingCharacterSheet(card.rulesetId);
+        return null;
+    }
+    const overflows = sheet.collectCardSkillBaseOverflows?.(card, overrides) || [];
     if (!overflows.length) return characterCard;
     const confirmed = await window.TrpgDialog?.confirm({
         title: actionLabel,
@@ -211,11 +240,20 @@ async function enforceSkillBaseLimits(
         confirmText: "继续",
     });
     if (!confirmed) return null;
-    return window.COC7CharacterSheet?.clampCardSkillBases?.(card, overrides) || characterCard;
+    return sheet.clampCardSkillBases?.(card, overrides) || characterCard;
 }
 
 function getCharacterCards(): COC7CharacterCard[] {
-    return window.COC7CharacterSheet?.listCharacterCards?.() || [];
+    const sheet = defaultRoomCharacterSheet();
+    if (!sheet) {
+        blockMissingCharacterSheet(null);
+        throw new Error("没有已注册的角色卡模块，无法列出角色卡。");
+    }
+    if (typeof sheet.listCharacterCards !== "function") {
+        showNotification("当前规则集未实现角色卡列表，无法展示角色卡。", "error");
+        throw new Error("当前规则集未实现角色卡列表。");
+    }
+    return sheet.listCharacterCards();
 }
 
 function getRoomEntryCards(): COC7CharacterCard[] {
@@ -351,7 +389,24 @@ function createCharacterFromRoomEntry(): void {
 function getSelectedCharacterCardSnapshot(selectId: string): Partial<COC7CharacterCard> | null {
     const cardId = (document.getElementById(selectId) as HTMLSelectElement | null)?.value;
     if (!cardId) return null;
-    return window.COC7CharacterSheet?.getCharacterCardSnapshot?.(cardId) || null;
+    const registry = window.TrpgCharacterSheetRegistry;
+    if (!registry) {
+        blockMissingCharacterSheet(null);
+        throw new Error("没有已注册的角色卡模块，无法读取角色卡。");
+    }
+    let supported = false;
+    for (const id of registry.ids()) {
+        const sheet = registry.get(id) as unknown as RoomCharacterSheet | undefined;
+        if (!sheet?.getCharacterCardSnapshot) continue;
+        supported = true;
+        const snapshot = sheet.getCharacterCardSnapshot(cardId);
+        if (snapshot) return snapshot;
+    }
+    if (!supported) {
+        blockMissingCharacterSheet(null);
+        throw new Error("已注册的角色卡模块无法读取角色卡快照。");
+    }
+    return null;
 }
 
 function syncRoomCharacterSelection(roomId: string, characterCard: Partial<COC7CharacterCard> | null): void {
@@ -845,7 +900,7 @@ async function enterRoom(room: Room): Promise<void> {
     // 实时配乐/配图同样按房间作用域恢复：读取上次段落与最近场景图。
     window.TrpgImmersive?.setRoom(room);
     // 房间规则优先级最高：切换房间后重建技能基础值，使新房规即时生效。
-    void window.COC7CharacterSheet?.reloadSkillBases?.();
+    void defaultRoomCharacterSheet()?.reloadSkillBases?.();
     window.restoreThinkingState?.();
     window.resumePendingAIRequest?.();
     const invisibleView = room.invisible_view === true;
@@ -1604,7 +1659,7 @@ async function saveHouseRules(): Promise<void> {
         // 房规变化会改变房间级沉浸开关，重新拉取生效状态（不重置当前画面）。
         window.TrpgImmersive?.refreshState?.();
         updateRoomDetail(currentRoom);
-        void window.COC7CharacterSheet?.reloadSkillBases?.();
+        void defaultRoomCharacterSheet()?.reloadSkillBases?.();
         bootstrap.Modal.getInstance(document.getElementById("roomHouseRulesModal"))?.hide();
         showNotification("房规已保存", "success");
     } catch (error) {
@@ -2066,8 +2121,13 @@ function clearCurrentRoom(): void {
 function previewRoomCharacter(encodedCard: string): void {
     try {
         const rawCard = JSON.parse(decodeURIComponent(encodedCard)) as Partial<COC7CharacterCard>;
-        const card = window.COC7CharacterSheet?.createCharacterCard?.(rawCard as COC7CharacterCardInput) || (rawCard as COC7CharacterCard);
-        const previewHtml = window.COC7CharacterSheet?.renderCharacterDetail?.(card) || `<h4>${escapeRoomHtml(card.name || "未命名角色卡")}</h4>`;
+        const sheet = characterSheetForCard(rawCard);
+        if (!sheet) {
+            blockMissingCharacterSheet(rawCard.rulesetId);
+            return;
+        }
+        const card = sheet.createCharacterCard?.(rawCard as COC7CharacterCardInput) || (rawCard as COC7CharacterCard);
+        const previewHtml = sheet.renderCharacterDetail?.(card) || `<h4>${escapeRoomHtml(card.name || "未命名角色卡")}</h4>`;
         const modalElement = document.createElement("div");
         modalElement.className = "modal fade";
         modalElement.innerHTML = `<div class="modal-dialog modal-xl"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">角色卡预览</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body">${previewHtml}</div></div></div>`;

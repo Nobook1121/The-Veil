@@ -26,9 +26,9 @@ def _normalize_difficulty(value: Any) -> str:
         return normalize(value)
     text = str(value or "regular").strip().lower()
     return "regular" if text in {"", "regular", "普通"} else ""
-def _default_thresholds() -> tuple[int, int]:
+def _default_thresholds(ruleset_id: str | None = None) -> tuple[int, int]:
     """当前规则集的大成功 / 大失败默认阈值；未声明时返回中性值（不额外判定）。"""
-    checks = _checks_capability()
+    checks = _checks_capability(ruleset_id)
     provider = getattr(checks, "default_thresholds", None)
     if callable(provider):
         return provider()
@@ -172,10 +172,10 @@ def _threshold_arg(arguments: dict[str, Any], key: str, fallback: int) -> int:
     """读取可配置的大成功/大失败阈值，做范围保护后返回。"""
     value = _as_int(arguments.get(key), fallback)
     return max(0, min(100, value))
-def _context_thresholds(context: Any) -> tuple[int, int]:
+def _context_thresholds(context: Any, ruleset_id: str | None = None) -> tuple[int, int]:
     """读取房间统一的大成功/大失败阈值。
 
-    优先级：房规内配置 > 管理员设置页的全局默认值 > COC7 默认值（1/96）。
+    优先级：房规内配置 > 管理员设置页的全局默认值 > 规则集默认值。
     """
     critical = fumble = None
     room_info = context.room_info() if hasattr(context, "room_info") else None
@@ -185,7 +185,7 @@ def _context_thresholds(context: Any) -> tuple[int, int]:
             critical = _nullable_int(rules.get("dice_critical_threshold"))
             fumble = _nullable_int(rules.get("dice_fumble_threshold"))
     if critical is None or fumble is None:
-        defaults = _admin_thresholds(getattr(context, "config_dir", None))
+        defaults = _admin_thresholds(getattr(context, "config_dir", None), ruleset_id)
         if critical is None:
             critical = defaults[0]
         if fumble is None:
@@ -203,10 +203,10 @@ def _nullable_int(value: Any) -> int | None:
         return None
 
 
-def _admin_thresholds(config_dir: Any) -> tuple[int, int]:
+def _admin_thresholds(config_dir: Any, ruleset_id: str | None = None) -> tuple[int, int]:
     """读取管理员设置页配置的骰娘默认阈值，读取失败时回退到规则集默认值。"""
     if not config_dir:
-        return _default_thresholds()
+        return _default_thresholds(ruleset_id)
     try:
         from trpg_server.agents.config import load_ai_runtime_config
 
@@ -216,7 +216,7 @@ def _admin_thresholds(config_dir: Any) -> tuple[int, int]:
             max(0, min(100, int(config.dice_fumble_threshold))),
         )
     except Exception:  # 配置缺失或损坏时不影响检定
-        return _default_thresholds()
+        return _default_thresholds(ruleset_id)
 
 
 def _merge_context_thresholds(arguments: dict[str, Any], context: Any) -> dict[str, Any]:

@@ -19,6 +19,12 @@ interface CharacterSheetRegistryApi {
     get: (id: string) => CharacterSheetModule | undefined;
     ids: () => string[];
     defaultModule: () => CharacterSheetModule | undefined;
+    /**
+     * 按角色卡的 ``rulesetId`` 取模块：
+     * - 缺省 / 空值走默认模块（历史卡兼容）；
+     * - 明确声明且未登记时返回 undefined，由调用方阻断，不做静默降级。
+     */
+    forRuleset: (rulesetId?: string | null) => CharacterSheetModule | undefined;
 }
 
 interface Window {
@@ -60,5 +66,20 @@ interface Window {
         return registered.length === 1 ? registered[0] : undefined;
     }
 
-    global.TrpgCharacterSheetRegistry = { register, get, ids, defaultModule };
+    function forRuleset(rulesetId?: string | null): CharacterSheetModule | undefined {
+        const key = keyOf(rulesetId);
+        if (!key) return defaultModule();
+        const direct = modules.get(key);
+        if (direct) return direct;
+        for (const module of modules.values()) {
+            try {
+                if (module.supportsRuleset?.(rulesetId)) return module;
+            } catch {
+                // 单个模块的判断异常不应影响其他规则集解析。
+            }
+        }
+        return undefined;
+    }
+
+    global.TrpgCharacterSheetRegistry = { register, get, ids, defaultModule, forRuleset };
 })(typeof window !== "undefined" ? window : globalThis as Window & typeof globalThis);

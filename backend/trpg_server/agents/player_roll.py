@@ -94,6 +94,11 @@ def _emit(event: str, payload: dict[str, Any]) -> None:
         logger.warning("Failed to broadcast dice event %s", event, exc_info=True)
 
 
+def emit_event(event: str, payload: dict[str, Any]) -> None:
+    """向房间广播一条事件；未注入广播器时静默（脚本 / 测试环境）。"""
+    _emit(event, payload)
+
+
 def _log(room_dir: Any, message: str, actor: str | None = None, room_id: str | None = None, **details: Any) -> None:
     if not room_dir:
         return

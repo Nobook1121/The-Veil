@@ -15,6 +15,32 @@ logger = logging.getLogger(__name__)
 # prompt 重复计入同样的内容，白白放大输入 token。
 UI_ONLY_TOOL_RESULT_KEYS = frozenset({"visible_message", "direct_message", "direct_messages"})
 
+# 会改动房间成员状态的工具。同一批工具执行完后只广播一次，避免每个工具各自触发前端刷新。
+ROOM_MEMBERS_MUTATING_TOOLS = frozenset(
+    {
+        "character.set_attribute",
+        "character.set_skill",
+        "character.add_item",
+        "coc7.social_check",
+        "coc7.combined_check",
+        "coc7.group_luck",
+        "coc7.contact_check",
+        "coc7.economy",
+        "room.request_interlude",
+        "room.save_interlude_review",
+    }
+)
+
+
+def _broadcast_room_members_changed(context: Any) -> None:
+    room_id = str(getattr(context, "room_id", "") or "").strip()
+    if not room_id:
+        return
+    from trpg_server.agents.player_roll import emit_event
+
+    emit_event("room_members_changed", {"room_id": room_id})
+
+
 # 各厂商 usage 的字段结构差异很大（尤其是缓存字段）。首次遇到一种新结构时打一条完整
 # 原文，方便直接确认平台到底有没有上报缓存信息；相同结构不再重复打印，避免刷屏。
 _usage_shapes_logged: set[tuple[str, ...]] = set()
@@ -489,6 +515,7 @@ def run_agent_completion(
             )
 
         messages.append(_assistant_tool_call_message(message))
+        members_changed = False
         for call in calls:
             function = call.get("function") or {}
             tool_name = str(function.get("name") or "")
@@ -529,6 +556,8 @@ def run_agent_completion(
             if isinstance(result, dict) and result.get("error"):
                 import logging
                 logging.getLogger(__name__).warning("Agent tool %s failed: %s", resolved_name, result.get("error"))
+            elif resolved_name in ROOM_MEMBERS_MUTATING_TOOLS:
+                members_changed = True
 
             reported_usage = result.get("knowledge_usage") if isinstance(result, dict) else None
             if isinstance(reported_usage, dict):
@@ -578,6 +607,9 @@ def run_agent_completion(
                 round_signatures.add(signature)
                 if not refetchable:
                     executed_calls[signature] = result_payload
+
+        if members_changed:
+            _broadcast_room_members_changed(context)
 
     # 工具轮次用尽：先移除工具、强制模型给出最终叙事；若仍无内容，则用工具结果兜底，
     # 保证玩家一定能收到一条回复，而不是空响应或 500 错误。

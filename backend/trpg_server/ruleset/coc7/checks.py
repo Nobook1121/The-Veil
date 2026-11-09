@@ -133,7 +133,16 @@ CHECK_NAME_ALIASES = {
 }
 
 
-DIFFICULTY_ALIASES = {"regular": "regular", "普通": "regular", "hard": "hard", "困难": "hard", "extreme": "extreme", "极难": "extreme"}
+DIFFICULTY_ALIASES = {
+    "regular": "regular",
+    "normal": "regular",
+    "普通": "regular",
+    "常规": "regular",
+    "hard": "hard",
+    "困难": "hard",
+    "extreme": "extreme",
+    "极难": "extreme",
+}
 DIFFICULTY_LABELS = {"regular": "", "hard": "困难", "extreme": "极难"}
 LEVEL_LABELS = {"critical": "大成功", "extreme": "极难成功", "hard": "困难成功", "regular": "成功", "failure": "失败", "fumble": "大失败"}
 DEFAULT_CRITICAL_THRESHOLD = 1
@@ -155,6 +164,8 @@ def _dice_module():
 
 class Coc7Checks:
     ruleset_id = "coc7"
+    # 经济 / 社交等通用流程引用的技能名由插件声明，核心不再硬编码。
+    credit_skill_name = "信用评级"
 
     def __init__(self, catalogs: Any = None) -> None:
         self._catalogs = catalogs
@@ -231,6 +242,20 @@ class Coc7Checks:
             return True
         text = CHECK_NAME_ALIASES.get(text, text)
         return text.casefold() in self.catalog_names()
+
+    def player_name_check_message(self, check_name: str) -> str:
+        """检定名误填成玩家 / 角色名时的提示。"""
+        return (
+            f"“{check_name}”是玩家/角色名，不是技能名；name 参数应填写要检定的技能或属性"
+            "（如 力量/敏捷/侦察/聆听/心理学/理智）。"
+        )
+
+    def unknown_check_message(self, check_name: str) -> str:
+        """检定名既不在角色卡上、也不在技能目录中时的提示。"""
+        return (
+            f"“{check_name}”不是 COC7 标准属性或技能目录中的技能，已拒绝该检定；"
+            "请改用标准检定名（如 侦察/聆听/心理学/力量/敏捷）或角色卡上已有的技能。"
+        )
 
     def localize_label(self, name: str) -> str:
         raw = str(name or "").strip()
