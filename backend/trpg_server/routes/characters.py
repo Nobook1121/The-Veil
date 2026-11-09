@@ -1053,6 +1053,33 @@ def delete_character_gallery(public_id):
     return success_response(message="Character gallery card deleted successfully")
 
 
+@bp.route("/api/character-gallery/<public_id>/export", methods=["GET"])
+def export_character_gallery(public_id):
+    """导出广场角色卡；仅发布者本人或具备管理权限的账号可取，与编辑规则一致。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+
+    path = _gallery_character_path(public_id)
+    if not path.exists():
+        return error_response("Character gallery card not found", 404, "Not found")
+    character = _character_from_storage(read_json(path, default={}), public_id)
+    if not character:
+        return error_response("Character gallery card not found", 404, "Not found")
+    if not _can_modify_gallery_character(character, "characters.gallery.edit"):
+        return error_response("Permission denied", 403, "Permission denied")
+
+    bundle = character_card_io.build_export_bundle(character)
+    log_user_action(
+        logger,
+        user_action_text(session.get("username"), "导出了广场角色卡"),
+        用户ID=session.get("user_id"),
+        角色卡ID=public_id,
+        角色名=character.get("name"),
+    )
+    return success_response(bundle, "Character exported successfully")
+
+
 @bp.route("/api/characters/<character_id>", methods=["PUT"])
 def save_character(character_id):
     login_error = _require_login()

@@ -1861,6 +1861,7 @@ interface Window {
         });
         byId<HTMLInputElement>("importCharacterFile")?.addEventListener("change", importCharacterFiles);
         byId("exportCharacter")?.addEventListener("click", exportActiveCard);
+        byId("exportGalleryCharacter")?.addEventListener("click", exportSelectedGalleryCards);
         // 「角色卡广场」按钮此前没有绑定任何事件，点击无反应；这里切到广场标签页。
         byId("openCharacterGallery")?.addEventListener("click", () => {
             window.switchMainTab?.("character-gallery");
@@ -3924,6 +3925,15 @@ interface Window {
             selectAll.disabled = selectable === 0;
         }
         if (deleteBtn) deleteBtn.disabled = selectedCount === 0;
+        if (target === "gallery") {
+            const exportBtn = byId<HTMLButtonElement>("exportGalleryCharacter");
+            if (exportBtn) {
+                exportBtn.disabled = selectedCount === 0;
+                exportBtn.title = selectedCount > 0
+                    ? `导出选中的 ${selectedCount} 张广场角色`
+                    : "请先在批量管理中勾选要导出的广场角色";
+            }
+        }
     }
 
     function setCharacterBatchMode(target: CharacterBatchTarget, enabled: boolean): void {
@@ -4997,17 +5007,44 @@ interface Window {
         encoded?: string;
     }
 
+    type CharacterExportScope = "card" | "gallery";
+
     function exportActiveCard(): void {
         const card = visibleCharacterCards().find((item) => item.id === activeCardId);
         if (!card) {
             notify("请先选择要导出的角色卡。", "warning");
             return;
         }
-        openCharacterExportDialog(card);
+        openCharacterExportDialog([card], "card");
+    }
+
+    function exportSelectedGalleryCards(): void {
+        const selected = characterBatchStates.gallery.selected;
+        if (!selected.size) {
+            notify("请先在批量管理中勾选要导出的广场角色。", "warning");
+            return;
+        }
+        const cards = galleryCards.filter((card) => selected.has(card.id));
+        if (!cards.length) {
+            notify("选中的广场角色已不存在，请刷新后重试。", "warning");
+            return;
+        }
+        const denied = cards.filter((card) => !canModifyGalleryCard(card));
+        if (denied.length) {
+            notify("只能导出本人发布或有权管理的广场角色卡。", "error");
+            return;
+        }
+        openCharacterExportDialog(cards, "gallery");
     }
 
     /** 导出方式选择弹窗：下载 JSON 文件，或复制 zlib + base64 分享文本串。 */
-    function openCharacterExportDialog(card: COC7CharacterCard): void {
+    function openCharacterExportDialog(cards: COC7CharacterCard[], scope: CharacterExportScope): void {
+        const targets = cards.filter(Boolean);
+        if (!targets.length) {
+            notify("没有可导出的角色卡。", "warning");
+            return;
+        }
+        const single = targets.length === 1;
         const modalElement = document.createElement("div");
         modalElement.className = "modal fade";
         modalElement.innerHTML = `
@@ -5017,16 +5054,16 @@ interface Window {
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-2">即将导出「${escapeHtml(card.name)}」的完整角色卡数据，请选择导出方式：</p>
+                    <p class="mb-2">即将导出${single ? `「${escapeHtml(targets[0]?.name || "")}」` : `选中的 ${targets.length} 张角色卡`}的完整角色卡数据，请选择导出方式：</p>
                     <div class="d-grid gap-2">
                         <button type="button" class="btn btn-primary" data-character-export="json">
-                            <i class="fa fa-download" aria-hidden="true"></i> 下载 JSON 文件
+                            <i class="fa fa-download" aria-hidden="true"></i> ${single ? "下载 JSON 文件" : `下载 ${targets.length} 个 JSON 文件`}
                         </button>
-                        <button type="button" class="btn btn-outline-primary" data-character-export="text">
+                        <button type="button" class="btn btn-outline-primary" data-character-export="text"${single ? "" : " disabled"}>
                             <i class="fa fa-copy" aria-hidden="true"></i> 复制分享文本串
                         </button>
                     </div>
-                    <p class="text-muted small mt-3 mb-0">文本串是 JSON 经 zlib 压缩后再 base64 编码的裸串，可直接粘贴分享，任何标准工具都能解压还原为原始 JSON。</p>
+                    <p class="text-muted small mt-3 mb-0">文本串是 JSON 经 zlib 压缩后再 base64 编码的裸串，可直接粘贴分享，任何标准工具都能解压还原为原始 JSON。${single ? "" : "分享文本串一次只能导出一张角色卡；批量导出请使用 JSON 文件。"}</p>
                 </div>
             </div></div>`;
         document.body.appendChild(modalElement);
@@ -5034,10 +5071,16 @@ interface Window {
         modalElement.addEventListener("hidden.bs.modal", () => modalElement.remove());
         modalElement.querySelectorAll<HTMLButtonElement>("[data-character-export]").forEach((button) => {
             button.addEventListener("click", () => {
+                if (button.disabled) return;
                 const mode = button.dataset.characterExport === "text" ? "text" : "json";
-                button.disabled = true;
-                void exportCharacterCard(card, mode).finally(() => {
-                    button.disabled = false;
+                modalElement.querySelectorAll<HTMLButtonElement>("[data-character-export]").forEach((item) => {
+                    item.disabled = true;
+                });
+                const target = targets[0];
+                const task = mode === "json" || !target
+                    ? exportCharacterCardsAsJson(targets, scope)
+                    : exportCharacterCardAsText(target, scope);
+                void task.finally(() => {
                     instance?.hide();
                 });
             });
@@ -5045,21 +5088,47 @@ interface Window {
         instance?.show();
     }
 
-    async function exportCharacterCard(card: COC7CharacterCard, mode: "json" | "text"): Promise<void> {
+    async function fetchCharacterExportBundle(
+        card: COC7CharacterCard,
+        scope: CharacterExportScope
+    ): Promise<CharacterExportBundle> {
+        const url = scope === "gallery"
+            ? `/api/character-gallery/${encodeURIComponent(card.id)}/export`
+            : `/api/characters/${encodeURIComponent(card.id)}/export`;
+        const response = await TrpgApi.get<ApiResponse<CharacterExportBundle>>(url);
+        if (response.success && response.data?.jsonText) return response.data;
+        throw new Error(response.message || response.error || `导出「${card.name}」失败`);
+    }
+
+    async function exportCharacterCardsAsJson(cards: COC7CharacterCard[], scope: CharacterExportScope): Promise<void> {
+        const failures: string[] = [];
+        let exported = 0;
+        for (const card of cards) {
+            try {
+                const bundle = await fetchCharacterExportBundle(card, scope);
+                const jsonText = bundle.jsonText || "";
+                if (!jsonText) throw new Error("导出内容为空");
+                downloadCharacterExportFile(bundle.filename || `${card.name || card.id}.json`, jsonText);
+                exported += 1;
+            } catch (error) {
+                failures.push(`${card.name || card.id}（${characterErrorMessage(error)}）`);
+            }
+        }
+        if (!exported) {
+            notify(`导出失败：${failures.join("、") || "没有可导出的角色卡"}`, "error");
+            return;
+        }
+        if (failures.length) {
+            notify(`已下载 ${exported} 张，${failures.length} 张失败：${failures.join("、")}`, "error");
+            return;
+        }
+        notify(exported === 1 ? "角色卡 JSON 已下载。" : `已下载 ${exported} 个角色卡 JSON 文件。`, "success");
+    }
+
+    async function exportCharacterCardAsText(card: COC7CharacterCard, scope: CharacterExportScope): Promise<void> {
         try {
-            const response = await TrpgApi.get<ApiResponse<CharacterExportBundle>>(`/api/characters/${encodeURIComponent(card.id)}/export`);
-            const bundle = response.success ? response.data : null;
-            const jsonText = bundle?.jsonText || "";
-            if (!jsonText) {
-                notify(response.message || response.error || "导出角色卡失败", "error");
-                return;
-            }
-            if (mode === "json") {
-                downloadCharacterExportFile(bundle?.filename || `${card.name || card.id}.json`, jsonText);
-                notify("角色卡 JSON 已下载。", "success");
-                return;
-            }
-            const encoded = bundle?.encoded || "";
+            const bundle = await fetchCharacterExportBundle(card, scope);
+            const encoded = bundle.encoded || "";
             if (!encoded) {
                 notify("分享文本串生成失败。", "error");
                 return;
