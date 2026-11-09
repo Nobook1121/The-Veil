@@ -220,6 +220,23 @@ def test_rulesets_endpoint_exposes_schema_descriptor():
     assert items["coc7"]["schema"]["attribute_keys"]
 
 
+def test_legacy_card_without_ruleset_id_reads_and_exports_as_default_plugin(tmp_path, monkeypatch):
+    """历史卡没有 rulesetId 时按默认插件读取，而不是被判成不兼容卡。"""
+    from trpg_server import character_card_io, character_service
+    from trpg_server.ruleset import default_ruleset_id
+    from trpg_server.ruleset.capabilities import pack_card
+
+    plugin = builtin_registry().resolve("")
+    stored = {"id": "legacy-card", "name": "旧卡", "attributes": {"str": 50}, "skills": []}
+    packed = pack_card(plugin, stored)
+    assert packed["rulesetId"] == default_ruleset_id()
+    assert packed["sheet"]["attributes"] == {"str": 50}
+
+    monkeypatch.setattr(character_service, "character_dir", lambda character_id: tmp_path)
+    exported = character_card_io.build_export_payload(dict(stored))
+    assert exported["rulesetId"] == default_ruleset_id()
+
+
 def test_combat_registry_forwards_to_ruleset_plugin():
     from trpg_server.combat import registry as combat_registry
 

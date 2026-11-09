@@ -404,6 +404,18 @@ interface Window {
     const ACTIVE_STORAGE_KEY = "ai-trpg:coc7-active-character";
     const RULE_SETTINGS_STORAGE_KEY = "ai-trpg:coc7-character-rule-settings";
     const USER_SKILL_BASES_STORAGE_KEY = "ai-trpg:coc7-skill-base-settings";
+    const RULESET_ID = "coc7";
+
+    /**
+     * 卡的规则集归属归一。
+     *
+     * 历史卡可能没有 ``rulesetId``（线上老房间、未跑迁移的卡），缺字段 / 空串
+     * 一律视为默认插件（本模块），只有明确写成其它 id 才会被判成外部卡。
+     * 所有比较都必须走这里，禁止在别处写 ``|| "未知"`` 之类的分叉。
+     */
+    function normalizeRulesetId(raw: unknown): string {
+        return String(raw ?? "").trim().toLowerCase() || RULESET_ID;
+    }
     const ATTRIBUTE_KEYS: COC7CoreAttributeKey[] = ["STR", "DEX", "SIZ", "APP", "CON", "INT", "POW", "EDU", "LUC"];
     const PLAYER_UNBOUND_LABEL = "未绑定玩家";
     const ATTRIBUTE_LABELS: Record<COC7CoreAttributeKey, string> = {
@@ -982,7 +994,7 @@ interface Window {
             background: normalizeBackground(input.background),
             relationships: normalizeRelationships(input.relationships),
             experiencedScenarios: normalizeExperiencedScenarios(input.experiencedScenarios),
-            rulesetId: String(input.rulesetId || "coc7").toLowerCase(),
+            rulesetId: normalizeRulesetId(input.rulesetId),
             createdAt: input.createdAt || now,
             updatedAt: now
         };
@@ -1541,8 +1553,8 @@ interface Window {
     function cardInputFromSchema(input: COC7CharacterCardInput): COC7CharacterCardInput {
         const sheet = input.sheet;
         if (!sheet || typeof sheet !== "object") return input;
-        const rulesetId = String(input.rulesetId || "coc7").toLowerCase();
-        if (rulesetId !== "coc7") return input;
+        const rulesetId = normalizeRulesetId(input.rulesetId);
+        if (rulesetId !== RULESET_ID) return input;
         const fromSheet = convertTestCharacterJsonToCardInput({
             ...(input as unknown as TestCharacterJson),
             ...(sheet as Record<string, unknown>)
@@ -3023,17 +3035,12 @@ interface Window {
      * 遇到其他规则集的卡直接拒绝并给出原因，不渲染半成品只读界面——
      * 否则用户会以为卡还可用，实际既改不了也存不回去。
      */
-    function cardRulesetId(card?: { rulesetId?: string } | null): string {
-        return String(card?.rulesetId || "").trim().toLowerCase();
-    }
-
     function supportsCard(card?: { rulesetId?: string } | null): boolean {
-        const id = cardRulesetId(card);
-        return !id || id === "coc7";
+        return normalizeRulesetId(card?.rulesetId) === RULESET_ID;
     }
 
     function foreignCardMessage(card?: { rulesetId?: string } | null): string {
-        const id = cardRulesetId(card) || "未知";
+        const id = normalizeRulesetId(card?.rulesetId);
         return `该角色卡属于规则集「${id}」，当前客户端未加载对应卡面实现，已阻止打开以免误改数据。`;
     }
 
@@ -4783,7 +4790,7 @@ interface Window {
                 sanChange: stringField(item.san_change || item.sanChange),
                 otherChanges: stringField(item.other_changes || item.otherChanges)
             })),
-            ...(payload.rulesetId ? { rulesetId: stringField(payload.rulesetId, "coc7") } : {}),
+            ...(payload.rulesetId ? { rulesetId: normalizeRulesetId(payload.rulesetId) } : {}),
             ...(payload.createdAt ? { createdAt: payload.createdAt } : {}),
             ...(payload.updatedAt ? { updatedAt: payload.updatedAt } : {})
         };
@@ -5176,10 +5183,7 @@ interface Window {
         initCharacterSheet,
         clearCharacterManagement: clearCharacterSheetState,
         reloadCharacterManagement: reloadCharacterSheet,
-        supportsRuleset: (rulesetId?: string | null) => {
-            const id = String(rulesetId ?? "").trim().toLowerCase();
-            return !id || id === "coc7";
-        },
+        supportsRuleset: (rulesetId?: string | null) => normalizeRulesetId(rulesetId) === RULESET_ID,
     }, { default: true });
 })(typeof window !== "undefined" ? window : globalThis as Window & typeof globalThis);
 

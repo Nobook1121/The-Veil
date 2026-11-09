@@ -370,3 +370,26 @@ def test_build_script_copies_localization_catalogs():
     assert "frontend" in build_script
     assert "locales" in build_script
     assert "dist" in build_script
+
+
+def test_character_sheet_treats_missing_ruleset_id_as_default_plugin():
+    """历史卡可能没有 rulesetId：必须按默认插件（coc7）打开，不能被当成外部卡阻断。"""
+    source = (ROOT / "frontend/src/rulesets/coc7/character-sheet.ts").read_text(encoding="utf-8")
+
+    # 唯一的归一入口：缺字段 / 空串 / 纯空白都落到默认插件。
+    assert 'const RULESET_ID = "coc7";' in source
+    assert "function normalizeRulesetId(raw: unknown): string {" in source
+    assert 'return String(raw ?? "").trim().toLowerCase() || RULESET_ID;' in source
+
+    # 卡数据 → 视图模型、schema 归一、导入、归属判定与注册声明全部走同一入口。
+    assert "rulesetId: normalizeRulesetId(input.rulesetId)," in source
+    assert "const rulesetId = normalizeRulesetId(input.rulesetId);" in source
+    assert "return normalizeRulesetId(card?.rulesetId) === RULESET_ID;" in source
+    assert "supportsRuleset: (rulesetId?: string | null) => normalizeRulesetId(rulesetId) === RULESET_ID," in source
+    assert 'normalizeRulesetId(payload.rulesetId)' in source
+
+    # 编辑/详情只拦截「明确声明的外部规则集」；缺 id 的卡照常进入编辑。
+    assert "if (card && !supportsCard(card)) {" in source
+    assert "if (!supportsCard(card)) {" in source
+    assert 'rulesetId !== "coc7"' not in source
+    assert 'rulesetId === "coc7"' not in source
