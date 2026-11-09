@@ -202,6 +202,25 @@ foreach ($dir in $runtimeDirs) {
     Copy-Relative $dir
 }
 
+# ---------------------------------------------------------------- 排除仅本地使用的 skill
+# skills/ 下被 .gitignore 忽略的目录属于开发者本机的 agent 参考 skill，
+# 只在本机保留，不随发布包分发。这里按 git 忽略状态统一处理，避免逐个点名。
+if (Get-Command git -ErrorAction SilentlyContinue) {
+    $skillsRoot = Join-Path $Root 'skills'
+    if (Test-Path $skillsRoot) {
+        Get-ChildItem -Path $skillsRoot -Directory | ForEach-Object {
+            git -C $Root check-ignore -q "skills/$($_.Name)"
+            if ($LASTEXITCODE -eq 0) {
+                $skillTarget = Join-Path $App "skills/$($_.Name)"
+                if (Test-Path $skillTarget) {
+                    Remove-Item -Path $skillTarget -Recurse -Force
+                    Write-Step "跳过仅本地使用的 skill: $($_.Name)"
+                }
+            }
+        }
+    }
+}
+
 # ---------------------------------------------------------------- 单文件运行资源
 Copy-Relative 'data/character_skills.json'
 Copy-Relative 'scripts/build-frontend.mjs'

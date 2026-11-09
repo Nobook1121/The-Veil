@@ -126,6 +126,9 @@ tmp_doc_utf16.txt
 /docs/assets-backup/
 /frontend/src/assets/brand/concepts/
 
+# 本地开发时给 agent 参考的第三方 Skill：只保留在本机，不进仓库与发布包
+/skills/oil-ui/
+
 # Release archives: upload to GitHub Releases instead of committing
 /release/*.zip
 /release/*.tar.gz
