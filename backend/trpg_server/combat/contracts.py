@@ -12,6 +12,28 @@ from typing import Any, Callable, Mapping, Protocol, runtime_checkable
 RollD100 = Callable[[], int]
 RollDice = Callable[[int, int], int]
 
+# 成功等级的默认排序：核心只做「按顺序比较」，等级名与顺序由插件的
+# ``level_rank()`` 覆盖。保留默认值是为了让只声明元数据的占位插件也能跑通。
+DEFAULT_LEVEL_RANK: dict[str, int] = {
+    "fumble": -1,
+    "failure": 0,
+    "regular": 1,
+    "hard": 2,
+    "extreme": 3,
+    "critical": 4,
+}
+# 默认「已失去行动能力」的状态集合，插件可用 ``skipped_statuses()`` 覆盖。
+DEFAULT_SKIPPED_STATUSES = frozenset({"unconscious", "dying", "dead"})
+
+
+def level_rank_of(level: str, rank: Mapping[str, int] | None = None) -> int:
+    table = rank if rank is not None else DEFAULT_LEVEL_RANK
+    return int(table.get(str(level or ""), 0))
+
+
+def is_success_level(level: str, rank: Mapping[str, int] | None = None) -> bool:
+    return level_rank_of(level, rank) > 0
+
 
 @dataclass
 class CheckOutcome:

@@ -108,7 +108,14 @@ class RulesetKnowledgeStore:
         meta = self._meta(ruleset_id); meta["enabled"] = False; data = self._registry(); data[str(ruleset_id)] = meta; self._save_registry(data); return meta
 
 
-def search_ruleset(room_id: str, query: str, *, store: RulesetKnowledgeStore, ruleset_id: str = "coc7", top_k: int = 3) -> list[dict[str, Any]]:
+def search_ruleset(room_id: str, query: str, *, store: RulesetKnowledgeStore, ruleset_id: str = "", top_k: int = 3) -> list[dict[str, Any]]:
+    if not ruleset_id:
+        try:
+            from trpg_server.ruleset import default_ruleset_id
+
+            ruleset_id = default_ruleset_id()
+        except RuntimeError:
+            ruleset_id = ""
     version = None
     if store.rooms_dir:
         info = read_json(store.rooms_dir / str(room_id) / "info.json", default={})

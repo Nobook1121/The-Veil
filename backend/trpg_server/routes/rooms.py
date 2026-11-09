@@ -15,7 +15,7 @@ from trpg_server.media_defaults import normalize_avatar
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
 from trpg_server.room_log import ARCHIVE_LOG_LIMIT, load_room_log, log_room_event
 from trpg_server.responses import error_response, success_response
-from trpg_server.ruleset import DEFAULT_RULESET_ID, RulesetSelectionError, builtin_registry
+from trpg_server.ruleset import RulesetSelectionError, builtin_registry, default_ruleset_id
 from trpg_server.room_access import can_access, find_room, is_elevated
 from trpg_server.room_mode import (
     MODE_PRESETS,
@@ -41,6 +41,15 @@ from trpg_server.scenario_store import load_scenario_by_id
 
 bp = Blueprint("rooms", __name__)
 logger = logging.getLogger(__name__)
+
+
+def _fallback_ruleset_id() -> str:
+    """当前默认插件 id；无可用插件时返回空串，避免读取旧房间快照时抛错。"""
+    try:
+        return default_ruleset_id()
+    except RuntimeError:
+        return ""
+
 
 USER_ROOM_LIMIT = 3
 ROOM_ROLE_OWNER = "owner"
@@ -622,7 +631,7 @@ def _sanitize_character_card(character_card):
     sanitized = {
         "id": card_id[:80],
         "name": name[:80],
-        "rulesetId": str(character_card.get("rulesetId") or "coc7")[:40],
+        "rulesetId": str(character_card.get("rulesetId") or _fallback_ruleset_id())[:40],
         "occupationId": str(character_card.get("occupationId", character_card.get("occupation_id", "")))[:80],
         "attributes": attributes,
         "maxHp": max_hp,
@@ -652,9 +661,9 @@ def _derive_character_card(character_card):
         return character_card
     try:
         from trpg_server.ruleset import get_plugin
+        from trpg_server.ruleset.capabilities import derive_card
 
-        plugin = get_plugin(character_card.get("rulesetId"))
-        return dict(plugin.schema.derive(character_card))
+        return derive_card(get_plugin(character_card.get("rulesetId")), character_card)
     except Exception:  # noqa: BLE001 - 插件异常不应阻断房间读取
         return dict(character_card)
 
@@ -1171,7 +1180,7 @@ def create_room():
     # 未指定时用默认规则集；剧本房间随后以剧本的 ruleset_id 为准。
     requested_ruleset = str(data.get("ruleset_id") or data.get("rulesetId") or "").strip()
     try:
-        ruleset_id = builtin_registry().assert_selectable(requested_ruleset or DEFAULT_RULESET_ID).id
+        ruleset_id = builtin_registry().assert_selectable(requested_ruleset or default_ruleset_id()).id
     except RulesetSelectionError as exc:
         return error_response(exc.message, 400, exc.reason_code)
     # 房间可见性默认为私人房间（仅能通过房间码加入）；公开房间会展示给所有玩家。

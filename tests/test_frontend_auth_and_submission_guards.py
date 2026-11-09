@@ -17,7 +17,7 @@ def test_register_password_strength_messages_are_localized():
 
 
 def test_character_editor_save_is_guarded_against_duplicate_clicks():
-    source = read_frontend_source("frontend/src/app/character-sheet.ts")
+    source = read_frontend_source("frontend/src/rulesets/coc7/character-sheet.ts")
 
     assert "let characterSaveInFlight = false;" in source
     assert "if (characterSaveInFlight) return;" in source

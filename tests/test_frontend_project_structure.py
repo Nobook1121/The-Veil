@@ -238,7 +238,7 @@ def test_improvement_sidebar_exposes_discovery_and_admin_gated_settings():
 def test_improvement_frontend_exposes_gallery_and_profile_tabs():
     main_tabs = (ROOT / "frontend/src/index/fragments/02-main-tabs.html").read_text(encoding="utf-8")
     auth_settings = (ROOT / "frontend/src/index/fragments/03-room-tools-auth-settings.html").read_text(encoding="utf-8")
-    character_source = (ROOT / "frontend/src/app/character-sheet.ts").read_text(encoding="utf-8")
+    character_source = (ROOT / "frontend/src/rulesets/coc7/character-sheet.ts").read_text(encoding="utf-8")
     tabs_source = (ROOT / "frontend/src/app/tabs.ts").read_text(encoding="utf-8")
 
     assert 'id="character-gallery"' in main_tabs
@@ -252,7 +252,7 @@ def test_improvement_frontend_exposes_gallery_and_profile_tabs():
 
 def test_character_gallery_cards_have_search_summary_and_public_ids():
     main_tabs = (ROOT / "frontend/src/index/fragments/02-main-tabs.html").read_text(encoding="utf-8")
-    character_source = (ROOT / "frontend/src/app/character-sheet.ts").read_text(encoding="utf-8")
+    character_source = (ROOT / "frontend/src/rulesets/coc7/character-sheet.ts").read_text(encoding="utf-8")
     character_css = (ROOT / "frontend/src/styles/02-scenario-character.css").read_text(encoding="utf-8")
 
     assert 'id="characterGallerySearch"' in main_tabs
@@ -266,7 +266,7 @@ def test_character_gallery_cards_have_search_summary_and_public_ids():
 
 def test_character_attribute_base_total_omits_limit_suffix_and_box():
     editor_fragment = (ROOT / "frontend/src/index/fragments/04-editor-modals.html").read_text(encoding="utf-8")
-    character_source = (ROOT / "frontend/src/app/character-sheet.ts").read_text(encoding="utf-8")
+    character_source = (ROOT / "frontend/src/rulesets/coc7/character-sheet.ts").read_text(encoding="utf-8")
     character_css = (ROOT / "frontend/src/styles/02-scenario-character.css").read_text(encoding="utf-8")
 
     assert '<strong id="attributeBaseTotal">0</strong>' in editor_fragment

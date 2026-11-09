@@ -14,7 +14,7 @@ from flask import current_app
 
 from trpg_server.agents.versioning import normalize_semver, scenario_content_changed, next_scenario_version
 from trpg_server.media_defaults import normalize_cover
-from trpg_server.ruleset import DEFAULT_RULESET_ID, RulesetSelectionError, builtin_registry
+from trpg_server.ruleset import RulesetSelectionError, builtin_registry, default_ruleset_id
 from trpg_server.scenario_store import (
     generate_public_id,
     load_scenario_record,
@@ -30,7 +30,7 @@ BASIC_FIELDS = ("title", "author", "description", "recommended_players", "cover"
 
 def _normalize_ruleset_id(value: Any) -> str:
     """规则与剧本绑定：只接受注册表中可选的规则集，否则 400。"""
-    candidate = str(value or "").strip() or DEFAULT_RULESET_ID
+    candidate = str(value or "").strip() or default_ruleset_id()
     try:
         return builtin_registry().assert_selectable(candidate).id
     except RulesetSelectionError as exc:

@@ -5,11 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from trpg_server.ruleset import (
-    DEFAULT_RULESET_ID,
     RULESET_API_VERSION,
     RulesetRegistry,
+    RulesetSelectionError,
     builtin_registry,
+    default_ruleset_id,
 )
 from trpg_server.ruleset.coc7.catalogs import Coc7Catalogs
 from trpg_server.ruleset.migrations import migrate_character_cards
@@ -35,7 +38,7 @@ def test_builtin_registry_only_exposes_coc7():
     registry = builtin_registry()
     assert registry.ids() == ["coc7"]
     plugin = registry.resolve(None)
-    assert plugin.id == DEFAULT_RULESET_ID
+    assert plugin.id == default_ruleset_id()
     assert plugin.api_version == RULESET_API_VERSION
     assert "character_schema" in plugin.capabilities
 
@@ -56,6 +59,44 @@ def test_incompatible_plugin_is_disabled_with_reason():
     assert len(items) == 1
     assert items[0]["enabled"] is False
     assert str(RULESET_API_VERSION + 1) in items[0]["reason"]
+
+
+def test_registry_runs_without_any_builtin_plugin():
+    """核心只依赖注册表：一个最小占位插件即可成为默认规则集。"""
+    plugin = _FakePlugin("placeholder")
+    registry = RulesetRegistry([plugin])
+    assert registry.default_id() == "placeholder"
+    assert registry.resolve(None) is plugin
+    assert registry.resolve("unknown") is plugin
+    assert registry.assert_selectable(None) is plugin
+
+
+def test_empty_registry_reports_unavailable_instead_of_crashing_import():
+    registry = RulesetRegistry([])
+    assert registry.default_id() is None
+    with pytest.raises(RuntimeError):
+        registry.resolve(None)
+    with pytest.raises(RulesetSelectionError):
+        registry.assert_selectable(None)
+
+
+def test_explicit_default_plugin_wins():
+    first, second = _FakePlugin("first"), _FakePlugin("second")
+    registry = RulesetRegistry([first, second], default_id="second")
+    assert registry.default_id() == "second"
+    assert registry.resolve(None) is second
+
+
+def test_plugin_modules_are_registry_driven_not_hardcoded(monkeypatch):
+    from trpg_server.ruleset import bootstrap
+
+    monkeypatch.setenv("TRPG_RULESET_PLUGINS", "")
+    empty = bootstrap.build_registry()
+    assert empty.ids() == []
+
+    monkeypatch.setenv("TRPG_RULESET_PLUGINS", "trpg_server.ruleset.coc7")
+    loaded = bootstrap.build_registry()
+    assert loaded.ids() == ["coc7"]
 
 
 def test_schema_pack_keeps_legacy_mirror_and_adds_sheet():
@@ -147,6 +188,38 @@ def test_kp_tools_are_assembled_from_ruleset_plugin():
     assert build_kp_tool_names("does-not-exist") == DEFAULT_KP_TOOLS
 
 
+def test_descriptor_transcribes_coc7_schema():
+    from trpg_server.ruleset.descriptors import SCHEMA_DESCRIPTOR_VERSION, descriptor_of
+
+    plugin = builtin_registry().resolve("coc7")
+    descriptor = descriptor_of(plugin)
+    assert descriptor["descriptor_version"] == SCHEMA_DESCRIPTOR_VERSION
+    assert descriptor["ruleset_id"] == "coc7"
+    assert descriptor["schema_version"] == plugin.schema_version
+    assert "attributes" in descriptor["sheet_fields"]
+    assert "str" in descriptor["attribute_keys"]
+    assert "sanity" in descriptor["resource_keys"]
+    assert "maxSan" in descriptor["derived_card_keys"]
+    assert {slot["kind"] for slot in descriptor["resource_slots"]} == {"hp", "san", "mp"}
+
+
+def test_descriptor_without_schema_is_empty_not_error():
+    from trpg_server.ruleset.descriptors import descriptor_of
+
+    descriptor = descriptor_of(_FakePlugin("bare"))
+    assert descriptor["ruleset_id"] == "bare"
+    assert descriptor["envelope_fields"] == []
+    assert descriptor["sheet_fields"] == []
+    assert descriptor["resource_slots"] == []
+
+
+def test_rulesets_endpoint_exposes_schema_descriptor():
+    registry = builtin_registry()
+    items = {item["id"]: item for item in registry.describe()}
+    assert items["coc7"]["schema"]["ruleset_id"] == "coc7"
+    assert items["coc7"]["schema"]["attribute_keys"]
+
+
 def test_combat_registry_forwards_to_ruleset_plugin():
     from trpg_server.combat import registry as combat_registry
 
@@ -189,6 +262,34 @@ def test_check_service_dispatches_to_ruleset_plugin(monkeypatch):
     assert result["roll"] == 12
     assert result["success"] is True
     assert result["player_name"] == "tester"
+
+
+def test_sanity_capability_missing_reports_unsupported(monkeypatch):
+    import trpg_server.ruleset.registry as registry_module
+    from trpg_server import room_rules
+    from trpg_server.agents.tools import dice
+
+    registry = RulesetRegistry(plugins=[_FakePlugin("bare")])
+    monkeypatch.setattr(registry_module, "_BUILTIN_REGISTRY", registry)
+
+    member = {
+        "user_id": "u1",
+        "username": "tester",
+        "character_card": {"name": "调查员", "rulesetId": "bare", "attributes": {"POW": 50}},
+        "character_state": {"current_san": 40, "max_san": 50},
+    }
+    with pytest.raises(room_rules.RuleOperationError) as excinfo:
+        room_rules.apply_san_change(None, {}, member, delta=-1)
+    assert excinfo.value.code == "sanity_unsupported"
+
+    class _Context:
+        room_dir = None
+
+        def room_info(self):
+            return {"members": [member]}
+
+    result = dice.roll_sanity_check({"player_name": "tester", "san_change": "1/1d6"}, _Context())
+    assert "不支持" in result.get("error", "")
 
 
 class _AdminActor:

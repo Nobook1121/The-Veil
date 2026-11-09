@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 SURPRISE_MODELS = ("bonus_die", "auto_success")
@@ -15,7 +15,38 @@ READY_WEAPON_COSTS = ("free", "action", "round")
 CAST_INTERRUPTS = ("keeper", "any_damage", "never")
 MAJOR_WOUND_PENALTIES = ("none", "cannot_act")
 SHIELD_ACTIONS = ("disabled", "counter_alias")
-COMBAT_RULESETS = ("coc7",)
+
+
+def combat_ruleset_ids() -> tuple[str, ...]:
+    """可选战斗规则集：跟随注册表里真正提供战斗能力的插件，不写死 id。"""
+    try:
+        from trpg_server.ruleset import builtin_registry
+
+        registry = builtin_registry()
+    except Exception:  # noqa: BLE001 - 注册表不可用时退回空白名单
+        return ()
+    ids: list[str] = []
+    for ruleset_id in registry.ids():
+        plugin = registry.get(ruleset_id)
+        if plugin is None or getattr(plugin, "combat", None) is None:
+            continue
+        if "combat" not in getattr(plugin, "capabilities", frozenset()):
+            continue
+        ids.append(ruleset_id)
+    return tuple(ids)
+
+
+def _default_ruleset_id() -> str:
+    ids = combat_ruleset_ids()
+    if not ids:
+        return ""
+    try:
+        from trpg_server.ruleset import default_ruleset_id
+
+        default = default_ruleset_id()
+    except RuntimeError:
+        return ids[0]
+    return default if default in ids else ids[0]
 
 
 @dataclass(frozen=True)
@@ -34,7 +65,7 @@ class CombatSettings:
       不是核心规则（p86）；默认关闭。
     """
 
-    ruleset_id: str = "coc7"
+    ruleset_id: str = field(default_factory=_default_ruleset_id)
     surprise_model: str = "bonus_die"
     ready_weapon_cost: str = "free"
     cast_interrupt: str = "keeper"
@@ -66,8 +97,11 @@ class CombatSettings:
         if threshold is not None and not 1 <= threshold <= 100:
             threshold = None
 
+        default_ruleset = _default_ruleset_id()
+        allowed_rulesets = combat_ruleset_ids() or ((default_ruleset,) if default_ruleset else ())
+
         return cls(
-            ruleset_id=_choice("combat_ruleset", "coc7", COMBAT_RULESETS),
+            ruleset_id=_choice("combat_ruleset", default_ruleset, allowed_rulesets),
             surprise_model=_choice("combat_surprise_model", "bonus_die", SURPRISE_MODELS),
             ready_weapon_cost=_choice("combat_ready_weapon_cost", "free", READY_WEAPON_COSTS),
             cast_interrupt=_choice("combat_cast_interrupt", "keeper", CAST_INTERRUPTS),

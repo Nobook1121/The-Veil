@@ -224,6 +224,7 @@ def create_action(
     risk: str = "write",
     ttl_seconds: int = AGENT_ACTION_TTL_SECONDS,
     room_id: str | None = None,
+    check_args: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     now = time.time()
     action = {
@@ -232,6 +233,9 @@ def create_action(
         "conversation_id": conversation_id,
         "tool": tool,
         "args": dict(args or {}),
+        # 校验用参数（模型的原始入参）。执行参数可能是预览生成的 apply_args，
+        # 二者形状不同，重新鉴权时必须用原始入参，否则 check 会误判为无权限。
+        "check_args": dict(check_args or {}),
         "summary": summary,
         "diff": dict(diff or {}),
         "risk": risk,

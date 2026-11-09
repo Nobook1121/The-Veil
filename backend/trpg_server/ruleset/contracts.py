@@ -2,10 +2,12 @@
 
 边界（硬约定）：
 
-- **只允许随包内置插件**：插件在 :mod:`trpg_server.ruleset.registry` 中静态注册，
+- **只允许随包内置插件**：插件由 :mod:`trpg_server.ruleset.bootstrap` 按模块登记，
   不从 ``data/`` 或用户可写目录加载任意本地 Python。
 - 每个插件声明 ``api_version``；与 :data:`RULESET_API_VERSION` 不一致即禁用。
 - 核心只依赖本文件的协议与数据结构，不 import 具体规则包。
+- 「未指定规则集时用哪个」由插件的加载顺序/配置决定（见
+  :func:`trpg_server.ruleset.registry.default_ruleset_id`），本文件不再写死 id。
 """
 
 from __future__ import annotations
@@ -15,8 +17,6 @@ from typing import Any, Mapping, Protocol, runtime_checkable
 
 # 契约版本：插件接口发生不兼容变更时递增。
 RULESET_API_VERSION = 1
-# 未指定规则集时的兜底；目前只有内置的 CoC7。
-DEFAULT_RULESET_ID = "coc7"
 
 
 @dataclass(frozen=True)

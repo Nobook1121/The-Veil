@@ -1,6 +1,8 @@
 """规则书插件注册表。
 
-只做三件事：静态注册内置插件、校验契约版本、按房间/剧本解析出唯一规则集。
+只做三件事：持有已注册插件、校验契约版本、按房间/剧本解析出唯一规则集。
+具体插件由 :mod:`trpg_server.ruleset.bootstrap` 登记后注入，本模块不 import
+任何规则包，因此删除某个插件不会让注册表本身导入失败。
 不存在从用户目录动态加载插件的入口——这是刻意的信任边界。
 """
 
@@ -10,11 +12,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
-from trpg_server.ruleset.contracts import (
-    DEFAULT_RULESET_ID,
-    RULESET_API_VERSION,
-    RulesetPlugin,
-)
+from trpg_server.ruleset.contracts import RULESET_API_VERSION, RulesetPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +50,12 @@ class RulesetRegistry:
         self,
         plugins: Iterable[RulesetPlugin] | None = None,
         declared: Iterable[DeclaredRuleset] | None = None,
+        default_id: str | None = None,
     ) -> None:
         self._plugins: dict[str, RulesetPlugin] = {}
         self._incompatible: dict[str, str] = {}
         self._declared: dict[str, DeclaredRuleset] = {}
+        self._default_id = str(default_id or "").strip().lower()
         for entry in declared or ():
             self._declared[entry.id] = entry
         for plugin in plugins or ():
@@ -78,6 +78,18 @@ class RulesetRegistry:
     def ids(self) -> list[str]:
         return list(self._plugins)
 
+    def declared(self) -> list[DeclaredRuleset]:
+        """仅占位展示、不注册为插件的规则集（如「开发中」）。"""
+        return list(self._declared.values())
+
+    def default_id(self) -> str | None:
+        """默认插件 id：显式配置优先，否则取第一个成功加载的插件。"""
+        if self._default_id and self._default_id in self._plugins:
+            return self._default_id
+        for ruleset_id in self._plugins:
+            return ruleset_id
+        return None
+
     def get(self, ruleset_id: str | None = None) -> RulesetPlugin | None:
         key = str(ruleset_id or "").strip().lower()
         return self._plugins.get(key)
@@ -87,15 +99,18 @@ class RulesetRegistry:
         plugin = self.get(ruleset_id)
         if plugin is not None:
             return plugin
+        default_id = self.default_id()
         if ruleset_id:
-            logger.info("Unknown ruleset %r, falling back to %s", ruleset_id, DEFAULT_RULESET_ID)
-        fallback = self.get(DEFAULT_RULESET_ID)
+            logger.info("Unknown ruleset %r, falling back to %s", ruleset_id, default_id or "<none>")
+        fallback = self.get(default_id) if default_id else None
         if fallback is None:
-            raise RuntimeError("No built-in ruleset registered")
+            raise RuntimeError("No ruleset plugin registered")
         return fallback
 
     def describe(self) -> list[dict[str, Any]]:
         """展示用清单：前端据此渲染可选/灰色卡片，无需硬编码规则集 id。"""
+        from trpg_server.ruleset.descriptors import descriptor_of
+
         items: list[dict[str, Any]] = []
         for ruleset_id, plugin in self._plugins.items():
             items.append(
@@ -107,6 +122,7 @@ class RulesetRegistry:
                     "schema_version": plugin.schema_version,
                     "supported_locales": list(plugin.supported_locales),
                     "capabilities": sorted(plugin.capabilities),
+                    "schema": descriptor_of(plugin),
                     "state": STATUS_AVAILABLE,
                     "selectable": True,
                     "enabled": True,
@@ -124,6 +140,7 @@ class RulesetRegistry:
                     "schema_version": 0,
                     "supported_locales": [],
                     "capabilities": [],
+                    "schema": None,
                     "state": STATUS_INCOMPATIBLE,
                     "selectable": False,
                     "enabled": False,
@@ -143,6 +160,7 @@ class RulesetRegistry:
                     "schema_version": 0,
                     "supported_locales": [],
                     "capabilities": [],
+                    "schema": None,
                     "state": entry.state,
                     "selectable": False,
                     "enabled": False,
@@ -154,7 +172,9 @@ class RulesetRegistry:
 
     def assert_selectable(self, ruleset_id: str | None) -> RulesetPlugin:
         """选择入口的硬校验：不可选/未实现/不兼容都抛错，并给出可读原因。"""
-        key = str(ruleset_id or "").strip().lower() or DEFAULT_RULESET_ID
+        key = str(ruleset_id or "").strip().lower() or (self.default_id() or "")
+        if not key:
+            raise RulesetSelectionError("", "服务端没有可用的规则集", "ruleset_unavailable")
         plugin = self._plugins.get(key)
         if plugin is not None:
             return plugin
@@ -194,17 +214,27 @@ _BUILTIN_REGISTRY: RulesetRegistry | None = None
 
 
 def builtin_registry() -> RulesetRegistry:
-    """进程级内置注册表；插件清单在这里静态列出。"""
+    """进程级内置注册表；插件清单由 :mod:`trpg_server.ruleset.bootstrap` 提供。"""
     global _BUILTIN_REGISTRY
     if _BUILTIN_REGISTRY is None:
-        from trpg_server.ruleset.coc7 import Coc7Plugin
+        from trpg_server.ruleset.bootstrap import build_registry
 
-        _BUILTIN_REGISTRY = RulesetRegistry(
-            [Coc7Plugin()],
-            # 仅作「开发中」占位：不可选、不注册为插件、不提供任何规则能力。
-            declared=[DeclaredRuleset(id="dnd5e", display_name="DnD 5e")],
-        )
+        _BUILTIN_REGISTRY = build_registry()
     return _BUILTIN_REGISTRY
+
+
+def reset_builtin_registry() -> None:
+    """清空进程级缓存（仅供测试与插件清单变更后重载）。"""
+    global _BUILTIN_REGISTRY
+    _BUILTIN_REGISTRY = None
+
+
+def default_ruleset_id() -> str:
+    """当前默认插件 id；未注册任何插件时抛错，由调用方决定降级方式。"""
+    default_id = builtin_registry().default_id()
+    if default_id is None:
+        raise RuntimeError("No ruleset plugin registered")
+    return default_id
 
 
 def get_plugin(ruleset_id: str | None = None) -> RulesetPlugin:

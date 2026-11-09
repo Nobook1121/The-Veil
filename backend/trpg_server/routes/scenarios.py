@@ -8,7 +8,7 @@ import requests
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.json_store import read_json
-from trpg_server.ruleset import DEFAULT_RULESET_ID
+from trpg_server.ruleset import default_ruleset_id
 from trpg_server import scenario_service
 from trpg_server.media_defaults import normalize_cover
 from trpg_server.logging_config import log_user_action, redact_sensitive, user_action_text
@@ -294,7 +294,7 @@ def load_scenarios():
         if trigger_catalog:
             scenario["trigger_catalog"] = trigger_catalog
         # 历史剧本没有该字段：读取时补默认值，不写回文件。
-        scenario.setdefault("ruleset_id", DEFAULT_RULESET_ID)
+        scenario.setdefault("ruleset_id", default_ruleset_id())
         public_ids.add(public_id)
         scenario_id = str(scenario.get("id"))
         existing = scenarios_by_id.get(scenario_id)

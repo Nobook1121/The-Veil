@@ -51,6 +51,14 @@ RESOURCE_KEYS = ("sanity", "hp", "mp")
 DERIVED_KEYS = ("db", "build", "mov")
 STATUS_BODY_KEYS = ("majorWound", "unconscious", "dead")
 STATUS_MENTAL_KEYS = ("indefiniteInsanity", "permanentInsanity", "temporaryInsanity")
+# 派生值写回卡的键；核心按此列表同步，不再写死 CoC 派生字段。
+CARD_DERIVED_KEYS = ("maxHp", "maxSan", "initialSan", "maxMp", "mov", "build", "damageBonus", "armor")
+# 运行时资源槽位：快照键 / 卡面镜像键 / 上限来源，由本插件声明。
+RESOURCE_SLOTS = (
+    {"kind": "hp", "state": "current_hp", "mirror": "currentHp", "cap_state": "max_hp", "cap_derived": "maxHp", "cap_min": 1},
+    {"kind": "san", "state": "current_san", "mirror": "currentSan", "cap_state": "max_san", "cap_derived": "maxSan", "cap_min": 0},
+    {"kind": "mp", "state": "current_mp", "mirror": "currentMp", "cap_state": "max_mp", "cap_derived": "maxMp", "cap_min": 0},
+)
 
 
 class Coc7CharacterSchema:
@@ -66,6 +74,14 @@ class Coc7CharacterSchema:
     derived_keys = DERIVED_KEYS
     status_body_keys = STATUS_BODY_KEYS
     status_mental_keys = STATUS_MENTAL_KEYS
+
+    def derived_card_keys(self) -> tuple[str, ...]:
+        """需要从派生值写回卡面的键。"""
+        return CARD_DERIVED_KEYS
+
+    def resource_slots(self) -> list[dict[str, Any]]:
+        """运行时资源槽位（当前值 / 上限 / 卡面镜像）。"""
+        return [dict(slot) for slot in RESOURCE_SLOTS]
 
     def pack(self, stored: Mapping[str, Any]) -> dict[str, Any]:
         """把当前卡整理成信封 + sheet；旧顶层字段保留为镜像，避免前端读取断档。"""

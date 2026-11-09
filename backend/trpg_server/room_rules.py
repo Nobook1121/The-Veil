@@ -233,12 +233,11 @@ def resolve_member(
     return member
 
 
-def _schema_for(card: dict[str, Any]):
-    """取规则集 schema；通用层只做调度。"""
+def _plugin_for(card: dict[str, Any]):
     try:
         from trpg_server.ruleset import get_plugin
 
-        return get_plugin((card or {}).get("rulesetId")).schema
+        return get_plugin((card or {}).get("rulesetId"))
     except Exception:  # noqa: BLE001 - 插件异常按无扩展能力处理
         return None
 
@@ -247,10 +246,13 @@ def derive_card(card: dict[str, Any]) -> dict[str, Any]:
     """按卡片所属规则集重算派生值；通用层只做调度，公式在插件内。"""
     if not isinstance(card, dict):
         return {}
-    try:
-        from trpg_server.ruleset import get_plugin
+    from trpg_server.ruleset.capabilities import derive_card as derive_with_plugin
 
-        return dict(get_plugin(card.get("rulesetId")).schema.derive(card))
+    plugin = _plugin_for(card)
+    if plugin is None:
+        return dict(card)
+    try:
+        return derive_with_plugin(plugin, card)
     except Exception:  # noqa: BLE001 - 规则插件异常不应阻断读路径
         logger.debug("Failed to derive character card", exc_info=True)
         return dict(card)
@@ -269,21 +271,27 @@ def sync_derived_stats(
     card = member_card(member)
     state = member["character_state"]
     derived = derive_card(card)
-    for key in ("maxHp", "maxSan", "initialSan", "maxMp", "mov", "build", "damageBonus", "armor"):
+    plugin = _plugin_for(card)
+    from trpg_server.ruleset.capabilities import derived_card_keys, resource_slots
+
+    # 派生键与资源槽位由规则集声明；未声明时用核心默认槽位，保持旧卡行为不变。
+    for key in derived_card_keys(plugin):
         if key in derived:
             card[key] = derived[key]
-    state["max_hp"] = max(1, _as_int(derived.get("maxHp"), _as_int(state.get("max_hp"), 1)))
-    state["max_san"] = max(0, _as_int(derived.get("maxSan"), _as_int(state.get("max_san"), 0)))
-    state["max_mp"] = max(0, _as_int(derived.get("maxMp"), _as_int(state.get("max_mp"), 0)))
 
-    syncs = (
-        ("hp", "current_hp", "currentHp", "max_hp"),
-        ("san", "current_san", "currentSan", "max_san"),
-        ("mp", "current_mp", "currentMp", "max_mp"),
-    )
+    slots = resource_slots(plugin)
+    for slot in slots:
+        cap_key = str(slot["cap_state"])
+        cap_min = _as_int(slot.get("cap_min"), 0)
+        previous_cap = _as_int(state.get(cap_key), cap_min)
+        state[cap_key] = max(cap_min, _as_int(derived.get(str(slot["cap_derived"])), previous_cap))
+
     pressed: dict[str, int] = {}
-    for kind, state_key, card_key, cap_key in syncs:
-        cap = state[cap_key]
+    for slot in slots:
+        kind = str(slot["kind"])
+        state_key = str(slot["state"])
+        card_key = str(slot["mirror"])
+        cap = state[str(slot["cap_state"])]
         value = _as_int(state.get(state_key), _as_int(card.get(card_key), cap))
         value = max(0, min(cap, value))
         previous = state.get(state_key)
@@ -306,42 +314,34 @@ def sync_derived_stats(
                 },
             )
             pressed[kind] = value
-    return {
-        "max_hp": state["max_hp"],
-        "max_san": state["max_san"],
-        "max_mp": state["max_mp"],
+    result: dict[str, Any] = {
         "mov": card.get("mov"),
         "build": card.get("build"),
         "damage_bonus": card.get("damageBonus"),
         "pressed": pressed,
     }
+    for slot in slots:
+        result[str(slot["cap_state"])] = state[str(slot["cap_state"])]
+    return result
+
+
+def _sanity_or_none(card: dict[str, Any]):
+    from trpg_server.ruleset.capabilities import sanity_of
+
+    return sanity_of(_plugin_for(card))
 
 
 def san_snapshot(member: dict[str, Any]) -> dict[str, int]:
-    """SAN 快照；上限取规则集派生值（99 − 克苏鲁神话值），不是旧卡的 maxSan。"""
+    """SAN 快照；上下限与镜像由规则集声明，本函数只负责调度。"""
     card = member_card(member)
     state = member.setdefault("character_state", {})
     if not isinstance(state, dict):
         state = {}
         member["character_state"] = state
-    derived = derive_card(card)
-    max_san = _as_int(
-        derived.get("maxSan"),
-        _as_int(state.get("max_san"), _as_int(card.get("maxSan", card.get("max_san")), 0)),
-    )
-    max_san = max(0, min(999, max_san))
-    fallback_current = _as_int(
-        derived.get("currentSan"),
-        _as_int(card.get("currentSan", card.get("current_san")), min(max_san, _as_int(derived.get("initialSan"), max_san))),
-    )
-    current = _as_int(state.get("current_san"), fallback_current)
-    current = max(0, min(max_san, current))
-    state["max_san"] = max_san
-    state["current_san"] = current
-    card["maxSan"] = max_san
-    card["currentSan"] = current
-    card["current_san"] = current
-    return {"current": current, "max": max_san}
+    sanity = _sanity_or_none(card)
+    if sanity is None:
+        raise RuleOperationError("当前规则集不支持理智值", code="sanity_unsupported")
+    return sanity.snapshot(card, derive_card(card), state, write=True)
 
 
 def _as_int(value: Any, fallback: int = 0) -> int:
@@ -491,25 +491,29 @@ def apply_san_change(
     card["currentSan"] = after
     card["current_san"] = after
     loss = max(0, -applied)
-    daily: dict[str, Any] = {}
-    if loss > 0:
-        # 同一游戏日累计损失达到阈值也判不定性疯狂（与单次阈值并存）。
-        schema = _schema_for(card)
-        handler = getattr(schema, "record_san_loss", None)
-        if callable(handler):
-            day = str(info.get("game_date") or info.get("game_day") or "").strip() or time.strftime("%Y-%m-%d")
-            daily = handler(state, day=day, before=before, loss=loss)
-        if daily.get("threshold_met") or (before > 0 and loss * 5 >= before):
-            flags = state.setdefault("mental_status", {})
-            if isinstance(flags, dict):
-                flags["indefiniteInsanity"] = flags["indefinite_insanity"] = True
-                card["indefinite_insanity"] = True
-    if after <= 0:
-        flags = state.setdefault("mental_status", {})
+    sanity = _sanity_or_none(card)
+    if sanity is None:
+        raise RuleOperationError("当前规则集不支持理智值", code="sanity_unsupported")
+    day = str(info.get("game_date") or info.get("game_day") or "").strip() or time.strftime("%Y-%m-%d")
+    outcome = sanity.resolve_loss(
+        card=card,
+        state=state,
+        before=before,
+        new_san=after,
+        maximum=maximum,
+        loss=loss,
+        day=day,
+        record_last=False,
+        write_card=False,
+    )
+    daily = outcome.get("daily") or {}
+    if outcome.get("indefinite"):
+        card["indefinite_insanity"] = True
+    if outcome.get("permanent"):
+        flags = state.get("mental_status")
         if isinstance(flags, dict):
-            flags["permanentInsanity"] = flags["permanent_insanity"] = True
             card["status"] = flags
-            card["permanent_insanity"] = True
+        card["permanent_insanity"] = True
 
     record = {
         "id": f"san-{int(time.time() * 1000)}-{len(state.get('sanity_records') or [])}",
@@ -821,19 +825,13 @@ def roll_check(
 
 def _normalize_san_change(value: Any) -> str:
     """玩家命令默认把「1d4/1d10」视为损失；显式带 ``+`` 才表示恢复。"""
-    text = str(value or "").strip()
-    if "/" not in text:
-        raise RuleOperationError(
-            "理智值变化必须使用「成功/失败」格式，例如 1d4/1d10",
-            code="invalid_san_change",
-        )
-    parts = []
-    for part in text.split("/", 1):
-        segment = part.strip()
-        if segment and segment[0] not in "+-":
-            segment = "-" + segment
-        parts.append(segment)
-    return "/".join(parts)
+    sanity = _sanity_or_none({})
+    if sanity is None:
+        raise RuleOperationError("当前规则集不支持理智值", code="sanity_unsupported")
+    try:
+        return sanity.normalize_change(value)
+    except ValueError as exc:
+        raise RuleOperationError(str(exc), code="invalid_san_change") from exc
 
 
 def roll_sanity(

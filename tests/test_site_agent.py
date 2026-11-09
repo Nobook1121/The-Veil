@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from flask import Flask
 
-from trpg_server import permission_config, role_config
+from trpg_server import permission_config, role_config, site_agent_tools
 from trpg_server import site_agent_store
 from trpg_server.site_agent_auth import (
     Actor,
@@ -18,7 +18,7 @@ from trpg_server.site_agent_auth import (
     sensitive_node_allowed,
 )
 from trpg_server.site_agent_prompt import detect_injection, untrusted_block
-from trpg_server.site_agent_tools import _make_wrapper
+from trpg_server.site_agent_tools import _make_wrapper, apply_pending_action
 from trpg_server.site_agent_tools.base import ToolArgumentError, ToolContext, ToolResult, ToolSpec, sanitize_arguments
 from trpg_server.site_agent_tools.profile import _validate as validate_profile_change
 from trpg_server.site_agent_tools.rooms import _is_room_manager
@@ -230,6 +230,61 @@ class TestWriteToolConfirmation:
         assert action["args"] == {"value": "curated"}
         # 预览参数只用于执行，不进入展示给用户的 diff。
         assert "apply_args" not in action["diff"]
+
+    def test_confirmation_rechecks_with_original_arguments(self, agent_app, monkeypatch):
+        """apply_args 与模型入参形状不同时，确认阶段必须用原始入参重新鉴权。"""
+        seen: dict = {}
+        spec_name = "demo.confirm_shape"
+
+        def preview(actor, arguments, context):
+            apply_args = {"character_id": "char-1", "payload": {"name": arguments["name"]}}
+            return ToolResult.success(
+                {"apply_args": apply_args, "summary": "创建角色卡"},
+                summary="创建角色卡",
+            )
+
+        def apply(actor, arguments, context):
+            seen["args"] = arguments
+            return ToolResult.success({"id": arguments.get("character_id")})
+
+        def check(actor, arguments):
+            # 与 characters.save 的真实校验一致：只认模型原始入参里的 name。
+            return None if str(arguments.get("name") or "").strip() else "角色卡名称不能为空"
+
+        spec = ToolSpec(
+            name=spec_name,
+            description="demo",
+            parameters={
+                "type": "object",
+                "properties": {"name": {"type": "string"}, "fields": {"type": "object"}},
+                "required": ["name"],
+            },
+            risk="write",
+            required_permission="characters.create",
+            preview=preview,
+            apply=apply,
+            check=check,
+        )
+        actor = Actor(
+            user_id=1,
+            username="alice",
+            role="USER",
+            permissions=frozenset({"agent.use", "characters.create"}),
+            room_ids=frozenset(),
+        )
+        context = ToolContext(actor=actor, config=SimpleNamespace(), conversation_id="c_1", turn_id="t1")
+        monkeypatch.setitem(site_agent_tools.SPECS_BY_NAME, spec_name, spec)
+        wrapper = _make_wrapper(spec, actor, context, SimpleNamespace(enabled=True, action_ttl_seconds=300))
+
+        result = wrapper({"name": "Alice"})
+        action = site_agent_store.load_action(result["pending_action"]["action_id"])
+        assert action is not None
+        assert action["args"] == {"character_id": "char-1", "payload": {"name": "Alice"}}
+        assert action["check_args"] == {"name": "Alice"}
+
+        applied = apply_pending_action(actor, action, config=SimpleNamespace(enabled=True))
+        assert applied.ok is True
+        assert seen["args"] == {"character_id": "char-1", "payload": {"name": "Alice"}}
 
 
 class TestProfileValidation:

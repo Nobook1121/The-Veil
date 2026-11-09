@@ -46,6 +46,19 @@ class Coc7Ruleset:
     ruleset_id = "coc7"
     display_name = "克苏鲁的呼唤 7e"
 
+    # -- 核心能力映射（供与规则无关的战斗工具调用）------------------------
+    def level_rank(self) -> dict[str, int]:
+        """成功等级排序：核心只做大小比较，不关心等级叫什么。"""
+        return LEVEL_RANK
+
+    def skipped_statuses(self) -> frozenset[str]:
+        """失去行动能力的状态集合。"""
+        return SKIPPED_STATUS
+
+    def build_and_damage_bonus(self, str_value: Any, siz_value: Any):
+        """伤害加值/体格：这是本规则集的伤害模型，由插件提供。"""
+        return build_and_damage_bonus(str_value, siz_value)
+
     # -- 先攻与行动经济 ---------------------------------------------------
     def roll_initiative(
         self, combatant: Mapping[str, Any], rng: Any, settings: Any

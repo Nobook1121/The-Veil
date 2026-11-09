@@ -336,9 +336,11 @@ def apply_save(actor: Any, character_id: str, payload: dict[str, Any]) -> dict[s
     character = _sync_weapon_payload(character, raw_payload)
     character = _persist_avatar(character)
     # 规则集信封由插件统一补齐，核心不硬编码 CoC 字段；旧顶层字段继续保留为镜像。
+    from trpg_server.ruleset.capabilities import pack_card
+
     ruleset = get_plugin(character.get("rulesetId"))
     character["rulesetId"] = ruleset.id
-    stored = ruleset.schema.pack(_runtime_to_test_character(character))
+    stored = pack_card(ruleset, _runtime_to_test_character(character))
     write_json_atomic(character_json_path(character["id"]), stored)
     # 前端按 schema 渲染：保存响应也带回 sheet，避免再依赖固定顶层字段。
     character["sheet"] = dict(stored.get("sheet") or {})
@@ -349,10 +351,10 @@ def apply_save(actor: Any, character_id: str, payload: dict[str, Any]) -> dict[s
     return character
 
 
-def _schema_for_card(card: dict[str, Any]):
+def _plugin_for_card(card: dict[str, Any]):
     try:
-        return get_plugin((card or {}).get("rulesetId")).schema
-    except Exception:  # noqa: BLE001 - 规则插件异常时按无派生能力处理
+        return get_plugin((card or {}).get("rulesetId"))
+    except Exception:  # noqa: BLE001 - 规则插件异常时按无扩展能力处理
         return None
 
 
@@ -367,10 +369,10 @@ def apply_room_changes(actor: Any, character_id: str, changes: list[dict[str, An
     if not existing:
         raise CharacterServiceError("character_not_found", "角色卡不存在", 404)
 
-    schema = _schema_for_card(existing)
-    skill_cap = 100
-    if schema is not None and hasattr(schema, "derive"):
-        skill_cap = _bounded_int(schema.derive(existing).get("skillCap"), 0, 999, 100)
+    from trpg_server.ruleset.capabilities import derive_card as derive_with_plugin
+
+    derived = derive_with_plugin(_plugin_for_card(existing), existing)
+    skill_cap = _bounded_int(derived.get("skillCap"), 0, 999, 100)
 
     payload: dict[str, Any] = {}
     for change in changes or []:
@@ -427,13 +429,17 @@ def apply_room_changes(actor: Any, character_id: str, changes: list[dict[str, An
     if not payload:
         return existing
     # 属性 / 神话值变化后统一重算派生值，并写入被夹紧的 HP / MP / SAN 与上限。
-    if schema is not None and hasattr(schema, "derive"):
+    plugin = _plugin_for_card(existing)
+    if plugin is not None:
+        from trpg_server.ruleset.capabilities import derived_card_keys, resource_slots
+
         merged = dict(existing)
         merged.update(payload)
-        derived = schema.derive(merged)
-        for key in ("maxHp", "currentHp", "maxSan", "initialSan", "currentSan", "maxMp", "currentMp", "armor", "mov", "build", "damageBonus"):
-            if key in derived:
-                payload[key] = derived[key]
+        refreshed = derive_with_plugin(plugin, merged)
+        keys = list(derived_card_keys(plugin)) + [str(slot["mirror"]) for slot in resource_slots(plugin)]
+        for key in keys:
+            if key in refreshed:
+                payload[key] = refreshed[key]
     payload["id"] = character_id
     return apply_save(actor, character_id, payload)
 

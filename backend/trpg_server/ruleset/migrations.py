@@ -13,6 +13,7 @@ from typing import Any
 
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.ruleset import get_plugin
+from trpg_server.ruleset.capabilities import pack_card, schema_of
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,9 @@ def migrate_card_file(path: Path, *, plugin: Any | None = None, dry_run: bool = 
         result["rulesetId"] = raw.get("rulesetId")
         return result
 
-    packed = ruleset.schema.pack(raw)
-    warnings = list(ruleset.schema.validate(packed.get("sheet") or {}))
+    packed = pack_card(ruleset, raw)
+    validate = getattr(schema_of(ruleset), "validate", None)
+    warnings = list(validate(packed.get("sheet") or {})) if callable(validate) else []
     result.update(
         {
             "status": "migrated" if not dry_run else "would_migrate",

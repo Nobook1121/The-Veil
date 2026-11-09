@@ -613,7 +613,7 @@ def test_character_template_clears_placeholder_weapon_rows():
 
 
 def test_frontend_character_template_exports_base_not_base_key():
-    source = Path("frontend/src/app/character-sheet.ts").read_text(encoding="utf-8")
+    source = Path("frontend/src/rulesets/coc7/character-sheet.ts").read_text(encoding="utf-8")
 
     export_block = source.split("function convertCardToTestCharacterJson", 1)[1].split(
         "function convertTestCharacterJsonToCardInput",

@@ -527,7 +527,7 @@ def chat():
                 started = time.perf_counter()
                 _emit_thinking_stage(room_id, ai_request_id, "ruleset_search", "正在查询规则书")
                 try:
-                    return search_ruleset(room_id, query, store=ruleset_store, top_k=top_k)
+                    return search_ruleset(room_id, query, store=ruleset_store, ruleset_id=room_ruleset_id, top_k=top_k)
                 finally:
                     ruleset_metrics["latency_ms"] += round((time.perf_counter() - started) * 1000, 2)
 
@@ -973,7 +973,8 @@ def chat():
                             )
                 except (OSError, ValueError):
                     logger.exception("Scenario retrieval failed")
-        rules_version = str((agent_context.room_info().get("rulesets") or {}).get("coc7") or "1") if room_id else "1"
+        room_rulesets = agent_context.room_info().get("rulesets") or {}
+        rules_version = str(room_rulesets.get(room_ruleset_id) or "1") if room_id else "1"
         memory_context = ""
         if memory_enabled and not scenario_start:
             try:

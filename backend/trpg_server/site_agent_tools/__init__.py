@@ -172,6 +172,7 @@ def _make_wrapper(spec: ToolSpec, actor: Any, context: ToolContext, config: Any)
             conversation_id=context.conversation_id,
             tool=spec.name,
             args=action_args if isinstance(action_args, dict) else args,
+            check_args=args,
             summary=preview.summary or str(data.get("summary") or ""),
             diff=data,
             risk=spec.risk,
@@ -233,7 +234,9 @@ def apply_pending_action(actor: Any, action: dict[str, Any], *, config: Any) -> 
         return ToolResult.failure("该操作不是可执行的写操作")
     args = action.get("args") if isinstance(action.get("args"), dict) else {}
     room_id = str(action.get("room_id") or "") or None
-    decision = authorize_tool(actor, spec, args, config=config, room_id=room_id)
+    # 重新鉴权用模型原始入参；旧版待确认操作没有 check_args 时退回执行参数。
+    check_args = action.get("check_args") if isinstance(action.get("check_args"), dict) else args
+    decision = authorize_tool(actor, spec, check_args, config=config, room_id=room_id)
     if not decision.allowed:
         return ToolResult.failure(DENIAL_MESSAGES.get(decision.reason, decision.reason))
     context = ToolContext(

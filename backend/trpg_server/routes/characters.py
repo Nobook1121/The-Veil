@@ -13,7 +13,8 @@ from trpg_server import character_card_io, character_service, weapon_catalog
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.permission_config import is_role_allowed, permission_config_path
 from trpg_server.responses import error_response, success_response
-from trpg_server.ruleset import builtin_registry, get_plugin
+from trpg_server.ruleset import builtin_registry, default_ruleset_id, get_plugin
+from trpg_server.ruleset.capabilities import catalog_items, catalog_value, derive_card, pack_card
 from trpg_server.security import normalize_filename, safe_join
 from trpg_server.settings import CHARACTER_GALLERY_DIR, CHARACTER_SKILLS_FILE, CHARACTERS_DIR, OCCUPATIONS_DIR, ROOMS_DIR, WEAPONS_DIR
 
@@ -370,7 +371,7 @@ def _runtime_to_test_character(character):
     now_text = _as_text(character.get("updatedAt") or character.get("createdAt"))
     return {
         "id": _as_text(character.get("id")),
-        "rulesetId": _as_text(character.get("rulesetId"), "coc7"),
+        "rulesetId": _as_text(character.get("rulesetId"), _fallback_ruleset_id()),
         "public_id": _as_text(character.get("public_id")),
         "publisher_id": character.get("publisher_id"),
         "publisher_name": _as_text(character.get("publisher_name")),
@@ -485,7 +486,7 @@ def _test_character_to_runtime(character, fallback_id=""):
     age = _as_int(character.get("age"), _as_int(attributes.get("age"), 25))
     return {
         "id": _as_text(character.get("id") or fallback_id),
-        "rulesetId": _as_text(character.get("rulesetId"), "coc7"),
+        "rulesetId": _as_text(character.get("rulesetId"), _fallback_ruleset_id()),
         "public_id": _as_text(character.get("public_id")),
         "publisher_id": character.get("publisher_id"),
         "publisher_name": _as_text(character.get("publisher_name")),
@@ -586,7 +587,7 @@ def _character_from_storage(raw, fallback_id=""):
         character["rulesetId"] = plugin.id
         # 旧卡没有 sheet：读取时由插件按 schema 现算一份，前端无需回退到固定字段。
         if not character.get("sheet"):
-            character["sheet"] = dict(plugin.schema.pack(raw).get("sheet") or {})
+            character["sheet"] = dict(pack_card(plugin, raw).get("sheet") or {})
         return character
     character = dict(raw)
     character.setdefault("id", fallback_id)
@@ -739,7 +740,7 @@ def _sanitize_room_character_card(character):
     sanitized = {
         "id": str(character.get("id", ""))[:80],
         "name": str(character.get("name", ""))[:80],
-        "rulesetId": str(character.get("rulesetId") or "coc7")[:40],
+        "rulesetId": str(character.get("rulesetId") or _fallback_ruleset_id())[:40],
         "occupationId": str(character.get("occupationId", character.get("occupation_id", "")))[:80],
         "attributes": attributes,
         "maxHp": max_hp,
@@ -761,7 +762,7 @@ def _sanitize_room_character_card(character):
         "status": character.get("status") if isinstance(character.get("status"), dict) else {},
     }
     try:
-        return dict(get_plugin(sanitized["rulesetId"]).schema.derive(sanitized))
+        return derive_card(get_plugin(sanitized["rulesetId"]), sanitized)
     except Exception:  # noqa: BLE001 - 插件异常时按未派生结果写入
         return sanitized
 
@@ -825,6 +826,14 @@ def _unbind_deleted_character_from_rooms(character_id):
             write_json_atomic(info_path, info)
 
 
+def _fallback_ruleset_id() -> str:
+    """当前默认插件 id；无可用插件时返回空串，避免读取旧卡时抛错。"""
+    try:
+        return default_ruleset_id()
+    except RuntimeError:
+        return ""
+
+
 def _request_ruleset():
     """目录接口按 ?ruleset= 选择插件；缺省用站点默认。"""
     return builtin_registry().resolve(str(request.args.get("ruleset") or "").strip())
@@ -836,7 +845,7 @@ def list_builtin_occupations():
     if login_error:
         return login_error
 
-    occupations = _request_ruleset().catalogs.occupations()
+    occupations = catalog_items(_request_ruleset(), "occupations")
     return success_response(occupations, "Occupation catalogs loaded successfully")
 
 
@@ -846,7 +855,7 @@ def list_character_skills():
     if login_error:
         return login_error
 
-    catalog = _request_ruleset().catalogs.skills()
+    catalog = catalog_value(_request_ruleset(), "skills", {})
     return success_response(catalog, "Skill catalog loaded successfully")
 
 
@@ -856,7 +865,7 @@ def list_builtin_weapons():
     if login_error:
         return login_error
 
-    weapons = _request_ruleset().catalogs.weapons()
+    weapons = catalog_items(_request_ruleset(), "weapons")
     return success_response(weapons, "Weapon catalogs loaded successfully")
 
 

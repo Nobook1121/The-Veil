@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from trpg_server import character_service, weapon_catalog
-from trpg_server.ruleset.registry import builtin_registry
+from trpg_server.ruleset.registry import builtin_registry, default_ruleset_id
 
 # 单次导入的硬上限，避免超大文件与压缩炸弹。
 MAX_IMPORT_TEXT_CHARS = 12 * 1024 * 1024
@@ -97,7 +97,7 @@ def _spec(name, kind, default=None, minimum=None, maximum=None, required=False):
 # 运行时角色卡的完整字段清单；导出按此清单取值，导入按同一清单校验。
 CARD_FIELD_SPECS: tuple[FieldSpec, ...] = (
     _spec("id", "str", ""),
-    _spec("rulesetId", "str", "coc7"),
+    _spec("rulesetId", "str", ""),
     _spec("public_id", "str", ""),
     _spec("publisher_id", "any", None),
     _spec("publisher_name", "str", ""),
@@ -185,6 +185,8 @@ def build_export_payload(character: dict[str, Any]) -> dict[str, Any]:
         payload[spec.name] = copy.deepcopy(spec.default) if value is None else value
     for spec in EXPORT_EXTRA_FIELD_SPECS:
         payload[spec.name] = copy.deepcopy(spec.default)
+    if not payload.get("rulesetId"):
+        payload["rulesetId"] = _default_ruleset_id()
     character_id = str(payload.get("id") or "")
     payload["customWeapons"] = weapon_catalog.read_custom_weapons(
         character_service.character_dir(character_id)
@@ -509,6 +511,14 @@ def _supported_ruleset_ids() -> list[str]:
     return builtin_registry().ids()
 
 
+def _default_ruleset_id() -> str:
+    """当前默认插件 id；没有任何插件时返回空串，由后续校验给出可读错误。"""
+    try:
+        return default_ruleset_id()
+    except RuntimeError:
+        return ""
+
+
 def merge_sheet_fields(data: Any) -> Any:
     """把 ``sheet`` 中的字段合并到顶层；顶层已有值时以顶层为准。"""
     if not isinstance(data, dict):
@@ -532,7 +542,7 @@ def validate_import_payload(data: Any) -> dict[str, Any]:
 
     merged = merge_sheet_fields(data)
 
-    ruleset_id = str(merged.get("rulesetId") or merged.get("ruleset_id") or "coc7").strip().lower()
+    ruleset_id = str(merged.get("rulesetId") or merged.get("ruleset_id") or _default_ruleset_id()).strip().lower()
     supported = _supported_ruleset_ids()
     if ruleset_id not in supported:
         raise _error(

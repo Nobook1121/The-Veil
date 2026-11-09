@@ -9,10 +9,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from trpg_server.dice_policy import PercentileRollPolicy
 from trpg_server.ruleset.contracts import RULESET_API_VERSION
 from trpg_server.ruleset.coc7.catalogs import Coc7Catalogs
 from trpg_server.ruleset.coc7.checks import Coc7Checks
 from trpg_server.ruleset.coc7 import growth as coc7_growth
+from trpg_server.ruleset.coc7.sanity import SANITY
 from trpg_server.ruleset.coc7.schema import Coc7CharacterSchema
 from trpg_server.ruleset.coc7.tools import Coc7Tools
 
@@ -48,6 +50,14 @@ class Coc7Plugin:
         self.tools = Coc7Tools()
         # 成长能力：纯计算模块，供通用层按规则集能力访问，不进入注册表结构。
         self.growth = coc7_growth
+        # 本规则集使用的骰子策略：核心只调抽象接口，不认识十位/个位。
+        self.roll_policy = PercentileRollPolicy()
+        # 理智 / 疯狂：上限、1/5 阈值、INT 检定与疯狂表现表都在插件内。
+        self.sanity = SANITY
         self.combat = _load_combat_ruleset()
         if self.combat is None:
             self.capabilities = self.capabilities - {"combat"}
+
+
+# 插件登记入口：装配点按模块路径导入本包后取这个实例。
+PLUGIN = Coc7Plugin()

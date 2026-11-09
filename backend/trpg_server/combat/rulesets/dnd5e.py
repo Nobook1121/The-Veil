@@ -140,3 +140,7 @@ class Dnd5eRuleset:
         spent = min(current, cost)
         combatant[key] = current - spent
         return {"spent": spent, "overflow": cost - spent}
+
+
+# 兼容加载入口：供战斗注册表按需实例化（占位规则集尚未插件化）。
+COMBAT_RULESET = Dnd5eRuleset()

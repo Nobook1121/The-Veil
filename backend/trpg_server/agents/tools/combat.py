@@ -29,11 +29,11 @@ from trpg_server.agents.tools.dice import (
     _result_message,
     _success_level,
 )
-from trpg_server.combat.registry import get_ruleset
-from trpg_server.combat.rulesets.coc7 import (
-    LEVEL_RANK,
-    SKIPPED_STATUS,
+from trpg_server.combat.contracts import DEFAULT_SKIPPED_STATUSES
+from trpg_server.combat.registry import (
     build_and_damage_bonus,
+    get_ruleset,
+    level_rank,
 )
 from trpg_server.combat.scheduler import TurnScheduler
 from trpg_server.combat.settings import CombatSettings, resolve_settings
@@ -41,6 +41,9 @@ from trpg_server.json_store import write_json_atomic
 from trpg_server.room_log import log_room_event
 
 logger = logging.getLogger(__name__)
+
+# 失去行动能力的默认状态集合；具体规则集可用 skipped_statuses() 覆盖。
+SKIPPED_STATUS = DEFAULT_SKIPPED_STATUSES
 
 MAX_BURST = 10
 
@@ -141,7 +144,7 @@ def _percentile_meta(
         {
             "roll": int(roll),
             "rolls": [int(roll)],
-            "success": LEVEL_RANK.get(level, 0) > 0,
+            "success": level_rank().get(level, 0) > 0,
             "success_level": level,
             "bonus_dice": 0,
             "penalty_dice": 0,
@@ -153,6 +156,16 @@ def _percentile_meta(
     )
 
 
+def _default_ruleset_id() -> str:
+    """默认插件 id；注册表为空时返回空串，由战斗注册表给出不可用错误。"""
+    try:
+        from trpg_server.ruleset import default_ruleset_id
+
+        return default_ruleset_id()
+    except RuntimeError:
+        return ""
+
+
 def _combat_settings(context: Any, info: dict[str, Any] | None = None) -> CombatSettings:
     if info is None:
         info = context.room_info() if hasattr(context, "room_info") else None
@@ -160,7 +173,7 @@ def _combat_settings(context: Any, info: dict[str, Any] | None = None) -> Combat
 
 
 def _combat_ruleset(combat: dict[str, Any], settings: CombatSettings):
-    return get_ruleset(str(combat.get("ruleset") or settings.ruleset_id or "coc7"))
+    return get_ruleset(str(combat.get("ruleset") or settings.ruleset_id or ""))
 
 
 def _is_casting(combat: dict[str, Any], name: str) -> bool:
@@ -236,7 +249,7 @@ def _combat_summary_state(combat: dict[str, Any]) -> dict[str, Any]:
         "current": current,
         "order": participants,
         "surprised": combat.get("surprised") or [],
-        "ruleset": combat.get("ruleset") or "coc7",
+        "ruleset": combat.get("ruleset") or _default_ruleset_id(),
     }
 
 
@@ -792,7 +805,7 @@ def _apply_damage(
 ) -> dict[str, Any]:
     """结算一次伤害；具体阈值由规则书插件决定。"""
     settings = settings or _combat_settings(context)
-    ruleset = get_ruleset(str(combatant.get("ruleset") or settings.ruleset_id or "coc7"))
+    ruleset = get_ruleset(str(combatant.get("ruleset") or settings.ruleset_id or ""))
     outcome = ruleset.resolve_damage(
         combatant,
         amount,
@@ -931,7 +944,7 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         for combatant in combatants.values():
             roll, _ = _percentile_roll(_roller)
             level = _success_level(roll, max(1, int(combatant.get("dex") or 1)), critical, fumble)
-            combatant["initiative"] = LEVEL_RANK.get(level, 0) * 1000 + int(combatant.get("dex") or 0)
+            combatant["initiative"] = level_rank().get(level, 0) * 1000 + int(combatant.get("dex") or 0)
             combatant["initiative_roll"] = roll
             if level == "critical":
                 combatant["first_attack_bonus"] = 1
@@ -1024,7 +1037,7 @@ def join_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         level = _success_level(
             roll, max(1, int(combatant.get("dex") or 1)), critical, fumble
         )
-        combatant["initiative"] = LEVEL_RANK.get(level, 0) * 1000 + int(
+        combatant["initiative"] = level_rank().get(level, 0) * 1000 + int(
             combatant.get("dex") or 0
         )
         combatant["initiative_roll"] = roll
@@ -1489,8 +1502,8 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         rolled["attack_roll"] = player_roll
         rolled["attack_candidates"] = []
         rolled["attack_level"] = _success_level(player_roll, max(1, skill_value), critical, fumble)
-    attack_rank = LEVEL_RANK.get(rolled["attack_level"], 0)
-    defense_rank = LEVEL_RANK.get(rolled["defense_level"], 0)
+    attack_rank = level_rank().get(rolled["attack_level"], 0)
+    defense_rank = level_rank().get(rolled["defense_level"], 0)
 
     if forced_surprise_hit:
         # 规则书选项：未准备目标近战自动成功，除非攻击者大失败（p90-91）。

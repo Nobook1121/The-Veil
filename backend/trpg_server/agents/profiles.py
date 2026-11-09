@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from trpg_server.ruleset import DEFAULT_RULESET_ID, builtin_registry
+from trpg_server.ruleset import builtin_registry
 
 
 # 图谱模式：隐藏 redundant 场景模块工具，追加叙事运行工具（§5.6）。
@@ -73,7 +73,8 @@ def build_kp_tool_names(ruleset_id: str | None = None) -> list[str]:
     return names
 
 
-DEFAULT_KP_TOOLS = build_kp_tool_names(DEFAULT_RULESET_ID)
+# 默认插件在加载完成后即确定；None 表示「注册表默认规则集」。
+DEFAULT_KP_TOOLS = build_kp_tool_names()
 
 
 

@@ -39,6 +39,7 @@ from trpg_server.site_agent_store import (
     user_today_usage,
 )
 from trpg_server.site_agent_tools import (
+    DENIAL_MESSAGES,
     apply_pending_action,
     build_tool_registry,
     exposed_specs,
@@ -423,9 +424,17 @@ def confirm_action(actor: Actor, action_id: str, *, apply: bool) -> dict[str, An
 
         spec = SPECS_BY_NAME.get(str(action.get("tool")))
     if spec is not None:
-        decision = authorize_tool(actor, spec, action_args, config=config, room_id=room_id)
+        # 重新鉴权必须使用模型原始入参；执行参数可能是预览生成的 apply_args，形状不同。
+        # 旧版待确认操作没有 check_args 时退回执行参数。
+        check_args = action.get("check_args") if isinstance(action.get("check_args"), dict) else action_args
+        decision = authorize_tool(actor, spec, check_args, config=config, room_id=room_id)
         if not decision.allowed:
-            raise SiteAgentError("permission_denied", "权限已变化，无法执行该操作", 403)
+            # 拒绝原因可能是权限变化，也可能是参数校验失败；统一报「权限已变化」会误导排查。
+            raise SiteAgentError(
+                "permission_denied",
+                DENIAL_MESSAGES.get(decision.reason, decision.reason),
+                403,
+            )
     result = apply_pending_action(actor, action, config=config)
     if not result.ok:
         append_audit(

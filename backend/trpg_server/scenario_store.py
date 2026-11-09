@@ -14,7 +14,7 @@ from typing import Any
 from trpg_server.config import load_settings
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.media_defaults import LEGACY_DEFAULT_COVERS, normalize_cover
-from trpg_server.ruleset import DEFAULT_RULESET_ID
+from trpg_server.ruleset import default_ruleset_id
 from trpg_server.security import normalize_filename, safe_join
 from trpg_server.agents.trigger_system import normalize_attachment
 
@@ -603,8 +603,8 @@ def normalize_scenario_payload(scenario: dict[str, Any], storage_dir: Path | Non
     # 校验因字段缺失把剧本从广场过滤掉，而创建房间的下拉框仍能选到它。
     normalized["title"] = str(scenario.get("title") or "").strip() or "未命名剧本"
     normalized["author"] = str(scenario.get("author") or "").strip() or "未知作者"
-    # 规则与剧本绑定：历史剧本与导入剧本缺失时默认 CoC7；选择校验在 scenario_service。
-    normalized["ruleset_id"] = str(scenario.get("ruleset_id") or "").strip() or DEFAULT_RULESET_ID
+    # 规则与剧本绑定：历史剧本与导入剧本缺失时用注册表默认插件；选择校验在 scenario_service。
+    normalized["ruleset_id"] = str(scenario.get("ruleset_id") or "").strip() or default_ruleset_id()
     try:
         player_count = int(scenario.get("playerCount") or 1)
     except (TypeError, ValueError):
