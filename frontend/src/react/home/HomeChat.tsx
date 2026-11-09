@@ -376,6 +376,7 @@ export function HomeChat() {
                             <p className="world-override-hint" data-i18n="world_override.hint">
                                 写下结果，世界照做。
                             </p>
+                            <p className="form-text world-override-limits" id="worldOverrideLimits" />
                             <textarea
                                 className="form-control world-override-input"
                                 id="worldOverrideInput"

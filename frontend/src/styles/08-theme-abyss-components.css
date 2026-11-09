@@ -587,14 +587,26 @@ body.theme-coc .nav-tabs .nav-link.active {
 /* --------------------------------------------------------------------------
    模态框 / 下拉 / 表格
    -------------------------------------------------------------------------- */
+/* 使用低透明度 + 毛玻璃的遮罩：避免弹窗打开瞬间整屏发黑，
+   同时让遮罩淡入时长与弹窗内容动画保持一致（0.32s）。 */
 body.theme-coc .modal-backdrop {
-    background: radial-gradient(ellipse at 50% 45%, rgba(8, 26, 30, 0.72), rgba(1, 3, 5, 0.94));
-    backdrop-filter: blur(7px);
+    /* 遮罩淡入关键帧的终点：与下面 .show 的 opacity:1 保持一致。 */
+    --bs-backdrop-opacity: 1;
+    background-color: rgba(2, 6, 9, 0.55) !important;
+    background-image:
+        radial-gradient(ellipse at 50% 45%, rgba(8, 26, 30, 0.22), transparent 68%),
+        radial-gradient(ellipse 70% 45% at 50% 105%, rgba(46, 132, 124, 0.16), transparent 72%);
+    backdrop-filter: blur(10px) saturate(1.05);
+    -webkit-backdrop-filter: blur(10px) saturate(1.05);
+    transition: opacity var(--theme-modal-motion, 0.32s) ease;
+}
+
+body.theme-coc .modal-backdrop.show {
     opacity: 1;
 }
 
 body.theme-coc .modal.show .modal-content {
-    animation: abyssModalIn 0.42s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+    animation: abyssModalIn var(--theme-modal-motion, 0.32s) cubic-bezier(0.22, 0.61, 0.36, 1) both;
     border: 1px solid rgba(224, 192, 130, 0.34);
     box-shadow:
         0 30px 80px -30px rgba(0, 0, 0, 0.98),
@@ -789,9 +801,11 @@ body.theme-coc .modal-backdrop.world-override-backdrop {
     backdrop-filter: blur(var(--theme-veil-blur, 10px)) saturate(1.05) !important;
 }
 
-/* 淡入结束时不再被 Bootstrap 的 0.5 透明度减半。 */
+/* 淡入结束时不再被 Bootstrap 的 0.5 透明度减半。
+   这里不能加 !important：CSS 动画会被 !important 声明压过，
+   加了之后打开阶段的关键帧淡入就会失效，遮罩会直接跳到全不透明。 */
 body.theme-coc .modal-backdrop.world-override-backdrop.show {
-    opacity: 1 !important;
+    opacity: 1;
 }
 
 /* 不支持 backdrop-filter 的浏览器：退回更实的暗色遮罩，文字对比度不受影响。 */

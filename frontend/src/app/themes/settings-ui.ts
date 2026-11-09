@@ -175,17 +175,19 @@ namespace ThemeSettingsUI {
         description.textContent = translate(definition.descriptionKey, "");
         selectButton.append(description);
 
+        // 徽标单独占一行：未选中的卡片也保留同高度槽位，切换选中态时卡片尺寸不跳动。
+        const badges = element("div", "theme-card-badges");
         if (selected) {
             const badge = element("span", "theme-card-badge theme-card-badge-current");
             badge.textContent = translate("theme.badge.current", "当前");
-            selectButton.append(badge);
+            badges.append(badge);
         }
         if (!enabled) {
             const badge = element("span", "theme-card-badge theme-card-badge-locked");
             badge.textContent = translate("theme.badge.admin_disabled", "管理员已禁用");
-            selectButton.append(badge);
+            badges.append(badge);
         }
-        card.append(selectButton);
+        card.append(selectButton, badges);
 
         if (mode === "admin" && onAvailability) {
             const availability = element("label", "theme-card-availability");

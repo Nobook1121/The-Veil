@@ -7,6 +7,8 @@
     --theme-bg-panel-muted: #f1f3f7;
     --theme-bg-elevated: #ffffff;
     --theme-bg-overlay: rgba(15, 23, 42, 0.48);
+    /* 弹窗遮罩与内容共用的入场时长，保证同一时间轴。 */
+    --theme-modal-motion: 0.3s;
 
     --theme-text-primary: #1f2933;
     --theme-text-secondary: #374151;
@@ -860,6 +862,34 @@ body.theme-transition .markdown-body {
 body.theme-transition::before,
 body.theme-transition::after {
     transition: opacity 0.4s ease, background-color 0.4s ease, background-image 0.4s ease !important;
+}
+
+/* Bootstrap 变量桥接：部分组件（世界树列表、图谱画布、空状态、表单等）
+   直接使用 Bootstrap 的 --bs-* 变量，若不桥接会停留在浅色默认值上。
+   这里统一映射到主题 token，所有主题（含深渊/赛博/深浅色）自动生效。 */
+:root,
+body {
+    --bs-body-bg: var(--theme-bg-panel);
+    --bs-body-color: var(--theme-text-primary);
+    --bs-emphasis-color: var(--theme-text-primary);
+    --bs-secondary-color: var(--theme-text-muted);
+    --bs-tertiary-color: var(--theme-text-muted);
+    --bs-secondary-bg: var(--theme-bg-panel-muted);
+    --bs-tertiary-bg: var(--theme-bg-panel-muted);
+    --bs-border-color: var(--theme-border-subtle);
+    --bs-border-color-translucent: color-mix(in srgb, var(--theme-border-subtle) 70%, transparent);
+    --bs-light-bg-subtle: var(--theme-bg-panel-muted);
+    --bs-dark-bg-subtle: var(--theme-bg-panel-muted);
+}
+
+/* Bootstrap 浅色工具类同样跟随主题，避免深色主题里出现刺眼的白色底块。
+   仅覆盖与 bg-light 搭配的 text-dark，保留 bg-info/bg-warning 等彩色底上的深色文字。 */
+.bg-light {
+    background-color: var(--theme-bg-panel-muted) !important;
+}
+
+.bg-light.text-dark {
+    color: var(--theme-text-primary) !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

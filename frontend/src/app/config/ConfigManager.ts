@@ -124,11 +124,18 @@ class ConfigManager {
         configSetCheckboxValue("recursiveScanning", this.get("general", "ai.knowledge", "recursive_scanning", true));
         configSetInputValue("maxRecursionDepth", this.get("general", "ai.knowledge", "max_recursion_depth", 3));
         configSetInputValue("lorebookTokenBudget", this.get("general", "ai.knowledge", "lorebook_token_budget", 0));
+        // 长期记忆回顾：默认开启、按字符预算注入少量条目
+        configSetCheckboxValue("memoryEnabled", this.get("general", "ai.memory", "enabled", true));
+        configSetInputValue("memoryInjectBudgetChars", this.get("general", "ai.memory", "inject_budget_chars", 800));
+        configSetInputValue("memoryInjectMaxItems", this.get("general", "ai.memory", "inject_max_items", 6));
         configSetCheckboxValue("cloudEmbeddingEnabled", this.get("general", "ai", "cloud_embedding_enabled", false));
         // 房间内嵌控制台：开关与保留条数必须回填，否则刷新后 UI 会退回 HTML 默认值。
         configSetCheckboxValue("enableRoomConsole", this.get("general", "room_console", "enabled", true));
         configSetCheckboxValue("mirrorRoomConsole", this.get("general", "room_console", "mirror_to_server_console", false));
         configSetInputValue("roomConsoleMaxEntries", this.get("general", "room_console", "max_entries", 500));
+        // 世界意志限频：站点默认值；房间只能收紧。
+        configSetInputValue("worldOverrideCooldownSeconds", this.get("general", "world_override", "cooldown_seconds", 20));
+        configSetInputValue("worldOverrideHourlyLimit", this.get("general", "world_override", "hourly_limit", 30));
         // 网站 Agent 的启用开关与限额
         configSetCheckboxValue("siteAgentEnabled", this.get("general", "site_agent", "enabled", true));
         configSetInputValue("siteAgentDailyTokenBudget", this.get("general", "site_agent", "daily_token_budget", 200000));

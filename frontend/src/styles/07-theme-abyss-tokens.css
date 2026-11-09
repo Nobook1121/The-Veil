@@ -15,6 +15,7 @@ body.theme-coc {
        正文内容之下，不会被不透明的主题背景整层遮住。 */
     isolation: isolate;
 
+    --theme-modal-motion: 0.32s;
     --theme-bg-page: #07060c;
     --theme-bg-page-layer: #0b0912;
     --theme-bg-panel: rgba(18, 15, 23, 0.84);

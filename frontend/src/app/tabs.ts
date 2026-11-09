@@ -294,10 +294,15 @@ function initSettingsTabs(): void {
     bindGeneralCheckboxSetting("recursiveScanning", "ai.knowledge", "recursive_scanning");
     bindGeneralNumberSetting("maxRecursionDepth", "ai.knowledge", "max_recursion_depth", 0, 10);
     bindGeneralNumberSetting("lorebookTokenBudget", "ai.knowledge", "lorebook_token_budget", 0, 200000);
+    bindGeneralCheckboxSetting("memoryEnabled", "ai.memory", "enabled");
+    bindGeneralNumberSetting("memoryInjectBudgetChars", "ai.memory", "inject_budget_chars", 0, 4000);
+    bindGeneralNumberSetting("memoryInjectMaxItems", "ai.memory", "inject_max_items", 1, 20);
     bindGeneralCheckboxSetting("cloudEmbeddingEnabled", "ai", "cloud_embedding_enabled");
     bindGeneralCheckboxSetting("enableRoomConsole", "room_console", "enabled");
     bindGeneralCheckboxSetting("mirrorRoomConsole", "room_console", "mirror_to_server_console");
     bindGeneralNumberSetting("roomConsoleMaxEntries", "room_console", "max_entries", 50, 5000);
+    bindGeneralNumberSetting("worldOverrideCooldownSeconds", "world_override", "cooldown_seconds", 0, 3600);
+    bindGeneralNumberSetting("worldOverrideHourlyLimit", "world_override", "hourly_limit", 0, 10000);
     bindGeneralCheckboxSetting("siteAgentEnabled", "site_agent", "enabled");
     bindGeneralNumberSetting("siteAgentDailyTokenBudget", "site_agent", "daily_token_budget", 0, 100000000);
     bindGeneralNumberSetting("siteAgentMaxTurnsPerHour", "site_agent", "max_turns_per_hour", 1, 1000);

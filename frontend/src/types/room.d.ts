@@ -48,6 +48,23 @@ interface RoomUsage {
     updated_at?: string;
 }
 
+interface RoomInterludeState {
+    active: boolean;
+    startedAt?: string | null;
+    startedBy?: string;
+    completedAt?: string | null;
+    settledAt?: string | null;
+    reviewCount?: number;
+    request?: {
+        id?: string;
+        at?: string;
+        by?: string;
+        byId?: string;
+        source?: string;
+        reason?: string;
+    } | null;
+}
+
 interface Room {
     id: string;
     code?: string;
@@ -58,6 +75,13 @@ interface Room {
     owner_id?: string | number;
     scenario_id?: number;
     scenario_title?: string;
+    scenario_version?: string;
+    // 房间级唯一规则集；旧房间由后端按剧本推断，推断不到回退 coc7。
+    ruleset_id?: string;
+    // 房间模式：预设名 + 两个正交能力位。旧房间由后端补默认值（scripted / true / required）。
+    room_mode?: "scripted" | "freeform" | "manual";
+    ai_kp_enabled?: boolean;
+    scenario_binding?: "required" | "optional" | "none";
     scenario_started_at?: string;
     scenario_started_by?: string | number;
     visibility?: "public" | "private";
@@ -65,6 +89,8 @@ interface Room {
     archived?: boolean;
     completed_at?: string;
     archived_at?: string;
+    // 显式幕间阶段；旧房间该字段缺省或 active=false 时按非幕间处理。
+    interlude?: RoomInterludeState;
     members?: RoomMember[];
     messages?: ChatMessage[];
     ai_history?: ChatMessage[];
@@ -123,6 +149,13 @@ interface RoomHouseRules {
     // 世界意志直执行：房间开关与额外允许使用的成员白名单（站点管理员不受开关影响）。
     world_override_enabled?: boolean;
     world_override_user_ids?: string[];
+    // CoC7 批次 1 房规开关：关闭时对应运行时入口不存在。
+    coc7_social_difficulty?: boolean;
+    coc7_combined_checks?: boolean;
+    coc7_group_luck?: boolean;
+    coc7_economy?: boolean;
+    coc7_contacts?: boolean;
+    coc7_age_adjustments?: boolean;
 }
 
 interface RoomConsoleEntry {

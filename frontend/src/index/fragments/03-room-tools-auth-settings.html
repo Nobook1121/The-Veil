@@ -12,7 +12,16 @@
                                     <input type="text" class="form-control" id="saveName" placeholder="请输入房间名称" required>
                                 </div>
                                 <div class="form-group mt-3">
-                                    <label data-i18n="room.field.scenario">房间剧本 *</label>
+                                    <label for="roomModeSelect" data-i18n="room.mode.label">房间模式</label>
+                                    <select class="form-select" id="roomModeSelect">
+                                        <option value="scripted" selected data-i18n="room.mode.option_scripted">剧本 + AI KP（标准）</option>
+                                        <option value="freeform" data-i18n="room.mode.option_freeform">无剧本 + AI KP（自由叙事）</option>
+                                        <option value="manual" data-i18n="room.mode.option_manual">无 AI KP（玩家自跑 / 真人 KP 带模组）</option>
+                                    </select>
+                                    <p class="form-text mb-0" id="roomModeHint">需要选择剧本，由 AI KP 主持叙事。</p>
+                                </div>
+                                <div class="form-group mt-3" id="roomScenarioField">
+                                    <label><span data-i18n="room.field.scenario">房间剧本</span> <span id="roomScenarioRequiredMark">*</span></label>
                                     <div class="room-scenario-picker">
                                         <div class="room-scenario-combobox">
                                             <input type="search" class="form-control form-control-sm" id="roomScenarioSearch" placeholder="点击搜索剧本名、作者或简介（star: 只看收藏）" autocomplete="off" aria-expanded="false" aria-controls="roomScenarioDropdown">
@@ -105,6 +114,7 @@
                                 </div>
                                 <p class="form-text mt-2" id="houseRuleDiceAnimationHint"></p>
                                 <hr class="my-3">
+                                <div id="roomImmersiveHouseRules">
                                 <h6>实时沉浸（配乐 / 配图）</h6>
                                 <div class="form-group mt-2">
                                     <label for="houseRuleImmersiveMusic">实时配乐</label>
@@ -162,6 +172,8 @@
                                     </select>
                                 </div>
                                 <p class="form-text mt-2">房间级开关只能收紧：站点总开关关闭时，这里选择「开启」也不会生效。手动配乐/配图仅房主与房间管理员可用。</p>
+                                </div>
+                                <div id="roomWorldOverrideHouseRules">
                                 <hr class="my-3">
                                 <h6 data-i18n="room.house_rules.world_override">世界意志直执行</h6>
                                 <div class="form-check">
@@ -173,6 +185,36 @@
                                     <label data-i18n="room.house_rules.world_override_users">额外允许使用的成员（可多选）</label>
                                     <div id="houseRuleWorldOverrideUsers"></div>
                                     <p class="form-text" data-i18n="room.house_rules.world_override_users_hint">白名单只对普通成员生效；房主、房管与站点管理员始终可用。</p>
+                                </div>
+                                </div>
+                                <hr class="my-3">
+                                <div id="roomCoc7HouseRules">
+                                <h6>CoC7 扩展房规</h6>
+                                <p class="form-text mt-2">关闭时对应命令与 AI 工具不存在，行为与旧版本一致；开启后由「rule」子命令与 AI KP 共同使用。</p>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7SocialDifficulty">
+                                    <label class="form-check-label" for="houseRuleCoc7SocialDifficulty">社交难度（按 NPC 社交技能 / 态度 / 筹码调整难度）</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7CombinedChecks">
+                                    <label class="form-check-label" for="houseRuleCoc7CombinedChecks">组合检定（一次掷骰对比多个技能）</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7GroupLuck">
+                                    <label class="form-check-label" for="houseRuleCoc7GroupLuck">团体幸运（最低幸运者代掷）</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7Contacts">
+                                    <label class="form-check-label" for="houseRuleCoc7Contacts">建立熟人（按地点与职业调整难度）</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7Economy">
+                                    <label class="form-check-label" for="houseRuleCoc7Economy">信用评级与开支（只读计算）</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7AgeAdjustments">
+                                    <label class="form-check-label" for="houseRuleCoc7AgeAdjustments">建卡年龄调整（仅新建角色卡，需玩家手动应用）</label>
+                                </div>
                                 </div>
                                 <hr class="my-3">
                                 <h6 data-i18n="room.house_rules.skill_bases">技能基础值</h6>
@@ -721,6 +763,18 @@
                                 <small class="form-text text-muted" data-i18n="settings.room_console.hint">房间日志记录在房间目录内，随房间一起归档；关闭后房间事件将像以前一样输出到服务器控制台。</small>
                             </div>
                             <div class="mb-4">
+                                <h4 data-i18n="settings.section.world_override">世界意志</h4>
+                                <div class="form-group">
+                                    <label data-i18n="settings.world_override.cooldown">同一玩家冷却（秒，0 表示不限制）</label>
+                                    <input type="number" class="form-control" id="worldOverrideCooldownSeconds" value="20" min="0" max="3600">
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label data-i18n="settings.world_override.hourly_limit">每房间每小时次数上限（0 表示不限制）</label>
+                                    <input type="number" class="form-control" id="worldOverrideHourlyLimit" value="30" min="0" max="10000">
+                                </div>
+                                <small class="form-text text-muted" data-i18n="settings.world_override.hint">房主与房管可以在房间内「收紧」这两个限制（更长的冷却、更少的次数），但不能放宽站点设置。</small>
+                            </div>
+                            <div class="mb-4">
                                 <h4>网站 Agent</h4>
                                 <div class="form-group">
                                     <div class="form-check">
@@ -978,6 +1032,23 @@
                                     <label for="lorebookTokenBudget">剧本注入 token 预算</label>
                                     <input type="number" class="form-control" id="lorebookTokenBudget" value="0" min="0" max="200000">
                                     <small class="text-muted">0 表示不限制（默认）。超大剧本可设上限，超出的低优先级章节会被整体丢弃（不截断正文）。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="memoryEnabled" checked>
+                                        <label class="form-check-label" for="memoryEnabled">启用长期记忆回顾</label>
+                                    </div>
+                                    <small class="text-muted">从房间事件日志、关键节点与早期对话归档中按相关性注入少量回顾，避免长剧本后期遗忘玩家早期的行动与承诺；关闭后不再注入，已有记录不受影响。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="memoryInjectBudgetChars">长期记忆注入字符预算</label>
+                                    <input type="number" class="form-control" id="memoryInjectBudgetChars" value="800" min="0" max="4000">
+                                    <small class="text-muted">每轮最多注入的回忆字符数（0-4000）；0 等同于关闭注入。</small>
+                                </div>
+                                <div class="form-group mt-2">
+                                    <label for="memoryInjectMaxItems">长期记忆注入条目上限</label>
+                                    <input type="number" class="form-control" id="memoryInjectMaxItems" value="6" min="1" max="20">
+                                    <small class="text-muted">每轮最多注入几条回忆（1-20），超出字符预算的条目会被丢弃。</small>
                                 </div>
                             </div>
                             <div class="mb-4">

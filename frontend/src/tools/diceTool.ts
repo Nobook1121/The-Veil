@@ -203,7 +203,7 @@ class DiceTool {
     }
 
     /**
-     * 本地投掷（/dice --table）：支持 NdM 与加法混合表达式。
+     * 本地投掷（/dice ... table）：支持 NdM 与加法混合表达式。
      * 传入 faces 时按物理落定的骰面结算；不传时退回随机数生成器（纯文本/兜底）。
      */
     rollLocal(expression: string, faces?: number[] | null): { plan: DicePlan; snapshot: DiceResultSnapshot } {

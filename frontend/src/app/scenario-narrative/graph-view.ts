@@ -159,8 +159,9 @@
         const connectSource = state.connectSource === node.id;
         const title = node.title.length > 10 ? `${node.title.slice(0, 10)}…` : node.title;
         let stroke = meta.color;
-        let fill = "#ffffff";
-        let textColor = "#212529";
+        // 默认节点跟随主题，避免深渊/赛博主题下出现刺眼的白色底块。
+        let fill = "var(--theme-bg-elevated)";
+        let textColor = "var(--theme-text-primary)";
         let dash = "";
         if (visibility === "hidden") {
             fill = playerMode ? "#e9ecef" : "#fff3bf";
@@ -183,9 +184,9 @@
             ? (visibility === "hidden" ? t("scenario.visibility.hidden_placeholder", "未揭示") : meta.label)
             : (visibility === "kp_only" ? "KP ONLY" : visibility === "hidden" ? t("scenario.visibility.hidden_placeholder", "未揭示") : meta.label);
         return `<g class="scenario-graph-node${selected ? " active" : ""}${connectSource ? " source" : ""}" data-node-id="${escapeHtml(node.id)}" data-visibility="${escapeHtml(visibility)}" data-x="${position.x}" data-y="${position.y}" transform="translate(${position.x},${position.y})">
-            <rect width="170" height="48" rx="8" fill="${fill}" stroke="${stroke}" stroke-width="${connectSource ? 3 : 1.6}"${dash}></rect>
-            <text x="12" y="21" font-size="12" fill="${textColor}">${escapeHtml(title || node.id)}</text>
-            <text x="12" y="37" font-size="10" fill="${selected ? "#ffffff" : textColor}">${escapeHtml(badge)}</text>
+            <rect width="170" height="48" rx="8" style="fill:${fill};stroke:${stroke}" stroke-width="${connectSource ? 3 : 1.6}"${dash}></rect>
+            <text x="12" y="21" font-size="12" style="fill:${textColor}">${escapeHtml(title || node.id)}</text>
+            <text x="12" y="37" font-size="10" style="fill:${selected ? "#ffffff" : textColor}">${escapeHtml(badge)}</text>
             ${node.layout_locked ? `<text x="154" y="14" font-size="10" fill="${selected ? "#ffffff" : "#868e96"}">🔒</text>` : ""}
             ${visibility === "kp_only" ? `<text x="154" y="40" font-size="10" fill="${selected ? "#ffffff" : "#868e96"}">🔐</text>` : ""}
         </g>`;

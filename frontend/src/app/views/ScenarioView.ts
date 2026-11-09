@@ -22,6 +22,11 @@ class ScenarioView {
     private formBaseline: string | null = null;
     /** 进度弹窗底栏按钮：转入后台 / 取消导入。 */
     private importProgressHandlers: ScenarioImportProgressHandlers | null = null;
+    /** 规则集选项（含「开发中」占位），来自 /api/rulesets。 */
+    private rulesetOptions: RulesetOption[] = [];
+    private rulesetOptionsPromise: Promise<void> | null = null;
+    /** 当前选择的规则集 id；剧本未设置时默认 coc7。 */
+    private rulesetSelection = "coc7";
 
     constructor() {
         const scenarioList = document.getElementById("scenarioList");
@@ -187,7 +192,7 @@ class ScenarioView {
     }
 
     fillDraftData(draft: ScenarioInput): void {
-        this.fillScenarioForm({ id: 0, title: draft.title || "", author: draft.author || "", playerCount: draft.playerCount || 0, notes: draft.notes || "", ...(draft.allow_open_ending === undefined ? {} : { allow_open_ending: draft.allow_open_ending }), ...(draft.accept_room_images === undefined ? {} : { accept_room_images: draft.accept_room_images }), modules: draft.modules || [], cover: draft.cover || "" });
+        this.fillScenarioForm({ id: 0, title: draft.title || "", author: draft.author || "", playerCount: draft.playerCount || 0, notes: draft.notes || "", ...(draft.ruleset_id ? { ruleset_id: draft.ruleset_id } : {}), ...(draft.allow_open_ending === undefined ? {} : { allow_open_ending: draft.allow_open_ending }), ...(draft.accept_room_images === undefined ? {} : { accept_room_images: draft.accept_room_images }), modules: draft.modules || [], cover: draft.cover || "" });
         updateScenarioModalTitle("scenario.modal.create", "创建剧本");
     }
 
@@ -619,6 +624,7 @@ class ScenarioView {
             author,
             playerCount,
             scenario_version: scenarioVersion,
+            ruleset_id: this.currentRulesetId(),
             notes: textarea("scenarioNotes").value.trim(),
             allow_open_ending: checkbox("scenarioAllowOpenEnding").checked,
             accept_room_images: checkbox("scenarioAcceptRoomImages").checked,
@@ -628,7 +634,7 @@ class ScenarioView {
     }
 
     getDraftData(): ScenarioInput {
-        return { title: input("scenarioTitle").value.trim(), author: input("scenarioAuthor").value.trim(), playerCount: Number.parseInt(input("scenarioPlayerCount").value, 10) || 0, notes: textarea("scenarioNotes").value.trim(), allow_open_ending: checkbox("scenarioAllowOpenEnding").checked, accept_room_images: checkbox("scenarioAcceptRoomImages").checked, modules: collectScenarioModules(), cover: input("scenarioCoverUrl").value, scenario_version: input("scenarioVersion").value.trim() };
+        return { title: input("scenarioTitle").value.trim(), author: input("scenarioAuthor").value.trim(), playerCount: Number.parseInt(input("scenarioPlayerCount").value, 10) || 0, notes: textarea("scenarioNotes").value.trim(), ruleset_id: this.currentRulesetId(), allow_open_ending: checkbox("scenarioAllowOpenEnding").checked, accept_room_images: checkbox("scenarioAcceptRoomImages").checked, modules: collectScenarioModules(), cover: input("scenarioCoverUrl").value, scenario_version: input("scenarioVersion").value.trim() };
     }
 
     showMessage(message: string, isError = false): void {
@@ -996,12 +1002,83 @@ class ScenarioView {
         return `<button type="button" class="scenario-favorite-btn${favorited ? " favorited" : ""} favorite-scenario" data-id="${id}" title="${label}" aria-label="${label}" aria-pressed="${favorited}"><i class="fa ${favorited ? "fa-star" : "fa-star-o"}" aria-hidden="true"></i></button>`;
     }
 
+    /** 规则集卡片：拉取一次 /api/rulesets，按注册表状态渲染可选/灰色。 */
+    private applyRulesetSelection(selectedId: string): void {
+        this.rulesetSelection = selectedId || "coc7";
+        void this.ensureRulesetOptions().then(() => this.renderRulesetOptions());
+    }
+
+    private ensureRulesetOptions(): Promise<void> {
+        if (this.rulesetOptionsPromise) return this.rulesetOptionsPromise;
+        this.rulesetOptionsPromise = (async () => {
+            try {
+                const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<RulesetOption[]>>("/api/rulesets");
+                if (response.ok && data?.success && Array.isArray(data.data)) {
+                    this.rulesetOptions = data.data;
+                }
+            } catch {
+                this.rulesetOptions = [];
+            }
+        })();
+        return this.rulesetOptionsPromise;
+    }
+
+    private renderRulesetOptions(): void {
+        const container = document.getElementById("scenarioRulesetOptions");
+        if (!container) return;
+        container.textContent = "";
+        if (!this.rulesetOptions.length) return;
+        for (const option of this.rulesetOptions) {
+            const label = document.createElement("label");
+            label.className = "ruleset-option";
+            if (!option.selectable) label.classList.add("is-disabled");
+            const radio = document.createElement("input");
+            radio.type = "radio";
+            radio.name = "scenarioRuleset";
+            radio.value = option.id;
+            radio.disabled = !option.selectable;
+            radio.checked = option.selectable && option.id === this.rulesetSelection;
+            if (radio.checked) label.classList.add("is-selected");
+            radio.addEventListener("change", () => {
+                container.querySelectorAll(".ruleset-option").forEach((item) => item.classList.remove("is-selected"));
+                label.classList.add("is-selected");
+                this.rulesetSelection = option.id;
+            });
+            const name = document.createElement("span");
+            name.className = "ruleset-name";
+            name.textContent = option.display_name || option.id;
+            label.appendChild(radio);
+            label.appendChild(name);
+            if (!option.selectable) {
+                const badge = document.createElement("span");
+                badge.className = "ruleset-badge";
+                badge.textContent = option.state === "development"
+                    ? scenarioT("scenario.ruleset.developing", "开发中")
+                    : scenarioT("scenario.ruleset.unavailable", "不可用");
+                if (option.reason) badge.title = option.reason;
+                label.appendChild(badge);
+            }
+            container.appendChild(label);
+        }
+        if (requiredElement("scenarioModal").dataset.importReviewReadonly === "true") {
+            container.querySelectorAll("input").forEach((field) => {
+                field.disabled = true;
+            });
+        }
+    }
+
+    private currentRulesetId(): string {
+        const checked = document.querySelector<HTMLInputElement>("#scenarioRulesetOptions input[name='scenarioRuleset']:checked");
+        return checked?.value || this.rulesetSelection;
+    }
+
     private resetScenarioForm(): void {
         this.directImportEditing = false;
         this.scenarioResources = [];
         const resourceList = document.getElementById("scenarioResourceList");
         if (resourceList) resourceList.innerHTML = "";
         requiredElement("scenarioModal").dataset.scenarioId = "";
+        this.applyRulesetSelection("coc7");
         input("scenarioTitle").value = "";
         input("scenarioPublicId").value = scenarioT("scenario.cover.auto", "保存后自动生成");
         input("scenarioVersion").value = "1.0.0";
@@ -1024,6 +1101,7 @@ class ScenarioView {
     private fillScenarioForm(scenario: Scenario): void {
         this.directImportEditing = scenario.import_mode === "direct";
         requiredElement("scenarioModal").dataset.scenarioId = String(scenario.id);
+        this.applyRulesetSelection(scenario.ruleset_id || "coc7");
         document.getElementById("scenarioResourcePanel")?.removeAttribute("hidden");
         input("scenarioTitle").value = scenario.title;
         input("scenarioPublicId").value = scenario.public_id || String(scenario.id);

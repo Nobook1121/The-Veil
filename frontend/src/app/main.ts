@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function initializeApplication(): Promise<void> {
     const dom = window.TrpgDom;
+    initModalOpeningSync();
     await window.TrpgI18n?.ready;
     window.TrpgI18n?.apply();
 
@@ -36,6 +37,37 @@ async function initializeApplication(): Promise<void> {
             dom.removeModalBackdropsWhenIdle();
         }, 100);
     });
+}
+
+/**
+ * 统一 Bootstrap 弹窗的打开时序。
+ *
+ * Bootstrap 的 Modal.show() 会等遮罩的 CSS transition 结束才调用 _showElement，
+ * 弹窗内容因此比遮罩（以及世界意志法阵）晚整整一个过渡时长。打开阶段给 body
+ * 打上 modal-opening，配合样式把遮罩的 transition 关掉、改用关键帧淡入，
+ * _showElement 便会立即执行；关闭阶段仍保留原来的过渡动画。
+ */
+function initModalOpeningSync(): void {
+    document.addEventListener("show.bs.modal", () => {
+        document.body.classList.add("modal-opening");
+        // 遮罩是在 show 事件之后、当前任务结束前插入 body 的，微任务刚好能看到它。
+        queueMicrotask(() => {
+            const backdrops = document.querySelectorAll<HTMLElement>(".modal-backdrop.show:not(.is-opening)");
+            const backdrop = backdrops[backdrops.length - 1];
+            if (!backdrop) return;
+            backdrop.classList.add("is-opening");
+            backdrop.addEventListener("animationend", () => backdrop.classList.remove("is-opening"), { once: true });
+        });
+    }, true);
+
+    const finishOpening = (): void => {
+        document.body.classList.remove("modal-opening");
+        document.querySelectorAll<HTMLElement>(".modal-backdrop.is-opening").forEach((element) => {
+            element.classList.remove("is-opening");
+        });
+    };
+    document.addEventListener("shown.bs.modal", finishOpening, true);
+    document.addEventListener("hidden.bs.modal", finishOpening, true);
 }
 
 async function loadAndApplyConfigs(): Promise<void> {

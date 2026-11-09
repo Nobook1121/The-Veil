@@ -1423,6 +1423,34 @@
     z-index: 1049 !important;
 }
 
+/* 与默认弹窗 .modal-dialog 的过渡对齐，避免遮罩先黑一下。 */
+.modal-backdrop.fade {
+    transition: opacity var(--theme-modal-motion, 0.3s) ease;
+}
+
+/*
+ * Bootstrap 的 Modal.show() 会等遮罩的 transition 结束才调用 _showElement，
+ * 弹窗内容因此比遮罩晚整整一个过渡时长（表现为“先出法阵，等一会儿才出窗口”）。
+ * 打开阶段关掉遮罩的 transition，_showElement 立即执行；淡入改由关键帧动画完成，
+ * 动画不参与 Bootstrap 的过渡计时，视觉上遮罩、法阵、弹窗仍在同一帧开始淡入。
+ */
+body.modal-opening .modal-backdrop {
+    transition-duration: 0s !important;
+}
+
+@keyframes theme-modal-backdrop-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: var(--bs-backdrop-opacity, 0.5);
+    }
+}
+
+body.modal-opening .modal-backdrop.is-opening {
+    animation: theme-modal-backdrop-in var(--theme-modal-motion, 0.3s) ease both;
+}
+
 /* 模态窗口层级 */
 .modal {
     z-index: 1050 !important;

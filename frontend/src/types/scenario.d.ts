@@ -140,6 +140,8 @@ interface ScenarioModule {
 interface Scenario {
     id: number;
     scenario_version?: string;
+    /** 规则与剧本绑定；历史/导入剧本缺省为 coc7。 */
+    ruleset_id?: string;
     title: string;
     author: string;
     playerCount: number;
@@ -222,6 +224,15 @@ interface ScenarioViewHandlers {
     onImportJobRetry?(job: ScenarioImportJob): Promise<void>;
     /** 放弃失败/已取消的任务：清理任务目录、已写入的向量与知识索引。 */
     onImportJobAbandon?(job: ScenarioImportJob): Promise<void>;
+}
+
+interface RulesetOption {
+    id: string;
+    display_name: string;
+    state: string;
+    selectable: boolean;
+    reason?: string;
+    reason_code?: string;
 }
 
 interface ScenarioImportProgressHandlers {

@@ -1253,10 +1253,10 @@ const DiceTable = (() => {
         return (Math.random() * 0x100000000) >>> 0;
     }
 
-    /** /dice <expr> --table：本地投掷并召唤骰桌，位置不限。 */
+    /** /dice <expr> table：本地投掷并召唤骰桌，位置不限。 */
     async function handleDiceTableCommand(expression: string): Promise<boolean> {
         if (effectiveLevel() === "text") {
-            showNotification("纯文本档位下不显示骰桌；已忽略 --table 参数。", "info");
+            showNotification("纯文本档位下不显示骰桌；已忽略 table 参数。", "info");
             return false;
         }
         let plan: DicePlan;

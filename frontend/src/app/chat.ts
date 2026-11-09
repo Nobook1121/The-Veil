@@ -99,9 +99,14 @@ const TYPING_IDLE_TIMEOUT_MS = 4000;
 let lastTypingEmitAt = 0;
 
 const COMMAND_DEFINITIONS: CommandDefinition[] = [
-    { name: "/dice", usage: "/dice {dice} [--table]", description: "掷骰；加 --table 本地召唤骰桌" },
+    { name: "/help", usage: "/help", description: "列出聊天斜杠命令与用法" },
+    { name: "/dice", usage: "/dice {骰式} [table]", description: "掷骰；加 table 本地召唤骰桌" },
     { name: "/check", usage: "/check {*玩家名} {*技能/属性名} {困难/极难} {调整值}", description: "属性或技能鉴定" },
-    { name: "/sc", usage: "/sc {玩家名} {成功变化/失败变化}", description: "理智检定并结算 SAN" },
+    { name: "/sc", usage: "/sc {玩家名} {成功变化/失败变化} [no-madness] [reason {原因}]", description: "理智检定并结算 SAN（损失 ≥5 自动疯狂判定）" },
+    { name: "/skill", usage: "/skill [玩家名] {技能名} [值|±N] [persist] [reason {原因}]", description: "查看或修改技能值；默认改自己，persist 写回持久卡" },
+    { name: "/attr", usage: "/attr [玩家名] {属性} [值|±N] [persist] [reason {原因}]", description: "查看或修改基础属性（STR/DEX/CON/APP/POW/SIZ/EDU/INT/LUC）" },
+    { name: "/item", usage: "/item [list|rm] [玩家名] {物品名} [qty N] [weapon] [persist]", description: "查看、添加或移除物品/武器" },
+    { name: "/interlude", usage: "/interlude [status|request|start|settle|review|end] [--yes] [--credit=玩家:事件]", description: "幕间：提议 / 开始 / 结算 / 复盘 / 结束并归档（结束需 --yes）" },
     { name: "/record", usage: "/record {damage/san} {username} {int} {reason?}", description: "管理员记录房间角色伤害或 San 损失" },
     { name: "/trigger", usage: "/trigger {触发器编号}", description: "触发场景触发器" },
     { name: "/roll", usage: "/roll", description: "完成当前等待中的玩家投掷" },
@@ -195,6 +200,40 @@ function initChat(): void {
             return;
         }
 
+        // 房间模式降级：无 AI 房间关闭剧本记录/触发器；无卡玩家只保留基础掷骰。
+        const commandRoom = getCurrentRoom();
+        const commandAiEnabled = commandRoom?.ai_kp_enabled !== false;
+        const selfCardless = isCurrentUserCardless(commandRoom);
+        const normalizedCommand = message.trim().toLowerCase();
+        if (!commandAiEnabled && (normalizedCommand.startsWith("/trigger") || normalizedCommand.startsWith("/record"))) {
+            activeChatInput.value = "";
+            await sendVisibleMessage("player", message);
+            showNotification("该房间未启用 AI KP，剧本记录与触发器不可用", "info");
+            return;
+        }
+        if (selfCardless && (
+            normalizedCommand.startsWith("/check")
+            || normalizedCommand.startsWith("/sc")
+            || normalizedCommand.startsWith("/item")
+            || normalizedCommand.startsWith("/skill")
+            || normalizedCommand.startsWith("/attr")
+        )) {
+            activeChatInput.value = "";
+            await sendVisibleMessage("player", message);
+            showNotification("当前账号未绑定角色卡，仅可使用基础掷骰（/dice）", "info");
+            return;
+        }
+
+        if (normalizedCommand === "/help") {
+            activeChatInput.value = "";
+            await sendVisibleMessage("player", message);
+            await sendVisibleMessage(
+                "system",
+                COMMAND_DEFINITIONS.map((command) => `${command.usage}\n　${command.description}`).join("\n")
+            );
+            return;
+        }
+
         if (message.toLowerCase().startsWith("/record")) {
             activeChatInput.value = "";
             await sendVisibleMessage("player", message);
@@ -214,9 +253,9 @@ function initChat(): void {
             return;
         }
 
-        // /dice --table：前端本地投掷并在屏幕中央召唤骰桌，不经过 AI。
-        const diceTableCommand = message.trim().match(/^\/dice\s+([\s\S]*?)(?:\s+(--table|-t))?\s*$/i);
-        if (diceTableCommand && diceTableCommand[2]) {
+        // /dice ... table：前端本地投掷并在屏幕中央召唤骰桌，不经过 AI。
+        const diceTableCommand = message.trim().match(/^\/dice(?:\s+([\s\S]*?))?\s+(?:--table|-t|table)\s*$/i);
+        if (diceTableCommand) {
             const expression = (diceTableCommand[1] || "").trim() || "1d100";
             activeChatInput.value = "";
             await sendVisibleMessage("player", message);
@@ -233,16 +272,32 @@ function initChat(): void {
             return;
         }
 
-        const commandResult = window.toolManager?.handleCommand(message) || null;
+        // /sc 与 /item 需要等待后端结算（含 SAN 落盘与留痕），因此统一按异步处理。
+        const commandResult = (await window.toolManager?.handleCommand(message)) || null;
         activeChatInput.value = "";
 
         if (commandResult) {
             await sendVisibleMessage("player", message);
             const lowerMessage = message.toLowerCase();
             const commandType = lowerMessage.startsWith("/dice") || lowerMessage.startsWith("/check") || lowerMessage.startsWith("/sc") ? "dice" : "system";
+            const interludePrompt = window.toolManager?.consumeInterludePrompt?.();
             window.setTimeout(() => {
                 void sendVisibleMessage(commandType, commandResult);
             }, 300);
+            if (interludePrompt) {
+                const kpRole = aiRoles.find((role) => role.id === "kp") || aiRoles[0];
+                if (kpRole) {
+                    pendingMessages.push({
+                        sender: getCurrentUsername(),
+                        content: interludePrompt,
+                        role: kpRole,
+                        time: new Date().toLocaleTimeString(),
+                    });
+                    window.setTimeout(() => {
+                        if (!isAIThinking) void sendToAI(activeChatInput, activeSendButton);
+                    }, 700);
+                }
+            }
             return;
         }
 
@@ -252,6 +307,10 @@ function initChat(): void {
         const currentRoomForSend = getCurrentRoom();
         if (currentRoomForSend?.archived) {
             showNotification("该房间已归档，AI 已关闭；仍可使用骰娘等房间工具", "info");
+            return;
+        }
+        if (currentRoomForSend?.ai_kp_enabled === false) {
+            showNotification("该房间未启用 AI KP，消息已发送给房间玩家；可使用 /check、/sc、/item 完成规则操作", "info");
             return;
         }
 
@@ -287,6 +346,14 @@ function isRateLimited(rateLimit: number): boolean {
     if (messageTimestamps.length >= rateLimit) return true;
     messageTimestamps.push(now);
     return false;
+}
+
+/** 当前账号在本房间是否没有绑定角色卡（无卡玩家只保留基础掷骰）。 */
+function isCurrentUserCardless(room: Room | null | undefined): boolean {
+    if (!room || !window.currentUser) return false;
+    const members = Array.isArray(room.members) ? room.members : [];
+    const member = members.find((item) => String(item.user_id) === String(window.currentUser?.user_id));
+    return member ? !member.character_card : false;
 }
 
 /** 战斗轮工具消息（检定/伤害）由战斗面板承载，聊天流只保留叙事。 */
@@ -627,65 +694,166 @@ function validateRecordCommandParts(type: string, username: string, valueText: s
     return null;
 }
 
-function getRecordCommandDraftHint(value: string): string {
-    const parts = value.trim().split(/\s+/);
-    const type = (parts[1] || "").toLowerCase();
-    const username = parts[2] || "";
-    const valueText = parts[3] || "";
-    if (!parts[1]) return "下一项：{damage/san}";
-    if (type !== "damage" && type !== "san") return "第 1 个参数必须是 {damage/san}";
-    if (!parts[2]) return "下一项：{username}";
-    if (!username) return "第 2 个参数必须是 {username}";
-    if (!parts[3]) return "下一项：{int}";
-    if (!/^[1-9]\d*$/.test(valueText)) return "第 3 个参数必须是正整数 {int}";
-    return "可选：{reason?}";
-}
+const COMMAND_KIND_LABELS: Record<string, string> = {
+    command: "命令",
+    subcommand: "子命令",
+    member: "玩家",
+    skill: "技能",
+    attribute: "属性",
+    item: "物品",
+    weapon: "武器",
+    flag: "开关",
+    value: "数值",
+    difficulty: "难度",
+    dice: "骰式",
+};
+
+const MAX_COMMAND_SUGGESTIONS = 12;
 
 function initCommandPalette(chatInput: HTMLInputElement): void {
     if (document.getElementById("commandPalette")) return;
     const palette = document.createElement("div");
     palette.id = "commandPalette";
-    palette.className = "command-palette list-group shadow-sm";
+    palette.className = "command-palette";
     palette.style.display = "none";
-    chatInput.parentElement?.appendChild(palette);
+    document.body.appendChild(palette);
 
-    chatInput.addEventListener("input", () => showCommandPalette(chatInput, palette));
-    chatInput.addEventListener("blur", () => window.setTimeout(() => {
+    let items: CommandSuggestion[] = [];
+    let activeIndex = 0;
+
+    // 固定在输入框正上方：用 fixed 定位避免被聊天气泡容器裁剪，也不挡住输入框。
+    const positionPalette = (): void => {
+        const rect = chatInput.getBoundingClientRect();
+        const available = Math.max(window.innerWidth - rect.left - 8, 160);
+        palette.style.left = `${rect.left}px`;
+        palette.style.width = `${Math.min(Math.max(rect.width, 220), available)}px`;
+        palette.style.bottom = `${Math.max(window.innerHeight - rect.top + 8, 8)}px`;
+    };
+
+    const hide = (): void => {
         palette.style.display = "none";
-    }, 120));
+        items = [];
+        activeIndex = 0;
+    };
+
+    const commit = (index: number): void => {
+        const selected = items[index];
+        if (!selected) return;
+        chatInput.value = applyCommandSuggestion(chatInput.value, selected);
+        chatInput.focus();
+        refresh();
+    };
+
+    const render = (): void => {
+        palette.textContent = "";
+        items.forEach((item, index) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = `command-palette-item${index === activeIndex ? " is-active" : ""}`;
+            button.dataset.index = String(index);
+
+            const value = document.createElement("strong");
+            value.className = "command-palette-item-value";
+            value.textContent = item.value;
+            button.appendChild(value);
+
+            if (item.description) {
+                const description = document.createElement("span");
+                description.className = "command-palette-item-desc";
+                description.textContent = item.description;
+                button.appendChild(description);
+            }
+            if (item.kind) {
+                const kind = document.createElement("span");
+                kind.className = "command-palette-item-kind";
+                kind.textContent = COMMAND_KIND_LABELS[item.kind] || item.kind;
+                button.appendChild(kind);
+            }
+
+            button.addEventListener("mousedown", (event) => {
+                event.preventDefault();
+                commit(index);
+            });
+            button.addEventListener("mouseenter", () => {
+                if (activeIndex === index) return;
+                activeIndex = index;
+                render();
+            });
+            palette.appendChild(button);
+        });
+        palette.style.display = items.length ? "block" : "none";
+    };
+
+    const refresh = (): void => {
+        const next = buildCommandSuggestions(chatInput.value);
+        items = next.slice(0, MAX_COMMAND_SUGGESTIONS);
+        activeIndex = 0;
+        if (!items.length) {
+            hide();
+            return;
+        }
+        positionPalette();
+        render();
+    };
+
+    chatInput.addEventListener("input", refresh);
+    chatInput.addEventListener("focus", refresh);
+    window.addEventListener("resize", () => {
+        if (palette.style.display !== "none") positionPalette();
+    });
+    chatInput.addEventListener("blur", () => {
+        window.setTimeout(hide, 120);
+    });
+    chatInput.addEventListener("keydown", (event) => {
+        if (palette.style.display === "none" || !items.length) return;
+        if (event.key === "ArrowDown") {
+            event.preventDefault();
+            event.stopPropagation();
+            activeIndex = (activeIndex + 1) % items.length;
+            render();
+            palette.scrollTop = activeIndex * 38;
+        } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            event.stopPropagation();
+            activeIndex = (activeIndex - 1 + items.length) % items.length;
+            render();
+            palette.scrollTop = activeIndex * 38;
+        } else if (event.key === "Tab") {
+            event.preventDefault();
+            event.stopPropagation();
+            commit(activeIndex);
+        } else if (event.key === "Escape") {
+            event.preventDefault();
+            hide();
+        } else if (event.key === "Enter") {
+            // 回车照常发送消息，只收起提示层，不改变发送行为。
+            hide();
+        }
+    });
 }
 
-function showCommandPalette(chatInput: HTMLInputElement, palette: HTMLElement): void {
-    const value = chatInput.value.trimStart();
-    if (!value.startsWith("/")) {
-        palette.style.display = "none";
-        return;
+/** 第一格列命令；后面的格子按当前命令与已填参数给出该位置可填的值。 */
+function buildCommandSuggestions(input: string): CommandSuggestion[] {
+    const value = input.trimStart();
+    if (!value.startsWith("/")) return [];
+    if (!/\s/.test(value)) {
+        const typed = value.toLowerCase();
+        return COMMAND_DEFINITIONS
+            .filter((command) => command.name.startsWith(typed))
+            .map((command) => ({
+                value: command.name,
+                description: command.description,
+                kind: "command" as const,
+            }));
     }
-    const commandName = value.split(/\s+/)[0]?.toLowerCase() || "";
-    const matches = COMMAND_DEFINITIONS.filter((command) => command.name.startsWith(commandName));
-    if (matches.length === 0) {
-        palette.style.display = "none";
-        return;
-    }
-    palette.innerHTML = matches.map((command) => {
-        const hint = command.name === "/record" ? getRecordCommandDraftHint(value) : "";
-        const hintHtml = hint ? window.TrpgTemplates.render("chat-command-palette-hint", { hint }) : "";
-        return window.TrpgTemplates.render("chat-command-palette-item", {
-            commandName: command.name,
-            usage: command.usage,
-            description: command.description,
-            hintHtml,
-        });
-    }).join("");
-    palette.querySelectorAll<HTMLButtonElement>("[data-command]").forEach((button) => {
-        button.addEventListener("mousedown", (event) => {
-            event.preventDefault();
-            chatInput.value = `${button.dataset.command || ""} `;
-            palette.style.display = "none";
-            chatInput.focus();
-        });
-    });
-    palette.style.display = "block";
+    return window.TrpgCommandSuggestions?.getSuggestions(value) || [];
+}
+
+/** 用候选替换当前格的已输入内容，并留一个空格方便继续输入。 */
+function applyCommandSuggestion(input: string, suggestion: CommandSuggestion): string {
+    if (/\s$/.test(input)) return `${input}${suggestion.value} `;
+    if (!input.trim()) return `${suggestion.value} `;
+    return `${input.replace(/\S+$/, suggestion.value)} `;
 }
 
 async function sendVisibleMessage(
@@ -716,7 +884,7 @@ async function sendVisibleMessage(
     return null;
 }
 
-/** /dice --table 本地投掷后写入房间历史，刷新或重连时按 metadata 静态还原骰桌。 */
+/** /dice ... table 本地投掷后写入房间历史，刷新或重连时按 metadata 静态还原骰桌。 */
 async function persistLocalDiceMessage(content: string, metadata: Record<string, unknown>): Promise<ChatMessage | null> {
     const room = getCurrentRoom();
     if (!room || room.invisible_view) return null;
@@ -1582,6 +1750,12 @@ function initWebSocket(): void {
         socket.on("room_messages_changed", () => { void window.reloadRoomMessages?.(); });
         socket.on("user_typing", (data) => handleUserTyping(data));
         socket.on("room_members_changed", () => { void window.refreshCurrentRoomMembers?.(); });
+        socket.on("room_interlude_updated", (data) => {
+            const payload = data as { room_id?: string; interlude?: RoomInterludeState };
+            if (window.currentRoom && payload?.room_id === window.currentRoom.id && payload.interlude) {
+                window.currentRoom.interlude = payload.interlude;
+            }
+        });
         socket.on("room_autosave_created", () => { void window.refreshRoomNodes?.(); });
         socket.on("room_console_log", (data) => { window.appendRoomConsoleEntry?.(data as RoomConsoleSocketPayload); });
         socket.on("role_changed", (data) => handleRoleChanged(data));

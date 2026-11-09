@@ -32,6 +32,8 @@ let roomEntrySelectionResolver: ((result: RoomEntrySelection | null) => void) | 
 let roomEntrySelectionSettled = false;
 let roomEntrySelectionAction: RoomEntrySelection["action"] = "join";
 let roomEntrySelectionRoomId: string | null = null;
+// 无 AI 房间允许不绑定角色卡进入；其余模式仍强制选择。
+let roomEntryAllowCardless = false;
 // 目标房间的房规技能基础值上限（进入房间选择角色卡时用于校验）。
 let roomEntrySkillBases: Record<string, number> = {};
 const roomActionLocks = new Set<string>();
@@ -121,6 +123,11 @@ function initRoomManagement(): void {
         settleRoomEntrySelection({ action: "invisible" });
         roomEntryCharacterModal?.hide();
     });
+    document.getElementById("roomEntryCardless")?.addEventListener("click", () => {
+        settleRoomEntrySelection({ action: roomEntrySelectionAction });
+        roomEntryCharacterModal?.hide();
+    });
+    document.getElementById("roomModeSelect")?.addEventListener("change", updateRoomModeFields);
     document.getElementById("roomEntryCreateCharacter")?.addEventListener("click", () => {
         createCharacterFromRoomEntry();
     });
@@ -269,8 +276,15 @@ function populateRoomEntryCharacterSelect(): void {
         ? rememberedCardId
         : (cards.some((card) => card.id === currentValue) ? currentValue : "");
     if (nextValue) select.value = nextValue;
-    if (emptyMessage) emptyMessage.hidden = cards.length > 0;
+    if (emptyMessage) {
+        emptyMessage.hidden = cards.length > 0;
+        emptyMessage.textContent = roomEntryAllowCardless
+            ? "当前账户还没有角色卡：无 AI 房间仍可直接进入，但只能使用基础掷骰。"
+            : "当前账户还没有角色卡，请先创建角色卡再进入房间。";
+    }
     if (confirmButton) confirmButton.disabled = cards.length === 0;
+    const cardlessButton = document.getElementById("roomEntryCardless") as HTMLButtonElement | null;
+    if (cardlessButton) cardlessButton.hidden = !roomEntryAllowCardless;
     const invisibleButton = document.getElementById("roomEntryInvisible") as HTMLButtonElement | null;
     if (invisibleButton) invisibleButton.hidden = !isElevatedUser() || roomEntrySelectionAction === "create";
 }
@@ -278,17 +292,23 @@ function populateRoomEntryCharacterSelect(): void {
 async function promptRoomEntryCharacterSelection(
     action: RoomEntrySelection["action"],
     roomId: string | null = null,
-    skillBases: Record<string, number> = {}
+    skillBases: Record<string, number> = {},
+    options: { allowCardless?: boolean } = {}
 ): Promise<RoomEntrySelection | null> {
     roomEntrySelectionAction = action;
     roomEntrySelectionRoomId = roomId;
     roomEntrySkillBases = skillBases;
+    roomEntryAllowCardless = options.allowCardless === true;
     // Character management loads cards asynchronously during application
     // startup. Refreshing the room list can happen before that request ends.
     await window.reloadCharacterManagement?.();
     populateRoomEntryCharacterSelect();
     roomEntrySelectionSettled = false;
-    setText("roomEntryCharacterMessage", action === "create" ? "创建房间前请选择要使用的角色卡。" : "进入房间前请选择要使用的角色卡。");
+    const baseMessage = action === "create" ? "创建房间前请选择要使用的角色卡。" : "进入房间前请选择要使用的角色卡。";
+    setText(
+        "roomEntryCharacterMessage",
+        roomEntryAllowCardless ? `${baseMessage}本房间未启用 AI KP，也可以不绑定角色卡直接进入。` : baseMessage
+    );
     if (!roomEntryCharacterModal) return Promise.resolve(null);
 
     return new Promise((resolve) => {
@@ -357,6 +377,15 @@ function scenarioSearchText(scenario: Scenario): string {
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
+}
+
+interface RoomLookupResult {
+    id?: string;
+    name?: string;
+    room_mode?: Room["room_mode"];
+    ai_kp_enabled?: boolean;
+    scenario_binding?: Room["scenario_binding"];
+    archived?: boolean;
 }
 
 interface RoomScenarioFilter {
@@ -497,12 +526,39 @@ async function loadRoomScenarioPicker(scenarioId?: number): Promise<void> {
     renderRoomScenarioPicker();
 }
 
+function updateRoomModeFields(): void {
+    const mode = (document.getElementById("roomModeSelect") as HTMLSelectElement | null)?.value || "scripted";
+    const scenarioField = document.getElementById("roomScenarioField") as HTMLElement | null;
+    const requiredMark = document.getElementById("roomScenarioRequiredMark") as HTMLElement | null;
+    const hint = document.getElementById("roomModeHint");
+    const searchInput = document.getElementById("roomScenarioSearch") as HTMLInputElement | null;
+    if (mode === "freeform") {
+        if (scenarioField) scenarioField.hidden = true;
+        if (requiredMark) requiredMark.hidden = true;
+        if (searchInput) searchInput.value = "";
+        roomScenarioPickerSelected = null;
+        closeRoomScenarioPicker();
+        if (hint) hint.textContent = "无需选择剧本，AI KP 将自由发挥；剧本相关工具与世界意志不可用。";
+    } else if (mode === "manual") {
+        if (scenarioField) scenarioField.hidden = false;
+        if (requiredMark) requiredMark.hidden = true;
+        if (hint) hint.textContent = "AI 不参与叙事，玩家自行推进；剧本仅作自查资料，可不选。";
+    } else {
+        if (scenarioField) scenarioField.hidden = false;
+        if (requiredMark) requiredMark.hidden = false;
+        if (hint) hint.textContent = "需要选择剧本，由 AI KP 主持叙事。";
+    }
+}
+
 async function openCreateRoomModal(scenarioId?: number): Promise<void> {
     populateCharacterSelectors();
     roomScenarioPickerSelected = null;
     closeRoomScenarioPicker();
     const searchInput = document.getElementById("roomScenarioSearch") as HTMLInputElement | null;
     if (searchInput) searchInput.value = "";
+    const modeSelect = document.getElementById("roomModeSelect") as HTMLSelectElement | null;
+    if (modeSelect) modeSelect.value = "scripted";
+    updateRoomModeFields();
 
     const roomNameInput = document.getElementById("saveName") as HTMLInputElement | null;
     if (roomNameInput) roomNameInput.value = "";
@@ -523,29 +579,32 @@ async function createRoom(): Promise<void> {
 
 async function createRoomUnlocked(): Promise<void> {
     const roomName = (document.getElementById("saveName") as HTMLInputElement | null)?.value.trim() || "";
-    const scenarioId = roomScenarioPickerSelected?.id;
-    const scenarioTitle = roomScenarioPickerSelected?.title || "";
+    const roomMode = (document.getElementById("roomModeSelect") as HTMLSelectElement | null)?.value || "scripted";
+    const scenarioId = roomMode === "freeform" ? undefined : roomScenarioPickerSelected?.id;
+    const scenarioTitle = roomMode === "freeform" ? "" : (roomScenarioPickerSelected?.title || "");
 
     if (!roomName) {
         showNotification("请输入房间名称", "error");
         return;
     }
-    if (!scenarioId) {
-        showNotification("请选择剧本", "error");
+    if (roomMode === "scripted" && !scenarioId) {
+        showNotification("AI 主持剧本的房间必须选择剧本", "error");
         return;
     }
 
     bootstrap.Modal.getInstance(document.getElementById("createSaveModal"))?.hide();
-    const roomEntrySelection = await promptRoomEntryCharacterSelection("create");
+    const roomEntrySelection = await promptRoomEntryCharacterSelection("create", null, {}, {
+        allowCardless: roomMode === "manual",
+    });
     if (!roomEntrySelection || roomEntrySelection.createCharacter || roomEntrySelection.action === "invisible") return;
 
     try {
         const data = await TrpgApi.post<ApiResponse<Room>>("/api/rooms", {
             name: roomName,
-            scenario_id: scenarioId,
-            scenario_title: scenarioTitle,
+            room_mode: roomMode,
+            ...(scenarioId ? { scenario_id: scenarioId, scenario_title: scenarioTitle } : {}),
             visibility: (document.getElementById("roomVisibilitySelect") as HTMLSelectElement | null)?.value || "private",
-            character_card: roomEntrySelection.characterCard,
+            ...(roomEntrySelection.characterCard ? { character_card: roomEntrySelection.characterCard } : {}),
         });
         if (!data.success || !data.data) {
             showNotification(`创建房间失败：${data.message || data.error || "未知错误"}`, "error");
@@ -574,7 +633,21 @@ async function joinRoomByCodeUnlocked(): Promise<void> {
         return;
     }
 
-    const roomEntrySelection = await promptRoomEntryCharacterSelection("join");
+    // 先用房间码查询模式：无 AI 房间允许不绑定角色卡进入。
+    let allowCardless = false;
+    try {
+        const lookup = await TrpgApi.get<ApiResponse<RoomLookupResult>>(`/api/rooms/lookup?code=${encodeURIComponent(roomCode)}`);
+        if (!lookup.success || !lookup.data) {
+            showNotification(`加入房间失败：${lookup.message || lookup.error || "房间码无效"}`, "error");
+            return;
+        }
+        allowCardless = lookup.data.ai_kp_enabled === false;
+    } catch (error) {
+        showNotification(`加入房间失败：${roomErrorMessage(error)}`, "error");
+        return;
+    }
+
+    const roomEntrySelection = await promptRoomEntryCharacterSelection("join", null, {}, { allowCardless });
     if (!roomEntrySelection) return;
     if (roomEntrySelection.createCharacter || roomEntrySelection.action === "create") return;
 
@@ -582,7 +655,9 @@ async function joinRoomByCodeUnlocked(): Promise<void> {
         const endpoint = roomEntrySelection.action === "invisible" ? "/api/rooms/spectate" : "/api/rooms/join";
         const data = await TrpgApi.post<ApiResponse<Room>>(endpoint, {
             room_code: roomCode,
-            ...(roomEntrySelection.action === "invisible" ? {} : { character_card: roomEntrySelection.characterCard }),
+            ...(roomEntrySelection.action === "invisible" || !roomEntrySelection.characterCard
+                ? {}
+                : { character_card: roomEntrySelection.characterCard }),
         });
         if (!data.success || !data.data) {
             showNotification(`加入房间失败：${data.message || data.error || "未知错误"}`, "error");
@@ -647,12 +722,20 @@ function renderRoomCard(room: Room): string {
         archivedBadgeHtml: room.archived || room.archived_at ? window.TrpgTemplates.render("room-archived-badge", { archivedAt: room.archived_at || "" }) : "",
         name: room.name,
         visibilityBadgeHtml: roomVisibilityBadge(room),
+        modeBadgeHtml: roomModeBadge(room),
         roomCode: room.room_code || room.code || "-",
-        scenarioTitle: room.scenario_title || "未知",
+        scenarioTitle:
+            room.scenario_title ||
+            (room.scenario_binding === "none" || room.room_mode === "freeform"
+                ? "自由叙事（无剧本）"
+                : room.ai_kp_enabled === false || room.room_mode === "manual"
+                  ? "无 AI 主持（无剧本）"
+                  : "未知"),
         members,
-        usageHtml: room.usage
-            ? `<br><small class="text-muted room-card-usage">AI 用量：${roomUsageText(room.usage)}</small>`
-            : "",
+        usageHtml:
+            room.usage && room.ai_kp_enabled !== false
+                ? `<br><small class="text-muted room-card-usage">AI 用量：${roomUsageText(room.usage)}</small>`
+                : "",
         actionLabel: isActive ? "管理房间" : "进入房间",
     });
 }
@@ -683,12 +766,14 @@ async function openRoomDetail(roomId: string): Promise<void> {
         const existingMember = currentUserId
             ? activeRoomMembers(data.data).find((member) => String(member.user_id) === currentUserId)
             : undefined;
-        if (existingMember?.character_card || (isElevatedUser() && !existingMember)) {
+        // 无 AI 房间允许无卡进入：已有成员记录（即使没有角色卡）直接恢复房间。
+        const cardlessAllowed = data.data.ai_kp_enabled === false;
+        if (existingMember?.character_card || (cardlessAllowed && existingMember) || (isElevatedUser() && !existingMember)) {
             await enterRoom(data.data);
             return;
         }
 
-        const roomEntrySelection = await promptRoomEntryCharacterSelection("join", roomId, roomSkillBaseOverrides(data.data));
+        const roomEntrySelection = await promptRoomEntryCharacterSelection("join", roomId, roomSkillBaseOverrides(data.data), { allowCardless: cardlessAllowed });
         if (!roomEntrySelection || roomEntrySelection.createCharacter || roomEntrySelection.action === "create") return;
 
         if (roomEntrySelection.action === "invisible") {
@@ -704,6 +789,23 @@ async function openRoomDetail(roomId: string): Promise<void> {
 
         const userId = currentUserId;
         if (!userId) return;
+
+        if (!roomEntrySelection.characterCard) {
+            if (!existingMember) {
+                const joinResponse = await TrpgApi.post<ApiResponse<Room>>("/api/rooms/join", {
+                    room_code: data.data.room_code || data.data.code,
+                });
+                if (!joinResponse.success || !joinResponse.data) {
+                    showNotification(joinResponse.message || joinResponse.error || "加入房间失败", "error");
+                    return;
+                }
+                await enterRoom(joinResponse.data);
+            } else {
+                await enterRoom(data.data);
+            }
+            showNotification("已进入房间（未绑定角色卡，仅可使用基础掷骰）", "success");
+            return;
+        }
 
         if (!existingMember) {
             const joinResponse = await TrpgApi.post<ApiResponse<Room>>("/api/rooms/join", {
@@ -829,9 +931,22 @@ function showRoomDetailView(): void {
 }
 
 function updateRoomDetail(room: Room): void {
+    const aiEnabled = room.ai_kp_enabled !== false;
+    const freeformRoom = room.scenario_binding === "none" || room.room_mode === "freeform";
+    const manualRoom = !aiEnabled || room.room_mode === "manual";
     setText("saveDetailTitle", room.name);
+    const modeBadge = document.getElementById("roomDetailModeBadge") as HTMLElement | null;
+    if (modeBadge) {
+        modeBadge.textContent = roomModeLabel(room);
+        modeBadge.className = `badge mt-1 ${roomModeBadgeClass(room)}`;
+        modeBadge.style.display = "inline-block";
+    }
+    setText("roomDetailModeHint", roomModeDescription(room));
     setText("saveCreatedAt", room.created_at || "-");
-    setText("saveScenarioTitle", room.scenario_title || "-");
+    setText(
+        "saveScenarioTitle",
+        room.scenario_title || (freeformRoom ? "自由叙事（无剧本）" : manualRoom ? "无 AI 主持（无剧本）" : "-")
+    );
     setText("saveParticipants", activeRoomMembers(room).map((member) => member.username).join(", ") || "-");
     setText("roomDetailCode", room.room_code || room.code || "-");
     const visibilityBadge = document.getElementById("roomDetailVisibility") as HTMLElement | null;
@@ -847,14 +962,18 @@ function updateRoomDetail(room: Room): void {
     updateStartScenarioButton(room);
     const archiveButton = document.getElementById("archiveRoom") as HTMLButtonElement | null;
     if (archiveButton) {
-        archiveButton.hidden = Boolean(room.archived || !room.completed_at || !canManageRoom(room));
+        // 仅 scripted 房间需要先到达结局；无剧本 / 无 AI 房间可显式归档。
+        const requiresEnding = room.scenario_binding === "required";
+        archiveButton.hidden = Boolean(room.archived || !canManageRoom(room) || (requiresEnding && !room.completed_at));
         archiveButton.textContent = "归档房间";
     }
     const houseRulesButton = document.getElementById("editHouseRules") as HTMLButtonElement | null;
     if (houseRulesButton) houseRulesButton.hidden = Boolean(room.archived) || !canManageRoom(room);
-    // 「切换剧本」仅管理员/房主可见，且已归档房间不再允许换绑。
+    // 「切换剧本」仅管理员/房主可见，且已归档或自由叙事房间不再允许换绑。
     const switchScenarioButton = document.getElementById("switchScenario") as HTMLButtonElement | null;
-    if (switchScenarioButton) switchScenarioButton.hidden = Boolean(room.archived) || !canManageRoom(room);
+    if (switchScenarioButton) {
+        switchScenarioButton.hidden = Boolean(room.archived) || !canManageRoom(room) || freeformRoom;
+    }
     const deleteButton = document.getElementById("deleteSave") as HTMLButtonElement | null;
     if (deleteButton) deleteButton.hidden = Boolean(room.archived);
     const archivedBadge = document.getElementById("roomDetailArchivedBadge") as HTMLElement | null;
@@ -867,7 +986,15 @@ function updateRoomDetail(room: Room): void {
     });
     // 房间背景音乐面板：房主/房间管理员可编辑，其他成员只读。
     void window.TrpgBgm?.renderRoomPlaylist(room, { editable: canManageRoom(room) && !room.archived });
-    renderRoomUsage(room.usage);
+    renderRoomUsage(aiEnabled ? room.usage : undefined);
+    const chatInput = document.getElementById("chatInput") as HTMLInputElement | null;
+    if (chatInput) {
+        chatInput.placeholder = manualRoom
+            ? "无 AI KP 房间：消息仅发送给房间玩家，掷骰仍可用"
+            : "加入房间后可发送消息，使用 @KP 呼叫 AI";
+        if (manualRoom) delete chatInput.dataset.i18nPlaceholder;
+        else chatInput.dataset.i18nPlaceholder = "chat.placeholder.room_required";
+    }
 }
 
 window.refreshRoomArchiveUi = (): void => {
@@ -923,7 +1050,7 @@ function formatRoomCosts(costs: Record<string, number> | undefined): string {
 
 function roomUsageText(usage: RoomUsage | undefined): string {
     if (!usage) return "";
-    return `本房间累计 ${formatRoomTokenCount(usage.total_tokens)} tokens · ${formatRoomCosts(usage.costs)}`;
+    return `${formatRoomTokenCount(usage.total_tokens)} tokens · ${formatRoomCosts(usage.costs)}`;
 }
 
 function roomUsageTooltip(usage: RoomUsage | undefined): string {
@@ -1283,6 +1410,15 @@ function renderHouseRuleWorldOverrideMembers(selectedIds: string[]): void {
     });
 }
 
+const COC7_HOUSE_RULE_FIELDS: Array<[string, keyof RoomHouseRules]> = [
+    ["houseRuleCoc7SocialDifficulty", "coc7_social_difficulty"],
+    ["houseRuleCoc7CombinedChecks", "coc7_combined_checks"],
+    ["houseRuleCoc7GroupLuck", "coc7_group_luck"],
+    ["houseRuleCoc7Contacts", "coc7_contacts"],
+    ["houseRuleCoc7Economy", "coc7_economy"],
+    ["houseRuleCoc7AgeAdjustments", "coc7_age_adjustments"],
+];
+
 async function openHouseRulesModal(): Promise<void> {
     if (!currentRoom?.id) return;
     const modalElement = document.getElementById("roomHouseRulesModal");
@@ -1293,6 +1429,12 @@ async function openHouseRulesModal(): Promise<void> {
     const fumbleInput = document.getElementById("houseRuleDiceFumble") as HTMLInputElement | null;
     const diceHint = document.getElementById("houseRuleDiceDefaultHint") as HTMLElement | null;
     if (!modalElement) return;
+    // 降级矩阵：无 AI 房间不展示沉浸规则；世界意志只依赖 AI KP，freeform 同样可配置。
+    const aiEnabled = currentRoom.ai_kp_enabled !== false;
+    const immersiveSection = document.getElementById("roomImmersiveHouseRules") as HTMLElement | null;
+    if (immersiveSection) immersiveSection.hidden = !aiEnabled;
+    const worldOverrideSection = document.getElementById("roomWorldOverrideHouseRules") as HTMLElement | null;
+    if (worldOverrideSection) worldOverrideSection.hidden = !aiEnabled;
     try {
         const [response, immersiveConfig] = await Promise.all([
             TrpgApi.get<ApiResponse<RoomHouseRulesPayload>>(`/api/rooms/${encodeURIComponent(currentRoom.id)}/house-rules`),
@@ -1353,6 +1495,11 @@ async function openHouseRulesModal(): Promise<void> {
                 ? response.data.house_rules.world_override_user_ids.map((item) => String(item))
                 : [],
         );
+        // CoC7 扩展房规：关闭时对应运行时入口不存在。
+        COC7_HOUSE_RULE_FIELDS.forEach(([elementId, field]) => {
+            const input = document.getElementById(elementId) as HTMLInputElement | null;
+            if (input) input.checked = Boolean(response.data?.house_rules?.[field]);
+        });
         // 沉浸房规：三态选择，留空跟随管理员设置；房间只能收紧开关，不能越过站点总开关。
         setHouseRuleNullableBoolean("houseRuleImmersiveMusic", response.data.house_rules?.immersive_music_enabled);
         setHouseRuleNullableBoolean("houseRuleImmersiveMusicAuto", response.data.house_rules?.immersive_music_auto_switch);
@@ -1436,6 +1583,12 @@ async function saveHouseRules(): Promise<void> {
                 immersive_illustration_auto: readHouseRuleNullableBoolean("houseRuleImmersiveIllustrationAuto"),
                 immersive_scenario_record: readHouseRuleNullableBoolean("houseRuleImmersiveScenarioRecord"),
                 immersive_scenario_prefer: readHouseRuleNullableBoolean("houseRuleImmersiveScenarioPrefer"),
+                ...Object.fromEntries(
+                    COC7_HOUSE_RULE_FIELDS.map(([elementId, field]) => [
+                        field,
+                        Boolean((document.getElementById(elementId) as HTMLInputElement | null)?.checked),
+                    ]),
+                ),
             },
             visibility: visibilitySelect?.value || "private",
         });
@@ -1470,7 +1623,14 @@ function canStartRoomScenario(room: Room): boolean {
 function updateStartScenarioButton(room: Room): void {
     const button = document.getElementById("startScenario") as HTMLButtonElement | null;
     if (!button) return;
-    button.hidden = room.invisible_view === true || Boolean(room.scenario_started_at) || !canStartRoomScenario(room);
+    const aiEnabled = room.ai_kp_enabled !== false;
+    const freeformRoom = room.scenario_binding === "none" || room.room_mode === "freeform";
+    button.hidden =
+        room.invisible_view === true ||
+        Boolean(room.scenario_started_at) ||
+        !aiEnabled ||
+        freeformRoom ||
+        !canStartRoomScenario(room);
     button.disabled = false;
 }
 
@@ -1540,16 +1700,24 @@ function renderRoomMemberList(room: Room | null): void {
         container.innerHTML = emptyHtml;
         return;
     }
+    // 无卡玩家单独归入「观战」，与有卡调查员分组显示，避免混在在线/离线列表里。
+    const cardedMembers = members.filter((member) => Boolean(member.character_card?.name));
+    const spectatorMembers = members.filter((member) => !member.character_card?.name);
     const groups: Array<{ key: string; fallback: string; members: RoomMember[] }> = [
         {
             key: "home.members.group.online",
             fallback: "在线 {count}",
-            members: members.filter((member) => member.is_online === true),
+            members: cardedMembers.filter((member) => member.is_online === true),
         },
         {
             key: "home.members.group.offline",
             fallback: "离线 {count}",
-            members: members.filter((member) => member.is_online !== true),
+            members: cardedMembers.filter((member) => member.is_online !== true),
+        },
+        {
+            key: "home.members.group.spectator",
+            fallback: "观战 {count}",
+            members: spectatorMembers,
         },
     ];
     container.innerHTML = groups
@@ -1581,8 +1749,10 @@ function renderRoomMemberListItem(room: Room, member: RoomMember): string {
         username: member.username || "-",
         roleBadgeHtml,
         selfBadgeHtml,
-        cardClass: hasCard ? "" : " is-unbound",
-        cardName: hasCard ? member.character_card?.name : roomText("home.members.unbound", "未绑定角色卡"),
+        cardClass: hasCard ? "" : " is-spectator",
+        cardName: hasCard
+            ? member.character_card?.name
+            : roomText("home.members.spectator", "观战"),
     });
 }
 
@@ -1990,7 +2160,42 @@ function roomVisibilityLabel(room: Room): string {
 
 function roomVisibilityBadge(room: Room): string {
     if (roomVisibility(room) !== "public") return "";
-    return `<span class="badge bg-info text-dark ms-1">公开</span>`;
+    return `<span class="badge bg-info text-dark">公开房间</span>`;
+}
+
+function roomModeLabel(room: Room): string {
+    if (room.room_mode === "freeform") return "AI 自由叙事";
+    if (room.room_mode === "manual" || room.ai_kp_enabled === false) return "无 AI 主持";
+    return "AI 主持剧本";
+}
+
+function roomModeBadgeClass(room: Room): string {
+    if (room.room_mode === "freeform") return "bg-success";
+    if (room.room_mode === "manual" || room.ai_kp_enabled === false) return "bg-secondary";
+    return "bg-primary";
+}
+
+function roomModeDescription(room: Room): string {
+    const freeform = room.scenario_binding === "none" || room.room_mode === "freeform";
+    const manual = room.ai_kp_enabled === false || room.room_mode === "manual";
+    if (manual) {
+        return "无 AI 主持：AI 叙事、配乐、配图、语音与导演全部关闭；玩家自行叙事、掷骰与使用房间工具";
+    }
+    if (freeform) {
+        return "AI 自由叙事（无剧本）：AI 以沙盒方式自由叙事，剧本工具与叙事图谱关闭；世界意志可直接拍定既定事实";
+    }
+    return "AI 主持剧本：AI 主持剧本叙事，剧本开场、世界意志与剧本级配图缓存可用";
+}
+
+function roomModeBadge(room: Room): string {
+    // 旧房间没有 room_mode 时后端已按 scripted 推断，这里统一按推断结果展示，避免信息缺失。
+    const cls =
+        room.room_mode === "freeform"
+            ? "bg-success-subtle text-success-emphasis border border-success-subtle"
+            : room.room_mode === "manual" || room.ai_kp_enabled === false
+              ? "bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle"
+              : "bg-primary-subtle text-primary-emphasis border border-primary-subtle";
+    return `<span class="badge ${cls}">${escapeRoomHtml(roomModeLabel(room))}</span>`;
 }
 
 async function writeClipboardText(text: string): Promise<void> {

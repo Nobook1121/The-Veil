@@ -68,6 +68,10 @@
                                 <span data-i18n="scenario.field.notes">剧本简介</span>
                                 <textarea class="form-control" id="scenarioNotes" rows="3"></textarea>
                             </label>
+                            <div class="form-group scenario-ruleset-field">
+                                <span data-i18n="scenario.field.ruleset">运行规则</span>
+                                <div class="ruleset-options" id="scenarioRulesetOptions" role="radiogroup" aria-label="运行规则"></div>
+                            </div>
                         </div>
                     </div>
                     </div>
@@ -535,6 +539,7 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" id="roomEntryCreateCharacter">创建角色卡</button>
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-outline-secondary" id="roomEntryCardless" hidden>不绑定角色卡进入</button>
                     <button type="button" class="btn btn-outline-secondary" id="roomEntryInvisible" hidden>隐身进入</button>
                     <button type="button" class="btn btn-primary" id="confirmRoomEntryCharacter">进入房间</button>
                 </div>
@@ -647,6 +652,43 @@
                                 <label class="attribute-editor-card"><span class="attribute-name">意志 <small>POW</small></span><small class="attribute-roll-hint" data-attribute-roll="POW">3d6x5</small><div class="attribute-value-row"><input type="number" class="form-control character-attribute-input" id="attributePOW" min="1" max="99" aria-label="意志属性值"><input type="number" class="form-control" id="attributePOWHalf" readonly aria-label="意志半值"><input type="number" class="form-control" id="attributePOWRatio" readonly aria-label="意志五分之一值"></div></label>
                                 <label class="attribute-editor-card"><span class="attribute-name">教育 <small>EDU</small></span><small class="attribute-roll-hint" data-attribute-roll="EDU">(2d6+6)x5</small><div class="attribute-value-row"><input type="number" class="form-control character-attribute-input" id="attributeEDU" min="1" max="99" aria-label="教育属性值"><input type="number" class="form-control" id="attributeEDUHalf" readonly aria-label="教育半值"><input type="number" class="form-control" id="attributeEDURatio" readonly aria-label="教育五分之一值"></div></label>
                                 <label class="attribute-editor-card"><span class="attribute-name">幸运 <small>LUC</small></span><small class="attribute-roll-hint" data-attribute-roll="LUC">3d6x5</small><div class="attribute-value-row attribute-value-row-single"><input type="number" class="form-control character-attribute-input" id="attributeLUC" min="1" max="99" aria-label="幸运属性值"></div></label>
+                            </div>
+                            <div class="character-age-adjust" id="characterAgeAdjustPanel" hidden>
+                                <div class="character-age-adjust-head">
+                                    <div>
+                                        <strong>年龄调整</strong>
+                                        <small>按年龄段修正属性；不会自动套用，也不会回溯已有角色卡</small>
+                                    </div>
+                                    <button type="button" class="btn btn-outline-light btn-sm" id="previewAgeAdjustment">应用年龄调整</button>
+                                </div>
+                                <div class="character-age-adjust-body" id="ageAdjustBody" hidden>
+                                    <div class="age-adjust-summary" id="ageAdjustSummary" aria-live="polite"></div>
+                                    <fieldset class="age-adjust-pool" id="ageAdjustStrSizGroup" hidden>
+                                        <legend>STR / SIZ 合计扣减 <strong id="ageAdjustStrSizTotal">0</strong></legend>
+                                        <label>力量 STR <input type="number" class="form-control" id="ageAdjustStrSizSTR" min="0" step="1" value="0"></label>
+                                        <label>体型 SIZ <input type="number" class="form-control" id="ageAdjustStrSizSIZ" min="0" step="1" value="0"></label>
+                                    </fieldset>
+                                    <fieldset class="age-adjust-pool" id="ageAdjustStrConDexGroup" hidden>
+                                        <legend>STR / CON / DEX 合计扣减 <strong id="ageAdjustStrConDexTotal">0</strong></legend>
+                                        <label>力量 STR <input type="number" class="form-control" id="ageAdjustStrConDexSTR" min="0" step="1" value="0"></label>
+                                        <label>体质 CON <input type="number" class="form-control" id="ageAdjustStrConDexCON" min="0" step="1" value="0"></label>
+                                        <label>敏捷 DEX <input type="number" class="form-control" id="ageAdjustStrConDexDEX" min="0" step="1" value="0"></label>
+                                    </fieldset>
+                                    <div class="age-adjust-edu" id="ageAdjustEduGroup" hidden>
+                                        <div class="age-adjust-edu-status">
+                                            <span>EDU 增强检定：剩余 <strong id="ageAdjustEduRemaining">0</strong> 次</span>
+                                            <span>当前 EDU <strong id="ageAdjustEduCurrent">0</strong></span>
+                                            <span>累计提升 <strong id="ageAdjustEduGain">0</strong></span>
+                                        </div>
+                                        <button type="button" class="btn btn-outline-light btn-sm" id="rollAgeAdjustEdu">掷一次 EDU 增强</button>
+                                        <ol class="age-adjust-edu-log" id="ageAdjustEduLog"></ol>
+                                    </div>
+                                    <div class="age-adjust-actions">
+                                        <span class="age-adjust-hint" id="ageAdjustHint"></span>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="cancelAgeAdjustment">取消</button>
+                                        <button type="button" class="btn btn-primary btn-sm" id="confirmAgeAdjustment">确认应用</button>
+                                    </div>
+                                </div>
                             </div>
                             <div class="character-resource-grid" aria-label="生命、魔法与理智">
                                 <section class="character-resource-card">

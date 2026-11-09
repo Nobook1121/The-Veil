@@ -12,6 +12,8 @@
     grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
     gap: 10px;
     margin: 12px 0 16px;
+    /* 同一行卡片始终等高，不因内容或选中态产生尺寸差异。 */
+    align-items: stretch;
 }
 
 .theme-card {
@@ -64,6 +66,7 @@
 .theme-card-swatch {
     position: relative;
     display: block;
+    flex: 0 0 auto;
     height: 58px;
     border: 1px solid var(--swatch-border);
     border-radius: 8px;
@@ -109,10 +112,23 @@
 }
 
 .theme-card-desc {
-    display: block;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    min-height: calc(0.76rem * 1.45 * 2);
     font-size: 0.76rem;
     line-height: 1.45;
     color: var(--theme-text-secondary);
+}
+
+/* 徽标槽位：所有卡片保留同样高度，选中/禁用时只填充内容，不改变卡片尺寸。 */
+.theme-card-badges {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    min-height: 20px;
 }
 
 .theme-card-badge {
@@ -120,6 +136,7 @@
     padding: 1px 7px;
     border-radius: 999px;
     font-size: 0.7rem;
+    line-height: 1.35;
     letter-spacing: 0.02em;
 }
 
@@ -142,6 +159,7 @@
     padding-top: 6px;
     border-top: 1px dashed var(--theme-border-subtle);
     font-size: 0.76rem;
+    line-height: 1.4;
     color: var(--theme-text-secondary);
     cursor: pointer;
 }

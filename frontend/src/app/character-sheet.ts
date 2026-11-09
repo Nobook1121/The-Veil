@@ -296,6 +296,8 @@ interface COC7CharacterCard {
     background: COC7Background;
     relationships: COC7Relationship[];
     experiencedScenarios: COC7ExperiencedScenario[];
+    rulesetId?: string;
+    sheet?: Record<string, unknown>;
     createdAt: string;
     updatedAt: string;
 }
@@ -360,7 +362,7 @@ interface CharacterApi {
     calculateAttributeDisplayValues: (value: number, ratioPercent?: number) => AttributeDisplayValues;
     calculateAttributeBaseTotal: (attributes: COC7Attributes) => number;
     calculateMaxHp: (attributes: COC7Attributes) => number;
-    calculateMaxSan: (attributes: COC7Attributes) => number;
+    calculateMaxSan: (attributes: COC7Attributes, mythosValue?: number) => number;
     calculateMaxMp: (attributes: COC7Attributes) => number;
     calculateMov: (attributes: COC7Attributes) => number;
     calculateOccupationSkillPoints: (attributes: COC7Attributes, occupationId: string) => number;
@@ -556,6 +558,35 @@ interface Window {
     let combatStatsManuallyEdited = false;
     let characterSaveInFlight = false;
 
+    /** 建卡年龄调整：只在新建角色卡、且房间开启 coc7_age_adjustments 时出现。 */
+    interface AgeAdjustmentEffects {
+        age: number;
+        band: string;
+        str_siz_total: number;
+        reduction_total: number;
+        app: number;
+        mov: number;
+        edu_points: number;
+        edu_checks: number;
+    }
+
+    interface EduEnhancementStep {
+        from: number;
+        to: number;
+        roll: number | null;
+        gain: number;
+    }
+
+    interface AgeAdjustmentState {
+        effects: AgeAdjustmentEffects;
+        eduGain: number;
+        eduChecksLeft: number;
+        eduCurrent: number;
+        eduLog: string[];
+    }
+
+    let ageAdjustment: AgeAdjustmentState | null = null;
+
     /** 批量管理：个人角色卡列表与角色卡广场各自独立维护模式与选中集合。 */
     type CharacterBatchTarget = "card" | "gallery";
     interface CharacterBatchState {
@@ -687,8 +718,19 @@ interface Window {
         return Math.floor((attributes.CON + attributes.SIZ) / 10);
     }
 
-    function calculateMaxSan(attributes: COC7Attributes): number {
-        return attributes.POW;
+    const MYTHOS_SKILL_KEY = "cthulhuMythos";
+
+    function mythosSkillValue(skills: COC7Skill[] | undefined): number {
+        const mythos = (skills || []).find(
+            (skill) => (skill.skillKey || skill.id) === MYTHOS_SKILL_KEY || skill.name === "克苏鲁神话"
+        );
+        return mythos ? clampNumber(mythos.value, 0, 99, 0) : 0;
+    }
+
+    function calculateMaxSan(attributes: COC7Attributes, mythosValue = 0): number {
+        // 书口径：初始理智值 = POW，上限 = 99 − 克苏鲁神话值。
+        const cap = 99 - clampNumber(mythosValue, 0, 99, 0);
+        return clampNumber(cap, 0, 99, 99);
     }
 
     function calculateMaxMp(attributes: COC7Attributes): number {
@@ -886,12 +928,15 @@ interface Window {
 
     function createCharacterCard(input: COC7CharacterCardInput = {}): COC7CharacterCard {
         const attributes = normalizeAttributes(input.attributes);
-        const maxHp = calculateMaxHp(attributes);
-        const maxSan = calculateMaxSan(attributes);
-        const maxMp = calculateMaxMp(attributes);
-        const damage = calculateBuildAndDamageBonus(attributes);
         const occupationId = input.occupationId || resolveOccupationIdFromInput(input.occupationName || "");
         const occupation = getOccupationById(occupationId);
+        const skills = normalizeSkills(input.skills, attributes, occupation);
+        const maxHp = calculateMaxHp(attributes);
+        const maxSan = calculateMaxSan(attributes, mythosSkillValue(skills));
+        const maxMp = calculateMaxMp(attributes);
+        const damage = calculateBuildAndDamageBonus(attributes);
+        // 初始理智值 = POW；上限受克苏鲁神话值压制（99 − 神话）。
+        const initialSan = clampNumber(input.initialSan, 0, maxSan, Math.min(attributes.POW, maxSan));
         const now = new Date().toISOString();
         return {
             id: input.id || `investigator-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -913,8 +958,8 @@ interface Window {
             maxHp,
             currentHp: clampNumber(input.currentHp, 0, maxHp, maxHp),
             maxSan,
-            initialSan: clampNumber(input.initialSan, 0, maxSan, maxSan),
-            currentSan: clampNumber(input.currentSan, 0, maxSan, maxSan),
+            initialSan,
+            currentSan: clampNumber(input.currentSan, 0, maxSan, initialSan),
             magicPoints: clampNumber(input.magicPoints ?? input.currentMp, 0, maxMp, maxMp),
             currentMp: clampNumber(input.currentMp ?? input.magicPoints, 0, maxMp, maxMp),
             maxMp,
@@ -926,7 +971,7 @@ interface Window {
             build: clampNumber(input.build, -2, 99, damage.build),
             damageBonus: input.damageBonus || damage.damageBonus,
             armor: clampNumber(input.armor, 0, 99, 0),
-            skills: normalizeSkills(input.skills, attributes, occupation),
+            skills,
             weapons: normalizeWeapons(input.weapons),
             equipment: normalizeEquipment(input.equipment),
             assets: {
@@ -937,6 +982,7 @@ interface Window {
             background: normalizeBackground(input.background),
             relationships: normalizeRelationships(input.relationships),
             experiencedScenarios: normalizeExperiencedScenarios(input.experiencedScenarios),
+            rulesetId: String(input.rulesetId || "coc7").toLowerCase(),
             createdAt: input.createdAt || now,
             updatedAt: now
         };
@@ -1488,12 +1534,41 @@ interface Window {
         return window.TrpgI18n?.t("", value) || value;
     }
 
+    /**
+     * 按规则集 schema 把服务端 payload 归一成前端视图模型。
+     * 新卡以 ``sheet`` 为准；旧卡 / 缺字段时用顶层镜像兜底，避免出现空卡。
+     */
+    function cardInputFromSchema(input: COC7CharacterCardInput): COC7CharacterCardInput {
+        const sheet = input.sheet;
+        if (!sheet || typeof sheet !== "object") return input;
+        const rulesetId = String(input.rulesetId || "coc7").toLowerCase();
+        if (rulesetId !== "coc7") return input;
+        const fromSheet = convertTestCharacterJsonToCardInput({
+            ...(input as unknown as TestCharacterJson),
+            ...(sheet as Record<string, unknown>)
+        } as TestCharacterJson);
+        return mergeNonEmptyCardInput(input, fromSheet);
+    }
+
+    function mergeNonEmptyCardInput(
+        base: COC7CharacterCardInput,
+        preferred: COC7CharacterCardInput
+    ): COC7CharacterCardInput {
+        const merged: Record<string, unknown> = { ...base };
+        for (const [key, value] of Object.entries(preferred)) {
+            const empty = value === undefined || value === null || value === ""
+                || (Array.isArray(value) && value.length === 0);
+            if (!empty || merged[key] === undefined) merged[key] = value;
+        }
+        return merged as COC7CharacterCardInput;
+    }
+
     async function loadCards(): Promise<void> {
         cards = [];
         try {
             const response = await TrpgApi.get<ApiResponse<COC7CharacterCardInput[]>>("/api/characters");
             if (response.success && Array.isArray(response.data)) {
-                cards = response.data.map((card) => createCharacterCard(card));
+                cards = response.data.map((card) => createCharacterCard(cardInputFromSchema(card)));
             }
         } catch (error) {
             console.warn("加载角色卡失败：", error);
@@ -1526,7 +1601,7 @@ interface Window {
         try {
             const response = await TrpgApi.get<ApiResponse<COC7CharacterCardInput[]>>("/api/character-gallery");
             if (response.success && Array.isArray(response.data)) {
-                galleryCards = response.data.map((card) => createCharacterCard(card));
+                galleryCards = response.data.map((card) => createCharacterCard(cardInputFromSchema(card)));
             }
         } catch (error) {
             console.warn("加载角色卡广场失败:", error);
@@ -1698,7 +1773,7 @@ interface Window {
     async function saveCardToServer(card: COC7CharacterCard): Promise<COC7CharacterCard | null> {
         try {
             const response = await TrpgApi.put<ApiResponse<COC7CharacterCard>>(`/api/characters/${encodeURIComponent(card.id)}`, card);
-            if (response.success && response.data) return createCharacterCard(response.data);
+            if (response.success && response.data) return createCharacterCard(cardInputFromSchema(response.data));
             notify(response.message || response.error || "保存角色卡失败", "error");
         } catch (error) {
             notify(`保存角色卡失败：${characterErrorMessage(error)}`, "error");
@@ -1710,7 +1785,7 @@ interface Window {
         try {
             const publicId = card.public_id || card.id;
             const response = await TrpgApi.put<ApiResponse<COC7CharacterCard>>(`/api/character-gallery/${encodeURIComponent(publicId)}`, card);
-            if (response.success && response.data) return createCharacterCard(response.data);
+            if (response.success && response.data) return createCharacterCard(cardInputFromSchema(response.data));
             notify(response.message || response.error || "保存广场角色卡失败", "error");
         } catch (error) {
             notify(`保存广场角色卡失败：${characterErrorMessage(error)}`, "error");
@@ -1770,7 +1845,7 @@ interface Window {
         });
         byId("importCharacter")?.addEventListener("click", () => {
             if (!requireLoginForCharacterAction("导入角色卡")) return;
-            byId<HTMLInputElement>("importCharacterFile")?.click();
+            openCharacterImportDialog();
         });
         byId<HTMLInputElement>("importCharacterFile")?.addEventListener("change", importCharacterFiles);
         byId("exportCharacter")?.addEventListener("click", exportActiveCard);
@@ -1873,12 +1948,14 @@ interface Window {
             });
         });
         byId("characterAge")?.addEventListener("input", () => {
+            resetAgeAdjustment();
             refreshEditorRuleSummary();
         });
         ["characterCurrentHp", "characterCurrentMp", "characterCurrentSan", "characterInitialSan"].forEach((fieldId) => {
             byId(fieldId)?.addEventListener("input", refreshEditorRuleSummary);
         });
         byId<HTMLInputElement>("characterAvatarUpload")?.addEventListener("change", handleAvatarUpload);
+        bindAgeAdjustmentControls();
         hydrateRuleSettingsPanel();
     }
 
@@ -2164,6 +2241,8 @@ interface Window {
             syncCustomSkillDisplayName(row);
         }
         refreshSkillTableCalculations();
+        // 克苏鲁神话值变化会压低 SAN 上限，立即回收超限的当前 / 初始理智值。
+        syncEditorResourceLimits();
         syncEditorCreditRating();
     }
 
@@ -2706,12 +2785,246 @@ interface Window {
         return catalog ? catalog.base : 0;
     }
 
+    function ageAdjustmentEnabled(): boolean {
+        const rules = window.currentRoom?.house_rules as RoomHouseRules | undefined;
+        return Boolean(rules?.coc7_age_adjustments);
+    }
+
+    function updateAgeAdjustmentVisibility(isNewCard: boolean): void {
+        const panel = byId("characterAgeAdjustPanel");
+        if (!panel) return;
+        panel.hidden = !(isNewCard && ageAdjustmentEnabled());
+        resetAgeAdjustment();
+    }
+
+    function resetAgeAdjustment(): void {
+        ageAdjustment = null;
+        const body = byId("ageAdjustBody");
+        if (body) body.hidden = true;
+        [
+            "ageAdjustStrSizSTR",
+            "ageAdjustStrSizSIZ",
+            "ageAdjustStrConDexSTR",
+            "ageAdjustStrConDexCON",
+            "ageAdjustStrConDexDEX"
+        ].forEach((id) => setInputValue(id, 0));
+        setText("ageAdjustHint", "");
+        const log = byId("ageAdjustEduLog");
+        if (log) log.innerHTML = "";
+        const previewButton = byId<HTMLButtonElement>("previewAgeAdjustment");
+        if (previewButton) {
+            previewButton.disabled = false;
+            previewButton.textContent = "应用年龄调整";
+        }
+    }
+
+    function ageAdjustmentAllocation(prefix: string, keys: string[]): Record<string, number> {
+        return keys.reduce<Record<string, number>>((allocation, key) => {
+            allocation[key] = Math.max(0, Number(getInputValue(`${prefix}${key}`)) || 0);
+            return allocation;
+        }, {});
+    }
+
+    function ageAdjustmentPoolTotal(allocation: Record<string, number>): number {
+        return Object.values(allocation).reduce((total, value) => total + value, 0);
+    }
+
+    function renderAgeAdjustmentHint(): void {
+        if (!ageAdjustment) {
+            setText("ageAdjustHint", "");
+            return;
+        }
+        const strSizTotal = Math.abs(Math.min(0, ageAdjustment.effects.str_siz_total));
+        const strConDexTotal = Math.abs(ageAdjustment.effects.reduction_total);
+        const strSizSpent = ageAdjustmentPoolTotal(ageAdjustmentAllocation("ageAdjustStrSiz", ["STR", "SIZ"]));
+        const strConDexSpent = ageAdjustmentPoolTotal(ageAdjustmentAllocation("ageAdjustStrConDex", ["STR", "CON", "DEX"]));
+        const parts: string[] = [];
+        if (strSizTotal > 0) parts.push(`STR/SIZ 已分配 ${strSizSpent}/${strSizTotal}`);
+        if (strConDexTotal > 0) parts.push(`STR/CON/DEX 已分配 ${strConDexSpent}/${strConDexTotal}`);
+        if (ageAdjustment.eduChecksLeft > 0) parts.push(`尚有 ${ageAdjustment.eduChecksLeft} 次 EDU 增强未掷（可留空）`);
+        setText("ageAdjustHint", parts.join("；"));
+    }
+
+    function renderAgeAdjustment(): void {
+        if (!ageAdjustment) return;
+        const effects = ageAdjustment.effects;
+        const strSizTotal = Math.abs(Math.min(0, effects.str_siz_total));
+        const strConDexTotal = Math.abs(effects.reduction_total);
+        const signed = (value: number) => (value > 0 ? `+${value}` : String(value));
+
+        const strSizGroup = byId("ageAdjustStrSizGroup");
+        if (strSizGroup) strSizGroup.hidden = strSizTotal <= 0;
+        setText("ageAdjustStrSizTotal", String(strSizTotal));
+        const strConDexGroup = byId("ageAdjustStrConDexGroup");
+        if (strConDexGroup) strConDexGroup.hidden = strConDexTotal <= 0;
+        setText("ageAdjustStrConDexTotal", String(strConDexTotal));
+
+        const eduGroup = byId("ageAdjustEduGroup");
+        if (eduGroup) eduGroup.hidden = !(effects.edu_checks > 0 || ageAdjustment.eduGain > 0);
+        setText("ageAdjustEduRemaining", String(ageAdjustment.eduChecksLeft));
+        setText("ageAdjustEduCurrent", String(ageAdjustment.eduCurrent));
+        setText("ageAdjustEduGain", String(ageAdjustment.eduGain));
+        const rollButton = byId<HTMLButtonElement>("rollAgeAdjustEdu");
+        if (rollButton) {
+            rollButton.disabled = ageAdjustment.eduChecksLeft <= 0 || ageAdjustment.eduCurrent >= 99;
+            rollButton.textContent = ageAdjustment.eduChecksLeft > 0 ? "掷一次 EDU 增强" : "EDU 增强已掷完";
+        }
+        const log = byId("ageAdjustEduLog");
+        if (log) {
+            log.innerHTML = ageAdjustment.eduLog
+                .map((line) => `<li>${escapeHtml(line)}</li>`)
+                .join("");
+        }
+
+        const summaryLines = [
+            `年龄段 ${effects.band}：STR/SIZ 合计 ${signed(effects.str_siz_total)}，STR/CON/DEX 合计 ${signed(-effects.reduction_total)}，APP ${signed(effects.app)}。`,
+            `MOV ${signed(effects.mov)}（保存时按年龄自动重算，不会二次扣减）；EDU ${signed(effects.edu_points)}，并需进行 ${effects.edu_checks} 次增强检定。`
+        ];
+        setText("ageAdjustSummary", summaryLines.join("\n"));
+        renderAgeAdjustmentHint();
+    }
+
+    async function previewAgeAdjustment(): Promise<void> {
+        if (!ageAdjustmentEnabled()) return;
+        const age = clampNumber(getInputValue("characterAge"), 15, 99, 25);
+        try {
+            const response = await TrpgApi.post<ApiResponse<AgeAdjustmentEffects>>(
+                "/api/characters/age-adjustment/preview",
+                { age }
+            );
+            const effects = response.data;
+            if (!effects) throw new Error("无法读取年龄调整数据");
+            const baseEdu = clampNumber(Number(getInputValue("attributeEDU")), 1, 99, 1);
+            ageAdjustment = {
+                effects,
+                eduGain: 0,
+                eduChecksLeft: effects.edu_checks,
+                eduCurrent: clampNumber(baseEdu + effects.edu_points, 1, 99, 1),
+                eduLog: []
+            };
+            const body = byId("ageAdjustBody");
+            if (body) body.hidden = false;
+            renderAgeAdjustment();
+        } catch (error) {
+            notify(error instanceof Error ? error.message : "年龄调整预览失败", "error");
+        }
+    }
+
+    async function rollAgeAdjustmentEdu(): Promise<void> {
+        if (!ageAdjustment || ageAdjustment.eduChecksLeft <= 0) return;
+        const rollButton = byId<HTMLButtonElement>("rollAgeAdjustEdu");
+        if (rollButton) rollButton.disabled = true;
+        try {
+            const response = await TrpgApi.post<ApiResponse<EduEnhancementStep>>(
+                "/api/characters/age-adjustment/edu-roll",
+                { edu: ageAdjustment.eduCurrent }
+            );
+            const step = response.data;
+            if (!step) throw new Error("无法读取 EDU 增强结果");
+            ageAdjustment.eduChecksLeft -= 1;
+            ageAdjustment.eduGain += step.gain;
+            ageAdjustment.eduCurrent = step.to;
+            const attempt = ageAdjustment.effects.edu_checks - ageAdjustment.eduChecksLeft;
+            ageAdjustment.eduLog.push(
+                `第 ${attempt} 次：掷出 ${step.roll ?? "-"}，EDU ${step.from} → ${step.to}` +
+                (step.gain > 0 ? `（+${step.gain}）` : "（未提升）")
+            );
+            renderAgeAdjustment();
+        } catch (error) {
+            notify(error instanceof Error ? error.message : "EDU 增强检定失败", "error");
+        } finally {
+            if (rollButton) rollButton.disabled = !ageAdjustment || ageAdjustment.eduChecksLeft <= 0 || ageAdjustment.eduCurrent >= 99;
+        }
+    }
+
+    async function confirmAgeAdjustment(): Promise<void> {
+        if (!ageAdjustment) return;
+        const effects = ageAdjustment.effects;
+        const strSizTotal = Math.abs(Math.min(0, effects.str_siz_total));
+        const strConDexTotal = Math.abs(effects.reduction_total);
+        const strSizAllocation = ageAdjustmentAllocation("ageAdjustStrSiz", ["STR", "SIZ"]);
+        const strConDexAllocation = ageAdjustmentAllocation("ageAdjustStrConDex", ["STR", "CON", "DEX"]);
+        if (ageAdjustmentPoolTotal(strSizAllocation) !== strSizTotal) {
+            setText("ageAdjustHint", `STR/SIZ 需要恰好分配 ${strSizTotal} 点`);
+            return;
+        }
+        if (ageAdjustmentPoolTotal(strConDexAllocation) !== strConDexTotal) {
+            setText("ageAdjustHint", `STR/CON/DEX 需要恰好分配 ${strConDexTotal} 点`);
+            return;
+        }
+        const confirmButton = byId<HTMLButtonElement>("confirmAgeAdjustment");
+        if (confirmButton) confirmButton.disabled = true;
+        try {
+            const response = await TrpgApi.post<ApiResponse<{ deltas: Record<string, number> }>>(
+                "/api/characters/age-adjustment/apply",
+                {
+                    age: effects.age,
+                    str_siz_allocation: strSizAllocation,
+                    str_con_dex_allocation: strConDexAllocation,
+                    edu_gain: ageAdjustment.eduGain
+                }
+            );
+            const deltas = response.data?.deltas;
+            if (!deltas) throw new Error("无法读取年龄调整结果");
+            const current = readAttributes();
+            const next: COC7Attributes = { ...current };
+            (["STR", "SIZ", "CON", "DEX", "APP", "EDU"] as COC7CoreAttributeKey[]).forEach((key) => {
+                next[key] = clampNumber(current[key] + Number(deltas[key] || 0), 1, 99, current[key]);
+            });
+            ATTRIBUTE_KEYS.forEach((key) => setInputValue(`attribute${key}`, next[key]));
+            refreshEditorRuleSummary();
+            // 年龄调整直接改写属性，必须强制重算 HP / 伤害加成 / MOV 等派生值。
+            syncEditorCombatStats(next, true);
+            ageAdjustment = null;
+            ageAdjustAdjustmentAppliedUi();
+            notify("年龄调整已写入属性，请检查后保存角色卡", "success");
+        } catch (error) {
+            notify(error instanceof Error ? error.message : "年龄调整应用失败", "error");
+        } finally {
+            if (confirmButton) confirmButton.disabled = false;
+        }
+    }
+
+    function ageAdjustAdjustmentAppliedUi(): void {
+        const body = byId("ageAdjustBody");
+        if (body) body.hidden = true;
+        const previewButton = byId<HTMLButtonElement>("previewAgeAdjustment");
+        if (previewButton) {
+            previewButton.disabled = true;
+            previewButton.textContent = "年龄调整已应用";
+        }
+        setText("ageAdjustHint", "");
+    }
+
+    function bindAgeAdjustmentControls(): void {
+        byId("previewAgeAdjustment")?.addEventListener("click", () => {
+            void previewAgeAdjustment();
+        });
+        byId("rollAgeAdjustEdu")?.addEventListener("click", () => {
+            void rollAgeAdjustmentEdu();
+        });
+        byId("confirmAgeAdjustment")?.addEventListener("click", () => {
+            void confirmAgeAdjustment();
+        });
+        byId("cancelAgeAdjustment")?.addEventListener("click", () => {
+            resetAgeAdjustment();
+        });
+        [
+            "ageAdjustStrSizSTR",
+            "ageAdjustStrSizSIZ",
+            "ageAdjustStrConDexSTR",
+            "ageAdjustStrConDexCON",
+            "ageAdjustStrConDexDEX"
+        ].forEach((id) => byId(id)?.addEventListener("input", renderAgeAdjustmentHint));
+    }
+
     function openEditor(card?: COC7CharacterCard): void {
         if (card?.playerId && !isCurrentUserElevated() && !isBoundToCurrentPlayer(card.playerId)) {
             notify("该角色卡已绑定其他玩家，当前玩家不能编辑。", "error");
             return;
         }
         const target = card ? cloneCard(card) : createCharacterCard();
+        updateAgeAdjustmentVisibility(!card);
         CUSTOM_WEAPONS = [];
         customWeaponsCardId = "";
         customWeaponsDirty = false;
@@ -3121,14 +3434,14 @@ interface Window {
     function syncEditorResourceLimits(attributes: COC7Attributes = readAttributes()): void {
         const maxHp = calculateMaxHp(attributes);
         const maxMp = calculateMaxMp(attributes);
-        const maxSan = calculateMaxSan(attributes);
+        const maxSan = calculateMaxSan(attributes, mythosSkillValue(readChecklistSkills()));
         setInputValue("characterMaxHp", maxHp);
         setInputValue("characterMaxMp", maxMp);
         setInputValue("characterMaxSan", maxSan);
         setInputValue("characterCurrentHp", clampNumber(getInputValue("characterCurrentHp"), 0, maxHp, maxHp));
         setInputValue("characterCurrentMp", clampNumber(getInputValue("characterCurrentMp"), 0, maxMp, maxMp));
-        setInputValue("characterCurrentSan", clampNumber(getInputValue("characterCurrentSan"), 0, maxSan, maxSan));
-        setInputValue("characterInitialSan", clampNumber(getInputValue("characterInitialSan"), 0, maxSan, maxSan));
+        setInputValue("characterCurrentSan", clampNumber(getInputValue("characterCurrentSan"), 0, maxSan, Math.min(attributes.POW, maxSan)));
+        setInputValue("characterInitialSan", clampNumber(getInputValue("characterInitialSan"), 0, maxSan, Math.min(attributes.POW, maxSan)));
     }
 
     function syncEditorCombatStats(attributes: COC7Attributes = readAttributes(), force = false): void {
@@ -3381,9 +3694,10 @@ interface Window {
         const editingId = getInputValue("characterEditingId");
         const existing = cards.find((card) => card.id === editingId) || galleryCards.find((card) => card.id === editingId);
         const attributes = readAttributes();
+        const skills = readChecklistSkills();
         const maxHp = calculateMaxHp(attributes);
         const maxMp = calculateMaxMp(attributes);
-        const maxSan = calculateMaxSan(attributes);
+        const maxSan = calculateMaxSan(attributes, mythosSkillValue(skills));
         const nextCardId = editingId || `investigator-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const playerId = resolveEditorPlayerId(existing);
         if (!validatePlayerBinding(nextCardId, playerId, existing)) return;
@@ -3409,8 +3723,8 @@ interface Window {
             currentMp: clampNumber(getInputValue("characterCurrentMp"), 0, maxMp, maxMp),
             magicPoints: clampNumber(getInputValue("characterCurrentMp"), 0, maxMp, maxMp),
             maxMp,
-            initialSan: clampNumber(getInputValue("characterInitialSan"), 0, maxSan, maxSan),
-            currentSan: clampNumber(getInputValue("characterCurrentSan"), 0, maxSan, maxSan),
+            initialSan: clampNumber(getInputValue("characterInitialSan"), 0, maxSan, Math.min(attributes.POW, maxSan)),
+            currentSan: clampNumber(getInputValue("characterCurrentSan"), 0, maxSan, Math.min(attributes.POW, maxSan)),
             status: readEditorStatus(),
             occupationSkillPoints: clampNumber(getInputValue("characterOccupationSkillPoints"), 0, 999, calculateOccupationSkillPoints(attributes, resolveOccupationIdFromInput(occupationName))),
             personalInterestPoints: clampNumber(getInputValue("characterPersonalInterestPoints"), 0, 999, calculatePersonalInterestPoints(attributes)),
@@ -3418,7 +3732,7 @@ interface Window {
                 occupation: clampNumber(getInputValue("characterOccupationSkillLimit"), 0, 99, 75),
                 other: clampNumber(getInputValue("characterOtherSkillLimit"), 0, 99, 50)
             },
-            skills: readChecklistSkills(),
+            skills,
             weapons: readWeaponRows(),
             damageBonus: getInputValue("characterDamageBonus") || calculateBuildAndDamageBonus(attributes).damageBonus,
             build: clampNumber(getInputValue("characterBuild"), -2, 99, calculateBuildAndDamageBonus(attributes).build),
@@ -4416,6 +4730,7 @@ interface Window {
                 sanChange: stringField(item.san_change || item.sanChange),
                 otherChanges: stringField(item.other_changes || item.otherChanges)
             })),
+            ...(payload.rulesetId ? { rulesetId: stringField(payload.rulesetId, "coc7") } : {}),
             ...(payload.createdAt ? { createdAt: payload.createdAt } : {}),
             ...(payload.updatedAt ? { updatedAt: payload.updatedAt } : {})
         };
@@ -4425,19 +4740,141 @@ interface Window {
         return isRecord(value) && ["deriveAttributes", "battleAttributes", "characterStatus", "skillGroups", "stories", "friends", "experiencedModules"].some((key) => key in value);
     }
 
-    function readCharacterImportFile(file: File): Promise<unknown> {
+    interface CharacterImportResult {
+        character?: COC7CharacterCard;
+        renamed?: boolean;
+    }
+
+    const MAX_IMPORT_FILE_BYTES = 8 * 1024 * 1024;
+
+    function readCharacterImportText(file: File): Promise<string> {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = () => {
-                try {
-                    resolve(JSON.parse(String(reader.result || "")) as unknown);
-                } catch (error) {
-                    reject(error);
-                }
-            };
+            reader.onload = () => resolve(String(reader.result || ""));
             reader.onerror = () => reject(reader.error || new Error("Failed to read character file"));
             reader.readAsText(file);
         });
+    }
+
+    /** 把 JSON 文本或 zlib + base64 分享串交给后端解析，成功则生成一张新角色卡。 */
+    async function importCharacterText(text: string): Promise<boolean> {
+        const payload = text.trim();
+        if (!payload) {
+            notify("请先选择角色卡文件，或粘贴分享文本串 / JSON。", "warning");
+            return false;
+        }
+        try {
+            const response = await TrpgApi.post<ApiResponse<CharacterImportResult>>("/api/characters/import", {
+                payload,
+                mode: "auto"
+            });
+            const result = response.success ? response.data : null;
+            const importedRaw = result?.character;
+            const imported = importedRaw
+                ? createCharacterCard(cardInputFromSchema(importedRaw as unknown as COC7CharacterCardInput))
+                : undefined;
+            if (!imported?.id) {
+                notify(response.message || response.error || "导入角色卡失败", "error");
+                return false;
+            }
+            cards = [imported, ...cards.filter((item) => item.id !== imported.id)];
+            activeCardId = imported.id;
+            renderList();
+            openCharacterDetail(activeCardId);
+            const overLimit = collectOverLimitSkillNames(imported);
+            if (overLimit.length) {
+                notify(`导入的角色卡中以下技能基础值超过设定上限，已按导入值保留：${overLimit.join("、")}`, "info");
+            }
+            notify(
+                result?.renamed
+                    ? `已导入角色卡「${imported.name}」（重名已自动改名）`
+                    : `已导入角色卡「${imported.name}」`,
+                "success"
+            );
+            return true;
+        } catch (error) {
+            notify(`导入角色卡失败：${characterErrorMessage(error)}`, "error");
+            return false;
+        }
+    }
+
+    async function importCharacterFiles(event: Event): Promise<void> {
+        const input = event.target as HTMLInputElement | null;
+        const files = Array.from(input?.files || []);
+        try {
+            for (const file of files) {
+                if (file.size > MAX_IMPORT_FILE_BYTES) {
+                    notify(`文件 ${file.name} 超过 8MB 导入上限`, "error");
+                    continue;
+                }
+                let text = "";
+                try {
+                    text = await readCharacterImportText(file);
+                } catch (error) {
+                    notify(`读取 ${file.name} 失败：${characterErrorMessage(error)}`, "error");
+                    continue;
+                }
+                await importCharacterText(text);
+            }
+        } finally {
+            if (input) input.value = "";
+        }
+    }
+
+    /** 导入弹窗：选择 JSON 文件，或粘贴分享文本串。 */
+    function openCharacterImportDialog(): void {
+        if (!canCreateCharacterCard()) return;
+        const modalElement = document.createElement("div");
+        modalElement.className = "modal fade";
+        modalElement.innerHTML = `
+            <div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">导入角色卡</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small">导入会创建一张新的角色卡，归当前账号所有，不会覆盖或修改已有角色卡；重名时会自动追加序号。</p>
+                    <div class="mb-3">
+                        <button type="button" class="btn btn-primary" data-import-action="file">
+                            <i class="fa fa-file-import" aria-hidden="true"></i> 选择 JSON 文件
+                        </button>
+                    </div>
+                    <label class="form-label">或粘贴分享文本串 / JSON</label>
+                    <textarea class="form-control font-monospace" data-import-text rows="6"
+                        placeholder="eNrl... 开头的分享文本串，或完整的角色卡 JSON"></textarea>
+                    <div class="d-flex justify-content-end mt-3">
+                        <button type="button" class="btn btn-primary" data-import-action="text">导入文本</button>
+                    </div>
+                    <p class="text-muted small mt-3 mb-0">支持导出生成的 JSON 文件与 zlib+base64 分享串，也兼容旧版角色卡 JSON；单个文件上限 8MB。</p>
+                </div>
+            </div></div>`;
+        document.body.appendChild(modalElement);
+        const instance = typeof bootstrap !== "undefined" ? new bootstrap.Modal(modalElement) : null;
+        modalElement.addEventListener("hidden.bs.modal", () => modalElement.remove());
+        modalElement.querySelector<HTMLButtonElement>('[data-import-action="file"]')?.addEventListener("click", () => {
+            instance?.hide();
+            const input = byId<HTMLInputElement>("importCharacterFile");
+            if (!input) {
+                notify("找不到文件选择控件。", "error");
+                return;
+            }
+            input.value = "";
+            input.click();
+        });
+        const textButton = modalElement.querySelector<HTMLButtonElement>('[data-import-action="text"]');
+        const textArea = modalElement.querySelector<HTMLTextAreaElement>("[data-import-text]");
+        textButton?.addEventListener("click", () => {
+            if (textButton.disabled) return;
+            textButton.disabled = true;
+            void importCharacterText(textArea?.value || "")
+                .then((ok) => {
+                    if (ok) instance?.hide();
+                })
+                .finally(() => {
+                    textButton.disabled = false;
+                });
+        });
+        instance?.show();
     }
 
     /** 收集基础值超过有效上限（房间 > 用户个性化 > 管理员 > 目录默认）的技能名。 */
@@ -4494,66 +4931,121 @@ interface Window {
         return createCharacterCard({ ...card, skills });
     }
 
-    async function importCharacterData(data: unknown): Promise<number> {
-        const payloads = Array.isArray(data) ? data : [data];
-        let imported = 0;
-        const overLimitSkills = new Set<string>();
-        for (const payload of payloads) {
-            if (!isRecord(payload)) continue;
-            if (!canCreateCharacterCard()) break;
-            const input = isTestCharacterJsonPayload(payload)
-                ? convertTestCharacterJsonToCardInput(payload)
-                : payload as COC7CharacterCardInput;
-            const { id: _importedId, ...importInput } = input;
-            const card = createCharacterCard({
-                ...importInput,
-                playerId: isCurrentUserElevated() ? stringField(input.playerId) : currentPlayerId()
-            });
-            collectOverLimitSkillNames(card).forEach((name) => overLimitSkills.add(name));
-            const savedCard = await saveCardToServer(card);
-            if (!savedCard) continue;
-            cards = [savedCard, ...cards.filter((item) => item.id !== savedCard.id)];
-            activeCardId = savedCard.id;
-            imported += 1;
-        }
-        if (overLimitSkills.size) {
-            notify(`导入的角色卡中以下技能基础值超过设定上限，已按导入值保留：${Array.from(overLimitSkills).join("、")}`, "info");
-        }
-        return imported;
-    }
-
-    async function saveImportedCharacterFile(file: File): Promise<void> {
-        try {
-            const imported = await importCharacterData(await readCharacterImportFile(file));
-            if (imported > 0) {
-                renderList();
-                openCharacterDetail(activeCardId);
-                notify(`已导入 ${imported} 张角色卡`, "success");
-            } else {
-                notify(`未能从 ${file.name} 导入角色卡`, "error");
-            }
-        } catch (error) {
-            notify(`导入角色卡失败：${characterErrorMessage(error)}`, "error");
-        }
-    }
-
-    function importCharacterFiles(event: Event): void {
-        const input = event.target as HTMLInputElement | null;
-        const files = Array.from(input?.files || []);
-        void files.reduce((chain, file) => chain.then(() => saveImportedCharacterFile(file)), Promise.resolve()).finally(() => {
-            if (input) input.value = "";
-        });
+    interface CharacterExportBundle {
+        filename?: string;
+        jsonText?: string;
+        encoded?: string;
     }
 
     function exportActiveCard(): void {
         const card = visibleCharacterCards().find((item) => item.id === activeCardId);
-        if (!card) return;
-        const payload = JSON.stringify(convertCardToTestCharacterJson(card), null, 2);
-        if (navigator.clipboard?.writeText) {
-            void navigator.clipboard.writeText(payload).then(() => notify("角色卡 JSON 已复制到剪贴板。", "success"));
-        } else {
-            console.log(payload);
-            notify("当前浏览器不支持剪贴板写入，角色卡 JSON 已输出到控制台。", "error");
+        if (!card) {
+            notify("请先选择要导出的角色卡。", "warning");
+            return;
+        }
+        openCharacterExportDialog(card);
+    }
+
+    /** 导出方式选择弹窗：下载 JSON 文件，或复制 zlib + base64 分享文本串。 */
+    function openCharacterExportDialog(card: COC7CharacterCard): void {
+        const modalElement = document.createElement("div");
+        modalElement.className = "modal fade";
+        modalElement.innerHTML = `
+            <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">导出角色卡</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">即将导出「${escapeHtml(card.name)}」的完整角色卡数据，请选择导出方式：</p>
+                    <div class="d-grid gap-2">
+                        <button type="button" class="btn btn-primary" data-character-export="json">
+                            <i class="fa fa-download" aria-hidden="true"></i> 下载 JSON 文件
+                        </button>
+                        <button type="button" class="btn btn-outline-primary" data-character-export="text">
+                            <i class="fa fa-copy" aria-hidden="true"></i> 复制分享文本串
+                        </button>
+                    </div>
+                    <p class="text-muted small mt-3 mb-0">文本串是 JSON 经 zlib 压缩后再 base64 编码的裸串，可直接粘贴分享，任何标准工具都能解压还原为原始 JSON。</p>
+                </div>
+            </div></div>`;
+        document.body.appendChild(modalElement);
+        const instance = typeof bootstrap !== "undefined" ? new bootstrap.Modal(modalElement) : null;
+        modalElement.addEventListener("hidden.bs.modal", () => modalElement.remove());
+        modalElement.querySelectorAll<HTMLButtonElement>("[data-character-export]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const mode = button.dataset.characterExport === "text" ? "text" : "json";
+                button.disabled = true;
+                void exportCharacterCard(card, mode).finally(() => {
+                    button.disabled = false;
+                    instance?.hide();
+                });
+            });
+        });
+        instance?.show();
+    }
+
+    async function exportCharacterCard(card: COC7CharacterCard, mode: "json" | "text"): Promise<void> {
+        try {
+            const response = await TrpgApi.get<ApiResponse<CharacterExportBundle>>(`/api/characters/${encodeURIComponent(card.id)}/export`);
+            const bundle = response.success ? response.data : null;
+            const jsonText = bundle?.jsonText || "";
+            if (!jsonText) {
+                notify(response.message || response.error || "导出角色卡失败", "error");
+                return;
+            }
+            if (mode === "json") {
+                downloadCharacterExportFile(bundle?.filename || `${card.name || card.id}.json`, jsonText);
+                notify("角色卡 JSON 已下载。", "success");
+                return;
+            }
+            const encoded = bundle?.encoded || "";
+            if (!encoded) {
+                notify("分享文本串生成失败。", "error");
+                return;
+            }
+            const copied = await copyTextToClipboard(encoded);
+            if (copied) notify("角色卡分享文本串已复制到剪贴板。", "success");
+            else notify("复制失败，请检查浏览器剪贴板权限后重试。", "error");
+        } catch (error) {
+            notify(`导出角色卡失败：${characterErrorMessage(error)}`, "error");
+        }
+    }
+
+    function downloadCharacterExportFile(filename: string, text: string): void {
+        const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+
+    async function copyTextToClipboard(text: string): Promise<boolean> {
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(text);
+                return true;
+            }
+        } catch {
+            // 权限被拒时退回 execCommand 方案。
+        }
+        try {
+            const area = document.createElement("textarea");
+            area.value = text;
+            area.setAttribute("readonly", "");
+            area.style.position = "fixed";
+            area.style.opacity = "0";
+            document.body.appendChild(area);
+            area.select();
+            const ok = document.execCommand("copy");
+            area.remove();
+            return ok;
+        } catch {
+            return false;
         }
     }
 

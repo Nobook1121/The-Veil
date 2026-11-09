@@ -18,7 +18,10 @@
         {{{ activeHeaderHtml }}}
         <div class="card-body">
             {{{ archivedBadgeHtml }}}
-            <h5 class="card-title" data-user-content="true">{{ name }} {{{ visibilityBadgeHtml }}}</h5>
+            <div class="room-card-head">
+                <h5 class="card-title" data-user-content="true" title="{{ name }}">{{ name }}</h5>
+                <div class="room-card-badges">{{{ visibilityBadgeHtml }}}{{{ modeBadgeHtml }}}</div>
+            </div>
             <p class="card-text mb-2">
                 <small class="text-muted">房间码：<span data-user-content="true">{{ roomCode }}</span>
                     <button type="button" class="btn btn-link btn-sm p-0 align-baseline room-code-copy" data-copy-room-code="{{ roomCode }}" title="点击复制房间码" aria-label="复制房间码"><i class="fa fa-copy" aria-hidden="true"></i></button>

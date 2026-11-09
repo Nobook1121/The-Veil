@@ -105,10 +105,19 @@ interface CombatActionResponse {
 }
 
 interface WorldOverrideStatus {
+    supported?: boolean;
     allowed: boolean;
     enabled: boolean;
     user_ids: string[];
     can_configure: boolean;
+    rate?: {
+        allowed: boolean;
+        reason: string;
+        retry_after: number;
+        cooldown_seconds: number;
+        hourly_limit: number;
+        hourly_remaining: number | null;
+    };
     members: Array<{ user_id: string; username: string; character_name: string }>;
 }
 

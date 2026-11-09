@@ -205,24 +205,27 @@
 
     function showVeil(): void {
         // 遮罩样式各主题共用（深渊/赛博各自有配色），标记始终打上。
-        markBackdrop(true);
+        // 遮罩在 show.bs.modal 之后才插入 body，用微任务等它出现，避免这一帧漏标。
+        queueMicrotask(() => markBackdrop(true));
         if (!veilEnabled()) {
             return;
         }
         const element = ensureVeil();
-        // 下一帧再加可见类，保证透明度过渡从 0 开始。
-        window.requestAnimationFrame(() => element.classList.add("is-visible"));
+        // 先强制一次布局，让浏览器记住 opacity:0 的起点；同一帧内再加可见类，
+        // 法阵就会和遮罩、弹窗一起淡入，而不是慢一帧才开始。
+        void element.offsetWidth;
+        element.classList.add("is-visible");
     }
 
     function hideVeil(): void {
         const element = veil;
         veil = null;
-        markBackdrop(false);
         if (element === null) {
             return;
         }
+        // 与弹窗收起同步淡出，避免法阵在弹窗消失后继续停留。
         element.classList.remove("is-visible");
-        window.setTimeout(() => element.remove(), 460);
+        window.setTimeout(() => element.remove(), 360);
     }
 
     function applyVisibility(): void {
@@ -273,9 +276,21 @@
             notify("你没有使用世界意志的权限", "error");
             return;
         }
+        if (status.rate && status.rate.allowed === false) {
+            notify(`世界意志冷却中：${status.rate.reason}，请 ${status.rate.retry_after} 秒后再试`, "info");
+            return;
+        }
         const modal = byId("worldOverrideModal");
         if (!modal) return;
         setMessage("");
+        const limits = byId("worldOverrideLimits");
+        if (limits && status.rate) {
+            const cooldown = status.rate.cooldown_seconds > 0 ? `同一玩家 ${status.rate.cooldown_seconds} 秒一次` : "同一玩家无冷却";
+            const quota = status.rate.hourly_limit > 0
+                ? `本房间每小时剩余 ${status.rate.hourly_remaining}/${status.rate.hourly_limit} 次`
+                : "本房间每小时不限次数";
+            limits.textContent = `${cooldown} · ${quota} · 使用记录会写入房间日志`;
+        }
         const input = byId<HTMLTextAreaElement>("worldOverrideInput");
         if (input) input.value = "";
         new bootstrap.Modal(modal).show();
@@ -323,13 +338,14 @@
                 void execute();
             }
         });
-        // Bootstrap 在 show 事件之后才把遮罩插到 body，所以等一个宏任务再挂法阵，
-        // 保证法阵位于遮罩之上、弹窗之下。
+        // 在 show 事件里同步挂法阵：它与遮罩、弹窗处于同一帧。
+        // 层级靠 z-index 保证（遮罩 1040 < 法阵 1049 < 弹窗 1050），不依赖插入顺序。
         const modal = byId("worldOverrideModal");
-        modal?.addEventListener("show.bs.modal", () => {
-            window.setTimeout(showVeil, 0);
-        });
-        modal?.addEventListener("hidden.bs.modal", hideVeil);
+        modal?.addEventListener("show.bs.modal", showVeil);
+        // 收起一开始就淡出法阵，和弹窗、遮罩使用同一段时间轴。
+        modal?.addEventListener("hide.bs.modal", hideVeil);
+        // 遮罩被移除后再撤销标记，避免淡出阶段闪回普通遮罩配色。
+        modal?.addEventListener("hidden.bs.modal", () => markBackdrop(false));
         void refresh();
     }
 

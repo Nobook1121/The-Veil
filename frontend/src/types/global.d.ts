@@ -32,6 +32,9 @@ interface Window {
     CheckTool: CheckToolConstructor;
     ToolManager: ToolManagerConstructor;
     toolManager?: ToolManager;
+    TrpgCommandSuggestions?: {
+        getSuggestions(input: string): CommandSuggestion[];
+    };
     currentRoom?: Room | null;
     uploadedCoverFile?: File;
     currentPlatform?: string;
