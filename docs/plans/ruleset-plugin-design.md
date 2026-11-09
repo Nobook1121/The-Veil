@@ -320,3 +320,12 @@ data/rulesets/coc7/catalogs/items.json      # 可空
 - 验证：`tests/test_ruleset_selection.py` 覆盖状态清单、`/api/rulesets` 接口契约（未登录 401、开发中占位 `selectable=false`）、拒绝选择、创建默认值与更新；`pytest -k "scenario or ruleset"` 共 129 项通过。
 - 房间侧：创建房间时固化 `ruleset_id`（显式请求必须 `selectable`，否则 400；剧本房间以剧本规则集为准）；切换剧本 / 剧本迁移同步更新。旧房间读取时按剧本推断，推断不到回退 `coc7`，不写回文件。
 - 导入侧：角色卡导入复用 `builtin_registry().ids()`（只含可用插件），`rulesetId=dnd5e` 会被拒绝并返回 `unsupported_ruleset`；剧本导入只做结构化，落库仍走剧本创建接口，因此同样受后端硬校验。
+
+### 11.2 检定数学整块下沉（2026-11-09，S3 / S7 / S8）
+
+- **金样先行**：`tests/test_coc7_check_golden.py` + `tests/fixtures/coc7_check_golden.json` 在搬迁前录制当前行为，覆盖技能 / 属性取值与名称解析、难度归一、8 组目标 × 3 组阈值 × 100 次掷骰的成功等级矩阵、奖励 / 惩罚骰候选、房间检定、SAN 检定、疯狂判定、社交 / 熟人 / 组合检定 / 团体幸运的完整返回结构与文字。
+- **批次 1（`fc1d1f2`）**：`SKILL_KEY_LABELS`、属性 / 技能别名、`CHECK_NAME_ALIASES`、判定名解析与目标值查询迁入 `ruleset/coc7/checks.py`；`dice.py` 只保留委托。
+- **批次 2（`982049a`）**：`DIFFICULTY_ALIASES`、`DIFFICULTY_LABELS`、`LEVEL_LABELS`、默认大成功 / 大失败阈值、`threshold`、`success_level`、`level_suffix`、房间检定摘要迁入插件；`dice.py` 与 `check_service.py` 不再持有 CoC 常量，仅保留百分骰原语、奖励 / 惩罚骰净额、广播与等待流程。
+- **批次 3（`dd01a5d`）**：`coc7/sanity.py` 声明 `check_name` / `madness_check_name`，SAN 计划与骰桌展示由核心读取插件声明；删除 `room_rules.py` 中未使用的 `MADNESS_LOSS_THRESHOLD` 副本。
+- 三批均先跑金样逐字一致，再跑全量 `pytest`（1328 passed / 1 skipped），逐批提交。
+- **金样未覆盖、仍需注意的路径**：`run_room_economy` 的信用评级消费换算；`combat/rulesets/coc7.py` 与 `agents/tools/combat.py` 内部的 `_success_level` 调用（走同一委托，但未纳入金样）；叙述层 `agents/narrative/*` 与 `agents/tools/narrative.py` 的成功 / 失败词表；前端 `checkTool.ts` 的别名与阈值渲染。
