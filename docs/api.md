@@ -203,6 +203,8 @@
 - `GET /api/rooms/<room_id>/spectate`：读取旁观信息。
 - `GET /api/rooms/<room_id>/members/<user_id>/character-diff`：读取该成员「房间快照 vs 持久角色卡」的差异，用于卡面标记「房间内临时」。只返回实际变化的字段（属性、技能、HP/SAN/MP、现金、物品与武器数量），每项为 `{ "current": 当前值, "saved": 保存值 }`；未绑定持久卡时 `diff` 为空对象。仅房间成员或具备 `characters.manage_all` 的管理员可读。
 - `PUT /api/rooms/<room_id>/members/<user_id>/character`：为成员绑定角色卡；换卡同样校验占用（`409 character_card_in_use`）。
+- `PUT /api/rooms/<room_id>/owner`：显式移交房主（房主本人或站点 `ADMIN` / `OWNER`）。body `{ "user_id": <目标用户ID> }`；目标必须是当前活跃成员，不能是自己，也不能是当前房主。成功后原房主降为普通成员、目标升为房主，双方都继续留在房间，并向房间广播 `room_members_changed`。错误码：`400 cannot_transfer_to_self`、`400 already_room_owner`、`404 Player not found in room`、`403`。
+- `POST /api/rooms/<room_id>/leave`：玩家**自助退出**房间（只移除自己，不替代、不放宽下面的管理员移除权限）。退出后该成员的角色卡立即释放，可被其它活跃房间绑定；重复退出幂等（`data.already_left=true`）。若该成员还有未归档的待写回改动（AI 改卡、`/skill`、`/item` 等），未带 `confirm_pending=true` 时返回 `409 pending_changes_unarchived` 并附 `pending_changes` 数量，前端据此后二次确认；携带该字段则照常退出、改动不写回。房主未显式移交就退出时，自动移交给**加入时间最早的活跃成员**（按成员记录的 `joined_at` 比较；字段缺失或无法解析时排在可解析成员之后，同一时间按成员列表顺序、再按 `user_id` 兜底），并在房间日志说明原因，`data.owner_transferred_to` 给出新房主；房主是最后一人时直接退出，房间保留（可暂时没有活跃房主）。成功后向房间广播 `room_members_changed`。
 - `PUT /api/rooms/<room_id>/members/<user_id>/role`：调整成员在房间内的角色。
 - `DELETE /api/rooms/<room_id>/members/<user_id>`：移除成员。
 - `POST /api/rooms/<room_id>/scenario-switch`：切换剧本。

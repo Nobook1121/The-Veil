@@ -49,6 +49,29 @@
                     </div>
                 </div>
 
+                <!-- 移交房主模态框 -->
+                <div class="modal fade" id="roomTransferOwnerModal" tabindex="-1" aria-labelledby="roomTransferOwnerModalLabel" aria-hidden="true">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="roomTransferOwnerModalLabel" data-i18n="room.transfer.title">移交房主</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p class="small text-muted" data-i18n="room.transfer.hint">选择一位仍在房间内的活跃成员接任房主。移交后你会降为普通成员，但仍可留在房间。</p>
+                                <div class="form-group">
+                                    <label for="roomTransferOwnerSelect" data-i18n="room.transfer.target">目标成员</label>
+                                    <select class="form-select" id="roomTransferOwnerSelect"></select>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="common.cancel">取消</button>
+                                <button type="button" class="btn btn-warning" id="confirmTransferRoomOwner" data-i18n="room.transfer.submit">移交</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="modal fade" id="roomHouseRulesModal" tabindex="-1" aria-labelledby="roomHouseRulesModalLabel" aria-hidden="true">
                     <div class="modal-dialog">
                         <div class="modal-content">

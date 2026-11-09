@@ -90,6 +90,15 @@ function initRoomManagement(): void {
     document.getElementById("archiveRoom")?.addEventListener("click", () => {
         void archiveCurrentRoom();
     });
+    document.getElementById("leaveRoom")?.addEventListener("click", () => {
+        void leaveCurrentRoom();
+    });
+    document.getElementById("transferRoomOwner")?.addEventListener("click", () => {
+        openRoomOwnerTransferModal();
+    });
+    document.getElementById("confirmTransferRoomOwner")?.addEventListener("click", () => {
+        void transferCurrentRoomOwner();
+    });
     document.getElementById("editHouseRules")?.addEventListener("click", () => {
         void openHouseRulesModal();
     });
@@ -1006,6 +1015,11 @@ function applyInvisibleRoomView(invisible: boolean): void {
     const createNodeButton = document.getElementById("createSaveNode") as HTMLButtonElement | null;
     if (deleteButton) deleteButton.hidden = invisible;
     if (createNodeButton) createNodeButton.hidden = invisible;
+    // 上帝视角不是房间成员，退出/移交入口随之隐藏。
+    const leaveButton = document.getElementById("leaveRoom") as HTMLButtonElement | null;
+    if (leaveButton && invisible) leaveButton.hidden = true;
+    const transferOwnerButton = document.getElementById("transferRoomOwner") as HTMLButtonElement | null;
+    if (transferOwnerButton && invisible) transferOwnerButton.hidden = true;
 }
 
 function showRoomListView(): void {
@@ -1066,6 +1080,24 @@ function updateRoomDetail(room: Room): void {
     }
     const deleteButton = document.getElementById("deleteSave") as HTMLButtonElement | null;
     if (deleteButton) deleteButton.hidden = Boolean(room.archived);
+    // 「退出房间」只对房间里仍在场的自己显示；上帝视角（invisible_view）不是成员，不提供。
+    const selfId = String(window.currentUser?.user_id);
+    const activeMembers = activeRoomMembers(room);
+    const selfMember = activeMembers.find((member) => String(member.user_id) === selfId);
+    const leaveButton = document.getElementById("leaveRoom") as HTMLButtonElement | null;
+    if (leaveButton) {
+        leaveButton.hidden = room.invisible_view === true || !selfMember;
+    }
+    // 「移交房主」仅当前用户是房主、且房间里还有其它活跃成员时显示。
+    const transferOwnerButton = document.getElementById("transferRoomOwner") as HTMLButtonElement | null;
+    if (transferOwnerButton) {
+        const otherActiveCount = activeMembers.filter((member) => String(member.user_id) !== selfId).length;
+        transferOwnerButton.hidden = Boolean(room.archived)
+            || room.invisible_view === true
+            || !selfMember
+            || String(room.creator_id) !== selfId
+            || otherActiveCount === 0;
+    }
     const archivedBadge = document.getElementById("roomDetailArchivedBadge") as HTMLElement | null;
     if (archivedBadge) archivedBadge.style.display = room.archived ? "inline-block" : "none";
     // 房间内嵌控制台：仅显示本房间日志，房主/管理员可执行房间域命令。
@@ -1998,6 +2030,105 @@ async function deleteCurrentRoom(): Promise<void> {
     } catch (error) {
         showNotification(`删除房间失败: ${roomErrorMessage(error)}`, "error");
     }
+}
+
+async function leaveCurrentRoom(): Promise<void> {
+    if (!currentRoom?.id || currentRoom.invisible_view === true) return;
+    const roomId = currentRoom.id;
+    const confirmed = await window.TrpgDialog?.confirm({
+        title: roomText("room.leave.title", "退出房间"),
+        message: roomText("room.leave.confirm", "确定要退出当前房间吗？退出后角色卡会立即释放，可在其它房间使用。"),
+        confirmText: roomText("room.action.leave", "退出房间"),
+        danger: true,
+    });
+    if (!confirmed) return;
+
+    const leavePath = `/api/rooms/${encodeURIComponent(roomId)}/leave`;
+    const response = await TrpgApi.post<ApiResponse<{ room_id?: string }>>(leavePath, {});
+    if (!response.success) {
+        // 未归档改动：先说明「退出后不会生效」，玩家确认后再带 confirm_pending 重试。
+        if (response.error === "pending_changes_unarchived") {
+            const stillLeave = await window.TrpgDialog?.confirm({
+                title: roomText("room.leave.title", "退出房间"),
+                message: roomText("room.leave.pending_confirm", "本房间内的改动尚未归档，退出后不会生效。仍要退出吗？"),
+                confirmText: roomText("room.action.leave", "退出房间"),
+                danger: true,
+            });
+            if (!stillLeave) return;
+            const retry = await TrpgApi.post<ApiResponse<{ room_id?: string }>>(leavePath, { confirm_pending: true });
+            if (!retry.success) {
+                showNotification(retry.message || retry.error || roomText("room.leave.failed", "退出房间失败"), "error");
+                return;
+            }
+            finishLeaveRoom();
+            return;
+        }
+        showNotification(response.message || response.error || roomText("room.leave.failed", "退出房间失败"), "error");
+        return;
+    }
+    finishLeaveRoom();
+}
+
+function openRoomOwnerTransferModal(): void {
+    if (!currentRoom?.id || currentRoom.invisible_view === true) return;
+    const selfId = String(window.currentUser?.user_id);
+    const select = document.getElementById("roomTransferOwnerSelect") as HTMLSelectElement | null;
+    if (!select) return;
+    const candidates = activeRoomMembers(currentRoom).filter((member) => String(member.user_id) !== selfId);
+    if (candidates.length === 0) {
+        showNotification(roomText("room.transfer.no_candidates", "房间里没有其他活跃成员可接任房主。"), "error");
+        return;
+    }
+    select.innerHTML = "";
+    candidates.forEach((member) => {
+        const option = document.createElement("option");
+        option.value = String(member.user_id);
+        option.textContent = member.username || String(member.user_id);
+        select.appendChild(option);
+    });
+    const modalElement = document.getElementById("roomTransferOwnerModal");
+    if (modalElement) {
+        (bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement)).show();
+    }
+}
+
+async function transferCurrentRoomOwner(): Promise<void> {
+    if (!currentRoom?.id || currentRoom.invisible_view === true) return;
+    const select = document.getElementById("roomTransferOwnerSelect") as HTMLSelectElement | null;
+    const targetUserId = select?.value || "";
+    if (!targetUserId) return;
+    const targetName = select?.selectedOptions[0]?.textContent?.trim() || targetUserId;
+    const confirmed = await window.TrpgDialog?.confirm({
+        title: roomText("room.transfer.title", "移交房主"),
+        message: roomText(
+            "room.transfer.confirm",
+            "确定把房主移交给 {name} 吗？移交后你会降为普通成员，但仍留在房间。"
+        ).replace("{name}", targetName),
+        confirmText: roomText("room.transfer.submit", "移交"),
+        danger: true,
+    });
+    if (!confirmed) return;
+
+    const response = await TrpgApi.put<ApiResponse<Room>>(
+        `/api/rooms/${encodeURIComponent(currentRoom.id)}/owner`,
+        { user_id: targetUserId }
+    );
+    if (!response.success || !response.data) {
+        showNotification(response.message || response.error || roomText("room.transfer.failed", "移交房主失败"), "error");
+        return;
+    }
+    bootstrap.Modal.getInstance(document.getElementById("roomTransferOwnerModal"))?.hide();
+    currentRoom = response.data;
+    window.currentRoom = currentRoom;
+    updateRoomDetail(currentRoom);
+    showNotification(roomText("room.transfer.done", "房主已移交"), "success");
+}
+
+function finishLeaveRoom(): void {
+    TrpgCookies.remove(getLastRoomStorageKey());
+    window.clearChatMessages?.();
+    clearCurrentRoom();
+    showNotification(roomText("room.leave.done", "已退出房间"), "success");
 }
 
 async function loadRoomNodes(): Promise<void> {
