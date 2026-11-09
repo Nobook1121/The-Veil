@@ -12,11 +12,21 @@
   不注入全量历史。
 - **对话不丢**：历史文件会被裁剪为最近 20 条；在裁剪或压缩前先把原文归档到
   记忆账本，保证早期对话仍可被检索，而不是仅依赖模型生成的摘要。
+
+性能约定（长剧本关键）：
+
+- 账本按「文件指纹（mtime_ns + size）」做内存索引缓存。同一轮里
+  ``harvest_room_memory`` / ``archive_history_for_memory`` / ``build_memory_context``
+  共用同一份索引，只有文件真正变化时才重新解析，且只解析新增的尾部字节。
+- 每条记录的检索分词结果按记录 id 缓存，跨轮未变更时不重复分词。
+- 账本超过阈值后轮转为 ``memory_ledger.<n>.jsonl`` 分片（格式不变，旧文件仍可读），
+  去重集合覆盖所有已加载分片，不再只检查最近 2000 条。
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -33,6 +43,15 @@ MAX_RECORD_TEXT = 300
 MAX_LOAD_RECORDS = 2000
 MAX_ARCHIVE_ITEMS = 200
 MAX_ARCHIVE_TEXT = 240
+
+# 分片轮转：单个账本超过条数或体积阈值后改名为 memory_ledger.<n>.jsonl，
+# 新建空账本继续追加。最旧的若干分片不再载入索引（文件保留在磁盘上）。
+MEMORY_LEDGER_MAX_SEGMENT_RECORDS = 4000
+MEMORY_LEDGER_MAX_SEGMENT_BYTES = 4 * 1024 * 1024
+MEMORY_LEDGER_MAX_SEGMENTS = 12
+
+_ROOM_CACHE_LIMIT = 64
+_TOKEN_CACHE_LIMIT = 60000
 
 _KIND_LABELS = {
     "promise": "承诺",
@@ -67,7 +86,31 @@ _COMPACT_LABEL_KINDS = {
 _WORD_RE = re.compile(r"[a-z0-9_]{2,}")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _COMPACT_FACT_RE = re.compile(r"^\s*-\s*\[(?P<label>[^\]]+)\]\s*(?P<text>.+?)\s*$")
-_APPEND_LOCK = threading.Lock()
+_LOCK = threading.RLock()
+
+# 可观测计数：测试与排查用，不参与业务逻辑。
+_STATS: dict[str, int] = {
+    "segment_reads": 0,       # 真正打开文件解析的次数
+    "records_parsed": 0,      # 解析出的记录条数
+    "tokenizations": 0,       # 记录级分词次数
+    "index_builds": 0,        # 索引重组次数
+    "index_hits": 0,          # 指纹命中、直接复用次数
+}
+
+
+def memory_cache_stats() -> dict[str, int]:
+    with _LOCK:
+        return dict(_STATS)
+
+
+def reset_memory_cache_stats() -> None:
+    with _LOCK:
+        for key in _STATS:
+            _STATS[key] = 0
+
+
+def _bump(key: str, amount: int = 1) -> None:
+    _STATS[key] = _STATS.get(key, 0) + amount
 
 
 def ledger_path(room_dir: Path | str) -> Path:
@@ -87,30 +130,276 @@ def _clip(text: str, limit: int = MAX_RECORD_TEXT) -> str:
     return text[:limit]
 
 
-def load_memory_records(room_dir: Path | str, limit: int = MAX_LOAD_RECORDS) -> list[dict[str, Any]]:
-    """读取记忆账本；文件不存在或单行损坏时返回可用的部分。"""
-    path = ledger_path(room_dir)
-    if not path.exists():
-        return []
-    records: list[dict[str, Any]] = []
+# ---------------------------------------------------------------------------
+# 账本索引（文件指纹 + 内存缓存）
+# ---------------------------------------------------------------------------
+
+
+class _Segment:
+    """单个账本文件的解析结果；追加时原地扩展，指纹随之更新。"""
+
+    __slots__ = ("path", "fingerprint", "size", "records", "text_keys")
+
+    def __init__(self, path: Path, fingerprint: tuple[int, int], size: int) -> None:
+        self.path = path
+        self.fingerprint = fingerprint
+        self.size = size
+        self.records: list[dict[str, Any]] = []
+        self.text_keys: set[str] = set()
+
+    def add_records(self, items: list[dict[str, Any]]) -> None:
+        self.records.extend(items)
+        for item in items:
+            self.text_keys.add(_normalize(str(item.get("text") or "")))
+
+
+class _RoomCache:
+    """房间级索引：分片列表 + 拼接视图 + 分词缓存。"""
+
+    __slots__ = ("room_dir", "segments", "records", "key", "token_cache", "last_access")
+
+    def __init__(self, room_dir: Path) -> None:
+        self.room_dir = room_dir
+        self.segments: dict[str, _Segment] = {}
+        self.records: list[dict[str, Any]] | None = None
+        self.key: tuple[tuple[str, tuple[int, int]], ...] | None = None
+        self.token_cache: dict[str, frozenset[str]] = {}
+        self.last_access = time.monotonic()
+
+    def exists(self, text_key: str) -> bool:
+        with _LOCK:
+            return any(text_key in segment.text_keys for segment in self.segments.values())
+
+    def recent(self, limit: int) -> list[dict[str, Any]]:
+        with _LOCK:
+            records = self.records or []
+            if limit and len(records) > limit:
+                return records[-limit:]
+            return list(records)
+
+    def remember_tokens(self, record: Mapping[str, Any]) -> frozenset[str]:
+        key = _token_key(record)
+        cached = self.token_cache.get(key)
+        if cached is not None:
+            return cached
+        tokens = frozenset(_tokens(str(record.get("text") or "")))
+        if len(self.token_cache) >= _TOKEN_CACHE_LIMIT:
+            self.token_cache.clear()
+        self.token_cache[key] = tokens
+        _bump("tokenizations")
+        return tokens
+
+
+_ROOM_CACHE: dict[str, _RoomCache] = {}
+
+
+def _room_key(room_dir: Path | str) -> str:
+    return str(Path(room_dir).resolve())
+
+
+def _segment_paths(room_dir: Path) -> list[Path]:
+    """按「最旧分片 → 最新分片 → 活动账本」返回需要读取的文件。"""
+    rotated: list[tuple[int, Path]] = []
+    if room_dir.is_dir():
+        for path in room_dir.glob("memory_ledger.*.jsonl"):
+            suffix = path.name[len("memory_ledger.") : -len(".jsonl")]
+            if suffix.isdigit():
+                rotated.append((int(suffix), path))
+    rotated.sort()
+    if MEMORY_LEDGER_MAX_SEGMENTS > 0:
+        rotated = rotated[-MEMORY_LEDGER_MAX_SEGMENTS:]
+    paths = [path for _, path in rotated]
+    active = ledger_path(room_dir)
+    if active.exists():
+        paths.append(active)
+    return paths
+
+
+def _parse_segment(path: Path, cached: _Segment | None) -> _Segment | None:
+    """读取分片；文件未变直接复用，仅追加时从旧长度处继续解析。"""
     try:
-        with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                text = line.strip()
-                if not text:
-                    continue
-                try:
-                    payload = json.loads(text)
-                except (TypeError, ValueError):
-                    continue
-                if isinstance(payload, dict) and str(payload.get("text") or "").strip():
-                    records.append(payload)
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    fingerprint = (stat.st_mtime_ns, stat.st_size)
+    if cached is not None and cached.fingerprint == fingerprint:
+        return cached
+
+    segment = cached
+    start = 0
+    if segment is None:
+        segment = _Segment(path, fingerprint, 0)
+    elif stat.st_size > segment.size:
+        # 只追加过：从上次读到的字节位置继续，避免整文件重解析。
+        start = segment.size
+    else:
+        # 文件被截断/重写（例如手工修复）：整份重读。
+        segment = _Segment(path, fingerprint, 0)
+
+    try:
+        with path.open("rb") as handle:
+            if start:
+                handle.seek(start)
+            chunk = handle.read()
     except OSError:
-        logger.warning("memory.load_failed room=%s", Path(room_dir).name, exc_info=True)
+        logger.warning("memory.load_failed room=%s", path.parent.name, exc_info=True)
+        return segment
+
+    consumed = len(chunk)
+    if chunk and not chunk.endswith(b"\n"):
+        # 最后一行可能仍在上游写入中：不解析、也不推进已读长度。
+        cut = chunk.rfind(b"\n")
+        if cut < 0:
+            chunk = b""
+            consumed = 0
+        else:
+            chunk = chunk[: cut + 1]
+            consumed = cut + 1
+    if chunk:
+        _bump("segment_reads")
+    parsed: list[dict[str, Any]] = []
+    for raw in chunk.splitlines():
+        text = raw.strip()
+        if not text:
+            continue
+        try:
+            payload = json.loads(text.decode("utf-8"))
+        except (TypeError, ValueError, UnicodeDecodeError):
+            continue
+        if isinstance(payload, dict) and str(payload.get("text") or "").strip():
+            parsed.append(payload)
+    if parsed:
+        _bump("records_parsed", len(parsed))
+        segment.add_records(parsed)
+    segment.size = start + consumed
+    segment.fingerprint = fingerprint
+    return segment
+
+
+def _refresh(cache: _RoomCache) -> _RoomCache:
+    with _LOCK:
+        paths = _segment_paths(cache.room_dir)
+        segments: list[_Segment] = []
+        key_parts: list[tuple[str, tuple[int, int]]] = []
+        for path in paths:
+            segment = _parse_segment(path, cache.segments.get(str(path)))
+            if segment is None:
+                continue
+            segments.append(segment)
+            key_parts.append((str(path), segment.fingerprint))
+        key = tuple(key_parts)
+        if cache.records is not None and cache.key == key:
+            _bump("index_hits")
+            return cache
+        records: list[dict[str, Any]] = []
+        for segment in segments:
+            records.extend(segment.records)
+        cache.segments = {str(segment.path): segment for segment in segments}
+        cache.records = records
+        cache.key = key
+        _bump("index_builds")
+        return cache
+
+
+def _index(room_dir: Path | str) -> _RoomCache:
+    key = _room_key(room_dir)
+    with _LOCK:
+        cache = _ROOM_CACHE.get(key)
+        if cache is None:
+            cache = _RoomCache(Path(room_dir))
+            _ROOM_CACHE[key] = cache
+            if len(_ROOM_CACHE) > _ROOM_CACHE_LIMIT:
+                oldest = min(_ROOM_CACHE, key=lambda item: _ROOM_CACHE[item].last_access)
+                if oldest != key:
+                    _ROOM_CACHE.pop(oldest, None)
+        cache.last_access = time.monotonic()
+    return _refresh(cache)
+
+
+def invalidate_memory_cache(room_dir: Path | str | None = None) -> None:
+    """测试或外部改文件后手动失效；正常追加由写入方就地更新。"""
+    with _LOCK:
+        if room_dir is None:
+            _ROOM_CACHE.clear()
+        else:
+            _ROOM_CACHE.pop(_room_key(room_dir), None)
+
+
+def load_memory_records(room_dir: Path | str, limit: int = MAX_LOAD_RECORDS) -> list[dict[str, Any]]:
+    """返回最近 ``limit`` 条记录（旧的在前）；文件未变时走内存索引。"""
+    if not room_dir:
         return []
-    if limit and len(records) > limit:
-        records = records[-limit:]
-    return records
+    return _index(room_dir).recent(limit)
+
+
+# ---------------------------------------------------------------------------
+# 写入
+# ---------------------------------------------------------------------------
+
+
+def _update_cache_after_append(
+    room_dir: Path,
+    active: Path,
+    items: list[dict[str, Any]],
+    written_bytes: int,
+) -> None:
+    """把自己刚写入的条目直接并入内存索引，避免同轮再次解析这些行。"""
+    cache = _ROOM_CACHE.get(_room_key(room_dir))
+    if cache is None or cache.records is None:
+        return
+    try:
+        stat = active.stat()
+    except OSError:
+        cache.key = None
+        return
+    fingerprint = (stat.st_mtime_ns, stat.st_size)
+    segment = cache.segments.get(str(active))
+    if segment is None:
+        if stat.st_size != written_bytes:
+            # 文件里已有别人的内容：交给下次读取从头解析。
+            cache.key = None
+            return
+        # 轮转后新建的活动分片，内容恰好就是本次写入的行。
+        segment = _Segment(active, fingerprint, written_bytes)
+        cache.segments[str(active)] = segment
+    segment.add_records(items)
+    cache.records.extend(items)
+    segment.size = stat.st_size
+    segment.fingerprint = fingerprint
+    # 指纹变化需要重组拼接视图；分片对象已更新，重组不会重新打开文件。
+    cache.key = None
+
+
+def _rotate_if_needed(room_dir: Path, active: Path) -> None:
+    cache = _ROOM_CACHE.get(_room_key(room_dir))
+    segment = cache.segments.get(str(active)) if cache else None
+    try:
+        stat = active.stat()
+    except OSError:
+        return
+    too_many = segment is not None and len(segment.records) > MEMORY_LEDGER_MAX_SEGMENT_RECORDS
+    too_big = stat.st_size > MEMORY_LEDGER_MAX_SEGMENT_BYTES
+    if not (too_many or too_big):
+        return
+    existing = [
+        int(path.name[len("memory_ledger.") : -len(".jsonl")])
+        for path in room_dir.glob("memory_ledger.*.jsonl")
+        if path.name[len("memory_ledger.") : -len(".jsonl")].isdigit()
+    ]
+    target = room_dir / f"memory_ledger.{max(existing, default=0) + 1}.jsonl"
+    try:
+        os.replace(active, target)
+    except OSError:
+        logger.warning("memory.rotate_failed room=%s", room_dir.name, exc_info=True)
+        return
+    logger.info("memory.rotate room=%s segment=%s", room_dir.name, target.name)
+    if cache is None:
+        return
+    if segment is not None:
+        cache.segments.pop(str(active), None)
+        segment.path = target
+        cache.segments[str(target)] = segment
+    cache.key = None
 
 
 def _append_records(room_dir: Path | str, records: Iterable[Mapping[str, Any]]) -> int:
@@ -123,10 +412,14 @@ def _append_records(room_dir: Path | str, records: Iterable[Mapping[str, Any]]) 
         json.dumps(item, ensure_ascii=False, sort_keys=True, default=str) + "\n"
         for item in items
     ]
-    with _APPEND_LOCK:
-        with ledger_path(directory).open("a", encoding="utf-8") as handle:
+    active = ledger_path(directory)
+    written_bytes = sum(len(line.encode("utf-8")) for line in lines)
+    with _LOCK:
+        with active.open("a", encoding="utf-8") as handle:
             handle.writelines(lines)
             handle.flush()
+        _update_cache_after_append(directory, active, items, written_bytes)
+        _rotate_if_needed(directory, active)
     return len(items)
 
 
@@ -151,18 +444,18 @@ def _make_record(
     }
 
 
-def _existing_texts(records: Iterable[Mapping[str, Any]]) -> set[str]:
-    return {_normalize(str(item.get("text") or "")) for item in records}
-
-
 def _append_new(room_dir: Path | str, candidates: list[dict[str, Any]]) -> int:
-    existing = _existing_texts(load_memory_records(room_dir))
+    """去重写入：去重集合覆盖全部已加载分片，不再只看最近 N 条尾部队列。"""
+    if not candidates:
+        return 0
+    cache = _index(room_dir)
+    seen: set[str] = set()
     fresh: list[dict[str, Any]] = []
     for item in candidates:
         key = _normalize(str(item.get("text") or ""))
-        if not key or key in existing:
+        if not key or key in seen or cache.exists(key):
             continue
-        existing.add(key)
+        seen.add(key)
         fresh.append(item)
         if len(fresh) >= MAX_ARCHIVE_ITEMS:
             break
@@ -375,6 +668,11 @@ def remember_compact_facts(room_dir: Path | str, compact_entries: list[dict[str,
     return added
 
 
+# ---------------------------------------------------------------------------
+# 检索
+# ---------------------------------------------------------------------------
+
+
 def _tokens(text: str) -> set[str]:
     lowered = str(text or "").casefold()
     tokens = set(_WORD_RE.findall(lowered))
@@ -383,10 +681,21 @@ def _tokens(text: str) -> set[str]:
     return tokens
 
 
-def _score_record(record: Mapping[str, Any], query_tokens: set[str]) -> float:
+def _token_key(record: Mapping[str, Any]) -> str:
+    record_id = str(record.get("id") or "").strip()
+    if record_id:
+        return record_id
+    return "text:" + _normalize(str(record.get("text") or ""))[:120]
+
+
+def _score_record(record: Mapping[str, Any], query_tokens: set[str], token_cache: _RoomCache | None) -> float:
     if not query_tokens:
         return 0.0
-    record_tokens = _tokens(str(record.get("text") or ""))
+    record_tokens = (
+        token_cache.remember_tokens(record)
+        if token_cache is not None
+        else frozenset(_tokens(str(record.get("text") or "")))
+    )
     if not record_tokens:
         return 0.0
     overlap = len(query_tokens & record_tokens)
@@ -442,11 +751,12 @@ def build_memory_context(
         limit = max(1, int(max_items))
     except (TypeError, ValueError):
         limit = 6
-    records = load_memory_records(room_dir)
+    cache = _index(room_dir)
+    records = cache.recent(MAX_LOAD_RECORDS)
     if not records:
         return ""
     query_tokens = _tokens(query)
-    scored = [(_score_record(item, query_tokens), index, item) for index, item in enumerate(records)]
+    scored = [(_score_record(item, query_tokens, cache), index, item) for index, item in enumerate(records)]
     hits = [(score, index, item) for score, index, item in scored if score > 0]
     hits.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
     selected = [item for _, _, item in hits[:limit]]
@@ -490,7 +800,8 @@ def memory_recall(room_dir: Path | str, query: str = "", limit: int = 10) -> lis
     """给房间工具使用：按相关度返回长期记忆（无查询时按重要性/时间倒序）。"""
     if not room_dir:
         return []
-    records = load_memory_records(room_dir)
+    cache = _index(room_dir)
+    records = cache.recent(MAX_LOAD_RECORDS)
     if not records:
         return []
     try:
@@ -499,7 +810,7 @@ def memory_recall(room_dir: Path | str, query: str = "", limit: int = 10) -> lis
         limit = 10
     query_tokens = _tokens(query)
     if query_tokens:
-        scored = [(_score_record(item, query_tokens), index, item) for index, item in enumerate(records)]
+        scored = [(_score_record(item, query_tokens, cache), index, item) for index, item in enumerate(records)]
         hits = [(score, index, item) for score, index, item in scored if score > 0]
         hits.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
         selected = [item for _, _, item in hits[:limit]]
@@ -518,8 +829,11 @@ __all__ = [
     "archive_history_for_memory",
     "build_memory_context",
     "harvest_room_memory",
+    "invalidate_memory_cache",
     "ledger_path",
     "load_memory_records",
+    "memory_cache_stats",
     "memory_recall",
     "remember_compact_facts",
+    "reset_memory_cache_stats",
 ]

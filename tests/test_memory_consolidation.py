@@ -1,13 +1,37 @@
 import json
 
+import pytest
+
+from trpg_server.agents import memory_consolidation
 from trpg_server.agents.memory_consolidation import (
     archive_history_for_memory,
     build_memory_context,
     harvest_room_memory,
     load_memory_records,
+    memory_cache_stats,
     memory_recall,
     remember_compact_facts,
+    reset_memory_cache_stats,
 )
+
+
+def _write_ledger(path, records):
+    with path.open("w", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _record(index, text=None):
+    return {
+        "id": f"m{index}",
+        "kind": "event",
+        "text": text or f"第{index}条记录：码头仓库线索编号{index}",
+        "importance": 2,
+        "turn": index,
+        "source": {"type": "event_log", "ref": f"evt{index}"},
+        "created_at": "2026-11-09 10:00:00",
+    }
+
 
 
 def _state_with_events():
@@ -136,3 +160,105 @@ def test_prompt_layers_include_memory_segment():
         user_input="hi",
     )
     assert "memory" not in without_memory.segments
+
+
+def _simulate_turn(room_dir, turn):
+    """模拟 chat.py 单轮的三处调用：收编 → 归档 → 构建注入块。"""
+    harvest_room_memory(
+        room_dir,
+        {
+            "clock": {"turn": turn},
+            "event_log": [
+                {
+                    "id": f"evt_{turn}",
+                    "kind": "player_decision",
+                    "content": f"第{turn}轮玩家决定去码头仓库",
+                }
+            ],
+        },
+    )
+    archive_history_for_memory(
+        room_dir,
+        [
+            {"role": "user", "content": f"第{turn}轮：我去码头仓库看看"},
+            {"role": "assistant", "content": f"第{turn}轮：仓库里堆满了旧木箱。"},
+        ],
+    )
+    return build_memory_context(room_dir, "码头仓库线索")
+
+
+def test_turn_reads_ledger_once_and_reuses_tokens(tmp_path):
+    """长剧本量级：一次解析 + 一次性分词，之后每轮 0 解析、仅新增条目分词。"""
+    _write_ledger(tmp_path / "memory_ledger.jsonl", [_record(i) for i in range(2500)])
+
+    reset_memory_cache_stats()
+    _simulate_turn(tmp_path, 1)
+    cold = memory_cache_stats()
+    # 冷启动只打开一次活动账本；打分只看最近 2000 条，因此分词量有上界。
+    assert cold["segment_reads"] == 1
+    assert cold["records_parsed"] == 2500
+    assert cold["tokenizations"] <= memory_consolidation.MAX_LOAD_RECORDS
+
+    reset_memory_cache_stats()
+    _simulate_turn(tmp_path, 2)
+    warm = memory_cache_stats()
+    assert warm["segment_reads"] == 0      # 未重新解析文件
+    assert warm["records_parsed"] == 0
+    # 本轮新增 3 条（1 条决策 + 2 条对话），只有它们需要分词。
+    assert warm["tokenizations"] <= 3
+
+
+def test_dedupe_covers_records_beyond_recent_window(tmp_path):
+    """早期记录（超出最近 2000 条窗口）仍参与去重，不会被重复追加。"""
+    old_text = "第0条早期承诺：答应玛莎在月落前送回怀表"
+    _write_ledger(
+        tmp_path / "memory_ledger.jsonl",
+        [_record(0, old_text), *[_record(i) for i in range(1, 2100)]],
+    )
+    added = harvest_room_memory(
+        tmp_path,
+        {
+            "clock": {"turn": 2100},
+            "event_log": [{"id": "dup", "kind": "player_decision", "content": old_text}],
+        },
+    )
+    assert added == 0
+
+
+def test_rotation_keeps_old_records_readable(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory_consolidation, "MEMORY_LEDGER_MAX_SEGMENT_RECORDS", 5)
+    monkeypatch.setattr(memory_consolidation, "MEMORY_LEDGER_MAX_SEGMENT_BYTES", 1 << 30)
+
+    for index in range(12):
+        archive_history_for_memory(tmp_path, [{"role": "user", "content": f"第{index}条：码头线索"}], max_items=1)
+
+    assert (tmp_path / "memory_ledger.1.jsonl").exists()
+    records = load_memory_records(tmp_path)
+    assert len(records) == 12
+    assert any("第0条" in item["text"] for item in records)
+    # 轮转后旧记录仍参与去重。
+    assert archive_history_for_memory(tmp_path, [{"role": "user", "content": "第0条：码头线索"}], max_items=1) == 0
+
+
+def test_legacy_ledger_without_optional_fields_is_readable(tmp_path):
+    (tmp_path / "memory_ledger.jsonl").write_text(
+        json.dumps({"kind": "event", "text": "旧格式记录：灯塔守夜人失踪"}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    records = load_memory_records(tmp_path)
+    assert len(records) == 1
+    assert "灯塔" in records[0]["text"]
+    assert "灯塔" in build_memory_context(tmp_path, "灯塔 守夜人")
+
+
+def test_truncated_tail_line_is_not_skipped_permanently(tmp_path):
+    ledger = tmp_path / "memory_ledger.jsonl"
+    _write_ledger(ledger, [_record(0)])
+    with ledger.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(_record(1), ensure_ascii=False) + "\n")
+        handle.write('{"id": "partial", "text": "写了一半')  # 模拟上游写到一半
+    assert len(load_memory_records(tmp_path)) == 2
+    # 补齐该行后再读，不会永久丢失。
+    with ledger.open("a", encoding="utf-8") as handle:
+        handle.write('的记录"}\n')
+    assert len(load_memory_records(tmp_path)) == 3
