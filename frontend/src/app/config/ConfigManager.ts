@@ -133,6 +133,8 @@ class ConfigManager {
         configSetCheckboxValue("enableRoomConsole", this.get("general", "room_console", "enabled", true));
         configSetCheckboxValue("mirrorRoomConsole", this.get("general", "room_console", "mirror_to_server_console", false));
         configSetInputValue("roomConsoleMaxEntries", this.get("general", "room_console", "max_entries", 500));
+        // 未激活房间自动回收期限：0 表示不回收。
+        configSetInputValue("roomCleanupInactiveDays", this.get("general", "rooms", "cleanup_inactive_days", 7));
         // 世界意志限频：站点默认值；房间只能收紧。
         configSetInputValue("worldOverrideCooldownSeconds", this.get("general", "world_override", "cooldown_seconds", 20));
         configSetInputValue("worldOverrideHourlyLimit", this.get("general", "world_override", "hourly_limit", 30));

@@ -168,6 +168,7 @@ def create_app(config=None):
     _configure_scenario_chunk_analyzer(app)
     register_socket_events(socketio)
     _start_autosave_scheduler(app)
+    _start_room_cleanup_scheduler(app)
 
     @app.errorhandler(404)
     def _api_not_found(error):
@@ -234,6 +235,34 @@ def _start_autosave_scheduler(app):
                 logger.debug("Autosave scheduler tick failed", exc_info=True)
 
     threading.Thread(target=_loop, name="autosave-scheduler", daemon=True).start()
+
+
+def _start_room_cleanup_scheduler(app):
+    """启动未激活房间自动回收线程：服务启动后先跑一次，之后按天轮询。
+
+    与自动存档线程一样，``TESTING`` 或 ``ROOM_CLEANUP_SCHEDULER_DISABLED``
+    （以及显式指定 ``ROOM_CLEANUP_SCHEDULER_TICK``）可关闭/调整，避免测试
+    或本地调试意外触发真实删除。
+    """
+    if app.config.get("TESTING") or app.config.get("ROOM_CLEANUP_SCHEDULER_DISABLED"):
+        return
+    if app.extensions.get("room_cleanup_scheduler_started"):
+        return
+    app.extensions["room_cleanup_scheduler_started"] = True
+    tick_seconds = max(3600, int(app.config.get("ROOM_CLEANUP_SCHEDULER_TICK", 86400)))
+
+    def _loop():
+        from trpg_server.routes.rooms import run_inactive_room_cleanup
+
+        while True:
+            try:
+                with app.app_context():
+                    run_inactive_room_cleanup()
+            except Exception:
+                logger.debug("Room cleanup scheduler tick failed", exc_info=True)
+            time.sleep(tick_seconds)
+
+    threading.Thread(target=_loop, name="room-cleanup-scheduler", daemon=True).start()
 
 
 def _configure_scenario_chunk_analyzer(app):

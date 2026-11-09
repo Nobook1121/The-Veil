@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.logging_config import log_user_action
 from trpg_server.room_mode import (
     MODE_PRESETS,
     ROOM_MODE_FREEFORM,
@@ -303,6 +304,83 @@ def remove_room(rooms_dir: Any, room_id: Any) -> bool:
         return False
     shutil.rmtree(room_dir)
     return True
+
+
+def _remove_room_history(history_dir: Any, room_id: str) -> None:
+    """删除某个房间在各用户目录下的 AI 对话历史文件。"""
+
+    if not history_dir:
+        return
+    directory = Path(history_dir)
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return
+    prefix = f"room-{room_id}-"
+    for path in entries:
+        if not path.is_file() or not path.name.startswith(prefix) or not path.name.endswith(".json"):
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            logger.warning("room.cleanup.history_remove_failed path=%s", path, exc_info=True)
+
+
+def cleanup_inactive_rooms(
+    rooms_dir: Any,
+    days: int = 7,
+    *,
+    history_dir: Any = None,
+    now: float | None = None,
+) -> list[dict[str, Any]]:
+    """回收长期未激活的未归档房间（默认 7 天）；``days <= 0`` 表示关闭。
+
+    未激活 = 没有活跃成员，且最后活动时间早于阈值。已归档房间、以及
+    「已通关但尚未归档」的房间会被跳过，避免绕过归档流程丢失结局记录。
+    只删除房间目录（含快照、记忆账本等）与该房间的 AI 对话历史；
+    角色卡与用户数据不在清理范围内。
+    """
+
+    if int(days) <= 0:
+        return []
+    horizon = (now if now is not None else time.time()) - int(days) * 86400
+    removed: list[dict[str, Any]] = []
+    for room_dir in _room_dirs(rooms_dir):
+        info = _read_info(room_dir)
+        if not info or info.get("archived") or _active_members(info):
+            continue
+        if info.get("completed_at"):
+            logger.info("room.cleanup.skip_completed room=%s", info.get("id") or room_dir.name)
+            continue
+        stamp = _parse_time(info.get("updated_at") or info.get("created_at"))
+        if stamp is None or stamp > horizon:
+            continue
+        room_id = str(info.get("id") or room_dir.name)
+        room_name = str(info.get("name") or room_id)
+        last_active = info.get("updated_at") or info.get("created_at")
+        # 删除前先写站点日志，即使删除中途失败也能追溯到是自动回收造成的。
+        log_user_action(
+            logger,
+            "系统自动回收了未激活房间",
+            房间ID=room_id,
+            房间名=room_name,
+            最后活动=last_active,
+            阈值天数=int(days),
+        )
+        try:
+            shutil.rmtree(room_dir)
+        except OSError:
+            logger.warning("room.cleanup.remove_failed room=%s", room_id, exc_info=True)
+            continue
+        _remove_room_history(history_dir, room_id)
+        removed.append({"id": room_id, "name": room_name, "last_active": last_active})
+    if removed:
+        logger.info(
+            "room.cleanup.removed count=%s rooms=%s",
+            len(removed),
+            ",".join(str(item["id"]) for item in removed),
+        )
+    return removed
 
 
 def trigger_autosave(app: Any) -> dict[str, Any]:

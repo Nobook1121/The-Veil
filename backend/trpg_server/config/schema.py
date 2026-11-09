@@ -201,6 +201,10 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec("max_entries", "room_console", ("max_entries",), clamped_int(minimum=50, maximum=5000), 500),
     FieldSpec("view_role", "room_console", ("view_role",), as_text, "admin"),
     FieldSpec("execute_role", "room_console", ("execute_role",), as_text, "admin"),
+    # [rooms]
+    # 未激活房间自动回收期限（天）；0 表示不回收。只清理未归档、无活跃成员且
+    # 最后活动时间超过阈值的房间，不触碰角色卡与用户数据。
+    FieldSpec("cleanup_inactive_days", "rooms", ("cleanup_inactive_days",), clamped_int(minimum=0, maximum=3650), 7),
     # [world_override]
     # 世界意志频率限制（站点默认）。房间只能在此基础上收紧，不能放宽。
     # 0 表示不限制；房间级配置见房规 world_override_*。

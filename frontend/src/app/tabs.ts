@@ -301,6 +301,7 @@ function initSettingsTabs(): void {
     bindGeneralCheckboxSetting("enableRoomConsole", "room_console", "enabled");
     bindGeneralCheckboxSetting("mirrorRoomConsole", "room_console", "mirror_to_server_console");
     bindGeneralNumberSetting("roomConsoleMaxEntries", "room_console", "max_entries", 50, 5000);
+    bindGeneralNumberSetting("roomCleanupInactiveDays", "rooms", "cleanup_inactive_days", 0, 3650);
     bindGeneralNumberSetting("worldOverrideCooldownSeconds", "world_override", "cooldown_seconds", 0, 3600);
     bindGeneralNumberSetting("worldOverrideHourlyLimit", "world_override", "hourly_limit", 0, 10000);
     bindGeneralCheckboxSetting("siteAgentEnabled", "site_agent", "enabled");

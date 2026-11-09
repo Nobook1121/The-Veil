@@ -229,6 +229,12 @@ def _autosave_settings():
     return {"enabled": bool(section["enabled"]), "interval": int(section["interval"])}
 
 
+def _room_cleanup_days():
+    """读取生效配置的 [rooms] cleanup_inactive_days；0 表示不回收。"""
+    section = load_settings(_get_config_dir()).data["rooms"]
+    return int(section["cleanup_inactive_days"])
+
+
 def _timestamp():
     return time.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -2929,6 +2935,23 @@ def run_scheduled_autosaves():
             _write_room_autosave(room_dir, room_id, messages)
         except OSError:
             logger.debug("Scheduled autosave failed for room %s", room_id, exc_info=True)
+
+
+def run_inactive_room_cleanup():
+    """后台调度入口：按 [rooms] cleanup_inactive_days 回收未激活房间。
+
+    由 app_factory 启动的守护线程在服务启动后先跑一次，之后按天轮询；
+    需要处于 Flask 应用上下文中。与加入/换卡共用占用锁，避免在玩家加入的
+    瞬间把房间删掉。
+    """
+    days = _room_cleanup_days()
+    if days <= 0:
+        return []
+    from trpg_server import room_admin
+
+    history_dir = current_app.config.get("HISTORY_DIR", HISTORY_DIR)
+    with card_binding_lock():
+        return room_admin.cleanup_inactive_rooms(_get_rooms_dir(), days, history_dir=history_dir)
 
 
 def save_all_rooms_on_shutdown():
