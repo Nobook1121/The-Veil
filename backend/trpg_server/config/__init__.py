@@ -19,6 +19,7 @@ from trpg_server.config.paths import (
     template_general_path,
 )
 from trpg_server.config.schema import AIRuntimeConfig
+from trpg_server.config.secret_keys import SECRET_GENERAL_KEYS
 from trpg_server.config.writer import update_sections
 
 __all__ = [
@@ -35,6 +36,7 @@ __all__ = [
     "load_settings",
     "render_minimal_general",
     "resolve_config_dir",
+    "SECRET_GENERAL_KEYS",
     "set_config_dir_override",
     "template_general_path",
     "update_sections",

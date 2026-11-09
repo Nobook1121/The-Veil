@@ -12,6 +12,7 @@ from typing import Any
 from flask import current_app
 
 from trpg_server.config import (
+    SECRET_GENERAL_KEYS,
     general_config_path,
     invalidate_settings_cache,
     load_settings,
@@ -31,8 +32,9 @@ OWNER_ONLY_SECTIONS = frozenset(
     }
 )
 
-# 密钥字段：读取时打码，写入时直接拒绝。
-SECRET_FIELDS = frozenset({("network.penetration.settings", "auth_token")})
+# 密钥字段：读取时打码，写入时直接拒绝。清单与 /api/config/general 共用，
+# 避免出现「配置接口打码、Agent 接口明文」的分叉。
+SECRET_FIELDS = SECRET_GENERAL_KEYS
 
 # 可编辑键只取主键名，避免模型写入历史别名造成同一配置出现两份。
 EDITABLE_SPECS = {
@@ -66,6 +68,11 @@ def _section_values(data: dict[str, Any], section: str) -> dict[str, Any]:
 
 def _read_value(data: dict[str, Any], section: str, key: str) -> Any:
     return _section_values(data, section).get(key)
+
+
+def _display_value(section: str, key: str, value: Any) -> Any:
+    """密钥字段对外展示时一律打码，避免预览等旁路回显原值。"""
+    return "******" if (section, key) in SECRET_FIELDS else value
 
 
 def _redacted_snapshot() -> dict[str, Any]:
@@ -160,7 +167,11 @@ def preview_update_settings(actor: Any, arguments: dict[str, Any], context: Tool
     settings = _settings()
     rows: list[dict[str, Any]] = []
     for change in changes:
-        before = _read_value(settings.data, change["section"], change["key"])
+        before = _display_value(
+            change["section"],
+            change["key"],
+            _read_value(settings.data, change["section"], change["key"]),
+        )
         rows.append(
             {
                 "section": change["section"],

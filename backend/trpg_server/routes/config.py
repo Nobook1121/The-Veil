@@ -16,7 +16,7 @@ from trpg_server.ai_platform_config import (
     save_platform_config,
 )
 from trpg_server.ai_platform_resolver import CAPABILITY_OPTIONS, normalize_capabilities
-from trpg_server.config import load_settings, update_sections
+from trpg_server.config import SECRET_GENERAL_KEYS, load_settings, update_sections
 from trpg_server.config.paths import general_config_path
 from trpg_server.config.sources import read_toml_file
 from trpg_server.json_store import write_json_atomic
@@ -35,10 +35,8 @@ CONFIG_LABELS = {
 
 # 密钥类字段：GET 一律掩码、POST 一律拒写（穿透令牌经 /api/network/penetration/config 管理，
 # 生图密钥经沉浸设置专用接口 /api/immersive/settings/secret 管理）。
-_REDACTED_GENERAL_KEYS = frozenset({
-    ("network.penetration.settings", "auth_token"),
-    ("immersive", "api_key"),
-})
+# 清单统一维护在 config/secret_keys.py，网站 Agent 工具共用同一份定义。
+_REDACTED_GENERAL_KEYS = SECRET_GENERAL_KEYS
 
 
 def _get_config_dir():

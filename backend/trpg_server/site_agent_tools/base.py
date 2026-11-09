@@ -1,7 +1,8 @@
 """网站 Agent 工具规格与参数校验。
 
 工具规格是能力白名单：模型只能看到并调用这里登记的条目。所有参数在进入业务逻辑
-之前都会按 JSON Schema 做一次白名单校验，身份字段（user_id/role/permission）一律丢弃。
+之前都会按 JSON Schema 做一次白名单校验；未声明的身份字段（user_id/role/permission 等）
+一律丢弃，只有工具自己声明的身份参数才允许进入，并由各自的 check 校验操作对象权限。
 """
 
 from __future__ import annotations
@@ -133,9 +134,14 @@ def sanitize_arguments(spec: ToolSpec, arguments: dict[str, Any] | None) -> dict
     cleaned: dict[str, Any] = {}
     for key, value in raw.items():
         key_text = str(key)
-        if key_text in IDENTITY_ARGUMENT_KEYS or key_text in FORBIDDEN_ARGUMENT_KEYS:
+        if key_text in FORBIDDEN_ARGUMENT_KEYS:
             continue
-        if key_text not in properties:
+        declared = key_text in properties
+        # 身份键只有在工具自己声明时才放行（如 users.set_role 的 user_id/role）；
+        # 未声明的身份键仍然丢弃，避免模型伪造 actor/权限上下文。
+        if key_text in IDENTITY_ARGUMENT_KEYS and not declared:
+            continue
+        if not declared:
             # 未声明的参数直接丢弃，避免模型塞入额外上下文影响业务逻辑。
             continue
         cleaned[key_text] = value

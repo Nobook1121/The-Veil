@@ -8,10 +8,17 @@ MAX_MEMORY_ITEMS = 200
 MAX_MEMORY_CONTENT_LENGTH = 1000
 
 
+def _room_dir(context: Any):
+    """兼容两种上下文：KP 工具把 room_dir 作为属性，网站 Agent 则提供同名方法。"""
+    room_dir = getattr(context, "room_dir", None)
+    return room_dir() if callable(room_dir) else room_dir
+
+
 def _memory_file(context: Any):
-    if not context.room_dir:
+    room_dir = _room_dir(context)
+    if not room_dir:
         raise ValueError("room context is required for memory")
-    return context.room_dir / "agent_memory.json"
+    return room_dir / "agent_memory.json"
 
 
 def remember_room_fact(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -50,7 +57,7 @@ def read_room_memory(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         from trpg_server.agents.memory_consolidation import memory_recall
 
         seen = {str(item.get("content") or "").strip() for item in memory}
-        for record in memory_recall(context.room_dir, query, limit):
+        for record in memory_recall(_room_dir(context), query, limit):
             content = str(record.get("text") or "").strip()
             if not content or content in seen:
                 continue

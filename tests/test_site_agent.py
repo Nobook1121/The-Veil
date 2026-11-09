@@ -21,10 +21,11 @@ from trpg_server.site_agent_prompt import detect_injection, untrusted_block
 from trpg_server.site_agent_tools import _make_wrapper, apply_pending_action
 from trpg_server.site_agent_tools.base import ToolArgumentError, ToolContext, ToolResult, ToolSpec, sanitize_arguments
 from trpg_server.site_agent_tools.profile import _validate as validate_profile_change
-from trpg_server.site_agent_tools.rooms import _is_room_manager
+from trpg_server.site_agent_tools.rooms import _is_room_manager, get_memory
 from trpg_server.site_agent_tools.settings import (
     get_general_settings,
     apply_update_settings,
+    preview_update_settings,
     _check_update_settings,
 )
 from trpg_server.config import invalidate_settings_cache
@@ -82,6 +83,28 @@ class TestArgumentSanitizing:
 
     def test_valid_arguments_pass(self):
         assert sanitize_arguments(self._spec(), {"text": "ok", "count": 2}) == {"text": "ok", "count": 2}
+
+    def test_declared_identity_arguments_are_kept(self):
+        """工具自己声明的身份参数不能被白名单误杀，否则 users/permissions 工具无法进入确认流程。"""
+        spec = ToolSpec(
+            name="users.set_role",
+            description="demo",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "integer"},
+                    "role": {"type": "string", "enum": ["USER", "ADMIN"]},
+                },
+                "required": ["user_id", "role"],
+            },
+            risk="write",
+        )
+        assert sanitize_arguments(spec, {"user_id": 2, "role": "USER"}) == {"user_id": 2, "role": "USER"}
+        # 未声明的身份键仍然丢弃，模型不能借此伪造操作者或扩大权限。
+        assert sanitize_arguments(spec, {"user_id": 2, "role": "USER", "permissions": ["*"], "actor_id": 9}) == {
+            "user_id": 2,
+            "role": "USER",
+        }
 
 
 class TestPromptSafety:
@@ -337,6 +360,95 @@ class TestRoomMessageAuthorization:
         assert _is_room_manager(self._actor(user_id=2, admin=True), self._info(creator_id=1)) is True
 
 
+class TestRoomMemoryAccess:
+    """Agent 长期记忆只对房主/房间管理员开放，普通玩家不能读取 KP 私有记忆。"""
+
+    @pytest.fixture()
+    def room_app(self, tmp_path: Path):
+        rooms_dir = tmp_path / "rooms"
+        room_dir = rooms_dir / "room-1"
+        room_dir.mkdir(parents=True)
+        (room_dir / "info.json").write_text(
+            json.dumps(
+                {
+                    "id": "room-1",
+                    "creator_id": 1,
+                    "members": [
+                        {"user_id": 1, "is_active": True, "room_role": "owner"},
+                        {"user_id": 2, "is_active": True, "room_role": "player"},
+                        {"user_id": 3, "is_active": True, "room_role": "admin"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (room_dir / "agent_memory.json").write_text(
+            json.dumps(
+                [{"id": "m1", "kind": "fact", "content": "KP 秘密：管家是邪教徒", "importance": 5}],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        app = Flask(__name__)
+        app.config["ROOMS_DIR"] = rooms_dir
+        with app.app_context():
+            yield app
+
+    def _actor(self, user_id: int, *, admin: bool = False):
+        return SimpleNamespace(user_id=user_id, username=f"user{user_id}", is_admin=admin)
+
+    def _context(self, actor) -> ToolContext:
+        return ToolContext(actor=actor, config=SimpleNamespace(), conversation_id="", turn_id="", room_id="room-1")
+
+    def test_player_cannot_read_private_memory(self, room_app):
+        actor = self._actor(2)
+        result = get_memory(actor, {}, self._context(actor))
+        assert result.ok is False
+        assert "房主" in result.error
+        assert "管家是邪教徒" not in json.dumps(result.to_dict(), ensure_ascii=False)
+
+    def test_owner_and_room_admin_can_read_memory(self, room_app):
+        owner = self._actor(1)
+        owner_result = get_memory(owner, {}, self._context(owner))
+        assert owner_result.ok is True
+        assert "管家是邪教徒" in json.dumps(owner_result.data, ensure_ascii=False)
+
+        room_admin = self._actor(3)
+        admin_result = get_memory(room_admin, {}, self._context(room_admin))
+        assert admin_result.ok is True
+
+    def test_site_admin_can_read_memory(self, room_app):
+        site_admin = self._actor(99, admin=True)
+        result = get_memory(site_admin, {}, self._context(site_admin))
+        assert result.ok is True
+
+
+class TestUsersToolConfirmation:
+    def test_set_role_enters_pending_confirmation(self, agent_app, monkeypatch):
+        """身份参数白名单修复后，users.set_role 应能正常生成待确认操作。"""
+        user = {"id": 2, "username": "bob", "role": "USER", "status": "active"}
+        monkeypatch.setattr("trpg_server.site_agent_tools.users._find_user", lambda user_id: user)
+        actor = Actor(
+            user_id=1,
+            username="alice",
+            role="ADMIN",
+            permissions=frozenset({"agent.use", "accounts.manage_users"}),
+            room_ids=frozenset(),
+        )
+        spec = site_agent_tools.SPECS_BY_NAME["users.set_role"]
+        context = ToolContext(actor=actor, config=SimpleNamespace(), conversation_id="c_1", turn_id="t1")
+        wrapper = _make_wrapper(spec, actor, context, SimpleNamespace(enabled=True, action_ttl_seconds=300))
+
+        result = wrapper({"user_id": 2, "role": "ADMIN"})
+
+        assert result.get("pending_action"), result
+        action = site_agent_store.load_action(result["pending_action"]["action_id"])
+        assert action is not None
+        assert action["args"] == {"user_id": 2, "role": "ADMIN"}
+        assert action["check_args"] == {"user_id": 2, "role": "ADMIN"}
+
+
 class TestSiteSettingsGuards:
     def _actor(self, role: str) -> Actor:
         return Actor(
@@ -400,6 +512,32 @@ class TestSiteSettingsGuards:
         sections = result.data["sections"]
         assert sections["network.penetration.settings"]["auth_token"] == "******"
         assert "super-secret" not in json.dumps(sections, ensure_ascii=False)
+
+    def test_immersive_api_key_is_redacted_on_read(self, config_app, monkeypatch):
+        """生图平台密钥与穿透令牌共用同一份打码清单，读取时不得回显原值。"""
+        monkeypatch.setenv("AI_TRPG_CFG_IMMERSIVE_API_KEY", "sk-live-secret")
+        invalidate_settings_cache()
+        actor = self._actor("ADMIN")
+        result = get_general_settings(
+            actor,
+            {},
+            ToolContext(actor=actor, config=SimpleNamespace(), conversation_id="", turn_id=""),
+        )
+        assert result.ok is True
+        sections = result.data["sections"]
+        assert sections["immersive"]["api_key"] == "******"
+        assert "sk-live-secret" not in json.dumps(result.data, ensure_ascii=False)
+
+    def test_secret_preview_and_write_are_rejected(self, config_app):
+        """预览与写入都必须在参数解析阶段拒绝密钥字段，不能把原值回显给模型。"""
+        actor = self._actor("OWNER")
+        context = ToolContext(actor=actor, config=SimpleNamespace(), conversation_id="", turn_id="")
+        secret = "sk-should-never-echo"
+        result = preview_update_settings(actor, self._changes("immersive", "api_key", secret), context)
+        assert result.ok is False
+        assert "sk-should-never-echo" not in json.dumps(result.to_dict(), ensure_ascii=False)
+        denied = _check_update_settings(actor, self._changes("immersive", "api_key", secret))
+        assert denied and "密钥" in denied
 
     def test_apply_writes_registered_key(self, config_app):
         actor = self._actor("ADMIN")

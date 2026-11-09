@@ -122,6 +122,11 @@ def get_character_record(actor: Any, arguments: dict[str, Any], context: ToolCon
 
 
 def get_memory(actor: Any, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+    # Agent 长期记忆只服务于房主/房间管理员（含站点管理员）。普通玩家即使拥有
+    # rooms.runtime_records 也不能读取 KP 的私有记忆与合并账本。
+    denied = _manager_error(actor, context)
+    if denied:
+        return ToolResult.failure(denied)
     result = read_room_memory(
         {"query": arguments.get("query") or "", "limit": arguments.get("limit") or 10},
         context,
@@ -327,7 +332,7 @@ ROOM_TOOLS = [
     ),
     ToolSpec(
         name="room.get_memory",
-        description="读取当前房间的 Agent 长期记忆，可按关键词过滤。",
+        description="读取当前房间的 Agent 长期记忆（仅房主或房间管理员可用），可按关键词过滤。",
         parameters=schema(
             {
                 "query": {"type": "string", "maxLength": 120},
