@@ -52,6 +52,10 @@ class Coc7RuleOptions:
     healing_natural: bool = False
     # 自然恢复必须声明休养；开启后未带 rest 不结算。
     healing_require_rest: bool = False
+    # 追逐：开放地点 / 行动点 / 险境 / 障碍 / 冲突的追逐会话。
+    chase_enabled: bool = False
+    # 法术与典籍：开放施法消耗、首次施法检定与典籍阅读结算（不含内容表）。
+    magic_enabled: bool = False
 
     @classmethod
     def from_house_rules(cls, rules: Mapping[str, Any] | None = None) -> "Coc7RuleOptions":
@@ -71,6 +75,8 @@ class Coc7RuleOptions:
             combat_poison=_flag(data, "coc7_combat_poison"),
             healing_natural=_flag(data, "coc7_healing_natural"),
             healing_require_rest=_flag(data, "coc7_healing_require_rest"),
+            chase_enabled=_flag(data, "coc7_chase_enabled"),
+            magic_enabled=_flag(data, "coc7_magic_enabled"),
         )
 
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from trpg_server import room_rules, world_override
+from trpg_server import room_chase, room_magic, room_rules, world_override
 from trpg_server.console_args import ConsoleArgSpec, parse_console_args
 
 ROOM_RULE_ACTOR = "房间控制台"
@@ -28,6 +28,15 @@ RULE_FLAG_WORDS = {
     "apply": "--apply",
     "yes": "--yes",
     "rest": "--rest",
+    "accelerate": "--accelerate",
+    "vehicle": "--vehicle",
+    "quarry": "--quarry",
+    "firearm": "--firearm",
+    "maneuver": "--maneuver",
+    "first": "--first",
+    "pushed": "--pushed",
+    "skim": "--skim",
+    "study": "--study",
 }
 # 带值选项：写成 key value。
 RULE_VALUE_OPTIONS = {
@@ -43,6 +52,22 @@ RULE_VALUE_OPTIONS = {
     "qty",
     "kind",
     "damage",
+    "mov",
+    "dex",
+    "build",
+    "durability",
+    "result",
+    "loss",
+    "outcome",
+    "mp",
+    "san",
+    "pow",
+    "weeks",
+    "multiplier",
+    "rating",
+    "cmi",
+    "cmf",
+    "spells",
 }
 # 尾部选项：reason / note 之后的全部内容都算它的值。
 RULE_TRAILING_OPTIONS = {"reason", "note"}
@@ -69,6 +94,23 @@ ROOM_RULE_HELP = "\n".join(
         "  rule skill <玩家> <技能名> <值|±N> [persist] [reason 原因] [yes]（修改技能；默认预演）",
         "  rule attr <玩家> <属性> <值|±N> [persist] [reason 原因] [yes]（修改 STR/DEX/INT 等基础属性；默认预演）",
         "  rule heal natural <玩家> <天数> [rest]（房规：按休养天数自然恢复，重伤每周 1 点）",
+        "  rule chase [status]         （房规：查看追逐位置、行动点与障碍）",
+        "  rule chase start <追逐者> <逃离者> [更多...]（开始追逐；初始距离 2）",
+        "  rule chase add <名称> [mov N] [dex N] [build N] [vehicle] [quarry]（加入 NPC/载具）",
+        "  rule chase round           （进入下一追逐轮，重置行动点）",
+        "  rule chase move <名称> [N] [accelerate]（移动地点；载具可加速 2-5 个）",
+        "  rule chase hazard <名称> <技能> [difficulty ...] [ap N] [damage N]（险境；成员自动掷骰）",
+        "  rule chase obstacle <起始位置> <名称> [skill 技能] [difficulty ...] [durability N]（放置障碍）",
+        "  rule chase overcome <名称> <起始位置> <技能> [difficulty ...]（翻越障碍；成员自动掷骰）",
+        "  rule chase break <起始位置> <damage N>（破坏障碍；返回撞毁反冲）",
+        "  rule chase conflict <攻击者> <目标> [firearm] [maneuver] [loss N]（同地点才能近战）",
+        "  rule chase end [outcome]   （结束追逐）",
+        "  非成员参与者的技能检定用 result regular|hard|extreme|critical|failure 显式传入。",
+        "  rule spell <玩家>                   （房规：查看已学法术、典籍与 MP）",
+        "  rule spell learn <玩家> <法术> [weeks N]（登记已学法术；耗时由 KP 显式给出）",
+        "  rule spell cast <玩家> <法术> [mp N] [san N] [pow N] [first] [pushed] [multiplier N] [result ...]",
+        "  rule spell grimoire <玩家> <书名> [skim|study] [weeks N] [san N] [cmi N] [cmf N] [rating N] [result ...] [spells a,b]",
+        "  首次施法为困难 POW 检定；孤注一掷失败时法术仍生效并额外支付 1D6 倍消耗。",
         "  rule limits                 （查看世界意志的生效频率限制）",
         "  rule limits cooldown <秒|inherit>（房间只能比站点更严格）",
         "  rule limits hourly <次数|inherit>（房间只能比站点更严格）",
@@ -89,6 +131,8 @@ RULE_SUBS = {
     "skill",
     "attr",
     "heal",
+    "chase",
+    "spell",
     "limits",
 }
 
@@ -209,6 +253,8 @@ def handle_room_rule_command(
         "contact": coc7_options.contacts,
         "economy": coc7_options.economy,
         "heal": coc7_options.healing_natural,
+        "chase": coc7_options.chase_enabled,
+        "spell": coc7_options.magic_enabled,
     }
     if sub in optional_subs and not optional_subs[sub]:
         return False, f"未知的规则命令：rule {sub}\n{ROOM_RULE_HELP}"
@@ -446,6 +492,34 @@ def handle_room_rule_command(
             actor_rank=actor_rank,
         )
 
+    if sub == "chase":
+        return _chase_command(
+            room_dir,
+            info,
+            rest,
+            flags,
+            options,
+            actor=actor,
+            actor_id=actor_id,
+            actor_rank=actor_rank,
+            config_dir=config_dir,
+            room_id=room_id,
+        )
+
+    if sub == "spell":
+        return _spell_command(
+            room_dir,
+            info,
+            rest,
+            flags,
+            options,
+            actor=actor,
+            actor_id=actor_id,
+            actor_rank=actor_rank,
+            config_dir=config_dir,
+            room_id=room_id,
+        )
+
     if sub in {"skill", "attr"}:
         return _stat_command(
             room_dir,
@@ -549,6 +623,437 @@ def _heal_command(
         f"{name} 自然恢复（{days} 天，{'含休养' if resting else '未声明休养'}）："
         f"{before} → {after}/{max_hp}（+{after - before}）。",
     )
+
+
+def _spell_command(
+    room_dir: Path,
+    info: dict[str, Any],
+    rest: list[str],
+    flags: set[str],
+    options: dict[str, str],
+    *,
+    actor: Any,
+    actor_id: Any,
+    actor_rank: Any,
+    config_dir: Any,
+    room_id: Any,
+) -> tuple[bool, str]:
+    """房规：法术与典籍（施法消耗 / 首次施法 / 典籍阅读），规则数学在插件内。"""
+    verbs = {"status", "list", "learn", "cast", "grimoire"}
+    action = "status"
+    args = list(rest)
+    if args and str(args[0]).strip().lower() in verbs:
+        action = str(args[0]).strip().lower()
+        args = args[1:]
+    if action in {"status", "list"} and not args:
+        return False, "用法：rule spell <玩家>"
+
+    try:
+        if action in {"status", "list"}:
+            member = room_rules.find_member(info, args[0])
+            if not member:
+                raise room_rules.RuleOperationError(f"找不到玩家 {args[0]}", code="unknown_member")
+            return True, room_magic.format_magic(member)
+
+        if action == "learn":
+            if len(args) < 2:
+                return False, "用法：rule spell learn <玩家> <法术> [weeks N]"
+            member = room_rules.find_member(info, args[0])
+            if not member:
+                raise room_rules.RuleOperationError(f"找不到玩家 {args[0]}", code="unknown_member")
+            payload = room_magic.learn_spell(
+                room_dir,
+                info,
+                member,
+                " ".join(args[1:]),
+                weeks=options.get("weeks") or 0,
+                actor=actor,
+            )
+            return True, (
+                f"{args[0]} 学会「{payload['spell']}」（耗时 {payload['weeks']} 周）。\n"
+                + room_magic.format_magic(member)
+            )
+
+        if action == "cast":
+            if len(args) < 2:
+                return False, (
+                    "用法：rule spell cast <玩家> <法术> [mp N] [san N] [pow N] "
+                    "[first] [pushed] [multiplier N] [result ...]"
+                )
+            member = room_rules.find_member(info, args[0])
+            if not member:
+                raise room_rules.RuleOperationError(f"找不到玩家 {args[0]}", code="unknown_member")
+            level = str(options.get("result") or "").strip().lower()
+            if not level:
+                try:
+                    check = room_rules.roll_check(
+                        room_dir,
+                        info,
+                        member,
+                        name="POW",
+                        difficulty="hard",
+                        reason="首次施法",
+                        actor=actor or ROOM_RULE_ACTOR,
+                        actor_id=actor_id,
+                        config_dir=config_dir,
+                        room_id=room_id,
+                    )
+                    level = str(check.get("success_level") or "failure")
+                except room_rules.RuleOperationError:
+                    level = ""
+            payload = room_magic.cast_spell(
+                room_dir,
+                info,
+                member,
+                name=" ".join(args[1:]),
+                mp_cost=options.get("mp") or 0,
+                san_cost=options.get("san") or 0,
+                pow_cost=options.get("pow") or 0,
+                first_cast="--first" in flags,
+                success_level=level or None,
+                pushed="--pushed" in flags,
+                multiplier=options.get("multiplier") or 1,
+                actor=actor,
+                actor_id=actor_id,
+            )
+            text = (
+                f"{args[0]} 施放「{payload['spell']}」："
+                + ("生效" if payload["effects"] else "没有效果")
+                + f"；消耗 MP {payload['mp_spent']}"
+                + (f" + 耐久 {payload['hp_spent']}" if payload["hp_spent"] else "")
+            )
+            if payload["pushed"]:
+                text += f"；孤注一掷反噬额外消耗 {payload['extra_cost']}，{payload['side_effect']}"
+            return True, text + "\n" + room_magic.format_magic(member)
+
+        if action == "grimoire":
+            if len(args) < 2:
+                return False, (
+                    "用法：rule spell grimoire <玩家> <书名> [skim|study] [weeks N] [san N] "
+                    "[cmi N] [cmf N] [rating N] [result ...] [spells a,b]"
+                )
+            member = room_rules.find_member(info, args[0])
+            if not member:
+                raise room_rules.RuleOperationError(f"找不到玩家 {args[0]}", code="unknown_member")
+            mode = "study"
+            title = " ".join(args[1:])
+            if "--skim" in flags:
+                mode = "skim"
+            elif "--study" in flags:
+                mode = "study"
+            elif len(args) > 2 and str(args[2]).lower() in {"skim", "study"}:
+                mode = str(args[2]).lower()
+                title = args[1]
+            spells = [
+                item.strip()
+                for item in str(options.get("spells") or "").replace("，", ",").split(",")
+                if item.strip()
+            ]
+            payload = room_magic.read_grimoire(
+                room_dir,
+                info,
+                member,
+                title=title,
+                mode=mode,
+                weeks=options.get("weeks") or 0,
+                san_loss=options.get("san") or 0,
+                cmi=options.get("cmi") or 0,
+                cmf=options.get("cmf") or 0,
+                rating=options.get("rating") or 0,
+                success_level=options.get("result"),
+                spells=spells,
+                actor=actor,
+                actor_id=actor_id,
+            )
+            if not payload["success"]:
+                return True, f"泛读《{payload['book']}》失败，未获得任何收益。"
+            return True, (
+                f"《{payload['book']}》{'泛读' if payload['mode'] == 'skim' else '精读'}完成："
+                f"克苏鲁神话 +{payload['mythos_gain']}，SAN -{payload['san_loss']}"
+                + (f"，累计精读 {payload['reads']} 次" if payload["reads"] else "")
+                + "\n"
+                + room_magic.format_magic(member)
+            )
+    except room_rules.RuleOperationError as exc:
+        return False, exc.message
+
+    return False, "用法：rule spell <玩家> | learn | cast | grimoire"
+
+
+def _chase_check_level(
+    room_dir: Path,
+    info: dict[str, Any],
+    name: str,
+    *,
+    skill: str,
+    difficulty: str,
+    bonus: int,
+    options: dict[str, str],
+    actor: Any,
+    actor_id: Any,
+    config_dir: Any,
+    room_id: Any,
+) -> str:
+    """成员的追逐技能检定自动掷骰；非成员必须显式给 result。"""
+    explicit = str(options.get("result") or "").strip().lower()
+    if explicit:
+        return explicit
+    member = room_rules.find_member(info, name)
+    if not member:
+        raise room_rules.RuleOperationError(
+            "非成员参与者请用 result regular|hard|extreme|critical|failure 传入检定结果",
+            code="chase_need_result",
+        )
+    result = room_rules.roll_check(
+        room_dir,
+        info,
+        member,
+        name=skill,
+        difficulty=difficulty,
+        bonus=bonus,
+        reason="追逐",
+        actor=actor or ROOM_RULE_ACTOR,
+        actor_id=actor_id,
+        config_dir=config_dir,
+        room_id=room_id,
+    )
+    return str(result.get("success_level") or "failure")
+
+
+def _chase_command(
+    room_dir: Path,
+    info: dict[str, Any],
+    rest: list[str],
+    flags: set[str],
+    options: dict[str, str],
+    *,
+    actor: Any,
+    actor_id: Any,
+    actor_rank: Any,
+    config_dir: Any,
+    room_id: Any,
+) -> tuple[bool, str]:
+    """房规：追逐会话（地点 / 行动点 / 险境 / 障碍 / 冲突），规则数学在插件内。"""
+    action = str(rest[0]).strip().lower() if rest else "status"
+    args = rest[1:]
+    difficulty = str(options.get("difficulty") or "regular").lower()
+
+    def fail(exc: room_rules.RuleOperationError) -> tuple[bool, str]:
+        return False, exc.message
+
+    try:
+        if action in {"status", "show"}:
+            return True, room_chase.format_chase(room_chase.get_chase(info))
+
+        if action == "start":
+            names = [str(item).strip() for item in args if str(item).strip()]
+            if len(names) < 2:
+                return False, "用法：rule chase start <追逐者> <逃离者> [更多参与者...]"
+            participants = []
+            for index, name in enumerate(names):
+                if len(names) == 2 and index == 1:
+                    role = "quarry"
+                elif "--quarry" in flags and index > 0:
+                    role = "quarry"
+                else:
+                    role = "pursuer"
+                member = room_rules.find_member(info, name)
+                if member:
+                    participants.append(room_chase.participant_from_member(member, role=role))
+                else:
+                    participants.append(
+                        room_chase.participant_from_spec(
+                            {
+                                "name": name,
+                                "mov": options.get("mov"),
+                                "dex": options.get("dex"),
+                                "build": options.get("build"),
+                                "vehicle": "--vehicle" in flags,
+                            },
+                            role=role,
+                        )
+                    )
+            chase = room_chase.start_chase(room_dir, info, participants, actor=actor)
+            return True, room_chase.format_chase(chase)
+
+        if action == "add":
+            if not args:
+                return False, "用法：rule chase add <名称> [mov N] [dex N] [build N] [vehicle] [quarry]"
+            chase = room_chase.get_chase(info)
+            if not chase:
+                return False, "当前没有进行中的追逐"
+            participant = room_chase.participant_from_spec(
+                {
+                    "name": args[0],
+                    "mov": options.get("mov"),
+                    "dex": options.get("dex"),
+                    "build": options.get("build"),
+                    "vehicle": "--vehicle" in flags,
+                },
+                role="quarry" if "--quarry" in flags else "pursuer",
+            )
+            if participant["role"] == "quarry":
+                participant["position"] = min(
+                    2, len(chase.get("locations") or []) - 1
+                )
+            chase.setdefault("participants", []).append(participant)
+            room_chase.save_chase(room_dir, info, chase)
+            return True, room_chase.format_chase(chase)
+
+        if action in {"round", "next"}:
+            return True, room_chase.format_chase(
+                room_chase.start_round(room_dir, info, actor=actor)
+            )
+
+        if action == "move":
+            if not args:
+                return False, "用法：rule chase move <名称> [地点数] [accelerate]"
+            count = _as_int(args[1], 1) if len(args) > 1 else 1
+            return True, room_chase.format_chase(
+                room_chase.move_participant(
+                    room_dir,
+                    info,
+                    args[0],
+                    locations=count,
+                    accelerate="--accelerate" in flags,
+                    actor=actor,
+                )
+            )
+
+        if action == "hazard":
+            if len(args) < 2:
+                return False, "用法：rule chase hazard <名称> <技能> [difficulty ...] [ap N] [damage N]"
+            ap_spent = _as_int(options.get("ap"), 0)
+            bonus = min(2, max(0, ap_spent))
+            level = _chase_check_level(
+                room_dir,
+                info,
+                args[0],
+                skill=" ".join(args[1:]),
+                difficulty=difficulty,
+                bonus=bonus,
+                options=options,
+                actor=actor,
+                actor_id=actor_id,
+                config_dir=config_dir,
+                room_id=room_id,
+            )
+            payload = room_chase.attempt_hazard(
+                room_dir,
+                info,
+                args[0],
+                success_level=level,
+                ap_spent=ap_spent,
+                ap_loss=options.get("loss") or 1,
+                damage=options.get("damage") or 0,
+                note=" ".join(args[1:]),
+                actor=actor,
+            )
+            return True, room_chase.format_chase(room_chase.get_chase(info)) + (
+                f"\n险境结算：{payload['name']} {'成功' if payload['success'] else '失败'}"
+                f"（奖励骰 {payload['bonus_dice']}，伤害 {payload['damage']}，"
+                f"损失行动点 {payload['ap_loss']}）。"
+            )
+
+        if action == "obstacle":
+            if len(args) < 2:
+                return False, "用法：rule chase obstacle <起始位置> <名称> [skill 技能] [difficulty ...] [durability N]"
+            obstacle = room_chase.add_obstacle(
+                room_dir,
+                info,
+                start=args[0],
+                name=args[1],
+                skill=str(options.get("skill") or ""),
+                difficulty=difficulty,
+                durability=options.get("durability"),
+                kind=options.get("kind"),
+                actor=actor,
+            )
+            return True, (
+                f"已放置障碍：{obstacle['name']}（耐久 {obstacle['durability']}，"
+                f"技能 {obstacle['skill'] or '任意'} / {obstacle['difficulty']}）。"
+            )
+
+        if action == "overcome":
+            if len(args) < 3:
+                return False, "用法：rule chase overcome <名称> <起始位置> <技能> [difficulty ...]"
+            level = _chase_check_level(
+                room_dir,
+                info,
+                args[0],
+                skill=" ".join(args[2:]),
+                difficulty=difficulty,
+                bonus=0,
+                options=options,
+                actor=actor,
+                actor_id=actor_id,
+                config_dir=config_dir,
+                room_id=room_id,
+            )
+            payload = room_chase.attempt_obstacle(
+                room_dir,
+                info,
+                args[0],
+                start=args[1],
+                success_level=level,
+                damage=options.get("damage") or 0,
+                actor=actor,
+            )
+            return True, (
+                f"{payload['obstacle']['name']}：{'已翻越' if payload['success'] else '未能翻越'}"
+                f"（位置 {payload['position']}）。\n"
+                + room_chase.format_chase(room_chase.get_chase(info))
+            )
+
+        if action == "break":
+            if len(args) < 2:
+                return False, "用法：rule chase break <起始位置> <damage N>"
+            payload = room_chase.damage_obstacle(
+                room_dir,
+                info,
+                start=args[0],
+                damage=options.get("damage") or args[1],
+                actor=actor,
+            )
+            obstacle = payload["obstacle"]
+            return True, (
+                f"{obstacle['name']} 剩余耐久 {obstacle['durability']}/{obstacle['max_durability']}"
+                + ("（已摧毁）" if obstacle["destroyed"] else "")
+                + (f"；撞毁反冲伤害 {payload['recoil']}" if payload["recoil"] else "")
+            )
+
+        if action == "conflict":
+            if len(args) < 2:
+                return False, (
+                    "用法：rule chase conflict <攻击者> <目标> [firearm] [maneuver] [loss N]"
+                )
+            payload = room_chase.resolve_conflict(
+                room_dir,
+                info,
+                args[0],
+                args[1],
+                has_firearm="--firearm" in flags,
+                maneuver_success="--maneuver" in flags,
+                ap_loss=options.get("loss") or 1,
+                note=str(options.get("note") or ""),
+                actor=actor,
+            )
+            return True, (
+                f"{payload['attacker']} → {payload['target']}："
+                + ("同地点近战" if payload["same_location"] else "火器跨地点")
+                + (f"，目标损失 {payload['target_ap_loss']} 行动点" if payload["target_ap_loss"] else "")
+                + "。"
+            )
+
+        if action == "end":
+            outcome = str(options.get("outcome") or (args[0] if args else "ended"))
+            chase = room_chase.end_chase(room_dir, info, outcome=outcome, actor=actor)
+            return True, room_chase.format_chase(chase)
+    except room_rules.RuleOperationError as exc:
+        return fail(exc)
+
+    return False, f"未知的追逐命令：rule chase {action}\n{ROOM_RULE_HELP}"
+
 
 
 def _stat_command(

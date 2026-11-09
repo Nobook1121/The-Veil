@@ -29,6 +29,7 @@ def _default_state() -> dict[str, Any]:
         "completed": False,
         "ending_reached": False,
         "combat": None,
+        "chase": None,
     }
 
 
@@ -43,6 +44,8 @@ def _normalize_state(value: Any) -> dict[str, Any]:
         state["npc_attitudes"] = {}
     if not isinstance(state.get("combat"), dict):
         state["combat"] = None
+    if not isinstance(state.get("chase"), dict):
+        state["chase"] = None
     state["rolling_summary"] = str(state.get("rolling_summary") or "")[:MAX_SUMMARY_LENGTH]
     state["event_log"] = [item for item in state["event_log"] if isinstance(item, dict)][-MAX_EVENT_LOG:]
     return state
@@ -98,4 +101,5 @@ def project_room_state(state: dict[str, Any] | None, snapshot: dict[str, Any] | 
         "event_log": normalized["event_log"][-20:],
         "triggeredFiles": normalized["triggeredFiles"][-100:],
         "triggerHistory": normalized["triggerHistory"][-50:],
+        "chase": normalized.get("chase"),
     }

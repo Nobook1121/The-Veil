@@ -44,6 +44,8 @@ SHEET_FIELDS = (
     "experiencedModules",
     "friends",
     "skillGroups",
+    # 规则扩展命名空间（批次 5：法术 / 典籍）；旧卡没有该字段时按空结构处理。
+    "extensions",
 )
 
 ATTRIBUTE_KEYS = ("str", "dex", "con", "app", "pow", "siz", "edu", "int", "luc")

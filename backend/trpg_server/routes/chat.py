@@ -841,6 +841,14 @@ def chat():
             ):
                 if not enabled:
                     excluded_tool_names.add(tool_name)
+            if not coc7_options.chase_enabled:
+                from trpg_server.agents.tools.chase import CHASE_TOOL_NAMES
+
+                excluded_tool_names |= set(CHASE_TOOL_NAMES)
+            if not coc7_options.magic_enabled:
+                from trpg_server.agents.tools.magic import MAGIC_TOOL_NAMES
+
+                excluded_tool_names |= set(MAGIC_TOOL_NAMES)
 
         prompt_history = _history_for_request(history, latex_settings=latex_settings)
         scene_static = None

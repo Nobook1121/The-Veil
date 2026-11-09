@@ -21,6 +21,8 @@ from trpg_server.agents.tools.combat import COMBAT_TOOLS, COMBAT_TOOL_NAMES
 from trpg_server.agents.tools.music import MUSIC_REQUEST_TOOL
 from trpg_server.agents.tools.character_items import ADD_CHARACTER_ITEM_TOOL
 from trpg_server.agents.tools.coc7 import COC7_EXTRA_TOOL_NAMES, COC7_EXTRA_TOOLS
+from trpg_server.agents.tools.chase import CHASE_TOOL_NAMES, CHASE_TOOLS
+from trpg_server.agents.tools.magic import MAGIC_TOOL_NAMES, MAGIC_TOOLS
 from trpg_server.agents.tools.character_stats import (
     SET_CHARACTER_ATTRIBUTE_TOOL,
     SET_CHARACTER_SKILL_TOOL,
@@ -57,6 +59,8 @@ def default_tool_registry() -> ToolRegistry:
             *NARRATIVE_TOOLS,
             *TRIGGER_RUNTIME_TOOLS,
             *COC7_EXTRA_TOOLS,
+            *CHASE_TOOLS,
+            *MAGIC_TOOLS,
             *INTERLUDE_TOOLS,
         ]
     )
@@ -65,6 +69,10 @@ def default_tool_registry() -> ToolRegistry:
 __all__ = [
     "COC7_EXTRA_TOOL_NAMES",
     "COC7_EXTRA_TOOLS",
+    "CHASE_TOOL_NAMES",
+    "CHASE_TOOLS",
+    "MAGIC_TOOL_NAMES",
+    "MAGIC_TOOLS",
     "COMBAT_TOOLS",
     "COMBAT_TOOL_NAMES",
     "INTERLUDE_TOOLS",

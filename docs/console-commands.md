@@ -511,6 +511,21 @@ rule item <玩家> <物品名> [qty N] [weapon] [persist] [reason 原因]
 rule skill <玩家> <技能名> <值|±N> [persist] [reason 原因] [yes]
 rule attr <玩家> <属性> <值|±N> [persist] [reason 原因] [yes]
 rule heal natural <玩家> <天数> [rest]（房规：按休养天数自然恢复；重伤每周 1 点）
+rule chase [status]          （房规：查看追逐位置、行动点与障碍）
+rule chase start <追逐者> <逃离者> [更多...]（开始追逐；逃离者初始距离 2）
+rule chase add <名称> [mov N] [dex N] [build N] [vehicle] [quarry]（加入 NPC / 载具）
+rule chase round             （进入下一追逐轮，按 MOV 重置行动点）
+rule chase move <名称> [N] [accelerate]（移动地点；载具可加速 2-5 个）
+rule chase hazard <名称> <技能> [difficulty ...] [ap N] [damage N]（险境；成员自动掷骰）
+rule chase obstacle <起始位置> <名称> [skill 技能] [difficulty ...] [durability N]
+rule chase overcome <名称> <起始位置> <技能> [difficulty ...]
+rule chase break <起始位置> <damage N>（破坏障碍，返回撞毁反冲）
+rule chase conflict <攻击者> <目标> [firearm] [maneuver] [loss N]
+rule chase end [outcome]     （结束追逐）
+rule spell <玩家>            （房规：查看已学法术、典籍与 MP）
+rule spell learn <玩家> <法术> [weeks N]（登记已学法术，耗时由 KP 显式给出）
+rule spell cast <玩家> <法术> [mp N] [san N] [pow N] [first] [pushed] [multiplier N] [result ...]
+rule spell grimoire <玩家> <书名> [skim|study] [weeks N] [san N] [cmi N] [cmf N] [rating N] [result ...] [spells a,b]
 rule limits                 （查看世界意志生效冷却与每小时次数）
 rule limits cooldown <秒|inherit>（房间只能比站点更严格）
 rule limits hourly <次数|inherit>（房间只能比站点更严格）
@@ -553,6 +568,21 @@ AI KP 的写卡工具（`character_stats` 的 `character.set_skill` / `character
 天数结算，不读取房间 `game_date`，也不自动推进时间。常规恢复为每天 1 点，处于重伤时为每 7 天
 1 点。房规 `coc7_healing_require_rest` 开启时必须在命令末尾加 `rest`，否则拒绝结算。恢复量
 与 SAN / 技能写回链路一致，登记一条 `hp` 待写回项并同步房间快照。
+
+`rule chase` 受房规 `coc7_chase_enabled` 控制，默认关闭。追逐用抽象地点记录位置，相邻地点
+距离 1，逃离者初始距离 2；每轮行动点为 `1 + 自己 MOV - 全场最低 MOV`，移动 1 个地点消耗
+1 点，载具「猛踩油门」可走 2-5 个地点但仍只花 1 点。险境可花行动点换奖励骰（1 点 1 个，
+单次最多 2 个），失败额外损失 1D3 行动点并按 KP 给出的伤害结算；障碍未翻越或摧毁前不能
+前进。除火器外只能攻击同一地点的目标。会话保存在房间信息的 `chase` 段，旧房间没有该段时
+视为没有追逐。
+
+`rule spell` 受房规 `coc7_magic_enabled` 控制，默认关闭，且**不内置法术表与典籍表**：
+法术名、MP / SAN / POW 消耗、典籍的神话等级与收益都由 KP 在命令里显式给出。施法时 MP
+不足按 1:1 扣耐久；首次施法需要困难 POW 检定（可用 `result` 传入结果），失败什么也不发生，
+加 `pushed` 则法术仍生效并额外支付 `1D6` 倍消耗。典籍阅读分泛读（`skim`，需语言检定成功，
+获得 CMI）与精读（`study`，按显式 `weeks` 结算，神话技能低于 `rating` 时获得 `cmf`，否则
+获得 `cmi`，并扣 `san`）；阅读次数与收益记录在卡面 `extensions.magic`，旧卡没有该字段时
+自动按空结构补齐。
 
 玩家侧还可以在聊天框直接使用斜杠命令（不依赖 AI KP）：
 

@@ -174,6 +174,10 @@ interface RoomHouseRules {
     coc7_combat_poison?: boolean;
     coc7_healing_natural?: boolean;
     coc7_healing_require_rest?: boolean;
+    // CoC7 批次 5：追逐会话开关，默认关闭。
+    coc7_chase_enabled?: boolean;
+    // CoC7 批次 5：法术与典籍开关，默认关闭。
+    coc7_magic_enabled?: boolean;
 }
 
 interface RoomConsoleEntry {

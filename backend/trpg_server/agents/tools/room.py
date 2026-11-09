@@ -373,6 +373,16 @@ def _active_combat_snapshot(context: Any) -> dict[str, Any] | None:
         return None
 
 
+def _active_chase_snapshot(context: Any) -> dict[str, Any] | None:
+    """当前追逐摘要；没有追逐时返回 None。"""
+    try:
+        from trpg_server import room_chase
+
+        return room_chase.chase_snapshot(room_chase.get_chase(context.room_info()))
+    except Exception:  # 追逐模块缺失或状态损坏时不影响快照
+        return None
+
+
 def get_room_snapshot(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     info = context.room_info()
     scenario = _find_scenario(context.scenarios_dir, info.get("scenario_id"), info.get("scenario_version"))
@@ -393,6 +403,7 @@ def get_room_snapshot(arguments: dict[str, Any], context: Any) -> dict[str, Any]
         "scenario": _summarize_scenario(scenario, info),
         "members": _summarize_members(characters["members"]),
         "combat": _active_combat_snapshot(context),
+        "chase": _active_chase_snapshot(context),
         "memory": read_room_memory({"limit": int(arguments.get("memory_limit") or 20)}, context),
         # Trigger metadata is loaded only when the model asks for scenario context.
         # Keeping it out of every snapshot reduces prompt size and prevents unrelated

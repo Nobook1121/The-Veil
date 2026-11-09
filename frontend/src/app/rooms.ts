@@ -1597,6 +1597,8 @@ const COMBAT_BOOL_FIELDS: Array<[string, keyof RoomHouseRules]> = [
     ["houseRuleCoc7CombatPoison", "coc7_combat_poison"],
     ["houseRuleCoc7HealingNatural", "coc7_healing_natural"],
     ["houseRuleCoc7HealingRequireRest", "coc7_healing_require_rest"],
+    ["houseRuleCoc7ChaseEnabled", "coc7_chase_enabled"],
+    ["houseRuleCoc7MagicEnabled", "coc7_magic_enabled"],
 ];
 const COMBAT_SELECT_FIELDS: Array<[string, keyof RoomHouseRules]> = [
     ["houseRuleCombatSurpriseModel", "combat_surprise_model"],

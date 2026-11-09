@@ -207,6 +207,10 @@ HOUSE_RULE_DEFINITIONS = {
     "coc7_healing_natural": {"type": "boolean", "default": False, "ai_prompt": False},
     # 自然恢复必须声明休养；关闭时不强制 rest。
     "coc7_healing_require_rest": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 追逐：开放地点 / 行动点 / 险境 / 障碍 / 冲突的追逐会话（默认关闭）。
+    "coc7_chase_enabled": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 法术与典籍：施法消耗 / 首次施法检定 / 典籍阅读结算（默认关闭，不含内容表）。
+    "coc7_magic_enabled": {"type": "boolean", "default": False, "ai_prompt": False},
 }
 DEFAULT_ROOM_HOUSE_RULES = {key: spec["default"] for key, spec in HOUSE_RULE_DEFINITIONS.items()}
 
