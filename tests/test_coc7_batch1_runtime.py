@@ -114,6 +114,142 @@ def test_economy_is_read_only_and_does_not_touch_card():
     assert member["character_card"]["assets"]["cash"] == 82
 
 
+def test_rule_economy_apply_writes_cash_to_pending_changes(tmp_path):
+    from trpg_server import room_rules
+
+    member = _member()
+    info = {
+        "room_id": "r1",
+        "house_rules": {"coc7_economy": True},
+        "members": [member],
+    }
+    save_room_info(tmp_path, info)
+
+    ok, text = handle_room_rule_command(
+        ["economy", "玩家甲", "40", "--apply"],
+        room_id="r1",
+        room_dir=tmp_path,
+        actor="房主",
+        actor_id="owner-id",
+        actor_rank=3,
+    )
+    assert ok is True
+    assert "已登记现金写回" in text
+    saved = room_rules.load_room_info(tmp_path)["members"][0]
+    assert saved["character_card"]["assets"]["cash"] == 42
+    pending = saved["character_state"]["pending_changes"]
+    assert len(pending) == 1
+    assert pending[0]["type"] == "assets"
+    assert pending[0]["value"] == {"cash": 42}
+    assert pending[0]["source"] == "rule"
+
+
+def test_rule_economy_preview_still_does_not_touch_card(tmp_path):
+    from trpg_server import room_rules
+
+    member = _member()
+    info = {
+        "room_id": "r1",
+        "house_rules": {"coc7_economy": True},
+        "members": [member],
+    }
+    save_room_info(tmp_path, info)
+
+    ok, _ = handle_room_rule_command(
+        ["economy", "玩家甲", "40"],
+        room_id="r1",
+        room_dir=tmp_path,
+        actor="房主",
+        actor_id="owner-id",
+        actor_rank=3,
+    )
+    assert ok is True
+    saved = room_rules.load_room_info(tmp_path)["members"][0]
+    assert saved["character_card"]["assets"]["cash"] == 82
+    assert "pending_changes" not in saved.get("character_state", {})
+
+
+def test_pending_changes_dedupe_absolute_values_and_merge_assets():
+    from trpg_server import room_rules
+
+    state: dict = {}
+    room_rules._add_pending_change(state, {"type": "assets", "value": {"cash": 50}})
+    room_rules._add_pending_change(
+        state, {"type": "assets", "value": {"spendingLevel": 2}}
+    )
+    room_rules._add_pending_change(state, {"type": "credit", "value": 45})
+    room_rules._add_pending_change(state, {"type": "credit", "value": 55})
+    room_rules._add_pending_change(
+        state, {"type": "skill", "name": "侦查", "value": 51}
+    )
+    room_rules._add_pending_change(
+        state, {"type": "skill", "name": "侦查", "value": 57}
+    )
+
+    records = state["pending_changes"]
+    assert len(records) == 3
+    assets = next(row for row in records if row["type"] == "assets")
+    assert assets["value"] == {"cash": 50, "spendingLevel": 2}
+    assert next(row for row in records if row["type"] == "credit")["value"] == 55
+    assert next(row for row in records if row["type"] == "skill")["value"] == 57
+
+
+def test_pending_changes_keep_relative_items_but_dedupe_same_record():
+    from trpg_server import room_rules
+
+    state: dict = {}
+    room_rules._add_pending_change(
+        state, {"type": "item", "name": "手电筒", "amount": 1, "record_id": "rec-1"}
+    )
+    room_rules._add_pending_change(
+        state, {"type": "item", "name": "手电筒", "amount": 1, "record_id": "rec-1"}
+    )
+    room_rules._add_pending_change(
+        state, {"type": "item", "name": "手电筒", "amount": 1, "record_id": "rec-2"}
+    )
+
+    records = state["pending_changes"]
+    assert [row["record_id"] for row in records] == ["rec-2", "rec-1"]
+    assert sum(row["amount"] for row in records) == 2
+
+
+def test_interlude_credit_event_queues_credit_and_assets(tmp_path):
+    from trpg_server import room_interlude, room_rules
+
+    member = _member()
+    info = {"room_id": "r1", "members": [member]}
+    save_room_info(tmp_path, info)
+
+    room_interlude.start_interlude(
+        tmp_path,
+        info,
+        actor="房主",
+        actor_id="owner-id",
+        rng=_rng(3),
+        credit_events=[{"player": "玩家甲", "event": "promotion"}],
+    )
+
+    saved = room_rules.load_room_info(tmp_path)["members"][0]
+    assert saved["character_card"]["creditRating"] == 44
+    pending = saved["character_state"]["pending_changes"]
+    credit = next(row for row in pending if row["type"] == "credit")
+    assets = next(row for row in pending if row["type"] == "assets")
+    assert credit["value"] == 44
+    assert assets["value"]["cash"] == saved["character_card"]["assets"]["cash"]
+    assert "spendingLevel" in assets["value"]
+
+
+def test_interlude_opening_prompt_limits_context_and_stops_plot():
+    from trpg_server import room_interlude
+
+    prompt = room_interlude.interlude_opening_prompt()
+    assert "幕间" in prompt
+    assert "关键节点" in prompt
+    assert "不要复述全量聊天" in prompt
+    assert "不要推进剧情" in prompt
+
+
+
 def test_rule_subcommands_are_absent_when_switch_is_off(tmp_path):
     info = {"room_id": "r1", "house_rules": {}, "members": [_member()]}
     save_room_info(tmp_path, info)

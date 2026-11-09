@@ -121,6 +121,49 @@ def test_item_writes_room_snapshot_only(tmp_path):
     assert member["character_state"]["item_changes"][0]["persisted"] is False
 
 
+def test_pure_word_options_match_legacy_flags(tmp_path):
+    room_dir, _ = _room(tmp_path)
+
+    result = _run(room_dir, "rule item player 手电筒 qty 2")
+
+    assert result.ok is True
+    member = _read(room_dir)["members"][1]
+    assert member["character_card"]["equipment"][0]["name"] == "手电筒"
+    assert member["character_card"]["equipment"][0]["quantity"] == 2
+
+    weapon = _run(room_dir, "rule item player 撬棍 weapon")
+    assert weapon.ok is True
+    assert _read(room_dir)["members"][1]["character_card"]["weapons"][0]["name"] == "撬棍"
+
+
+def test_pure_word_san_yes_and_reason_still_parses_negative_number(tmp_path):
+    room_dir, _ = _room(tmp_path)
+
+    result = _run(room_dir, "rule san add player -5 yes reason 剧情")
+
+    assert result.ok is True
+    member = _read(room_dir)["members"][1]
+    assert member["character_state"]["current_san"] == 35
+    record = member["character_state"]["sanity_records"][0]
+    assert record["delta"] == -5
+    assert record["reason"] == "剧情"
+
+
+def test_pure_word_skill_change_persist_preview(tmp_path):
+    room_dir, _ = _room(tmp_path)
+
+    preview = _run(room_dir, "rule skill player 侦查 +5 reason 成长")
+    assert preview.ok is True
+    assert "预演" in preview.message
+    assert _read(room_dir)["members"][1]["character_card"]["skills"][0]["value"] == 60
+
+    result = _run(room_dir, "rule skill player 侦查 +5 yes reason 成长")
+    assert result.ok is True
+    member = _read(room_dir)["members"][1]
+    assert member["character_card"]["skills"][0]["value"] == 65
+    assert member["character_state"]["skill_changes"][0]["reason"] == "成长"
+
+
 def test_rule_check_reports_missing_skill_in_chinese(tmp_path):
     room_dir, _ = _room(tmp_path)
 

@@ -4,7 +4,7 @@
 双重把关。默认严格对齐项目约定：
 - ``rule check`` 只读结算，不改变数值；
 - ``rule item`` 与聊天 ``/item`` 使用同一实现；
-- ``rule san add|set`` 默认预演，加 ``--yes`` 才落盘。
+- ``rule san add|set`` 默认预演，加 ``yes`` 才落盘（旧 ``--yes`` 仍兼容）。
 """
 from __future__ import annotations
 
@@ -16,24 +16,55 @@ from trpg_server import room_rules, world_override
 
 ROOM_RULE_ACTOR = "房间控制台"
 
+# 纯词开关：写成 leverage / weapon / persist / yes，不再要求 -- 前缀。
+RULE_FLAG_WORDS = {
+    "leverage": "--leverage",
+    "hometown": "--hometown",
+    "remote": "--remote",
+    "profession": "--profession",
+    "push": "--push",
+    "weapon": "--weapon",
+    "persist": "--persist",
+    "apply": "--apply",
+    "yes": "--yes",
+}
+# 带值选项：写成 key value。
+RULE_VALUE_OPTIONS = {
+    "difficulty",
+    "adjustment",
+    "bonus",
+    "penalty",
+    "attitude",
+    "target-skill",
+    "mode",
+    "era",
+    "assets",
+    "qty",
+    "kind",
+    "damage",
+}
+# 尾部选项：reason / note 之后的全部内容都算它的值。
+RULE_TRAILING_OPTIONS = {"reason", "note"}
+
 ROOM_RULE_HELP = "\n".join(
     [
         "  rule                        （查看本房间规则集、生效限频与成员 SAN 概览）",
         "  rule status                 （同上，只读）",
-        "  rule check <玩家> <技能/属性> [--difficulty=normal|hard|extreme] [--adjustment=±N] [--bonus=N] [--penalty=N]（结算一次检定）",
-        "  rule social <玩家> <技能> [--attitude=supportive|neutral|opposed|hostile] [--leverage] [--target-skill=N]（房规：社交难度）",
-        "  rule combined <玩家> <技能1> <技能2> [...] [--mode=all|any] [--difficulty=normal|hard|extreme] [--bonus=N] [--penalty=N]（房规：组合检定只掷一次）",
+        "  rule check <玩家> <技能/属性> [difficulty normal|hard|extreme] [adjustment ±N] [bonus N] [penalty N]（结算一次检定）",
+        "  rule social <玩家> <技能> [attitude supportive|neutral|opposed|hostile] [leverage] [target-skill N]（房规：社交难度）",
+        "  rule combined <玩家> <技能1> <技能2> [...] [mode all|any] [difficulty normal|hard|extreme] [bonus N] [penalty N]（房规：组合检定只掷一次）",
         "  rule groupluck              （房规：由在场最低幸运者代掷团体幸运）",
-        "  rule contact <玩家> <技能> [--hometown] [--remote] [--profession] [--push] [--difficulty=normal|hard|extreme]（房规：建立熟人）",
-        "  rule economy <玩家> [金额] [--era=1920s|modern] [--assets=N]（房规：信用评级与开支预览，只读）",
-        "  rule san add <玩家> <±N> [--reason=...] [--yes]（调整 SAN；默认预演）",
-        "  rule san set <玩家> <N> [--reason=...] [--yes]（设为指定 SAN；默认预演）",
-        "  rule item <玩家> <物品名> [--qty=N] [--weapon] [--persist] [--reason=...]（追加物品/武器；--persist 才写回持久卡）",
-        "  rule skill <玩家> <技能名> <值|±N> [--persist] [--reason=...] [--yes]（修改技能；默认预演）",
-        "  rule attr <玩家> <属性> <值|±N> [--persist] [--reason=...] [--yes]（修改 STR/DEX/INT 等基础属性；默认预演）",
+        "  rule contact <玩家> <技能> [hometown] [remote] [profession] [push] [difficulty normal|hard|extreme]（房规：建立熟人）",
+        "  rule economy <玩家> [金额] [era 1920s|modern] [assets N] [apply] [reason 原因]（房规：信用评级与开支；默认只读预览，apply 登记现金写回）",
+        "  rule san add <玩家> <±N> [reason 原因] [yes]（调整 SAN；默认预演）",
+        "  rule san set <玩家> <N> [reason 原因] [yes]（设为指定 SAN；默认预演）",
+        "  rule item <玩家> <物品名> [qty N] [weapon] [persist] [reason 原因]（追加物品/武器；persist 才写回持久卡）",
+        "  rule skill <玩家> <技能名> <值|±N> [persist] [reason 原因] [yes]（修改技能；默认预演）",
+        "  rule attr <玩家> <属性> <值|±N> [persist] [reason 原因] [yes]（修改 STR/DEX/INT 等基础属性；默认预演）",
         "  rule limits                 （查看世界意志的生效频率限制）",
         "  rule limits cooldown <秒|inherit>（房间只能比站点更严格）",
         "  rule limits hourly <次数|inherit>（房间只能比站点更严格）",
+        "  参数用空格分隔的纯词；旧的 --xxx / --key=value 写法仍然可用。",
     ]
 )
 
@@ -54,18 +85,36 @@ RULE_SUBS = {
 
 
 def _parse(args: list[str]) -> tuple[list[str], set[str], dict[str, str]]:
+    """纯词参数解析。
+
+    ``rule item 玩家 手电筒 qty 2 weapon persist`` 与旧的
+    ``rule item 玩家 手电筒 --qty=2 --weapon --persist`` 等价；
+    ``-5`` 这类带符号数值始终按位置参数处理。
+    """
     positionals: list[str] = []
     flags: set[str] = set()
     options: dict[str, str] = {}
-    for token in args:
+    index = 0
+    while index < len(args):
+        token = args[index]
+        lowered = token.lower()
         if token.startswith("--") and "=" in token:
             key, _, value = token.partition("=")
             options[key[2:].lower()] = value
-        elif token.startswith("-") and not re.fullmatch(r"-\d+", token):
-            # ``-5`` 这类带符号数值是参数，不是命令行 flag。
+        elif token.startswith("-") and not re.fullmatch(r"-\d+(?:\.\d+)?", token):
             flags.add(token.lower())
+        elif lowered in RULE_FLAG_WORDS:
+            flags.add(RULE_FLAG_WORDS[lowered])
+        elif lowered in RULE_VALUE_OPTIONS:
+            if index + 1 < len(args):
+                options[lowered] = args[index + 1]
+                index += 1
+        elif lowered in RULE_TRAILING_OPTIONS:
+            options[lowered] = " ".join(args[index + 1:])
+            break
         else:
             positionals.append(token)
+        index += 1
     return positionals, flags, options
 
 
@@ -187,7 +236,7 @@ def handle_room_rule_command(
         if len(rest) < 2:
             return False, (
                 "用法：rule social <玩家> <技能> "
-                "[--attitude=supportive|neutral|opposed|hostile] [--leverage] [--target-skill=N]"
+                "[attitude supportive|neutral|opposed|hostile] [leverage] [target-skill N]"
             )
         raw_target = options.get("target-skill")
         try:
@@ -213,7 +262,7 @@ def handle_room_rule_command(
         if len(rest) < 3:
             return False, (
                 "用法：rule combined <玩家> <技能1> <技能2> [...] "
-                "[--mode=all|any] [--difficulty=normal|hard|extreme] [--bonus=N] [--penalty=N]"
+                "[mode all|any] [difficulty normal|hard|extreme] [bonus N] [penalty N]"
             )
         try:
             member = room_rules.resolve_member(info, rest[0], actor_id=actor_id, actor_rank=actor_rank)
@@ -260,8 +309,8 @@ def handle_room_rule_command(
     if sub == "contact":
         if len(rest) < 2:
             return False, (
-                "用法：rule contact <玩家> <技能> [--hometown] [--remote] [--profession] "
-                "[--push] [--difficulty=normal|hard|extreme]"
+                "用法：rule contact <玩家> <技能> [hometown] [remote] [profession] "
+                "[push] [difficulty normal|hard|extreme]"
             )
         try:
             member = room_rules.resolve_member(info, rest[0], actor_id=actor_id, actor_rank=actor_rank)
@@ -286,29 +335,51 @@ def handle_room_rule_command(
 
     if sub == "economy":
         if not rest:
-            return False, "用法：rule economy <玩家> [金额] [--era=1920s|modern] [--assets=N]"
+            return False, (
+                "用法：rule economy <玩家> [金额] [era 1920s|modern] [assets N] "
+                "[apply] [reason 原因]"
+            )
         amount = _as_number(rest[1]) if len(rest) > 1 else None
         if len(rest) > 1 and amount is None:
             return False, "金额必须是数字，例如 25 或 $12.5"
         assets = _as_number(options.get("assets")) if options.get("assets") is not None else None
         if options.get("assets") is not None and assets is None:
-            return False, "--assets 必须是数字"
+            return False, "assets 必须是数字"
+        apply_write = "--apply" in flags or "--yes" in flags
+        if apply_write and amount is None:
+            return False, "写回现金需要同时提供金额，例如：rule economy 玩家 25 apply"
+        if apply_write and assets is not None:
+            return False, "其他资产字段为自由文本，写回只覆盖现金；assets 仅用于预览"
         try:
             member = room_rules.resolve_member(info, rest[0], actor_id=actor_id, actor_rank=actor_rank)
-            result = room_rules.economy_summary(
-                member,
-                amount=amount,
-                era=str(options.get("era") or "1920s"),
-                assets=assets,
-                info=info,
-            )
+            if apply_write:
+                result = room_rules.apply_economy_expense(
+                    room_dir,
+                    info,
+                    member,
+                    amount=amount,
+                    era=str(options.get("era") or "1920s"),
+                    reason=str(options.get("reason") or ""),
+                    actor=actor or ROOM_RULE_ACTOR,
+                    actor_id=actor_id,
+                    config_dir=config_dir,
+                    room_id=room_id,
+                )
+            else:
+                result = room_rules.economy_summary(
+                    member,
+                    amount=amount,
+                    era=str(options.get("era") or "1920s"),
+                    assets=assets,
+                    info=info,
+                )
         except room_rules.RuleOperationError as exc:
             return False, exc.message
         return True, str(result.get("summary") or "计算完成")
 
     if sub == "check":
         if len(rest) < 2:
-            return False, "用法：rule check <玩家> <技能/属性> [--difficulty=hard|extreme]"
+            return False, "用法：rule check <玩家> <技能/属性> [difficulty hard|extreme]"
         try:
             member = room_rules.resolve_member(info, rest[0], actor_id=actor_id, actor_rank=actor_rank)
             result = room_rules.roll_check(
@@ -346,7 +417,7 @@ def handle_room_rule_command(
 
     if sub == "item":
         if len(rest) < 2:
-            return False, "用法：rule item <玩家> <物品名> [--qty=N] [--weapon] [--persist]"
+            return False, "用法：rule item <玩家> <物品名> [qty N] [weapon] [persist]"
         try:
             member = room_rules.resolve_member(info, rest[0], actor_id=actor_id, actor_rank=actor_rank)
             result = room_rules.add_item(
@@ -411,7 +482,7 @@ def _stat_command(
 ) -> tuple[bool, str]:
     label = "技能" if kind == "skill" else "属性"
     usage = (
-        f"用法：rule {kind} <玩家> <{label}名> <值|±N> [--persist] [--reason=...] [--yes]（默认预演）"
+        f"用法：rule {kind} <玩家> <{label}名> <值|±N> [persist] [reason 原因] [yes]（默认预演）"
     )
     if len(rest) < 3:
         return False, usage
@@ -486,7 +557,7 @@ def _stat_command(
     if _assume_yes(flags):
         return _apply()
     if confirm is None:
-        return True, preview + "\n（预演模式：确认无误后加 --yes 执行）"
+        return True, preview + "\n（预演模式：确认无误后加 yes 执行）"
     if confirm(f"确认调整 {name} 的{label}「{target_name}」?"):
         return _apply()
     return True, preview + "\n（已取消，未执行）"
@@ -528,7 +599,7 @@ def _san_command(
     actor_rank: Any,
 ) -> tuple[bool, str]:
     if len(rest) < 3 or rest[0].lower() not in {"add", "set"}:
-        return False, "用法：rule san add <玩家> <±N> | rule san set <玩家> <N>（默认预演，--yes 落盘）"
+        return False, "用法：rule san add <玩家> <±N> | rule san set <玩家> <N>（默认预演，yes 落盘）"
     mode = rest[0].lower()
     try:
         member = room_rules.resolve_member(info, rest[1], actor_id=actor_id, actor_rank=actor_rank)
@@ -562,7 +633,7 @@ def _san_command(
     if _assume_yes(flags):
         return _apply()
     if confirm is None:
-        return True, preview + "\n（预演模式：确认无误后加 --yes 执行）"
+        return True, preview + "\n（预演模式：确认无误后加 yes 执行）"
     if confirm(f"确认调整 {name} 的 SAN?"):
         return _apply()
     return True, preview + "\n（已取消，未执行）"

@@ -375,10 +375,19 @@ def apply_room_changes(actor: Any, character_id: str, changes: list[dict[str, An
     skill_cap = _bounded_int(derived.get("skillCap"), 0, 999, 100)
 
     payload: dict[str, Any] = {}
+    seen_record_keys: set[tuple[str, str]] = set()
     for change in changes or []:
         if not isinstance(change, dict):
             continue
         kind = str(change.get("type") or "").strip().lower()
+        record_id = str(change.get("record_id") or "")
+        # 同一条变更记录可能被兼容队列重复列出；物品是相对增量，重复应用会让数量翻倍。
+        # ``record_id`` 只标识来源审计记录，不同类型（如技能与 SAN 夹紧）可共用同一 ID。
+        if record_id:
+            record_key = (record_id, kind)
+            if record_key in seen_record_keys:
+                continue
+            seen_record_keys.add(record_key)
         if kind == "san":
             payload["currentSan"] = _bounded_int(change.get("value"), 0, 999, 0)
         elif kind in {"hp", "mp"}:

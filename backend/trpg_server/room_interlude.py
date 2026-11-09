@@ -107,6 +107,21 @@ def is_active(info: dict[str, Any] | None) -> bool:
     return bool(interlude_state(info).get("active"))
 
 
+def interlude_opening_prompt() -> str:
+    """进入幕间后触发 AI KP 开场点评的固定提示词。
+
+    两个入口（聊天命令与控制台命令）共用同一段提示，保证表现一致。内容来源限定为
+    已落盘的摘要 / 关键节点 / 房间日志，避免把全量聊天塞进上下文。
+    """
+    return (
+        "（系统）房间已进入幕间，剧情暂停推进。请以当前 KP / 角色口吻，先对玩家这次的表现"
+        "做一段轻松自然的点评，再简短回顾这次的剧情：你们解决了什么、发生了什么、留下了"
+        "什么后果。只能依据房间摘要、已落盘的关键节点与房间日志，不要编造没有记录的事，"
+        "也不要复述全量聊天。语气像平常说话，不要写成报告、条目或格式化清单，不要脱离角色。"
+        "说完这段开场白后停下，等待玩家提问；之后只做复盘与回答玩家对剧情的提问，不要推进剧情。"
+    )
+
+
 def snapshot(info: dict[str, Any] | None) -> dict[str, Any]:
     """给房间摘要 / 前端快照使用的只读副本。"""
     state = interlude_state(info)
@@ -240,6 +255,7 @@ def _apply_credit_events(
                 room_dir,
                 info,
                 member,
+                name=str(row.get("name") or "信用评级"),
                 value=after,
                 reason=f"幕间信用评级：{event}",
                 actor=actor,
@@ -749,8 +765,7 @@ def handle_console_command(
         except InterludeError as exc:
             return False, exc.message
         return True, (
-            "已进入幕间并完成结算。\n"
-            "在聊天框发送任意一条消息，KP 会给出点评与结语（控制台无法直接触发 AI 回合）。\n"
+            "已进入幕间并完成结算，KP 正在准备点评与结语。\n"
             + _format_state(info)
         )
 

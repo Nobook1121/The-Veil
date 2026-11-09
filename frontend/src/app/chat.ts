@@ -559,6 +559,49 @@ async function sendWorldOverrideMessage(text: string): Promise<void> {
     await sendToAI(chatInput, sendButton, { worldOverride: true });
 }
 
+/**
+ * 幕间开场：控制台命令与聊天命令共用同一个触发入口。
+ *
+ * 只把提示词塞进现有聊天主链路，不复制 AI 调用逻辑。AI 不可用或房间未启用
+ * AI KP 时仅提示，幕间状态已经落盘，不会因为没有开场白而卡住。
+ */
+async function runInterludeOpening(prompt: string): Promise<void> {
+    const text = (prompt || "").trim();
+    if (!text) return;
+    const room = getCurrentRoom();
+    if (!room || room.archived) return;
+    if (room.ai_kp_enabled === false) {
+        showNotification("房间未启用 AI KP，幕间已进入；可直接在聊天中继续复盘", "info");
+        return;
+    }
+    if (chatReadOnly) {
+        showNotification("隐身查看时不会触发 AI 点评", "info");
+        return;
+    }
+    const chatInput = document.getElementById("chatInput") as HTMLInputElement | null;
+    const sendButton = document.getElementById("sendButton") as HTMLButtonElement | null;
+    if (!chatInput || !sendButton) return;
+    const kpRole = aiRoles.find((role) => role.id === "kp") || aiRoles[0] || { id: "kp", name: "KP" };
+    pendingMessages.push({
+        sender: getCurrentUsername(),
+        content: text,
+        role: kpRole,
+        time: new Date().toLocaleTimeString(),
+    });
+    if (isAIThinking) {
+        showNotification("幕间点评已加入队列，将在当前回复完成后发送", "info");
+        return;
+    }
+    try {
+        await sendToAI(chatInput, sendButton);
+    } catch {
+        showNotification("幕间点评生成失败，房间仍处于幕间，可直接在聊天中继续复盘", "error");
+    }
+}
+window.triggerInterludeKpOpening = (prompt: string): void => {
+    void runInterludeOpening(prompt);
+};
+
 async function startScenario(): Promise<void> {
     const room = getCurrentRoom();
     if (!room || room.invisible_view) {

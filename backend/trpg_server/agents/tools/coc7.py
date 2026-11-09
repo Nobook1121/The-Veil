@@ -148,13 +148,24 @@ def execute_economy(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         return {"ok": False, "error": "coc7 economy house rule is disabled"}
     try:
         member = _member(info, arguments, context)
-        result = room_rules.economy_summary(
-            member,
-            amount=_number(arguments.get("amount")),
-            era=str(arguments.get("era") or "1920s"),
-            assets=_number(arguments.get("assets")),
-            info=info,
-        )
+        if bool(arguments.get("apply")):
+            result = room_rules.apply_economy_expense(
+                context.room_dir,
+                info,
+                member,
+                amount=_number(arguments.get("amount")),
+                era=str(arguments.get("era") or "1920s"),
+                reason=str(arguments.get("reason") or ""),
+                **_common(context),
+            )
+        else:
+            result = room_rules.economy_summary(
+                member,
+                amount=_number(arguments.get("amount")),
+                era=str(arguments.get("era") or "1920s"),
+                assets=_number(arguments.get("assets")),
+                info=info,
+            )
     except room_rules.RuleOperationError as exc:
         return {"ok": False, "error": exc.message}
     return {"ok": True, **result}
@@ -257,16 +268,23 @@ ECONOMY_TOOL = AgentTool(
     name="coc7.economy",
     description=(
         "Read a CoC7 investigator's credit rating, cash, other assets and daily spending level, and "
-        "optionally preview one expense (cash first, then other assets). Read-only: it never writes "
-        "back to the character card. Use only when the economy house rule is enabled."
+        "optionally preview one expense (cash first, then other assets). Set apply=true only when the "
+        "purchase actually happens: the tool then deducts cash and queues a pending asset change that "
+        "is merged into the persisted character card on room archive. Other assets are free text and "
+        "are not deducted numerically. Use only when the economy house rule is enabled."
     ),
     parameters={
         "type": "object",
         "properties": {
             "player_name": {"type": "string", "description": "Room member's login username or character card name."},
-            "amount": {"type": "number", "description": "Optional expense amount to preview."},
+            "amount": {"type": "number", "description": "Expense amount. Required when apply=true."},
             "era": {"type": "string", "enum": ["1920s", "modern"], "description": "Price table era."},
-            "assets": {"type": "number", "description": "Override for other assets in the expense preview."},
+            "assets": {"type": "number", "description": "Override for other assets in the read-only expense preview."},
+            "apply": {
+                "type": "boolean",
+                "description": "When true, actually settle the expense and queue the cash change for write-back.",
+            },
+            "reason": {"type": "string", "description": "Short reason recorded with the pending cash change."},
         },
         "required": ["player_name"],
     },

@@ -10,6 +10,7 @@ import logging
 
 from flask import Blueprint, current_app, request, session
 
+from trpg_server import room_interlude
 from trpg_server.responses import error_response, success_response
 from trpg_server.room_console_commands import (
     ROOM_COMMAND_WHITELIST,
@@ -210,8 +211,13 @@ def run_room_console_command(room_id):
         room_id=resolved_room_id,
         broadcast=broadcast,
     )
+    # 控制台进入幕间与聊天命令保持同样的后续动作：返回开场提示，由前端复用聊天
+    # 主链路触发一次 AI KP 回合。AI 不可用只影响开场白，不会回滚已进入的幕间。
+    extra: dict[str, object] = {}
+    if result.ok and _parse_command(command) == ("interlude", "start"):
+        extra["kp_prompt"] = room_interlude.interlude_opening_prompt()
     return success_response(
-        {"ok": result.ok, "message": result.message}, "Room command executed"
+        {"ok": result.ok, "message": result.message, **extra}, "Room command executed"
     )
 
 

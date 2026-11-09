@@ -131,9 +131,9 @@
     }
 
     async function submitCommand(command: string, extraFlag = ""): Promise<void> {
-        let response: ApiResponse<{ ok: boolean; message: string }>;
+        let response: ApiResponse<{ ok: boolean; message: string; kp_prompt?: string }>;
         try {
-            response = await TrpgApi.post<ApiResponse<{ ok: boolean; message: string }>>(
+            response = await TrpgApi.post<ApiResponse<{ ok: boolean; message: string; kp_prompt?: string }>>(
                 `/api/rooms/${encodeURIComponent(activeRoomId)}/console/command`,
                 { command: `${command}${extraFlag}` }
             );
@@ -148,6 +148,10 @@
         const result = response.data;
         // 命令结果（含 warning / error）统一显示在房间控制台内，不再弹窗提示。
         if (!result.ok) return;
+        // 控制台进入幕间后，复用聊天主链路触发一次 KP 开场点评；失败不影响幕间状态。
+        if (result.kp_prompt) {
+            global.triggerInterludeKpOpening?.(result.kp_prompt);
+        }
         // 破坏性命令缺省返回「预演」文本，确认后再带 --yes 真正执行。
         if (isDestructiveCommand(command) && result.message.includes("预演")) {
             const confirmed = await global.TrpgDialog?.confirm({

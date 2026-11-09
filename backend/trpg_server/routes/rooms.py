@@ -2810,7 +2810,7 @@ def start_room_interlude(room_id):
         {
             **_interlude_payload(info),
             "settlement": outcome.get("settlement") or {},
-            "kp_prompt": "（系统）房间已进入幕间。请只做复盘与点评：先给一段简短的点评和结语，不要推进剧情。",
+            "kp_prompt": room_interlude.interlude_opening_prompt(),
         },
         "Interlude started",
     )

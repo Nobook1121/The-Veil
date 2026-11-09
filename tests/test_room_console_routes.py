@@ -105,6 +105,35 @@ def test_post_command_executes_for_admin(tmp_path):
     assert entries[0]["source"] == "command"
 
 
+def test_post_interlude_start_returns_kp_opening_prompt(tmp_path):
+    _write_room(tmp_path, members=[
+        {
+            "user_id": 1,
+            "username": "tester",
+            "role": "ADMIN",
+            "status": "active",
+            "is_active": True,
+            "room_role": "owner",
+            "character_card": {"name": "调查员", "skills": [{"name": "信用评级", "value": 41}]},
+        }
+    ])
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client)
+
+    response = client.post(
+        "/api/rooms/r-1/console/command",
+        json={"command": "interlude start"},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["ok"] is True
+    assert "幕间" in data["kp_prompt"]
+    assert "关键节点" in data["kp_prompt"]
+
+
 def test_post_global_command_is_rejected_but_still_logged(tmp_path):
     _write_room(tmp_path)
     app = _app(tmp_path)

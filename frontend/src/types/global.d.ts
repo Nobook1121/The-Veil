@@ -61,6 +61,7 @@ interface Window {
     appendRoomConsoleEntry?: (payload?: RoomConsoleSocketPayload) => void;
     closeRoomConsole?: () => void;
     refreshCurrentRoomMembers?: () => Promise<void>;
+    triggerInterludeKpOpening?: (prompt: string) => void;
     refreshRoomNodes?: () => Promise<void>;
     refreshRoomUsage?: () => Promise<void>;
     reloadRoomMessages?: () => Promise<void>;

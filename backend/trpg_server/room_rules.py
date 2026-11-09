@@ -359,11 +359,13 @@ def _add_pending_change(state: dict[str, Any], change: dict[str, Any]) -> dict[s
 
     ``pending_persist`` 保留为粗粒度兼容标记；字段级信息在 ``pending_changes``，
     旧房间没有该队列时归档仍按 ``pending_persist`` / ``item_changes`` 兼容处理。
+    同一字段的绝对值改动只保留最新一条，避免归档时重复计数。
     """
     records = state.get(PENDING_CHANGES_KEY)
     if not isinstance(records, list):
         records = []
         state[PENDING_CHANGES_KEY] = records
+    change = _dedupe_pending_change(records, change)
     record = {
         "id": f"chg-{int(time.time() * 1000)}-{len(records)}",
         "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -1628,3 +1630,139 @@ def economy_summary(
         )
     except check_service.CheckServiceError as exc:
         raise _check_error(exc) from exc
+
+
+def apply_economy_expense(
+    room_dir: Any,
+    info: dict[str, Any],
+    member: dict[str, Any],
+    *,
+    amount: Any,
+    era: str = "1920s",
+    reason: str = "",
+    actor: Any = None,
+    actor_id: Any = None,
+    source: str = "rule",
+    config_dir: Any = None,
+    room_id: Any = None,
+) -> dict[str, Any]:
+    """结算一次信用评级消费，并把现金变化登记到统一待写回队列。
+
+    角色卡没有数值化的「其他资产」字段（``assetsText`` 是自由文本），因此写回只
+    覆盖 ``assets.cash``；其他资产仍由 KP 在叙事与卡面文本里处理。金额未超出
+    每日消费水平时不动现金，也不产生待写回项。
+    """
+    from trpg_server import check_service
+
+    card = member_card(member)
+    try:
+        result = check_service.run_room_economy(
+            member,
+            player_name=member_ref(member),
+            amount=amount,
+            era=era,
+            assets=0,
+            ruleset_id=resolve_rule_id(info),
+        )
+    except check_service.CheckServiceError as exc:
+        raise _check_error(exc) from exc
+
+    expense = result.get("expense")
+    if not isinstance(expense, dict):
+        raise RuleOperationError("缺少金额，无法结算消费", code="missing_amount")
+
+    current_assets = card.get("assets") if isinstance(card.get("assets"), dict) else {}
+    before = max(0, _as_int(current_assets.get("cash"), 0))
+    after = max(0, _as_int(expense.get("cash"), before))
+    result["applied"] = False
+    result["before_cash"] = before
+    result["after_cash"] = after
+    if after == before:
+        result["summary"] = f"{result.get('summary') or ''} 现金未发生变化，未登记写回。"
+        return result
+
+    assets = dict(current_assets)
+    assets["cash"] = after
+    card["assets"] = assets
+    record_room_changes(
+        member,
+        [
+            {
+                "type": "assets",
+                "value": {"cash": after},
+                "source": source,
+                "reason": str(reason or "信用评级消费").strip()[:200],
+            }
+        ],
+    )
+    save_room_info(room_dir, info)
+    _log(
+        room_dir,
+        info,
+        f"现金 {before} → {after}（信用评级消费）",
+        actor=actor,
+        actor_id=actor_id,
+        source=source,
+        target=member_display_name(member),
+        reason=reason,
+    )
+    result["applied"] = True
+    result["summary"] = (
+        f"{result.get('summary') or ''} 已登记现金写回：{before} → {after}"
+        "（归档时合并进角色卡）。"
+    )
+    return result
+
+
+# 绝对值类改动重复登记时只保留最新一条：归档合并写入的是最终值，重复记录没有意义。
+_ABSOLUTE_CHANGE_TYPES = {"san", "hp", "mp", "armor", "credit"}
+
+
+def _pending_change_identity(change: dict[str, Any]) -> tuple[str, str] | None:
+    """返回可去重的字段身份；相对量（物品增删）返回 ``None``，避免误合并。"""
+    kind = str(change.get("type") or "").strip().lower()
+    if kind in _ABSOLUTE_CHANGE_TYPES:
+        return (kind, "")
+    if kind == "skill":
+        return (kind, str(change.get("name") or "").strip().casefold())
+    if kind == "attr":
+        return (kind, str(change.get("key") or "").strip().casefold())
+    if kind == "assets":
+        return (kind, "")
+    return None
+
+
+def _dedupe_pending_change(records: list[Any], change: dict[str, Any]) -> dict[str, Any]:
+    """去掉同一字段的旧记录；资产变更合并为新旧键的并集。
+
+    物品 / 武器属于相对增量，只按 ``record_id`` 去重，保证多次合法购买仍会累加。
+    """
+    record_id = str(change.get("record_id") or "")
+    kind = str(change.get("type") or "").strip().lower()
+    if record_id:
+        # ``record_id`` 指向来源审计记录，同一条技能记录也可能同时产生 SAN 夹紧
+        # 变更；只在同一类型内去重，避免把不同类型的变更误删。
+        for index, row in enumerate(records):
+            if (
+                isinstance(row, dict)
+                and str(row.get("record_id") or "") == record_id
+                and str(row.get("type") or "").strip().lower() == kind
+            ):
+                records.pop(index)
+                break
+    identity = _pending_change_identity(change)
+    if identity is None:
+        return change
+    for index, row in enumerate(records):
+        if not isinstance(row, dict) or _pending_change_identity(row) != identity:
+            continue
+        if identity[0] == "assets":
+            old_value = row.get("value")
+            new_value = change.get("value")
+            if isinstance(old_value, dict) and isinstance(new_value, dict):
+                merged = dict(old_value)
+                merged.update(new_value)
+                change = {**change, "value": merged}
+        records.pop(index)
+        break
+    return change
