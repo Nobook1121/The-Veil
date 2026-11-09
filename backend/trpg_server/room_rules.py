@@ -22,8 +22,6 @@ from trpg_server.room_log import log_room_event
 
 logger = logging.getLogger(__name__)
 
-# 一次 SAN 损失达到该值时自动进入（临时）疯狂判定。
-MADNESS_LOSS_THRESHOLD = 5
 # 留痕记录上限，避免房间快照无限增长。
 MAX_RECORDS = 100
 ITEM_KINDS = {"item", "weapon"}

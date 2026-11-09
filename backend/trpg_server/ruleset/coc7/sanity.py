@@ -81,6 +81,9 @@ class Coc7Sanity:
 
     ruleset_id = "coc7"
     loss_threshold = MADNESS_LOSS_THRESHOLD
+    # 核心的骰桌展示与工具输出只读取这两个名字，不再硬编码 CoC 文案。
+    check_name = "理智"
+    madness_check_name = "疯狂表现"
 
     def __init__(self) -> None:
         self.policy = dice_policy.PercentileRollPolicy()

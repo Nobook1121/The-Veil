@@ -626,6 +626,7 @@ def _coc_check_plan(arguments: dict[str, Any]) -> dict[str, Any]:
 def _sanity_check_plan(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip()
     current: int | None = None
+    sanity = None
     try:
         member = _find_member(player_name, context)
         card = member.get("character_card") if member else None
@@ -645,7 +646,8 @@ def _sanity_check_plan(arguments: dict[str, Any], context: Any) -> dict[str, Any
         _dice_count(arguments, "bonus_dice", "bonus"),
         _dice_count(arguments, "penalty_dice", "penalty"),
     )
-    return _plan_percentile(check_name="理智", difficulty=None, target=current, bonus=bonus, penalty=penalty)
+    check_name = str(getattr(sanity, "check_name", "") or "")
+    return _plan_percentile(check_name=check_name, difficulty=None, target=current, bonus=bonus, penalty=penalty)
 
 
 _DICE_TERM_RE = re.compile(r"(\d+)d(\d+)", re.IGNORECASE)
@@ -1084,7 +1086,7 @@ def roll_sanity_check(
             "dice_roll": _dice_roll_metadata(
                 result,
                 mode="percentile",
-                check_name="理智",
+                check_name=sanity.check_name,
                 target=current,
                 roller=player_name,
             )
@@ -1192,7 +1194,7 @@ def roll_madness(
             "dice_roll": _dice_roll_metadata(
                 result,
                 mode="percentile",
-                check_name="疯狂表现",
+                check_name=sanity.madness_check_name,
                 target=_as_int(result.get("int_target"), 0),
                 roller=player_name,
             )
