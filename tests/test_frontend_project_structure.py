@@ -473,3 +473,124 @@ def test_procedural_music_pause_keeps_position_and_stops_scheduling():
     # 调度与 ducking 都必须尊重暂停，否则 tick 会在暂停期间偷偷补排。
     assert "audibleBars(): number {" in engine
     assert "if (paused) return;" in engine
+
+
+def test_external_track_player_exposes_unified_playback_controls():
+    external = (ROOT / "frontend/src/app/immersive/external-player.ts").read_text(encoding="utf-8")
+    types = (ROOT / "frontend/src/types/immersive.d.ts").read_text(encoding="utf-8")
+
+    # 统一播放器需要的播放态接口。
+    assert "export function getPlaybackState(): ImmersiveExternalPlaybackState {" in external
+    assert "export function play(): void {" in external
+    assert "export function pause(): void {" in external
+    assert "export function resume(): void {" in external
+    assert "export function next(): void {" in external
+    assert "export function prev(): void {" in external
+    assert "export function seek(seconds: number): void {" in external
+    assert "getPlaybackState: TrpgImmersiveExternalModule.getPlaybackState" in external
+    assert "next: TrpgImmersiveExternalModule.next" in external
+    assert "seek: TrpgImmersiveExternalModule.seek" in external
+    assert "interface ImmersiveExternalPlaybackState {" in types
+    assert "getPlaybackState: () => ImmersiveExternalPlaybackState;" in types
+
+    # 切歌池来自服务端下发的 alternatives，暂停/恢复不重置播放位置。
+    assert "payload.alternatives || []" in external
+    assert "element.currentTime" in external
+    assert 'mode === "paused"' in external
+    assert "pausedByUser" in external
+
+
+def test_external_player_is_wired_into_unified_player_and_not_muted_by_engine_gain():
+    player = (ROOT / "frontend/src/app/immersive/player.ts").read_text(encoding="utf-8")
+    engine = (ROOT / "frontend/src/app/immersive/music-engine.ts").read_text(encoding="utf-8")
+    external = (ROOT / "frontend/src/app/immersive/external-player.ts").read_text(encoding="utf-8")
+    immersive_index = (ROOT / "frontend/src/app/immersive/index.ts").read_text(encoding="utf-8")
+
+    # 统一播放器把外链接入同一套按钮，且不改动既有档位优先级。
+    assert 'type Primary = "procedural" | "external" | "bgm" | "none";' in player
+    assert 'primary = extUsable ? "external"' in player
+    assert 'primary = bgmUsable ? "bgm" : extUsable ? "external"' in player
+    assert "window.TrpgImmersiveExternal?.next" in player
+    assert "window.TrpgImmersiveExternal?.prev" in player
+    assert "window.TrpgImmersiveExternal?.pause" in player
+    assert "window.TrpgImmersiveExternal?.resume" in player
+    assert "window.TrpgImmersiveExternal?.seek" in player
+
+    # 外链事件本身就是引擎交接信号：否则 external 档永远不会开始。
+    assert 'payload.engine === "external"' in external
+    assert "applyEngine({" in external
+    assert 'if (engineMode === "external") {' in engine
+
+    # 回归点：external 档会把 engineGain 淡到 0，外链不能再挂到那里，否则整首静音。
+    external_input = engine.split("export function externalInput(): GainNode | null {", 1)[1].split("}", 1)[0]
+    assert "musicMuteGain" in external_input
+    assert "engineGain" not in external_input
+
+    # 切到仅 BGM / 离开房间时必须停掉外链，避免引擎销毁后还在后台播放。
+    assert "window.TrpgImmersiveExternal?.stop?.(600);" in immersive_index
+
+
+def test_hybrid_overlay_row_controls_external_track_without_taking_over_bgm():
+    player = (ROOT / "frontend/src/app/immersive/player.ts").read_text(encoding="utf-8")
+    external = (ROOT / "frontend/src/app/immersive/external-player.ts").read_text(encoding="utf-8")
+    styles = (ROOT / "frontend/src/styles/11-immersive.css").read_text(encoding="utf-8")
+
+    # 只在这个条件下出现：混合档 + BGM 仍是主轨 + 外链引擎在跑 + 外链有队列。
+    assert 'if (source !== "hybrid" || engineMode() !== "external") return null;' in player
+    assert "if (!external?.active || external.count <= 0) return null;" in player
+    assert 'overlay: overlayInfo(source, external)' in player
+    assert "overlay: null," in player
+
+    # 次要行：显示曲名，两个按钮复用外链已有接口，不新开状态。
+    assert 'id="immersivePlayerOverlay"' in player
+    assert 'id="immersivePlayerOverlayTitle"' in player
+    assert 'id="immersivePlayerOverlayPrev"' in player
+    assert 'id="immersivePlayerOverlayNext"' in player
+    assert 'byId<HTMLButtonElement>("immersivePlayerOverlayPrev")?.addEventListener("click", () => skipOverlay(-1));' in player
+    assert 'byId<HTMLButtonElement>("immersivePlayerOverlayNext")?.addEventListener("click", () => skipOverlay(1));' in player
+    assert "window.TrpgImmersiveExternal?.next?.();" in player
+    assert "window.TrpgImmersiveExternal?.prev?.();" in player
+    assert 'document.addEventListener("trpg:external-state", () => refresh());' in player
+
+    # 外链切歌/停止时主动通知，保证曲名即时更新。
+    assert "function notifyState(): void {" in external
+    assert 'document.dispatchEvent(new CustomEvent("trpg:external-state"));' in external
+
+    # 样式复用播放器 token，没有为单套主题写死颜色。
+    assert ".immersive-player-overlay {" in styles
+    assert "background: var(--theme-bg-panel-muted);" in styles
+    assert "color: var(--theme-accent-primary);" in styles
+    assert ".immersive-player-btn.is-compact {" in styles
+    assert ".immersive-player-overlay[hidden] {" in styles
+
+
+def test_external_idle_hands_engine_back_and_player_reads_engine_mode():
+    player = (ROOT / "frontend/src/app/immersive/player.ts").read_text(encoding="utf-8")
+    external = (ROOT / "frontend/src/app/immersive/external-player.ts").read_text(encoding="utf-8")
+
+    # 引擎交还的判定表：只有「引擎在 external + 队列空」才切走。
+    assert "export function nextEngineForIdle(" in external
+    table = external.split("export function nextEngineForIdle(", 1)[1].split("\n    }", 1)[0]
+    assert 'if (engine !== "external") return "keep";' in table
+    assert 'if (hasQueue) return "keep";' in table
+    assert 'return hasPlan ? "procedural" : "off";' in table
+    assert '): "keep" | "procedural" | "off" {' in table
+
+    # 收尾必须真的调用引擎切换，并让底床跟回来；restoreBed 的 external 守卫保留。
+    settle = external.split("function settleEngine(", 1)[1].split("\n    }", 1)[0]
+    assert "api?.setEngineMode?.(decision, fadeMs);" in settle
+    assert "restoreBed(Math.max(0.6, fadeMs / 1000));" in settle
+    assert 'if (window.TrpgImmersiveMusic?.currentEngineMode?.() === "external") return;' in external
+
+    # 自然播完：队列作废并交还引擎，避免停在 external 无声。
+    ended = external.split("function handleEnded(index: number): void {", 1)[1].split("\n    }", 1)[0]
+    assert "queue = [];" in ended
+    assert "settleEngine(1200);" in ended
+    # 加载失败：剔除失败曲目后同样走收尾；有备选曲时判定表会保留 external。
+    degrade = external.split("function degrade(reason: string): void {", 1)[1]
+    assert "queue = queue.filter((item) => item.track_key !== failedKey);" in degrade
+    assert "settleEngine(900);" in degrade
+
+    # 播放器主轨按「实际引擎模式」判定，不再只看 currentPlan。
+    assert 'const extUsable = Boolean(external?.active) && engine === "external";' in player
+    assert 'const procUsable = Boolean(currentPlan) && engine === "procedural";' in player

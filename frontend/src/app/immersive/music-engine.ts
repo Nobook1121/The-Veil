@@ -1431,6 +1431,10 @@ namespace TrpgImmersiveMusicModule {
         }
         // 环境音跟随场景先切换；即使配乐被静音，环境音仍按用户自己的开关工作。
         applyAmbient(normalized);
+        // 外链曲库接管时程序化配乐必须完全关闭：只记住最新谱面，切回时再按共享位置重建。
+        if (engineMode === "external") {
+            return;
+        }
         // 用户暂停期间只记住「接下来要播什么」，绝不重建总线；
         // 恢复时从暂停位置继续，因此不会出现两条总线叠在一起。
         if (paused) {
@@ -1768,7 +1772,7 @@ namespace TrpgImmersiveMusicModule {
         }
         gain.setValueAtTime(Math.max(0.0001, gain.value), now);
         gain.exponentialRampToValueAtTime(1, now + Math.min(seconds, 3));
-        if (previous === "off" && activePlan && !muted && !paused && ctx.state === "running" && !liveBuses.length) {
+        if ((previous === "off" || previous === "external") && activePlan && !muted && !paused && ctx.state === "running" && !liveBuses.length) {
             activeSignature = "";
             switchBus(activePlan, null, startPositionBars(null, syncAnchor));
         }
@@ -1814,12 +1818,13 @@ namespace TrpgImmersiveMusicModule {
     }
 
     /**
-     * 外链播放器的汇入点：引擎总增益（受 off / 静音 / 语音 ducking 控制），
-     * 不经过底床增益，所以压低底床不会连带压低外链曲目。
+     * 外链播放器的汇入点：配乐静音增益（受「配乐静音」与语音 ducking 控制），
+     * 不经过引擎总增益——external 档会把引擎总增益淡到 0 来关掉程序化配乐，
+     * 若外链也挂在那里就会被一起静音。off 档由外链播放器自身 stop 保证安静。
      */
     export function externalInput(): GainNode | null {
         const ctx = ensureContext();
-        return ctx && engineGain ? engineGain : null;
+        return ctx && musicMuteGain ? musicMuteGain : null;
     }
 
     export function barTiming(): { barSeconds: number; nextBarIn: number; positionBars: number } | null {

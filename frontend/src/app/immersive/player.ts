@@ -7,13 +7,14 @@
  * - 播放器状态归本地（每个玩家自己的暂停/进度/切歌），服务端的共享小节位置只在
  *   「正常播放」时用于对齐；用户手动操作不会被立即回拉，下一次叙事配乐事件才重新对齐。
  * - 音源交接规则（见 resolveSnapshot）：
- *   realtime → 只有程序化配乐；bgm → 只有 BGM；hybrid → BGM 当底、程序化叠在上面。
- *   切换档位由沉浸模块统一 setSuppressed/setEngineMode，播放器只负责显示实际在响的那一轨。
+ *   realtime → 程序化配乐（外链曲库接管时显示外链）；bgm → 只有 BGM；
+ *   hybrid → BGM 当底、程序化/外链叠在上面。切换档位由沉浸模块统一
+ *   setSuppressed/setEngineMode，播放器只负责显示实际在响的那一轨。
  * - 程序化配乐没有音轨：不提供拖动进度，只提供暂停与「下一段」。
  */
 namespace TrpgImmersivePlayerModule {
     type MusicSource = "realtime" | "bgm" | "hybrid";
-    type Primary = "procedural" | "bgm" | "none";
+    type Primary = "procedural" | "external" | "bgm" | "none";
 
     interface Snapshot {
         visible: boolean;
@@ -27,6 +28,8 @@ namespace TrpgImmersivePlayerModule {
         position: number;
         duration: number;
         canSeek: boolean;
+        /** 混合档下 BGM 为主轨时，外链叠加层的次要控制行；其它情况为 null。 */
+        overlay: { title: string; index: number; count: number } | null;
     }
 
     const PROFILE_LABEL: Record<string, string> = {
@@ -78,6 +81,36 @@ namespace TrpgImmersivePlayerModule {
         }
     }
 
+    function externalState(): ImmersiveExternalPlaybackState | null {
+        try {
+            return window.TrpgImmersiveExternal?.getPlaybackState?.() ?? null;
+        } catch {
+            return null;
+        }
+    }
+
+    function engineMode(): string {
+        try {
+            return window.TrpgImmersiveMusic?.currentEngineMode?.() || "";
+        } catch {
+            return "";
+        }
+    }
+
+    /**
+     * 混合档的次要控制行：只有「BGM 仍是主轨 + 外链引擎真的在跑 + 外链有队列」时出现。
+     * 纯 BGM / 纯外链档都返回 null，避免和第二套控件重复。
+     */
+    function overlayInfo(source: MusicSource, external: ImmersiveExternalPlaybackState | null): Snapshot["overlay"] {
+        if (source !== "hybrid" || engineMode() !== "external") return null;
+        if (!external?.active || external.count <= 0) return null;
+        return {
+            title: external.title || "外链曲目",
+            index: external.index,
+            count: external.count,
+        };
+    }
+
     function proceduralPaused(): boolean {
         try {
             return Boolean(window.TrpgImmersiveMusic?.isPaused?.());
@@ -107,15 +140,23 @@ namespace TrpgImmersivePlayerModule {
         const source = musicSource();
         const bgm = bgmState();
         const currentPlan = plan();
+        const external = externalState();
         const roomId = currentRoomId();
+        const engine = engineMode();
         const bgmUsable = Boolean(bgm?.active);
-        const procUsable = Boolean(currentPlan);
+        // 外链/程序化都以「实际引擎模式」为准，而不是只看各自有没有曲目：
+        // 引擎停在 external 时程序化总线已被淡到 0，谱面还在但不会出声，
+        // 只看 currentPlan 会把静音显示成「在播」。
+        const extUsable = Boolean(external?.active) && engine === "external";
+        const procUsable = Boolean(currentPlan) && engine === "procedural";
 
         let primary: Primary = "none";
-        // 「仅 BGM」档下程序化引擎是关的：没有 BGM 就不该假装在放实时配乐。
+        // 档位优先级保持原样：bgm 档只认 BGM；realtime 优先外链（引擎切到外链时
+        // 程序化配乐已经停播），否则程序化；hybrid 以 BGM 为主轨，BGM 为空时
+        // 才显示外链/程序化，避免接入新音源改变既有档位行为。
         if (source === "bgm") primary = bgmUsable ? "bgm" : "none";
-        else if (source === "realtime") primary = procUsable ? "procedural" : "none";
-        else primary = bgmUsable ? "bgm" : procUsable ? "procedural" : "none";
+        else if (source === "realtime") primary = extUsable ? "external" : procUsable ? "procedural" : "none";
+        else primary = bgmUsable ? "bgm" : extUsable ? "external" : procUsable ? "procedural" : "none";
 
         const visible = Boolean(roomId) && primary !== "none";
         if (primary === "bgm" && bgm) {
@@ -128,7 +169,7 @@ namespace TrpgImmersivePlayerModule {
                 title: bgm.title || "未命名曲目",
                 subtitle: hybrid
                     ? [
-                        procUsable ? "实时配乐叠加" : "实时配乐未在播放",
+                        extUsable ? "外链曲库叠加" : procUsable ? "实时配乐叠加" : "实时配乐未在播放",
                         `${bgm.index + 1}/${bgm.count}`,
                         modeLabel(bgm.mode),
                     ].join(" · ")
@@ -138,6 +179,27 @@ namespace TrpgImmersivePlayerModule {
                 position: bgm.current,
                 duration: bgm.duration,
                 canSeek: bgm.duration > 0,
+                overlay: overlayInfo(source, external),
+            };
+        }
+        if (primary === "external" && external) {
+            return {
+                visible,
+                source,
+                primary,
+                badge: source === "hybrid" ? "混合 · 外链曲库" : "外链曲库",
+                title: external.title || "外链曲目",
+                subtitle: [
+                    external.artist,
+                    `${external.index + 1}/${external.count}`,
+                    "外链曲库",
+                ].filter(Boolean).join(" · "),
+                playing: external.playing,
+                draggable: true,
+                position: external.position,
+                duration: external.duration,
+                canSeek: external.duration > 0,
+                overlay: null,
             };
         }
         if (primary === "procedural") {
@@ -156,6 +218,7 @@ namespace TrpgImmersivePlayerModule {
                 position: 0,
                 duration: 0,
                 canSeek: false,
+                overlay: null,
             };
         }
         return {
@@ -170,6 +233,7 @@ namespace TrpgImmersivePlayerModule {
             position: 0,
             duration: 0,
             canSeek: false,
+            overlay: null,
         };
     }
 
@@ -207,6 +271,19 @@ namespace TrpgImmersivePlayerModule {
                         <i class="fa fa-step-forward" aria-hidden="true"></i>
                     </button>
                 </div>
+            </div>
+            <div class="immersive-player-overlay" id="immersivePlayerOverlay" hidden>
+                <span class="immersive-player-overlay-label">外链</span>
+                <span class="immersive-player-overlay-title" id="immersivePlayerOverlayTitle">—</span>
+                <span class="immersive-player-overlay-count" id="immersivePlayerOverlayCount"></span>
+                <span class="immersive-player-overlay-actions">
+                    <button type="button" class="immersive-player-btn is-compact" id="immersivePlayerOverlayPrev" title="外链上一首" aria-label="外链上一首">
+                        <i class="fa fa-step-backward" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="immersive-player-btn is-compact" id="immersivePlayerOverlayNext" title="外链下一首" aria-label="外链下一首">
+                        <i class="fa fa-step-forward" aria-hidden="true"></i>
+                    </button>
+                </span>
             </div>
             <div class="immersive-player-progress">
                 <input type="range" id="immersivePlayerRange" class="immersive-player-range" min="0" max="1000" step="1" value="0" aria-label="播放进度">
@@ -252,6 +329,8 @@ namespace TrpgImmersivePlayerModule {
         byId<HTMLButtonElement>("immersivePlayerToggle")?.addEventListener("click", () => togglePlayback());
         byId<HTMLButtonElement>("immersivePlayerPrev")?.addEventListener("click", () => skip(-1));
         byId<HTMLButtonElement>("immersivePlayerNext")?.addEventListener("click", () => skip(1));
+        byId<HTMLButtonElement>("immersivePlayerOverlayPrev")?.addEventListener("click", () => skipOverlay(-1));
+        byId<HTMLButtonElement>("immersivePlayerOverlayNext")?.addEventListener("click", () => skipOverlay(1));
 
         const range = byId<HTMLInputElement>("immersivePlayerRange");
         if (range) {
@@ -263,7 +342,12 @@ namespace TrpgImmersivePlayerModule {
                 dragging = false;
                 const duration = Number(range.dataset.duration || 0);
                 if (duration > 0) {
-                    window.TrpgBgm?.seek?.((Number(range.value) / 1000) * duration);
+                    const seconds = (Number(range.value) / 1000) * duration;
+                    if (resolveSnapshot().primary === "external") {
+                        window.TrpgImmersiveExternal?.seek?.(seconds);
+                    } else {
+                        window.TrpgBgm?.seek?.(seconds);
+                    }
                 }
             };
             range.addEventListener("pointerdown", startDrag);
@@ -282,6 +366,7 @@ namespace TrpgImmersivePlayerModule {
 
         document.addEventListener("trpg:bgm-state", () => refresh());
         document.addEventListener("trpg:music-state", () => refresh());
+        document.addEventListener("trpg:external-state", () => refresh());
         window.addEventListener("resize", () => {
             const nextHost = isNarrowLayout() ? "immersiveChatStageHost" : "immersiveSidebarStageHost";
             if (nextHost !== mountedHostId) mount();
@@ -293,12 +378,21 @@ namespace TrpgImmersivePlayerModule {
         if (snapshot.primary === "bgm") {
             if (snapshot.playing) {
                 window.TrpgBgm?.pause?.();
-                // 混合档：暂停要连同叠加的实时配乐一起停，避免只停一半。
-                if (snapshot.source === "hybrid") window.TrpgImmersiveMusic?.pause?.();
+                // 混合档：暂停要连同叠加的实时配乐/外链一起停，避免只停一半。
+                if (snapshot.source === "hybrid") {
+                    window.TrpgImmersiveMusic?.pause?.();
+                    window.TrpgImmersiveExternal?.pause?.();
+                }
             } else {
                 window.TrpgBgm?.play?.();
-                if (snapshot.source === "hybrid") window.TrpgImmersiveMusic?.resume?.();
+                if (snapshot.source === "hybrid") {
+                    window.TrpgImmersiveMusic?.resume?.();
+                    window.TrpgImmersiveExternal?.resume?.();
+                }
             }
+        } else if (snapshot.primary === "external") {
+            if (snapshot.playing) window.TrpgImmersiveExternal?.pause?.();
+            else window.TrpgImmersiveExternal?.resume?.();
         } else if (snapshot.primary === "procedural") {
             const music = window.TrpgImmersiveMusic;
             if (snapshot.playing) {
@@ -316,9 +410,20 @@ namespace TrpgImmersivePlayerModule {
         if (snapshot.primary === "bgm") {
             if (direction >= 0) window.TrpgBgm?.next?.();
             else window.TrpgBgm?.prev?.();
+        } else if (snapshot.primary === "external") {
+            if (direction >= 0) window.TrpgImmersiveExternal?.next?.();
+            else window.TrpgImmersiveExternal?.prev?.();
         } else if (snapshot.primary === "procedural") {
             window.TrpgImmersiveMusic?.skipSection?.(direction);
         }
+    }
+
+    /** 混合档的次要行：只切外链叠加层，不碰主轨 BGM。 */
+    function skipOverlay(direction: number): void {
+        if (!resolveSnapshot().overlay) return;
+        if (direction >= 0) window.TrpgImmersiveExternal?.next?.();
+        else window.TrpgImmersiveExternal?.prev?.();
+        refresh();
     }
 
     export function refresh(): void {
@@ -349,6 +454,20 @@ namespace TrpgImmersivePlayerModule {
         if (title) title.textContent = snapshot.title;
         const sub = byId<HTMLElement>("immersivePlayerSub");
         if (sub) sub.textContent = snapshot.subtitle;
+
+        // 混合档次要行：外链叠加层（曲名 + 上一首/下一首），没有队列时整行隐藏。
+        const overlay = byId<HTMLElement>("immersivePlayerOverlay");
+        if (overlay) {
+            overlay.hidden = !snapshot.overlay;
+            if (snapshot.overlay) {
+                const overlayTitle = byId<HTMLElement>("immersivePlayerOverlayTitle");
+                if (overlayTitle) overlayTitle.textContent = snapshot.overlay.title;
+                const overlayCount = byId<HTMLElement>("immersivePlayerOverlayCount");
+                if (overlayCount) {
+                    overlayCount.textContent = `${snapshot.overlay.index + 1}/${snapshot.overlay.count}`;
+                }
+            }
+        }
 
         const toggle = byId<HTMLButtonElement>("immersivePlayerToggle");
         const icon = toggle?.querySelector<HTMLElement>("i") ?? null;

@@ -3,16 +3,19 @@
  *
  * 关键约束（比「能播」更重要）：
  *
- * 1. **底床永不停**：外链只做「叠上去」的一层；加载失败、未就绪、播放出错时
- *    立刻把底床抬回 1，而不是先静音再补救；
+ * 1. **底床可让位，但必须交还**：外链生效期间程序化底床（引擎总增益）被淡到静音，
+ *    外链是叠加层而不是替代品；加载失败时若有旧曲仍在就继续放旧曲，否则由
+ *    `settleEngine` 把引擎交还（有谱面 → `procedural` 重建底床，无谱面 → `off`），
+ *    绝不允许「引擎停在 external 但什么都不响」；
  * 2. **等功率交叉淡化**：底床用 cos 曲线下降、外链用 sin 曲线上升，功率之和恒定；
  * 3. **切换点对齐小节/乐句边界**：从 `TrpgImmersiveMusic.barTiming()` 取当前小节
  *    时基，优先对齐到最近的乐句边界（最多等 4 小节），否则等下一条小节线；
  * 4. **不阻塞主线程**：所有网络等待都是 `canplay` 事件 + 超时，失败仅降级日志；
  * 5. **不硬切**：引擎 `off` / 切回程序化 / 换曲都用淡化，暂停动作放在淡化之后。
  *
- * 音频图：`<audio> → elementGain → engineGain → musicMuteGain → 限幅/EQ/主输出`。
- * 外链不经过底床增益，所以压低底床不会压低外链；两者都受引擎总增益与配乐静音控制。
+ * 音频图：`<audio> → elementGain → musicMuteGain → 限幅/EQ/主输出`。
+ * 外链刻意绕开 `engineGain`：external 档会把引擎总增益淡到 0 来关掉程序化配乐，
+ * 挂在那里会被一起静音。两路都受「配乐静音」与语音 ducking 控制。
  */
 namespace TrpgImmersiveExternalModule {
     const LOAD_TIMEOUT_MS = 7000;
@@ -20,7 +23,7 @@ namespace TrpgImmersiveExternalModule {
     const LOOP_MIN_DURATION = 12;
     const DEFAULT_FADE_MS = 4200;
 
-    type ExternalMode = "idle" | "loading" | "playing";
+    type ExternalMode = "idle" | "loading" | "playing" | "paused";
 
     let elements: HTMLAudioElement[] | null = null;
     let gains: GainNode[] | null = null;
@@ -32,6 +35,13 @@ namespace TrpgImmersiveExternalModule {
     /** 正在出声的曲目，用于「新曲加载失败时继续放旧的」而不是直接掉回底床。 */
     let playingTrack: ImmersiveExternalTrack | null = null;
     let mode: ExternalMode = "idle";
+    /** 当前可用曲目队列（服务端选中的曲目 + alternatives），用于统一播放器切歌。 */
+    let queue: ImmersiveExternalTrack[] = [];
+    let queueIndex = 0;
+    /** 用户主动暂停：与「切歌/降级导致的停止」区分，恢复时从当前播放位置继续。 */
+    let pausedByUser = false;
+    /** 最近一次外链事件；本地切歌时复用它携带的淡入时长与乐句参数。 */
+    let lastPayload: ImmersiveExternalEvent | null = null;
     /** 每次换曲/停止都递增；异步回调据此丢弃过期结果。 */
     let generation = 0;
     let pendingTimers: number[] = [];
@@ -74,6 +84,55 @@ namespace TrpgImmersiveExternalModule {
         return Math.max(minimum, Math.min(maximum, value));
     }
 
+    /** 服务端只保证「当前曲目」，alternatives 是本地的切歌池；按 track_key 去重。 */
+    function buildQueue(payload: ImmersiveExternalEvent): ImmersiveExternalTrack[] {
+        const list: ImmersiveExternalTrack[] = [];
+        const seen = new Set<string>();
+        const candidates = [payload.track, ...(payload.alternatives || [])];
+        for (const item of candidates) {
+            if (!item || !item.track_key || !item.stream_path || seen.has(item.track_key)) continue;
+            seen.add(item.track_key);
+            list.push(item);
+        }
+        return list;
+    }
+
+    function queueIndexOf(trackKey: string): number {
+        if (!trackKey) return -1;
+        return queue.findIndex((item) => item.track_key === trackKey);
+    }
+
+    function currentElement(): HTMLAudioElement | null {
+        const index = playingIndex >= 0 ? playingIndex : activeIndex;
+        return elements?.[index] ?? null;
+    }
+
+    function trackDuration(track: ImmersiveExternalTrack | null, element: HTMLAudioElement | null): number {
+        const fromElement = Number(element?.duration);
+        if (Number.isFinite(fromElement) && fromElement > 0) return fromElement;
+        const fromTrack = Number(track?.duration_ms);
+        return Number.isFinite(fromTrack) && fromTrack > 0 ? fromTrack / 1000 : 0;
+    }
+
+    /**
+     * 自然播完（循环调度未生效时的兜底）。
+     * 没有自动续播，所以队列到这里就作废：清空后交给 `settleEngine`，
+     * 否则引擎会永久停在 external、总线已淡到 0，变成「显示在播但没声音」。
+     */
+    function handleEnded(index: number): void {
+        if (playingIndex !== index) return;
+        lastReason = "track_ended";
+        mode = "idle";
+        playingIndex = -1;
+        playingTrack = null;
+        currentTrack = null;
+        queue = [];
+        queueIndex = 0;
+        setAttribution(null);
+        settleEngine(1200);
+        notifyState();
+    }
+
     function clearTimers(): void {
         for (const timer of pendingTimers) window.clearTimeout(timer);
         pendingTimers = [];
@@ -81,6 +140,15 @@ namespace TrpgImmersiveExternalModule {
 
     function later(handler: () => void, delayMs: number): void {
         pendingTimers.push(window.setTimeout(handler, Math.max(0, delayMs)));
+    }
+
+    /** 通知统一播放器刷新外链叠加层（曲名/序号），不引入第二套状态。 */
+    function notifyState(): void {
+        try {
+            document.dispatchEvent(new CustomEvent("trpg:external-state"));
+        } catch {
+            // 忽略事件派发失败。
+        }
     }
 
     function setAttribution(track: ImmersiveExternalTrack | null, suffix = ""): void {
@@ -223,11 +291,43 @@ namespace TrpgImmersiveExternalModule {
 
     /**
      * 外链结束/失败时是否把程序化底床抬回来。
-     * 外链块生效期间程序化配乐已关闭，不保留底床，因此保持静音并依赖可见提示。
+     * 外链块生效期间程序化配乐已关闭（服务端 `fallback=off` 是既定策略），
+     * 所以 external 模式下保持静音本身是对的；收尾不在这里做，而是先由
+     * `settleEngine` 把引擎切走，再让底床抬回。
      */
     function restoreBed(seconds: number): void {
         if (window.TrpgImmersiveMusic?.currentEngineMode?.() === "external") return;
         rampBed(1, seconds, true);
+    }
+
+    /**
+     * 外链退到 idle 后引擎该归谁。判定表固定，便于状态机测试直接核对：
+     * - 引擎本来就不在 external：不动；
+     * - 队列里还有备选曲：保留 external，播放器仍可继续切歌；
+     * - 队列空了：有可用谱面回 `procedural`，否则显式 `off`——绝不停在 external。
+     */
+    export function nextEngineForIdle(
+        engine: string,
+        hasPlan: boolean,
+        hasQueue: boolean,
+    ): "keep" | "procedural" | "off" {
+        if (engine !== "external") return "keep";
+        if (hasQueue) return "keep";
+        return hasPlan ? "procedural" : "off";
+    }
+
+    /** 按判定表把引擎从 external 交还，并让底床跟着回来。 */
+    function settleEngine(fadeMs = 1400): void {
+        const api = window.TrpgImmersiveMusic;
+        const decision = nextEngineForIdle(
+            api?.currentEngineMode?.() || "",
+            Boolean(api?.currentPlan?.()),
+            queue.length > 0,
+        );
+        if (decision === "keep") return;
+        api?.setEngineMode?.(decision, fadeMs);
+        // 引擎已离开 external，restoreBed 的守卫不再拦截，底床这时才抬得回来。
+        restoreBed(Math.max(0.6, fadeMs / 1000));
     }
 
     /** 外链接入最多等这么久：4s 淡入本身已跨越大半个慢速小节，再等更久只会显得迟滞。 */
@@ -256,7 +356,9 @@ namespace TrpgImmersiveExternalModule {
      * 降级：只丢弃「没接上的那一首」。
      *
      * - 如果已有外链在播，保持它和压低的底床，用户听不到断档；
-     * - 如果没有，抬回底床并清空署名；
+     * - 如果没有，清空署名，并把这一首从切歌池剔除；
+     * - 队列随之清空时交给 `settleEngine` 收尾（procedural / off），
+     *   还剩备选曲时保留 external，播放器可以继续切歌；
      * - 任何情况下都不把播放器推进错误态，也不阻塞。
      */
     function degrade(reason: string): void {
@@ -274,18 +376,29 @@ namespace TrpgImmersiveExternalModule {
             }
         }
         if (keep >= 0 && playingTrack) {
-            // 旧曲仍在：恢复「播放中」状态并续上循环调度。
-            mode = "playing";
+            // 旧曲仍在：恢复原有状态（用户暂停时保持暂停），并续上循环调度。
+            mode = pausedByUser ? "paused" : "playing";
             currentTrack = playingTrack;
-            setAttribution(playingTrack, "播放中");
+            setAttribution(playingTrack, pausedByUser ? "已暂停" : "播放中");
+            notifyState();
+            if (pausedByUser) {
+                return;
+            }
+            // 暂停加载期间可能已经把旧元素停了：恢复「播放中」时必须重新 play。
+            void graph?.elements[keep]?.play().catch(() => undefined);
             scheduleLoop(token);
             return;
         }
+        const failedKey = currentTrack?.track_key || "";
         mode = "idle";
         currentTrack = null;
         playingTrack = null;
         setAttribution(null);
-        restoreBed(0.9);
+        // 接不上的这一首留在队列里只会让引擎被判定为「还有曲目」而拒绝交还。
+        if (failedKey) queue = queue.filter((item) => item.track_key !== failedKey);
+        queueIndex = Math.min(queueIndex, Math.max(0, queue.length - 1));
+        settleEngine(900);
+        notifyState();
         later(() => {
             if (generation !== token || mode !== "idle") return;
             if (elements) {
@@ -316,7 +429,12 @@ namespace TrpgImmersiveExternalModule {
         playingTrack = null;
         currentTrack = null;
         lastReason = "stopped";
+        pausedByUser = false;
+        queue = [];
+        queueIndex = 0;
+        lastPayload = null;
         setAttribution(null);
+        notifyState();
         later(() => {
             if (generation !== token) return;
             if (elements) {
@@ -405,9 +523,11 @@ namespace TrpgImmersiveExternalModule {
         }
         mode = "loading";
         currentTrack = next;
+        queueIndex = Math.max(0, queueIndexOf(next.track_key));
         lastReason = "";
         lastError = "";
         setAttribution(next, "接入中");
+        notifyState();
 
         element.pause();
         element.src = next.stream_path;
@@ -433,6 +553,18 @@ namespace TrpgImmersiveExternalModule {
         token: number,
     ): Promise<void> {
         if (token !== generation || !gains || !sourceCtx) return;
+        // 用户已暂停时只准备好曲目（预加载完成、停在 0 秒），恢复时直接播放。
+        if (pausedByUser) {
+            element.pause();
+            element.onended = () => handleEnded(index);
+            activeIndex = index;
+            playingIndex = index;
+            playingTrack = track;
+            currentTrack = track;
+            mode = "paused";
+            setAttribution(track, "已暂停");
+            return;
+        }
         try {
             await element.play();
         } catch {
@@ -463,17 +595,8 @@ namespace TrpgImmersiveExternalModule {
         }
         const targetGain = gains[index];
         if (targetGain) rampGain(targetGain, 1, fade, true, sourceCtx);
-        element.onended = () => {
-            if (token !== generation) return;
-            // 循环调度失败时的兜底：轨道自然结束后退回底床，不报错、不静音。
-            lastReason = "track_ended";
-            mode = "idle";
-            if (playingIndex === index) playingIndex = -1;
-            playingTrack = null;
-            restoreBed(1.4);
-            setAttribution(null);
-            currentTrack = null;
-        };
+        // 用「当前出声下标」而非 token 判断，暂停/恢复导致 generation 变化后依然有效。
+        element.onended = () => handleEnded(index);
         activeIndex = index;
         playingIndex = index;
         playingTrack = track;
@@ -489,18 +612,39 @@ namespace TrpgImmersiveExternalModule {
     export function applyEvent(payload: ImmersiveExternalEvent | null | undefined): void {
         if (!payload) return;
         if (payload.status === "disabled") {
-            stop(1200);
+            // 外链块被关掉：把引擎交还给程序化/关闭，并停掉外链（stop 的淡出不受影响）。
+            if (payload.engine === "procedural" || payload.engine === "off") {
+                applyEngine({ room_id: payload.room_id || "", engine: payload.engine, fade_ms: 1200 });
+            } else {
+                stop(1200);
+            }
             return;
+        }
+        if (payload.status === "selected" && payload.track && payload.engine === "external") {
+            // 服务端没有独立的 engine 广播，外链事件本身就是交接信号：
+            // 先把引擎切到 external（程序化总线淡出并停止），否则下面的守卫会拒绝开始。
+            if (window.TrpgImmersiveMusic?.currentEngineMode?.() !== "external") {
+                applyEngine({
+                    room_id: payload.room_id || "",
+                    engine: "external",
+                    fade_ms: payload.fade_ms || payload.crossfade_ms || DEFAULT_FADE_MS,
+                });
+            }
         }
         if (payload.status !== "selected" || !payload.track) {
             lastReason = payload.reason || payload.status;
             // 已在播放的曲子继续播；空结果/降级不打断当前氛围。
-            if (mode !== "playing") setAttribution(null);
+            if (mode !== "playing" && mode !== "paused") setAttribution(null);
             return;
         }
         const engine = window.TrpgImmersiveMusic?.currentEngineMode?.();
         if (engine === "procedural" || engine === "off") return;
-        if (currentTrack && currentTrack.track_key === payload.track.track_key && mode === "playing") {
+        // 队列来自「当前曲目 + alternatives」，本地可据此实现上一首/下一首。
+        queue = buildQueue(payload);
+        queueIndex = Math.max(0, queueIndexOf(payload.track.track_key));
+        lastPayload = payload;
+        if (currentTrack && currentTrack.track_key === payload.track.track_key
+            && (mode === "playing" || mode === "paused" || mode === "loading")) {
             return;
         }
         void beginTrack(payload.track, payload);
@@ -523,12 +667,194 @@ namespace TrpgImmersiveExternalModule {
         stop(fadeMs);
     }
 
+    /** 统一播放器读取的播放态；没有曲目或已停止时 active=false。 */
+    export function getPlaybackState(): ImmersiveExternalPlaybackState {
+        const track = playingTrack || currentTrack;
+        const element = currentElement();
+        const index = track ? queueIndexOf(track.track_key) : -1;
+        return {
+            active: Boolean(track) && mode !== "idle",
+            playing: mode === "playing",
+            paused: mode === "paused" || (pausedByUser && mode === "loading"),
+            title: track?.title || "",
+            artist: track?.artist || "",
+            index: index >= 0 ? index : Math.max(0, queueIndex),
+            count: queue.length,
+            position: element && Number.isFinite(element.currentTime) ? element.currentTime : 0,
+            duration: trackDuration(track, element),
+            trackKey: track?.track_key || "",
+        };
+    }
+
+    export function hasQueue(): boolean {
+        return queue.length > 0 && mode !== "idle";
+    }
+
+    /**
+     * 暂停：记下暂停标记、停掉循环调度，并让增益淡出后暂停元素。
+     * 不重置 currentTime，恢复时从原位置继续；引擎处于 external 时底床本来就已关闭。
+     */
+    export function pause(): void {
+        if (pausedByUser || mode === "idle") return;
+        pausedByUser = true;
+        // 加载中不要清定时器/递增 generation：让 startPlayback 正常跑完后停在暂停态，
+        // 否则加载流程会被取消，播放器永久卡在 loading。
+        if (mode === "loading") {
+            // 旧曲可能仍在交叉淡出：把它一起压下去，否则「暂停」看起来没生效。
+            const oldIndex = playingIndex;
+            const oldElement = oldIndex >= 0 ? elements?.[oldIndex] ?? null : null;
+            const oldGain = oldIndex >= 0 ? gains?.[oldIndex] ?? null : null;
+            if (oldElement && oldGain && sourceCtx) {
+                rampGain(oldGain, 0.0001, 0.35, false, sourceCtx);
+                later(() => {
+                    try {
+                        oldElement.pause();
+                    } catch {
+                        // 忽略已销毁元素。
+                    }
+                }, 420);
+            }
+            return;
+        }
+        clearTimers();
+        generation += 1;
+        const token = generation;
+        if (mode !== "playing") return;
+        mode = "paused";
+        setAttribution(playingTrack || currentTrack, "已暂停");
+        notifyState();
+        const graph = elements && gains && sourceCtx ? { elements, gains, ctx: sourceCtx } : null;
+        if (graph) {
+            for (const gain of graph.gains) rampGain(gain, 0.0001, 0.45, false, graph.ctx);
+        }
+        later(() => {
+            if (generation !== token) return;
+            for (const element of elements ?? []) {
+                try {
+                    element.pause();
+                } catch {
+                    // 忽略已销毁元素。
+                }
+            }
+        }, 540);
+    }
+
+    /** 恢复：从暂停位置继续播放当前元素，并重新挂上循环调度。 */
+    export function resume(): void {
+        if (!pausedByUser) return;
+        pausedByUser = false;
+        // 加载中恢复：不要在这里重播旧曲，让 startPlayback 就绪后直接开始新曲。
+        if (mode === "loading") {
+            setAttribution(currentTrack, "接入中");
+            return;
+        }
+        clearTimers();
+        const element = currentElement();
+        const track = playingTrack || currentTrack;
+        if (!element || !track || !gains || !sourceCtx) {
+            mode = "idle";
+            return;
+        }
+        try {
+            window.TrpgImmersiveMusic?.unlock?.();
+        } catch {
+            // 解锁失败时 play() 会给出明确结果。
+        }
+        const token = generation + 1;
+        generation = token;
+        const index = playingIndex >= 0 ? playingIndex : activeIndex;
+        void element.play().then(() => {
+            if (token !== generation || pausedByUser) return;
+            mode = "playing";
+            const gain = gains?.[index];
+            if (gain && sourceCtx) rampGain(gain, 1, 0.5, true, sourceCtx);
+            setAttribution(track, "播放中");
+            notifyState();
+            scheduleLoop(token);
+        }).catch(() => {
+            if (token !== generation) return;
+            lastError = "play_rejected";
+            pausedByUser = true;
+            mode = "paused";
+            setAttribution(track, "已暂停");
+            notifyState();
+        });
+    }
+
+    /** 与统一播放器的“播放”语义对齐：外部只需恢复。 */
+    export function play(): void {
+        resume();
+    }
+
+    export function toggle(): void {
+        if (pausedByUser) resume();
+        else pause();
+    }
+
+    function step(direction: number): void {
+        if (queue.length < 2) return;
+        const index = (queueIndex + (direction >= 0 ? 1 : -1) + queue.length) % queue.length;
+        const track = queue[index];
+        if (!track) return;
+        queueIndex = index;
+        const payload: ImmersiveExternalEvent = lastPayload
+            ? { ...lastPayload, track, fade_ms: 1200, crossfade_ms: 1200 }
+            : {
+                ok: true,
+                status: "selected",
+                engine: "external",
+                fallback: "off",
+                track,
+                fade_ms: 1200,
+                crossfade_ms: 1200,
+                phrase_bars: 8,
+            };
+        lastPayload = payload;
+        void beginTrack(track, payload);
+    }
+
+    export function next(): void {
+        step(1);
+    }
+
+    export function prev(): void {
+        step(-1);
+    }
+
+    /** 拖动进度：外链有真实音轨，可以直接 seek；循环定时器要按新位置重排。 */
+    export function seek(seconds: number): void {
+        const element = currentElement();
+        const track = playingTrack || currentTrack;
+        if (!element || !track) return;
+        const duration = trackDuration(track, element);
+        if (!(duration > 0)) return;
+        const target = clamp(Number(seconds) || 0, 0, Math.max(0, duration - 0.25));
+        try {
+            element.currentTime = target;
+        } catch {
+            return;
+        }
+        clearTimers();
+        if (mode === "playing") {
+            generation += 1;
+            scheduleLoop(generation);
+        }
+    }
+
     export function state(): Record<string, unknown> {
+        const playback = getPlaybackState();
         return {
             mode,
+            paused: playback.paused,
             reason: lastReason,
             error: lastError,
-            track_key: currentTrack?.track_key || "",
+            track_key: playback.trackKey,
+            title: playback.title,
+            artist: playback.artist,
+            index: playback.index,
+            count: playback.count,
+            position: playback.position,
+            duration: playback.duration,
             attribution: currentTrack?.attribution || "",
             bed_level: lastBedLevel,
             engine: window.TrpgImmersiveMusic?.currentEngineMode?.() || "unknown",
@@ -542,4 +868,13 @@ window.TrpgImmersiveExternal = {
     stop: TrpgImmersiveExternalModule.stopAll,
     state: TrpgImmersiveExternalModule.state,
     setReporter: TrpgImmersiveExternalModule.setReporter,
+    getPlaybackState: TrpgImmersiveExternalModule.getPlaybackState,
+    hasQueue: TrpgImmersiveExternalModule.hasQueue,
+    play: TrpgImmersiveExternalModule.play,
+    pause: TrpgImmersiveExternalModule.pause,
+    resume: TrpgImmersiveExternalModule.resume,
+    toggle: TrpgImmersiveExternalModule.toggle,
+    next: TrpgImmersiveExternalModule.next,
+    prev: TrpgImmersiveExternalModule.prev,
+    seek: TrpgImmersiveExternalModule.seek,
 };

@@ -178,6 +178,7 @@ namespace TrpgImmersiveModule {
         if (!roomIdOf(currentRoom)) {
             if (music?.isEnabled()) music.shutdown();
             else music?.stop();
+            window.TrpgImmersiveExternal?.stop?.(600);
             bgm?.setSuppressed(false);
             bgm?.setDuck(false);
             return;
@@ -186,6 +187,7 @@ namespace TrpgImmersiveModule {
             // 仅 BGM：实时引擎完全停止并销毁 AudioContext，绝不发声。
             if (music?.isEnabled()) music.shutdown();
             else music?.stop();
+            window.TrpgImmersiveExternal?.stop?.(600);
             bgm?.setSuppressed(false);
             bgm?.setDuck(false);
         } else {

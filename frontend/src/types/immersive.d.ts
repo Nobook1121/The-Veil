@@ -491,6 +491,29 @@ interface TrpgImmersiveExternalApi {
     stop: (fadeMs?: number) => void;
     state: () => Record<string, unknown>;
     setReporter: (reporter: ((event: Record<string, unknown>) => void) | null) => void;
+    getPlaybackState: () => ImmersiveExternalPlaybackState;
+    hasQueue: () => boolean;
+    play: () => void;
+    pause: () => void;
+    resume: () => void;
+    toggle: () => void;
+    next: () => void;
+    prev: () => void;
+    seek: (seconds: number) => void;
+}
+
+/** 统一播放器读取的外链播放态。 */
+interface ImmersiveExternalPlaybackState {
+    active: boolean;
+    playing: boolean;
+    paused: boolean;
+    title: string;
+    artist: string;
+    index: number;
+    count: number;
+    position: number;
+    duration: number;
+    trackKey: string;
 }
 
 /**
