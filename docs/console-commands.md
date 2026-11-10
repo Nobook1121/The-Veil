@@ -18,7 +18,8 @@
 2. **交互确认**：若当前是交互式控制台，会弹出 `是否执行(y/N)` 提示，输入 `y` 才真正执行；
 3. **`--yes` / `-y`**：跳过提示直接执行，适合脚本化批处理。
 
-> 房间控制台的所有命令域统一使用纯词参数，预演确认写 `yes`（旧 `--yes` 仍兼容），
+> 房间控制台的所有命令域统一使用纯词参数：预演确认写 `yes`，带值写 `key value`，
+> 参数一律不带 `-` / `--` 前缀；站点控制台仍沿用 `--yes` 等写法。
 > 详见下方「房间内嵌控制台」。
 
 ```text
@@ -507,10 +508,10 @@ rule contact <玩家> <技能> [hometown] [remote] [profession] [push] [difficul
 rule economy <玩家> [金额] [era 1920s|modern] [assets N] [apply] [reason 原因]（房规：信用评级与开支；默认只读预览，apply 登记现金写回）
 rule san add <玩家> <±N> [reason 原因] [yes]（调整 SAN；默认预演，yes 落盘）
 rule san set <玩家> <N> [reason 原因] [yes]（设为指定 SAN；默认预演）
-rule san bout [玩家]              （房规：查看发作类型、症状与 1D10 小时结束时间）
+rule san bout [玩家]              （房规：查看发作类型、症状与时长：即时 1D10 战斗轮 / 总结 1D10 小时）
 rule san bout end <玩家>          （房规：提前结束当前发作）
-rule san habituation [玩家]        （房规：查看按来源记录的习惯恐惧）
-rule san habituation add <玩家> <来源> <本次损失>（记录来源损失并判断是否免疫）
+rule san habituation [玩家]        （房规：查看按来源累计的习惯恐惧）
+rule san habituation add <玩家> <来源> <本次损失> [该来源单次最大损失]（记录来源损失并判断是否免疫）
 rule san habituation tick [玩家]   （房规：幕间习惯恐惧 −1；省略玩家则全房间）
 rule san reality <玩家> [成功|失败|大成功|大失败] [来源说明]（房规：现实认知检定与免疫）
 rule san trait [phobia|mania] [关键词|roll]（房规：按需查询恐惧症 / 躁狂症表）
@@ -543,14 +544,14 @@ time                        （查看房间游戏时钟；房规 coc7_game_clock
 time show                   （同上，只读）
 time advance <N>d|<N>h [yes]（推进游戏时间；如 3d / 12h / 3 days）
 time set <YYYY-MM-DD[ HH:MM]> [yes]（把游戏时间设到指定时刻，只能向前）
+time correct <YYYY-MM-DD[ HH:MM]> reason <原因> [yes]（房主校正，可回拨，写房间日志）
 interlude care [月数]        （房规：幕间疗养，按月结算 HP 与 MP；缺省读时钟差）
 interlude therapy <玩家> <月数|indefinite> <每月精神分析结果...>（房规：心理治疗按月结算 SAN）
 ```
 
 房间控制台的参数统一使用空格分隔的纯词：开关直接写词（`yes`、`persist`、`weapon`、
 `publish`），带值的写 `key value`（`depth 2`、`limit 20`、`reason 原因`）。负数值
-（如 `-5`、`-12.5`）仍按位置参数处理，不会被误判成开关。旧的 `--yes` / `--json` /
-`--key=value` 写法继续兼容，无需改动已有脚本。
+（如 `-5`、`-12.5`）仍按位置参数处理，不会被误判成开关；参数一律不带 `-` / `--` 前缀。
 
 `difficulty` 支持 `normal|hard|extreme`，也接受 `regular`（`normal` 与 `regular` 等价）及中文
 `普通|困难|极难`。
@@ -592,17 +593,32 @@ AI KP 的写卡工具（`character_stats` 的 `character.set_skill` / `character
 ### 房间游戏时钟（`coc7_game_clock`，默认关闭）
 
 - 时钟按**服务器时间**记录：`info.json` 的 `game_clock = {started_at, current,
-  elapsed_seconds, updated_at, updated_by}`，`current` 是带服务器时区偏移的 ISO 8601。
+  elapsed_seconds, updated_at, updated_by, corrections}`，`current` 是带服务器时区偏移的
+  ISO 8601；`corrections` 只保留最近 20 条校正记录。
 - 开启后可用 `time show` 查询、`time advance` / `time set` 推进；推进是「命令 + 显式增量」，
   只能向前，缺省为预演，`yes`（或网页确认框）才落盘。AI 只拿到只读的 `room.game_clock`
   工具，无法推进时间。
+- `time correct <时刻> reason <原因>` 是唯一的回拨入口，仅房主可用：必须给出原因，只确认一次
+  （网页 / 聊天控制台弹一次确认框，或命令末尾加 `yes`），并写入房间日志与 `game_clock.corrections`
+  （before / after / delta / 操作者 / 原因）。校正不会触发毒剂或疯狂到期结算。
 - 首次推进时才以服务器当前时间惰性初始化；纯查询不写盘。旧房间没有 `game_clock` 字段且开关
   关闭时按未启用处理，不写盘也不报错；`game_date` 缺失或不可解析时不会凭空补时间。
-- 并发：同一进程内推进串行化；需要强校验的调用方可传 `expected_current` 做乐观并发检查，
-  不一致时报冲突而不是静默覆盖。
+- 并发：同进程用模块级锁串行，跨进程 / 多 worker 用 `info.json.lock` 文件锁（`O_EXCL` 创建，
+  超时 10 秒报 `clock_busy`；锁文件超过 30 秒视为异常退出的陈旧锁，自动清理后重试），
+  读取与写入都在锁内完成，避免后写覆盖先写；需要强校验的调用方可传 `expected_current`
+  做乐观并发检查，不一致时报冲突而不是静默覆盖。
 - 毒剂 `onset_rounds > 0` 会登记到期轮，战斗轮推进到该轮时自动结算；`time advance` /
-  `time set` 视为足够长的时间流逝，会立即结算所有待发作毒剂。
+  `time set` 会结算战斗内所有待发作毒剂，并按游戏时间结算战斗外的毒剂队列。
+- 战斗外的毒剂登记在房间 `state.json` 的 `poison_queue`（AI 工具 `combat.poison_queue`，
+  `action=add|list`）：KP 可在叙事里下毒，`onset_rounds` 按战斗回合到期（需要进行中的战斗），
+  `onset_days` / `onset_hours` 按游戏时间到期（需要游戏时钟），都不给则立即结算。它与
+  `combat.pending_poisons` 语义一致，但不要求战斗状态存在；结算的 CON 检定与伤害减半仍由
+  `ruleset/coc7` 提供。
 - 典籍精读未给 `weeks` 时读时钟周数；显式 `weeks` 仍然优先。
+- `time advance` / `time set` 成功后还会调用 SAN 侧的
+  `room_sanity.expire_bouts(room_dir, info=..., now=游戏当前时刻)`，收束到期的总结症状发作
+  （`bout`）与临时性疯狂（均为 1D10 小时）；钩子幂等，函数缺失或签名不匹配时静默跳过，
+  不影响时间推进。
 - `interlude care` 按月结算疗养（每月 30 天，HP 自然恢复 + MP 恢复），`interlude therapy`
   按月结算心理治疗 SAN（每月一次精神分析结果由 KP 给出；`indefinite` 用 1D6 个月作为周期）。
   幕间开始 / 结束会把游戏时间写入幕间快照，归档快照额外带 `game_clock`。
@@ -631,21 +647,38 @@ CMI / CMF / MR 与典籍法术列表，骰值类消耗（如 `2D10`）仍会提�
 `rule san bout` / `habituation` / `reality` / `trait` 属于批次 3 的理智结构化，受
 `coc7_sanity_state`（总开关）、`coc7_sanity_bout`、`coc7_sanity_habituation`、
 `coc7_sanity_reality`、`coc7_sanity_traits` 控制，默认全部关闭；关闭时这些子命令
-按旧的 `rule san add|set` 分支处理，与旧版本完全一致。开启后：
+按旧的 `rule san add|set` 分支处理，与旧版本完全一致。另有配套房规
+`coc7_sanity_bout_safety_minutes`（即时症状收尾安全阀，默认 60 分钟，0 = 关闭）：
+它不是规则书数值，只是防止 KP 忘记收尾导致永久免疫的工程兜底；房规保存后立即生效，
+不需要重启房间。开启后：
 
 - 精神状态写入 `character_card.extensions.mental`（同时镜像到
   `character_state.mental`），包含 `phobias[]`、`manias[]`、`bout{}`、`habituations{}`、
   `realityImmunity`、`realityChecks[]`、`mythosMadnessCount` 等字段；旧卡没有该字段时
   读取即按默认结构补齐，不改动 `sheet` 既有字段、不改 `localStorage` 键。
-- `bout` 记录发作类型、开始时间、`1D10` 小时时长、预计结束时间与汇总症状
-  （失忆 / 暴力 / 偏执 / 昏厥 / 恐惧症 / 躁狂症等）。
-- 习惯恐惧按来源记录「历史最大理智损失」；再次遭遇同一来源且本次损失不超过记录值
-  时免疫，`tick` 每次让每个来源 −1，归零后删除。幕间开始时会调用一次
-  `room_sanity.interlude_decay`；心理治疗由 `interlude therapy` 按月编排（见「房间游戏时钟」）。
-- 现实认知用 POW 检定：成功看穿幻象并获得一次性免疫（抵掉下一次理智损失），
+- `bout` 分两种呈现方式：即时症状 `mode=immediate` 持续 `1D10` 个战斗轮（按轮推进，没有
+  时钟结束时间）；总结症状 `mode=summary` 持续 `1D10` 小时并记录预计结束时间。两种时长都保留在
+  `duration_rounds` / `duration_hours`，展示以 `mode` 为准。发作期间免疫进一步的理智损失。
+  计时统一使用房间时钟口径：游戏时钟开启时写游戏时间并带 `clock=game` 标记，未开启时才显式
+  回退服务器墙钟（`clock=wall`）；旧数据没有标记时按墙钟记录处理，首次收敛会折算到当前时钟，
+  不会变成永久免疫或立刻结束。`time correct` 回拨后会平移活动计时，保留剩余时长。
+  即时症状超过房规 `coc7_sanity_bout_safety_minutes`（默认 60 分钟）仍未收尾时，房间时钟会
+  兜底结束（`end_reason=超时`，避免遗忘后永久免疫）；该值设为 0 时关闭兜底，需要 KP 或
+  `rule san bout end` 显式收尾。即时症状不写结束时间，关闭兜底后不会残留旧超时时间戳。
+- 疯狂阶段：临时性疯狂 `1D10` 小时，到期由房间时钟调用 `expire_bouts` 自动结束；不定性疯狂
+  持续到被治愈，但当前版本没有自动治愈链路（幕间心理治疗只结算 SAN，不清除疯狂阶段），
+  需要 KP 显式裁定并记录；永久性疯狂不会自行恢复。
+- 习惯恐惧按来源累计理智损失，上限是该存在单次遭遇可能造成的最大损失（如 `0/1D6` → 6）；
+  累计达到上限后不再损失，未达上限时按剩余额度扣减。`tick` 每次让每个来源累计值 −1，
+  归零后删除；幕间开始时会调用一次 `room_sanity.interlude_decay`；心理治疗由
+  `interlude therapy` 按月编排（见「房间游戏时钟」）。
+- 现实认知是用当前 SAN 做的理智检定（规则书 p.135）：成功看穿幻象并获得对幻觉的抗性，
+  直到下一次真正失去理智值；被抗性抵消的幻觉损失不算失去理智值，因此不消耗抗性。
   失败理智 −1 并立即进入一次疯狂发作。
 - 恐惧症 / 躁狂症表是插件内容数据（`data/rulesets/coc7/catalogs/phobias.json` /
   `manias.json`，各 100 条），只按关键词或随机抽取查询，不整表注入上下文。
+- 恐惧 / 躁狂的惩罚骰只接受 KP 显式指认的条目名（或 id / 英文名）精确匹配，不做外观关键词
+  猜测；`check.roll_room_check` 的 `exposure` 请先用 `san.traits` 查出准确名称。
 - AI KP 侧对应工具：`san.bout`、`san.habituation`、`san.reality_check`、`san.traits`，
   以及 `check.roll_room_check` 的 `exposure` 参数（命中角色已有恐惧 / 躁狂时加 1 颗惩罚骰）。
 
@@ -679,7 +712,7 @@ CMI / CMF / MR 与典籍法术列表，骰值类消耗（如 `2D10`）仍会提�
 
 破坏性命令（`log clear`、`archive`、`narrative reset` / `unlock` / `trigger fire` /
 `rebuild-state`）同样遵循「缺省预演、确认后执行」的约定：网页控制台先返回预演文本，
-再由交互确认框决定是否真正执行；加 `yes` 可跳过确认（旧的 `--yes` / `-y` 仍兼容）。
+再由交互确认框决定是否真正执行；命令末尾加 `yes` 可跳过确认。
 
 房间 `narrative` 命令只读写本房间的运行态、账本、轨迹与房规：
 `trace` 读取房间目录下的 `narrative_trace.jsonl`（最近 2000 条）；`media` 只列本房间
