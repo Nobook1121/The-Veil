@@ -30,6 +30,7 @@ OWNER_ONLY_SECTIONS = frozenset(
         "network.penetration",
         "network.penetration.settings",
         "site_agent",
+        "update",
     }
 )
 

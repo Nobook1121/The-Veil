@@ -140,6 +140,8 @@ class ConfigManager {
         configSetInputValue("worldOverrideHourlyLimit", this.get("general", "world_override", "hourly_limit", 30));
         // 网站 Agent 的启用开关与限额
         configSetCheckboxValue("siteAgentEnabled", this.get("general", "site_agent", "enabled", true));
+        configSetCheckboxValue("updateCheckOnStartup", this.get("general", "update", "check_update_on_startup", true));
+        configSetCheckboxValue("updateAutoDownload", this.get("general", "update", "auto_update", false));
         configSetInputValue("siteAgentDailyTokenBudget", this.get("general", "site_agent", "daily_token_budget", 200000));
         configSetInputValue("siteAgentMaxTurnsPerHour", this.get("general", "site_agent", "max_turns_per_hour", 60));
         configSetInputValue("siteAgentMaxToolRounds", this.get("general", "site_agent", "max_tool_rounds", 6));

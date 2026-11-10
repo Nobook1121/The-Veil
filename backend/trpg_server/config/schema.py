@@ -269,7 +269,11 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec("window_height", "window", ("window_height",), clamped_int(minimum=300, maximum=10000), 800),
     # [update]
     FieldSpec("check_update_on_startup", "update", ("check_update_on_startup",), as_bool, True),
+    # auto_update 的语义是「自动下载」，不做自动安装/替换（见 update_service）
     FieldSpec("auto_update", "update", ("auto_update",), as_bool, False),
+    FieldSpec("repo", "update", ("repo",), as_text, "Nobook1121/The-Veil"),
+    FieldSpec("channel", "update", ("channel",), as_text, "stable"),
+    FieldSpec("request_timeout_seconds", "update", ("request_timeout_seconds",), clamped_int(minimum=3, maximum=15), 8),
     # [site_agent]（与 site_agent_config.SiteAgentConfig 默认值/边界保持一致）
     FieldSpec("enabled", "site_agent", ("enabled",), as_bool, True),
     FieldSpec("max_tool_rounds", "site_agent", ("max_tool_rounds",), clamped_int(minimum=1, maximum=20), 6),

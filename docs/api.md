@@ -400,6 +400,19 @@
 
 ---
 
+## 十八、应用信息与更新（App Info & Update）
+
+来源：`routes/app_info.py`、`app_info.py`、`update_service.py`
+
+- `GET /api/app/info`：公开。返回应用名称、版本、构建信息（`mode` / `sha` / `built_at` / `channel`）、许可证、仓库链接、运行时（Python / 平台）与致谢数据。
+- `GET /api/app/update`：公开。返回更新状态（`unknown` / `up_to_date` / `available` / `downloading` / `ready` / `error` / `disabled`）、当前与最新版本、发布说明、下载进度与是否启用。
+- `POST /api/app/update/check`：检查 GitHub Releases 最新版本（需 `settings.general` 权限节点）。
+- `POST /api/app/update/download`：后台下载发布包（需 `settings.general`），前端轮询 `GET /api/app/update` 读取进度。
+
+更新源与检查行为由 `[update]` 配置段控制：`repo`（`owner/name` 或完整 GitHub URL）、`channel`（`stable` / `prerelease`）、`request_timeout_seconds`、`check_update_on_startup`、`auto_update`。下载只校验 SHA256 并落到 `data/runtime/update/downloads/`，**不会自动替换程序目录**。设置 `AI_TRPG_DISABLE_UPDATE_CHECK=1` 可完全停用更新检查。
+
+---
+
 ## 相关文档
 
 - [开发说明](development.md)

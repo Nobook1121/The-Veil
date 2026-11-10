@@ -169,6 +169,7 @@ def create_app(config=None):
     register_socket_events(socketio)
     _start_autosave_scheduler(app)
     _start_room_cleanup_scheduler(app)
+    _start_update_checker(app)
 
     @app.errorhandler(404)
     def _api_not_found(error):
@@ -235,6 +236,13 @@ def _start_autosave_scheduler(app):
                 logger.debug("Autosave scheduler tick failed", exc_info=True)
 
     threading.Thread(target=_loop, name="autosave-scheduler", daemon=True).start()
+
+
+def _start_update_checker(app):
+    """启动更新检查线程；测试与 AI_TRPG_DISABLE_UPDATE_CHECK=1 时自动跳过。"""
+    from trpg_server.update_service import start_startup_checker
+
+    start_startup_checker(app)
 
 
 def _start_room_cleanup_scheduler(app):
@@ -373,6 +381,7 @@ def register_blueprints(app):
     from trpg_server.routes.themes import bp as themes_bp
     from trpg_server.routes.triggers import bp as triggers_bp
     from trpg_server.routes.users import bp as users_bp
+    from trpg_server.routes.app_info import bp as app_info_bp
 
     app.register_blueprint(assets_bp)
     app.register_blueprint(bgm_bp)
@@ -405,3 +414,4 @@ def register_blueprints(app):
     app.register_blueprint(themes_bp)
     app.register_blueprint(triggers_bp)
     app.register_blueprint(narrative_bp)
+    app.register_blueprint(app_info_bp)

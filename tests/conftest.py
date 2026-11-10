@@ -49,3 +49,6 @@ os.environ["PYTEST_DEBUG_TEMPROOT"] = str(TEMP_ROOT)
 _inductor_cache = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
 if not _inductor_cache or _inside_repo(Path(_inductor_cache)):
     os.environ["TORCHINDUCTOR_CACHE_DIR"] = str(TEMP_ROOT / "torchinductor")
+
+# 更新检查默认关闭，避免测试期间访问 GitHub 或写入 data/runtime/update。
+os.environ.setdefault("AI_TRPG_DISABLE_UPDATE_CHECK", "1")

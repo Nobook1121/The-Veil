@@ -1,0 +1,39 @@
+{
+  "contributors": [
+    {
+      "name": "Nobook1121",
+      "role": "项目发起与维护",
+      "url": "https://github.com/Nobook1121"
+    }
+  ],
+  "special_thanks": [],
+  "dependencies": [
+    {
+      "name": "Flask",
+      "license": "BSD-3-Clause",
+      "url": "https://flask.palletsprojects.com/"
+    },
+    {
+      "name": "Flask-SocketIO",
+      "license": "MIT",
+      "url": "https://github.com/miguelgrinberg/Flask-SocketIO"
+    },
+    {
+      "name": "Bootstrap",
+      "license": "MIT",
+      "url": "https://getbootstrap.com/"
+    },
+    {
+      "name": "Font Awesome",
+      "license": "OFL-1.1 / MIT",
+      "url": "https://fontawesome.com/"
+    },
+    {
+      "name": "CodeMirror",
+      "license": "MIT",
+      "url": "https://codemirror.net/"
+    }
+  ],
+  "sponsor_channels": [],
+  "sponsors": []
+}

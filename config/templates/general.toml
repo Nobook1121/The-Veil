@@ -156,7 +156,13 @@ window_height = 800
 
 [update]
 check_update_on_startup = true
+# 自动下载更新包（不会自动安装或替换程序文件）
 auto_update = false
+# GitHub 仓库（owner/name 或完整地址）；留空则关闭更新检查
+repo = "Nobook1121/The-Veil"
+# stable 只取正式版；prerelease 允许预发布
+channel = "stable"
+request_timeout_seconds = 8
 
 [site_agent]
 enabled = true
