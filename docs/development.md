@@ -62,3 +62,6 @@ python -W error::DeprecationWarning -m pytest tests\test_app_factory.py -q
 - 交互状态需要同步可访问性属性，例如 `aria-expanded`、`aria-selected` 和 `aria-current`。
 - UI 样式优先使用 `style.css` 顶部 token，避免继续散落硬编码颜色、阴影和圆角。
 - **禁止使用浏览器原生弹窗 `alert()` / `confirm()` / `prompt()`**：其外观无法与产品风格统一、会阻塞主线程，且在部分浏览器中会被拦截。轻量反馈统一用 `showNotification()`；需要用户确认或输入时用 `window.TrpgDialog.confirm()` / `window.TrpgDialog.prompt()`（`js/dialog.js`，基于 Bootstrap 模态框，返回 Promise 可直接 `await`）。
+- **新功能一律进 React 岛**；老模块只在被本次改动触及的范围内顺带迁移，不做无关重写。
+- 新 React 岛必须：在 `index/fragments/*.html` 预留明确挂载点；卸载时清理事件监听、定时器与进行中的请求；props / 事件 / 对外方法都有 TS 类型，禁止 `any` 逃逸。
+- 全局共享 API 见 [frontend-globals.md](frontend-globals.md)：每个 `window.Trpg*` 都标注「保留 / 冻结 / 待迁移」，新代码不得依赖「冻结」项，也不得新增全局（改用 props / context 注入）。
