@@ -20,6 +20,17 @@ def _flag(rules: Mapping[str, Any], key: str) -> bool:
     return bool(value)
 
 
+def _minutes(rules: Mapping[str, Any], key: str, default: int = 60, maximum: int = 1440) -> int:
+    """读分钟数；留空沿用默认值，0 表示关闭该工程兜底。"""
+    value = rules.get(key, default)
+    if value is None or value == "":
+        return default
+    try:
+        return max(0, min(maximum, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass(frozen=True)
 class Coc7RuleOptions:
     """只读开关集合；每一项都对应一个可单独验收的规则面。"""
@@ -66,12 +77,15 @@ class Coc7RuleOptions:
     sanity_state: bool = False
     # 目击神话：首次因神话陷入疯狂时克苏鲁神话 +5，之后每次 +1。
     sanity_mythos: bool = False
-    # 习惯恐惧：按来源记录最大理智损失，未超过记录则免疫；幕间 −1。
+    # 习惯恐惧：按来源累计理智损失，上限为该存在单次遭遇最大损失；幕间 −1。
     sanity_habituation: bool = False
-    # 现实认知：开放 POW 现实认知检定与成功后的免疫标记。
+    # 现实认知：理智检定（目标值为当前 SAN）；成功获得对幻觉的抗性直到下次失去理智值。
     sanity_reality: bool = False
-    # 发作计时：疯狂发作改为掷 1D10 小时并写入 bout，可查询。
+    # 发作计时：即时症状 1D10 战斗轮 / 总结症状 1D10 小时，写入可查询的 bout。
     sanity_bout: bool = False
+    # 即时症状收尾安全阀（分钟）。不是规则书数值，只用于防止 KP 忘记收尾后永久免疫；
+    # 0 = 关闭兜底（完全按原逻辑，需要显式收尾），留空按默认 60。
+    sanity_bout_safety_minutes: int = 60
     # 恐惧 / 躁狂 100 条表：疯狂表现按需查表，暴露来源时检定吃惩罚骰。
     sanity_traits: bool = False
 
@@ -102,6 +116,7 @@ class Coc7RuleOptions:
             sanity_habituation=_flag(data, "coc7_sanity_habituation"),
             sanity_reality=_flag(data, "coc7_sanity_reality"),
             sanity_bout=_flag(data, "coc7_sanity_bout"),
+            sanity_bout_safety_minutes=_minutes(data, "coc7_sanity_bout_safety_minutes"),
             sanity_traits=_flag(data, "coc7_sanity_traits"),
         )
 

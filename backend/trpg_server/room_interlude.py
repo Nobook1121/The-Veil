@@ -668,8 +668,9 @@ def apply_therapy(
 ) -> dict[str, Any]:
     """心理治疗：按月结算 SAN（每月一次精神分析检定结果由 KP 给出）。
 
-    本函数只做时间与结算编排；不定性疯狂的详细状态字段由 SAN 模块负责。
-    ``indefinite=True`` 时用 1D6 个月作为本轮治疗周期。
+    本函数只做时间与结算编排，**不会**清除不定性疯狂：SAN 模块目前没有自动治愈
+    不定性疯狂的链路，需要 KP 显式裁定并记录。``indefinite=True`` 时用 1D6 个月
+    作为本轮治疗周期。
     """
     if not room_clock.is_enabled(info):
         raise InterludeError(
@@ -1178,7 +1179,7 @@ def handle_console_command(
         if confirm is not None and confirm("结束幕间并自动归档？(y/N)"):
             pass
         else:
-            return True, "结束幕间会立即归档房间。确认后请输入：interlude end yes（旧 --yes 仍兼容）"
+            return True, "结束幕间会立即归档房间。确认后请输入：interlude end yes"
     try:
         end_interlude(room_dir, info, actor=actor, actor_id=actor_id)
     except InterludeError as exc:

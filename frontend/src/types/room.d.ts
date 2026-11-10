@@ -186,12 +186,14 @@ interface RoomHouseRules {
     coc7_sanity_state?: boolean;
     // CoC7 批次 3：目击神话时克苏鲁神话 +5 / +1。
     coc7_sanity_mythos?: boolean;
-    // CoC7 批次 3：习惯恐惧（按来源记录最大理智损失，幕间 −1）。
+    // CoC7 批次 3：习惯恐惧（按来源累计理智损失，上限为该存在单次遭遇最大损失，幕间 −1）。
     coc7_sanity_habituation?: boolean;
-    // CoC7 批次 3：现实认知检定与免疫。
+    // CoC7 批次 3：现实认知（理智检定；成功获得对幻觉的抗性直到下次失去理智值）。
     coc7_sanity_reality?: boolean;
-    // CoC7 批次 3：疯狂发作 1D10 小时计时。
+    // CoC7 批次 3：疯狂发作计时（即时 1D10 战斗轮 / 总结 1D10 小时）。
     coc7_sanity_bout?: boolean;
+    // 即时症状收尾安全阀（分钟，0 = 关闭）。工程兜底，不是规则书数值；留空 = 默认 60。
+    coc7_sanity_bout_safety_minutes?: number | null;
     // CoC7 批次 3：恐惧症 / 躁狂症 100 条表与暴露惩罚骰。
     coc7_sanity_traits?: boolean;
 }

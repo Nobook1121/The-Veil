@@ -361,16 +361,25 @@
                                 </div>
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="houseRuleCoc7SanityHabituation">
-                                    <label class="form-check-label" for="houseRuleCoc7SanityHabituation">习惯恐惧：按来源记录最大理智损失，未超过记录则免疫，幕间 −1</label>
+                                    <label class="form-check-label" for="houseRuleCoc7SanityHabituation">习惯恐惧：按来源累计理智损失，上限为该存在单次遭遇最大损失，幕间 −1</label>
                                 </div>
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="houseRuleCoc7SanityReality">
-                                    <label class="form-check-label" for="houseRuleCoc7SanityReality">现实认知：POW 检定成功看穿幻象并免疫后续理智损失</label>
+                                    <label class="form-check-label" for="houseRuleCoc7SanityReality">现实认知：理智检定，成功看穿幻象并获得对幻觉的抗性，直到下次失去理智值</label>
                                 </div>
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="houseRuleCoc7SanityBout">
-                                    <label class="form-check-label" for="houseRuleCoc7SanityBout">发作计时：疯狂发作掷 1D10 小时并记录汇总症状</label>
+                                    <label class="form-check-label" for="houseRuleCoc7SanityBout">发作计时：即时症状 1D10 战斗轮 / 总结症状 1D10 小时，写入可查询的发作记录</label>
                                 </div>
+                                <div class="row g-2 align-items-center mt-1">
+                                    <div class="col-auto">
+                                        <label class="form-label small mb-0" for="houseRuleCoc7SanityBoutSafety">即时症状收尾安全阀（分钟）</label>
+                                    </div>
+                                    <div class="col-auto">
+                                        <input class="form-control form-control-sm" type="number" min="0" max="1440" step="1" id="houseRuleCoc7SanityBoutSafety" placeholder="60">
+                                    </div>
+                                </div>
+                                <p class="form-text small">工程兜底，不是规则书数值：防止 KP 忘记收尾导致永久免疫。0 = 关闭，此时需由 KP 或 <code>rule san bout end</code> 显式收尾；留空 = 默认 60 分钟。</p>
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="houseRuleCoc7SanityTraits">
                                     <label class="form-check-label" for="houseRuleCoc7SanityTraits">恐惧症 / 躁狂症 100 条表（按需查询）与暴露惩罚骰</label>

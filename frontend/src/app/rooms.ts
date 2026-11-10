@@ -1509,6 +1509,15 @@ function readCombatDexExtraAction(): number | null {
     return Math.max(1, Math.min(100, value));
 }
 
+/** 即时症状安全阀分钟数：留空表示用默认 60，0 表示关闭兜底。 */
+function readHouseRuleBoutSafety(): number | null {
+    const raw = (document.getElementById("houseRuleCoc7SanityBoutSafety") as HTMLInputElement | null)?.value.trim() || "";
+    if (!raw) return null;
+    const value = Number.parseInt(raw, 10);
+    if (!Number.isFinite(value)) return null;
+    return Math.max(0, Math.min(1440, value));
+}
+
 /** 沉浸房规三态布尔：留空（""）表示跟随管理员设置，on/off 为房间显式覆盖。 */
 function readHouseRuleNullableBoolean(elementId: string): boolean | null {
     const select = document.getElementById(elementId) as HTMLSelectElement | null;
@@ -1712,6 +1721,11 @@ async function openHouseRulesModal(): Promise<void> {
             const value = response.data?.house_rules?.combat_dex_extra_action_threshold;
             dexExtraInput.value = value === null || value === undefined ? "" : String(value);
         }
+        const boutSafetyInput = document.getElementById("houseRuleCoc7SanityBoutSafety") as HTMLInputElement | null;
+        if (boutSafetyInput) {
+            const value = response.data?.house_rules?.coc7_sanity_bout_safety_minutes;
+            boutSafetyInput.value = value === null || value === undefined ? "" : String(value);
+        }
         // 沉浸房规：三态选择，留空跟随管理员设置；房间只能收紧开关，不能越过站点总开关。
         setHouseRuleNullableBoolean("houseRuleImmersiveMusic", response.data.house_rules?.immersive_music_enabled);
         setHouseRuleNullableBoolean("houseRuleImmersiveMusicAuto", response.data.house_rules?.immersive_music_auto_switch);
@@ -1814,6 +1828,8 @@ async function saveHouseRules(): Promise<void> {
                     ]).filter(([, value]) => value !== undefined),
                 ),
                 combat_dex_extra_action_threshold: readCombatDexExtraAction(),
+                // 即时症状收尾安全阀：留空沿用默认 60 分钟，0 表示关闭兜底。
+                coc7_sanity_bout_safety_minutes: readHouseRuleBoutSafety(),
             },
             visibility: visibilitySelect?.value || "private",
         });

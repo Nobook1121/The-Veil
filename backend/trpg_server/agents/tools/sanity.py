@@ -75,6 +75,7 @@ def execute_san_habituation(arguments: dict[str, Any], context: Any) -> dict[str
                 member,
                 source=str(arguments.get("source") or ""),
                 loss=int(arguments.get("loss") or 0),
+                cap=int(arguments["cap"]) if arguments.get("cap") is not None else None,
                 actor=_actor(context),
                 actor_id=getattr(context, "user_id", None),
             )
@@ -126,8 +127,9 @@ def execute_san_traits(arguments: dict[str, Any], context: Any) -> dict[str, Any
 SAN_BOUT_TOOL = AgentTool(
     name="san.bout",
     description=(
-        "Read the current bout of madness (type, symptoms, 1D10-hour duration and end time) "
-        "for one investigator or all active bouts in the room. Returns no game math."
+        "Read the current bout of madness (type, symptoms, and its duration: 1D10 combat rounds "
+        "for immediate symptoms or 1D10 hours for summary symptoms) for one investigator or all "
+        "active bouts in the room. Returns no game math."
     ),
     parameters={
         "type": "object",
@@ -139,9 +141,10 @@ SAN_BOUT_TOOL = AgentTool(
 SAN_HABITUATION_TOOL = AgentTool(
     name="san.habituation",
     description=(
-        "Track CoC7 habituation. status: list recorded maximum SAN loss per source; "
-        "record: note a loss from a source and get whether it is waived; interlude: reduce every "
-        "record by 1. Only call when the room enables the habituation rule."
+        "Track CoC7 habituation. status: list cumulative SAN loss per source; record: add a loss "
+        "from a source and get the applied/waived amount; interlude: reduce every source's cumulative "
+        "loss by 1. Pass cap (the maximum single-encounter loss for that being, e.g. 6 for 0/1D6) when "
+        "known. Only call when the room enables the habituation rule."
     ),
     parameters={
         "type": "object",
@@ -150,6 +153,7 @@ SAN_HABITUATION_TOOL = AgentTool(
             "action": {"type": "string", "enum": ["status", "record", "interlude"]},
             "source": {"type": "string", "description": "Creature or phenomenon name, used as the key."},
             "loss": {"type": "integer", "description": "SAN loss just suffered from that source."},
+            "cap": {"type": "integer", "description": "Maximum single-encounter SAN loss for that source (e.g. 6 for 0/1D6)."},
         },
         "required": ["player"],
     },
@@ -159,8 +163,9 @@ SAN_HABITUATION_TOOL = AgentTool(
 SAN_REALITY_CHECK_TOOL = AgentTool(
     name="san.reality_check",
     description=(
-        "Resolve a CoC7 reality check with POW. Success grants immunity to further SAN loss from "
-        "the illusion; failure costs 1 SAN. Pass result only when the player rolled physically."
+        "Resolve a CoC7 reality check with a Sanity roll (target = current SAN). Success grants "
+        "resistance to hallucinations until the next real Sanity loss; failure costs 1 SAN and "
+        "starts a bout of madness. Pass result only when the player rolled physically."
     ),
     parameters={
         "type": "object",

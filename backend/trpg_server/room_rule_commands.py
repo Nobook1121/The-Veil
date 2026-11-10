@@ -4,7 +4,7 @@
 双重把关。默认严格对齐项目约定：
 - ``rule check`` 只读结算，不改变数值；
 - ``rule item`` 与聊天 ``/item`` 使用同一实现；
-- ``rule san add|set`` 默认预演，加 ``yes`` 才落盘（旧 ``--yes`` 仍兼容）。
+- ``rule san add|set`` 默认预演，加 ``yes`` 才落盘。
 """
 from __future__ import annotations
 
@@ -97,12 +97,12 @@ ROOM_RULE_HELP = "\n".join(
         "  rule economy <玩家> [金额] [era 1920s|modern] [assets N] [apply] [reason 原因]（房规：信用评级与开支；默认只读预览，apply 登记现金写回）",
         "  rule san add <玩家> <±N> [reason 原因] [yes]（调整 SAN；默认预演）",
         "  rule san set <玩家> <N> [reason 原因] [yes]（设为指定 SAN；默认预演）",
-        "  rule san bout [玩家]              （房规：查看疯狂发作类型、症状与 1D10 小时结束时间）",
+        "  rule san bout [玩家]              （房规：查看发作类型、症状与时长：即时 1D10 轮 / 总结 1D10 小时）",
         "  rule san bout end <玩家>          （房规：提前结束当前发作）",
-        "  rule san habituation [玩家]        （房规：查看按来源记录的习惯恐惧）",
-        "  rule san habituation add <玩家> <来源> <本次损失>（记录来源损失并判断是否免疫）",
-        "  rule san habituation tick [玩家]   （房规：幕间习惯恐惧 −1；省略玩家则全房间）",
-        "  rule san reality <玩家> [成功|失败|大成功|大失败] [来源说明]（房规：现实认知检定与免疫）",
+        "  rule san habituation [玩家]        （房规：查看按来源累计的习惯恐惧）",
+        "  rule san habituation add <玩家> <来源> <本次损失> [该来源单次最大损失]（记录累计并判断是否免疫）",
+        "  rule san habituation tick [玩家]   （房规：幕间习惯恐惧累计 −1；省略玩家则全房间）",
+        "  rule san reality <玩家> [成功|失败|大成功|大失败] [来源说明]（房规：用当前 SAN 做现实认知检定，成功获得对幻觉的抗性）",
         "  rule san trait [phobia|mania] [关键词|roll]（房规：按需查询恐惧症 / 躁狂症表）",
         "  rule item <玩家> <物品名> [qty N] [weapon] [persist] [reason 原因]（追加物品/武器；persist 才写回持久卡）",
         "  rule skill <玩家> <技能名> <值|±N> [persist] [reason 原因] [yes]（修改技能；默认预演）",
@@ -158,8 +158,7 @@ RULE_SUBS = {
 def _parse(args: list[str]) -> tuple[list[str], set[str], dict[str, str]]:
     """纯词参数解析（共享实现）。
 
-    ``rule item 玩家 手电筒 qty 2 weapon persist`` 与旧的
-    ``rule item 玩家 手电筒 --qty=2 --weapon --persist`` 等价；
+    ``rule item 玩家 手电筒 qty 2 weapon persist`` 就是全部参数写法；
     ``-5`` 这类带符号数值始终按位置参数处理。
     """
     parsed = parse_console_args(args, RULE_ARG_SPEC)

@@ -11,7 +11,7 @@ import random
 import re
 from typing import Any, Callable
 
-from trpg_server import dice_policy
+from trpg_server import dice_policy, room_clock
 from trpg_server.ruleset.coc7 import rules as coc7_rules
 from trpg_server.ruleset.coc7 import sanity_state, traits
 from trpg_server.ruleset.coc7.options import resolve_options
@@ -91,6 +91,16 @@ def _loss_expression(expression: Any) -> str:
     return "-" + text
 
 
+def _bout_mode(value: Any) -> str:
+    """发作呈现方式：即时症状（1D10 轮）或总结症状（1D10 小时）。"""
+    text = str(value or "").strip().lower()
+    if text in {"immediate", "即时", "即时症状", "round", "rounds", "轮"}:
+        return "immediate"
+    if text in {"summary", "总结", "总结症状", "hour", "hours", "小时"}:
+        return "summary"
+    return "immediate"
+
+
 class Coc7Sanity:
     """CoC7 的理智 / 疯狂能力。"""
 
@@ -155,15 +165,31 @@ class Coc7Sanity:
         state: dict[str, Any],
         room_info: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """只读快照：不创建字段，旧卡直接得到默认结构。"""
+        """只读快照：不创建字段，旧卡直接得到默认结构。
+
+        发作的「进行中」判断与写入时使用同一个房间时钟口径（``room_clock.san_now``），
+        旧数据按墙钟记录在快照副本中折算到当前口径，不回写。
+        """
         options = resolve_options(room_info)
         block = state.get("mental")
         if not isinstance(block, dict):
             extensions = card.get("extensions") if isinstance(card.get("extensions"), dict) else {}
             block = extensions.get("mental") if isinstance(extensions, dict) else None
         data = sanity_state.normalize(block)
+        now_ts, _, clock_kind = room_clock.san_now(room_info)
+        sanity_state.rebase_timers(
+            data,
+            now=now_ts,
+            target_clock=clock_kind,
+            safety_minutes=options.sanity_bout_safety_minutes,
+        )
         data["enabled"] = bool(options.sanity_state)
-        data["activeBout"] = bool(options.sanity_state and sanity_state.has_active_bout(data))
+        data["activeBout"] = bool(
+            options.sanity_state
+            and sanity_state.has_active_bout(
+                data, now_ts, safety_minutes=options.sanity_bout_safety_minutes
+            )
+        )
         return data
 
     def active_bout(
@@ -176,7 +202,7 @@ class Coc7Sanity:
         options = resolve_options(room_info)
         if not options.sanity_state:
             return None
-        snapshot = self.mental_snapshot(card, state)
+        snapshot = self.mental_snapshot(card, state, room_info)
         bout = snapshot.get("bout")
         return dict(bout) if isinstance(bout, dict) and snapshot.get("activeBout") else None
 
@@ -296,11 +322,15 @@ class Coc7Sanity:
         day: str,
         room_info: dict[str, Any] | None = None,
         source: Any = None,
+        illusion: bool = False,
     ) -> dict[str, Any]:
         """按成功 / 失败结算一次理智检定。
 
         ``room_info`` 决定批次 3 房规是否生效；全部关闭时与旧行为逐字一致。
-        启用了习惯恐惧且给出 ``source`` 时，损失不超过该来源的记录值即免疫。
+        规则书第八章：
+        - 疯狂发作期间免疫进一步的理智损失（p.138“笔记：关于幻觉和理智损失”）；
+        - 现实认知成功后的免疫只针对**幻觉**，持续到下一次失去理智值（p.135）；
+        - 习惯恐惧按来源累计，达到该存在单次遭遇的最大损失后不再损失（附录 p.386）。
         """
         options = resolve_options(room_info)
         if options.sanity_state:
@@ -318,25 +348,55 @@ class Coc7Sanity:
         pending: list[dict[str, Any]] = []
         mental: dict[str, Any] | None = None
         habituation: dict[str, Any] | None = None
-        waived = False
+        waived = ""
         if options.sanity_state and loss > 0:
             mental = self.mental_block(card, state)
-            if options.sanity_reality and mental.get("realityImmunity"):
-                # 看穿幻象后获得的一次性免疫：抵掉下一次理智损失，用掉即消失。
-                mental["realityImmunity"] = False
-                waived = True
+            # 发作判断必须和写入 started_at 使用同一个时钟口径：游戏时钟优先，
+            # 旧墙钟记录先折算到当前口径，避免 time correct 后永远不到期。
+            now_ts, now_text, clock_kind = room_clock.san_now(room_info)
+            if options.sanity_bout:
+                sanity_state.rebase_timers(
+                    mental,
+                    now=now_ts,
+                    target_clock=clock_kind,
+                    safety_minutes=options.sanity_bout_safety_minutes,
+                )
+            if options.sanity_bout and sanity_state.has_active_bout(
+                mental, now_ts, safety_minutes=options.sanity_bout_safety_minutes
+            ):
+                # 规则书 p.138：“当调查员疯狂发作时，他将免疫进一步的理智值损失。”
+                waived = "bout"
                 delta = 0
                 new_san = current
                 loss = 0
-            else:
+            elif options.sanity_reality and illusion and mental.get("realityImmunity"):
+                # 规则书第八章「疯狂的副作用2：幻想与现实的界限」（p.135）：
+                # “成功：调查员将会看穿任何的自身产生的幻觉……并暂时获得对幻觉的
+                #  抗性，直到调查员下一次失去理智值为止。（这也是为了防止守秘人会
+                #  不停的给予调查员新的幻觉来抵消现实认知检定的效果。）”
+                # 因此抗性只对 illusion=True 的损失生效；被它抵消的幻觉损失并没有
+                # 真正失去理智值，不消耗抗性（这正是原文括号的用意，不是漏清标记）。
+                waived = "reality"
+                delta = 0
+                new_san = current
+                loss = 0
+            if loss > 0 and options.sanity_habituation and str(source or "").strip():
+                habituation = sanity_state.note_habituation(
+                    mental,
+                    str(source or ""),
+                    loss,
+                    max_loss=self.max_loss(failure_expr),
+                )
+                applied = int(habituation["applied"])
+                if applied != loss:
+                    loss = applied
+                    delta = -applied
+                    new_san = max(0, current - applied)
+            # 同页原文只把“下一次失去理智值”作为终止条件：被抗性抵消、或完全被
+            # 习惯恐惧吸收的损失都没有真正扣 SAN，所以不在这里清除抗性。
+            if loss > 0:
                 mental["realityImmunity"] = False
-                mental["lastLossAt"] = sanity_state.now_text()
-                if options.sanity_habituation and str(source or "").strip():
-                    habituation = sanity_state.note_habituation(mental, str(source or ""), loss)
-                    if habituation["immune"]:
-                        delta = 0
-                        new_san = current
-                        loss = 0
+                mental["lastLossAt"] = now_text
             pending.append(self._mental_pending(mental, "理智检定"))
         outcome = self.resolve_loss(
             card=card,
@@ -355,12 +415,25 @@ class Coc7Sanity:
         )
         if roll == 100 and not success:
             summary += " 掷出 100，本次按最大损失结算。"
-        if waived:
-            summary += " 现实认知免疫抵消了本次理智损失。"
+        if waived == "bout":
+            summary += " 疯狂发作期间免疫进一步的理智损失，本次不再损失。"
+        elif waived == "reality":
+            summary += " 现实认知免疫抵消了来自幻觉的理智损失。"
         if habituation and habituation["immune"]:
-            summary += f" 习惯恐惧：对「{habituation['source']}」的损失未超过记录值 {habituation['previous']}，本次不再损失理智。"
+            summary += (
+                f" 习惯恐惧：对「{habituation['source']}」的累计损失已达上限 "
+                f"{habituation['previous_total']}/{habituation['cap']}，本次不再损失。"
+            )
+        elif habituation and habituation["applied"] != habituation["loss"]:
+            summary += (
+                f" 习惯恐惧：对「{habituation['source']}」累计 {habituation['previous_total']}/"
+                f"{habituation['cap']}，本次只损失 {habituation['applied']} 点。"
+            )
         elif habituation:
-            summary += f" 习惯恐惧：记录「{habituation['source']}」的最大理智损失为 {habituation['loss']}。"
+            summary += (
+                f" 习惯恐惧：记录对「{habituation['source']}」的累计理智损失 "
+                f"{habituation['previous_total'] + habituation['applied']}/{habituation['cap'] or '?'}。"
+            )
         if outcome["madness_required"]:
             summary += " 一次损失≥5点：请继续调用 san.roll_madness 做智力检定并抽取疯狂表现。"
         if daily.get("threshold_met"):
@@ -381,8 +454,10 @@ class Coc7Sanity:
             result["mental"] = mental
             result["pending_changes"] = pending
             result["reality_immunity"] = bool(mental.get("realityImmunity"))
-        if waived:
+        if waived == "reality":
             result["reality_waived"] = True
+        if waived == "bout":
+            result["bout_immunity"] = True
         if habituation is not None:
             result["habituation"] = habituation
         return result
@@ -451,8 +526,15 @@ class Coc7Sanity:
         duration_hours: int,
         duration_rounds: int,
         current_san: int,
+        bout_mode: str = "immediate",
+        started_at: str = "",
+        clock: str = "wall",
     ) -> dict[str, Any]:
-        """把疯狂结果写入结构化精神状态，并返回需要持久化的变更。"""
+        """把疯狂结果写入结构化精神状态，并返回需要持久化的变更。
+
+        ``started_at`` / ``clock`` 由调用方按房间统一时间口径给出，保证写入与
+        到期判断使用同一个时钟。
+        """
         block = self.mental_block(card, state)
         pending: list[dict[str, Any]] = []
         notes: list[str] = []
@@ -474,16 +556,43 @@ class Coc7Sanity:
                 madness_type=madness_type,
                 name=str(bout.get("name") or ""),
                 description=str(bout.get("description") or ""),
-                duration_hours=duration_hours,
+                mode=bout_mode,
                 duration_rounds=duration_rounds,
+                duration_hours=duration_hours,
                 trait=trait,
                 source=source,
                 san_loss=loss,
                 bout_roll=bout_roll,
+                started_at=started_at or None,
+                clock=clock,
             )
-            notes.append(f"发作计时：1D10={bout_record['duration_hours']} 小时，预计 {bout_record['expires_at']} 结束。")
+            if bout_record["mode"] == "summary":
+                notes.append(
+                    f"发作（总结症状）：1D10={bout_record['duration_hours']} 小时，"
+                    f"预计 {bout_record['expires_at']} 结束。"
+                )
+            else:
+                notes.append(f"发作（即时症状）：1D10={bout_record['duration_rounds']} 个战斗轮。")
             if bout_record.get("symptoms"):
                 notes.append("汇总症状：" + "、".join(bout_record["symptoms"]) + "。")
+        # 疯狂阶段：临时性 1D10 小时；不定性持续到治愈；永久不结束。
+        if options.sanity_state:
+            insanity_kind = madness_type if madness_type in ("temporary", "indefinite", "permanent") else ""
+            if insanity_kind:
+                record = sanity_state.start_insanity(
+                    block,
+                    insanity_kind,
+                    duration_hours=duration_hours,
+                    source=source,
+                    started_at=started_at or None,
+                    clock=clock,
+                )
+                if record.get("endsAt"):
+                    notes.append(f"临时性疯狂持续 {record['durationHours']} 小时，预计 {record['endsAt']} 恢复。")
+                elif insanity_kind == "indefinite":
+                    notes.append("不定性疯狂持续到被治愈（系统治疗需 1D6 个月）。")
+                elif insanity_kind == "permanent":
+                    notes.append("永久性疯狂不会自行恢复。")
         mythos: dict[str, Any] = {}
         if options.sanity_mythos:
             mythos = self._gain_mythos(card, state, block, current_san)
@@ -520,34 +629,45 @@ class Coc7Sanity:
         room_info: dict[str, Any] | None = None,
         madness_type: str = "indefinite",
         source: str = "",
+        mode: str = "immediate",
         roller: Callable[[int], int] | None = None,
     ) -> dict[str, Any]:
-        """外部裁定触发的发作（现实认知失败等）：1D10 小时 + 汇总症状。"""
+        """外部裁定触发的发作（现实认知失败等）。
+
+        即时症状持续 1D10 个战斗轮；总结症状持续 1D10 小时。
+        """
         options = resolve_options(room_info)
         if not options.sanity_state or not options.sanity_bout:
             return {}
         pick = roller or (lambda sides: random.randint(1, sides))
         bout_roll = max(1, min(10, int(pick(10))))
         bout = dict(MADNESS_BOUTS[bout_roll - 1])
+        rounds = max(1, min(10, int(pick(10))))
         hours = max(1, min(10, int(pick(10))))
         block = self.mental_block(card, state)
+        _, now_text, clock_kind = room_clock.san_now(room_info)
         record = sanity_state.start_bout(
             block,
             madness_type=madness_type,
             name=str(bout.get("name") or ""),
             description=str(bout.get("description") or ""),
+            mode=mode,
+            duration_rounds=rounds,
             duration_hours=hours,
             source=source,
             bout_roll=bout_roll,
+            started_at=now_text,
+            clock=clock_kind,
         )
+        if record.get("mode") == "summary":
+            timing = f"1D10={record.get('duration_hours')} 小时，预计 {record.get('expires_at')} 结束"
+        else:
+            timing = f"1D10={record.get('duration_rounds')} 个战斗轮"
         return {
             "mental": block,
             "bout": record,
             "pending_changes": [self._mental_pending(block, "发作")],
-            "summary": (
-                f"进入发作「{record.get('name')}」（1D10={record.get('duration_hours')} 小时），"
-                f"预计 {record.get('expires_at')} 结束。"
-            ),
+            "summary": f"进入发作「{record.get('name')}」（{timing}）。",
         }
 
     def resolve_madness(
@@ -567,6 +687,8 @@ class Coc7Sanity:
     ) -> dict[str, Any]:
         """CoC7 临时 / 不定 / 永久疯狂结算。"""
         options = resolve_options(room_info)
+        # 疯狂发作 / 临时性疯狂的写入与后续到期判断共用同一时钟口径。
+        _, now_text, clock_kind = room_clock.san_now(room_info)
         loss = _nullable_int(arguments.get("loss"))
         if loss is None:
             loss = _nullable_int(state.get("last_san_loss"))
@@ -598,6 +720,7 @@ class Coc7Sanity:
         int_success = int_target > 0 and int_roll <= int_target
 
         insane = permanent or indefinite or (loss >= MADNESS_LOSS_THRESHOLD and int_success)
+        bout_mode = _bout_mode(arguments.get("bout_mode"))
         bout_roll = max(1, min(10, int(roller(10))))
         bout = dict(MADNESS_BOUTS[bout_roll - 1])
         duration_hours = max(1, min(10, int(roller(10))))
@@ -668,6 +791,9 @@ class Coc7Sanity:
                     duration_hours=duration_hours,
                     duration_rounds=duration_rounds,
                     current_san=current_san,
+                    bout_mode=bout_mode,
+                    started_at=now_text,
+                    clock=clock_kind,
                 )
         else:
             # INT 检定失败：记忆被压抑，不进入疯狂，也不写入新的疯狂记录。
@@ -742,6 +868,7 @@ class Coc7Sanity:
             result["mental"] = structured["mental"]
             result["bout_record"] = structured["bout"]
             result["trait_record"] = structured["trait_row"]
+            result["bout_mode"] = bout_mode
             if structured["mythos"]:
                 result["mythos"] = structured["mythos"]
         return result

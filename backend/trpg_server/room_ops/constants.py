@@ -176,12 +176,22 @@ HOUSE_RULE_DEFINITIONS = {
     "coc7_sanity_state": {"type": "boolean", "default": False, "ai_prompt": False},
     # 目击神话：首次因神话疯狂时克苏鲁神话 +5，之后每次 +1。
     "coc7_sanity_mythos": {"type": "boolean", "default": False, "ai_prompt": False},
-    # 习惯恐惧：按来源记录最大理智损失，未超过记录则免疫，幕间 −1。
+    # 习惯恐惧：按来源累计理智损失，上限为该存在单次遭遇最大损失；幕间 −1。
     "coc7_sanity_habituation": {"type": "boolean", "default": False, "ai_prompt": False},
-    # 现实认知：POW 检定成功看穿幻象并免疫后续理智损失。
+    # 现实认知：理智检定（目标值为当前 SAN）成功看穿幻象，获得对幻觉的抗性直到下次失去理智值。
     "coc7_sanity_reality": {"type": "boolean", "default": False, "ai_prompt": False},
-    # 发作计时：疯狂发作掷 1D10 小时并写入可查询的 bout。
+    # 发作计时：即时症状 1D10 战斗轮 / 总结症状 1D10 小时，写入可查询的 bout。
     "coc7_sanity_bout": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 即时症状收尾安全阀（分钟）。不是规则书数值：规则书只规定即时症状持续 1D10 战斗轮，
+    # 系统没有按战斗轮推进的时钟，故用挂钟分钟数兜底收尾，防止 KP 忘记收尾导致永久免疫。
+    # 0 = 关闭兜底（完全按原逻辑，需要 KP / rule san bout end 显式收尾）；留空按默认 60。
+    "coc7_sanity_bout_safety_minutes": {
+        "type": "nullable_integer",
+        "default": 60,
+        "min": 0,
+        "max": 1440,
+        "ai_prompt": False,
+    },
     # 恐惧 / 躁狂 100 条表：按需查表，暴露来源时检定吃惩罚骰。
     "coc7_sanity_traits": {"type": "boolean", "default": False, "ai_prompt": False},
 }
