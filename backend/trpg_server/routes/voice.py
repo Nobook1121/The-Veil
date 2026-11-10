@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 from pathlib import Path
@@ -18,6 +19,7 @@ from flask import Blueprint, Response, current_app, request, session
 from trpg_server.config import update_sections
 from trpg_server.config.paths import general_config_path, resolve_config_dir
 from trpg_server.responses import error_response, success_response
+from trpg_server.security import safe_join
 from trpg_server.voice import events, local_cache, local_models, local_service
 from trpg_server.voice.config import load_voice_settings, load_room_voice, resolve_room_voice
 from trpg_server.voice.director import log_playback
@@ -39,6 +41,8 @@ ALLOWED_CONFIG_KEYS = {
 _SYNTH_LOCK = threading.Lock()
 _SYNTH_WINDOW: dict[int, tuple[int, float]] = {}
 _SYNTH_MAX_PER_MINUTE = 60
+# 房间 ID 只允许字母、数字、下划线与连字符，防止拼进房间目录时越过根目录。
+ROOM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _require_login():
@@ -59,10 +63,39 @@ def _rooms_dir() -> Path:
     return Path(current_app.config.get("ROOMS_DIR") or (Path(current_app.root_path).parent / "runtime" / "rooms"))
 
 
+def _room_dir(room_id: str) -> Path | None:
+    """校验房间 ID 后安全拼接房间目录；非法 ID 直接返回 None。"""
+    text = str(room_id or "").strip()
+    if not text or not ROOM_ID_PATTERN.fullmatch(text):
+        return None
+    try:
+        return safe_join(_rooms_dir(), text)
+    except ValueError:
+        return None
+
+
+def _room_id_from(value: object) -> str | None:
+    """读取并校验 room_id；非法时返回 None（调用方据此返回 400）。"""
+    text = str(value or "").strip()
+    return text if _room_dir(text) is not None else None
+
+
+def _session_user_id() -> int:
+    try:
+        return int(session.get("user_id") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _room_access_denied(room_id: str | None) -> bool:
+    """读接口统一校验调用者与房间的关系：非成员（含非法 room_id）一律拒绝。"""
+    return room_id is None or not _room_member(room_id, _session_user_id())
+
+
 def _public_settings(settings: dict[str, object], room_id: str = "") -> dict[str, object]:
     view = dict(settings)
-    room_dir = _rooms_dir() / room_id if room_id else None
-    if room_id and room_dir and room_dir.is_dir():
+    room_dir = _room_dir(room_id) if room_id else None
+    if room_dir is not None and room_dir.is_dir():
         room_info_path = room_dir / "info.json"
         try:
             info = json.loads(room_info_path.read_text(encoding="utf-8"))
@@ -79,12 +112,21 @@ def get_voice_config():
     login_error = _require_login()
     if login_error is not None:
         return login_error
+    room_id = str(request.args.get("room_id") or "").strip()
+    if room_id:
+        # 房间维度的配置读取必须校验成员关系，避免跨房间探测他人的房规与音色绑定。
+        valid_room_id = _room_id_from(room_id)
+        if valid_room_id is None:
+            return error_response("Invalid room_id", 400, "invalid_room_id")
+        if _room_access_denied(valid_room_id):
+            return error_response("Permission denied", 403, "Permission denied")
+        room_id = valid_room_id
     try:
         settings = load_voice_settings(_config_dir())
         model_status = local_models.installed_status(str(settings.get("local_model") or local_models.MODEL_ID))
         return success_response(
             data={
-                "settings": _public_settings(settings, str(request.args.get("room_id") or "")),
+                "settings": _public_settings(settings, room_id),
                 "profiles": [profile.to_dict() for profile in PROFILES],
                 "engine": {
                     "system": True,
@@ -131,7 +173,9 @@ def save_voice_config():
 
 
 def _room_member(room_id: str, user_id: int) -> bool:
-    room_dir = _rooms_dir() / room_id
+    room_dir = _room_dir(room_id)
+    if room_dir is None:
+        return False
     try:
         info = json.loads((room_dir / "info.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -145,21 +189,27 @@ def _room_member(room_id: str, user_id: int) -> bool:
     return False
 
 
+def _authorize_room_read(room_id_value: object):
+    """读取房间维度数据前的统一校验：必填、ID 合法、且调用者是房间成员。"""
+    room_id = str(room_id_value or "").strip()
+    if not room_id:
+        return None, error_response("room_id is required", 400)
+    if _room_id_from(room_id) is None:
+        return None, error_response("Invalid room_id", 400, "invalid_room_id")
+    if not _room_member(room_id, _session_user_id()):
+        return None, error_response("Permission denied", 403, "Permission denied")
+    return room_id, None
+
+
 @bp.route("/api/voice/playback", methods=["POST"])
 def report_playback():
     login_error = _require_login()
     if login_error is not None:
         return login_error
     payload = request.get_json(silent=True) or {}
-    room_id = str(payload.get("room_id") or "").strip()
-    if not room_id:
-        return error_response("room_id is required", 400)
-    try:
-        user_id = int(session.get("user_id") or 0)
-    except (TypeError, ValueError):
-        user_id = 0
-    if not _room_member(room_id, user_id):
-        return error_response("Permission denied", 403, "Permission denied")
+    room_id, denied = _authorize_room_read(payload.get("room_id"))
+    if denied is not None:
+        return denied
     try:
         log_playback(
             room_id=room_id,
@@ -188,7 +238,9 @@ def _room_rules(room_dir: Path) -> dict:
 
 
 def _effective_for_room(room_id: str) -> tuple[dict, Path]:
-    room_dir = _rooms_dir() / room_id
+    room_dir = _room_dir(room_id)
+    if room_dir is None:
+        raise ValueError("invalid room_id")
     settings = load_voice_settings(_config_dir())
     return resolve_room_voice(settings, _room_rules(room_dir)), room_dir
 
@@ -211,16 +263,10 @@ def synthesize_segment():
     if login_error is not None:
         return login_error
     payload = request.get_json(silent=True) or {}
-    room_id = str(payload.get("room_id") or "").strip()
-    if not room_id:
-        return error_response("room_id is required", 400)
-    try:
-        user_id = int(session.get("user_id") or 0)
-    except (TypeError, ValueError):
-        user_id = 0
-    if not _room_member(room_id, user_id):
-        return error_response("Permission denied", 403, "Permission denied")
-    if not _allow_synth(user_id):
+    room_id, denied = _authorize_room_read(payload.get("room_id"))
+    if denied is not None:
+        return denied
+    if not _allow_synth(_session_user_id()):
         return error_response("Too many requests", 429, "rate_limited")
     text = str(payload.get("text") or "").strip()
     if not text:
@@ -284,10 +330,14 @@ def local_status():
     try:
         room_id = str(request.args.get("room_id") or "").strip()
         effective = load_voice_settings(_config_dir())
+        room_voice = {"local_speakers": {}}
         if room_id:
-            effective, _ = _effective_for_room(room_id)
+            room_id, denied = _authorize_room_read(room_id)
+            if denied is not None:
+                return denied
+            effective, room_dir = _effective_for_room(room_id)
+            room_voice = load_room_voice(room_dir)
         data = local_service.service_status(effective)
-        room_voice = load_room_voice(_rooms_dir() / room_id) if room_id else {"local_speakers": {}}
         data["bindings"] = {
             profile.id: local_service.speaker_binding(profile.id, effective, room_voice)
             for profile in PROFILES
@@ -334,9 +384,9 @@ def cache_stats():
     login_error = _require_login()
     if login_error is not None:
         return login_error
-    room_id = str(request.args.get("room_id") or "").strip()
-    if not room_id or not _room_member(room_id, int(session.get("user_id") or 0)):
-        return error_response("Permission denied", 403, "Permission denied")
+    room_id, denied = _authorize_room_read(request.args.get("room_id"))
+    if denied is not None:
+        return denied
     effective, room_dir = _effective_for_room(room_id)
     data = local_cache.stats(room_dir)
     data["limits"] = {
@@ -354,10 +404,10 @@ def cache_clear():
     if login_error is not None:
         return login_error
     payload = request.get_json(silent=True) or {}
-    room_id = str(payload.get("room_id") or "").strip()
-    if not room_id or not _room_member(room_id, int(session.get("user_id") or 0)):
-        return error_response("Permission denied", 403, "Permission denied")
-    room_dir = _rooms_dir() / room_id
+    room_id, denied = _authorize_room_read(payload.get("room_id"))
+    if denied is not None:
+        return denied
+    room_dir = _room_dir(room_id)
     files, size = local_cache.clear(room_dir)
     events.emit("cache_clear", room_id=room_id, engine="local", reason=f"{files} files")
     return success_response(message="Cache cleared", data={"files": files, "bytes": size})
@@ -369,9 +419,9 @@ def cache_prune():
     if login_error is not None:
         return login_error
     payload = request.get_json(silent=True) or {}
-    room_id = str(payload.get("room_id") or "").strip()
-    if not room_id or not _room_member(room_id, int(session.get("user_id") or 0)):
-        return error_response("Permission denied", 403, "Permission denied")
+    room_id, denied = _authorize_room_read(payload.get("room_id"))
+    if denied is not None:
+        return denied
     effective, room_dir = _effective_for_room(room_id)
     removed, freed = local_cache.prune(room_dir, effective)
     events.emit("cache_evict", room_id=room_id, engine="local", reason=f"{removed} files")

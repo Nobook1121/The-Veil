@@ -6,16 +6,17 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Any
 
 from flask import current_app
 
 from trpg_server.config import (
-    SECRET_GENERAL_KEYS,
+    SECRET_MASK,
     general_config_path,
     invalidate_settings_cache,
+    is_secret_config_key,
     load_settings,
+    redact_config_tree,
     update_sections,
 )
 from trpg_server.config.schema import SMALL_MODELS_SECTION, SPECS_BY_SECTION_KEY
@@ -31,10 +32,6 @@ OWNER_ONLY_SECTIONS = frozenset(
         "site_agent",
     }
 )
-
-# 密钥字段：读取时打码，写入时直接拒绝。清单与 /api/config/general 共用，
-# 避免出现「配置接口打码、Agent 接口明文」的分叉。
-SECRET_FIELDS = SECRET_GENERAL_KEYS
 
 # 可编辑键只取主键名，避免模型写入历史别名造成同一配置出现两份。
 EDITABLE_SPECS = {
@@ -72,16 +69,12 @@ def _read_value(data: dict[str, Any], section: str, key: str) -> Any:
 
 def _display_value(section: str, key: str, value: Any) -> Any:
     """密钥字段对外展示时一律打码，避免预览等旁路回显原值。"""
-    return "******" if (section, key) in SECRET_FIELDS else value
+    return SECRET_MASK if is_secret_config_key(section, key) else value
 
 
 def _redacted_snapshot() -> dict[str, Any]:
-    data = deepcopy(_settings().data)
-    for section, key in SECRET_FIELDS:
-        values = _section_values(data, section)
-        if key in values:
-            values[key] = "******"
-    return data
+    # 按键名规则递归打码：未显式登记的 ``*_api_key`` 等新密钥同样不会明文外泄。
+    return redact_config_tree(_settings().data)
 
 
 def _coerce_value(spec: Any, raw: Any) -> tuple[Any, str | None]:
@@ -131,8 +124,8 @@ def _parse_changes(arguments: dict[str, Any]) -> tuple[list[dict[str, Any]], str
         if pair in seen:
             return [], f"重复修改 {section}.{key}"
         seen.add(pair)
-        if pair in SECRET_FIELDS:
-            return [], f"{section}.{key} 是密钥字段，不能通过 Agent 修改"
+        if is_secret_config_key(section, key):
+            return [], f"{section}.{key} 是密钥字段，不能通过 Agent 修改（请使用对应的专用设置入口）"
         spec = EDITABLE_SPECS.get(pair)
         if spec is None:
             return [], f"不支持的设置项：{section}.{key}"

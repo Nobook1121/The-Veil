@@ -119,6 +119,42 @@ def test_general_config_api_masks_penetration_auth_token(tmp_path):
     assert payload["config"]["network.penetration.settings"]["auth_token"] == ""
 
 
+def test_general_config_api_masks_unregistered_api_key(tmp_path):
+    """未登记的 ``*_api_key`` 也按后缀规则打码，不依赖显式清单。"""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "general.toml").write_text(
+        '[ai]\nvoice_cloud_api_key = "sk-live-voice"\nmax_tokens = 4096\n',
+        encoding="utf-8",
+    )
+    client = _app(tmp_path).test_client()
+
+    response = client.get("/api/config/general")
+    payload = response.get_json()["data"]
+
+    assert payload["config"]["ai"]["voice_cloud_api_key"] == ""
+    assert "sk-live-voice" not in response.get_data(as_text=True)
+
+
+def test_general_config_api_omits_unregistered_sections(tmp_path):
+    """公开接口只回传 schema 中登记的段，不再原样吐出整棵配置树。"""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "general.toml").write_text(
+        '[ai]\nmax_tokens = 4096\n\n[legacy]\nvoice_cloud_api_key = "sk-legacy"\n',
+        encoding="utf-8",
+    )
+    client = _app(tmp_path).test_client()
+
+    response = client.get("/api/config/general")
+    payload = response.get_json()["data"]
+
+    assert "legacy" not in payload["config"]
+    assert payload["config"]["ai"]["max_tokens"] == 4096
+    assert "sk-legacy" not in response.get_data(as_text=True)
+    assert all(not key.startswith("legacy.") for key in payload["overrides"])
+
+
 def test_save_config_skips_env_locked_keys(tmp_path, monkeypatch):
     monkeypatch.setenv("AI_TRPG_CFG_AI_MAX_TOKENS", "8192")
     client = _app(tmp_path).test_client()

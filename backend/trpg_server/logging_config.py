@@ -5,6 +5,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
+from trpg_server.config.secret_keys import is_sensitive_key as _is_config_sensitive_key
 from trpg_server.settings import CONFIG_DIR
 
 SENSITIVE_KEYS = {
@@ -237,7 +238,9 @@ def _is_sensitive_key(key: Any) -> bool:
         "clientsecret",
     }:
         return True
-    return compact.endswith(("apikey", "accesstoken", "refreshtoken", "sessiontoken", "csrftoken", "password", "secret", "privatekey"))
+    return _is_config_sensitive_key(key) or compact.endswith(
+        ("apikey", "accesstoken", "refreshtoken", "sessiontoken", "csrftoken", "password", "secret", "privatekey")
+    )
 
 
 def set_log_config_dir(config_dir: str | Path | None = None) -> None:

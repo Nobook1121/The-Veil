@@ -16,6 +16,7 @@ from trpg_server.config.paths import (
     general_config_path,
     resolve_config_dir,
 )
+from trpg_server.config.secret_keys import redact_config_value
 from trpg_server.config.sources import (
     LEGACY_JSON_FILES,
     read_legacy_json_layer,
@@ -43,7 +44,8 @@ def format_settings(section_filter: str | None = None, config_dir: Any = None) -
         if section_filter and section != section_filter:
             continue
         lines.append(f"[{section}]")
-        values = settings.data[section]
+        # 控制台输出同样属于“工具结果”，密钥字段一律打码后再展示。
+        values = redact_config_value(settings.data[section], section=section)
         for key in sorted(values):
             lock = settings.locked.get(f"{section}.{key}")
             marker = f"  (locked: {lock})" if lock else ""
@@ -82,8 +84,9 @@ def format_migration_preview(config_dir: Any = None) -> str:
     lines = ["将执行以下迁移："]
     if pending:
         for section in sorted(pending):
-            for key in sorted(pending[section]):
-                lines.append(f"  写入 [{section}] {key} = {pending[section][key]!r}")
+            values = redact_config_value(pending[section], section=section)
+            for key in sorted(values):
+                lines.append(f"  写入 [{section}] {key} = {values[key]!r}")
     else:
         lines.append("  （没有需要写入 general.toml 的新键）")
     for path in files:

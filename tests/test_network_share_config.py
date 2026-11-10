@@ -90,3 +90,26 @@ def test_share_base_url_is_persisted_and_can_be_cleared(tmp_path):
     )
     assert cleared.status_code == 200
     assert client.get("/api/network/addresses").get_json()["data"]["share_base_url"] == ""
+
+
+def test_penetration_config_never_returns_plaintext_auth_token(tmp_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "general.toml").write_text(
+        '[network.penetration.settings]\nauth_token = "tok-live-secret"\n',
+        encoding="utf-8",
+    )
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.get("/api/network/penetration/config")
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["settings"]["auth_token"] == "******"
+    assert "tok-live-secret" not in response.get_data(as_text=True)
+
+    # 状态接口同样属于读取出口，不能把令牌回传给调用方。
+    status = client.get("/api/network/penetration/status")
+    assert status.status_code == 200
+    assert status.get_json()["data"]["settings"]["auth_token"] == "******"
+    assert "tok-live-secret" not in status.get_data(as_text=True)

@@ -19,7 +19,14 @@ from trpg_server.config.paths import (
     template_general_path,
 )
 from trpg_server.config.schema import AIRuntimeConfig
-from trpg_server.config.secret_keys import SECRET_GENERAL_KEYS
+from trpg_server.config.secret_keys import (
+    SECRET_GENERAL_KEYS,
+    SECRET_MASK,
+    is_secret_config_key,
+    is_sensitive_key,
+    redact_config_tree,
+    redact_config_value,
+)
 from trpg_server.config.writer import update_sections
 
 __all__ = [
@@ -37,7 +44,12 @@ __all__ = [
     "render_minimal_general",
     "resolve_config_dir",
     "SECRET_GENERAL_KEYS",
+    "SECRET_MASK",
     "set_config_dir_override",
     "template_general_path",
+    "is_secret_config_key",
+    "is_sensitive_key",
+    "redact_config_tree",
+    "redact_config_value",
     "update_sections",
 ]

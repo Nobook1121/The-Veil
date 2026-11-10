@@ -4,6 +4,7 @@ import time
 
 from flask import Blueprint, current_app, request, session
 
+from trpg_server.config import redact_config_value
 from trpg_server.logging_config import log_user_action, user_action_text
 from trpg_server.network_discovery import (
     DEFAULT_PORT,
@@ -25,6 +26,12 @@ logger = logging.getLogger(__name__)
 
 def _get_config_dir():
     return current_app.config.get("CONFIG_DIR", CONFIG_DIR)
+
+
+def _redacted_penetration_config(config_dir=None):
+    """穿透配置对外一律打码密钥字段，规则与设置接口 / 网站 Agent 共用。"""
+    config = get_penetration_config(config_dir)
+    return redact_config_value(config, section="network.penetration.settings")
 
 
 @bp.route("/api/network/config", methods=["GET"])
@@ -145,7 +152,7 @@ def test_network_connection():
 @require_permission_node("settings.network")
 def get_penetration_config_api():
     try:
-        config = get_penetration_config(_get_config_dir())
+        config = _redacted_penetration_config(_get_config_dir())
         return success_response(config, "Penetration config loaded successfully")
     except Exception as exc:
         logger.exception("Failed to get penetration config")
@@ -177,7 +184,7 @@ def update_penetration_config_api():
 @bp.route("/api/network/penetration/status", methods=["GET"])
 def get_penetration_status():
     try:
-        config = get_penetration_config(_get_config_dir())
+        config = _redacted_penetration_config(_get_config_dir())
         status = {
             "enabled": config.get("enabled", False),
             "type": config.get("type", "ngrok"),

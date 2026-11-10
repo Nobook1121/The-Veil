@@ -539,6 +539,27 @@ class TestSiteSettingsGuards:
         denied = _check_update_settings(actor, self._changes("immersive", "api_key", secret))
         assert denied and "密钥" in denied
 
+    def test_unregistered_api_key_is_redacted_and_rejected(self, config_app):
+        """未登记的 ``*_api_key`` 也按后缀规则打码，写入同样被拒绝。"""
+        config_path = config_app.config["CONFIG_DIR"] / "general.toml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text('[ai]\nvoice_cloud_api_key = "sk-agent-secret"\n', encoding="utf-8")
+        invalidate_settings_cache()
+        actor = self._actor("ADMIN")
+        context = ToolContext(actor=actor, config=SimpleNamespace(), conversation_id="", turn_id="")
+
+        result = get_general_settings(actor, {}, context)
+        assert result.ok is True
+        sections = result.data["sections"]
+        assert sections["ai"]["voice_cloud_api_key"] == "******"
+        assert "sk-agent-secret" not in json.dumps(result.data, ensure_ascii=False)
+
+        denied = _check_update_settings(actor, self._changes("ai", "voice_cloud_api_key", "sk-new"))
+        assert denied and "密钥" in denied
+        preview = preview_update_settings(actor, self._changes("ai", "voice_cloud_api_key", "sk-new"), context)
+        assert preview.ok is False
+        assert "sk-new" not in json.dumps(preview.to_dict(), ensure_ascii=False)
+
     def test_apply_writes_registered_key(self, config_app):
         actor = self._actor("ADMIN")
         result = apply_update_settings(

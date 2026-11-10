@@ -333,3 +333,40 @@ def test_voice_playback_requires_room_membership(tmp_path):
         headers={"X-CSRF-Token": "csrf"},
     )
     assert denied.status_code == 403
+
+
+def test_voice_config_rejects_invalid_room_id(tmp_path):
+    app = _app(tmp_path, role="USER", user_id=1)
+    _write_room(tmp_path, user_id=1)
+    client = app.test_client()
+    _login(client, user_id=1, role="USER")
+
+    for bad_id in ("../secret", "r-1/../../x", "r 1", "r.1", "%2e%2e"):
+        response = client.get("/api/voice/config", query_string={"room_id": bad_id})
+        assert response.status_code == 400, bad_id
+        assert response.get_json()["error"] == "invalid_room_id"
+
+
+def test_voice_config_read_requires_room_membership(tmp_path):
+    app = _app(tmp_path, role="USER", user_id=2)
+    _write_room(tmp_path, room_id="r-1", user_id=1)
+    client = app.test_client()
+    _login(client, user_id=2, role="USER")
+
+    response = client.get("/api/voice/config", query_string={"room_id": "r-1"})
+
+    assert response.status_code == 403
+    assert response.get_json()["error"] == "Permission denied"
+
+
+def test_voice_config_member_can_read_room_config(tmp_path):
+    app = _app(tmp_path, role="USER", user_id=1)
+    _write_room(tmp_path, room_id="r-1", user_id=1)
+    client = app.test_client()
+    _login(client, user_id=1, role="USER")
+
+    response = client.get("/api/voice/config", query_string={"room_id": "r-1"})
+
+    assert response.status_code == 200
+    settings = response.get_json()["data"]["settings"]
+    assert "room" in settings and "npc_profiles" in settings

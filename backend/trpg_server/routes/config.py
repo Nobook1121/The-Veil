@@ -16,8 +16,14 @@ from trpg_server.ai_platform_config import (
     save_platform_config,
 )
 from trpg_server.ai_platform_resolver import CAPABILITY_OPTIONS, normalize_capabilities
-from trpg_server.config import SECRET_GENERAL_KEYS, load_settings, update_sections
+from trpg_server.config import (
+    is_secret_config_key,
+    load_settings,
+    redact_config_tree,
+    update_sections,
+)
 from trpg_server.config.paths import general_config_path
+from trpg_server.config.schema import SPECS
 from trpg_server.config.sources import read_toml_file
 from trpg_server.json_store import write_json_atomic
 from trpg_server.logging_config import log_user_action, user_action_text
@@ -35,8 +41,19 @@ CONFIG_LABELS = {
 
 # 密钥类字段：GET 一律掩码、POST 一律拒写（穿透令牌经 /api/network/penetration/config 管理，
 # 生图密钥经沉浸设置专用接口 /api/immersive/settings/secret 管理）。
-# 清单统一维护在 config/secret_keys.py，网站 Agent 工具共用同一份定义。
-_REDACTED_GENERAL_KEYS = SECRET_GENERAL_KEYS
+# 判定规则统一维护在 config/secret_keys.py，网站 Agent 工具共用同一份定义。
+# 公开读取接口只回传设置页真正使用的段（schema 中登记的段），
+# 不再把整棵生效配置树原样吐出，避免未登记键/遗留段被顺带暴露。
+PUBLIC_CONFIG_SECTIONS = frozenset(spec.section for spec in SPECS)
+
+
+def _public_sections(data):
+    return {section: dict(values) for section, values in data.items() if section in PUBLIC_CONFIG_SECTIONS}
+
+
+def _public_overrides(locked):
+    """只回传公开段相关的锁定来源，避免泄露未公开段的部署细节。"""
+    return {key: source for key, source in locked.items() if key.rsplit(".", 1)[0] in PUBLIC_CONFIG_SECTIONS}
 
 
 def _get_config_dir():
@@ -90,11 +107,9 @@ def get_general_config():
     """
     try:
         settings = load_settings(_get_config_dir())
-        data = {section: dict(values) for section, values in settings.data.items()}
-        for section, key in _REDACTED_GENERAL_KEYS:
-            if key in data.get(section, {}):
-                data[section][key] = ""
-        return success_response(data={"config": data, "overrides": settings.locked})
+        # 只暴露设置页使用的段，密钥类字段递归打码（含未登记的新密钥键）。
+        data = redact_config_tree(_public_sections(settings.data), mask="")
+        return success_response(data={"config": data, "overrides": _public_overrides(settings.locked)})
     except Exception:
         logger.exception("Failed to load general config")
         return server_error("Load failed")
@@ -119,12 +134,14 @@ def save_config(config_name):
         # 与密钥类字段不允许经此接口写入。
         changes = {}
         skipped_locked = []
+        skipped_secret = []
         for section, values in config_data.items():
             if not isinstance(values, dict):
                 continue
             user_section = user_layer.get(section, {})
             for key, value in values.items():
-                if (section, key) in _REDACTED_GENERAL_KEYS:
+                if is_secret_config_key(section, key):
+                    skipped_secret.append(f"{section}.{key}")
                     continue
                 if f"{section}.{key}" in locked:
                     skipped_locked.append(f"{section}.{key}")
@@ -133,6 +150,8 @@ def save_config(config_name):
                     continue
                 changes.setdefault(section, {})[key] = value
 
+        if skipped_secret:
+            logger.info("Config save rejected secret keys: %s", ",".join(sorted(skipped_secret)))
         if skipped_locked:
             logger.info("Config save skipped deployment-locked keys: %s", ",".join(sorted(skipped_locked)))
         if changes:
