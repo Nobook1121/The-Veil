@@ -88,7 +88,7 @@ def _confirm(
     if flags & {"yes", "y"}:
         return apply()
     if confirm is None:
-        return True, preview + "\n（预演模式：确认无误后加 yes 执行；旧 --yes 仍兼容）"
+        return True, preview + "\n（预演模式：确认无误后加 yes 执行）"
     if confirm(f"{prompt} (y/N)"):
         return apply()
     return True, preview + "\n（已取消，未执行）"

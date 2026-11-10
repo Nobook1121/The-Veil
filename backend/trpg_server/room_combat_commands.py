@@ -307,7 +307,7 @@ def handle_room_combat_command(
             return False, "当前没有进行中的战斗"
         if not (flags & {"--yes", "-y"}):
             if confirm is None:
-                return True, "将结束当前战斗（保留角色最终耐久）。确认无误后加 yes 执行（旧 --yes 仍兼容）。"
+                return True, "将结束当前战斗（保留角色最终耐久）。确认无误后加 yes 执行。"
             if not confirm("结束当前战斗？(y/N)"):
                 return True, "已取消，未结束战斗。"
         result = combat.end_combat({"reason": options.get("reason", "")}, context)

@@ -131,7 +131,7 @@ def test_combat_end_previews_without_yes(tmp_path):
     result = _run(room_dir, "combat end")
     assert result.ok is True
     assert "yes" in result.message
-    assert "--yes" in result.message
+    assert "--yes" not in result.message
 
     assert _run(room_dir, "combat").ok is True
     assert "第 1 轮" in _run(room_dir, "combat").message
