@@ -41,6 +41,7 @@ namespace TrpgBgmModule {
     let awaitingGesture = false;
     let gestureArmed = false;
     let cachedTracks: BgmTrack[] = [];
+    let personalCollapseBound = false;
 
     function isSupportedUrl(value: string): boolean {
         const url = value.trim();
@@ -147,6 +148,10 @@ namespace TrpgBgmModule {
         }
     }
 
+    /**
+     * 兼容旧版悬浮播放器：主界面已改为沉浸区统一播放器，
+     * 这里保留对 `bgmPlayer*` 节点的更新（存在时才生效），并统一广播状态。
+     */
     function updateToggleButton(): void {
         const button = document.getElementById("bgmPlayerToggle") as HTMLButtonElement | null;
         const icon = button?.querySelector<HTMLElement>("i") || null;
@@ -158,6 +163,33 @@ namespace TrpgBgmModule {
         }
         if (icon) icon.className = paused ? "fa fa-play" : "fa fa-pause";
         document.getElementById("bgmPlayer")?.classList.toggle("is-paused", paused);
+        notifyState();
+    }
+
+    /** 播放器渲染完全交给统一播放器模块；这里只广播「BGM 状态变了」。 */
+    function notifyState(): void {
+        try {
+            document.dispatchEvent(new CustomEvent("trpg:bgm-state"));
+        } catch {
+            // 无 document 的环境（测试）忽略。
+        }
+    }
+
+    /** 旧的悬浮播放器已移除；按需创建隐藏 audio 元素，保证 init 不再因缺节点而中断。 */
+    function ensureAudio(): HTMLAudioElement {
+        if (audio) return audio;
+        const existing = document.getElementById("bgmAudio") as HTMLAudioElement | null;
+        if (existing) {
+            audio = existing;
+            return existing;
+        }
+        const created = document.createElement("audio");
+        created.id = "bgmAudio";
+        created.preload = "none";
+        created.hidden = true;
+        document.body.appendChild(created);
+        audio = created;
+        return created;
     }
 
     function setText(id: string, value: string): void {
@@ -281,20 +313,18 @@ namespace TrpgBgmModule {
 
     /** 按「来源 + 曲目列表」应用播放列表；同一列表只更新模式，不打断当前播放。 */
     function applyPlaylist(source: BgmTrackSource | null, urls: string[], mode: BgmPlaybackMode): void {
-        const widget = document.getElementById("bgmPlayer") as HTMLElement | null;
-        if (!widget || !audio) return;
+        if (!audio) return;
         if (!source || urls.length === 0) {
             stopAudio();
-            widget.hidden = true;
             return;
         }
 
-        widget.hidden = false;
         activeMode = mode;
         const signature = `${source}|${urls.join("\n")}`;
         if (signature === activeUrlsSignature) {
             currentSource = source;
             updatePlayerLabels();
+            notifyState();
             return;
         }
 
@@ -321,6 +351,11 @@ namespace TrpgBgmModule {
 
     export function refresh(): void {
         if (!audio) return;
+        // 统一播放器只在房间内出现；离开房间时必须停播，避免「没有控件却在自动出声」。
+        if (!roomContext) {
+            applyPlaylist(null, [], DEFAULT_MODE);
+            return;
+        }
         const personal = getPersonalSettings();
         const roomUrls = roomContext?.urls || [];
         const roomMode = roomContext?.mode || DEFAULT_MODE;
@@ -345,6 +380,77 @@ namespace TrpgBgmModule {
             }
         }
         applyPlaylist(source, urls, source === "room" ? roomMode : personal.mode);
+    }
+
+    /** 统一播放器要读的 BGM 快照；没有曲目时 active=false。 */
+    export function getPlaybackState(): BgmPlaybackState {
+        const count = activePlaylist.length;
+        const duration = audio && Number.isFinite(audio.duration) ? audio.duration : 0;
+        const current = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+        return {
+            active: count > 0 && Boolean(currentUrl),
+            playing: Boolean(audio && currentUrl && !audio.paused),
+            paused: !audio || audio.paused,
+            source: currentSource,
+            title: currentUrl ? deriveTitle(currentUrl) : "",
+            index: count ? trackIndex : -1,
+            count,
+            current,
+            duration,
+            mode: activeMode,
+            suppressed,
+            ducked,
+        };
+    }
+
+    export function play(): void {
+        if (!audio || !currentUrl) return;
+        pausedByUser = false;
+        awaitingGesture = false;
+        attemptPlay();
+        updateToggleButton();
+    }
+
+    export function pause(): void {
+        if (!audio) return;
+        pausedByUser = true;
+        audio.pause();
+        updateToggleButton();
+    }
+
+    export function toggle(): void {
+        if (!audio) return;
+        if (audio.paused) play();
+        else pause();
+    }
+
+    /** 下一首：沿用列表/随机策略，与自然播完时的行为一致。 */
+    export function next(): void {
+        if (!audio || !activePlaylist.length) return;
+        let index = trackIndex + 1;
+        if (activeMode === "shuffle" && activePlaylist.length > 1) {
+            index = Math.floor(Math.random() * activePlaylist.length);
+            if (index === trackIndex) index = (index + 1) % activePlaylist.length;
+        }
+        loadTrackAt(index, true);
+    }
+
+    export function prev(): void {
+        if (!audio || !activePlaylist.length) return;
+        loadTrackAt(trackIndex - 1, true);
+    }
+
+    /** 拖动进度：只在有真实时长时生效（外链有时拿不到 metadata，会被忽略）。 */
+    export function seek(seconds: number): void {
+        if (!audio || !Number.isFinite(seconds)) return;
+        const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+        if (duration <= 0) return;
+        audio.currentTime = Math.max(0, Math.min(duration, seconds));
+        notifyState();
+    }
+
+    export function hasPlaylist(): boolean {
+        return activePlaylist.length > 0;
     }
 
     /** 沉浸配乐播放/停止时调用：压低或恢复 BGM 音量（不改变用户的播放/暂停状态）。 */
@@ -763,9 +869,11 @@ namespace TrpgBgmModule {
 
     /** 个人主页音乐面板默认收起，点标题栏展开；状态记在本地，切换标签后保持。 */
     function bindPersonalCollapse(): void {
+        if (personalCollapseBound) return;
         const panel = document.getElementById("personalBgmSection");
         const toggle = document.getElementById("personalBgmToggle");
         if (!panel || !toggle) return;
+        personalCollapseBound = true;
         const apply = (expanded: boolean): void => {
             panel.classList.toggle("is-collapsed", !expanded);
             toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
@@ -797,9 +905,10 @@ namespace TrpgBgmModule {
 
     export function init(): void {
         if (initialized) return;
-        const audioElement = document.getElementById("bgmAudio") as HTMLAudioElement | null;
-        if (!audioElement) return;
         initialized = true;
+        // 旧版把 audio 节点写死在页面里；现在改为按需创建，
+        // 这样即使页面没有 bgmPlayer / bgmAudio 节点，个人设置面板与播放器也不会失效。
+        const audioElement = ensureAudio();
         audio = audioElement;
         // 循环策略由播放模式控制（ended 事件里切歌），不再使用浏览器原生 loop。
         audio.loop = false;
@@ -807,12 +916,16 @@ namespace TrpgBgmModule {
         audio.addEventListener("play", updateToggleButton);
         audio.addEventListener("pause", updateToggleButton);
         audio.addEventListener("ended", handleEnded);
+        audio.addEventListener("timeupdate", notifyState);
+        audio.addEventListener("loadedmetadata", notifyState);
+        audio.addEventListener("durationchange", notifyState);
         audio.addEventListener("error", () => {
             if (currentUrl) markLoadError();
         });
         document.getElementById("bgmPlayerToggle")?.addEventListener("click", handleToggle);
         document.getElementById("bgmUploadButton")?.addEventListener("click", () => void uploadTrack());
         document.getElementById("personalBgmPriority")?.addEventListener("change", handlePriorityChange);
+        // 个人面板的展开/收起与音频节点无关：先绑定，保证入口一点就能打开。
         bindPersonalCollapse();
         window.addEventListener("storage", (event) => {
             if (event.key === PERSONAL_URLS_KEY || event.key === PERSONAL_MODE_KEY || event.key === PRIORITY_KEY) {
@@ -838,6 +951,14 @@ window.TrpgBgm = {
     renderRoomPlaylist: TrpgBgmModule.renderRoomPlaylist,
     fetchTracks: TrpgBgmModule.fetchTracks,
     loadLibraryPanel: TrpgBgmModule.loadLibraryPanel,
+    getPlaybackState: TrpgBgmModule.getPlaybackState,
+    play: TrpgBgmModule.play,
+    pause: TrpgBgmModule.pause,
+    toggle: TrpgBgmModule.toggle,
+    next: TrpgBgmModule.next,
+    prev: TrpgBgmModule.prev,
+    seek: TrpgBgmModule.seek,
+    hasPlaylist: TrpgBgmModule.hasPlaylist,
 };
 
 if (document.readyState === "loading") {

@@ -870,7 +870,7 @@
     "profile.bgm.library_deleted": "Music deleted",
     "profile.bgm.title": "My background music",
     "profile.bgm.local_badge": "Stored only in this browser",
-    "profile.bgm.hint": "Add multiple tracks; the floating player sits at the lower-right and can be paused anytime. Outside rooms it follows your playback priority.",
+    "profile.bgm.hint": "Add multiple tracks. Inside a room, the right-hand immersive area shows a unified player with play, pause, next/previous and seeking. Playback follows the priority below.",
     "profile.bgm.custom_placeholder": "Or paste an http(s) URL",
     "profile.bgm.add": "Add",
     "profile.bgm.mode_label": "Playback mode",

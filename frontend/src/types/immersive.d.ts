@@ -395,6 +395,15 @@ interface TrpgImmersiveMusicApi {
     /** 当前小节时基，用于把切换点对齐到小节/乐句边界。 */
     barTiming: () => { barSeconds: number; nextBarIn: number; positionBars: number } | null;
     audioClock: () => number;
+    /** 最近一次应用的计划，供统一播放器显示曲目信息。 */
+    currentPlan: () => ImmersiveMusicPlan | null;
+    /** 播放器暂停：停止调度并记住位置；恢复时从该小节继续。 */
+    pause: () => void;
+    resume: () => void;
+    isPaused: () => boolean;
+    togglePause: () => boolean;
+    /** 程序化配乐没有音轨：「下一首」= 跳到 cue 的下一个段落。 */
+    skipSection: (direction: number) => boolean;
 }
 
 interface ImmersiveMusicBusDiagnostics {
@@ -519,10 +528,16 @@ interface TrpgAudioBlocksApi {
     setSelection: (containerId: string, blocks: string[]) => void;
 }
 
+interface TrpgImmersivePlayerApi {
+    init: () => void;
+    refresh: () => void;
+}
+
 interface Window {
     TrpgImmersiveMusic?: TrpgImmersiveMusicApi;
     TrpgImmersiveAmbient?: TrpgImmersiveAmbientApi;
     TrpgImmersiveExternal?: TrpgImmersiveExternalApi;
     TrpgImmersive?: TrpgImmersiveApi;
+    TrpgImmersivePlayer?: TrpgImmersivePlayerApi;
     TrpgAudioBlocks?: TrpgAudioBlocksApi;
 }

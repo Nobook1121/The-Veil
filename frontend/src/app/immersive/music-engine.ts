@@ -91,6 +91,12 @@ namespace TrpgImmersiveMusicModule {
     let queuedPlan: ImmersiveMusicPlan | null = null;
     /** 最近一次服务端下发的房间共享位置；换谱/换 tempo 时据此对齐。 */
     let syncAnchor: SyncAnchor | null = null;
+    /**
+     * 用户暂停（播放器按钮）：与「静音」不同——暂停会停掉调度并记住出声位置，
+     * 恢复时从那个小节继续，既不会从头重放，也不会让两套总线叠在一起。
+     */
+    let paused = false;
+    let pausedPositionBars = 0;
     let muted = readMuted();
     let gestureArmed = false;
     // 语音配音 ducking：0 表示不压低，数字越大音乐越轻。语音总线独立，不接入音乐图。
@@ -644,6 +650,17 @@ namespace TrpgImmersiveMusicModule {
         /** 本条总线接下来要演奏的绝对小节序号（跨循环连续）。 */
         positionBars(): number {
             return this.cycle * this.timeline.totalBars + this.barIndex;
+        }
+
+        /**
+         * 此刻真正在出声的小节序号（排程是提前 2 秒做的，直接取 barIndex 会偏前）。
+         * 暂停/跳段时用它作为「继续位置」，恢复后不会跳音或从头开始。
+         */
+        audibleBars(): number {
+            const barDuration = Math.max(0.1, this.timeline.barDuration);
+            const ahead = Math.max(0, Math.ceil((this.nextBarTime - this.ctx.currentTime) / barDuration));
+            const index = this.cycle * this.timeline.totalBars + this.barIndex - ahead;
+            return Math.max(0, index);
         }
 
         /** 外链衔接用：当前小节长度、距下一个小节线的秒数、当前小节位置。 */
@@ -1303,10 +1320,13 @@ namespace TrpgImmersiveMusicModule {
         bus.start(now + 0.06, fadeMs);
         startScheduler();
         applyDuck();
+        notifyState();
     }
 
     function tick(): void {
         if (!context) return;
+        // 用户暂停时不补发任何音符：定时器可以留着，但绝不能重新排程。
+        if (paused) return;
         // 页面切后台/系统打断后 AudioContext 可能停在 suspended，定时器却还在跑。
         // 这里主动恢复，避免「调度器还在、声音已经没了」的假运行。
         if (context.state === "suspended") {
@@ -1363,7 +1383,7 @@ namespace TrpgImmersiveMusicModule {
     }
 
     function applyDuck(): void {
-        const audible = Boolean(activePlan) && !muted && Boolean(context) && liveBuses.length > 0 && engineMode !== "off";
+        const audible = Boolean(activePlan) && !muted && !paused && Boolean(context) && liveBuses.length > 0 && engineMode !== "off";
         const shouldDuck = audible && activePlan?.duck_bgm !== false;
         try {
             window.TrpgBgm?.setDuck?.(shouldDuck);
@@ -1411,6 +1431,17 @@ namespace TrpgImmersiveMusicModule {
         }
         // 环境音跟随场景先切换；即使配乐被静音，环境音仍按用户自己的开关工作。
         applyAmbient(normalized);
+        // 用户暂停期间只记住「接下来要播什么」，绝不重建总线；
+        // 恢复时从暂停位置继续，因此不会出现两条总线叠在一起。
+        if (paused) {
+            // 暂停期间如果换了曲子，恢复点应跟随新曲子的共享位置，而不是沿用旧曲的小节号。
+            if (signature !== activeSignature) {
+                activeSignature = signature;
+                pausedPositionBars = syncAnchor ? syncAnchor.positionBars : 0;
+            }
+            notifyState();
+            return;
+        }
         if (muted) {
             queuedPlan = normalized;
             return;
@@ -1446,6 +1477,7 @@ namespace TrpgImmersiveMusicModule {
                 return;
             }
             applyDuck();
+            notifyState();
             return;
         }
         // 真正的换谱（档位/种子/段落/导演乐谱）：交叉淡入到新总线。
@@ -1464,10 +1496,13 @@ namespace TrpgImmersiveMusicModule {
         queuedPlan = null;
         activeSignature = "";
         syncAnchor = null;
+        paused = false;
+        pausedPositionBars = 0;
         if (context) {
             const now = context.currentTime;
             for (const bus of liveBuses.slice()) bus.fadeOut(now, 900);
         }
+        liveBuses = [];
         stopScheduler();
         try {
             window.TrpgImmersiveAmbient?.stop?.(700);
@@ -1475,6 +1510,97 @@ namespace TrpgImmersiveMusicModule {
             // 环境音尚未加载时忽略。
         }
         applyDuck();
+        notifyState();
+    }
+
+    /** 通知播放器刷新：引擎状态变化统一从这一个出口广播，避免各处漏更新。 */
+    function notifyState(): void {
+        try {
+            document.dispatchEvent(new CustomEvent("trpg:music-state"));
+        } catch {
+            // 非浏览器环境（Node 探针）没有 document，忽略即可。
+        }
+    }
+
+    /** 用户暂停：淡出并停止补发，但记住此刻真正出声的小节。 */
+    export function pause(): void {
+        if (paused) return;
+        paused = true;
+        const live = liveBuses[liveBuses.length - 1] ?? null;
+        if (live) pausedPositionBars = live.audibleBars();
+        if (context) {
+            if (musicMuteGain) musicMuteGain.gain.setTargetAtTime(0, context.currentTime, 0.08);
+            for (const bus of liveBuses.slice()) bus.fadeOut(context.currentTime, 380);
+        }
+        liveBuses = [];
+        stopScheduler();
+        applyDuck();
+        notifyState();
+    }
+
+    /** 从暂停位置继续：按小节边界重建一条总线，不会从头开始也不会叠加。 */
+    export function resume(): void {
+        if (!paused) return;
+        paused = false;
+        const ctx = ensureContext();
+        if (musicMuteGain && ctx) {
+            musicMuteGain.gain.setTargetAtTime(muted ? 0 : 1, ctx.currentTime, 0.12);
+        }
+        if (!ctx || muted || engineMode === "off" || !activePlan) {
+            applyDuck();
+            notifyState();
+            return;
+        }
+        if (ctx.state === "suspended") {
+            void ctx.resume().catch(() => armGesture());
+            armGesture();
+            applyDuck();
+            notifyState();
+            return;
+        }
+        activeSignature = contentSignature(activePlan);
+        switchBus(activePlan, null, pausedPositionBars);
+    }
+
+    export function isPaused(): boolean {
+        return paused;
+    }
+
+    export function togglePause(): boolean {
+        if (paused) resume();
+        else pause();
+        return paused;
+    }
+
+    /**
+     * 程序化配乐没有音轨，所以「下一首」= 跳到当前 cue 的下一个段落
+     * （bed → rise → climax → void → tail → bed），保持在同一循环里。
+     */
+    export function skipSection(direction: number): boolean {
+        if (!activePlan) return false;
+        const spec = TrpgImmersiveMusicArranger.resolveSpec(activePlan);
+        const timeline = TrpgImmersiveMusicArranger.buildTimeline(spec, 0);
+        if (!timeline.bars.length) return false;
+        const order: TrpgImmersiveMusicTheory.SectionKind[] = ["bed", "rise", "climax", "void", "tail"];
+        const live = liveBuses[liveBuses.length - 1] ?? null;
+        const current = paused ? null : live?.currentSectionKind() ?? null;
+        const currentIndex = current ? order.indexOf(current) : -1;
+        const step = direction >= 0 ? 1 : -1;
+        const nextIndex = ((Math.max(0, currentIndex) + step) % order.length + order.length) % order.length;
+        const nextKind = order[nextIndex] ?? "bed";
+        const total = Math.max(1, timeline.totalBars);
+        const base = paused ? pausedPositionBars : live?.positionBars() ?? 0;
+        const cycle = Math.floor(base / total);
+        const targetBar = TrpgImmersiveMusicArranger.sectionStartBar(timeline, nextKind);
+        const ordinal = cycle * total + targetBar;
+        if (paused) {
+            pausedPositionBars = ordinal;
+            notifyState();
+            return true;
+        }
+        activeSignature = contentSignature(activePlan);
+        switchBus(activePlan, null, ordinal);
+        return true;
     }
 
     /**
@@ -1552,6 +1678,7 @@ namespace TrpgImmersiveMusicModule {
             }
         }
         applyDuck();
+        notifyState();
     }
 
     export function isMuted(): boolean {
@@ -1580,15 +1707,16 @@ namespace TrpgImmersiveMusicModule {
     export function unlock(): boolean {
         const ctx = ensureContext();
         if (!ctx) return false;
+        // 用户暂停期间只解锁上下文，不重建总线：否则一次点击就会让音乐偷偷响起来。
         if (ctx.state === "suspended") {
             void ctx.resume().then(() => {
-                if (ctx.state === "running" && activePlan && !liveBuses.length && !muted && engineMode !== "off") {
+                if (ctx.state === "running" && activePlan && !liveBuses.length && !muted && !paused && engineMode !== "off") {
                     activeSignature = "";
                     switchBus(activePlan, null, startPositionBars(null, syncAnchor));
                 }
             }).catch(() => undefined);
         }
-        if (ctx.state === "running" && activePlan && !liveBuses.length && !muted && engineMode !== "off") {
+        if (ctx.state === "running" && activePlan && !liveBuses.length && !muted && !paused && engineMode !== "off") {
             activeSignature = "";
             switchBus(activePlan, null, startPositionBars(null, syncAnchor));
         }
@@ -1597,7 +1725,7 @@ namespace TrpgImmersiveMusicModule {
     }
 
     export function isRunning(): boolean {
-        return Boolean(activePlan) && Boolean(context) && liveBuses.length > 0 && !muted && engineMode !== "off";
+        return Boolean(activePlan) && Boolean(context) && liveBuses.length > 0 && !muted && !paused && engineMode !== "off";
     }
 
     export function currentPlan(): ImmersiveMusicPlan | null {
@@ -1634,15 +1762,17 @@ namespace TrpgImmersiveMusicModule {
                 liveBuses = [];
                 stopScheduler();
                 applyDuck();
+                notifyState();
             }, Math.round(seconds * 1000) + 80);
             return;
         }
         gain.setValueAtTime(Math.max(0.0001, gain.value), now);
         gain.exponentialRampToValueAtTime(1, now + Math.min(seconds, 3));
-        if (previous === "off" && activePlan && !muted && ctx.state === "running" && !liveBuses.length) {
+        if (previous === "off" && activePlan && !muted && !paused && ctx.state === "running" && !liveBuses.length) {
             activeSignature = "";
             switchBus(activePlan, null, startPositionBars(null, syncAnchor));
         }
+        notifyState();
     }
 
     export function currentEngineMode(): "procedural" | "external" | "off" {
@@ -1747,4 +1877,11 @@ window.TrpgImmersiveMusic = {
     externalInput: TrpgImmersiveMusicModule.externalInput,
     barTiming: TrpgImmersiveMusicModule.barTiming,
     audioClock: TrpgImmersiveMusicModule.audioClock,
+    // 统一播放器接入点：暂停/恢复与「下一段」。
+    currentPlan: TrpgImmersiveMusicModule.currentPlan,
+    pause: TrpgImmersiveMusicModule.pause,
+    resume: TrpgImmersiveMusicModule.resume,
+    isPaused: TrpgImmersiveMusicModule.isPaused,
+    togglePause: TrpgImmersiveMusicModule.togglePause,
+    skipSection: TrpgImmersiveMusicModule.skipSection,
 };

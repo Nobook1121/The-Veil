@@ -766,3 +766,225 @@ body.immersive-lightbox-open {
         max-height: 220px;
     }
 }
+
+/* ==========================================================================
+   统一配乐播放器（右侧栏沉浸区）
+   两种音源共用一套控件：BGM 有真实音轨，可拖动进度；实时配乐没有音轨，
+   进度区退化为「实时生成中」指示。颜色全部走 --theme-* token，
+   浅色/深色/深渊/赛博四套主题都会自动适配。
+   ========================================================================== */
+.immersive-player {
+    margin-top: 10px;
+    padding: 12px 14px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--theme-border-subtle);
+    background: var(--theme-bg-panel);
+    color: var(--theme-text-primary);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.immersive-player[hidden] {
+    display: none !important;
+}
+
+.immersive-player-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.immersive-player-kicker {
+    font-size: 0.6875rem;
+    letter-spacing: 0.18em;
+    font-weight: 600;
+    color: var(--theme-text-muted);
+}
+
+.immersive-player-badge {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--theme-accent-primary);
+    background: var(--theme-accent-soft);
+    border: 1px solid color-mix(in srgb, var(--theme-accent-primary) 34%, transparent);
+    white-space: nowrap;
+}
+
+.immersive-player-body {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.immersive-player-meta {
+    min-width: 0;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.immersive-player-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--theme-text-primary);
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.immersive-player-sub {
+    font-size: 0.75rem;
+    color: var(--theme-text-muted);
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.immersive-player-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.immersive-player-btn {
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: 1px solid var(--theme-border-subtle);
+    background: var(--theme-bg-panel-muted);
+    color: var(--theme-text-secondary);
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.12s ease;
+}
+
+.immersive-player-btn:hover {
+    color: var(--theme-accent-primary);
+    border-color: var(--theme-accent-primary);
+    background: var(--theme-accent-soft);
+}
+
+.immersive-player-btn:active {
+    transform: scale(0.94);
+}
+
+.immersive-player-btn:focus-visible {
+    outline: 2px solid var(--theme-accent-primary);
+    outline-offset: 2px;
+}
+
+.immersive-player-btn.is-primary {
+    width: 36px;
+    height: 36px;
+    color: var(--theme-text-inverse);
+    background: var(--theme-accent-primary);
+    border-color: var(--theme-accent-primary);
+}
+
+.immersive-player-btn.is-primary:hover {
+    color: var(--theme-text-inverse);
+    background: var(--theme-accent-primary-hover);
+    border-color: var(--theme-accent-primary-hover);
+}
+
+.immersive-player-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.immersive-player-range {
+    width: 100%;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--theme-accent-primary);
+    cursor: pointer;
+    background: transparent;
+}
+
+.immersive-player-range:disabled {
+    cursor: default;
+    opacity: 0.55;
+}
+
+.immersive-player-range[hidden] {
+    display: none !important;
+}
+
+.immersive-player-times {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.6875rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--theme-text-muted);
+}
+
+.immersive-player-times span[hidden] {
+    display: none !important;
+}
+
+/* 实时配乐：没有音轨，用呼吸点表示「正在生成」。 */
+.immersive-player-livebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 0.6875rem;
+    color: var(--theme-text-muted);
+}
+
+.immersive-player-livebar[hidden] {
+    display: none !important;
+}
+
+.immersive-player-livedot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--theme-accent-primary);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--theme-accent-primary) 55%, transparent);
+    animation: immersive-player-pulse 1.8s ease-out infinite;
+}
+
+@keyframes immersive-player-pulse {
+    0% {
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--theme-accent-primary) 55%, transparent);
+    }
+    70% {
+        box-shadow: 0 0 0 7px color-mix(in srgb, var(--theme-accent-primary) 0%, transparent);
+    }
+    100% {
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--theme-accent-primary) 0%, transparent);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .immersive-player-livedot {
+        animation: none;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .immersive-player {
+        margin-top: 8px;
+        padding: 10px 12px 8px;
+    }
+
+    .immersive-player-title {
+        font-size: 0.8125rem;
+    }
+}
+

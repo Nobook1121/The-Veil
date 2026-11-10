@@ -393,3 +393,83 @@ def test_character_sheet_treats_missing_ruleset_id_as_default_plugin():
     assert "if (!supportsCard(card)) {" in source
     assert 'rulesetId !== "coc7"' not in source
     assert 'rulesetId === "coc7"' not in source
+
+
+def test_unified_immersive_player_is_loaded_and_controls_both_sources():
+    scripts = (ROOT / "frontend/src/index/fragments/05-platform-modals-and-scripts.html").read_text(encoding="utf-8")
+    player = (ROOT / "frontend/src/app/immersive/player.ts").read_text(encoding="utf-8")
+
+    # 脚本必须在沉浸模块之后加载：播放器依赖 TrpgImmersiveMusic / TrpgImmersive。
+    assert '<script src="js/immersive/player.js"></script>' in scripts
+    assert scripts.index("js/immersive/index.js") < scripts.index("js/immersive/player.js")
+
+    # 同一套控件驱动两套音源。
+    assert "window.TrpgBgm?.getPlaybackState" in player
+    assert "window.TrpgBgm?.next" in player
+    assert "window.TrpgImmersiveMusic?.skipSection" in player
+    assert "window.TrpgImmersiveMusic?.pause" in player
+    assert "window.TrpgImmersiveMusic?.resume" in player
+
+    # 挂载到右侧栏沉浸区（窄屏回落到聊天区），与配图/配乐面板共用宿主。
+    assert '"immersiveSidebarStageHost"' in player
+    assert '"immersiveChatStageHost"' in player
+
+    # 程序化配乐没有音轨：进度条必须按快照隐藏，不能给用户拖一个假进度。
+    assert "range.hidden = !snapshot.draggable;" in player
+    assert "draggable: false" in player
+
+
+def test_immersive_player_styles_use_theme_tokens():
+    styles = (ROOT / "frontend/src/styles/11-immersive.css").read_text(encoding="utf-8")
+
+    assert ".immersive-player {" in styles
+    assert ".immersive-player-btn.is-primary" in styles
+    assert ".immersive-player-livedot" in styles
+    assert "accent-color: var(--theme-accent-primary);" in styles
+    assert "background: var(--theme-bg-panel-muted);" in styles
+    assert "color: var(--theme-text-inverse);" in styles
+    # 所有主题共用 token，不允许为某套主题单独写播放器颜色补丁。
+    for theme in ["theme-dark", "theme-tome", "theme-cyber-2", "theme-light"]:
+        assert f".{theme} .immersive-player" not in styles
+
+
+def test_bgm_entry_binds_without_hardcoded_audio_node():
+    bgm = (ROOT / "frontend/src/app/bgm.ts").read_text(encoding="utf-8")
+    tabs = (ROOT / "frontend/src/app/tabs.ts").read_text(encoding="utf-8")
+
+    # 回归点：旧 init 在缺少 #bgmAudio 时提前 return，导致「我的背景音乐」点不开。
+    assert "if (!audioElement) return;" not in bgm
+    assert "function ensureAudio(): HTMLAudioElement {" in bgm
+    assert "const audioElement = ensureAudio();" in bgm
+
+    # 个人面板的展开/收起必须幂等且不依赖音频节点。
+    assert "let personalCollapseBound = false;" in bgm
+    assert "if (personalCollapseBound) return;" in bgm
+    init_block = bgm.split("export function init(", 1)[1]
+    assert "bindPersonalCollapse();" in init_block
+
+    # 个人主页标签被打开时才渲染曲目列表，入口文案与面板都在同一个 section 内。
+    assert "window.TrpgBgm?.renderPersonalSettings()" in tabs
+    fragment = (ROOT / "frontend/src/index/fragments/02-main-tabs.html").read_text(encoding="utf-8")
+    assert 'id="personalBgmSection"' in fragment
+    assert 'id="personalBgmToggle"' in fragment
+
+
+def test_procedural_music_pause_keeps_position_and_stops_scheduling():
+    engine = (ROOT / "frontend/src/app/immersive/music-engine.ts").read_text(encoding="utf-8")
+
+    # 暂停：记住「真正出声的小节」、停掉调度、清空总线（避免双总线叠响）。
+    pause_block = engine.split("export function pause(): void {", 1)[1].split("export function resume(", 1)[0]
+    assert "paused = true;" in pause_block
+    assert "pausedPositionBars = live.audibleBars();" in pause_block
+    assert "stopScheduler();" in pause_block
+    assert "liveBuses = [];" in pause_block
+
+    # 恢复：从记录的小节重建单条总线，不从头开始。
+    resume_block = engine.split("export function resume(): void {", 1)[1].split("export function isPaused", 1)[0]
+    assert "paused = false;" in resume_block
+    assert "switchBus(activePlan, null, pausedPositionBars);" in resume_block
+
+    # 调度与 ducking 都必须尊重暂停，否则 tick 会在暂停期间偷偷补排。
+    assert "audibleBars(): number {" in engine
+    assert "if (paused) return;" in engine

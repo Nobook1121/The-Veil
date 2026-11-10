@@ -27,6 +27,22 @@ interface BgmRoomPlaylistOptions {
     editable?: boolean;
 }
 
+/** 统一播放器读取的 BGM 快照。 */
+interface BgmPlaybackState {
+    active: boolean;
+    playing: boolean;
+    paused: boolean;
+    source: BgmTrackSource | null;
+    title: string;
+    index: number;
+    count: number;
+    current: number;
+    duration: number;
+    mode: BgmPlaybackMode;
+    suppressed: boolean;
+    ducked: boolean;
+}
+
 interface TrpgBgmApi {
     init: () => void;
     setRoom: (room: Room | null) => void;
@@ -42,6 +58,14 @@ interface TrpgBgmApi {
     renderRoomPlaylist: (room: Room, options?: BgmRoomPlaylistOptions) => Promise<void>;
     fetchTracks: () => Promise<BgmTrack[]>;
     loadLibraryPanel: () => Promise<void>;
+    getPlaybackState: () => BgmPlaybackState;
+    play: () => void;
+    pause: () => void;
+    toggle: () => void;
+    next: () => void;
+    prev: () => void;
+    seek: (seconds: number) => void;
+    hasPlaylist: () => boolean;
 }
 
 interface Window {

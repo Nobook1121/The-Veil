@@ -870,7 +870,7 @@
     "profile.bgm.library_deleted": "音乐已删除",
     "profile.bgm.title": "我的背景音乐",
     "profile.bgm.local_badge": "仅保存在当前浏览器",
-    "profile.bgm.hint": "可添加多首音乐，播放器悬浮在页面右下角，可随时暂停。进入房间后按下面的播放优先级自动播放。",
+    "profile.bgm.hint": "可添加多首音乐。进入房间后，右侧沉浸区会显示统一播放器，可播放、暂停、切歌与拖动进度。按下面的播放优先级自动播放。",
     "profile.bgm.custom_placeholder": "或粘贴 http(s) 外链",
     "profile.bgm.add": "添加",
     "profile.bgm.mode_label": "播放模式",
