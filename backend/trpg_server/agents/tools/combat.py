@@ -14,6 +14,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from trpg_server import weapon_catalog
 from trpg_server.agents.room_state import load_room_state, save_room_state
@@ -827,8 +828,13 @@ def _apply_damage(
     armor: int | None = None,
     ignore_armor: bool = False,
     settings: CombatSettings | None = None,
+    persist: bool = True,
 ) -> dict[str, Any]:
-    """结算一次伤害；具体阈值由规则书插件决定。"""
+    """结算一次伤害；具体阈值由规则书插件决定。
+
+    ``persist=False`` 用于战斗进行中的结算：只改 combatant，由战斗状态统一
+    保存，避免房间快照与战斗快照互相覆盖。
+    """
     settings = settings or _combat_settings(context)
     ruleset = get_ruleset(str(combatant.get("ruleset") or settings.ruleset_id or ""))
     outcome = ruleset.resolve_damage(
@@ -858,7 +864,8 @@ def _apply_damage(
         combatant["aiming"] = False
         combatant["aim_declared_round"] = 0
         combatant["aim_lost_reason"] = "受伤"
-    _persist_player_state(context, combatant)
+    if persist:
+        _persist_player_state(context, combatant)
     return result
 
 
@@ -991,6 +998,7 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     )
     combat = {
         "active": True,
+        "id": uuid4().hex,
         "round": 1,
         "turn": 0,
         "order": order,
@@ -1000,6 +1008,16 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         "started_at": _timestamp(),
         "log": [],
     }
+    # 上一场战斗可能因提前结束留下按回合到期的毒剂；新战斗一律清掉，避免旧毒
+    # 打到相同轮数时误触发。条目自带 combat_id，这里再兜一层。
+    try:
+        from trpg_server import room_poison
+
+        dropped = room_poison.drop_round_entries(context.room_dir)
+        if dropped:
+            _append_log(combat, f"已清理上一场战斗遗留的 {dropped} 条回合制毒剂。", context)
+    except Exception:  # noqa: BLE001 - 清理失败不能阻止开战
+        logger.exception("清理上一场战斗遗留的回合制毒剂失败")
     _scheduler(combat, context).begin_round(combat)
     _append_log(combat, "战斗开始：" + " → ".join(order), context)
     _save_combat(context, combat)
@@ -1156,6 +1174,23 @@ def _advance(
     if context is not None:
         for text in _settle_due_poisons(combat, context, settings=settings):
             _append_log(combat, text, context)
+        # 战斗外的毒剂队列同样按回合到期；结算本身已写房间日志，这里只进战斗面板。
+        round_no = max(1, _as_int(combat.get("round"), 1))
+        try:
+            narrative = settle_narrative_poisons(
+                getattr(context, "room_dir", None),
+                round_no=round_no,
+                combat=combat,
+                combat_id=combat.get("id"),
+                room_id=getattr(context, "room_id", None),
+                context=context,
+                save_combat=False,
+            )
+        except Exception:  # noqa: BLE001 - 毒剂结算失败不能阻断回合推进
+            logger.exception("回合推进结算战斗外毒剂失败")
+            narrative = {}
+        for text in narrative.get("messages") or []:
+            _append_log(combat, text, context, mirror=False)
     return combat
 
 
@@ -2408,6 +2443,7 @@ def _resolve_poison(
     context: Any,
     settings: CombatSettings,
     detail_rules: Any,
+    persist: bool = True,
 ) -> dict[str, Any]:
     """单次毒剂伤害结算（即时与延迟到期共用）。"""
     potency = detail_rules.poison_penalty_dice(potency_raw)
@@ -2425,7 +2461,9 @@ def _resolve_poison(
     amount += _as_int(parsed["segments"][0].get("fixed"), 0)
     total = max(0, amount) * dose_count
     applied_amount = detail_rules.poison_damage(total, resisted=resisted)
-    applied = _apply_damage(context, target, applied_amount, settings=settings)
+    applied = _apply_damage(
+        context, target, applied_amount, settings=settings, persist=persist
+    )
 
     verdict = f"抵抗成功，伤害减半 {total}→{applied_amount}" if resisted else f"抵抗失败，承受 {applied_amount} 点伤害"
     summary = (
@@ -2483,16 +2521,23 @@ def _settle_due_poisons(
         if not force and _as_int(entry.get("due_round"), 0) > round_no:
             remaining.append(entry)
             continue
-        result = _resolve_poison(
-            combat,
-            target,
-            potency_raw=entry.get("potency"),
-            damage_raw=entry.get("damage"),
-            doses=entry.get("doses"),
-            context=context,
-            settings=settings,
-            detail_rules=detail_rules,
-        )
+        try:
+            result = _resolve_poison(
+                combat,
+                target,
+                potency_raw=entry.get("potency"),
+                damage_raw=entry.get("damage"),
+                doses=entry.get("doses"),
+                context=context,
+                settings=settings,
+                detail_rules=detail_rules,
+            )
+        except Exception:  # noqa: BLE001 - 单条失败不能拖累整轮结算
+            logger.exception("延迟毒剂结算失败：%s", entry.get("target_name"))
+            messages.append(
+                f"{entry.get('target_name') or '?'} 的延迟毒剂结算失败，已丢弃。"
+            )
+            continue
         messages.append("延迟毒剂发作：" + str(result["summary"]))
     combat["pending_poisons"] = remaining
     return messages
@@ -2506,14 +2551,313 @@ def settle_poisons_after_time(
 ) -> dict[str, Any]:
     """时间推进后结算所有待发作毒剂（时钟粒度是天/小时，视为全部到期）。"""
     context = _TimeAdvanceContext(room_dir, room_id=room_id, config_dir=config_dir)
+    messages: list[str] = []
     combat = _load_combat(context)
-    if not combat:
-        return {"settled": 0, "messages": []}
-    messages = _settle_due_poisons(combat, context, force=True)
-    if not messages:
-        return {"settled": 0, "messages": []}
-    _save_combat(context, combat)
+    touched = False
+    if combat:
+        try:
+            combat_messages = _settle_due_poisons(combat, context, force=True)
+        except Exception:  # noqa: BLE001 - 时间推进不能因毒剂结算失败而回滚
+            logger.exception("时间推进结算战斗内毒剂失败")
+            combat_messages = []
+        if combat_messages:
+            touched = True
+            messages.extend(combat_messages)
+    # 战斗进行中同样把战斗外队列结算到 combatant 上，避免房间快照回滚掉这次掉血。
+    narrative = settle_narrative_poisons(
+        room_dir,
+        combat=combat,
+        room_id=room_id,
+        config_dir=config_dir,
+        context=context,
+        save_combat=False,
+    )
+    messages.extend(narrative.get("messages") or [])
+    if combat and (touched or narrative.get("messages")):
+        try:
+            _save_combat(context, combat)
+        except Exception:  # noqa: BLE001 - 保存失败不能回滚已经推进的时间
+            logger.exception("保存时间推进后的战斗状态失败")
     return {"settled": len(messages), "messages": messages}
+
+
+def _find_room_member(info: dict[str, Any], name: Any) -> dict[str, Any] | None:
+    """按用户名 / 角色名 / 用户 id 找房间成员（战斗外毒剂用）。"""
+    key = str(name or "").strip().casefold()
+    if not key:
+        return None
+    members = info.get("members") if isinstance(info.get("members"), list) else []
+    for member in members:
+        if not isinstance(member, dict):
+            continue
+        card = member.get("character_card") if isinstance(member.get("character_card"), dict) else {}
+        names = {
+            str(member.get("username") or "").strip().casefold(),
+            str(card.get("name") or "").strip().casefold(),
+            str(member.get("user_id") or "").strip().casefold(),
+        }
+        if key in {item for item in names if item}:
+            return member
+    return None
+
+
+def _narrative_poison_rules(context: Any) -> tuple[CombatSettings, Any] | tuple[None, None]:
+    """战斗外毒剂只搬运数据，CON 检定等规则数学仍由规则集插件提供。"""
+    room_options = _coc7_room_options(context)
+    settings = _combat_settings(context)
+    detail_rules = _combat_detail_rules(settings)
+    if not (room_options and room_options.combat_poison and detail_rules):
+        return None, None
+    return settings, detail_rules
+
+
+def _find_combatant_by_member(
+    combat: dict[str, Any], member: dict[str, Any]
+) -> dict[str, Any] | None:
+    """在战斗里按房间成员定位 combatant：先认 ``user_id``，再认用户名 / 角色名。"""
+    user_id = member.get("user_id")
+    if user_id not in (None, ""):
+        for item in (combat.get("combatants") or {}).values():
+            if isinstance(item, dict) and item.get("user_id") == user_id:
+                return item
+    card = member.get("character_card") if isinstance(member.get("character_card"), dict) else {}
+    for name in (member.get("username"), card.get("name")):
+        found = _resolve_combatant(combat, name)
+        if found is not None:
+            return found
+    return None
+
+
+def settle_narrative_poisons(
+    room_dir: Any,
+    *,
+    round_no: Any = None,
+    combat: dict[str, Any] | None = None,
+    combat_id: Any = None,
+    force_rounds: bool = False,
+    room_id: Any = None,
+    config_dir: Any = None,
+    context: Any = None,
+    save_combat: bool = True,
+) -> dict[str, Any]:
+    """结算战斗外登记的毒剂；不要求 ``combat.active`` 存在。
+
+    战斗进行中（传入手头这场战斗的 ``combat``）时按成员定位到 combatant 直接
+    结算，``persist=False`` 只改战斗快照，不写房间 ``info.json``：否则房间快照
+    会和战斗快照互相覆盖，下一次战斗动作又把这次掉血回滚掉。每条独立
+    try/except，失败条目丢弃并记录；到期项先在房间锁内原子认领（按 id 移出
+    队列）再结算，两个结算方不会各认领同一批条目各扣一次。
+    """
+    from trpg_server import room_poison
+    from trpg_server.room_clock import room_lock
+
+    if not room_dir:
+        return {"settled": 0, "messages": []}
+    if not room_poison.load_queue(room_dir):
+        return {"settled": 0, "messages": []}
+
+    ctx = context or _TimeAdvanceContext(room_dir, room_id=room_id, config_dir=config_dir)
+    settings, detail_rules = _narrative_poison_rules(ctx)
+    if settings is None or detail_rules is None:
+        return {"settled": 0, "messages": []}
+
+    from trpg_server import room_clock
+
+    info = ctx.room_info()
+    clock = room_clock.read_clock(info)
+    now = room_clock.parse_moment((clock or {}).get("current"))
+    active = combat if isinstance(combat, dict) and combat.get("active") else None
+    scope = str(combat_id or (active or {}).get("id") or "") or None
+    # 锁内一次性完成「读队列 → 挑到期 → 按 id 移出」，认领后别的结算方就看不到
+    # 这批条目了；伤害在锁外结算，避免长事务占着房间锁。
+    with room_lock(room_dir):
+        queue = room_poison.load_queue(room_dir)
+        due, remaining = room_poison.take_due(
+            queue,
+            round_no=round_no,
+            now=now,
+            combat_id=scope,
+            force_rounds=force_rounds,
+        )
+        if due:
+            room_poison.save_queue(room_dir, remaining)
+    if not due:
+        return {"settled": 0, "messages": []}
+
+    messages: list[str] = []
+    settled = 0
+    try:
+        for entry in due:
+            label = str(entry.get("target") or entry.get("target_name") or "?").strip()
+            try:
+                if active is not None:
+                    member = _find_room_member(ctx.room_info(), label)
+                    target = (
+                        _find_combatant_by_member(active, member) if member else None
+                    ) or _resolve_combatant(active, label)
+                    if target is None:
+                        messages.append(f"{label} 的延迟毒剂因目标不在战斗中而取消。")
+                        continue
+                    if target.get("dead"):
+                        messages.append(f"{label} 的延迟毒剂因目标已倒下而取消。")
+                        continue
+                    result = _resolve_poison(
+                        active,
+                        target,
+                        potency_raw=entry.get("potency"),
+                        damage_raw=entry.get("damage"),
+                        doses=entry.get("doses"),
+                        context=ctx,
+                        settings=settings,
+                        detail_rules=detail_rules,
+                        persist=False,
+                    )
+                else:
+                    # 每条前重新读 info：上一条可能刚改过同一成员的 HP。
+                    member = _find_room_member(ctx.room_info(), label)
+                    if member is None:
+                        messages.append(f"{label} 的延迟毒剂因找不到角色而取消。")
+                        continue
+                    target = _combatant_from_member(member)
+                    if target.get("dead"):
+                        messages.append(f"{label} 的延迟毒剂因目标已倒下而取消。")
+                        continue
+                    result = _resolve_poison(
+                        {},
+                        target,
+                        potency_raw=entry.get("potency"),
+                        damage_raw=entry.get("damage"),
+                        doses=entry.get("doses"),
+                        context=ctx,
+                        settings=settings,
+                        detail_rules=detail_rules,
+                    )
+            except Exception:  # noqa: BLE001 - 单条失败丢弃该条，不能拖累整批或重复扣血
+                logger.exception("战斗外毒剂结算失败：%s", label)
+                messages.append(f"{label} 的延迟毒剂结算失败，已丢弃。")
+                continue
+            messages.append("毒剂发作：" + str(result["summary"]))
+            settled += 1
+    finally:
+        # 队列已在认领时按 id 移出，这里只统一保存战斗状态。
+        if active is not None and save_combat and (settled or messages):
+            try:
+                _save_combat(ctx, active)
+            except Exception:  # noqa: BLE001 - 保存失败不应吞掉结算消息
+                logger.exception("保存战斗内毒剂结算结果失败")
+    for text in messages:
+        log_room_event(
+            room_dir,
+            text,
+            level="warning",
+            actor="系统",
+            source="poison",
+            room_id=room_id or getattr(ctx, "room_id", None),
+        )
+    return {"settled": settled, "messages": messages}
+
+
+def poison_queue(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """战斗外的毒剂登记 / 查看：KP 在叙事里下毒，不依赖战斗状态是否存在。"""
+    from trpg_server import room_clock, room_poison
+
+    room_dir = getattr(context, "room_dir", None)
+    if not room_dir:
+        return {"error": "poison queue requires a room context"}
+    action = str(arguments.get("action") or "list").strip().lower()
+    queue = room_poison.load_queue(room_dir)
+    if action == "list":
+        return {"queue": queue, "summary": room_poison.describe(queue)}
+    if action != "add":
+        return {"error": f"未知的 action：{action}（可用 add / list）"}
+
+    room_options = _coc7_room_options(context)
+    settings = _combat_settings(context)
+    detail_rules = _combat_detail_rules(settings)
+    if not (room_options and room_options.combat_poison and detail_rules):
+        return {"error": "毒剂房规未开启，请先在房规中开启「毒剂」"}
+
+    info = context.room_info()
+    label = _as_text(arguments.get("target"))
+    member = _find_room_member(info, label)
+    if member is None:
+        return {"error": f"房间成员里找不到 {label or '（未提供 target）'}"}
+
+    common = {
+        "target": label,
+        "damage": _as_text(arguments.get("damage"), "1D6") or "1D6",
+        "potency": arguments.get("potency"),
+        "doses": arguments.get("doses"),
+    }
+    onset_rounds = max(0, _as_int(arguments.get("onset_rounds"), 0))
+    onset_hours = max(0, _as_int(arguments.get("onset_hours"), 0))
+    onset_days = max(0, _as_int(arguments.get("onset_days"), 0))
+
+    if onset_rounds > 0 and (onset_hours > 0 or onset_days > 0):
+        return {
+            "error": (
+                "onset_rounds 与 onset_hours / onset_days 只能二选一："
+                "回合制只在当前战斗里到期，时间制按游戏时钟到期"
+            )
+        }
+
+    if onset_rounds > 0:
+        combat = _load_combat(context)
+        if not combat:
+            return {
+                "error": "按回合到期需要一场进行中的战斗；战斗外请改用 onset_days / onset_hours"
+            }
+        due_round = max(1, _as_int(combat.get("round"), 1)) + onset_rounds
+        entry = room_poison.register(
+            room_dir, due_round=due_round, combat_id=combat.get("id"), **common
+        )
+        return {
+            "pending": True,
+            "entry": entry,
+            "summary": f"{label} 中毒：{onset_rounds} 轮后（第 {due_round} 轮）自动发作。",
+        }
+
+    if onset_hours > 0 or onset_days > 0:
+        clock = room_clock.read_clock(info)
+        current = room_clock.parse_moment((clock or {}).get("current"))
+        if current is None:
+            return {
+                "error": "按游戏时间到期需要先启用并初始化游戏时钟（房规 coc7_game_clock）"
+            }
+        from datetime import timedelta
+
+        due = current + timedelta(days=onset_days, hours=onset_hours)
+        entry = room_poison.register(
+            room_dir, due_at=room_clock.format_moment(due), **common
+        )
+        return {
+            "pending": True,
+            "entry": entry,
+            "summary": f"{label} 中毒：将于 {room_clock.format_display(due)} 发作。",
+        }
+
+    target = _combatant_from_member(member)
+    if target.get("dead"):
+        return {"error": f"{label} 已死亡，无法结算毒剂"}
+    result = _resolve_poison(
+        {},
+        target,
+        potency_raw=arguments.get("potency"),
+        damage_raw=arguments.get("damage"),
+        doses=arguments.get("doses"),
+        context=context,
+        settings=settings,
+        detail_rules=detail_rules,
+    )
+    log_room_event(
+        room_dir,
+        result["summary"],
+        level="warning",
+        actor="系统",
+        source="poison",
+        room_id=getattr(context, "room_id", None),
+    )
+    return {**result, "queue": room_poison.load_queue(room_dir)}
 
 
 class _TimeAdvanceContext:
@@ -2534,6 +2878,38 @@ def end_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     combat = _load_combat(context)
     if not combat:
         return {"error": "当前没有进行中的战斗"}
+    from trpg_server import room_poison
+
+    # 先结清本场已到期的回合制毒剂，再取消尚未到期的——战斗一结束就没有轮次
+    # 上下文，留着只会在下一场战斗打到相同轮数时误触发。
+    try:
+        narrative = settle_narrative_poisons(
+            getattr(context, "room_dir", None),
+            round_no=max(1, _as_int(combat.get("round"), 1)),
+            combat=combat,
+            combat_id=combat.get("id"),
+            room_id=getattr(context, "room_id", None),
+            context=context,
+            save_combat=False,
+        )
+        for text in narrative.get("messages") or []:
+            _append_log(combat, text, context, mirror=False)
+    except Exception:  # noqa: BLE001 - 结算失败不能阻止结束战斗
+        logger.exception("战斗结束时结算回合制毒剂失败")
+    try:
+        dropped = room_poison.drop_round_entries(context.room_dir)
+        if dropped:
+            _append_log(combat, f"战斗结束，取消 {dropped} 条尚未到期的回合制毒剂。", context, mirror=False)
+    except Exception:  # noqa: BLE001 - 清理失败不能阻止结束战斗
+        logger.exception("清空回合制毒剂队列失败")
+    # 战斗期间毒剂只改 combatant，结束时统一回写房间快照，避免角色卡停在中途数值。
+    for combatant in (combat.get("combatants") or {}).values():
+        if not isinstance(combatant, dict):
+            continue
+        try:
+            _persist_player_state(context, combatant)
+        except Exception:  # noqa: BLE001 - 单个角色回写失败不能阻止结束战斗
+            logger.exception("战斗结束回写角色状态失败：%s", combatant.get("name"))
     combat["active"] = False
     combat["ended_at"] = _timestamp()
     _append_log(combat, "战斗结束", context)
@@ -2752,6 +3128,30 @@ COMBAT_POISON_TOOL = AgentTool(
     handler=poison_combatant,
 )
 
+COMBAT_POISON_QUEUE_TOOL = AgentTool(
+    name="combat.poison_queue",
+    description=(
+        "战斗外的毒剂登记表。action=add 在叙事里给房间成员下毒：onset_rounds 按战斗回合到期"
+        "（需要进行中的战斗），onset_days / onset_hours 按游戏时间到期（需要游戏时钟），"
+        "都不给则立即结算；到期后由战斗轮推进或 room time advance 自动结算。action=list 查看待发作列表。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["add", "list"], "description": "默认 list"},
+            "target": {"type": "string", "description": "房间成员名 / 角色名"},
+            "damage": {"type": "string", "description": "伤害表达式，如 1D6 或 2D10+2"},
+            "potency": {"type": "integer", "minimum": 0, "maximum": 2, "description": "毒性：CON 检定的惩罚骰数"},
+            "doses": {"type": "integer", "minimum": 1, "description": "剂量倍数，默认 1"},
+            "onset_rounds": {"type": "integer", "minimum": 0, "description": "多少轮后发作"},
+            "onset_hours": {"type": "integer", "minimum": 0, "description": "多少游戏小时后发作"},
+            "onset_days": {"type": "integer", "minimum": 0, "description": "多少游戏天后发作"},
+        },
+        "required": ["action"],
+    },
+    handler=poison_queue,
+)
+
 COMBAT_DELAY_TOOL = AgentTool(
     name="combat.delay",
     description="延迟行动：把自己的回合挪到本轮末尾；若已经是最后一人，则本轮放弃行动。",
@@ -2838,6 +3238,7 @@ COMBAT_TOOLS = [
     COMBAT_DAMAGE_TOOL,
     COMBAT_HEAL_TOOL,
     COMBAT_POISON_TOOL,
+    COMBAT_POISON_QUEUE_TOOL,
     COMBAT_TREAT_TOOL,
     COMBAT_END_TOOL,
 ]
