@@ -225,15 +225,13 @@
     font-weight: bold;
 }
 
+/* 设置内容区的尺寸与滚动由 styles/13-settings-redesign.css 统一管理。 */
 .settings-content {
     display: none;
 }
 
 .settings-content.active {
     display: block;
-    max-height: calc(100vh - 210px);
-    overflow-y: auto;
-    padding-right: 8px;
 }
 
 /* 关于应用样式 */
@@ -244,31 +242,6 @@
 
 .about-info strong {
     color: var(--theme-text-secondary);
-}
-
-/* 网络配置界面样式 */
-#network-settings-content {
-    max-height: 70vh;
-    overflow-y: auto;
-    padding-right: 10px;
-}
-
-#network-settings-content::-webkit-scrollbar {
-    width: 8px;
-}
-
-#network-settings-content::-webkit-scrollbar-track {
-    background: var(--theme-scrollbar-track);
-    border-radius: var(--theme-radius-sm);
-}
-
-#network-settings-content::-webkit-scrollbar-thumb {
-    background: var(--theme-scrollbar-thumb);
-    border-radius: var(--theme-radius-sm);
-}
-
-#network-settings-content::-webkit-scrollbar-thumb:hover {
-    background: var(--theme-scrollbar-thumb-hover);
 }
 
 /* 滑块样式 */
@@ -329,11 +302,6 @@
 }
 
 /* AI平台管理样式 */
-#model-settings-content.active {
-    max-height: calc(100vh - 210px);
-    padding-right: 8px;
-}
-
 .settings-pending-save-bar {
     position: sticky;
     bottom: 12px;

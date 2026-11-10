@@ -169,44 +169,56 @@ function closeDropdownButtons(): void {
 }
 
 function switchSettingsTab(tabName: string): void {
-    // 兼容旧链接/书签：音乐库已并入「实时沉浸」标签卡。
-    if (tabName === "bgm") tabName = "immersive";
+    // 兼容旧链接/书签：分类合并后保留旧入口。
+    const aliases: Record<string, string> = {
+        bgm: "immersive",
+        theme: "general",
+        character: "play",
+        network: "system",
+        permissions: "access",
+        users: "access",
+    };
+    const normalized = aliases[tabName] || tabName;
     const settingsTabs = document.querySelectorAll<HTMLElement>(".settings-tab");
     const settingsContents = document.querySelectorAll<HTMLElement>(".settings-content");
 
     settingsTabs.forEach((tab) => {
-        tab.classList.remove("active");
-        tab.setAttribute("aria-selected", "false");
+        const active = tab.dataset.settings === normalized;
+        tab.classList.toggle("active", active);
+        tab.setAttribute("aria-selected", String(active));
+        tab.tabIndex = active ? 0 : -1;
     });
     settingsContents.forEach((content) => content.classList.remove("active"));
 
-    const targetTab = document.querySelector<HTMLElement>(`.settings-tab[data-settings="${CSS.escape(tabName)}"]`);
-    const targetContent = document.getElementById(`${tabName}-settings-content`);
-    targetTab?.classList.add("active");
-    targetTab?.setAttribute("aria-selected", "true");
+    const targetTab = document.querySelector<HTMLElement>(`.settings-tab[data-settings="${CSS.escape(normalized)}"]`);
+    const targetContent = document.getElementById(`${normalized}-settings-content`);
     targetContent?.classList.add("active");
-    if (tabName === "permissions") {
+    if (normalized === "access") {
         void loadPermissionConfig();
-    }
-    if (tabName === "users") {
         void loadUserManagement();
     }
-    if (tabName === "knowledge") {
+    if (normalized === "knowledge") {
         void loadRulesetKnowledge();
         void loadScenarioKnowledge();
         void loadEmbeddingHealth();
     }
-    if (tabName === "model") {
+    if (normalized === "model") {
         // 生图平台表已并入「模型设置」，AI 平台/模型/密钥统一在这里维护。
         window.TrpgImmersive?.renderModelSettings?.();
     }
-    if (tabName === "immersive") {
+    if (normalized === "immersive") {
         window.TrpgImmersive?.renderSettings?.();
         // 音乐库已并入「实时沉浸」标签卡，切换到这里时按需加载列表。
         void window.TrpgBgm?.loadLibraryPanel();
     }
+    if (normalized === "about") {
+        window.TrpgAbout?.init?.();
+    }
     // 骰子贴图库按需初始化，避免非管理员页面加载时发出多余请求。
     window.TrpgAdminDiceTextures?.init();
+    if (targetTab) {
+        targetTab.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
 }
 
 function initSettingsTabs(): void {
@@ -220,8 +232,11 @@ function initSettingsTabs(): void {
     settingsTabs.forEach((tab) => {
         tab.setAttribute("role", "tab");
         tab.setAttribute("aria-selected", tab.classList.contains("active") ? "true" : "false");
+        tab.tabIndex = tab.classList.contains("active") ? 0 : -1;
         tab.addEventListener("click", () => switchSettingsTab(tab.dataset.settings || ""));
     });
+    initSettingsRailKeyboard();
+    initSettingsBackToTop();
 
     const temperatureSlider = document.getElementById("temperature") as HTMLInputElement | null;
     const temperatureValue = document.getElementById("temperatureValue");
@@ -312,6 +327,8 @@ function initSettingsTabs(): void {
     bindGeneralNumberSetting("siteAgentMaxHistoryMessages", "site_agent", "max_history_messages", 4, 200);
     bindGeneralNumberSetting("siteAgentMaxToolResultChars", "site_agent", "max_tool_result_chars", 200, 20000);
     bindGeneralNumberSetting("siteAgentActionTtlSeconds", "site_agent", "action_ttl_seconds", 30, 3600);
+    bindGeneralCheckboxSetting("updateCheckOnStartup", "update", "check_update_on_startup");
+    bindGeneralCheckboxSetting("updateAutoDownload", "update", "auto_update");
     // 实时沉浸：配乐/配图的站点级开关、默认档位与预算限额（管理员的密钥与连通性测试走独立接口）。
     bindGeneralCheckboxSetting("immersiveEnabled", "immersive", "enabled");
     bindGeneralCheckboxSetting("immersiveMusicAutoSwitch", "immersive", "music_auto_switch");
@@ -403,6 +420,62 @@ function initSettingsTabs(): void {
     window.TrpgSettingsAssistant?.init();
     // 管理员骰子贴图库：默认停在常规设置页时也要渲染上传入口与皮肤编辑。
     window.TrpgAdminDiceTextures?.init();
+}
+
+/** 分类轨方向键导航：↑↓/Home/End 在标签间移动焦点并直接切换。 */
+function initSettingsRailKeyboard(): void {
+    const rail = document.getElementById("settingsRail");
+    if (!rail) return;
+    rail.addEventListener("keydown", (event) => {
+        const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
+        if (!keys.includes(event.key)) return;
+        const tabs = Array.from(rail.querySelectorAll<HTMLElement>(".settings-tab")).filter((tab) => !tab.hidden);
+        if (tabs.length === 0) return;
+        const current = tabs.indexOf(document.activeElement as HTMLElement);
+        let next = current < 0 ? 0 : current;
+        if (event.key === "ArrowDown") next = (current + 1 + tabs.length) % tabs.length;
+        if (event.key === "ArrowUp") next = (current - 1 + tabs.length) % tabs.length;
+        if (event.key === "Home") next = 0;
+        if (event.key === "End") next = tabs.length - 1;
+        event.preventDefault();
+        const target = tabs[next];
+        if (!target) return;
+        target.focus();
+        switchSettingsTab(target.dataset.settings || "");
+    });
+}
+
+/** 内容区滚动超过一屏时显示「回到顶部」。 */
+function initSettingsBackToTop(): void {
+    const button = document.getElementById("settingsBackToTop");
+    const contents = Array.from(document.querySelectorAll<HTMLElement>(".settings-content"));
+    if (!button || contents.length === 0) return;
+    const outerScroller = document.querySelector<HTMLElement>("#settings .p-4");
+    const activeContent = (): HTMLElement | undefined => contents.find((content) => content.classList.contains("active"));
+    // 宽屏滚动在 .settings-content，窄屏由外层 .p-4 统一滚动。
+    const scrollerOf = (content: HTMLElement): HTMLElement => {
+        if (outerScroller && outerScroller.scrollHeight > outerScroller.clientHeight + 1) {
+            return outerScroller;
+        }
+        return content;
+    };
+    const sync = (): void => {
+        const content = activeContent();
+        if (!content) {
+            button.hidden = true;
+            return;
+        }
+        button.hidden = scrollerOf(content).scrollTop < 600;
+    };
+    contents.forEach((content) => content.addEventListener("scroll", sync, { passive: true }));
+    outerScroller?.addEventListener("scroll", sync, { passive: true });
+    button.addEventListener("click", () => {
+        const content = activeContent();
+        if (!content) return;
+        scrollerOf(content).scrollTo({ top: 0, behavior: "smooth" });
+        content.scrollTo({ top: 0, behavior: "smooth" });
+    });
+    sync();
 }
 
 async function loadRulesetKnowledge(): Promise<void> {
@@ -636,7 +709,8 @@ function bindDiceRerollLimitState(): void {
 function applyGeneralDeploymentOverrides(): void {
     generalSettingControls.forEach((control) => {
         const source = configManager.getOverrideSource("general", control.section, control.key);
-        const group = control.element.closest<HTMLElement>(".form-group");
+        const group = control.element.closest<HTMLElement>(".form-group")
+            || control.element.closest<HTMLElement>(".form-check");
         let hint = group?.querySelector<HTMLElement>(".setting-override-hint") || null;
         if (source !== null) {
             control.element.dataset.deploymentLocked = "true";
@@ -678,10 +752,22 @@ function updateGeneralPendingState(): void {
     const pendingBar = document.getElementById("generalSettingsPendingSaveBar");
     const count = document.getElementById("generalSettingsPendingChangeCount");
     let dirtyCount = 0;
+    document.querySelectorAll<HTMLElement>(".settings-tab-dirty").forEach((dot) => {
+        dot.hidden = true;
+    });
     generalSettingControls.forEach((control) => {
         const isDirty = readGeneralSettingValue(control) !== control.savedValue;
         if (isDirty) dirtyCount += 1;
-        control.element.closest<HTMLElement>(".form-group")?.classList.toggle("setting-dirty", isDirty);
+        const group = control.element.closest<HTMLElement>(".form-group")
+            || control.element.closest<HTMLElement>(".form-check");
+        group?.classList.toggle("setting-dirty", isDirty);
+        if (isDirty) {
+            const tabName = control.element.closest<HTMLElement>(".settings-content")?.id.replace(/-settings-content$/, "");
+            const dot = tabName
+                ? document.querySelector<HTMLElement>(`.settings-tab[data-settings="${CSS.escape(tabName)}"] .settings-tab-dirty`)
+                : null;
+            if (dot) dot.hidden = false;
+        }
     });
     if (!pendingBar || !count) return;
     pendingBar.hidden = dirtyCount === 0;

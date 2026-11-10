@@ -212,8 +212,9 @@ def test_settings_exposes_data_driven_permission_matrix():
     tabs_ts = (ROOT / "frontend/src/app/tabs.ts").read_text(encoding="utf-8")
     styles = (ROOT / "frontend/src/styles/03-tools-settings-platform.css").read_text(encoding="utf-8")
 
-    assert 'data-settings="permissions"' in settings_fragment
-    assert 'id="permissions-settings-content"' in settings_fragment
+    # 权限与用户管理合并到「用户与权限」分类。
+    assert 'data-settings="access"' in settings_fragment
+    assert 'id="access-settings-content"' in settings_fragment
     assert 'id="permissionMatrix"' in settings_fragment
     assert "/api/config/permissions" in tabs_ts
     assert "renderPermissionMatrix" in tabs_ts

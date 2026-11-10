@@ -284,10 +284,11 @@ def test_theme_ui_is_schema_driven_with_all_control_types():
     assert "theme-field-reset" in source, "每个字段必须提供恢复默认"
 
 
-def test_theme_tabs_exist_and_old_fx_panels_are_gone():
+def test_theme_settings_live_inside_general_tab_and_old_fx_panels_are_gone():
     fragment = FRAGMENT.read_text(encoding="utf-8")
-    assert 'data-settings="theme"' in fragment
-    assert 'id="theme-settings-content"' in fragment
+    # 主题已并入「基础」分类，旧的独立主题标签不再存在。
+    assert 'data-settings="theme"' not in fragment
+    assert 'id="theme-settings-content"' not in fragment
     assert 'id="themeAdminPicker"' in fragment
     assert 'id="profile-theme"' in fragment
     assert 'id="profileThemePicker"' in fragment

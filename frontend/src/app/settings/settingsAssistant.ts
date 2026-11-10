@@ -23,9 +23,17 @@ const SettingsAssistant = (() => {
         ".table-responsive",
         ".modal",
         "#adminDiceTextures",
+        "#adminDiceTexturesSection",
         "#ai-platforms-container",
         "#aiPlatformsContainer",
         "#knowledgeList",
+        ".about-hero",
+        ".about-links",
+        "#appUpdatePanel .update-actions",
+        "#appUpdatePanel .update-progress",
+        "#updateNotes",
+        "#sponsorList",
+        "#aboutDependencies",
         "[data-settings-assist='off']",
     ].join(", ");
     const HINT_SELECTOR = "small.form-text, small.text-muted, .form-text";
@@ -185,13 +193,12 @@ const SettingsAssistant = (() => {
                 entries.push({ tab, host, title, hint, section: sectionTitle(host), kind: "setting" });
             });
 
-            content.querySelectorAll<HTMLElement>(".mb-4").forEach((section) => {
+            content.querySelectorAll<HTMLElement>(".mb-4, .settings-section").forEach((section) => {
                 if (isExcluded(section)) return;
                 const heading = section.querySelector<HTMLElement>("h1, h2, h3, h4, h5, h6");
                 const title = headingText(heading);
                 if (!title) return;
-                const hint = Array.from(section.children)
-                    .filter((child) => child.classList.contains("setting-section-hint"))
+                const hint = Array.from(section.querySelectorAll<HTMLElement>(".settings-section-desc, .setting-section-hint"))
                     .map((child) => headingText(child))
                     .join(" ");
                 entries.push({ tab, host: section, title, hint, section: "", kind: "section" });

@@ -827,19 +827,35 @@
                                 <p class="page-subtitle" data-i18n="settings.page.subtitle">配置主题、模型、网络、角色卡规则与应用运行偏好。</p>
                             </div>
                         </header>
-                        <!-- 设置子标签页 -->
-                        <div class="settings-tabs mb-4">
-                            <button class="settings-tab active" data-settings="general" data-i18n="settings.tab.general">常规设置</button>
-                            <button class="settings-tab" data-settings="theme" data-admin-only="true" data-i18n="settings.tab.theme">主题</button>
-                            <button class="settings-tab" data-settings="model" data-i18n="settings.tab.model">模型设置</button>
-                            <button class="settings-tab" data-settings="network" data-i18n="settings.tab.network">网络配置</button>
-                            <button class="settings-tab" data-settings="character" data-i18n="settings.tab.character">角色卡规则</button>
-                            <button class="settings-tab" data-settings="users" data-admin-only="true" data-i18n="settings.tab.users">用户管理</button>
-                            <button class="settings-tab" data-settings="permissions" data-i18n="settings.tab.permissions">权限配置</button>
-                            <button class="settings-tab" data-settings="knowledge" data-admin-only="true">知识库管理</button>
-                            <button class="settings-tab" data-settings="immersive" data-admin-only="true">实时沉浸</button>
-                            <button class="settings-tab" data-settings="about" data-i18n="settings.tab.about">关于应用</button>
-                        </div>
+                        <div class="settings-shell">
+                            <nav class="settings-rail" id="settingsRail" role="tablist" aria-label="设置分类" aria-orientation="vertical">
+                                <button class="settings-tab active" type="button" role="tab" id="settings-tab-general" data-settings="general" aria-selected="true" aria-controls="general-settings-content">
+                                    <i class="fa fa-sliders" aria-hidden="true"></i><span data-i18n="settings.tab.general">基础</span><span class="settings-tab-dirty" hidden></span>
+                                </button>
+                                <button class="settings-tab" type="button" role="tab" id="settings-tab-play" data-settings="play" aria-selected="false" aria-controls="play-settings-content">
+                                    <i class="fa fa-gamepad" aria-hidden="true"></i><span data-i18n="settings.tab.play">游玩</span><span class="settings-tab-dirty" hidden></span>
+                                </button>
+                                <button class="settings-tab" type="button" role="tab" id="settings-tab-model" data-settings="model" aria-selected="false" aria-controls="model-settings-content">
+                                    <i class="fa fa-microchip" aria-hidden="true"></i><span data-i18n="settings.tab.model">模型与 AI</span><span class="settings-tab-dirty" hidden></span>
+                                </button>
+                                <button class="settings-tab" type="button" role="tab" id="settings-tab-knowledge" data-settings="knowledge" aria-selected="false" aria-controls="knowledge-settings-content">
+                                    <i class="fa fa-book" aria-hidden="true"></i><span data-i18n="settings.tab.knowledge">知识库</span><span class="settings-tab-dirty" hidden></span>
+                                </button>
+                                <button class="settings-tab" type="button" role="tab" id="settings-tab-system" data-settings="system" aria-selected="false" aria-controls="system-settings-content">
+                                    <i class="fa fa-sitemap" aria-hidden="true"></i><span data-i18n="settings.tab.system">系统与网络</span><span class="settings-tab-dirty" hidden></span>
+                                </button>
+                                <button class="settings-tab" type="button" role="tab" id="settings-tab-access" data-settings="access" aria-selected="false" aria-controls="access-settings-content">
+                                    <i class="fa fa-user-secret" aria-hidden="true"></i><span data-i18n="settings.tab.access">用户与权限</span><span class="settings-tab-dirty" hidden></span>
+                                </button>
+                                <button class="settings-tab" type="button" role="tab" id="settings-tab-immersive" data-settings="immersive" aria-selected="false" aria-controls="immersive-settings-content">
+                                    <i class="fa fa-music" aria-hidden="true"></i><span data-i18n="settings.tab.immersive">实时沉浸</span><span class="settings-tab-dirty" hidden></span>
+                                </button>
+                                <button class="settings-tab" type="button" role="tab" id="settings-tab-about" data-settings="about" aria-selected="false" aria-controls="about-settings-content">
+                                    <i class="fa fa-info-circle" aria-hidden="true"></i><span data-i18n="settings.tab.about">关于</span><span class="settings-tab-dirty" hidden></span>
+                                </button>
+                            </nav>
+                            <div class="settings-pane">
+                                <div class="settings-toolbar">
                         <!-- 设置搜索：匹配设置名称与说明文字，支持模糊匹配并跳转定位 -->
                         <div class="settings-search" role="search">
                             <i class="fa fa-search" aria-hidden="true"></i>
@@ -852,6 +868,10 @@
                             </button>
                             <div class="settings-search-results" id="settingsSearchResults" hidden data-i18n-dynamic="true"></div>
                         </div>
+                                    <button type="button" class="settings-back-to-top" id="settingsBackToTop" hidden
+                                            title="回到顶部" aria-label="回到顶部" data-i18n-title="settings.back_to_top" data-i18n-aria-label="settings.back_to_top">
+                                        <i class="fa fa-arrow-up" aria-hidden="true"></i><span data-i18n="settings.back_to_top">回到顶部</span>
+                                    </button>
                         <!-- 常规设置统一保存条：本页任何设置改动都不会立即生效，需点「保存」后才会应用 -->
                         <div class="settings-pending-save-bar" id="generalSettingsPendingSaveBar" hidden>
                             <span><strong id="generalSettingsPendingChangeCount">0</strong> <span data-i18n="settings.pending.general">项设置更改未保存</span></span>
@@ -860,457 +880,394 @@
                                 <button type="button" class="btn btn-primary" id="saveGeneralSettingsChanges" data-i18n="common.save">保存</button>
                             </div>
                         </div>
-                        
-                        <!-- 常规设置内容 -->
-                        <div id="general-settings-content" class="settings-content active">
-                            <div class="mb-4">
-                                <h4 data-i18n="settings.section.interface">界面设置</h4>
-                                <div class="form-group mt-2">
-                                    <label data-i18n="Language">语言</label>
-                                    <select class="form-select" id="languageSelect">
-                                        <option value="zh-CN" data-i18n="Simplified Chinese">简体中文</option>
-                                        <option value="en-US" data-i18n="English">English</option>
-                                    </select>
                                 </div>
-                            </div>
-                            <div class="mb-4">
-                                <h4 data-i18n="settings.section.notifications">通知设置</h4>
-                                <div class="form-group">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="enableSound">
-                                        <label class="form-check-label" for="enableSound" data-i18n="settings.notifications.sound">启用提示音</label>
-                                    </div>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="enableNotification">
-                                        <label class="form-check-label" for="enableNotification" data-i18n="settings.notifications.desktop">启用桌面通知</label>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="mb-4">
-                                <h4 data-i18n="settings.section.autosave">自动保存设置</h4>
-                                <div class="form-group">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="enableAutosave" checked>
-                                        <label class="form-check-label" for="enableAutosave" data-i18n="settings.autosave.enable">启用自动保存</label>
-                                    </div>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label data-i18n="settings.autosave.interval">自动保存间隔（秒）</label>
-                                    <input type="number" class="form-control" id="autosaveInterval" value="300" min="30" max="3600">
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label data-i18n="settings.autosave.nodes">自动保存节点数量</label>
-                                    <input type="number" class="form-control" id="autosaveMaxNodes" value="3" min="1" max="50">
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label data-i18n="settings.autosave.trigger_limit">剧本触发器附件上限（字节）</label>
-                                    <input type="number" class="form-control" id="triggerMaxFileSize" value="5242880" min="1024" max="52428800">
-                                </div>
-                            </div>
-                            <div class="mb-4">
-                                <h4 data-i18n="settings.section.room_console">房间控制台</h4>
-                                <div class="form-group">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="enableRoomConsole" checked>
-                                        <label class="form-check-label" for="enableRoomConsole" data-i18n="settings.room_console.enable">启用房间内嵌控制台</label>
-                                    </div>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="mirrorRoomConsole">
-                                        <label class="form-check-label" for="mirrorRoomConsole" data-i18n="settings.room_console.mirror">同时输出到服务器控制台</label>
-                                    </div>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label data-i18n="settings.room_console.max_entries">房间日志条数上限</label>
-                                    <input type="number" class="form-control" id="roomConsoleMaxEntries" value="500" min="50" max="5000">
-                                    <small class="form-text text-muted" data-i18n="settings.room_console.max_entries_hint">每个房间保留的日志条数，超出后裁剪最早的记录。</small>
-                                </div>
-                                <small class="form-text text-muted" data-i18n="settings.room_console.hint">房间日志记录在房间目录内，随房间一起归档；关闭后房间事件将像以前一样输出到服务器控制台。</small>
-                            </div>
-                            <div class="mb-4">
-                                <h4 data-i18n="settings.section.rooms">房间回收</h4>
-                                <div class="form-group">
-                                    <label data-i18n="settings.rooms.cleanup_inactive_days">未激活房间自动回收期限（天）</label>
-                                    <input type="number" class="form-control" id="roomCleanupInactiveDays" value="7" min="0" max="3650">
-                                    <small class="form-text text-muted" data-i18n="settings.rooms.cleanup_inactive_days_hint">房间没有活跃成员且超过该天数没有活动时，会在服务启动后或每天自动删除；0 表示不回收。只删除房间目录与该房间的 AI 对话历史，角色卡与用户数据不受影响。</small>
-                                </div>
-                            </div>
-                            <div class="mb-4">
-                                <h4 data-i18n="settings.section.world_override">世界意志</h4>
-                                <div class="form-group">
-                                    <label data-i18n="settings.world_override.cooldown">同一玩家冷却（秒，0 表示不限制）</label>
-                                    <input type="number" class="form-control" id="worldOverrideCooldownSeconds" value="20" min="0" max="3600">
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label data-i18n="settings.world_override.hourly_limit">每房间每小时次数上限（0 表示不限制）</label>
-                                    <input type="number" class="form-control" id="worldOverrideHourlyLimit" value="30" min="0" max="10000">
-                                </div>
-                                <small class="form-text text-muted" data-i18n="settings.world_override.hint">房主与房管可以在房间内「收紧」这两个限制（更长的冷却、更少的次数），但不能放宽站点设置。</small>
-                            </div>
-                            <div class="mb-4">
-                                <h4>网站 Agent</h4>
-                                <div class="form-group">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="siteAgentEnabled" checked>
-                                        <label class="form-check-label" for="siteAgentEnabled">启用网站 Agent</label>
-                                    </div>
-                                    <small class="form-text text-muted">关闭后所有用户的悬浮球与 Agent 页立即不可用；已保存的会话仍会保留。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="siteAgentDailyTokenBudget">每日 Token 预算（0 表示不限制）</label>
-                                    <input type="number" class="form-control" id="siteAgentDailyTokenBudget" value="200000" min="0" max="100000000">
-                                    <small class="form-text text-muted">按用户统计当日 Agent 消耗，超出后拒绝新的对话请求。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="siteAgentMaxTurnsPerHour">每用户每小时最大轮数</label>
-                                    <input type="number" class="form-control" id="siteAgentMaxTurnsPerHour" value="60" min="1" max="1000">
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="siteAgentMaxToolRounds">单轮工具调用上限</label>
-                                    <input type="number" class="form-control" id="siteAgentMaxToolRounds" value="6" min="1" max="20">
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="siteAgentRequestTimeout">单次模型请求超时（秒）</label>
-                                    <input type="number" class="form-control" id="siteAgentRequestTimeout" value="120" min="30" max="1800">
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="siteAgentMaxHistoryMessages">携带的历史消息条数</label>
-                                    <input type="number" class="form-control" id="siteAgentMaxHistoryMessages" value="40" min="4" max="200">
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="siteAgentMaxToolResultChars">单个工具结果最大字符数</label>
-                                    <input type="number" class="form-control" id="siteAgentMaxToolResultChars" value="4000" min="200" max="20000">
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="siteAgentActionTtlSeconds">待确认操作有效期（秒）</label>
-                                    <input type="number" class="form-control" id="siteAgentActionTtlSeconds" value="300" min="30" max="3600">
-                                    <small class="form-text text-muted">超过有效期后写操作卡片自动失效，需要 Agent 重新生成。</small>
-                                </div>
-                            </div>
-                            <div class="mb-4">
-                                <h4>聊天设置</h4>
-                                <div class="form-group">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="showTimestamp" checked>
-                                        <label class="form-check-label" for="showTimestamp">显示消息时间戳</label>
-                                    </div>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="streamOutput">
-                                        <label class="form-check-label" for="streamOutput">启用 AI 流式输出</label>
-                                    </div>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="scenarioImportStreamOutput" checked>
-                                        <label class="form-check-label" for="scenarioImportStreamOutput">剧本导入默认启用流式请求</label>
-                                    </div>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="showAIHints" checked>
-                                        <label class="form-check-label" for="showAIHints">允许 KP 在回复中提供提示</label>
-                                    </div>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label>消息字体大小（像素）</label>
-                                    <input type="number" class="form-control" id="messageFontSize" value="14" min="10" max="24">
-                                </div>
-                                <div class="form-group mt-3">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="enableAIResponseLock">
-                                        <label class="form-check-label" for="enableAIResponseLock">AI回复期间锁定输入（AI回复完成后才能发送新消息）</label>
-                                    </div>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label>消息发送频率限制（条/分钟）</label>
-                                    <input type="number" class="form-control" id="messageRateLimit" value="10" min="0" max="60">
-                                    <small class="text-muted">设置为0表示不限制</small>
-                                </div>
-                            </div>
-                            <div class="mb-4">
-                                <h4>LaTeX 氛围排版</h4>
-                                <p class="text-muted">允许 KP 与玩家用 KaTeX 片段营造文字氛围。总控关闭后，KP 不会收到排版指导，聊天框对所有消息都不做公式渲染。</p>
-                                <div class="form-group">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="latexEnabled" checked>
-                                        <label class="form-check-label" for="latexEnabled">启用 LaTeX 氛围排版（总控）</label>
-                                    </div>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="latexKpEnabled" checked>
-                                        <label class="form-check-label" for="latexKpEnabled">KP 回复可渲染 LaTeX</label>
-                                    </div>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="latexPlayerEnabled" checked>
-                                        <label class="form-check-label" for="latexPlayerEnabled">玩家消息可渲染 LaTeX</label>
-                                    </div>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="latexIntensity">LaTeX 使用强度</label>
-                                    <select class="form-select" id="latexIntensity">
-                                        <option value="light">克制（极少使用）</option>
-                                        <option value="standard" selected>标准</option>
-                                        <option value="rich">丰富</option>
-                                    </select>
-                                    <small class="text-muted">强度只影响 KP 的判断倾向，单条回复的公式数与长度仍受下方上限约束。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="latexMaxFormulasPerMessage">单条消息公式片段上限</label>
-                                    <input type="number" class="form-control" id="latexMaxFormulasPerMessage" value="12" min="1" max="50">
-                                    <small class="text-muted">行内与独立公式块合计，超限片段按原文显示（1-50）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="latexMaxFormulaChars">单块公式源码最大字符数</label>
-                                    <input type="number" class="form-control" id="latexMaxFormulaChars" value="300" min="50" max="2000">
-                                    <small class="text-muted">超过该长度的公式不会被渲染，历史清洗时替换为「公式」（50-2000）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="latexMaxCleanMessageChars">发送给 AI 前的单条清洗字符上限</label>
-                                    <input type="number" class="form-control" id="latexMaxCleanMessageChars" value="2000" min="200" max="10000">
-                                    <small class="text-muted">限制单条历史清洗后的长度，防止超长消息撑爆上下文（200-10000）。</small>
-                                </div>
-                            </div>
-                            <div class="mb-4">
-                                <h4>KP 请求限制</h4>
-                                <p class="text-muted">达到限制时 KP 会自动收尾，并在聊天框与日志中给出说明，不会静默无响应。</p>
-                                <div class="form-group mt-2">
-                                    <label for="maxToolRounds">最大工具调用轮数</label>
-                                    <input type="number" class="form-control" id="maxToolRounds" value="8" min="1" max="30">
-                                    <small class="text-muted">达到该轮数后 KP 停止调用工具并直接收尾叙事（1-30）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="aiRequestTimeout">单次 AI 请求等待时间（秒）</label>
-                                    <input type="number" class="form-control" id="aiRequestTimeout" value="300" min="30" max="1800">
-                                    <small class="text-muted">超过该时间判定为超时并提示（30-1800）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="aiRequestMaxRetries">连接中断重试次数</label>
-                                    <input type="number" class="form-control" id="aiRequestMaxRetries" value="5" min="0" max="20">
-                                    <small class="text-muted">请求被网络中断（未收到响应）时自动重试的最大次数，重试进度会显示在聊天框；0 表示不重试（0-20）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="dedupeToolCalls" checked>
-                                        <label class="form-check-label" for="dedupeToolCalls">重复工具调用短路</label>
-                                    </div>
-                                    <small class="text-muted">同一轮发言内用相同参数重复调用同一工具时不再执行，直接复用上次结果，避免重复掷骰/重复触发。</small>
-                                </div>
-                            </div>
-                            <div class="mb-4">
-                                <h4>最大输出 Token（全局）</h4>
-                                <p class="text-muted">所有平台共用的 max_tokens 默认值。请求模板（各模型 JSON）里若自行写了 max_tokens，以模板为准；没有写的，则统一按下值下发。</p>
-                                <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="constrainMaxTokens" checked>
-                                        <label class="form-check-label" for="constrainMaxTokens">约束最大输出 token</label>
-                                    </div>
-                                    <small class="text-muted">勾选：未在请求模板单独设置的请求统一下发下面的默认值；不勾选：不下发 max_tokens，完全交给平台自身（探针/连通性测试始终使用极小值，不受影响）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="maxTokens">默认最大输出 token</label>
-                                    <input type="number" class="form-control" id="maxTokens" value="16384" min="1" max="200000">
-                                    <small class="text-muted">仅在上方开关勾选、且请求模板未单独声明时生效（1-200000）。</small>
-                                </div>
-                            </div>
-                            <div class="mb-4">
-                                <h4>本地响应缓存</h4>
-                                <p class="text-muted">相同输入 + 相同剧情状态下直接复用本地回复，命中即整次跳过上游请求，是最省 token 的方式。仅对无副作用输入（非检定/非触发/非转场）生效，不会让 KP 忽略剧本推进。</p>
-                                <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="semanticCacheEnabled" checked>
-                                        <label class="form-check-label" for="semanticCacheEnabled">启用房间内语义缓存</label>
-                                    </div>
-                                    <small class="text-muted">关闭后房间内对话每次都直连上游（主页聊天仍使用精确缓存）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="semanticCacheTtl">语义缓存有效期（秒）</label>
-                                    <input type="number" class="form-control" id="semanticCacheTtl" value="120" min="30" max="86400">
-                                    <small class="text-muted">越大命中越多、越省 token，但过期内容被复用的窗口也越长（30-86400）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="exactCacheTtl">精确缓存有效期（秒）</label>
-                                    <input type="number" class="form-control" id="exactCacheTtl" value="300" min="30" max="86400">
-                                    <small class="text-muted">主页聊天（无房间状态）的精确缓存有效期（30-86400）。</small>
-                                </div>
-                            </div>
-                            <div class="mb-4">
-                                <h4>AI 用量观测</h4>
-                                <p class="text-muted">把每次请求的输入 token 按分段做本地估算并记入用量日志，用于分析成本结构，不改变 AI 行为。</p>
-                                <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="recordPromptSegments" checked>
-                                        <label class="form-check-label" for="recordPromptSegments">记录提示词分段 token（成本归因）</label>
-                                    </div>
-                                    <small class="text-muted">关闭后不再做分段估算，用量仪表盘只显示总量。</small>
-                                </div>
-                            </div>
-                            <div class="mb-4">
-                                <h4>知识库检索与剧本切块</h4>
-                                <p class="text-muted">控制每次请求召回的章节数量、导入剧本的切块粒度，以及章节召回的新鲜度策略。</p>
-                                <div class="form-group mt-2">
-                                    <label for="retrievalTopKDefault">普通剧本检索召回章节数</label>
-                                    <input type="number" class="form-control" id="retrievalTopKDefault" value="5" min="1" max="32">
-                                    <small class="text-muted">带场景模块的剧本每次召回的章节数量（1-32）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="retrievalTopKDirect">导入剧本检索召回章节数</label>
-                                    <input type="number" class="form-control" id="retrievalTopKDirect" value="6" min="1" max="32">
-                                    <small class="text-muted">导入剧本只有知识块这一条剧情来源，命中后会回填整章（1-32）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="chunkChildMaxChars">导入剧本子块字符上限</label>
-                                    <input type="number" class="form-control" id="chunkChildMaxChars" value="800" min="200" max="8000">
-                                    <small class="text-muted">子块越小召回越精确；章节超过该长度才继续切分（优先在段落边界）（200-8000）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="chunkParentMaxChars">导入剧本回填章节字符上限</label>
-                                    <input type="number" class="form-control" id="chunkParentMaxChars" value="2400" min="200" max="16000">
-                                    <small class="text-muted">命中子块后按顺序回填同章节内容，直到达到该上限（200-16000）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="stickyRounds">章节粘滞轮数</label>
-                                    <input type="number" class="form-control" id="stickyRounds" value="1" min="0" max="10">
-                                    <small class="text-muted">关键词激活的章节在随后 N 轮内强制注入，保证上下文连贯（0-10）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="cooldownRounds">章节冷却轮数</label>
-                                    <input type="number" class="form-control" id="cooldownRounds" value="3" min="0" max="20">
-                                    <small class="text-muted">命中关键词激活的章节在粘滞期后进入 N 轮硬冷却，期间不再被召回（0-20）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="keywordChannelEnabled" checked>
-                                        <label class="form-check-label" for="keywordChannelEnabled">启用关键词（世界书）直命中通道</label>
-                                    </div>
-                                    <small class="text-muted">查询命中章节触发词时直接激活该章节；无命中才走语义检索。关闭后仅用 BM25 + 向量。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="recursiveScanning" checked>
-                                        <label class="form-check-label" for="recursiveScanning">启用递归扫描</label>
-                                    </div>
-                                    <small class="text-muted">用已激活章节的正文继续匹配其它章节的触发词，帮助长剧本串联设定（受深度与步数上限约束）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="maxRecursionDepth">递归扫描最大深度</label>
-                                    <input type="number" class="form-control" id="maxRecursionDepth" value="3" min="0" max="10">
-                                    <small class="text-muted">递归触发的最大层数（0-10），步数与激活条目数另有硬上限。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="lorebookTokenBudget">剧本注入 token 预算</label>
-                                    <input type="number" class="form-control" id="lorebookTokenBudget" value="0" min="0" max="200000">
-                                    <small class="text-muted">0 表示不限制（默认）。超大剧本可设上限，超出的低优先级章节会被整体丢弃（不截断正文）。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" id="memoryEnabled" checked>
-                                        <label class="form-check-label" for="memoryEnabled">启用长期记忆回顾</label>
-                                    </div>
-                                    <small class="text-muted">从房间事件日志、关键节点与早期对话归档中按相关性注入少量回顾，避免长剧本后期遗忘玩家早期的行动与承诺；关闭后不再注入，已有记录不受影响。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="memoryInjectBudgetChars">长期记忆注入字符预算</label>
-                                    <input type="number" class="form-control" id="memoryInjectBudgetChars" value="800" min="0" max="4000">
-                                    <small class="text-muted">每轮最多注入的回忆字符数（0-4000）；0 等同于关闭注入。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="memoryInjectMaxItems">长期记忆注入条目上限</label>
-                                    <input type="number" class="form-control" id="memoryInjectMaxItems" value="6" min="1" max="20">
-                                    <small class="text-muted">每轮最多注入几条回忆（1-20），超出字符预算的条目会被丢弃。</small>
-                                </div>
-                            </div>
-                            <div class="mb-4">
-                                <h4 data-i18n="settings.dice.title">骰娘设置</h4>
-                                <p class="text-muted" data-i18n="settings.dice.description">全房间统一阈值，房间规则未单独设置时使用该默认值。</p>
-                                <div class="form-group mt-2">
-                                    <label for="diceCriticalThresholdDefault" data-i18n="settings.dice.critical">默认大成功阈值（点数 ≤）</label>
-                                    <input type="number" class="form-control" id="diceCriticalThresholdDefault" value="1" min="0" max="100">
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="diceFumbleThresholdDefault" data-i18n="settings.dice.fumble">默认大失败阈值（点数 ≥）</label>
-                                    <input type="number" class="form-control" id="diceFumbleThresholdDefault" value="96" min="0" max="100">
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="diceAnimationLevel" data-i18n="settings.dice.animation_level">骰子动画档位</label>
-                                    <select class="form-select" id="diceAnimationLevel">
-                                        <option value="text" data-i18n="settings.dice.level_text">纯文本</option>
-                                        <option value="simple" data-i18n="settings.dice.level_simple">简易动画</option>
-                                        <option value="3d" selected data-i18n="settings.dice.level_3d">3D 骰子</option>
-                                    </select>
-                                    <small class="text-muted" data-i18n="settings.dice.animation_level_hint">全局默认档位，房间可在房规内覆盖。3D 不可用时自动降级并写入房间日志。</small>
-                                </div>
-                                <div class="form-check mt-3">
-                                    <input class="form-check-input" type="checkbox" id="dicePhysicsResults" checked>
-                                    <label class="form-check-label" for="dicePhysicsResults" data-i18n="settings.dice.physics_results">启用现代化骰子点数生成器</label>
-                                    <small class="d-block text-muted" data-i18n="settings.dice.physics_results_hint">开启后由客户端读取骰子落定后朝上的面，服务端据此结算；关闭则沿用服务端随机数生成器。纯文本档位与兜底场景始终使用旧生成器。</small>
-                                </div>
-                                <div class="form-check mt-3">
-                                    <input class="form-check-input" type="checkbox" id="dicePlayerRollDefault" checked>
-                                    <label class="form-check-label" for="dicePlayerRollDefault" data-i18n="settings.dice.player_roll">允许玩家投掷骰子</label>
-                                    <small class="d-block text-muted" data-i18n="settings.dice.player_roll_hint">AI 检定时等待目标玩家点击投掷；不依赖动画档位，纯文本模式下同样可用。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="dicePlayerRollTimeout" data-i18n="settings.dice.player_roll_timeout">玩家投掷等待超时（秒）</label>
-                                    <input type="number" class="form-control" id="dicePlayerRollTimeout" value="120" min="30" max="300">
-                                    <small class="text-muted" data-i18n="settings.dice.player_roll_timeout_hint">超时后由服务端自动投掷，避免 AI 永久等待。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="diceRerollMode" data-i18n="settings.dice.reroll_mode">骰子重投模式</label>
-                                    <select class="form-select" id="diceRerollMode">
-                                        <option value="off" data-i18n="settings.dice.reroll_mode_off">关闭重投</option>
-                                        <option value="limited" data-i18n="settings.dice.reroll_mode_limited">指定次数</option>
-                                        <option value="unlimited" data-i18n="settings.dice.reroll_mode_unlimited">无限重投</option>
-                                    </select>
-                                    <small class="text-muted" data-i18n="settings.dice.reroll_mode_hint">开启后玩家可在骰桌浮层重投并确认结果；关闭时投掷后自动返回。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label for="diceRerollLimit" data-i18n="settings.dice.reroll_limit">重投次数（1-20）</label>
-                                    <input type="number" class="form-control" id="diceRerollLimit" value="3" min="1" max="20">
-                                    <small class="text-muted" data-i18n="settings.dice.reroll_limit_hint">仅在重投模式为「指定次数」时可编辑。</small>
-                                </div>
-                                <div class="mt-3" data-admin-only="true" id="adminDiceTexturesSection">
-                                    <h5 data-i18n="settings.dice.textures_title">骰子贴图库</h5>
-                                    <p class="text-muted small" data-i18n="settings.dice.textures_hint">上传桌面贴图与骰面贴图，组合成皮肤供玩家在本机选择。</p>
-                                    <div id="adminDiceTextures"></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- 主题设置内容（仅管理员） -->
-                        <div id="theme-settings-content" class="settings-content">
-                            <div class="theme-admin-shell">
-                                <section class="theme-admin-picker">
-                                    <h4 data-i18n="settings.theme.title">主题管理</h4>
-                                    <p class="text-muted small" data-i18n="settings.theme.admin_hint">设置站点默认主题与全局可用范围。下方参数作为站点默认值，个人覆盖值优先于站点默认；被锁定的参数个人不可修改。</p>
-                                    <div class="form-group mt-3">
-                                        <label for="themeSelect" data-i18n="settings.field.default_theme">默认主题</label>
-                                        <select class="form-select theme-native-select" id="themeSelect">
-                                            <option value="light" data-i18n="profile.theme.light">浅色</option>
-                                            <option value="dark" data-i18n="profile.theme.dark">深色</option>
-                                            <option value="pattern_cyber_2" data-i18n="profile.theme.cyber">赛博档案</option>
-                                            <option value="pattern_coc" data-i18n="profile.theme.coc">克苏鲁档案</option>
-                                            <option value="pattern_tome" data-i18n="profile.theme.tome">秘典·羊皮纸</option>
-                                            <option value="system" data-i18n="profile.theme.system">跟随系统</option>
+                                <div class="settings-pane-body">
+                                    <div id="general-settings-content" class="settings-content active" role="tabpanel" aria-labelledby="settings-tab-general">
+                                            <section class="settings-section" id="settings-section-interface">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title" data-i18n="settings.section.interface">界面设置</h3>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.personal">个人偏好</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group mt-2">
+                                        <label data-i18n="Language">语言</label>
+                                        <select class="form-select" id="languageSelect">
+                                            <option value="zh-CN" data-i18n="Simplified Chinese">简体中文</option>
+                                            <option value="en-US" data-i18n="English">English</option>
                                         </select>
                                     </div>
-                                    <input type="hidden" id="enabledThemesInput" value="">
-                                    <input type="hidden" id="themeOverridesInput" value="{}">
-                                    <div class="theme-picker-grid" id="themeAdminPicker"></div>
-                                </section>
-                                <section class="theme-detail-panel" id="themeAdminDetail"></section>
-                            </div>
-                        </div>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-theme">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title" data-i18n="settings.theme.title">主题管理</h3>
+                                                        <p class="settings-section-desc">设置站点默认主题与全局可用范围。下方参数作为站点默认值，个人覆盖值优先于站点默认值。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                        <section class="theme-admin-picker">
+                                        <div class="form-group mt-3">
+                                            <label for="themeSelect" data-i18n="settings.field.default_theme">默认主题</label>
+                                            <select class="form-select theme-native-select" id="themeSelect">
+                                                <option value="light" data-i18n="profile.theme.light">浅色</option>
+                                                <option value="dark" data-i18n="profile.theme.dark">深色</option>
+                                                <option value="pattern_cyber_2" data-i18n="profile.theme.cyber">赛博档案</option>
+                                                <option value="pattern_coc" data-i18n="profile.theme.coc">克苏鲁档案</option>
+                                                <option value="pattern_tome" data-i18n="profile.theme.tome">秘典·羊皮纸</option>
+                                                <option value="system" data-i18n="profile.theme.system">跟随系统</option>
+                                            </select>
+                                        </div>
+                                        <input type="hidden" id="enabledThemesInput" value="">
+                                        <input type="hidden" id="themeOverridesInput" value="{}">
+                                        <div class="theme-picker-grid" id="themeAdminPicker"></div>
+                                    </section>
+                                    <section class="theme-detail-panel" id="themeAdminDetail"></section>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-notifications">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title" data-i18n="settings.section.notifications">通知设置</h3>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.personal">个人偏好</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="enableSound">
+                                            <label class="form-check-label" for="enableSound" data-i18n="settings.notifications.sound">启用提示音</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="enableNotification">
+                                            <label class="form-check-label" for="enableNotification" data-i18n="settings.notifications.desktop">启用桌面通知</label>
+                                        </div>
+                                    </div>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-chat">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title">聊天设置</h3>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.personal">个人偏好</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="showTimestamp" checked>
+                                            <label class="form-check-label" for="showTimestamp">显示消息时间戳</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="streamOutput">
+                                            <label class="form-check-label" for="streamOutput">启用 AI 流式输出</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="scenarioImportStreamOutput" checked>
+                                            <label class="form-check-label" for="scenarioImportStreamOutput">剧本导入默认启用流式请求</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="showAIHints" checked>
+                                            <label class="form-check-label" for="showAIHints">允许 KP 在回复中提供提示</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label>消息字体大小（像素）</label>
+                                        <input type="number" class="form-control" id="messageFontSize" value="14" min="10" max="24">
+                                    </div>
+                                    <div class="form-group mt-3">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="enableAIResponseLock">
+                                            <label class="form-check-label" for="enableAIResponseLock">AI回复期间锁定输入（AI回复完成后才能发送新消息）</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label>消息发送频率限制（条/分钟）</label>
+                                        <input type="number" class="form-control" id="messageRateLimit" value="10" min="0" max="60">
+                                        <small class="text-muted">设置为0表示不限制</small>
+                                    </div>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-latex">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title">LaTeX 氛围排版</h3>
+                                                        <p class="settings-section-desc">允许 KP 与玩家用 KaTeX 片段营造文字氛围。总控关闭后，KP 不会收到排版指导，聊天框对所有消息都不做公式渲染。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="latexEnabled" checked>
+                                            <label class="form-check-label" for="latexEnabled">启用 LaTeX 氛围排版（总控）</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="latexKpEnabled" checked>
+                                            <label class="form-check-label" for="latexKpEnabled">KP 回复可渲染 LaTeX</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="latexPlayerEnabled" checked>
+                                            <label class="form-check-label" for="latexPlayerEnabled">玩家消息可渲染 LaTeX</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="latexIntensity">LaTeX 使用强度</label>
+                                        <select class="form-select" id="latexIntensity">
+                                            <option value="light">克制（极少使用）</option>
+                                            <option value="standard" selected>标准</option>
+                                            <option value="rich">丰富</option>
+                                        </select>
+                                        <small class="text-muted">强度只影响 KP 的判断倾向，单条回复的公式数与长度仍受下方上限约束。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="latexMaxFormulasPerMessage">单条消息公式片段上限</label>
+                                        <input type="number" class="form-control" id="latexMaxFormulasPerMessage" value="12" min="1" max="50">
+                                        <small class="text-muted">行内与独立公式块合计，超限片段按原文显示（1-50）。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="latexMaxFormulaChars">单块公式源码最大字符数</label>
+                                        <input type="number" class="form-control" id="latexMaxFormulaChars" value="300" min="50" max="2000">
+                                        <small class="text-muted">超过该长度的公式不会被渲染，历史清洗时替换为「公式」（50-2000）。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="latexMaxCleanMessageChars">发送给 AI 前的单条清洗字符上限</label>
+                                        <input type="number" class="form-control" id="latexMaxCleanMessageChars" value="2000" min="200" max="10000">
+                                        <small class="text-muted">限制单条历史清洗后的长度，防止超长消息撑爆上下文（200-10000）。</small>
+                                    </div>
+                                                </div>
+                                            </section>
+                                    </div>
 
-                        <!-- 模型设置内容 -->
-                        <div id="model-settings-content" class="settings-content">
+                                    <div id="play-settings-content" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-play">
+                                            <section class="settings-section" id="settings-section-autosave">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title" data-i18n="settings.section.autosave">自动保存设置</h3>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="enableAutosave" checked>
+                                            <label class="form-check-label" for="enableAutosave" data-i18n="settings.autosave.enable">启用自动保存</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label data-i18n="settings.autosave.interval">自动保存间隔（秒）</label>
+                                        <input type="number" class="form-control" id="autosaveInterval" value="300" min="30" max="3600">
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label data-i18n="settings.autosave.nodes">自动保存节点数量</label>
+                                        <input type="number" class="form-control" id="autosaveMaxNodes" value="3" min="1" max="50">
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label data-i18n="settings.autosave.trigger_limit">剧本触发器附件上限（字节）</label>
+                                        <input type="number" class="form-control" id="triggerMaxFileSize" value="5242880" min="1024" max="52428800">
+                                    </div>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-room-console">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title" data-i18n="settings.section.room_console">房间控制台</h3>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="enableRoomConsole" checked>
+                                            <label class="form-check-label" for="enableRoomConsole" data-i18n="settings.room_console.enable">启用房间内嵌控制台</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="mirrorRoomConsole">
+                                            <label class="form-check-label" for="mirrorRoomConsole" data-i18n="settings.room_console.mirror">同时输出到服务器控制台</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label data-i18n="settings.room_console.max_entries">房间日志条数上限</label>
+                                        <input type="number" class="form-control" id="roomConsoleMaxEntries" value="500" min="50" max="5000">
+                                        <small class="form-text text-muted" data-i18n="settings.room_console.max_entries_hint">每个房间保留的日志条数，超出后裁剪最早的记录。</small>
+                                    </div>
+                                    <small class="form-text text-muted" data-i18n="settings.room_console.hint">房间日志记录在房间目录内，随房间一起归档；关闭后房间事件将像以前一样输出到服务器控制台。</small>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-room-cleanup">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title" data-i18n="settings.section.rooms">房间回收</h3>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group">
+                                        <label data-i18n="settings.rooms.cleanup_inactive_days">未激活房间自动回收期限（天）</label>
+                                        <input type="number" class="form-control" id="roomCleanupInactiveDays" value="7" min="0" max="3650">
+                                        <small class="form-text text-muted" data-i18n="settings.rooms.cleanup_inactive_days_hint">房间没有活跃成员且超过该天数没有活动时，会在服务启动后或每天自动删除；0 表示不回收。只删除房间目录与该房间的 AI 对话历史，角色卡与用户数据不受影响。</small>
+                                    </div>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-world-override">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title" data-i18n="settings.section.world_override">世界意志</h3>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group">
+                                        <label data-i18n="settings.world_override.cooldown">同一玩家冷却（秒，0 表示不限制）</label>
+                                        <input type="number" class="form-control" id="worldOverrideCooldownSeconds" value="20" min="0" max="3600">
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label data-i18n="settings.world_override.hourly_limit">每房间每小时次数上限（0 表示不限制）</label>
+                                        <input type="number" class="form-control" id="worldOverrideHourlyLimit" value="30" min="0" max="10000">
+                                    </div>
+                                    <small class="form-text text-muted" data-i18n="settings.world_override.hint">房主与房管可以在房间内「收紧」这两个限制（更长的冷却、更少的次数），但不能放宽站点设置。</small>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-dice">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title" data-i18n="settings.dice.title">骰娘设置</h3>
+                                                        <p class="settings-section-desc" data-i18n="settings.dice.description">全房间统一阈值，房间规则未单独设置时使用该默认值。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group mt-2">
+                                        <label for="diceCriticalThresholdDefault" data-i18n="settings.dice.critical">默认大成功阈值（点数 ≤）</label>
+                                        <input type="number" class="form-control" id="diceCriticalThresholdDefault" value="1" min="0" max="100">
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="diceFumbleThresholdDefault" data-i18n="settings.dice.fumble">默认大失败阈值（点数 ≥）</label>
+                                        <input type="number" class="form-control" id="diceFumbleThresholdDefault" value="96" min="0" max="100">
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="diceAnimationLevel" data-i18n="settings.dice.animation_level">骰子动画档位</label>
+                                        <select class="form-select" id="diceAnimationLevel">
+                                            <option value="text" data-i18n="settings.dice.level_text">纯文本</option>
+                                            <option value="simple" data-i18n="settings.dice.level_simple">简易动画</option>
+                                            <option value="3d" selected data-i18n="settings.dice.level_3d">3D 骰子</option>
+                                        </select>
+                                        <small class="text-muted" data-i18n="settings.dice.animation_level_hint">全局默认档位，房间可在房规内覆盖。3D 不可用时自动降级并写入房间日志。</small>
+                                    </div>
+                                    <div class="form-check mt-3">
+                                        <input class="form-check-input" type="checkbox" id="dicePhysicsResults" checked>
+                                        <label class="form-check-label" for="dicePhysicsResults" data-i18n="settings.dice.physics_results">启用现代化骰子点数生成器</label>
+                                        <small class="d-block text-muted" data-i18n="settings.dice.physics_results_hint">开启后由客户端读取骰子落定后朝上的面，服务端据此结算；关闭则沿用服务端随机数生成器。纯文本档位与兜底场景始终使用旧生成器。</small>
+                                    </div>
+                                    <div class="form-check mt-3">
+                                        <input class="form-check-input" type="checkbox" id="dicePlayerRollDefault" checked>
+                                        <label class="form-check-label" for="dicePlayerRollDefault" data-i18n="settings.dice.player_roll">允许玩家投掷骰子</label>
+                                        <small class="d-block text-muted" data-i18n="settings.dice.player_roll_hint">AI 检定时等待目标玩家点击投掷；不依赖动画档位，纯文本模式下同样可用。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="dicePlayerRollTimeout" data-i18n="settings.dice.player_roll_timeout">玩家投掷等待超时（秒）</label>
+                                        <input type="number" class="form-control" id="dicePlayerRollTimeout" value="120" min="30" max="300">
+                                        <small class="text-muted" data-i18n="settings.dice.player_roll_timeout_hint">超时后由服务端自动投掷，避免 AI 永久等待。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="diceRerollMode" data-i18n="settings.dice.reroll_mode">骰子重投模式</label>
+                                        <select class="form-select" id="diceRerollMode">
+                                            <option value="off" data-i18n="settings.dice.reroll_mode_off">关闭重投</option>
+                                            <option value="limited" data-i18n="settings.dice.reroll_mode_limited">指定次数</option>
+                                            <option value="unlimited" data-i18n="settings.dice.reroll_mode_unlimited">无限重投</option>
+                                        </select>
+                                        <small class="text-muted" data-i18n="settings.dice.reroll_mode_hint">开启后玩家可在骰桌浮层重投并确认结果；关闭时投掷后自动返回。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="diceRerollLimit" data-i18n="settings.dice.reroll_limit">重投次数（1-20）</label>
+                                        <input type="number" class="form-control" id="diceRerollLimit" value="3" min="1" max="20">
+                                        <small class="text-muted" data-i18n="settings.dice.reroll_limit_hint">仅在重投模式为「指定次数」时可编辑。</small>
+                                    </div>
+                                    <div class="mt-3" data-admin-only="true" id="adminDiceTexturesSection">
+                                        <h5 data-i18n="settings.dice.textures_title">骰子贴图库</h5>
+                                        <p class="text-muted small" data-i18n="settings.dice.textures_hint">上传桌面贴图与骰面贴图，组合成皮肤供玩家在本机选择。</p>
+                                        <div id="adminDiceTextures"></div>
+                                    </div>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-character-rules">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title">角色卡规则</h3>
+                                                        <p class="settings-section-desc">配置 COC7 调查员属性栏比例、角色卡数量上限、武器栏位与默认随机属性投骰公式。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group">
+                                        <label for="attributeRatioPercent">属性第三格比例（%）</label>
+                                        <input type="number" class="form-control" id="attributeRatioPercent" min="1" max="100" value="20">
+                                        <small class="text-muted">默认为属性值的 20%。保存后会影响角色卡编辑页的第三格显示。</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="maxCardsPerUser">普通用户角色卡数量上限</label>
+                                        <input type="number" class="form-control" id="maxCardsPerUser" min="1" max="999" value="3">
+                                        <small class="text-muted">默认 3 张。管理员和 OWNER 不受该数量限制。</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="weaponSlotCount">默认武器栏位数量</label>
+                                        <input type="number" class="form-control" id="weaponSlotCount" min="1" max="20" value="5">
+                                        <small class="text-muted">默认 5 个。新建或打开角色卡时会补足武器表格行数。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label class="form-check-label" for="allowSkillBaseEdit">
+                                            <input type="checkbox" class="form-check-input me-2" id="allowSkillBaseEdit">
+                                            允许导入时保留技能基础值
+                                        </label>
+                                        <small class="text-muted">关闭后，技能基础值以职业文件和技能目录为准。</small>
+                                    </div>
+                                    <div class="form-group mt-3">
+                                        <label>技能基础值</label>
+                                        <div class="mt-1">
+                                            <button class="btn btn-outline-secondary btn-sm" id="openAdminSkillBaseSettings" type="button">设置技能基础值</button>
+                                        </div>
+                                        <small class="text-muted">管理员默认值仅作兜底：房间规则与用户个性化未填写时才生效。</small>
+                                    </div>
+
+                                <div class="character-roll-settings-grid" aria-label="属性随机生成公式">
+                                    <label>力量 STR<input type="text" class="form-control" id="attributeRollSTR" placeholder="3d6x5"></label>
+                                    <label>敏捷 DEX<input type="text" class="form-control" id="attributeRollDEX" placeholder="3d6x5"></label>
+                                    <label>体型 SIZ<input type="text" class="form-control" id="attributeRollSIZ" placeholder="(2d6+6)x5"></label>
+                                    <label>外貌 APP<input type="text" class="form-control" id="attributeRollAPP" placeholder="3d6x5"></label>
+                                    <label>体质 CON<input type="text" class="form-control" id="attributeRollCON" placeholder="3d6x5"></label>
+                                    <label>智力 INT<input type="text" class="form-control" id="attributeRollINT" placeholder="(2d6+6)x5"></label>
+                                    <label>意志 POW<input type="text" class="form-control" id="attributeRollPOW" placeholder="3d6x5"></label>
+                                    <label>教育 EDU<input type="text" class="form-control" id="attributeRollEDU" placeholder="(2d6+6)x5"></label>
+                                    <label>幸运 LUC<input type="text" class="form-control" id="attributeRollLUC" placeholder="3d6x5"></label>
+                                </div>
+                                                </div>
+                                                <div class="settings-section-footer">
+                                <div class="mt-3 d-flex align-items-center gap-3">
+                                    <button class="btn btn-primary" id="saveCharacterRuleSettings" type="button">保存角色卡规则</button>
+                                    <span class="settings-message" id="characterRuleSettingsMessage" aria-live="polite"></span>
+                                </div>
+                                                </div>
+                                            </section>
+                                    </div>
+
+                                    <div id="model-settings-content" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-model">
                             <section class="tool-panel mb-4" id="aiDebugSettings">
                                 <div class="tool-panel-header">
                                     <h4>AI 调试模式</h4>
@@ -1422,112 +1379,108 @@
                                 </div>
                                 <div class="settings-message immersive-settings-note mt-2" id="immersivePlatformMessage" aria-live="polite"></div>
                             </div>
-                        </div>
-
-                        <div id="knowledge-settings-content" class="settings-content">
-                            <section class="tool-panel mb-4">
-                                <div class="tool-panel-header"><h4>知识库管理</h4><span>查看剧本与规则知识库状态、位置及向量数量</span></div>
-                                <div id="embeddingModelStatus" class="alert alert-secondary" role="status">正在检查 Embedding 模型…</div>
-                                <div class="form-check mb-3">
-                                    <input type="checkbox" class="form-check-input" id="cloudEmbeddingEnabled">
-                                    <label class="form-check-label" for="cloudEmbeddingEnabled">本地模型不可用时改用云端 Embedding 接口</label>
-                                    <small class="text-muted d-block">默认关闭。开启后会改用 AI 平台配置中的 Embedding 接口（产生接口调用费用），向量维度随云端模型变化，需要重建知识库索引。</small>
-                                </div>
-                                <p class="text-muted">每个规则集使用独立索引；新增规则集后可在下方单独上传与检索。</p>
-                                <div class="d-flex gap-2 align-items-center mb-3">
-                                    <select class="form-select" id="rulesetSelect" aria-label="规则集"></select>
-                                    <input class="form-control" type="file" id="rulesetFile" accept=".txt,.md,.markdown,.text,.doc,.docx,.pdf">
-                                    <button class="btn btn-primary" id="uploadRulesetButton" type="button">上传并索引</button>
-                                </div>
-                                <div id="rulesetList" class="list-group" aria-live="polite">正在加载规则集…</div>
-                                <div id="rulesetMessage" class="settings-message" aria-live="polite"></div>
-                            </section>
-                            <section class="tool-panel mb-4">
-                                <div class="tool-panel-header"><h4>剧本知识库</h4><span>删除仅清理向量和索引，不会删除剧本</span></div>
-                                <div class="d-flex gap-2 mb-3"><input class="form-control" id="scenarioKnowledgeSearch" placeholder="搜索剧本知识库"><button class="btn btn-outline-secondary" id="scenarioKnowledgeRefresh" type="button">搜索</button></div>
-                                <div id="scenarioKnowledgeList" class="list-group" aria-live="polite">正在加载剧本知识库…</div>
-                            </section>
-                        </div>
-                        
-                        <!-- 网络配置内容 -->
-                        <div id="network-settings-content" class="settings-content">
-                            <div class="mb-4">
-                                <h4>网络配置</h4>
-                                <div class="network-config">
-                                    <div class="form-group">
-                                        <label>端口号</label>
-                                        <input type="number" class="form-control" id="networkPort" min="1" max="65535" value="8086">
+                                            <section class="settings-section" id="settings-section-kp-limits">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title">KP 请求限制</h3>
+                                                        <p class="settings-section-desc">达到限制时 KP 会自动收尾，并在聊天框与日志中给出说明，不会静默无响应。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group mt-2">
+                                        <label for="maxToolRounds">最大工具调用轮数</label>
+                                        <input type="number" class="form-control" id="maxToolRounds" value="8" min="1" max="30">
+                                        <small class="text-muted">达到该轮数后 KP 停止调用工具并直接收尾叙事（1-30）。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="aiRequestTimeout">单次 AI 请求等待时间（秒）</label>
+                                        <input type="number" class="form-control" id="aiRequestTimeout" value="300" min="30" max="1800">
+                                        <small class="text-muted">超过该时间判定为超时并提示（30-1800）。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="aiRequestMaxRetries">连接中断重试次数</label>
+                                        <input type="number" class="form-control" id="aiRequestMaxRetries" value="5" min="0" max="20">
+                                        <small class="text-muted">请求被网络中断（未收到响应）时自动重试的最大次数，重试进度会显示在聊天框；0 表示不重试（0-20）。</small>
                                     </div>
                                     <div class="form-group mt-2">
                                         <div class="form-check">
-                                            <input type="checkbox" class="form-check-input" id="enableDiscovery">
-                                            <label class="form-check-label" for="enableDiscovery">启用局域网服务发现</label>
+                                            <input type="checkbox" class="form-check-input" id="dedupeToolCalls" checked>
+                                            <label class="form-check-label" for="dedupeToolCalls">重复工具调用短路</label>
                                         </div>
+                                        <small class="text-muted">同一轮发言内用相同参数重复调用同一工具时不再执行，直接复用上次结果，避免重复掷骰/重复触发。</small>
                                     </div>
-                                    <div class="form-group mt-3">
-                                        <label for="shareBaseUrlSelect">房间邀请地址（生成邀请链接/二维码时使用）</label>
-                                        <select class="form-control" id="shareBaseUrlSelect"></select>
-                                        <input type="text" class="form-control mt-2" id="shareBaseUrlInput" placeholder="留空则使用访问者当前地址，例如 http://192.168.1.10:8086" disabled>
-                                        <div class="form-text">本机有多个网络地址（多网卡/虚拟网卡）时，可在此选定用于生成邀请链接与二维码的对外地址。</div>
-                                    </div>
-                                    <div class="form-group mt-3">
-                                        <button class="btn btn-primary" id="saveNetworkConfig">保存网络配置</button>
-                                        <button class="btn btn-secondary ml-2" id="testNetworkConnection">测试网络连接</button>
-                                    </div>
-                                    <div class="network-status mt-3 p-3 border rounded">
-                                        <h5>网络状态</h5>
-                                        <div class="status-item">
-                                            <span>服务器状态：</span>
-                                            <span id="serverStatus" class="status-value">未知</span>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-max-tokens">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title">最大输出 Token（全局）</h3>
+                                                        <p class="settings-section-desc">所有平台共用的 max_tokens 默认值。请求模板（各模型 JSON）里若自行写了 max_tokens，以模板为准；没有写的，则统一按下值下发。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group mt-2">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="constrainMaxTokens" checked>
+                                            <label class="form-check-label" for="constrainMaxTokens">约束最大输出 token</label>
                                         </div>
-                                        <div class="status-item">
-                                            <span>局域网IP：</span>
-                                            <span id="lanIp" class="status-value">未知</span>
-                                        </div>
-                                        <div class="status-item">
-                                            <span>外部可访问性：</span>
-                                            <span id="externalAccess" class="status-value">未知</span>
-                                        </div>
+                                        <small class="text-muted">勾选：未在请求模板单独设置的请求统一下发下面的默认值；不勾选：不下发 max_tokens，完全交给平台自身（探针/连通性测试始终使用极小值，不受影响）。</small>
                                     </div>
-                                </div>
-                            </div>
-
-                        </div>
-
-                        <div id="character-settings-content" class="settings-content">
-                            <div class="mb-4">
-                                <h4>角色卡规则变量</h4>
-                                <p class="text-muted">配置 COC7 调查员属性栏第三格比例值，以及默认随机属性投骰公式。</p>
-                                <div class="form-group">
-                                    <label for="attributeRatioPercent">属性第三格比例（%）</label>
-                                    <input type="number" class="form-control" id="attributeRatioPercent" min="1" max="100" value="20">
-                                    <small class="text-muted">默认为属性值的 20%。保存后会影响角色卡编辑页的第三格显示。</small>
-                                </div>
-                                <div class="form-group">
-                                    <label for="maxCardsPerUser">普通用户角色卡数量上限</label>
-                                    <input type="number" class="form-control" id="maxCardsPerUser" min="1" max="999" value="3">
-                                    <small class="text-muted">默认 3 张。管理员和 OWNER 不受该数量限制。</small>
-                                </div>
-                                <div class="form-group">
-                                    <label for="weaponSlotCount">默认武器栏位数量</label>
-                                    <input type="number" class="form-control" id="weaponSlotCount" min="1" max="20" value="5">
-                                    <small class="text-muted">默认 5 个。新建或打开角色卡时会补足武器表格行数。</small>
-                                </div>
-                                <div class="form-group mt-2">
-                                    <label class="form-check-label" for="allowSkillBaseEdit">
-                                        <input type="checkbox" class="form-check-input me-2" id="allowSkillBaseEdit">
-                                        允许导入时保留技能基础值
-                                    </label>
-                                    <small class="text-muted">关闭后，技能基础值以职业文件和技能目录为准。</small>
-                                </div>
-                                <div class="form-group mt-3">
-                                    <label>技能基础值</label>
-                                    <div class="mt-1">
-                                        <button class="btn btn-outline-secondary btn-sm" id="openAdminSkillBaseSettings" type="button">设置技能基础值</button>
+                                    <div class="form-group mt-2">
+                                        <label for="maxTokens">默认最大输出 token</label>
+                                        <input type="number" class="form-control" id="maxTokens" value="16384" min="1" max="200000">
+                                        <small class="text-muted">仅在上方开关勾选、且请求模板未单独声明时生效（1-200000）。</small>
                                     </div>
-                                    <small class="text-muted">管理员默认值仅作兜底：房间规则与用户个性化未填写时才生效。</small>
-                                </div>
-                            </div>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-response-cache">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title">本地响应缓存</h3>
+                                                        <p class="settings-section-desc">相同输入 + 相同剧情状态下直接复用本地回复，命中即整次跳过上游请求，是最省 token 的方式。仅对无副作用输入（非检定/非触发/非转场）生效，不会让 KP 忽略剧本推进。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group mt-2">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="semanticCacheEnabled" checked>
+                                            <label class="form-check-label" for="semanticCacheEnabled">启用房间内语义缓存</label>
+                                        </div>
+                                        <small class="text-muted">关闭后房间内对话每次都直连上游（主页聊天仍使用精确缓存）。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="semanticCacheTtl">语义缓存有效期（秒）</label>
+                                        <input type="number" class="form-control" id="semanticCacheTtl" value="120" min="30" max="86400">
+                                        <small class="text-muted">越大命中越多、越省 token，但过期内容被复用的窗口也越长（30-86400）。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="exactCacheTtl">精确缓存有效期（秒）</label>
+                                        <input type="number" class="form-control" id="exactCacheTtl" value="300" min="30" max="86400">
+                                        <small class="text-muted">主页聊天（无房间状态）的精确缓存有效期（30-86400）。</small>
+                                    </div>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-ai-usage">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title">AI 用量观测</h3>
+                                                        <p class="settings-section-desc">把每次请求的输入 token 按分段做本地估算并记入用量日志，用于分析成本结构，不改变 AI 行为。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group mt-2">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="recordPromptSegments" checked>
+                                            <label class="form-check-label" for="recordPromptSegments">记录提示词分段 token（成本归因）</label>
+                                        </div>
+                                        <small class="text-muted">关闭后不再做分段估算，用量仪表盘只显示总量。</small>
+                                    </div>
+                                                </div>
+                                            </section>
                             <section class="tool-panel mb-4" id="aiTokenDashboard">
                                 <div class="tool-panel-header">
                                     <h4>每日 AI Token 用量</h4>
@@ -1543,24 +1496,216 @@
                                     <div id="aiTokenSegmentSummary" class="small text-muted">加载中…</div>
                                 </div>
                             </section>
-                            <div class="character-roll-settings-grid" aria-label="属性随机生成公式">
-                                <label>力量 STR<input type="text" class="form-control" id="attributeRollSTR" placeholder="3d6x5"></label>
-                                <label>敏捷 DEX<input type="text" class="form-control" id="attributeRollDEX" placeholder="3d6x5"></label>
-                                <label>体型 SIZ<input type="text" class="form-control" id="attributeRollSIZ" placeholder="(2d6+6)x5"></label>
-                                <label>外貌 APP<input type="text" class="form-control" id="attributeRollAPP" placeholder="3d6x5"></label>
-                                <label>体质 CON<input type="text" class="form-control" id="attributeRollCON" placeholder="3d6x5"></label>
-                                <label>智力 INT<input type="text" class="form-control" id="attributeRollINT" placeholder="(2d6+6)x5"></label>
-                                <label>意志 POW<input type="text" class="form-control" id="attributeRollPOW" placeholder="3d6x5"></label>
-                                <label>教育 EDU<input type="text" class="form-control" id="attributeRollEDU" placeholder="(2d6+6)x5"></label>
-                                <label>幸运 LUC<input type="text" class="form-control" id="attributeRollLUC" placeholder="3d6x5"></label>
-                            </div>
-                            <div class="mt-3 d-flex align-items-center gap-3">
-                                <button class="btn btn-primary" id="saveCharacterRuleSettings" type="button">保存角色卡规则</button>
-                                <span class="settings-message" id="characterRuleSettingsMessage" aria-live="polite"></span>
-                            </div>
-                        </div>
+                                            <section class="settings-section" id="settings-section-site-agent">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title">网站 Agent</h3>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="siteAgentEnabled" checked>
+                                            <label class="form-check-label" for="siteAgentEnabled">启用网站 Agent</label>
+                                        </div>
+                                        <small class="form-text text-muted">关闭后所有用户的悬浮球与 Agent 页立即不可用；已保存的会话仍会保留。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="siteAgentDailyTokenBudget">每日 Token 预算（0 表示不限制）</label>
+                                        <input type="number" class="form-control" id="siteAgentDailyTokenBudget" value="200000" min="0" max="100000000">
+                                        <small class="form-text text-muted">按用户统计当日 Agent 消耗，超出后拒绝新的对话请求。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="siteAgentMaxTurnsPerHour">每用户每小时最大轮数</label>
+                                        <input type="number" class="form-control" id="siteAgentMaxTurnsPerHour" value="60" min="1" max="1000">
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="siteAgentMaxToolRounds">单轮工具调用上限</label>
+                                        <input type="number" class="form-control" id="siteAgentMaxToolRounds" value="6" min="1" max="20">
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="siteAgentRequestTimeout">单次模型请求超时（秒）</label>
+                                        <input type="number" class="form-control" id="siteAgentRequestTimeout" value="120" min="30" max="1800">
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="siteAgentMaxHistoryMessages">携带的历史消息条数</label>
+                                        <input type="number" class="form-control" id="siteAgentMaxHistoryMessages" value="40" min="4" max="200">
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="siteAgentMaxToolResultChars">单个工具结果最大字符数</label>
+                                        <input type="number" class="form-control" id="siteAgentMaxToolResultChars" value="4000" min="200" max="20000">
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="siteAgentActionTtlSeconds">待确认操作有效期（秒）</label>
+                                        <input type="number" class="form-control" id="siteAgentActionTtlSeconds" value="300" min="30" max="3600">
+                                        <small class="form-text text-muted">超过有效期后写操作卡片自动失效，需要 Agent 重新生成。</small>
+                                    </div>
+                                                </div>
+                                            </section>
+                                    </div>
 
-                        <div id="permissions-settings-content" class="settings-content">
+                                    <div id="knowledge-settings-content" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-knowledge">
+                            <section class="tool-panel mb-4">
+                                <div class="tool-panel-header"><h4>知识库管理</h4><span>查看剧本与规则知识库状态、位置及向量数量</span></div>
+                                <div id="embeddingModelStatus" class="alert alert-secondary" role="status">正在检查 Embedding 模型…</div>
+                                <div class="form-check mb-3">
+                                    <input type="checkbox" class="form-check-input" id="cloudEmbeddingEnabled">
+                                    <label class="form-check-label" for="cloudEmbeddingEnabled">本地模型不可用时改用云端 Embedding 接口</label>
+                                    <small class="text-muted d-block">默认关闭。开启后会改用 AI 平台配置中的 Embedding 接口（产生接口调用费用），向量维度随云端模型变化，需要重建知识库索引。</small>
+                                </div>
+                                <p class="text-muted">每个规则集使用独立索引；新增规则集后可在下方单独上传与检索。</p>
+                                <div class="d-flex gap-2 align-items-center mb-3">
+                                    <select class="form-select" id="rulesetSelect" aria-label="规则集"></select>
+                                    <input class="form-control" type="file" id="rulesetFile" accept=".txt,.md,.markdown,.text,.doc,.docx,.pdf">
+                                    <button class="btn btn-primary flex-shrink-0" id="uploadRulesetButton" type="button">上传并索引</button>
+                                </div>
+                                <div id="rulesetList" class="list-group" aria-live="polite">正在加载规则集…</div>
+                                <div id="rulesetMessage" class="settings-message" aria-live="polite"></div>
+                            </section>
+                            <section class="tool-panel mb-4">
+                                <div class="tool-panel-header"><h4>剧本知识库</h4><span>删除仅清理向量和索引，不会删除剧本</span></div>
+                                <div class="d-flex gap-2 mb-3"><input class="form-control" id="scenarioKnowledgeSearch" placeholder="搜索剧本知识库"><button class="btn btn-outline-secondary" id="scenarioKnowledgeRefresh" type="button">搜索</button></div>
+                                <div id="scenarioKnowledgeList" class="list-group" aria-live="polite">正在加载剧本知识库…</div>
+                            </section>
+                                            <section class="settings-section" id="settings-section-retrieval-memory">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title">知识库检索与剧本切块</h3>
+                                                        <p class="settings-section-desc">控制每次请求召回的章节数量、导入剧本的切块粒度，以及章节召回的新鲜度策略。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="form-group mt-2">
+                                        <label for="retrievalTopKDefault">普通剧本检索召回章节数</label>
+                                        <input type="number" class="form-control" id="retrievalTopKDefault" value="5" min="1" max="32">
+                                        <small class="text-muted">带场景模块的剧本每次召回的章节数量（1-32）。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="retrievalTopKDirect">导入剧本检索召回章节数</label>
+                                        <input type="number" class="form-control" id="retrievalTopKDirect" value="6" min="1" max="32">
+                                        <small class="text-muted">导入剧本只有知识块这一条剧情来源，命中后会回填整章（1-32）。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="chunkChildMaxChars">导入剧本子块字符上限</label>
+                                        <input type="number" class="form-control" id="chunkChildMaxChars" value="800" min="200" max="8000">
+                                        <small class="text-muted">子块越小召回越精确；章节超过该长度才继续切分（优先在段落边界）（200-8000）。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="chunkParentMaxChars">导入剧本回填章节字符上限</label>
+                                        <input type="number" class="form-control" id="chunkParentMaxChars" value="2400" min="200" max="16000">
+                                        <small class="text-muted">命中子块后按顺序回填同章节内容，直到达到该上限（200-16000）。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="stickyRounds">章节粘滞轮数</label>
+                                        <input type="number" class="form-control" id="stickyRounds" value="1" min="0" max="10">
+                                        <small class="text-muted">关键词激活的章节在随后 N 轮内强制注入，保证上下文连贯（0-10）。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="cooldownRounds">章节冷却轮数</label>
+                                        <input type="number" class="form-control" id="cooldownRounds" value="3" min="0" max="20">
+                                        <small class="text-muted">命中关键词激活的章节在粘滞期后进入 N 轮硬冷却，期间不再被召回（0-20）。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="keywordChannelEnabled" checked>
+                                            <label class="form-check-label" for="keywordChannelEnabled">启用关键词（世界书）直命中通道</label>
+                                        </div>
+                                        <small class="text-muted">查询命中章节触发词时直接激活该章节；无命中才走语义检索。关闭后仅用 BM25 + 向量。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="recursiveScanning" checked>
+                                            <label class="form-check-label" for="recursiveScanning">启用递归扫描</label>
+                                        </div>
+                                        <small class="text-muted">用已激活章节的正文继续匹配其它章节的触发词，帮助长剧本串联设定（受深度与步数上限约束）。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="maxRecursionDepth">递归扫描最大深度</label>
+                                        <input type="number" class="form-control" id="maxRecursionDepth" value="3" min="0" max="10">
+                                        <small class="text-muted">递归触发的最大层数（0-10），步数与激活条目数另有硬上限。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="lorebookTokenBudget">剧本注入 token 预算</label>
+                                        <input type="number" class="form-control" id="lorebookTokenBudget" value="0" min="0" max="200000">
+                                        <small class="text-muted">0 表示不限制（默认）。超大剧本可设上限，超出的低优先级章节会被整体丢弃（不截断正文）。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="memoryEnabled" checked>
+                                            <label class="form-check-label" for="memoryEnabled">启用长期记忆回顾</label>
+                                        </div>
+                                        <small class="text-muted">从房间事件日志、关键节点与早期对话归档中按相关性注入少量回顾，避免长剧本后期遗忘玩家早期的行动与承诺；关闭后不再注入，已有记录不受影响。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="memoryInjectBudgetChars">长期记忆注入字符预算</label>
+                                        <input type="number" class="form-control" id="memoryInjectBudgetChars" value="800" min="0" max="4000">
+                                        <small class="text-muted">每轮最多注入的回忆字符数（0-4000）；0 等同于关闭注入。</small>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="memoryInjectMaxItems">长期记忆注入条目上限</label>
+                                        <input type="number" class="form-control" id="memoryInjectMaxItems" value="6" min="1" max="20">
+                                        <small class="text-muted">每轮最多注入几条回忆（1-20），超出字符预算的条目会被丢弃。</small>
+                                    </div>
+                                                </div>
+                                            </section>
+                                    </div>
+
+                                    <div id="system-settings-content" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-system">
+                                            <section class="settings-section" id="settings-section-network">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title">网络配置</h3>
+                                                        <p class="settings-section-desc">调整监听端口、局域网服务发现与邀请链接地址；测试连接不会修改已保存配置。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.deployment">部署级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                    <div class="network-config">
+                                        <div class="form-group">
+                                            <label>端口号</label>
+                                            <input type="number" class="form-control" id="networkPort" min="1" max="65535" value="8086">
+                                        </div>
+                                        <div class="form-group mt-2">
+                                            <div class="form-check">
+                                                <input type="checkbox" class="form-check-input" id="enableDiscovery">
+                                                <label class="form-check-label" for="enableDiscovery">启用局域网服务发现</label>
+                                            </div>
+                                        </div>
+                                        <div class="form-group mt-3">
+                                            <label for="shareBaseUrlSelect">房间邀请地址（生成邀请链接/二维码时使用）</label>
+                                            <select class="form-control" id="shareBaseUrlSelect"></select>
+                                            <input type="text" class="form-control mt-2" id="shareBaseUrlInput" placeholder="留空则使用访问者当前地址，例如 http://192.168.1.10:8086" disabled>
+                                            <div class="form-text">本机有多个网络地址（多网卡/虚拟网卡）时，可在此选定用于生成邀请链接与二维码的对外地址。</div>
+                                        </div>
+                                        <div class="network-status mt-3 p-3 border rounded">
+                                            <h5>网络状态</h5>
+                                            <div class="status-item">
+                                                <span>服务器状态：</span>
+                                                <span id="serverStatus" class="status-value">未知</span>
+                                            </div>
+                                            <div class="status-item">
+                                                <span>局域网IP：</span>
+                                                <span id="lanIp" class="status-value">未知</span>
+                                            </div>
+                                            <div class="status-item">
+                                                <span>外部可访问性：</span>
+                                                <span id="externalAccess" class="status-value">未知</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                                </div>
+                                                <div class="settings-section-footer">
+                                        <div class="form-group mt-3">
+                                            <button class="btn btn-primary" id="saveNetworkConfig">保存网络配置</button>
+                                            <button class="btn btn-secondary ml-2" id="testNetworkConnection">测试网络连接</button>
+                                        </div>
+                                                </div>
+                                            </section>
+                                    </div>
+
+                                    <div id="access-settings-content" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-access">
                             <section class="permission-settings-panel">
                                 <div class="permission-settings-header">
                                     <div>
@@ -1574,9 +1719,7 @@
                                 <div class="permission-matrix" id="permissionMatrix" aria-live="polite"></div>
                                 <div class="settings-message" id="permissionConfigMessage" aria-live="polite"></div>
                             </section>
-                        </div>
 
-                        <div id="users-settings-content" class="settings-content" data-admin-only="true">
                             <section class="permission-settings-panel user-management-panel">
                                 <div class="permission-settings-header">
                                     <div>
@@ -1652,10 +1795,9 @@
                                 </div>
                                 <div class="settings-message" id="userManagementMessage" aria-live="polite"></div>
                             </section>
-                        </div>
-                        
-                        <!-- 实时沉浸系统（管理员；音乐库已并入本标签卡） -->
-                        <div id="immersive-settings-content" class="settings-content" data-admin-only="true">
+                                    </div>
+
+                                    <div id="immersive-settings-content" class="settings-content" data-admin-only="true" role="tabpanel" aria-labelledby="settings-tab-immersive">
                             <section class="permission-settings-panel">
                                 <div class="mb-3">
                                     <h4>实时沉浸系统</h4>
@@ -2128,24 +2270,134 @@
                                 <div class="bgm-library-list" id="bgmLibraryList"></div>
                                 <div class="settings-message" id="bgmLibraryMessage" aria-live="polite"></div>
                             </section>
-                        </div>
+                                    </div>
 
-                        <!-- 关于应用内容 -->
-                        <div id="about-settings-content" class="settings-content">
-                            <div class="mb-4">
-                                <h4>应用信息</h4>
-                                <div class="about-info">
-                                    <p><strong>应用名称：</strong> 帷幕</p>
-                                    <p><strong>版本：</strong> 0.0.6</p>
-                                    <p><strong>开发者：</strong> Nobook1121</p>
-                                    <p><strong>描述：</strong> 一个基于人工智能的TRPG跑团系统</p>
+                                    <div id="about-settings-content" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-about">
+                                        <div class="about-shell">
+                                            <section class="about-hero">
+                                                <img class="about-logo" id="aboutAppLogo" src="/assets/brand/icon-128.png" alt="帷幕">
+                                                <div class="about-hero-copy">
+                                                    <h2 class="about-name" id="aboutAppName">帷幕 The Veil</h2>
+                                                    <p class="about-subtitle" data-i18n="settings.about.subtitle">自托管 AI 跑团平台</p>
+                                                    <div class="about-meta">
+                                                        <span class="about-pill" id="aboutVersionValue">v-</span>
+                                                        <span class="about-pill" id="aboutBuildValue">dev · local</span>
+                                                        <span class="about-pill" id="aboutLicenseValue">Apache-2.0</span>
+                                                    </div>
+                                                    <div class="about-links" id="repoLinkGroup" hidden>
+                                                        <a class="about-link" id="repoGithub" href="#" target="_blank" rel="noopener noreferrer">
+                                                            <i class="fa fa-github" aria-hidden="true"></i><span data-i18n="settings.about.links.github">GitHub 仓库</span>
+                                                        </a>
+                                                        <a class="about-link" id="repoIssues" href="#" target="_blank" rel="noopener noreferrer">
+                                                            <i class="fa fa-exclamation-circle" aria-hidden="true"></i><span data-i18n="settings.about.links.issues">问题反馈</span>
+                                                        </a>
+                                                        <a class="about-link" id="repoDiscussions" href="#" target="_blank" rel="noopener noreferrer">
+                                                            <i class="fa fa-comments" aria-hidden="true"></i><span data-i18n="settings.about.links.discussions">讨论区</span>
+                                                        </a>
+                                                        <a class="about-link" id="repoWikiLink" href="#" target="_blank" rel="noopener noreferrer">
+                                                            <i class="fa fa-book" aria-hidden="true"></i><span data-i18n="settings.about.links.wiki">使用文档</span>
+                                                        </a>
+                                                        <a class="about-link" id="repoReleases" href="#" target="_blank" rel="noopener noreferrer">
+                                                            <i class="fa fa-download" aria-hidden="true"></i><span data-i18n="settings.about.links.releases">发布记录</span>
+                                                        </a>
+                                                        <a class="about-link" id="repoStarLink" href="#" target="_blank" rel="noopener noreferrer" hidden>
+                                                            <i class="fa fa-star" aria-hidden="true"></i><span id="repoStarCount">0</span>
+                                                        </a>
+                                                    </div>
+                                                    <span class="settings-message" id="aboutInfoError" hidden></span>
+                                                    <button class="btn btn-sm btn-outline-secondary mt-2" id="aboutInfoRetry" type="button" hidden>
+                                                        <i class="fa fa-refresh" aria-hidden="true"></i> <span data-i18n="settings.about.retry">重试</span>
+                                                    </button>
+                                                </div>
+                                            </section>
+
+                                            <section class="about-card" id="appUpdatePanel">
+                                                <h5 data-i18n="settings.about.update.title">应用更新</h5>
+                                                <p class="settings-section-desc" data-i18n="settings.about.update.hint">从 GitHub Releases 检查新版本并下载发布包；下载后需手动替换程序目录并重启。</p>
+                                                <div class="update-status">
+                                                    <span class="update-state-pill" id="updateStateBadge" data-state="unknown" data-i18n="settings.about.update.state_idle">尚未检查</span>
+                                                    <p class="update-message" id="updateMessage" hidden></p>
+                                                </div>
+                                                <dl class="update-facts">
+                                                    <div><dt data-i18n="settings.about.update.current">当前版本</dt><dd id="updateCurrentVersion">v—</dd></div>
+                                                    <div><dt data-i18n="settings.about.update.latest">最新版本</dt><dd id="updateLatestVersion">—</dd></div>
+                                                    <div><dt data-i18n="settings.about.update.checked_at">上次检查</dt><dd id="updateCheckedAt">—</dd></div>
+                                                </dl>
+                                                <div class="update-progress" id="updateProgressWrap" hidden>
+                                                    <div class="update-progress-fill" id="updateProgressFill"></div>
+                                                </div>
+                                                <div class="update-actions">
+                                                    <button class="btn btn-primary" id="updateCheckButton" type="button">
+                                                        <i class="fa fa-refresh" aria-hidden="true"></i> <span data-i18n="settings.about.update.check">检查更新</span>
+                                                    </button>
+                                                    <button class="btn btn-outline-secondary" id="updateDownloadButton" type="button" hidden>
+                                                        <i class="fa fa-download" aria-hidden="true"></i> <span data-i18n="settings.about.update.download">下载更新包</span>
+                                                    </button>
+                                                    <a class="btn btn-outline-secondary" id="updateReleaseLink" href="#" target="_blank" rel="noopener noreferrer" hidden>
+                                                        <span data-i18n="settings.about.update.release_notes">查看发布说明</span>
+                                                    </a>
+                                                </div>
+                                                <div class="update-notes" id="updateNotes" hidden></div>
+                                                <p class="settings-section-desc" id="updateReadonlyNote" hidden data-i18n="settings.about.update.readonly">当前账号没有更新权限，只能查看版本与发布说明。</p>
+                                                <label class="form-check update-toggle" data-admin-only="true">
+                                                    <input class="form-check-input" type="checkbox" id="updateCheckOnStartup">
+                                                    <span class="form-check-label" data-i18n="settings.about.update.check_on_startup">启动时检查更新</span>
+                                                </label>
+                                                <label class="form-check update-toggle" data-admin-only="true">
+                                                    <input class="form-check-input" type="checkbox" id="updateAutoDownload">
+                                                    <span class="form-check-label" data-i18n="settings.about.update.auto_download">自动下载更新包（不会自动安装）</span>
+                                                </label>
+                                                <p class="settings-section-desc" data-admin-only="true" data-i18n="settings.about.update.scope_hint">更新源与检查行为属于站点配置，修改后点击底部「保存」生效。</p>
+                                            </section>
+
+                                            <div class="about-grid">
+                                                <section class="about-card">
+                                                    <h5 data-i18n="settings.about.build.title">构建信息</h5>
+                                                    <dl class="about-kv">
+                                                        <dt data-i18n="settings.about.build.version">版本</dt><dd id="aboutBuildVersion">-</dd>
+                                                        <dt data-i18n="settings.about.build.mode">构建方式</dt><dd id="aboutBuildMode">-</dd>
+                                                        <dt data-i18n="settings.about.build.sha">提交</dt><dd id="aboutBuildSha">-</dd>
+                                                        <dt data-i18n="settings.about.build.time">构建时间</dt><dd id="aboutBuildTime">-</dd>
+                                                        <dt data-i18n="settings.about.build.channel">通道</dt><dd id="aboutBuildChannel">-</dd>
+                                                    </dl>
+                                                </section>
+                                                <section class="about-card">
+                                                    <h5 data-i18n="settings.about.runtime.title">运行时与许可</h5>
+                                                    <dl class="about-kv">
+                                                        <dt data-i18n="settings.about.runtime.python">Python</dt><dd id="aboutRuntimePython">-</dd>
+                                                        <dt data-i18n="settings.about.runtime.platform">平台</dt><dd id="aboutRuntimePlatform">-</dd>
+                                                        <dt data-i18n="settings.about.license">许可证</dt><dd id="aboutLicenseName">-</dd>
+                                                        <dt data-i18n="settings.about.license_spdx">SPDX</dt><dd id="aboutLicenseSpdx">-</dd>
+                                                    </dl>
+                                                    <div class="about-links">
+                                                        <a class="about-link" id="aboutLicenseLink" href="#" target="_blank" rel="noopener noreferrer">
+                                                            <i class="fa fa-file-text-o" aria-hidden="true"></i><span data-i18n="settings.about.license_view">查看许可证</span>
+                                                        </a>
+                                                        <a class="about-link" id="aboutThirdPartyLink" href="#" target="_blank" rel="noopener noreferrer" hidden>
+                                                            <i class="fa fa-file-text-o" aria-hidden="true"></i><span data-i18n="settings.about.third_party">第三方许可</span>
+                                                        </a>
+                                                    </div>
+                                                </section>
+                                            </div>
+
+                                            <section class="about-card">
+                                                <h5 data-i18n="settings.about.credits.title">致谢</h5>
+                                                <p class="credits-empty" id="aboutCreditsSummary" hidden></p>
+                                                <div class="credits-list" id="aboutContributors"></div>
+                                                <h5 class="mt-3" data-i18n="settings.about.dependencies.title">依赖与许可</h5>
+                                                <div class="credits-deps" id="aboutDependencies"></div>
+                                            </section>
+
+                                            <section class="about-card" id="sponsorSection" hidden>
+                                                <h5 data-i18n="settings.about.sponsors.title">支持项目</h5>
+                                                <div class="sponsor-grid" id="sponsorList"></div>
+                                            </section>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="mb-4">
-                                <h4>许可证</h4>
-                                <p class="text-muted" data-no-settings-hint>本软件遵循 MIT 许可证开源发布。</p>
-                            </div>
                         </div>
+
                     </div>
                 </div>
             </div>
