@@ -191,6 +191,11 @@ class NarrativeRuntime:
             return True
         return evaluate_condition(node.completion, self.narrative).ok
 
+    def _at_ending(self) -> bool:
+        """当前是否已停在结局节点：结局是终局，不再接受移动与触发。"""
+        node = self.location_node()
+        return node is not None and node.kind == "ending"
+
     def resolve_node(self, reference: Any, *, kinds: tuple[str, ...] | None = None) -> NarrativeNode | None:
         ref = _text(reference)
         if not ref:
@@ -249,6 +254,8 @@ class NarrativeRuntime:
     def exits(self, *, include_blocked: bool = True, include_hidden: bool = False) -> list[dict[str, Any]]:
         location = self.location_id
         if not location:
+            return []
+        if self._at_ending():
             return []
         revealed = self.revealed_ids()
         result: list[dict[str, Any]] = []
@@ -455,8 +462,15 @@ class NarrativeRuntime:
         pc: str | None = None,
         source: str | None = None,
         audience: str = "player",
+        allow_at_ending: bool = False,
     ) -> dict[str, Any]:
-        """状态变更后由引擎自动求值；返回值并入工具结果，前端统一持久化。"""
+        """状态变更后由引擎自动求值；返回值并入工具结果，前端统一持久化。
+
+        ``allow_at_ending`` 仅供「刚进入结局」的那一次 enter 求值使用；
+        其余自动触发路径在结局中一律短路，避免终局后仍产生触发副作用。
+        """
+        if self._at_ending() and not allow_at_ending:
+            return {"triggers_fired": [], "trigger_denied": []}
         context = dict(context or {})
         resolver = TriggerResolver(self.bundle, self.narrative)
         hits, denied = resolver.evaluate(kind, context, pc=pc, audience=audience)
@@ -491,6 +505,19 @@ class NarrativeRuntime:
         action_text: str = "",
         audience: str = "player",
     ) -> dict[str, Any]:
+        if self._at_ending():
+            log_warning(
+                "guard.trigger.denied",
+                room_id=self.room_id or "",
+                turn=self._turn(),
+                trigger_id=_text(trigger_id),
+                reason="ending",
+            )
+            return {
+                "triggered": False,
+                "trigger_id": _text(trigger_id),
+                "denied": [{"trigger_id": _text(trigger_id), "reason": "ending"}],
+            }
         resolver = TriggerResolver(self.bundle, self.narrative)
         hits, denied = resolver.request(
             trigger_id,
@@ -606,6 +633,10 @@ class NarrativeRuntime:
                 **extra,
             )
 
+        if self._at_ending():
+            _deny("ending", to=_text(target_ref))
+            raise NarrativeRuntimeError("已进入结局，无法继续移动")
+
         target = self.resolve_node(target_ref, kinds=("location", "ending"))
         if target is None:
             _deny("unknown_target")
@@ -673,6 +704,7 @@ class NarrativeRuntime:
             {"location_id": target.id, "first_time": not visited_before},
             pc=actor,
             source="enter",
+            allow_at_ending=target.kind == "ending",
         )
         return {
             "moved": True,
