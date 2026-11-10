@@ -391,7 +391,8 @@ def test_room_message_logs_display_name_without_content(monkeypatch, caplog, tmp
     room_dir = tmp_path / "room-1"
     room_dir.mkdir(parents=True, exist_ok=True)
 
-    import trpg_server.routes.rooms as rooms_routes
+    # 视图函数已按域拆到 rooms_messages，monkeypatch 必须打到视图所在模块。
+    import trpg_server.routes.rooms_messages as rooms_routes
     from trpg_server import logging_config, room_log
 
     def write_messages(room_dir, saved):
