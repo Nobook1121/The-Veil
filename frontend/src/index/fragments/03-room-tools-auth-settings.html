@@ -345,6 +345,36 @@
                                 <button type="button" class="btn btn-outline-secondary btn-sm" id="openRoomSkillBaseSettings" data-i18n="room.house_rules.skill_bases_button">设置技能基础值</button>
                             </div>
                             <div class="modal-footer">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7MagicCatalogEnabled">
+                                    <label class="form-check-label" for="houseRuleCoc7MagicCatalogEnabled">开放内置法术 / 典籍内容表（KP 按需查询，不进入系统提示）</label>
+                                </div>
+                                <hr class="my-3">
+                                <h6>理智与疯狂</h6>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7SanityState">
+                                    <label class="form-check-label" for="houseRuleCoc7SanityState">结构化精神状态（总开关：恐惧症 / 躁狂症 / 发作 / 习惯恐惧 / 现实免疫写入卡面扩展）</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7SanityMythos">
+                                    <label class="form-check-label" for="houseRuleCoc7SanityMythos">目击神话：首次因神话陷入疯狂克苏鲁神话 +5，之后每次 +1</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7SanityHabituation">
+                                    <label class="form-check-label" for="houseRuleCoc7SanityHabituation">习惯恐惧：按来源记录最大理智损失，未超过记录则免疫，幕间 −1</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7SanityReality">
+                                    <label class="form-check-label" for="houseRuleCoc7SanityReality">现实认知：POW 检定成功看穿幻象并免疫后续理智损失</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7SanityBout">
+                                    <label class="form-check-label" for="houseRuleCoc7SanityBout">发作计时：疯狂发作掷 1D10 小时并记录汇总症状</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7SanityTraits">
+                                    <label class="form-check-label" for="houseRuleCoc7SanityTraits">恐惧症 / 躁狂症 100 条表（按需查询）与暴露惩罚骰</label>
+                                </div>
                                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="common.cancel">取消</button>
                                 <button type="button" class="btn btn-primary" id="saveHouseRules" data-i18n="common.save">保存</button>
                             </div>

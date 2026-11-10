@@ -1153,6 +1153,9 @@ def _advance(
     scheduler = _scheduler(combat, context, settings)
     for text in scheduler.advance(combat, consume_all=consume_all):
         _append_log(combat, text, context)
+    if context is not None:
+        for text in _settle_due_poisons(combat, context, settings=settings):
+            _append_log(combat, text, context)
     return combat
 
 
@@ -2331,7 +2334,7 @@ def heal_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
 
 
 def poison_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
-    """毒剂结算：体质抵抗成功伤害减半；发作轮数大于 0 时只登记，不自动调度。"""
+    """毒剂结算：体质抵抗成功伤害减半；``onset_rounds > 0`` 时登记到期轮并自动结算。"""
     combat = _load_combat(context)
     if not combat:
         return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
@@ -2348,9 +2351,26 @@ def poison_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
 
     onset = max(0, _as_int(arguments.get("onset_rounds"), 0))
     if onset > 0:
+        current_round = max(1, _as_int(combat.get("round"), 1))
+        due_round = current_round + onset
+        pending = combat.get("pending_poisons")
+        if not isinstance(pending, list):
+            pending = []
+        pending.append(
+            {
+                "target_id": target.get("id"),
+                "target_name": target.get("name"),
+                "registered_round": current_round,
+                "due_round": due_round,
+                "potency": arguments.get("potency"),
+                "damage": _as_text(arguments.get("damage"), "1D6") or "1D6",
+                "doses": max(1, _as_int(arguments.get("doses"), 1)),
+            }
+        )
+        combat["pending_poisons"] = pending
         summary = (
-            f"{target.get('name')} 中毒：{onset} 轮后发作。"
-            "当前不做延迟调度，请在到期后再次调用 combat.poison 并令 onset_rounds=0 结算。"
+            f"{target.get('name')} 中毒：{onset} 轮后发作（第 {due_round} 轮），"
+            "战斗轮推进到该轮时自动结算。"
         )
         _append_log(combat, summary, context)
         _save_combat(context, combat)
@@ -2359,12 +2379,40 @@ def poison_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             "target": target.get("name"),
             "pending": True,
             "onset_rounds": onset,
+            "due_round": due_round,
             "summary": summary,
         }
 
-    potency = detail_rules.poison_penalty_dice(arguments.get("potency"))
-    doses = max(1, _as_int(arguments.get("doses"), 1))
-    expression = _as_text(arguments.get("damage"), "1D6") or "1D6"
+    result = _resolve_poison(
+        combat,
+        target,
+        potency_raw=arguments.get("potency"),
+        damage_raw=arguments.get("damage"),
+        doses=arguments.get("doses"),
+        context=context,
+        settings=settings,
+        detail_rules=detail_rules,
+    )
+    _append_log(combat, result["summary"], context)
+    _save_combat(context, combat)
+    return {**_combat_summary_state(combat), **result}
+
+
+def _resolve_poison(
+    combat: dict[str, Any],
+    target: dict[str, Any],
+    *,
+    potency_raw: Any,
+    damage_raw: Any,
+    doses: Any,
+    context: Any,
+    settings: CombatSettings,
+    detail_rules: Any,
+) -> dict[str, Any]:
+    """单次毒剂伤害结算（即时与延迟到期共用）。"""
+    potency = detail_rules.poison_penalty_dice(potency_raw)
+    dose_count = max(1, _as_int(doses, 1))
+    expression = _as_text(damage_raw, "1D6") or "1D6"
     con = detail_rules.poison_check_target(target.get("con"))
     critical, fumble = _context_thresholds(context)
     roll, candidates = _percentile_roll(_roller, 0, potency)
@@ -2375,7 +2423,7 @@ def poison_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     terms = [tuple(term) for term in parsed["segments"][0]["terms"]]
     amount, detail = _damage_roller(terms)
     amount += _as_int(parsed["segments"][0].get("fixed"), 0)
-    total = max(0, amount) * doses
+    total = max(0, amount) * dose_count
     applied_amount = detail_rules.poison_damage(total, resisted=resisted)
     applied = _apply_damage(context, target, applied_amount, settings=settings)
 
@@ -2384,10 +2432,7 @@ def poison_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         f"{target.get('name')} 中毒（毒性 {potency}，CON {con}，d100={roll}，{level}）："
         f"{verdict}，耐久 {applied.get('hp_before')}→{applied.get('hp_after')}。"
     )
-    _append_log(combat, summary, context)
-    _save_combat(context, combat)
     return {
-        **_combat_summary_state(combat),
         "target": target.get("name"),
         "check": {"roll": roll, "candidates": candidates, "level": level, "target": con},
         "potency": potency,
@@ -2395,6 +2440,94 @@ def poison_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         **applied,
         "summary": summary,
     }
+
+
+def _find_combatant_by_id(combat: dict[str, Any], target_id: Any) -> dict[str, Any] | None:
+    key = str(target_id or "")
+    if not key:
+        return None
+    for item in (combat.get("combatants") or {}).values():
+        if isinstance(item, dict) and str(item.get("id") or "") == key:
+            return item
+    return None
+
+
+def _settle_due_poisons(
+    combat: dict[str, Any],
+    context: Any,
+    *,
+    settings: CombatSettings | None = None,
+    force: bool = False,
+) -> list[str]:
+    """结算到期的延迟毒剂；返回写入战斗日志的文本。"""
+    pending = combat.get("pending_poisons")
+    if not isinstance(pending, list) or not pending:
+        return []
+    room_options = _coc7_room_options(context)
+    settings = settings or _combat_settings(context)
+    detail_rules = _combat_detail_rules(settings)
+    if not (room_options and room_options.combat_poison and detail_rules):
+        return []
+    round_no = max(1, _as_int(combat.get("round"), 1))
+    messages: list[str] = []
+    remaining: list[dict[str, Any]] = []
+    for entry in pending:
+        if not isinstance(entry, dict):
+            continue
+        target = _find_combatant_by_id(combat, entry.get("target_id")) or _resolve_combatant(
+            combat, entry.get("target_name")
+        )
+        if target is None or target.get("dead"):
+            messages.append(f"{entry.get('target_name') or '?'} 的延迟毒剂因目标已倒下而取消。")
+            continue
+        if not force and _as_int(entry.get("due_round"), 0) > round_no:
+            remaining.append(entry)
+            continue
+        result = _resolve_poison(
+            combat,
+            target,
+            potency_raw=entry.get("potency"),
+            damage_raw=entry.get("damage"),
+            doses=entry.get("doses"),
+            context=context,
+            settings=settings,
+            detail_rules=detail_rules,
+        )
+        messages.append("延迟毒剂发作：" + str(result["summary"]))
+    combat["pending_poisons"] = remaining
+    return messages
+
+
+def settle_poisons_after_time(
+    room_dir: Any,
+    *,
+    room_id: Any = None,
+    config_dir: Any = None,
+) -> dict[str, Any]:
+    """时间推进后结算所有待发作毒剂（时钟粒度是天/小时，视为全部到期）。"""
+    context = _TimeAdvanceContext(room_dir, room_id=room_id, config_dir=config_dir)
+    combat = _load_combat(context)
+    if not combat:
+        return {"settled": 0, "messages": []}
+    messages = _settle_due_poisons(combat, context, force=True)
+    if not messages:
+        return {"settled": 0, "messages": []}
+    _save_combat(context, combat)
+    return {"settled": len(messages), "messages": messages}
+
+
+class _TimeAdvanceContext:
+    """时间推进结算用的最小上下文：只需要房间目录与 info。"""
+
+    def __init__(self, room_dir: Any, *, room_id: Any = None, config_dir: Any = None):
+        self.room_dir = room_dir
+        self.room_id = room_id
+        self.config_dir = config_dir
+
+    def room_info(self) -> dict[str, Any]:
+        from trpg_server.room_rules import load_room_info
+
+        return load_room_info(self.room_dir)
 
 
 def end_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -2600,7 +2733,7 @@ COMBAT_HEAL_TOOL = AgentTool(
 
 COMBAT_POISON_TOOL = AgentTool(
     name="combat.poison",
-    description="毒剂结算：体质抵抗成功伤害减半。onset_rounds 大于 0 时只登记发作时间，不自动调度。",
+    description="毒剂结算：体质抵抗成功伤害减半。onset_rounds 大于 0 时登记到期轮，战斗轮推进到该轮时自动结算。",
     parameters={
         "type": "object",
         "properties": {
@@ -2611,7 +2744,7 @@ COMBAT_POISON_TOOL = AgentTool(
             "onset_rounds": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "发作轮数；大于 0 时本次只登记，到期后再次调用并传 0 结算",
+                "description": "发作轮数；大于 0 时延迟到该轮自动结算，传 0 则立即结算",
             },
         },
         "required": ["target", "damage"],

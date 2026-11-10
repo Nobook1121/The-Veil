@@ -174,10 +174,26 @@ interface RoomHouseRules {
     coc7_combat_poison?: boolean;
     coc7_healing_natural?: boolean;
     coc7_healing_require_rest?: boolean;
+    // CoC7 房间游戏时钟：按服务器时间记录房间内经过的时间，默认关闭。
+    coc7_game_clock?: boolean;
     // CoC7 批次 5：追逐会话开关，默认关闭。
     coc7_chase_enabled?: boolean;
     // CoC7 批次 5：法术与典籍开关，默认关闭。
     coc7_magic_enabled?: boolean;
+    // CoC7 批次 6：内置法术 / 典籍内容表查询开关，默认关闭。
+    coc7_magic_catalog_enabled?: boolean;
+    // CoC7 批次 3：理智结构化总开关，关闭时理智链路与旧版本一致。
+    coc7_sanity_state?: boolean;
+    // CoC7 批次 3：目击神话时克苏鲁神话 +5 / +1。
+    coc7_sanity_mythos?: boolean;
+    // CoC7 批次 3：习惯恐惧（按来源记录最大理智损失，幕间 −1）。
+    coc7_sanity_habituation?: boolean;
+    // CoC7 批次 3：现实认知检定与免疫。
+    coc7_sanity_reality?: boolean;
+    // CoC7 批次 3：疯狂发作 1D10 小时计时。
+    coc7_sanity_bout?: boolean;
+    // CoC7 批次 3：恐惧症 / 躁狂症 100 条表与暴露惩罚骰。
+    coc7_sanity_traits?: boolean;
 }
 
 interface RoomConsoleEntry {

@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from trpg_server import room_rules
+from trpg_server import room_clock, room_rules
 from trpg_server.ruleset.coc7 import magic as magic_rules
 
 
@@ -130,6 +130,48 @@ def _apply_mp(room_dir: Any, info: dict[str, Any], member: dict[str, Any], delta
     card["maxMp"] = max_mp
     room_rules.save_room_info(room_dir, info)
     return {"before": before, "after": after, "delta": after - before}
+
+
+def recover_mp(
+    room_dir: Any,
+    info: dict[str, Any],
+    member: dict[str, Any],
+    *,
+    days: Any,
+) -> dict[str, Any]:
+    """按天恢复 MP：每小时 1 点（POW 每满 100 额外 +1），不超过上限。"""
+    days_value = max(0, _as_int(days))
+    card = room_rules.member_card(member)
+    state = member.setdefault("character_state", {})
+    attributes = card.get("attributes") if isinstance(card.get("attributes"), dict) else {}
+    max_mp = _as_int(state.get("max_mp"), magic_rules.max_mp(attributes.get("pow")))
+    before = _as_int(state.get("current_mp", card.get("currentMp")), max_mp)
+    gain = magic_rules.mp_recovery(days_value * 24, attributes.get("pow"))
+    after = max(0, min(max_mp, before + gain))
+    state["max_mp"] = max_mp
+    state["current_mp"] = after
+    state["pending_persist"] = True
+    card["currentMp"] = after
+    card["maxMp"] = max_mp
+    room_rules.record_room_changes(
+        member,
+        [
+            {
+                "type": "mp",
+                "value": after,
+                "source": "rule_command",
+                "reason": f"按天恢复 MP {days_value} 天",
+            }
+        ],
+    )
+    room_rules.save_room_info(room_dir, info)
+    return {
+        "days": days_value,
+        "before": before,
+        "after": after,
+        "max_mp": max_mp,
+        "gain": after - before,
+    }
 
 
 def _apply_pow(room_dir: Any, info: dict[str, Any], member: dict[str, Any], delta: Any) -> dict[str, int]:
@@ -277,7 +319,7 @@ def read_grimoire(
     *,
     title: Any,
     mode: str = "study",
-    weeks: Any = 0,
+    weeks: Any = None,
     san_loss: Any = 0,
     cmi: Any = 0,
     cmf: Any = 0,
@@ -287,7 +329,11 @@ def read_grimoire(
     actor: Any = None,
     actor_id: Any = None,
 ) -> dict[str, Any]:
-    """泛读 / 精读一本典籍；耗时与收益均由 KP 显式传入，不依赖房间时钟。"""
+    """泛读 / 精读一本典籍。
+
+    ``weeks`` 显式给出时优先使用；未给出且房间已启用游戏时钟时，用
+    「当前游戏时间 − 上次阅读时间」的整周数代替，不凭空补时间。
+    """
     book = " ".join(str(title or "").split())[:80]
     if not book:
         raise _error("典籍名不能为空", code="invalid_grimoire")
@@ -322,7 +368,16 @@ def read_grimoire(
         )
         loss = max(0, _as_int(san_loss))
         record["reads"] = _as_int(record.get("reads")) + 1
-        record["weeks"] = max(0, _as_int(weeks))
+        auto_weeks = weeks is None
+        weeks_value = (
+            room_clock.clock_weeks_since(info, record.get("last_read_at"))
+            if auto_weeks
+            else _as_int(weeks)
+        )
+        record["weeks"] = max(0, _as_int(weeks_value))
+        clock = room_clock.read_clock(info)
+        if clock is not None:
+            record["last_read_at"] = clock["current"]
 
     if gain:
         _add_mythos(room_dir, info, member, gain, book=book, actor=actor, actor_id=actor_id)

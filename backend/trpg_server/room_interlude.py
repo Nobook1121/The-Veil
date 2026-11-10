@@ -18,10 +18,11 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from trpg_server import room_rules
+from trpg_server import room_clock, room_magic, room_rules, room_sanity
 from trpg_server.console_args import ConsoleArgSpec, first_positional, parse_console_args
 from trpg_server.json_store import read_json
 from trpg_server.room_log import load_room_log, log_room_event
+from trpg_server.ruleset.coc7 import treatment
 
 INTERLUDE_KEY = "interlude"
 MAX_REVIEWS = 20
@@ -138,6 +139,11 @@ def snapshot(info: dict[str, Any] | None) -> dict[str, Any]:
         "request": state.get("request"),
         "settledAt": settlement.get("settled_at"),
         "reviewCount": len(state.get("reviews") or []),
+        "startedGameTime": state.get("startedGameTime"),
+        "endedGameTime": state.get("endedGameTime"),
+        "gameTime": (room_clock.read_stored_clock(info) or {}).get("current"),
+        "care": settlement.get("care"),
+        "therapy": settlement.get("therapy"),
     }
 
 
@@ -513,6 +519,7 @@ def start_interlude(
     if state["active"]:
         raise InterludeError("房间已经处于幕间", code="already_active", status=409)
     now = _now()
+    clock = room_clock.read_clock(info)
     # 幕间意味着剧情结束：补齐结束时间，结束后才能走现有归档链路。
     if not info.get("completed_at"):
         info["completed_at"] = now
@@ -524,8 +531,11 @@ def start_interlude(
             "startedById": str(actor_id or ""),
             "completedAt": None,
             "settlement": {},
+            "startedGameTime": clock["current"] if clock else None,
         }
     )
+    # 习惯恐惧按幕间衰减一次（规则开关关闭时内部直接跳过）。
+    room_sanity.interlude_decay(room_dir, info)
     info.pop("interlude_request", None)
     info[INTERLUDE_KEY] = state
     room_rules.save_room_info(room_dir, info)
@@ -560,12 +570,201 @@ def end_interlude(
             "completedAt": _now(),
             "endedBy": str(actor or ""),
             "endedById": str(actor_id or ""),
+            "endedGameTime": (room_clock.read_clock(info) or {}).get("current"),
         }
     )
     info[INTERLUDE_KEY] = state
     room_rules.save_room_info(room_dir, info)
     _log(room_dir, info, "结束幕间", actor=actor, actor_id=actor_id, source="interlude")
     return snapshot(info)
+
+
+def apply_monthly_care(
+    room_dir: Any,
+    info: dict[str, Any],
+    *,
+    months: int | None = None,
+    actor: Any = None,
+    actor_id: Any = None,
+) -> dict[str, Any]:
+    """幕间疗养：按月结算所有活跃成员的 HP 自然恢复与 MP 恢复。
+
+    月份显式给出时优先使用；否则读「当前游戏时间 − 上次疗养/幕间开始时间」的
+    整月数，没有起点时按 0 处理（不凭空补时间）。
+    """
+    if not room_clock.is_enabled(info):
+        raise InterludeError(
+            "幕间疗养需要先开启游戏时钟（房规 coc7_game_clock）", code="clock_disabled"
+        )
+    state = _ensure_state(info)
+    if not state["active"]:
+        raise InterludeError("房间当前不在幕间", code="not_active", status=409)
+    settlement = state.get("settlement") if isinstance(state.get("settlement"), dict) else {}
+    state["settlement"] = settlement
+    clock = room_clock.read_clock(info)
+    explicit = months is not None
+    if months is None:
+        marker = settlement.get("careGameTime") or state.get("startedGameTime")
+        days = room_clock.clock_days_since(info, marker)
+        months = treatment.months_from_days(days) if days is not None else 0
+    months = max(0, int(months))
+    if months <= 0:
+        if clock is not None:
+            settlement["careGameTime"] = clock["current"]
+        room_rules.save_room_info(room_dir, info)
+        return {"months": 0, "days": 0, "members": []}
+
+    days = treatment.recuperation_days(months)
+    rows: list[dict[str, Any]] = []
+    for member in _active_members(info):
+        name = room_rules.member_display_name(member)
+        try:
+            hp = room_rules.apply_natural_healing(
+                room_dir,
+                info,
+                member,
+                days=days,
+                reason=f"幕间疗养 {months} 个月",
+                source="interlude",
+            )
+            mp = room_magic.recover_mp(room_dir, info, member, days=days)
+            rows.append(
+                {
+                    "player": name,
+                    "hp": {"before": hp["before"], "after": hp["after"], "max": hp["max_hp"]},
+                    "mp": {"before": mp["before"], "after": mp["after"], "max": mp["max_mp"]},
+                }
+            )
+        except room_rules.RuleOperationError as exc:
+            rows.append({"player": name, "error": exc.message})
+    care = {
+        "months": months,
+        "days": days,
+        "explicit": explicit,
+        "game_time": clock["current"] if clock else None,
+        "members": rows,
+        "applied_at": _now(),
+    }
+    settlement["care"] = care
+    if clock is not None:
+        settlement["careGameTime"] = clock["current"]
+    room_rules.save_room_info(room_dir, info)
+    _log(room_dir, info, f"幕间疗养结算 {months} 个月", actor=actor, actor_id=actor_id, source="interlude")
+    return care
+
+
+def apply_therapy(
+    room_dir: Any,
+    info: dict[str, Any],
+    *,
+    player: Any,
+    months: int | None = None,
+    results: list[Any] | None = None,
+    indefinite: bool = False,
+    d6: Any = None,
+    actor: Any = None,
+    actor_id: Any = None,
+    rng: Callable[[int], int] | None = None,
+) -> dict[str, Any]:
+    """心理治疗：按月结算 SAN（每月一次精神分析检定结果由 KP 给出）。
+
+    本函数只做时间与结算编排；不定性疯狂的详细状态字段由 SAN 模块负责。
+    ``indefinite=True`` 时用 1D6 个月作为本轮治疗周期。
+    """
+    if not room_clock.is_enabled(info):
+        raise InterludeError(
+            "心理治疗需要先开启游戏时钟（房规 coc7_game_clock）", code="clock_disabled"
+        )
+    state = _ensure_state(info)
+    if not state["active"]:
+        raise InterludeError("房间当前不在幕间", code="not_active", status=409)
+    rng = rng or random.randint
+    try:
+        member = room_rules.resolve_member(
+            info, str(player or ""), actor_id=actor_id, actor_rank=OPERATOR_RANK
+        )
+        room_rules.member_card(member)
+    except room_rules.RuleOperationError as exc:
+        raise InterludeError(exc.message, code="invalid_member") from exc
+    name = room_rules.member_display_name(member)
+    member_state = member.setdefault("character_state", {})
+    if not isinstance(member_state, dict):
+        member_state = {}
+        member["character_state"] = member_state
+    clock = room_clock.read_clock(info)
+
+    if indefinite:
+        months = treatment.indefinite_months(d6 if d6 is not None else rng(6))
+    elif months is None:
+        days = room_clock.clock_days_since(info, member_state.get("last_therapy"))
+        months = treatment.months_from_days(days) if days is not None else None
+    if months is None:
+        raise InterludeError("游戏时钟还没有该成员的治疗起点；请显式给出月数。", code="no_start")
+    months = max(0, int(months))
+    levels = [str(item).strip() for item in (results or []) if str(item).strip()]
+    if months <= 0:
+        return {"player": name, "months": 0, "indefinite": indefinite, "san_delta": 0}
+    if len(levels) != months:
+        raise InterludeError(
+            f"请为 {months} 个月各给出一个精神分析结果（regular/hard/extreme/critical/failure/fumble）。",
+            code="invalid_results",
+        )
+
+    settlement = state.get("settlement") if isinstance(state.get("settlement"), dict) else {}
+    state["settlement"] = settlement
+    rows: list[dict[str, Any]] = []
+    total = 0
+    for index, level in enumerate(levels, start=1):
+        delta = treatment.monthly_san_delta(level, d3=rng(3), d6=rng(6))
+        try:
+            applied = room_rules.apply_san_change(
+                room_dir,
+                info,
+                member,
+                delta=delta,
+                reason=f"心理治疗第 {index} 月（{level}）",
+                actor=actor,
+                actor_id=actor_id,
+                source="therapy",
+            )
+        except room_rules.RuleOperationError as exc:
+            rows.append({"month": index, "level": level, "error": exc.message})
+            continue
+        applied_delta = int(applied.get("delta", delta))
+        total += applied_delta
+        rows.append({"month": index, "level": level, "san_delta": applied_delta})
+    if clock is not None:
+        member_state["last_therapy"] = clock["current"]
+    until = None
+    if clock is not None:
+        current = room_clock.parse_moment(clock["current"])
+        if current is not None:
+            from datetime import timedelta
+
+            until = room_clock.format_moment(current + timedelta(days=months * treatment.MONTH_DAYS))
+    record = {
+        "player": name,
+        "months": months,
+        "indefinite": indefinite,
+        "san_delta": total,
+        "months_detail": rows,
+        "game_time": clock["current"] if clock else None,
+        "until": until,
+        "at": _now(),
+    }
+    therapy = settlement.get("therapy") if isinstance(settlement.get("therapy"), list) else []
+    therapy.append(record)
+    settlement["therapy"] = therapy[-20:]
+    room_rules.save_room_info(room_dir, info)
+    _log(
+        room_dir,
+        info,
+        f"心理治疗结算：{name} {months} 个月，SAN {total:+d}",
+        actor=actor,
+        actor_id=actor_id,
+        source="interlude",
+    )
+    return record
 
 
 def add_review(
@@ -767,6 +966,21 @@ def _format_state(info: dict[str, Any]) -> str:
                 parts.append("SAN恢复：" + "、".join(f"{row.get('skill')}+{row.get('applied', row.get('san'))}" for row in san))
             lines.append(f"  {entry.get('player') or '-'}：" + ("；".join(parts) if parts else "无变化"))
     lines.append(f"复盘记录：{len(state.get('reviews') or [])} 条")
+    clock = room_clock.read_clock(info)
+    if clock is not None:
+        lines.append(f"游戏时间：{room_clock.format_display(clock['current'])}")
+        if settlement.get("careGameTime"):
+            lines.append(f"上次疗养：{room_clock.format_display(settlement['careGameTime'])}")
+    care = settlement.get("care") if isinstance(settlement.get("care"), dict) else None
+    if care:
+        lines.append(f"最近疗养：{care.get('months')} 个月（{care.get('days')} 天）")
+    therapy = settlement.get("therapy") if isinstance(settlement.get("therapy"), list) else []
+    if therapy:
+        last = therapy[-1] if isinstance(therapy[-1], dict) else {}
+        lines.append(
+            f"最近心理治疗：{last.get('player') or '-'} {last.get('months')} 个月，"
+            f"SAN {int(last.get('san_delta') or 0):+d}"
+        )
     return "\n".join(lines)
 
 
@@ -774,6 +988,8 @@ INTERLUDE_ARG_SPECS = {
     "start": ConsoleArgSpec.of(values={"credit"}),
     "settle": ConsoleArgSpec.of(values={"credit"}),
     "review": ConsoleArgSpec.of(values={"text"}, trailing={"topic"}),
+    "care": ConsoleArgSpec.of(values={"months"}),
+    "therapy": ConsoleArgSpec.of(values={"months", "results", "d6"}),
     "end": ConsoleArgSpec.of(flags={"yes"}),
 }
 
@@ -815,8 +1031,8 @@ def handle_console_command(
     info = room_rules.load_room_info(room_dir)
     if sub == "status":
         return True, _format_state(info)
-    if sub not in {"request", "start", "settle", "review", "end"}:
-        return False, "用法：interlude [status|request|start|settle|review|end]"
+    if sub not in {"request", "start", "settle", "review", "care", "therapy", "end"}:
+        return False, "用法：interlude [status|request|start|settle|review|care|therapy|end]"
     if room_rules._actor_rank_value(actor_rank) < OPERATOR_RANK:
         return False, "只有房主 / 房间管理员可以执行该幕间命令"
 
@@ -867,6 +1083,79 @@ def handle_console_command(
         except InterludeError as exc:
             return False, exc.message
         return True, "幕间结算完成。\n" + _format_state(info)
+
+    if sub == "care":
+        raw = options.get("months") or (positionals[1] if len(positionals) > 1 else "")
+        months: int | None = None
+        if str(raw).strip():
+            try:
+                months = int(raw)
+            except (TypeError, ValueError):
+                return False, "月数必须是正整数"
+        try:
+            care = apply_monthly_care(
+                room_dir, info, months=months, actor=actor, actor_id=actor_id
+            )
+        except InterludeError as exc:
+            return False, exc.message
+        if not care["months"]:
+            return True, "游戏时间距上次疗养不足 1 个月，未结算；可显式给出月数。"
+        lines = [f"幕间疗养结算：{care['months']} 个月（{care['days']} 天）"]
+        for row in care["members"]:
+            if row.get("error"):
+                lines.append(f"  {row['player']}：{row['error']}")
+                continue
+            lines.append(
+                f"  {row['player']}：HP {row['hp']['before']}→{row['hp']['after']}/{row['hp']['max']}，"
+                f"MP {row['mp']['before']}→{row['mp']['after']}/{row['mp']['max']}"
+            )
+        return True, "\n".join(lines)
+
+    if sub == "therapy":
+        if len(positionals) < 3:
+            return False, (
+                "用法：interlude therapy <玩家> <月数|indefinite> <每月精神分析结果...> "
+                "（结果用逗号或空格分隔，例如 regular,failure,fumble）"
+            )
+        months_text = str(options.get("months") or positionals[2]).strip()
+        indefinite = months_text.lower() in {"indefinite", "1d6", "不定性", "不定性疯狂"}
+        months = None
+        if months_text and not indefinite:
+            try:
+                months = int(months_text)
+            except (TypeError, ValueError):
+                return False, "月数必须是正整数，或写 indefinite 让系统掷 1D6 个月"
+        raw_results = options.get("results") or " ".join(positionals[3:])
+        levels = [item for item in raw_results.replace(",", " ").split() if item]
+        d6_value: Any = options.get("d6")
+        if d6_value not in (None, ""):
+            try:
+                d6_value = int(d6_value)
+            except (TypeError, ValueError):
+                return False, "d6 必须是 1-6 的整数"
+        try:
+            record = apply_therapy(
+                room_dir,
+                info,
+                player=positionals[1],
+                months=months,
+                results=levels,
+                indefinite=indefinite,
+                d6=d6_value,
+                actor=actor,
+                actor_id=actor_id,
+                rng=rng,
+            )
+        except InterludeError as exc:
+            return False, exc.message
+        detail = "（不定性周期）" if record.get("indefinite") else ""
+        message = (
+            f"心理治疗结算{detail}：{record['player']} {record['months']} 个月，"
+            f"SAN {int(record.get('san_delta') or 0):+d}"
+        )
+        if record.get("until"):
+            message += f"；本轮周期至 {room_clock.format_display(record['until'])}"
+        return True, message
 
     if sub == "review":
         content = options.get("text") or " ".join(positionals[1:])

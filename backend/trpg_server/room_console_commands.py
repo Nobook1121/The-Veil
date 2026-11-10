@@ -22,6 +22,7 @@ from trpg_server.room_log import clear_room_log, log_room_event, read_room_log
 from trpg_server.room_mode import SCENARIO_BINDING_NONE, normalize_room_mode
 from trpg_server.room_narrative_commands import ROOM_NARRATIVE_HELP, handle_room_narrative_command
 from trpg_server.room_rule_commands import ROOM_RULE_HELP, handle_room_rule_command
+from trpg_server.room_time_commands import ROOM_TIME_HELP, handle_room_time_command
 from trpg_server.settings import ROOMS_DIR
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,8 @@ ROOM_COMMAND_WHITELIST: dict[str, set[str]] = {
         "damage", "heal", "treat", "end",
     },
     "rule": {"status", "check", "san", "item", "skill", "attr", "limits"},
-    "interlude": {"status", "request", "start", "settle", "review", "end"},
+    "time": {"show", "status", "advance", "set", "help"},
+    "interlude": {"status", "request", "start", "settle", "review", "care", "therapy", "end"},
 }
 
 # 不带子命令时默认执行的子命令（例如 `members` 等价于 `members list`）。
@@ -68,6 +70,7 @@ DEFAULT_SUBS: dict[str, str] = {
     "voice": "status",
     "combat": "status",
     "rule": "status",
+    "time": "show",
     "interlude": "status",
 }
 
@@ -86,7 +89,7 @@ def _core_arg_spec(domain: str, sub: str) -> ConsoleArgSpec:
                 flags={"yes", "cache"}, values={"tags", "profile", "intensity"}
             )
         return ConsoleArgSpec.of(flags={"yes"})
-    if domain in {"voice", "dice", "archive"}:
+    if domain in {"voice", "dice", "archive", "time"}:
         return ConsoleArgSpec.of(flags={"yes"})
     if domain == "members" and sub in {"kick", "promote"}:
         return ConsoleArgSpec.of(flags={"yes"})
@@ -180,10 +183,13 @@ def room_command_help_text() -> str:
             "  voice cache prune [yes]    （按站点/房间配额 LRU 清理本房间缓存，默认预演）",
             *ROOM_COMBAT_HELP.splitlines(),
             *ROOM_RULE_HELP.splitlines(),
+            *ROOM_TIME_HELP.splitlines(),
             "  interlude                   （查看幕间状态、结算与复盘记录）",
             "  interlude request [理由]    （登记进入幕间的提议，等待房主 / 管理员确认）",
             "  interlude start [credit 玩家:事件,...]（进入幕间并立即结算成长 / SAN / CR）",
             "  interlude settle [credit 玩家:事件,...]（补算信用评级等经济项）",
+            "  interlude care [月数]       （房规：幕间疗养，按月结算 HP 与 MP；缺省读游戏时钟差）",
+            "  interlude therapy <玩家> <月数|indefinite> <每月精神分析结果...>（房规：心理治疗按月结算 SAN）",
             "  interlude review <内容> [topic 话题]（保存一条复盘记录）",
             "  interlude end [yes]         （结束幕间并自动归档；必须二次确认）",
             "  说明：破坏性命令缺省为「预演」，加 yes 或在交互确认时输入 y 才会真正执行。",
@@ -326,6 +332,18 @@ def execute_room_command(
             actor_rank=actor_rank,
             confirm=confirm,
             app=app,
+        )
+        return RoomCommandResult(ok, message)
+    if domain == "time":
+        ok, message = handle_room_time_command(
+            parts[1:],
+            room_id=room_id,
+            room_dir=room_dir,
+            actor=actor,
+            actor_id=actor_id,
+            actor_rank=actor_rank,
+            confirm=confirm,
+            config_dir=app.config.get("CONFIG_DIR") if app is not None else None,
         )
         return RoomCommandResult(ok, message)
     if domain == "interlude":

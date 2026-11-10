@@ -15,6 +15,11 @@ COC7_TOOL_NAMES = (
     "sanity.roll_sanity_check",
     "san.roll_madness",
     "sanity.roll_madness",
+    # 批次 3 房规：理智结构化 / 发作 / 习惯恐惧 / 现实认知 / 恐惧躁狂表。
+    "san.bout",
+    "san.habituation",
+    "san.reality_check",
+    "san.traits",
     # 批次 1 房规：开关关闭时由 routes/chat.py 从 profile 中剔除。
     "coc7.social_check",
     "coc7.combined_check",

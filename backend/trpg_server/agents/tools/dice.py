@@ -893,8 +893,16 @@ def roll_room_check(
         return {"error": f"player {player_name} was not found in current room"}
     room_info = context.room_info() if hasattr(context, "room_info") else {}
     ruleset_id = str((room_info or {}).get("ruleset_id") or "").strip() or None
+    exposure = str(arguments.get("exposure") or arguments.get("fear_source") or "").strip()
+    fear = {"penalty": 0, "matched": "", "kind": ""}
+    if exposure:
+        card = member.get("character_card")
+        state = member.get("character_state")
+        sanity = _sanity_for(card) if isinstance(card, dict) else None
+        if sanity is not None and isinstance(state, dict) and hasattr(sanity, "fear_penalty"):
+            fear = sanity.fear_penalty(card, state, exposure, room_info=room_info)
     try:
-        return check_service.run_room_check(
+        result = check_service.run_room_check(
             member,
             context=context,
             player_name=player_name,
@@ -902,7 +910,7 @@ def roll_room_check(
             difficulty=difficulty,
             adjustment=arguments.get("adjustment", arguments.get("correction")),
             bonus=_dice_count(arguments, "bonus_dice", "bonus"),
-            penalty=_dice_count(arguments, "penalty_dice", "penalty"),
+            penalty=_dice_count(arguments, "penalty_dice", "penalty") + int(fear.get("penalty") or 0),
             critical_threshold=arguments.get("critical_threshold"),
             fumble_threshold=arguments.get("fumble_threshold"),
             ruleset_id=ruleset_id,
@@ -911,6 +919,11 @@ def roll_room_check(
         )
     except check_service.CheckServiceError as exc:
         return {"error": str(exc)}
+    if fear.get("penalty") and isinstance(result, dict) and "error" not in result:
+        result["fear_exposure"] = fear
+        if not result.get("pending") and isinstance(result.get("summary"), str):
+            result["summary"] += f" 恐惧暴露「{fear['matched']}」：本次检定额外承受 {fear['penalty']} 颗惩罚骰。"
+    return result
 
 
 def execute_roll_room_check(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -973,6 +986,15 @@ def _sanity_for(card: Any):
     from trpg_server.ruleset.capabilities import sanity_of
 
     return sanity_of(_plugin_of(card))
+
+
+def _room_info_of(context: Any) -> dict[str, Any] | None:
+    """读取房间信息用于房规开关；上下文缺失时视为全部关闭。"""
+    try:
+        info = context.room_info() if context is not None and hasattr(context, "room_info") else None
+    except Exception:  # noqa: BLE001 - 房规读取失败不应中断检定
+        return None
+    return info if isinstance(info, dict) else None
 
 
 def _sanity_day_key(arguments: dict[str, Any], context: Any) -> str:
@@ -1038,6 +1060,8 @@ def roll_sanity_check(
             failure_expr=failure_expr,
             roller=roller,
             day=_sanity_day_key(arguments, context),
+            room_info=_room_info_of(context),
+            source=arguments.get("source") or arguments.get("cause"),
         )
     except ValueError as exc: return {"error": str(exc)}
     delta = int(outcome["delta"])
@@ -1056,6 +1080,7 @@ def roll_sanity_check(
         ]
         if new_san <= 0:
             change_list.append({"type": "status", "value": dict(flags), "source": "ai_tool", "reason": "理智归零"})
+        change_list.extend(outcome.get("pending_changes") or [])
         _room_rules.record_room_changes(member, change_list)
     except Exception:  # noqa: BLE001 - 待写回登记失败不应中断检定
         pass
@@ -1071,6 +1096,11 @@ def roll_sanity_check(
         write_json_atomic(context.room_dir / "info.json", room_info)
     summary = str(outcome.get("summary") or "")
     result = {"player_name": player_name, "roll": roll, "san": current, "current_san": new_san, "max_san": maximum, "success": success, "success_level": level, "change": delta, "change_expression": success_expr if success else failure_expr, "change_rolls": detail_rolls, "san_change": change, "bonus_dice": bonus_dice, "penalty_dice": penalty_dice, "daily_san_loss": daily.get("loss", max(0, current - new_san)), "daily_san_base": daily.get("base"), "daily_san_date": daily.get("date"), "daily_threshold_met": bool(daily.get("threshold_met")), "madness_check_required": madness_check_required, "madness_note": str(outcome.get("madness_note") or ""), "temporary_insanity": bool(flags.get("temporaryInsanity")), "indefinite_insanity": bool(flags.get("indefiniteInsanity")), "permanent_insanity": bool(flags.get("permanentInsanity")), "summary": summary}
+    if outcome.get("mental") is not None:
+        result["mental"] = outcome["mental"]
+        result["reality_immunity"] = bool(outcome.get("reality_immunity"))
+    if outcome.get("habituation") is not None:
+        result["habituation"] = outcome["habituation"]
     result["visible_message"] = _result_message(
         summary,
         "san.roll_sanity_check",
@@ -1161,6 +1191,7 @@ def roll_madness(
         critical_threshold=critical_threshold,
         fumble_threshold=fumble_threshold,
         success_level=_success_level,
+        room_info=_room_info_of(context),
     )
     if outcome.get("skipped"):
         return outcome
@@ -1306,8 +1337,8 @@ def execute_roll_dice(arguments: dict[str, Any], context: Any) -> dict[str, Any]
     return result
 
 ROLL_COC_CHECK_TOOL = AgentTool(name="dice.roll_coc_check", description="Roll a real backend COC7 percentile check. The result reports whether it is a critical success or fumble. Uses the room's configured critical/fumble thresholds unless overridden by arguments.", parameters={"type": "object", "properties": {"character_name": {"type": "string"}, "skill": {"type": "string"}, "target": {"type": "integer", "minimum": 1, "maximum": 100}, "difficulty": {"type": "string"}, "adjustment": {"type": "string"}, "correction": {"type": "string"}, "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "critical_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "fumble_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "reason": {"type": "string"}, "trigger_id": {"type": ["integer", "string"], "description": "Optional. When this check gates a scenario trigger, pass the trigger id so the trigger content is revealed in the same round if the check succeeds. Do not pass it when the trigger condition is not tied to this check."}}, "required": ["skill", "target"]}, handler=execute_roll_coc_check)
-ROLL_ROOM_CHECK_TOOL = AgentTool(name="check.roll_room_check", description="Resolve a current-room player's character card and roll a COC7 check. player_name accepts the login name OR the character card name. For the check itself, pass skill (preferred) or name with the skill/attribute, e.g. 力量/敏捷/侦察/聆听/心理学/理智; never put a player or character name into the check name. The result reports whether it is a critical success or fumble. Uses the room's configured critical/fumble thresholds unless overridden by arguments.", parameters={"type": "object", "properties": {"player_name": {"type": "string", "description": "Room member's login username or character card name (not the skill name)."}, "skill": {"type": "string", "description": "Skill or attribute to test, e.g. 力量/敏捷/侦察/聆听/心理学. Prefer this field."}, "name": {"type": "string", "description": "Legacy alias of skill. Must be a skill or attribute name, never a player/character name."}, "difficulty": {"type": "string"}, "adjustment": {"type": "string"}, "correction": {"type": "string"}, "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "critical_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "fumble_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "trigger_id": {"type": ["integer", "string"], "description": "Optional. When this check gates a scenario trigger, pass the trigger id so the trigger content is revealed in the same round if the check succeeds. Do not pass it when the trigger condition is not tied to this check."}}, "required": ["player_name"]}, handler=execute_roll_room_check)
-ROLL_SANITY_CHECK_TOOL = AgentTool(name="san.roll_sanity_check", description="Roll a player's SAN check and apply success/failure sanity change directly to the room character state.", parameters={"type": "object", "properties": {"player_name": {"type": "string"}, "san_change": {"type": "string", "description": "Success/failure change, e.g. 1d4/1d6 or +1d4/-1d6"}}, "required": ["player_name", "san_change"]}, handler=execute_roll_sanity_check)
+ROLL_ROOM_CHECK_TOOL = AgentTool(name="check.roll_room_check", description="Resolve a current-room player's character card and roll a COC7 check. player_name accepts the login name OR the character card name. For the check itself, pass skill (preferred) or name with the skill/attribute, e.g. 力量/敏捷/侦察/聆听/心理学/理智; never put a player or character name into the check name. The result reports whether it is a critical success or fumble. Uses the room's configured critical/fumble thresholds unless overridden by arguments.", parameters={"type": "object", "properties": {"player_name": {"type": "string", "description": "Room member's login username or character card name (not the skill name)."}, "skill": {"type": "string", "description": "Skill or attribute to test, e.g. 力量/敏捷/侦察/聆听/心理学. Prefer this field."}, "name": {"type": "string", "description": "Legacy alias of skill. Must be a skill or attribute name, never a player/character name."}, "difficulty": {"type": "string"}, "adjustment": {"type": "string"}, "correction": {"type": "string"}, "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "critical_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "fumble_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "exposure": {"type": "string", "description": "Optional. Name/tag of the horror source the player is currently exposed to (e.g. 蜘蛛/深潜者). If the card has a matching phobia/mania and the room enables the sanity traits rule, one extra penalty die is applied."}, "trigger_id": {"type": ["integer", "string"], "description": "Optional. When this check gates a scenario trigger, pass the trigger id so the trigger content is revealed in the same round if the check succeeds. Do not pass it when the trigger condition is not tied to this check."}}, "required": ["player_name"]}, handler=execute_roll_room_check)
+ROLL_SANITY_CHECK_TOOL = AgentTool(name="san.roll_sanity_check", description="Roll a player's SAN check and apply success/failure sanity change directly to the room character state. If the room enables sanity habituation, pass source (the creature/phenomenon) so repeated exposure can be tracked and waived. Never add penalty dice for a phobia here; use check.roll_room_check with exposure for that.", parameters={"type": "object", "properties": {"player_name": {"type": "string"}, "san_change": {"type": "string", "description": "Success/failure change, e.g. 1d4/1d6 or +1d4/-1d6"}, "source": {"type": "string", "description": "Optional. The mythos source of this SAN check (e.g. 深潜者). Used for habituation tracking when enabled."}}, "required": ["player_name", "san_change"]}, handler=execute_roll_sanity_check)
 ROLL_SANITY_CHECK_ALIAS_TOOL = AgentTool(name="sanity.roll_sanity_check", description=ROLL_SANITY_CHECK_TOOL.description, parameters=ROLL_SANITY_CHECK_TOOL.parameters, handler=execute_roll_sanity_check)
 ROLL_MADNESS_TOOL = AgentTool(name="san.roll_madness", description="CoC7 madness resolution. Call this immediately whenever a player loses 5 or more SAN from one sanity roll: it makes the INT check, decides temporary/indefinite/permanent insanity, rolls 1D10 on the Bouts of Madness table, and writes the result (including any new phobia/mania) into the player's character card. Pass loss (defaults to the last SAN loss recorded by san.roll_sanity_check) and an optional cause.", parameters={"type": "object", "properties": {"player_name": {"type": "string", "description": "Room member's login username or character card name."}, "loss": {"type": "integer", "minimum": 0, "description": "SAN points lost in this single incident. Omit to use the last SAN check's loss."}, "cause": {"type": "string", "description": "What caused the madness, used for the card's madness record."}, "force": {"type": "boolean", "description": "Set true to force a madness roll even if loss is below 5 (e.g. keeper decision)."}}, "required": ["player_name"]}, handler=execute_roll_madness)
 ROLL_MADNESS_ALIAS_TOOL = AgentTool(name="sanity.roll_madness", description=ROLL_MADNESS_TOOL.description, parameters=ROLL_MADNESS_TOOL.parameters, handler=execute_roll_madness)

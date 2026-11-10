@@ -210,15 +210,15 @@
 - `POST /api/rooms/<room_id>/scenario-switch`：切换剧本。
 - `GET /api/rooms/<room_id>/world-override`：读取世界意志权限、房间开关与频率配额（`rate.cooldown_seconds` / `rate.hourly_limit` / `rate.hourly_remaining`）。`scripted` 与 `freeform` 房间可用；`manual` 返回 `supported=false`，前端隐藏入口。
 - `POST /api/rooms/<room_id>/scenario-migration`：在换剧本时迁移剧情进度。
-- `GET|PUT /api/rooms/<room_id>/house-rules`：读取 / 保存房间规则（含技能基础值覆盖）。战斗细节与恢复类开关默认关闭：`coc7_combat_aim_tracking`、`coc7_combat_cover_dodge`、`coc7_combat_friendly_fire`、`coc7_combat_knockout`、`coc7_combat_hit_locations`、`coc7_combat_poison`、`coc7_healing_natural`、`coc7_healing_require_rest`、`coc7_chase_enabled`、`coc7_magic_enabled`。
+- `GET|PUT /api/rooms/<room_id>/house-rules`：读取 / 保存房间规则（含技能基础值覆盖）。战斗细节与恢复类开关默认关闭：`coc7_combat_aim_tracking`、`coc7_combat_cover_dodge`、`coc7_combat_friendly_fire`、`coc7_combat_knockout`、`coc7_combat_hit_locations`、`coc7_combat_poison`、`coc7_healing_natural`、`coc7_healing_require_rest`、`coc7_game_clock`、`coc7_chase_enabled`、`coc7_magic_enabled`、`coc7_magic_catalog_enabled`。理智结构化类开关同样默认关闭：`coc7_sanity_state`（总开关）、`coc7_sanity_mythos`、`coc7_sanity_habituation`、`coc7_sanity_reality`、`coc7_sanity_bout`、`coc7_sanity_traits`；开启后结构化精神状态保存在角色卡 `extensions.mental`，详见 [控制台命令](console-commands.md) 的 `rule san` 一节。
 - `GET /api/rooms/<room_id>/console/log`：读取本房间控制台日志（可按 `level` / `search` / `limit` 过滤）。
 - `GET /api/rooms/<room_id>/console/commands`：读取房间控制台命令白名单与帮助文本。
-- `POST /api/rooms/<room_id>/console/command`：执行一条房间范围内命令（body: `{command}`）。当命令是 `interlude start` 且执行成功时，响应 `data` 额外带 `kp_prompt`，供前端复用聊天主链路触发一次 AI KP 幕间开场点评；AI 不可用不影响幕间状态。
+- `POST /api/rooms/<room_id>/console/command`：执行一条房间范围内命令（body: `{command}`）。当命令是 `interlude start` 且执行成功时，响应 `data` 额外带 `kp_prompt`，供前端复用聊天主链路触发一次 AI KP 幕间开场点评；AI 不可用不影响幕间状态。房规 `coc7_game_clock` 开启后新增 `time show` / `time advance <N>d|<N>h [yes]` / `time set <YYYY-MM-DD[ HH:MM]> [yes]`，读接口只读、写接口限定房主 / 房间管理员且缺省预演；AI 侧只有只读工具 `room.game_clock`。
 - `GET /api/rooms/<room_id>/console/ai-changes`：读取本房间的 AI 写卡记录（操作者、目标玩家、字段、旧值 → 新值、工具、时间、`record_id` 与回滚状态）。仅房主 / 房间管理员 / 系统管理员可读。
 - `POST /api/rooms/<room_id>/console/ai-changes/<record_id>/rollback`：回滚一条 AI 写卡记录：把字段恢复为变更前的值、撤销对应的 `pending_changes` 项、同步房间快照，并把条目标记为「已回滚」（保留记录）。重复回滚幂等；已归档房间返回 409。成功后广播 `room_members_changed`，其他客户端会刷新成员与记录。
 - `DELETE /api/rooms/<room_id>/console/log`：清空本房间控制台日志（破坏性，已归档房间拒绝）。
 - `POST /api/rooms/<room_id>/archive`：归档房间。
-- `POST /api/rooms/<room_id>/interlude/end`：结束幕间并归档（房主 / 房间管理员 / 站点管理员），body 需带 `{ "confirm": true }`，否则返回 `409`。成功后先结束幕间（保留成长 / SAN 结算结果），再复用 `room_admin.archive_room` 写入结局记录与不可变归档快照。房间操作区的「归档房间」按钮在幕间中调用本接口，确保「结束幕间 + 归档」两步都执行，不会只归档而不收尾；命令入口 `/interlude end` 与控制台 `interlude end` 行为不变。
+- `POST /api/rooms/<room_id>/interlude/end`：结束幕间并归档（房主 / 房间管理员 / 站点管理员），body 需带 `{ "confirm": true }`，否则返回 `409`。成功后先结束幕间（保留成长 / SAN 结算结果），再复用 `room_admin.archive_room` 写入结局记录与不可变归档快照。房间操作区的「归档房间」按钮在幕间中调用本接口，确保「结束幕间 + 归档」两步都执行，不会只归档而不收尾；命令入口 `/interlude end` 与控制台 `interlude end` 行为不变。幕间快照额外记录 `startedGameTime` / `endedGameTime` / `gameTime`；归档快照在启用游戏时钟时带 `game_clock`（`started_at` / `current` / `elapsed_seconds` / `updated_at` / `updated_by`），未启用时不写该字段。
 - `GET /api/rooms/<room_id>/archive`：读取归档房间内容（别名 `GET /api/room-archives/<room_id>`）。
 - `GET /api/room-archives`：列出归档房间（别名 `GET /api/rooms/archives`）。
 - `GET /api/rooms/<room_id>/messages`：读取房间聊天记录。

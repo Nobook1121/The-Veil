@@ -161,6 +161,63 @@ def member_display_name(member: dict[str, Any]) -> str:
     return str(card.get("name") or member.get("character_name") or member.get("username") or "未命名角色")
 
 
+def apply_natural_healing(
+    room_dir: Any,
+    info: dict[str, Any],
+    member: dict[str, Any],
+    *,
+    days: int,
+    reason: str = "自然恢复",
+    source: str = "rule_command",
+) -> dict[str, int]:
+    """按休养天数结算自然恢复；恢复量由规则集插件提供，本函数只搬状态。"""
+    from trpg_server.ruleset import get_plugin
+    from trpg_server.ruleset.capabilities import combat_rules_of
+
+    rules = combat_rules_of(get_plugin(resolve_rule_id(info)))
+    if rules is None:
+        raise RuleOperationError("当前规则集未提供自然恢复能力", code="no_natural_healing")
+    card = member_card(member)
+    state = member.get("character_state")
+    if not isinstance(state, dict):
+        state = {}
+        member["character_state"] = state
+    max_hp = (
+        _as_int(state.get("max_hp"), 0)
+        or _as_int(card.get("maxHp"), 0)
+        or _as_int(card.get("max_hp"), 0)
+        or _as_int(card.get("hp"), 1)
+    )
+    max_hp = max(1, max_hp)
+    current = _as_int(state.get("current_hp"), _as_int(card.get("currentHp"), max_hp))
+    before = max(0, min(max_hp, current))
+    status = card.get("status") if isinstance(card.get("status"), dict) else {}
+    major_wound = bool(state.get("major_wound") or status.get("majorWound"))
+    amount = rules.natural_healing(days, major_wound=major_wound)
+    after = min(max_hp, before + amount)
+    if after != before:
+        state["max_hp"] = max_hp
+        state["current_hp"] = after
+        card["currentHp"] = after
+        card["current_hp"] = after
+        if after > 0:
+            state["dying"] = False
+            state["stable"] = True
+        record_room_changes(
+            member,
+            [
+                {
+                    "type": "hp",
+                    "value": after,
+                    "source": source,
+                    "reason": reason,
+                }
+            ],
+        )
+        save_room_info(room_dir, info)
+    return {"before": before, "after": after, "max_hp": max_hp, "amount": after - before}
+
+
 def member_ref(member: dict[str, Any]) -> str:
     """给 dice 工具使用的稳定引用（登录名优先，其次角色名）。"""
     card = member.get("character_card") if isinstance(member.get("character_card"), dict) else {}

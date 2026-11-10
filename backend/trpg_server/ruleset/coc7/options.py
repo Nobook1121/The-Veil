@@ -52,10 +52,28 @@ class Coc7RuleOptions:
     healing_natural: bool = False
     # 自然恢复必须声明休养；开启后未带 rest 不结算。
     healing_require_rest: bool = False
+    # 房间游戏时钟：按服务器时间记录房间内经过的时间，供恢复 / 典籍 / 毒剂 /
+    # 幕间疗养读取。关闭时所有依赖时间的规则仍要求显式天数 / 周数。
+    game_clock: bool = False
     # 追逐：开放地点 / 行动点 / 险境 / 障碍 / 冲突的追逐会话。
     chase_enabled: bool = False
     # 法术与典籍：开放施法消耗、首次施法检定与典籍阅读结算（不含内容表）。
     magic_enabled: bool = False
+    # 法术 / 典籍内容表：按需查询规则书第十二章法术与第十一章典籍（不含结算）。
+    magic_catalog_enabled: bool = False
+    # 理智结构化：恐惧症 / 躁狂症 / 发作 / 习惯恐惧 / 现实免疫写入卡面扩展。
+    # 这是批次 3 的总开关；关闭时其余理智开关一律不生效，行为与旧版本一致。
+    sanity_state: bool = False
+    # 目击神话：首次因神话陷入疯狂时克苏鲁神话 +5，之后每次 +1。
+    sanity_mythos: bool = False
+    # 习惯恐惧：按来源记录最大理智损失，未超过记录则免疫；幕间 −1。
+    sanity_habituation: bool = False
+    # 现实认知：开放 POW 现实认知检定与成功后的免疫标记。
+    sanity_reality: bool = False
+    # 发作计时：疯狂发作改为掷 1D10 小时并写入 bout，可查询。
+    sanity_bout: bool = False
+    # 恐惧 / 躁狂 100 条表：疯狂表现按需查表，暴露来源时检定吃惩罚骰。
+    sanity_traits: bool = False
 
     @classmethod
     def from_house_rules(cls, rules: Mapping[str, Any] | None = None) -> "Coc7RuleOptions":
@@ -75,8 +93,16 @@ class Coc7RuleOptions:
             combat_poison=_flag(data, "coc7_combat_poison"),
             healing_natural=_flag(data, "coc7_healing_natural"),
             healing_require_rest=_flag(data, "coc7_healing_require_rest"),
+            game_clock=_flag(data, "coc7_game_clock"),
             chase_enabled=_flag(data, "coc7_chase_enabled"),
             magic_enabled=_flag(data, "coc7_magic_enabled"),
+            magic_catalog_enabled=_flag(data, "coc7_magic_catalog_enabled"),
+            sanity_state=_flag(data, "coc7_sanity_state"),
+            sanity_mythos=_flag(data, "coc7_sanity_mythos"),
+            sanity_habituation=_flag(data, "coc7_sanity_habituation"),
+            sanity_reality=_flag(data, "coc7_sanity_reality"),
+            sanity_bout=_flag(data, "coc7_sanity_bout"),
+            sanity_traits=_flag(data, "coc7_sanity_traits"),
         )
 
 

@@ -507,10 +507,18 @@ rule contact <玩家> <技能> [hometown] [remote] [profession] [push] [difficul
 rule economy <玩家> [金额] [era 1920s|modern] [assets N] [apply] [reason 原因]（房规：信用评级与开支；默认只读预览，apply 登记现金写回）
 rule san add <玩家> <±N> [reason 原因] [yes]（调整 SAN；默认预演，yes 落盘）
 rule san set <玩家> <N> [reason 原因] [yes]（设为指定 SAN；默认预演）
+rule san bout [玩家]              （房规：查看发作类型、症状与 1D10 小时结束时间）
+rule san bout end <玩家>          （房规：提前结束当前发作）
+rule san habituation [玩家]        （房规：查看按来源记录的习惯恐惧）
+rule san habituation add <玩家> <来源> <本次损失>（记录来源损失并判断是否免疫）
+rule san habituation tick [玩家]   （房规：幕间习惯恐惧 −1；省略玩家则全房间）
+rule san reality <玩家> [成功|失败|大成功|大失败] [来源说明]（房规：现实认知检定与免疫）
+rule san trait [phobia|mania] [关键词|roll]（房规：按需查询恐惧症 / 躁狂症表）
 rule item <玩家> <物品名> [qty N] [weapon] [persist] [reason 原因]
 rule skill <玩家> <技能名> <值|±N> [persist] [reason 原因] [yes]
 rule attr <玩家> <属性> <值|±N> [persist] [reason 原因] [yes]
-rule heal natural <玩家> <天数> [rest]（房规：按休养天数自然恢复；重伤每周 1 点）
+rule heal natural <玩家> [天数] [rest]（房规：自然恢复；未给天数时用游戏时钟差）
+rule heal mp <玩家> [天数]（房规：按天恢复 MP；未给天数时用游戏时钟差）
 rule chase [status]          （房规：查看追逐位置、行动点与障碍）
 rule chase start <追逐者> <逃离者> [更多...]（开始追逐；逃离者初始距离 2）
 rule chase add <名称> [mov N] [dex N] [build N] [vehicle] [quarry]（加入 NPC / 载具）
@@ -524,11 +532,19 @@ rule chase conflict <攻击者> <目标> [firearm] [maneuver] [loss N]
 rule chase end [outcome]     （结束追逐）
 rule spell <玩家>            （房规：查看已学法术、典籍与 MP）
 rule spell learn <玩家> <法术> [weeks N]（登记已学法术，耗时由 KP 显式给出）
-rule spell cast <玩家> <法术> [mp N] [san N] [pow N] [first] [pushed] [multiplier N] [result ...]
-rule spell grimoire <玩家> <书名> [skim|study] [weeks N] [san N] [cmi N] [cmf N] [rating N] [result ...] [spells a,b]
+rule spell cast <玩家> <法术> [mp N] [san N] [pow N] [first] [pushed] [multiplier N] [result ...] [catalog]
+rule spell grimoire <玩家> <书名> [skim|study] [weeks N] [san N] [cmi N] [cmf N] [rating N] [result ...] [spells a,b] [language 语言] [catalog]
+rule spell find <关键词> [kind spell|grimoire] [group 大类] [language 语言] [max-san N] [max-mp N] [limit N]
+rule spell show <名称>
 rule limits                 （查看世界意志生效冷却与每小时次数）
 rule limits cooldown <秒|inherit>（房间只能比站点更严格）
 rule limits hourly <次数|inherit>（房间只能比站点更严格）
+time                        （查看房间游戏时钟；房规 coc7_game_clock）
+time show                   （同上，只读）
+time advance <N>d|<N>h [yes]（推进游戏时间；如 3d / 12h / 3 days）
+time set <YYYY-MM-DD[ HH:MM]> [yes]（把游戏时间设到指定时刻，只能向前）
+interlude care [月数]        （房规：幕间疗养，按月结算 HP 与 MP；缺省读时钟差）
+interlude therapy <玩家> <月数|indefinite> <每月精神分析结果...>（房规：心理治疗按月结算 SAN）
 ```
 
 房间控制台的参数统一使用空格分隔的纯词：开关直接写词（`yes`、`persist`、`weapon`、
@@ -565,9 +581,31 @@ AI KP 的写卡工具（`character_stats` 的 `character.set_skill` / `character
 共用 `apply_room_changes` 合并进角色卡。其他资产在卡面是自由文本，不做数值扣减。
 
 `rule heal natural` 受房规 `coc7_healing_natural` 控制，默认关闭；开启后按命令里显式给出的
-天数结算，不读取房间 `game_date`，也不自动推进时间。常规恢复为每天 1 点，处于重伤时为每 7 天
-1 点。房规 `coc7_healing_require_rest` 开启时必须在命令末尾加 `rest`，否则拒绝结算。恢复量
-与 SAN / 技能写回链路一致，登记一条 `hp` 待写回项并同步房间快照。
+天数结算；若同时开启游戏时钟 `coc7_game_clock` 且省略天数，则读取「当前游戏时间 − 上次休养
+时间」的整天数（首次使用以时钟起点计算），显式天数始终优先。常规恢复为每天 1 点，处于重伤时
+为每 7 天 1 点。房规 `coc7_healing_require_rest` 开启时必须在命令末尾加 `rest`，否则拒绝结算。
+恢复量与 SAN / 技能写回链路一致，登记一条 `hp` 待写回项并同步房间快照。
+
+`rule heal mp` 用于按天恢复 MP，依赖游戏时钟：每小时恢复 1 点（POW 每满 100 额外 +1），
+上限为角色最大 MP；省略天数时读时钟差。MP 恢复同样登记持久化变更。
+
+### 房间游戏时钟（`coc7_game_clock`，默认关闭）
+
+- 时钟按**服务器时间**记录：`info.json` 的 `game_clock = {started_at, current,
+  elapsed_seconds, updated_at, updated_by}`，`current` 是带服务器时区偏移的 ISO 8601。
+- 开启后可用 `time show` 查询、`time advance` / `time set` 推进；推进是「命令 + 显式增量」，
+  只能向前，缺省为预演，`yes`（或网页确认框）才落盘。AI 只拿到只读的 `room.game_clock`
+  工具，无法推进时间。
+- 首次推进时才以服务器当前时间惰性初始化；纯查询不写盘。旧房间没有 `game_clock` 字段且开关
+  关闭时按未启用处理，不写盘也不报错；`game_date` 缺失或不可解析时不会凭空补时间。
+- 并发：同一进程内推进串行化；需要强校验的调用方可传 `expected_current` 做乐观并发检查，
+  不一致时报冲突而不是静默覆盖。
+- 毒剂 `onset_rounds > 0` 会登记到期轮，战斗轮推进到该轮时自动结算；`time advance` /
+  `time set` 视为足够长的时间流逝，会立即结算所有待发作毒剂。
+- 典籍精读未给 `weeks` 时读时钟周数；显式 `weeks` 仍然优先。
+- `interlude care` 按月结算疗养（每月 30 天，HP 自然恢复 + MP 恢复），`interlude therapy`
+  按月结算心理治疗 SAN（每月一次精神分析结果由 KP 给出；`indefinite` 用 1D6 个月作为周期）。
+  幕间开始 / 结束会把游戏时间写入幕间快照，归档快照额外带 `game_clock`。
 
 `rule chase` 受房规 `coc7_chase_enabled` 控制，默认关闭。追逐用抽象地点记录位置，相邻地点
 距离 1，逃离者初始距离 2；每轮行动点为 `1 + 自己 MOV - 全场最低 MOV`，移动 1 个地点消耗
@@ -576,13 +614,40 @@ AI KP 的写卡工具（`character_stats` 的 `character.set_skill` / `character
 前进。除火器外只能攻击同一地点的目标。会话保存在房间信息的 `chase` 段，旧房间没有该段时
 视为没有追逐。
 
-`rule spell` 受房规 `coc7_magic_enabled` 控制，默认关闭，且**不内置法术表与典籍表**：
-法术名、MP / SAN / POW 消耗、典籍的神话等级与收益都由 KP 在命令里显式给出。施法时 MP
-不足按 1:1 扣耐久；首次施法需要困难 POW 检定（可用 `result` 传入结果），失败什么也不发生，
-加 `pushed` 则法术仍生效并额外支付 `1D6` 倍消耗。典籍阅读分泛读（`skim`，需语言检定成功，
-获得 CMI）与精读（`study`，按显式 `weeks` 结算，神话技能低于 `rating` 时获得 `cmf`，否则
-获得 `cmi`，并扣 `san`）；阅读次数与收益记录在卡面 `extensions.magic`，旧卡没有该字段时
-自动按空结构补齐。
+`rule spell` 的结算部分受房规 `coc7_magic_enabled` 控制，默认关闭。法术名、MP / SAN / POW
+消耗、典籍的神话等级与收益都可以由 KP 在命令里显式给出。施法时 MP 不足按 1:1 扣耐久；首次施法
+需要困难 POW 检定（可用 `result` 传入结果），失败什么也不发生，加 `pushed` 则法术仍生效并额外
+支付 `1D6` 倍消耗。典籍阅读分泛读（`skim`，需语言检定成功，获得 CMI）与精读（`study`，按显式
+`weeks` 结算，神话技能低于 `rating` 时获得 `cmf`，否则获得 `cmi`，并扣 `san`）；阅读次数与收益
+记录在卡面 `extensions.magic`，旧卡没有该字段时自动按空结构补齐。
+
+内置内容表由独立房规 `coc7_magic_catalog_enabled` 控制，默认关闭。开启后 `rule spell find` /
+`rule spell show` 可按名称、关键词或类别查询规则书第十二章法术与第十一章典籍（只读、不注入
+系统提示）；施法 / 研读命令加 `catalog` 时，内容表只补齐**未显式给出**的 MP / SAN / POW、
+CMI / CMF / MR 与典籍法术列表，骰值类消耗（如 `2D10`）仍会提示由 KP 掷定，显式参数始终优先。
+只开内容表、不开 `coc7_magic_enabled` 时，`find` / `show` 可用，`learn` / `cast` / `grimoire`
+仍按「未知的规则命令」处理。
+
+`rule san bout` / `habituation` / `reality` / `trait` 属于批次 3 的理智结构化，受
+`coc7_sanity_state`（总开关）、`coc7_sanity_bout`、`coc7_sanity_habituation`、
+`coc7_sanity_reality`、`coc7_sanity_traits` 控制，默认全部关闭；关闭时这些子命令
+按旧的 `rule san add|set` 分支处理，与旧版本完全一致。开启后：
+
+- 精神状态写入 `character_card.extensions.mental`（同时镜像到
+  `character_state.mental`），包含 `phobias[]`、`manias[]`、`bout{}`、`habituations{}`、
+  `realityImmunity`、`realityChecks[]`、`mythosMadnessCount` 等字段；旧卡没有该字段时
+  读取即按默认结构补齐，不改动 `sheet` 既有字段、不改 `localStorage` 键。
+- `bout` 记录发作类型、开始时间、`1D10` 小时时长、预计结束时间与汇总症状
+  （失忆 / 暴力 / 偏执 / 昏厥 / 恐惧症 / 躁狂症等）。
+- 习惯恐惧按来源记录「历史最大理智损失」；再次遭遇同一来源且本次损失不超过记录值
+  时免疫，`tick` 每次让每个来源 −1，归零后删除。幕间开始时会调用一次
+  `room_sanity.interlude_decay`；心理治疗由 `interlude therapy` 按月编排（见「房间游戏时钟」）。
+- 现实认知用 POW 检定：成功看穿幻象并获得一次性免疫（抵掉下一次理智损失），
+  失败理智 −1 并立即进入一次疯狂发作。
+- 恐惧症 / 躁狂症表是插件内容数据（`data/rulesets/coc7/catalogs/phobias.json` /
+  `manias.json`，各 100 条），只按关键词或随机抽取查询，不整表注入上下文。
+- AI KP 侧对应工具：`san.bout`、`san.habituation`、`san.reality_check`、`san.traits`，
+  以及 `check.roll_room_check` 的 `exposure` 参数（命中角色已有恐惧 / 躁狂时加 1 颗惩罚骰）。
 
 玩家侧还可以在聊天框直接使用斜杠命令（不依赖 AI KP）：
 

@@ -11,8 +11,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from trpg_server import room_chase, room_magic, room_rules, world_override
+from trpg_server import room_chase, room_clock, room_magic, room_rules, world_override
 from trpg_server.console_args import ConsoleArgSpec, parse_console_args
+from trpg_server.ruleset.capabilities import attribute_cap
 
 ROOM_RULE_ACTOR = "房间控制台"
 
@@ -37,6 +38,7 @@ RULE_FLAG_WORDS = {
     "pushed": "--pushed",
     "skim": "--skim",
     "study": "--study",
+    "catalog": "--catalog",
 }
 # 带值选项：写成 key value。
 RULE_VALUE_OPTIONS = {
@@ -68,6 +70,11 @@ RULE_VALUE_OPTIONS = {
     "cmi",
     "cmf",
     "spells",
+    "group",
+    "language",
+    "max-san",
+    "max-mp",
+    "limit",
 }
 # 尾部选项：reason / note 之后的全部内容都算它的值。
 RULE_TRAILING_OPTIONS = {"reason", "note"}
@@ -90,10 +97,18 @@ ROOM_RULE_HELP = "\n".join(
         "  rule economy <玩家> [金额] [era 1920s|modern] [assets N] [apply] [reason 原因]（房规：信用评级与开支；默认只读预览，apply 登记现金写回）",
         "  rule san add <玩家> <±N> [reason 原因] [yes]（调整 SAN；默认预演）",
         "  rule san set <玩家> <N> [reason 原因] [yes]（设为指定 SAN；默认预演）",
+        "  rule san bout [玩家]              （房规：查看疯狂发作类型、症状与 1D10 小时结束时间）",
+        "  rule san bout end <玩家>          （房规：提前结束当前发作）",
+        "  rule san habituation [玩家]        （房规：查看按来源记录的习惯恐惧）",
+        "  rule san habituation add <玩家> <来源> <本次损失>（记录来源损失并判断是否免疫）",
+        "  rule san habituation tick [玩家]   （房规：幕间习惯恐惧 −1；省略玩家则全房间）",
+        "  rule san reality <玩家> [成功|失败|大成功|大失败] [来源说明]（房规：现实认知检定与免疫）",
+        "  rule san trait [phobia|mania] [关键词|roll]（房规：按需查询恐惧症 / 躁狂症表）",
         "  rule item <玩家> <物品名> [qty N] [weapon] [persist] [reason 原因]（追加物品/武器；persist 才写回持久卡）",
         "  rule skill <玩家> <技能名> <值|±N> [persist] [reason 原因] [yes]（修改技能；默认预演）",
         "  rule attr <玩家> <属性> <值|±N> [persist] [reason 原因] [yes]（修改 STR/DEX/INT 等基础属性；默认预演）",
-        "  rule heal natural <玩家> <天数> [rest]（房规：按休养天数自然恢复，重伤每周 1 点）",
+        "  rule heal natural <玩家> [天数] [rest]（房规：自然恢复；未给天数时用游戏时钟差，重伤每周 1 点）",
+        "  rule heal mp <玩家> [天数]（房规：按天恢复 MP；未给天数时用游戏时钟差）",
         "  rule chase [status]         （房规：查看追逐位置、行动点与障碍）",
         "  rule chase start <追逐者> <逃离者> [更多...]（开始追逐；初始距离 2）",
         "  rule chase add <名称> [mov N] [dex N] [build N] [vehicle] [quarry]（加入 NPC/载具）",
@@ -108,8 +123,11 @@ ROOM_RULE_HELP = "\n".join(
         "  非成员参与者的技能检定用 result regular|hard|extreme|critical|failure 显式传入。",
         "  rule spell <玩家>                   （房规：查看已学法术、典籍与 MP）",
         "  rule spell learn <玩家> <法术> [weeks N]（登记已学法术；耗时由 KP 显式给出）",
-        "  rule spell cast <玩家> <法术> [mp N] [san N] [pow N] [first] [pushed] [multiplier N] [result ...]",
-        "  rule spell grimoire <玩家> <书名> [skim|study] [weeks N] [san N] [cmi N] [cmf N] [rating N] [result ...] [spells a,b]",
+        "  rule spell cast <玩家> <法术> [mp N] [san N] [pow N] [first] [pushed] [multiplier N] [result ...] [catalog]",
+        "  rule spell grimoire <玩家> <书名> [skim|study] [weeks N] [san N] [cmi N] [cmf N] [rating N] [result ...] [spells a,b] [language 语言] [catalog]",
+        "  rule spell find <关键词> [kind spell|grimoire] [group 大类] [language 语言] [max-san N] [max-mp N] [limit N]（房规：按需查询规则书法术 / 典籍）",
+        "  rule spell show <名称>             （房规：查看单条法术或典籍的完整条目）",
+        "  catalog 由内容表补齐空缺消耗；显式参数优先，骰值类仍由 KP 掷骰。",
         "  首次施法为困难 POW 检定；孤注一掷失败时法术仍生效并额外支付 1D6 倍消耗。",
         "  rule limits                 （查看世界意志的生效频率限制）",
         "  rule limits cooldown <秒|inherit>（房间只能比站点更严格）",
@@ -231,11 +249,29 @@ def handle_room_rule_command(
     config_dir: Any = None,
     app: Any = None,
 ) -> tuple[bool, str]:
+    room_dir = Path(room_dir)
+    info = room_rules.load_room_info(room_dir)
+
+    # `mp` 同时是法术命令的取值选项，不能交给通用解析器；这里先截获
+    # `rule heal mp <玩家> [天数]`，避免玩家名被当成 mp 的值吞掉。
+    raw_args = [str(item) for item in args]
+    if len(raw_args) >= 2 and raw_args[0].lower() == "heal" and raw_args[1].lower() == "mp":
+        from trpg_server.ruleset.coc7.options import resolve_options
+
+        if not _require_operator(actor_rank):
+            return False, "只有房主 / 房间管理员可以执行该规则命令"
+        return _mp_heal_command(
+            room_dir,
+            info,
+            ["mp", *raw_args[2:]],
+            coc7_options=resolve_options(info),
+            actor_id=actor_id,
+            actor_rank=actor_rank,
+        )
+
     positionals, flags, options = _parse(args)
     sub = positionals[0].lower() if positionals else "status"
     rest = positionals[1:]
-    room_dir = Path(room_dir)
-    info = room_rules.load_room_info(room_dir)
     if config_dir is None and app is not None:
         config_dir = app.config.get("CONFIG_DIR")
 
@@ -252,9 +288,9 @@ def handle_room_rule_command(
         "groupluck": coc7_options.group_luck,
         "contact": coc7_options.contacts,
         "economy": coc7_options.economy,
-        "heal": coc7_options.healing_natural,
+        "heal": coc7_options.healing_natural or coc7_options.game_clock,
         "chase": coc7_options.chase_enabled,
-        "spell": coc7_options.magic_enabled,
+        "spell": coc7_options.magic_enabled or coc7_options.magic_catalog_enabled,
     }
     if sub in optional_subs and not optional_subs[sub]:
         return False, f"未知的规则命令：rule {sub}\n{ROOM_RULE_HELP}"
@@ -547,82 +583,266 @@ def _heal_command(
     actor_id: Any,
     actor_rank: Any,
 ) -> tuple[bool, str]:
-    """房规：按休养天数自然恢复；时间由调用方显式给出，不读房间时钟。"""
-    usage = "用法：rule heal natural <玩家> <天数> [rest]"
-    if len(rest) < 3 or str(rest[0]).strip().lower() not in {"natural", "自然"}:
+    """房规：自然恢复 / 按天恢复 MP。
+
+    天数显式给出时优先使用；未给出且房间启用游戏时钟时，用「当前游戏时间 −
+    上次结算时间」的整天数代替。没有起点时保守返回 0，不凭空补时间。
+    """
+    mode = str(rest[0]).strip().lower() if rest else ""
+    if mode == "mp":
+        return _mp_heal_command(
+            room_dir,
+            info,
+            rest,
+            coc7_options=coc7_options,
+            actor_id=actor_id,
+            actor_rank=actor_rank,
+        )
+    usage = "用法：rule heal natural <玩家> [天数] [rest]（未启用游戏时钟时必须给天数）"
+    if len(rest) < 2 or mode not in {"natural", "自然"}:
         return False, usage
-    try:
-        days = int(rest[2])
-    except (TypeError, ValueError):
-        return False, "天数必须是正整数"
-    if days <= 0:
-        return False, "天数必须是正整数"
     resting = "--rest" in flags
     if coc7_options.healing_require_rest and not resting:
         return False, "本房规要求声明休养：请在命令末尾加 rest"
 
-    from trpg_server.ruleset import get_plugin
-    from trpg_server.ruleset.capabilities import combat_rules_of
-
     try:
-        rules = combat_rules_of(get_plugin(room_rules.resolve_rule_id(info)))
         member = room_rules.resolve_member(info, rest[1], actor_id=actor_id, actor_rank=actor_rank)
-    except room_rules.RuleOperationError as exc:
-        return False, exc.message
-    if rules is None:
-        return False, "当前规则集未提供自然恢复能力"
-
-    try:
-        card = room_rules.member_card(member)
+        room_rules.member_card(member)
     except room_rules.RuleOperationError as exc:
         return False, exc.message
     state = member.get("character_state")
     if not isinstance(state, dict):
         state = {}
         member["character_state"] = state
-    max_hp = (
-        room_rules._as_int(state.get("max_hp"), 0)
-        or room_rules._as_int(card.get("maxHp"), 0)
-        or room_rules._as_int(card.get("max_hp"), 0)
-        or room_rules._as_int(card.get("hp"), 1)
-    )
-    max_hp = max(1, max_hp)
-    current = room_rules._as_int(
-        state.get("current_hp"), room_rules._as_int(card.get("currentHp"), max_hp)
-    )
-    before = max(0, min(max_hp, current))
-    status = card.get("status") if isinstance(card.get("status"), dict) else {}
-    major_wound = bool(state.get("major_wound") or status.get("majorWound"))
-    amount = rules.natural_healing(days, major_wound=major_wound)
-    after = min(max_hp, before + amount)
+    days_text = rest[2] if len(rest) > 2 else ""
+    explicit = bool(str(days_text).strip())
+    clock = room_clock.read_clock(info)
+    if explicit:
+        try:
+            days = int(days_text)
+        except (TypeError, ValueError):
+            return False, "天数必须是正整数"
+        if days <= 0:
+            return False, "天数必须是正整数"
+    else:
+        if not coc7_options.game_clock:
+            return False, usage
+        marker = state.get("last_natural_heal") or (clock or {}).get("started_at")
+        delta = room_clock.clock_days_since(info, marker)
+        if delta is None:
+            return False, "游戏时钟还没有可用的起点；请显式给出天数。"
+        days = delta
     name = room_rules.member_display_name(member)
-    if after == before:
-        return True, f"{name} 休养 {days} 天，未获得恢复（耐久 {before}/{max_hp}）。"
+    if days <= 0:
+        return True, f"{name} 距上次休养不足 1 天，未结算；可显式给出天数。"
 
-    state["max_hp"] = max_hp
-    state["current_hp"] = after
-    card["currentHp"] = after
-    card["current_hp"] = after
-    if after > 0:
-        state["dying"] = False
-        state["stable"] = True
-    room_rules.record_room_changes(
-        member,
-        [
-            {
-                "type": "hp",
-                "value": after,
-                "source": "rule_command",
-                "reason": f"自然恢复 {days} 天" + ("（休养）" if resting else ""),
-            }
-        ],
-    )
+    source = f"{days} 天" if explicit else f"游戏时钟 {days} 天"
+    clock = room_clock.read_clock(info)
+    if clock is not None:
+        state["last_natural_heal"] = clock["current"]
+    try:
+        result = room_rules.apply_natural_healing(
+            room_dir,
+            info,
+            member,
+            days=days,
+            reason=f"自然恢复 {source}" + ("（休养）" if resting else ""),
+        )
+    except room_rules.RuleOperationError as exc:
+        return False, exc.message
     room_rules.save_room_info(room_dir, info)
+    if result["after"] == result["before"]:
+        return True, (
+            f"{name} 休养 {source}，未获得恢复"
+            f"（耐久 {result['before']}/{result['max_hp']}）。"
+        )
     return (
         True,
-        f"{name} 自然恢复（{days} 天，{'含休养' if resting else '未声明休养'}）："
-        f"{before} → {after}/{max_hp}（+{after - before}）。",
+        f"{name} 自然恢复（{source}，{'含休养' if resting else '未声明休养'}）："
+        f"{result['before']} → {result['after']}/{result['max_hp']}（+{result['amount']}）。",
     )
+
+
+def _mp_heal_command(
+    room_dir: Path,
+    info: dict[str, Any],
+    rest: list[str],
+    *,
+    coc7_options: Any,
+    actor_id: Any,
+    actor_rank: Any,
+) -> tuple[bool, str]:
+    """房规：按天恢复 MP；未给天数时读游戏时钟差值。"""
+    usage = "用法：rule heal mp <玩家> [天数]（未启用游戏时钟时必须给天数）"
+    if not coc7_options.game_clock:
+        return False, "按天恢复 MP 需要先开启游戏时钟（房规 coc7_game_clock）"
+    if len(rest) < 2:
+        return False, usage
+    try:
+        member = room_rules.resolve_member(info, rest[1], actor_id=actor_id, actor_rank=actor_rank)
+        room_rules.member_card(member)
+    except room_rules.RuleOperationError as exc:
+        return False, exc.message
+    state = member.get("character_state")
+    if not isinstance(state, dict):
+        state = {}
+        member["character_state"] = state
+    days_text = rest[2] if len(rest) > 2 else ""
+    explicit = bool(str(days_text).strip())
+    clock = room_clock.read_clock(info)
+    if explicit:
+        try:
+            days = int(days_text)
+        except (TypeError, ValueError):
+            return False, "天数必须是正整数"
+        if days <= 0:
+            return False, "天数必须是正整数"
+    else:
+        marker = state.get("last_mp_recovery") or (clock or {}).get("started_at")
+        delta = room_clock.clock_days_since(info, marker)
+        if delta is None:
+            return False, "游戏时钟还没有可用的起点；请显式给出天数。"
+        days = delta
+    name = room_rules.member_display_name(member)
+    if clock is not None:
+        state["last_mp_recovery"] = clock["current"]
+    if days <= 0:
+        room_rules.save_room_info(room_dir, info)
+        return True, f"{name} 距上次 MP 恢复不足 1 天，未结算；可显式给出天数。"
+    result = room_magic.recover_mp(room_dir, info, member, days=days)
+    source = f"{days} 天" if explicit else f"游戏时钟 {days} 天"
+    return (
+        True,
+        f"{name} 按天恢复 MP（{source}）："
+        f"{result['before']} → {result['after']}/{result['max_mp']}（+{result['gain']}）。",
+    )
+
+
+def _format_spell_detail(entry: dict[str, Any]) -> str:
+    from trpg_server.ruleset.coc7 import magic_content
+
+    head = f"{entry.get('name')}（p{entry.get('page')}）"
+    if entry.get("group"):
+        head += f" · 所属 {entry['group']}"
+    lines = [head]
+    if entry.get("cost"):
+        lines.append(f"  消耗：{entry['cost']}")
+    if entry.get("cost_note"):
+        lines.append(f"  说明：{entry['cost_note']}")
+    if entry.get("casting_time"):
+        lines.append(f"  施法用时：{entry['casting_time']}")
+    check = entry.get("check_detail") or {}
+    if check:
+        bits = []
+        if check.get("kinds"):
+            bits.append("/".join(check["kinds"]))
+        if check.get("skills"):
+            bits.append("/".join(check["skills"]))
+        lines.append("  检定：" + (" · ".join(bits) or "需要检定"))
+    elif entry.get("check"):
+        lines.append(f"  检定：{entry['check']}")
+    if entry.get("aliases"):
+        lines.append("  别名：" + "、".join(entry["aliases"]))
+    if entry.get("summary"):
+        lines.append(f"  摘要：{entry['summary']}")
+    if entry.get("text"):
+        lines.append(f"  原文：{entry['text']}")
+        if entry.get("text_truncated"):
+            lines.append("  （原文过长，已截断；需要更多请查规则书）")
+    lines.append(f"  来源：{magic_content.SOURCE_SPELL}")
+    return "\n".join(lines)
+
+
+def _format_grimoire_detail(book: dict[str, Any]) -> str:
+    from trpg_server.ruleset.coc7 import magic_content
+
+    lines = [f"《{book.get('title')}》（p{book.get('page')}）"]
+    for edition in book.get("editions") or []:
+        bits = [str(edition.get("language") or "?")]
+        if edition.get("author"):
+            bits.append(str(edition["author"]))
+        if edition.get("year"):
+            bits.append(str(edition["year"]))
+        lines.append("  " + " / ".join(bits))
+        stats = []
+        if edition.get("san_loss"):
+            stats.append(f"SAN {edition['san_loss']}")
+        if edition.get("cmi") is not None:
+            stats.append(f"CMI +{edition['cmi']}")
+        if edition.get("cmf") is not None:
+            stats.append(f"CMF +{edition['cmf']}")
+        if edition.get("rating") is not None:
+            stats.append(f"MR {edition['rating']}")
+        if edition.get("weeks"):
+            stats.append(f"{edition['weeks']} 周")
+        if stats:
+            lines.append("   " + " · ".join(stats))
+        if edition.get("spells"):
+            lines.append("   法术：" + "、".join(edition["spells"]))
+        if edition.get("occult"):
+            lines.append(f"   神秘学：{edition['occult']}")
+    if book.get("summary"):
+        lines.append(f"  摘要：{book['summary']}")
+    if book.get("text"):
+        lines.append(f"  原文：{book['text']}")
+        if book.get("text_truncated"):
+            lines.append("  （原文过长，已截断；需要更多请查规则书）")
+    lines.append(f"  来源：{magic_content.SOURCE_GRIMOIRE}")
+    return "\n".join(lines)
+
+
+def _spell_lookup(action: str, args: list[str], options: dict[str, str]) -> tuple[bool, str]:
+    """按需查询规则书法术 / 典籍：返回精简列表或单条完整条目。"""
+    from trpg_server.ruleset.coc7 import magic_content
+
+    query = " ".join(args).strip()
+    if action == "show":
+        if not query:
+            return False, "用法：rule spell show <法术或典籍名称>"
+        spell = magic_content.describe_spell(query)
+        if spell:
+            return True, _format_spell_detail(spell)
+        book = magic_content.describe_grimoire(query)
+        if book:
+            return True, _format_grimoire_detail(book)
+        return False, f"内容表里没有「{query}」。用 rule spell find 关键词 先搜一下。"
+
+    kind = str(options.get("kind") or "any").strip().lower()
+    limit = _as_int(options.get("limit"), 6)
+    group = options.get("group")
+    language = options.get("language")
+    max_san = options.get("max-san")
+    max_mp = options.get("max-mp")
+    lines: list[str] = []
+    if kind in {"spell", "法术"}:
+        results = magic_content.find_spells(
+            query, group=group, max_san=max_san, max_mp=max_mp, limit=limit
+        )
+        lines.extend(magic_content.format_spell_line(item) for item in results)
+    elif kind in {"grimoire", "book", "典籍"}:
+        results = magic_content.find_grimoires(
+            query, language=language, max_san=max_san, limit=limit
+        )
+        lines.extend(magic_content.format_grimoire_line(item) for item in results)
+    else:
+        spells_found = magic_content.find_spells(
+            query, group=group, max_san=max_san, max_mp=max_mp, limit=limit
+        )
+        books_found = magic_content.find_grimoires(
+            query, language=language, max_san=max_san, limit=limit
+        )
+        if spells_found:
+            lines.append("【法术】")
+            lines.extend("  " + magic_content.format_spell_line(item) for item in spells_found)
+        if books_found:
+            lines.append("【典籍】")
+            lines.extend(
+                "  " + magic_content.format_grimoire_line(item) for item in books_found
+            )
+    if not lines:
+        return False, f"内容表里没有匹配「{query}」的条目。"
+    lines.append("用 rule spell show <名称> 查看单条完整条目。")
+    return True, "\n".join(lines)
 
 
 def _spell_command(
@@ -639,12 +859,27 @@ def _spell_command(
     room_id: Any,
 ) -> tuple[bool, str]:
     """房规：法术与典籍（施法消耗 / 首次施法 / 典籍阅读），规则数学在插件内。"""
-    verbs = {"status", "list", "learn", "cast", "grimoire"}
+    from trpg_server.ruleset.coc7 import magic_content
+    from trpg_server.ruleset.coc7.options import resolve_options
+
+    coc7_options = resolve_options(info)
+    settlement = coc7_options.magic_enabled
+    catalog = coc7_options.magic_catalog_enabled
+    verbs = {"status", "list", "learn", "cast", "grimoire", "find", "show"}
     action = "status"
     args = list(rest)
     if args and str(args[0]).strip().lower() in verbs:
         action = str(args[0]).strip().lower()
         args = args[1:]
+
+    # 查表与结算分开受开关控制：只开内容表时仍可 find / show，但不能施法。
+    if action in {"find", "show"}:
+        if not catalog:
+            return False, f"未知的规则命令：rule spell {action}\n{ROOM_RULE_HELP}"
+        return _spell_lookup(action, args, options)
+    if not settlement:
+        return False, f"未知的规则命令：rule spell {action}\n{ROOM_RULE_HELP}"
+
     if action in {"status", "list"} and not args:
         return False, "用法：rule spell <玩家>"
 
@@ -683,6 +918,31 @@ def _spell_command(
             member = room_rules.find_member(info, args[0])
             if not member:
                 raise room_rules.RuleOperationError(f"找不到玩家 {args[0]}", code="unknown_member")
+            spell_name = " ".join(args[1:])
+            costs = {
+                "mp": _as_int(options.get("mp"), 0),
+                "san": _as_int(options.get("san"), 0),
+                "pow": _as_int(options.get("pow"), 0),
+            }
+            note = ""
+            if "--catalog" in flags and catalog:
+                stats = magic_content.spell_costs(spell_name)
+                if stats is None:
+                    note = "内容表未收录该法术，按显式参数结算。\n"
+                else:
+                    pending: list[str] = []
+                    for unit in ("mp", "san", "pow"):
+                        if costs[unit]:
+                            continue
+                        value = stats.get(unit)
+                        if isinstance(value, int):
+                            costs[unit] = value
+                        elif (stats.get("units") or {}).get(unit):
+                            pending.append(str(stats["units"][unit]))
+                    note = f"内容表消耗：{stats.get('raw') or '无'}。"
+                    if pending:
+                        note += f" 骰值由 KP 掷定：{'、'.join(pending)}。"
+                    note += "\n"
             level = str(options.get("result") or "").strip().lower()
             if not level:
                 try:
@@ -705,10 +965,10 @@ def _spell_command(
                 room_dir,
                 info,
                 member,
-                name=" ".join(args[1:]),
-                mp_cost=options.get("mp") or 0,
-                san_cost=options.get("san") or 0,
-                pow_cost=options.get("pow") or 0,
+                name=spell_name,
+                mp_cost=costs["mp"],
+                san_cost=costs["san"],
+                pow_cost=costs["pow"],
                 first_cast="--first" in flags,
                 success_level=level or None,
                 pushed="--pushed" in flags,
@@ -717,7 +977,8 @@ def _spell_command(
                 actor_id=actor_id,
             )
             text = (
-                f"{args[0]} 施放「{payload['spell']}」："
+                note
+                + f"{args[0]} 施放「{payload['spell']}」："
                 + ("生效" if payload["effects"] else "没有效果")
                 + f"；消耗 MP {payload['mp_spent']}"
                 + (f" + 耐久 {payload['hp_spent']}" if payload["hp_spent"] else "")
@@ -730,7 +991,7 @@ def _spell_command(
             if len(args) < 2:
                 return False, (
                     "用法：rule spell grimoire <玩家> <书名> [skim|study] [weeks N] [san N] "
-                    "[cmi N] [cmf N] [rating N] [result ...] [spells a,b]"
+                    "[cmi N] [cmf N] [rating N] [result ...] [spells a,b] [language 语言] [catalog]"
                 )
             member = room_rules.find_member(info, args[0])
             if not member:
@@ -749,26 +1010,53 @@ def _spell_command(
                 for item in str(options.get("spells") or "").replace("，", ",").split(",")
                 if item.strip()
             ]
+            cmi = _as_int(options.get("cmi"), 0)
+            cmf = _as_int(options.get("cmf"), 0)
+            rating = _as_int(options.get("rating"), 0)
+            note = ""
+            if "--catalog" in flags and catalog:
+                stats = magic_content.grimoire_stats(title, options.get("language"))
+                if stats is None:
+                    note = "内容表未收录该典籍，按显式参数结算。\n"
+                else:
+                    if not cmi and stats.get("cmi") is not None:
+                        cmi = stats["cmi"]
+                    if not cmf and stats.get("cmf") is not None:
+                        cmf = stats["cmf"]
+                    if not rating and stats.get("rating") is not None:
+                        rating = stats["rating"]
+                    if not spells and stats.get("spells"):
+                        spells = list(stats["spells"])
+                    note = (
+                        f"内容表版本：{stats.get('language') or '?'}；"
+                        f"CMI {stats.get('cmi')} / CMF {stats.get('cmf')} / MR {stats.get('rating')}；"
+                        f"SAN {stats.get('san_loss') or '-'}；{stats.get('weeks') or '-'} 周。\n"
+                    )
             payload = room_magic.read_grimoire(
                 room_dir,
                 info,
                 member,
                 title=title,
                 mode=mode,
-                weeks=options.get("weeks") or 0,
-                san_loss=options.get("san") or 0,
-                cmi=options.get("cmi") or 0,
-                cmf=options.get("cmf") or 0,
-                rating=options.get("rating") or 0,
+                weeks=(
+                    _as_int(options.get("weeks"), 0)
+                    if options.get("weeks") not in (None, "")
+                    else None
+                ),
+                san_loss=_as_int(options.get("san"), 0),
+                cmi=cmi,
+                cmf=cmf,
+                rating=rating,
                 success_level=options.get("result"),
                 spells=spells,
                 actor=actor,
                 actor_id=actor_id,
             )
             if not payload["success"]:
-                return True, f"泛读《{payload['book']}》失败，未获得任何收益。"
+                return True, note + f"泛读《{payload['book']}》失败，未获得任何收益。"
             return True, (
-                f"《{payload['book']}》{'泛读' if payload['mode'] == 'skim' else '精读'}完成："
+                note
+                + f"《{payload['book']}》{'泛读' if payload['mode'] == 'skim' else '精读'}完成："
                 f"克苏鲁神话 +{payload['mythos_gain']}，SAN -{payload['san_loss']}"
                 + (f"，累计精读 {payload['reads']} 次" if payload["reads"] else "")
                 + "\n"
@@ -777,7 +1065,7 @@ def _spell_command(
     except room_rules.RuleOperationError as exc:
         return False, exc.message
 
-    return False, "用法：rule spell <玩家> | learn | cast | grimoire"
+    return False, "用法：rule spell <玩家> | learn | cast | grimoire | find | show"
 
 
 def _chase_check_level(
@@ -1107,8 +1395,15 @@ def _stat_command(
             (key for key in attributes if str(key).strip().casefold() == attribute.casefold()),
             attribute,
         )
-        before = max(0, min(999, room_rules._as_int(attributes.get(current_key), 0)))
-        after = max(0, min(999, before + amount if relative else amount))
+        before = max(0, room_rules._as_int(attributes.get(current_key), 0))
+        # 属性上限由规则集插件提供；这里把上限折回入参，保证预演与实际写回一致。
+        attr_cap = attribute_cap(room_rules.derive_card(card))
+        if attr_cap is not None:
+            if relative and amount > 0:
+                amount = min(amount, max(0, attr_cap - before))
+            elif not relative:
+                amount = min(max(0, amount), attr_cap)
+        after = max(0, before + amount if relative else amount)
         target_name = attribute
     preview = f"将把 {name} 的{label}「{target_name}」从 {before} 调整为 {after}（{after - before:+d}）。"
     reason = str(options.get("reason") or "").strip()
@@ -1189,6 +1484,20 @@ def _san_command(
     actor_id: Any,
     actor_rank: Any,
 ) -> tuple[bool, str]:
+    from trpg_server import room_sanity
+
+    try:
+        handled, text = room_sanity.handle_command(
+            room_dir,
+            info,
+            args=[str(item) for item in rest],
+            actor=str(actor or ""),
+            actor_id=str(actor_id or ""),
+        )
+    except room_rules.RuleOperationError as exc:
+        return True, exc.message
+    if handled:
+        return True, text
     if len(rest) < 3 or rest[0].lower() not in {"add", "set"}:
         return False, "用法：rule san add <玩家> <±N> | rule san set <玩家> <N>（默认预演，yes 落盘）"
     mode = rest[0].lower()

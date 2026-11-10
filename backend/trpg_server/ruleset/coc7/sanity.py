@@ -7,11 +7,14 @@
 
 from __future__ import annotations
 
+import random
 import re
 from typing import Any, Callable
 
 from trpg_server import dice_policy
 from trpg_server.ruleset.coc7 import rules as coc7_rules
+from trpg_server.ruleset.coc7 import sanity_state, traits
+from trpg_server.ruleset.coc7.options import resolve_options
 
 # 一次理智损失达到该值时进入临时疯狂判定。
 MADNESS_LOSS_THRESHOLD = 5
@@ -76,6 +79,18 @@ def _roll_value(expression: Any, roller: Callable[[int], int]) -> tuple[int, lis
     return sign * int(text), [int(text)]
 
 
+def _loss_expression(expression: Any) -> str:
+    """结构化 SAN 模式下：未带符号的表达式按「损失」理解。
+
+    控制台的 ``normalize_change`` 早就采用同一约定；旧卡与开关关闭时仍按
+    原样传给 ``_roll_value``，因此历史行为完全不变。
+    """
+    text = str(expression or "0").strip()
+    if text[:1] in {"+", "-"}:
+        return text
+    return "-" + text
+
+
 class Coc7Sanity:
     """CoC7 的理智 / 疯狂能力。"""
 
@@ -112,6 +127,84 @@ class Coc7Sanity:
             card["currentSan"] = current
             card["current_san"] = current
         return {"current": current, "max": maximum}
+
+    # ------------------------------------------------------------ 结构化精神状态
+
+    def mental_block(self, card: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+        """取（必要时创建）结构化精神状态，并同步卡面扩展与房间状态。
+
+        旧卡没有 ``extensions.mental`` 时按默认值补齐；不删除任何既有字段。
+        """
+        block = state.get("mental")
+        if not isinstance(block, dict):
+            extensions = card.get("extensions") if isinstance(card.get("extensions"), dict) else {}
+            candidate = extensions.get("mental") if isinstance(extensions, dict) else None
+            block = candidate if isinstance(candidate, dict) else {}
+        block = sanity_state.normalize(block)
+        state["mental"] = block
+        extensions = card.get("extensions")
+        if not isinstance(extensions, dict):
+            extensions = {}
+            card["extensions"] = extensions
+        extensions["mental"] = block
+        return block
+
+    def mental_snapshot(
+        self,
+        card: dict[str, Any],
+        state: dict[str, Any],
+        room_info: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """只读快照：不创建字段，旧卡直接得到默认结构。"""
+        options = resolve_options(room_info)
+        block = state.get("mental")
+        if not isinstance(block, dict):
+            extensions = card.get("extensions") if isinstance(card.get("extensions"), dict) else {}
+            block = extensions.get("mental") if isinstance(extensions, dict) else None
+        data = sanity_state.normalize(block)
+        data["enabled"] = bool(options.sanity_state)
+        data["activeBout"] = bool(options.sanity_state and sanity_state.has_active_bout(data))
+        return data
+
+    def active_bout(
+        self,
+        card: dict[str, Any],
+        state: dict[str, Any],
+        room_info: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """当前仍在持续的疯狂发作；开关关闭或已过期时返回 ``None``。"""
+        options = resolve_options(room_info)
+        if not options.sanity_state:
+            return None
+        snapshot = self.mental_snapshot(card, state)
+        bout = snapshot.get("bout")
+        return dict(bout) if isinstance(bout, dict) and snapshot.get("activeBout") else None
+
+    def fear_penalty(
+        self,
+        card: dict[str, Any],
+        state: dict[str, Any],
+        source: Any,
+        room_info: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """恐惧 / 躁狂暴露：命中来源时返回 1 颗惩罚骰（开关关闭时为 0）。"""
+        options = resolve_options(room_info)
+        if not options.sanity_state or not options.sanity_traits:
+            return {"penalty": 0, "matched": "", "kind": ""}
+        snapshot = self.mental_snapshot(card, state)
+        return sanity_state.fear_penalty(snapshot, str(source or ""))
+
+    def traits_query(self, kind: Any = None, keyword: Any = None, *, limit: int = 10) -> dict[str, Any]:
+        """按需查询恐惧症 / 躁狂症表；不整表注入上下文。"""
+        return traits.query(kind, keyword, limit=limit)
+
+    def _mental_pending(self, block: dict[str, Any], reason: str) -> dict[str, Any]:
+        return {
+            "type": "extensions",
+            "value": {"mental": dict(block)},
+            "source": "ai_tool",
+            "reason": reason,
+        }
 
     # ------------------------------------------------------------ 输入与上限
 
@@ -201,8 +294,19 @@ class Coc7Sanity:
         failure_expr: str,
         roller: Callable[[int], int],
         day: str,
+        room_info: dict[str, Any] | None = None,
+        source: Any = None,
     ) -> dict[str, Any]:
-        """按成功 / 失败结算一次理智检定。"""
+        """按成功 / 失败结算一次理智检定。
+
+        ``room_info`` 决定批次 3 房规是否生效；全部关闭时与旧行为逐字一致。
+        启用了习惯恐惧且给出 ``source`` 时，损失不超过该来源的记录值即免疫。
+        """
+        options = resolve_options(room_info)
+        if options.sanity_state:
+            # 结构化模式把未带符号的「1d6」视为损失，与房间控制台保持一致。
+            success_expr = _loss_expression(success_expr)
+            failure_expr = _loss_expression(failure_expr)
         selected_expr = success_expr if success else failure_expr
         if roll == 100 and not success:
             # 7 版：理智检定掷出 100 时取该次判定的最大损失。
@@ -211,6 +315,29 @@ class Coc7Sanity:
             delta, detail_rolls = _roll_value(selected_expr, roller)
         new_san = max(0, min(maximum, current + delta))
         loss = max(0, current - new_san)
+        pending: list[dict[str, Any]] = []
+        mental: dict[str, Any] | None = None
+        habituation: dict[str, Any] | None = None
+        waived = False
+        if options.sanity_state and loss > 0:
+            mental = self.mental_block(card, state)
+            if options.sanity_reality and mental.get("realityImmunity"):
+                # 看穿幻象后获得的一次性免疫：抵掉下一次理智损失，用掉即消失。
+                mental["realityImmunity"] = False
+                waived = True
+                delta = 0
+                new_san = current
+                loss = 0
+            else:
+                mental["realityImmunity"] = False
+                mental["lastLossAt"] = sanity_state.now_text()
+                if options.sanity_habituation and str(source or "").strip():
+                    habituation = sanity_state.note_habituation(mental, str(source or ""), loss)
+                    if habituation["immune"]:
+                        delta = 0
+                        new_san = current
+                        loss = 0
+            pending.append(self._mental_pending(mental, "理智检定"))
         outcome = self.resolve_loss(
             card=card,
             state=state,
@@ -228,11 +355,17 @@ class Coc7Sanity:
         )
         if roll == 100 and not success:
             summary += " 掷出 100，本次按最大损失结算。"
+        if waived:
+            summary += " 现实认知免疫抵消了本次理智损失。"
+        if habituation and habituation["immune"]:
+            summary += f" 习惯恐惧：对「{habituation['source']}」的损失未超过记录值 {habituation['previous']}，本次不再损失理智。"
+        elif habituation:
+            summary += f" 习惯恐惧：记录「{habituation['source']}」的最大理智损失为 {habituation['loss']}。"
         if outcome["madness_required"]:
             summary += " 一次损失≥5点：请继续调用 san.roll_madness 做智力检定并抽取疯狂表现。"
         if daily.get("threshold_met"):
             summary += " 同一游戏日累计理智损失已达当日起始理智的 1/5，判定不定性疯狂。"
-        return {
+        result = {
             "delta": delta,
             "new_san": new_san,
             "detail_rolls": detail_rolls,
@@ -244,8 +377,178 @@ class Coc7Sanity:
             else "",
             "summary": summary,
         }
+        if mental is not None:
+            result["mental"] = mental
+            result["pending_changes"] = pending
+            result["reality_immunity"] = bool(mental.get("realityImmunity"))
+        if waived:
+            result["reality_waived"] = True
+        if habituation is not None:
+            result["habituation"] = habituation
+        return result
 
     # ------------------------------------------------------------ 疯狂
+
+    def _gain_mythos(
+        self,
+        card: dict[str, Any],
+        state: dict[str, Any],
+        block: dict[str, Any],
+        current_san: int,
+    ) -> dict[str, Any]:
+        """目击神话：首次 +5，之后每次 +1；同时压低理智上限。"""
+        count = int(block.get("mythosMadnessCount") or 0)
+        gain = 5 if count == 0 else 1
+        block["mythosMadnessCount"] = count + 1
+
+        skills = card.get("skills") if isinstance(card.get("skills"), list) else []
+        row = next(
+            (
+                item
+                for item in skills
+                if isinstance(item, dict)
+                and str(item.get("name") or "").strip() in {"克苏鲁神话", "Cthulhu Mythos"}
+            ),
+            None,
+        )
+        before = _as_int(row.get("value") if isinstance(row, dict) else 0, 0)
+        after = max(0, min(99, before + gain))
+        if row is None:
+            row = {"name": "克苏鲁神话", "value": after, "base": 0}
+            skills.append(row)
+            card["skills"] = skills
+        else:
+            row["value"] = after
+
+        maximum = max(0, 99 - after)
+        state["max_san"] = maximum
+        card["maxSan"] = maximum
+        clamped = min(int(current_san or 0), maximum)
+        state["current_san"] = clamped
+        card["currentSan"] = card["current_san"] = clamped
+        return {
+            "gain": gain,
+            "before": before,
+            "after": after,
+            "max_san": maximum,
+            "san_clamped": clamped < int(current_san or 0),
+            "san": clamped,
+        }
+
+    def _record_structured_madness(
+        self,
+        *,
+        card: dict[str, Any],
+        state: dict[str, Any],
+        options: Any,
+        madness_type: str,
+        loss: int,
+        source: str,
+        bout_roll: int,
+        bout: dict[str, Any],
+        trait: str,
+        trait_entry: dict[str, Any],
+        duration_hours: int,
+        duration_rounds: int,
+        current_san: int,
+    ) -> dict[str, Any]:
+        """把疯狂结果写入结构化精神状态，并返回需要持久化的变更。"""
+        block = self.mental_block(card, state)
+        pending: list[dict[str, Any]] = []
+        notes: list[str] = []
+        trait_row: dict[str, Any] = {}
+        if trait:
+            kind = "phobia" if bout_roll == 9 else "mania"
+            trait_row = sanity_state.add_trait(
+                block,
+                kind=kind,
+                name=str(trait_entry.get("name") or trait.split("：", 1)[0]),
+                tag=str(trait_entry.get("tag") or ""),
+                en=str(trait_entry.get("en") or ""),
+                source=source,
+            )
+        bout_record: dict[str, Any] = {}
+        if options.sanity_bout:
+            bout_record = sanity_state.start_bout(
+                block,
+                madness_type=madness_type,
+                name=str(bout.get("name") or ""),
+                description=str(bout.get("description") or ""),
+                duration_hours=duration_hours,
+                duration_rounds=duration_rounds,
+                trait=trait,
+                source=source,
+                san_loss=loss,
+                bout_roll=bout_roll,
+            )
+            notes.append(f"发作计时：1D10={bout_record['duration_hours']} 小时，预计 {bout_record['expires_at']} 结束。")
+            if bout_record.get("symptoms"):
+                notes.append("汇总症状：" + "、".join(bout_record["symptoms"]) + "。")
+        mythos: dict[str, Any] = {}
+        if options.sanity_mythos:
+            mythos = self._gain_mythos(card, state, block, current_san)
+            notes.append(f"克苏鲁神话 +{mythos['gain']}（{mythos['before']}%→{mythos['after']}%）。")
+            pending.append(
+                {
+                    "type": "skill",
+                    "name": "克苏鲁神话",
+                    "value": mythos["after"],
+                    "source": "ai_tool",
+                    "reason": "目击神话",
+                }
+            )
+            if mythos["san_clamped"]:
+                pending.append(
+                    {"type": "san", "value": mythos["san"], "source": "ai_tool", "reason": "理智上限下降"}
+                )
+                notes.append(f"理智上限降至 {mythos['max_san']}。")
+        pending.append(self._mental_pending(block, "疯狂发作"))
+        return {
+            "mental": block,
+            "bout": bout_record,
+            "trait_row": trait_row,
+            "mythos": mythos,
+            "pending_changes": pending,
+            "notes": notes,
+        }
+
+    def begin_bout(
+        self,
+        *,
+        card: dict[str, Any],
+        state: dict[str, Any],
+        room_info: dict[str, Any] | None = None,
+        madness_type: str = "indefinite",
+        source: str = "",
+        roller: Callable[[int], int] | None = None,
+    ) -> dict[str, Any]:
+        """外部裁定触发的发作（现实认知失败等）：1D10 小时 + 汇总症状。"""
+        options = resolve_options(room_info)
+        if not options.sanity_state or not options.sanity_bout:
+            return {}
+        pick = roller or (lambda sides: random.randint(1, sides))
+        bout_roll = max(1, min(10, int(pick(10))))
+        bout = dict(MADNESS_BOUTS[bout_roll - 1])
+        hours = max(1, min(10, int(pick(10))))
+        block = self.mental_block(card, state)
+        record = sanity_state.start_bout(
+            block,
+            madness_type=madness_type,
+            name=str(bout.get("name") or ""),
+            description=str(bout.get("description") or ""),
+            duration_hours=hours,
+            source=source,
+            bout_roll=bout_roll,
+        )
+        return {
+            "mental": block,
+            "bout": record,
+            "pending_changes": [self._mental_pending(block, "发作")],
+            "summary": (
+                f"进入发作「{record.get('name')}」（1D10={record.get('duration_hours')} 小时），"
+                f"预计 {record.get('expires_at')} 结束。"
+            ),
+        }
 
     def resolve_madness(
         self,
@@ -260,8 +563,10 @@ class Coc7Sanity:
         critical_threshold: int,
         fumble_threshold: int,
         success_level: Callable[[int, int, int, int], str],
+        room_info: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """CoC7 临时 / 不定 / 永久疯狂结算。"""
+        options = resolve_options(room_info)
         loss = _nullable_int(arguments.get("loss"))
         if loss is None:
             loss = _nullable_int(state.get("last_san_loss"))
@@ -298,15 +603,22 @@ class Coc7Sanity:
         duration_hours = max(1, min(10, int(roller(10))))
         duration_rounds = max(1, min(10, int(roller(10))))
         trait = ""
+        trait_entry: dict[str, Any] = {}
         if insane and bout_roll in (9, 10):
-            pool = SAMPLE_PHOBIAS if bout_roll == 9 else SAMPLE_MANIAS
-            trait = pool[max(1, min(10, int(roller(10)))) - 1]
+            kind = "phobia" if bout_roll == 9 else "mania"
+            if options.sanity_state and options.sanity_traits:
+                trait_entry = traits.random_entry(kind, roller)
+                trait = traits.format_entry(trait_entry)
+            else:
+                pool = SAMPLE_PHOBIAS if bout_roll == 9 else SAMPLE_MANIAS
+                trait = pool[max(1, min(10, int(roller(10)))) - 1]
             bout["trait"] = trait
 
         flags = state.setdefault("mental_status", {})
         if not isinstance(flags, dict):
             flags = {}
             state["mental_status"] = flags
+        structured: dict[str, Any] = {}
         madness_record: dict[str, Any] | None = None
         if insane:
             madness_type = "permanent" if permanent else "indefinite" if indefinite else "temporary"
@@ -341,6 +653,22 @@ class Coc7Sanity:
             card["temporary_insanity"] = madness_type == "temporary"
             card["indefinite_insanity"] = madness_type == "indefinite"
             card["permanent_insanity"] = madness_type == "permanent"
+            if options.sanity_state:
+                structured = self._record_structured_madness(
+                    card=card,
+                    state=state,
+                    options=options,
+                    madness_type=madness_type,
+                    loss=loss,
+                    source=str(arguments.get("cause") or arguments.get("source") or "").strip(),
+                    bout_roll=bout_roll,
+                    bout=bout,
+                    trait=trait,
+                    trait_entry=trait_entry,
+                    duration_hours=duration_hours,
+                    duration_rounds=duration_rounds,
+                    current_san=current_san,
+                )
         else:
             # INT 检定失败：记忆被压抑，不进入疯狂，也不写入新的疯狂记录。
             flags.setdefault("temporaryInsanity", flags.get("temporary_insanity", False))
@@ -373,6 +701,9 @@ class Coc7Sanity:
                 "记忆被压抑，未进入临时性疯狂。"
             )
 
+        if structured.get("notes"):
+            summary += " " + " ".join(structured["notes"])
+
         pending_changes: list[dict[str, Any]] = []
         if insane:
             pending_changes.append(
@@ -383,8 +714,9 @@ class Coc7Sanity:
                 pending_changes.append(
                     {"type": "background", "value": dict(background), "source": "ai_tool", "reason": "疯狂表现"}
                 )
+        pending_changes.extend(structured.get("pending_changes") or [])
 
-        return {
+        result = {
             "player_name": player_name,
             "roll": int_roll,
             "success": int_success,
@@ -406,6 +738,13 @@ class Coc7Sanity:
             "pending_changes": pending_changes,
             "persist": insane,
         }
+        if structured:
+            result["mental"] = structured["mental"]
+            result["bout_record"] = structured["bout"]
+            result["trait_record"] = structured["trait_row"]
+            if structured["mythos"]:
+                result["mythos"] = structured["mythos"]
+        return result
 
 
 SANITY = Coc7Sanity()
