@@ -315,7 +315,7 @@
                                 </div>
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="houseRuleCoc7CombatPoison">
-                                    <label class="form-check-label" for="houseRuleCoc7CombatPoison">毒剂（CON 抵抗，成功伤害减半；发作轮数需 KP 到期再结算）</label>
+                                    <label class="form-check-label" for="houseRuleCoc7CombatPoison">毒剂（CON 抵抗，成功伤害减半；延迟发作在对应轮 / 时间推进时自动结算）</label>
                                 </div>
                                 <h6 class="mt-3">恢复</h6>
                                 <div class="form-check">
@@ -325,6 +325,12 @@
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="houseRuleCoc7HealingRequireRest">
                                     <label class="form-check-label" for="houseRuleCoc7HealingRequireRest">自然恢复必须声明休养（rest）</label>
+                                </div>
+                                <hr class="my-3">
+                                <h6>时间</h6>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="houseRuleCoc7GameClock">
+                                    <label class="form-check-label" for="houseRuleCoc7GameClock">房间游戏时钟（按服务器时间；未给天数 / 周数时用时间差结算恢复、典籍与毒剂到期）</label>
                                 </div>
                                 </div>
                                 <hr class="my-3">
@@ -339,12 +345,6 @@
                                     <input class="form-check-input" type="checkbox" id="houseRuleCoc7MagicEnabled">
                                     <label class="form-check-label" for="houseRuleCoc7MagicEnabled">开放施法消耗、首次施法检定与典籍阅读结算（不含内置法术表）</label>
                                 </div>
-                                <hr class="my-3">
-                                <h6 data-i18n="room.house_rules.skill_bases">技能基础值</h6>
-                                <p class="form-text" data-i18n="room.house_rules.skill_bases_hint">房间规则优先级最高，进入房间后覆盖用户个性化与管理员默认值。</p>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" id="openRoomSkillBaseSettings" data-i18n="room.house_rules.skill_bases_button">设置技能基础值</button>
-                            </div>
-                            <div class="modal-footer">
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="houseRuleCoc7MagicCatalogEnabled">
                                     <label class="form-check-label" for="houseRuleCoc7MagicCatalogEnabled">开放内置法术 / 典籍内容表（KP 按需查询，不进入系统提示）</label>
@@ -375,6 +375,12 @@
                                     <input class="form-check-input" type="checkbox" id="houseRuleCoc7SanityTraits">
                                     <label class="form-check-label" for="houseRuleCoc7SanityTraits">恐惧症 / 躁狂症 100 条表（按需查询）与暴露惩罚骰</label>
                                 </div>
+                                <hr class="my-3">
+                                <h6 data-i18n="room.house_rules.skill_bases">技能基础值</h6>
+                                <p class="form-text" data-i18n="room.house_rules.skill_bases_hint">房间规则优先级最高，进入房间后覆盖用户个性化与管理员默认值。</p>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" id="openRoomSkillBaseSettings" data-i18n="room.house_rules.skill_bases_button">设置技能基础值</button>
+                            </div>
+                            <div class="modal-footer">
                                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="common.cancel">取消</button>
                                 <button type="button" class="btn btn-primary" id="saveHouseRules" data-i18n="common.save">保存</button>
                             </div>
