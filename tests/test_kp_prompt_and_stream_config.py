@@ -58,7 +58,7 @@ def test_frontend_reveals_kp_replies_progressively():
 def test_debug_mode_exposes_independent_prompt_settings():
     settings_html = Path("frontend/src/index/fragments/03-room-tools-auth-settings.html").read_text(encoding="utf-8")
     platform_source = Path("frontend/src/app/platform-ui.ts").read_text(encoding="utf-8")
-    chat_source = Path("backend/trpg_server/routes/chat.py").read_text(encoding="utf-8")
+    chat_source = Path("backend/trpg_server/agents/turn_pipeline.py").read_text(encoding="utf-8")
     debug_prompt = Path("config/templates/roles/debug-kp.md").read_text(encoding="utf-8")
 
     assert 'id="debugMode"' in settings_html

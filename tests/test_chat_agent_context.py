@@ -33,7 +33,8 @@ from trpg_server.routes.rooms import create_room_message
 
 def test_chat_blocks_kp_self_start_until_scenario_started():
     # 兜底硬门控：剧本未开始时，非正式开场请求不得让 KP 自行开场/推进。
-    source = Path("backend/trpg_server/routes/chat.py").read_text(encoding="utf-8")
+    # 回合流水线已抽到 agents/turn_pipeline.py，源码断言随之迁移。
+    source = Path("backend/trpg_server/agents/turn_pipeline.py").read_text(encoding="utf-8")
 
     assert 'agent_profile.id == "kp" and room_id and not scenario_start' in source
     assert 'not _start_gate_info.get("scenario_started_at")' in source
