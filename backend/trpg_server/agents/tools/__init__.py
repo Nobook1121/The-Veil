@@ -22,7 +22,12 @@ from trpg_server.agents.tools.music import MUSIC_REQUEST_TOOL
 from trpg_server.agents.tools.character_items import ADD_CHARACTER_ITEM_TOOL
 from trpg_server.agents.tools.coc7 import COC7_EXTRA_TOOL_NAMES, COC7_EXTRA_TOOLS
 from trpg_server.agents.tools.chase import CHASE_TOOL_NAMES, CHASE_TOOLS
-from trpg_server.agents.tools.magic import MAGIC_TOOL_NAMES, MAGIC_TOOLS
+from trpg_server.agents.tools.magic import (
+    MAGIC_CATALOG_TOOL_NAMES,
+    MAGIC_CATALOG_TOOLS,
+    MAGIC_TOOL_NAMES,
+    MAGIC_TOOLS,
+)
 from trpg_server.agents.tools.sanity import SANITY_TOOL_NAMES, SANITY_TOOLS
 from trpg_server.agents.tools.character_stats import (
     SET_CHARACTER_ATTRIBUTE_TOOL,
@@ -63,6 +68,7 @@ def default_tool_registry() -> ToolRegistry:
             *COC7_EXTRA_TOOLS,
             *CHASE_TOOLS,
             *MAGIC_TOOLS,
+            *MAGIC_CATALOG_TOOLS,
             *SANITY_TOOLS,
             *INTERLUDE_TOOLS,
             *GAME_CLOCK_TOOLS,
@@ -75,6 +81,8 @@ __all__ = [
     "COC7_EXTRA_TOOLS",
     "CHASE_TOOL_NAMES",
     "CHASE_TOOLS",
+    "MAGIC_CATALOG_TOOL_NAMES",
+    "MAGIC_CATALOG_TOOLS",
     "MAGIC_TOOL_NAMES",
     "MAGIC_TOOLS",
     "SANITY_TOOL_NAMES",
