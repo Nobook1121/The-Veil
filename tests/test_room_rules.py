@@ -529,6 +529,40 @@ def test_rule_attr_relative_and_absolute(tmp_path):
     assert _read(room_dir)["members"][1]["character_card"]["attributes"]["STR"] == 60
 
 
+def test_attribute_writes_clamp_to_ruleset_cap(tmp_path):
+    """属性上限由规则集插件提供（CoC7 = 99），预演、控制台与 KP 工具口径一致。"""
+    from trpg_server.agents.tools.character_stats import execute_set_character_attribute
+
+    room_dir, info = _room(tmp_path)
+    context = room_rules.RoomRuleContext(room_dir, info, room_id="r-1", user_id=2, username="player")
+
+    preview = _run(room_dir, "rule attr player INT +200")
+    assert preview.ok is True
+    assert "99" in preview.message
+
+    result = _run(room_dir, "rule attr player INT +200 --yes")
+    assert result.ok is True
+    assert _read(room_dir)["members"][1]["character_card"]["attributes"]["INT"] == 99
+    assert "99" in result.message
+
+    tool = execute_set_character_attribute({"player_name": "player", "name": "INT", "value": 150}, context)
+    assert tool["ok"] is True
+    assert tool["after"] == 99
+
+
+def test_legacy_over_cap_attribute_stays_readable_until_written(tmp_path):
+    """旧卡超限属性读取 / 展示不报错，写入时才收敛到规则集上限。"""
+    room_dir, _ = _room(tmp_path)
+    stored = _read(room_dir)
+    stored["members"][1]["character_card"]["attributes"]["INT"] = 120
+    (room_dir / "info.json").write_text(json.dumps(stored, ensure_ascii=False), encoding="utf-8")
+
+    preview = _run(room_dir, "rule attr player INT -5")
+    assert preview.ok is True
+    assert _read(room_dir)["members"][1]["character_card"]["attributes"]["INT"] == 120
+    assert "115" in preview.message
+
+
 def test_ai_tools_update_skill_and_attribute_in_room_snapshot(tmp_path):
     from trpg_server.agents.tools.character_stats import (
         execute_set_character_attribute,
