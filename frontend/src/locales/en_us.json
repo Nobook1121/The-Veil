@@ -651,7 +651,7 @@
     "room.archive.confirm": "Archiving shuts down the AI but keeps the room in the room list; you can still use the dice roller and view history.",
     "room.archive.submit": "Archive",
     "room.archive.interlude_title": "End Interlude and Archive",
-    "room.archive.interlude_confirm": "The room is still in its interlude. Archiving will first end the interlude (keeping growth / SAN settlement results), then close the room and write the ending record and an immutable archive snapshot; the room stays in the room list for history and dice tools. End the interlude and archive now?",
+    "room.archive.interlude_confirm": "The room is still in its interlude. Archiving will first end the interlude and keep its settlement results, then close the room and write the ending record and an immutable archive snapshot; the room stays in the room list for history and dice tools. End the interlude and archive now?",
     "room.archive.interlude_submit": "End and Archive",
     "room.archive.done": "Room archived; you remain in the room with the AI disabled and dice tools available",
     "room.archive.interlude_done": "Interlude ended and room archived; you remain in the room and can view history and use the dice roller",
