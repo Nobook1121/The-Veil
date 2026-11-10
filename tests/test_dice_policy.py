@@ -6,11 +6,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from trpg_server.dice_policy import (
     PercentileRollPolicy,
     RollPlan,
     normalize_modifier,
     roll_with_policy,
+    sample_face,
 )
 
 
@@ -62,3 +65,37 @@ def test_default_policy_is_percentile_primitive():
     plan = PercentileRollPolicy().plan(1, 0)
     assert plan.sides == (10, 10, 10)
     assert plan.modifier == 1
+
+
+def test_sample_face_accepts_one_based_range():
+    assert sample_face(lambda sides: 1, 10) == 1
+    assert sample_face(lambda sides: 10, 10) == 10
+    assert sample_face(lambda sides: sides, 100) == 100
+
+
+@pytest.mark.parametrize(("value", "sides"), [(0, 10), (11, 10), (-1, 10), (0, 100), (101, 100)])
+def test_sample_face_rejects_out_of_range_source(value, sides):
+    """随机源必须是 1..sides；0 起始或越界直接报错，不静默偏移一位。"""
+    with pytest.raises(ValueError, match="1\\.\\."):
+        sample_face(lambda _sides: value, sides)
+
+
+def test_percentile_policy_rejects_zero_based_roller():
+    """0 起始的随机源会让十位偏移一位，必须在策略层失败而不是产出错误结果。"""
+    policy = PercentileRollPolicy()
+    plan = policy.plan(1, 0)
+    with pytest.raises(ValueError, match="1\\.\\."):
+        policy.roll(lambda _sides: 0, plan)
+
+
+def test_percentile_digits_share_one_based_source_convention():
+    """随机源恒为 10 时，十位应取 9、个位取 0，结果 90（而不是偏移后的 99/00）。"""
+    roll, candidates = roll_with_policy(PercentileRollPolicy(), lambda _sides: 10, bonus=1)
+    assert roll == 90
+    assert candidates == [90, 90]
+
+
+def test_percentile_single_die_uses_raw_d100_face():
+    roll, candidates = roll_with_policy(PercentileRollPolicy(), lambda _sides: 100)
+    assert roll == 100
+    assert candidates == []

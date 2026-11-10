@@ -338,6 +338,23 @@ def test_attribute_change_rejects_unknown_key(tmp_path):
     assert response.status_code == 400
 
 
+def test_attribute_change_clamps_to_ruleset_cap(tmp_path):
+    """属性上限由规则集插件提供：CoC7 写入 150 应落到 99。"""
+    room_dir, _ = _room(tmp_path)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = client.post(
+        "/api/rooms/r-1/rules/attributes",
+        json={"key": "STR", "value": 150},
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["after"] == 99
+    assert _member(room_dir, "player")["character_card"]["attributes"]["STR"] == 99
+
+
 def test_item_list_returns_equipment_and_weapons(tmp_path):
     _room(tmp_path)
     client = _app(tmp_path).test_client()

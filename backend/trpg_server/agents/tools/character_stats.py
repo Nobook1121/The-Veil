@@ -9,6 +9,7 @@ from typing import Any
 
 from trpg_server import room_ai_changes, room_rules
 from trpg_server.agents.tools.base import AgentTool
+from trpg_server.ruleset.capabilities import clamp_attribute_change
 
 
 def _int_argument(arguments: dict[str, Any], key: str) -> int | None:
@@ -58,6 +59,12 @@ def _execute_change(kind: str, arguments: dict[str, Any], context: Any) -> dict[
                     f"房主已回滚该改动，当前值为 {current}，以当前角色卡为准，不要重试。"
                 ),
             }
+        # 属性上调按规则集插件声明的上限钳制，核心不写死上限数值。
+        if kind != "skill":
+            card = room_rules.member_card(member)
+            value, delta = clamp_attribute_change(
+                room_rules.derive_card(card), card, target, value=value, delta=delta
+            )
         state_before = room_ai_changes.snapshot_resource_state(member)
         common = {
             "value": None if delta is not None else value,

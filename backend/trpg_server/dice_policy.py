@@ -23,6 +23,26 @@ MODIFIER_LIMIT = 2
 Roller = Callable[[int], int]
 
 
+def sample_face(roller: Roller, sides: int) -> int:
+    """掷一枚骰子，并强制随机源返回 ``1..sides``。
+
+    百分骰的十位用 ``(x - 1) % 10``、个位用 ``x % 10`` 推导数字：只有随机源
+    以 1 起始时两者才落在同一口径上。若随机源返回 0 起始或越界的值，十位会
+    整体偏移一位，因此这里显式约束并直接报错，而不是静默夹紧或纠正。
+
+    值域约定只作用于随机源；物理骰面走 ``normalize_faces`` 的 ``% 10``，
+    因为前端上报的是 0-9 的骰面数字。
+    """
+    raw = roller(sides)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"roller must return an integer in 1..{sides}, got {raw!r}") from exc
+    if not 1 <= value <= sides:
+        raise ValueError(f"roller must return a value in 1..{sides}, got {value}")
+    return value
+
+
 def normalize_modifier(bonus: int | None, penalty: int | None, limit: int = MODIFIER_LIMIT) -> int:
     """奖励与惩罚先抵消，返回有符号净额（正=有利，负=不利）。"""
     try:
@@ -84,11 +104,12 @@ class PercentileRollPolicy:
         return RollPlan(sides=(10,) * (abs(net) + 2), modifier=net)
 
     def roll(self, roller: Roller, plan: RollPlan) -> list[int]:
+        # 随机源统一经 sample_face 约束为 1..sides，十位 / 个位才共用同一口径。
         if plan.sides == (100,):
-            return [max(1, min(100, int(roller(100))))]
+            return [sample_face(roller, 100)]
         # 先掷个位再掷十位，保持既有随机序列与测试夹具的调用顺序。
-        units = int(roller(10)) % 10
-        tens = [(int(roller(10)) - 1) % 10 for _ in range(len(plan.sides) - 1)]
+        units = sample_face(roller, 10) % 10
+        tens = [(sample_face(roller, 10) - 1) % 10 for _ in range(len(plan.sides) - 1)]
         return [*tens, units]
 
     def normalize_faces(self, faces: Sequence[int], plan: RollPlan) -> list[int]:

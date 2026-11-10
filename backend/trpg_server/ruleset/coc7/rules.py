@@ -20,6 +20,9 @@ import time
 from typing import Any, Mapping
 
 SKILL_MAX = 99
+# 属性上限：7 版规则书里人类属性以 99 封顶；旧卡可能存有历史超限值，
+# 读路径不报错也不改写，只在写入时按此上限钳制。
+ATTRIBUTE_MAX = 99
 SAN_CAP_BASE = 99
 MYTHOS_SKILL_NAMES = ("克苏鲁神话", "cthulhumythos", "cthulhu mythos", "mythos")
 
@@ -207,6 +210,8 @@ def derive_sheet(sheet: Mapping[str, Any] | None) -> dict[str, Any]:
     data["armor"] = _clamp(data.get("armor"), 0, 99, 0)
     # 技能封顶（7 版：任何技能不得超过 99%）。
     data["skillCap"] = SKILL_MAX
+    # 属性封顶由插件声明，核心写路径只读这个键，不再写死具体数值。
+    data["attributeCap"] = ATTRIBUTE_MAX
     return data
 
 

@@ -15,6 +15,7 @@ from trpg_server import room_rules
 from trpg_server.responses import error_response, success_response
 from trpg_server.room_access import can_access, find_room, is_elevated
 from trpg_server.room_log import log_room_event
+from trpg_server.ruleset.capabilities import clamp_attribute_change
 
 bp = Blueprint("room_rules", __name__)
 logger = logging.getLogger(__name__)
@@ -197,11 +198,17 @@ def change_attribute(room_id: str):
         delta = _optional_int(data.get("delta"))
         if value is None and delta is None:
             raise room_rules.RuleOperationError("需要提供 value（设为）或 delta（增减）", code="invalid_argument")
+        key = str(data.get("key") or data.get("attribute") or data.get("name") or "")
+        # 属性上调按规则集插件声明的上限钳制，核心不写死上限数值。
+        card = room_rules.member_card(member)
+        value, delta = clamp_attribute_change(
+            room_rules.derive_card(card), card, key, value=value, delta=delta
+        )
         result = room_rules.apply_attribute_change(
             room_dir,
             info,
             member,
-            key=str(data.get("key") or data.get("attribute") or data.get("name") or ""),
+            key=key,
             value=value,
             delta=delta,
             reason=str(data.get("reason") or ""),

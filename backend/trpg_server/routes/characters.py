@@ -361,7 +361,11 @@ def _runtime_to_test_character(character):
     assets = _as_dict(character.get("assets"))
     status = _as_dict(character.get("status"))
     now_text = _as_text(character.get("updatedAt") or character.get("createdAt"))
-    return {
+    # 规则扩展命名空间（如 extensions.mental）：旧卡没有时保持缺省，不写空键。
+    extensions = _as_dict(character.get("extensions"))
+    if not extensions:
+        extensions = _as_dict(_as_dict(character.get("sheet")).get("extensions"))
+    test = {
         "id": _as_text(character.get("id")),
         "rulesetId": _as_text(character.get("rulesetId"), _fallback_ruleset_id()),
         "public_id": _as_text(character.get("public_id")),
@@ -461,6 +465,9 @@ def _runtime_to_test_character(character):
         "createdAt": _as_text(character.get("createdAt") or now_text),
         "updatedAt": now_text,
     }
+    if extensions:
+        test["extensions"] = extensions
+    return test
 
 
 def _test_character_to_runtime(character, fallback_id=""):
@@ -476,7 +483,8 @@ def _test_character_to_runtime(character, fallback_id=""):
     stories = _as_dict(character.get("stories"))
     assets = _as_dict(character.get("assets"))
     age = _as_int(character.get("age"), _as_int(attributes.get("age"), 25))
-    return {
+    extensions = _as_dict(character.get("extensions")) or _as_dict(_as_dict(character.get("sheet")).get("extensions"))
+    runtime = {
         "id": _as_text(character.get("id") or fallback_id),
         "rulesetId": _as_text(character.get("rulesetId"), _fallback_ruleset_id()),
         "public_id": _as_text(character.get("public_id")),
@@ -568,6 +576,9 @@ def _test_character_to_runtime(character, fallback_id=""):
         # 规则自有卡面快照；前端优先按 sheet 渲染，顶层字段仅作镜像兜底。
         "sheet": _as_dict(character.get("sheet")),
     }
+    if extensions:
+        runtime["extensions"] = extensions
+    return runtime
 
 
 def _character_from_storage(raw, fallback_id=""):

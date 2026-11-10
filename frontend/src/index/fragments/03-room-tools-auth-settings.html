@@ -1388,7 +1388,7 @@
                                     <label class="form-check-label" for="cloudEmbeddingEnabled">本地模型不可用时改用云端 Embedding 接口</label>
                                     <small class="text-muted d-block">默认关闭。开启后会改用 AI 平台配置中的 Embedding 接口（产生接口调用费用），向量维度随云端模型变化，需要重建知识库索引。</small>
                                 </div>
-                                <p class="text-muted">COC7 使用独立索引；未来可接入 COC6、D&amp;D 等规则集。</p>
+                                <p class="text-muted">每个规则集使用独立索引；新增规则集后可在下方单独上传与检索。</p>
                                 <div class="d-flex gap-2 align-items-center mb-3">
                                     <select class="form-select" id="rulesetSelect" aria-label="规则集"></select>
                                     <input class="form-control" type="file" id="rulesetFile" accept=".txt,.md,.markdown,.text,.doc,.docx,.pdf">

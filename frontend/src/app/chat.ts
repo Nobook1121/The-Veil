@@ -107,7 +107,7 @@ const COMMAND_DEFINITIONS: CommandDefinition[] = [
     { name: "/attr", usage: "/attr [玩家名] {属性} [值|±N] [persist] [reason {原因}]", description: "查看或修改基础属性（STR/DEX/CON/APP/POW/SIZ/EDU/INT/LUC）" },
     { name: "/item", usage: "/item [list|rm] [玩家名] {物品名} [qty N] [weapon] [persist]", description: "查看、添加或移除物品/武器" },
     { name: "/interlude", usage: "/interlude [status|request|start|settle|review|end] [--yes] [--credit=玩家:事件]", description: "幕间：提议 / 开始 / 结算 / 复盘 / 结束并归档（结束需 --yes）" },
-    { name: "/record", usage: "/record {damage/san} {username} {int} {reason?}", description: "管理员记录房间角色伤害或 San 损失" },
+    { name: "/record", usage: "/record {damage/san} {username} {int} {reason?}", description: "管理员记录房间角色伤害或状态损失" },
     { name: "/trigger", usage: "/trigger {触发器编号}", description: "触发场景触发器" },
     { name: "/roll", usage: "/roll", description: "完成当前等待中的玩家投掷" },
     { name: "/roll confirm", usage: "/roll confirm", description: "确认重投后的最终结果" },

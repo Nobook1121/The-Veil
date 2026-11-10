@@ -147,6 +147,62 @@ def resource_slot(plugin: Any, kind: str) -> dict[str, Any] | None:
     return None
 
 
+def attribute_cap(derived: Mapping[str, Any] | None) -> int | None:
+    """从插件派生结果读取属性上限；插件未声明时返回 ``None``。
+
+    上限属于规则数据，核心只认 ``attributeCap`` 这个键，不写死 99 / 999。
+    """
+    value = derived.get("attributeCap") if isinstance(derived, Mapping) else None
+    try:
+        cap = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return cap if cap > 0 else None
+
+
+def clamp_attribute_value(derived: Mapping[str, Any] | None, value: Any) -> Any:
+    """按插件上限钳制属性写入值；未声明上限时原样返回。"""
+    cap = attribute_cap(derived)
+    if cap is None:
+        return value
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return value
+    return min(cap, number)
+
+
+def clamp_attribute_change(
+    derived: Mapping[str, Any] | None,
+    card: Mapping[str, Any] | None,
+    key: str,
+    *,
+    value: int | None = None,
+    delta: int | None = None,
+) -> tuple[int | None, int | None]:
+    """把属性写入请求钳制到插件声明的上限，返回新的 ``(value, delta)``。
+
+    未声明上限的规则集原样返回；减益不做额外限制，只拦截会把值推过上限的增益。
+    """
+    cap = attribute_cap(derived)
+    if cap is None:
+        return value, delta
+    attributes = card.get("attributes") if isinstance(card, Mapping) else None
+    target = str(key or "").strip().casefold()
+    before = 0
+    if isinstance(attributes, Mapping):
+        for name, current in attributes.items():
+            if str(name).strip().casefold() == target:
+                before = _as_int(current, 0)
+                break
+    if value is not None:
+        # 与 ``apply_attribute_change`` 一致：value 优先于 delta。
+        return min(_as_int(value, 0), cap), delta
+    if delta is not None:
+        return None, max(0, min(delta, cap - before)) if delta > 0 else delta
+    return value, delta
+
+
 def _as_int(value: Any, fallback: int = 0) -> int:
     try:
         return int(value)

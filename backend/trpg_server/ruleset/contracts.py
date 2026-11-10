@@ -107,6 +107,8 @@ class RulesetPlugin(Protocol):
 
     id: str
     display_name: str
+    # 展示用简介；可缺省。缺省时前端回退到中性通用文案，不回退成具体规则集名称。
+    description: str
     api_version: int
     ruleset_version: str
     schema_version: int

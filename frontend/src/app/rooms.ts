@@ -1263,7 +1263,7 @@ async function archiveCurrentRoom(): Promise<void> {
                   title: roomText("room.archive.interlude_title", "结束幕间并归档房间"),
                   message: roomText(
                       "room.archive.interlude_confirm",
-                      "房间仍在幕间。归档会先结束幕间（含成长 / SAN 结算结果），再关闭房间并写入结局记录与不可变归档快照；房间仍保留在房间管理列表中，可查看历史并使用骰娘。确定结束幕间并归档吗？"
+                      "房间仍在幕间。归档会先结束幕间并保留幕间结算结果，再关闭房间并写入结局记录与不可变归档快照；房间仍保留在房间管理列表中，可查看历史并使用骰娘。确定结束幕间并归档吗？"
                   ),
                   confirmText: roomText("room.archive.interlude_submit", "结束幕间并归档"),
                   danger: true,

@@ -117,6 +117,7 @@ class RulesetRegistry:
                 {
                     "id": ruleset_id,
                     "display_name": plugin.display_name,
+                    "description": str(getattr(plugin, "description", "") or ""),
                     "api_version": plugin.api_version,
                     "ruleset_version": plugin.ruleset_version,
                     "schema_version": plugin.schema_version,
@@ -135,6 +136,7 @@ class RulesetRegistry:
                 {
                     "id": ruleset_id,
                     "display_name": ruleset_id,
+                    "description": "",
                     "api_version": None,
                     "ruleset_version": "",
                     "schema_version": 0,
@@ -155,6 +157,7 @@ class RulesetRegistry:
                 {
                     "id": entry.id,
                     "display_name": entry.display_name,
+                    "description": "",
                     "api_version": None,
                     "ruleset_version": "",
                     "schema_version": 0,

@@ -42,6 +42,24 @@ _HISTORY_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 HISTORY_COMPACT_CHAR_THRESHOLD = 12000
 
+# 历史压缩提示词：拆成「引导语 / JSON 结构示例 / 事实约束」三个常量，
+# 避免 JSON 示例的右花括号与中文说明粘在同一段字面量里难以阅读。
+# 三段拼出的最终字符串必须与拆分前逐字节一致，否则会改变模型看到的结构化输出约束。
+COMPACT_PROMPT_INTRO = (
+    "你在维护跑团房间的滚动记忆。请把「已有滚动摘要」与「新增对话」融合成一份更新的摘要，"
+    "不要编造未发生的内容。只输出 JSON，不要输出多余文字，格式："
+)
+COMPACT_PROMPT_JSON_SHAPE = (
+    '{"narrative": "不超过250字的叙事摘要，保留当前场景、未解决的线索与检定结果", '
+    '"key_facts": [{"type": "location_discovered|npc_status|item_acquired|decision_made|promise_made|player_decision", '
+    '"text": "一句话事实"}]}'
+)
+COMPACT_PROMPT_FACT_RULES = (
+    "关键事实必须来自对话原文；玩家答应过谁什么、对谁做过承诺，一律记为 promise_made，"
+    "并写明对象与内容；玩家做过的关键行动记为 player_decision。没有发生的事实不要补写。"
+)
+COMPACT_PROMPT = COMPACT_PROMPT_INTRO + COMPACT_PROMPT_JSON_SHAPE + COMPACT_PROMPT_FACT_RULES
+
 
 def _resolve_latex_settings(latex_settings):
     """一次请求只解析一次 LaTeX 配置；未显式传入时回退到带缓存的全局读取。"""
@@ -678,15 +696,7 @@ def _compact_history_with_ai(requester, model, history, latex_settings=None):
         "messages": [
             {
                 "role": "system",
-                "content": (
-                    "你在维护跑团房间的滚动记忆。请把「已有滚动摘要」与「新增对话」融合成一份更新的摘要，"
-                    "不要编造未发生的内容。只输出 JSON，不要输出多余文字，格式："
-                    '{"narrative": "不超过250字的叙事摘要，保留当前场景、未解决的线索与检定结果", '
-                    '"key_facts": [{"type": "location_discovered|npc_status|item_acquired|decision_made|promise_made|player_decision", '
-                    '"text": "一句话事实"}]}'
-                    "关键事实必须来自对话原文；玩家答应过谁什么、对谁做过承诺，一律记为 promise_made，"
-                    "并写明对象与内容；玩家做过的关键行动记为 player_decision。没有发生的事实不要补写。"
-                ),
+                "content": COMPACT_PROMPT,
             },
             {"role": "user", "content": "\n\n".join(sections)},
         ],

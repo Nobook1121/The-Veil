@@ -42,15 +42,15 @@
                     </div>
                 </div>
 
-                <!-- COC7 调查员角色卡管理内容 -->
+                <!-- 角色卡管理内容（页眉文案由当前规则集提供，缺失时回退通用文案） -->
                 <div id="character" class="tab-content">
                     <div class="character-workspace p-4" id="characterWorkspace">
                         <div class="character-matrix-bg" aria-hidden="true"></div>
                         <header class="character-command-header" data-page-header="characters">
                             <div>
-                                <p class="character-kicker"><i class="fa fa-terminal" aria-hidden="true"></i> COC7 INVESTIGATOR NODE</p>
-                                <h2 data-i18n="character.page.title">克苏鲁调查员角色卡</h2>
-                                <p class="character-subtitle" data-i18n="character.page.subtitle">基于 COC 第七版规则管理属性、技能、装备、伤势与 San 值记录。</p>
+                                <p class="character-kicker"><i class="fa fa-terminal" aria-hidden="true"></i> <span data-i18n="character.page.kicker">CHARACTER WORKSPACE</span></p>
+                                <h2 id="characterPageTitle" data-i18n="character.page.title">角色卡工作区</h2>
+                                <p class="character-subtitle" id="characterPageSubtitle" data-i18n="character.page.subtitle">管理角色卡的属性、技能、装备、伤势与状态记录。</p>
                             </div>
                             <div class="character-command-actions">
                                 <button class="character-command-button secondary" id="importCharacter" type="button" title="导入角色卡" data-i18n-title="character.action.import">
@@ -62,7 +62,7 @@
                                     <i class="fa fa-download" aria-hidden="true"></i>
                                     <span data-i18n="character.action.export">导出</span>
                                 </button>
-                                <button class="character-command-button" id="createCharacter" type="button" title="创建调查员">
+                                <button class="character-command-button" id="createCharacter" type="button" title="创建角色卡" data-i18n-title="character.action.create_title">
                                     <i class="fa fa-user-plus" aria-hidden="true"></i>
                                     <span data-i18n="character.action.create">新建</span>
                                 </button>
@@ -119,7 +119,7 @@
                         <div class="character-matrix-bg" aria-hidden="true"></div>
                         <header class="character-command-header" data-page-header="character-gallery">
                             <div>
-                                <p class="character-kicker"><i class="fa fa-users" aria-hidden="true"></i> INVESTIGATOR GALLERY</p>
+                                <p class="character-kicker"><i class="fa fa-users" aria-hidden="true"></i> <span data-i18n="gallery.page.kicker">CHARACTER GALLERY</span></p>
                                 <h2 data-i18n="gallery.page.title">角色卡广场</h2>
                                 <p class="character-subtitle" data-i18n="gallery.page.subtitle">发布、预览并应用公开角色卡，作为个人角色卡的创建模板。</p>
                             </div>

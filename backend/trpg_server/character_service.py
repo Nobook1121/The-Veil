@@ -369,6 +369,7 @@ def apply_room_changes(actor: Any, character_id: str, changes: list[dict[str, An
     if not existing:
         raise CharacterServiceError("character_not_found", "角色卡不存在", 404)
 
+    from trpg_server.ruleset.capabilities import clamp_attribute_value
     from trpg_server.ruleset.capabilities import derive_card as derive_with_plugin
 
     derived = derive_with_plugin(_plugin_for_card(existing), existing)
@@ -408,7 +409,11 @@ def apply_room_changes(actor: Any, character_id: str, changes: list[dict[str, An
             attributes = payload.get("attributes")
             if attributes is None:
                 attributes = dict(existing.get("attributes") or {})
-            _apply_attribute_change(attributes, str(change.get("key") or ""), _bounded_int(change.get("value"), 0, 999, 0))
+            # 写回时按规则集插件声明的属性上限钳制；旧卡里的超限值只在写入时收敛。
+            attr_value = clamp_attribute_value(derived, change.get("value"))
+            _apply_attribute_change(
+                attributes, str(change.get("key") or ""), _bounded_int(attr_value, 0, 10**9, 0)
+            )
             payload["attributes"] = attributes
         elif kind in {"item", "weapon", "item_remove", "weapon_remove"}:
             _apply_item_change(payload, existing, change)
@@ -424,6 +429,16 @@ def apply_room_changes(actor: Any, character_id: str, changes: list[dict[str, An
             if isinstance(value, dict):
                 background.update(value)
             payload["background"] = background
+        elif kind == "extensions":
+            # 规则扩展命名空间：按 namespace 合并（如 extensions.mental），未知命名原样保留。
+            extensions = dict(payload.get("extensions") or existing.get("extensions") or {})
+            value = change.get("value")
+            if isinstance(value, dict):
+                for namespace, namespace_value in value.items():
+                    extensions[str(namespace)] = (
+                        dict(namespace_value) if isinstance(namespace_value, dict) else namespace_value
+                    )
+            payload["extensions"] = extensions
         elif kind == "credit":
             payload["creditRating"] = _bounded_int(change.get("value"), 0, 99, 0)
         elif kind == "assets":

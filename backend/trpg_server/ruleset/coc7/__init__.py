@@ -36,6 +36,7 @@ def _load_combat_ruleset() -> Any | None:
 class Coc7Plugin:
     id = "coc7"
     display_name = "克苏鲁的呼唤 7e"
+    description = "基于《克苏鲁的呼唤》第七版规则管理调查员的属性、技能、装备、伤势与理智记录。"
     api_version = RULESET_API_VERSION
     ruleset_version = "1.0"
     schema_version = 1

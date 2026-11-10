@@ -365,6 +365,64 @@ def test_room_changes_write_hp_mp_and_armor_to_persistent_card(tmp_path):
     assert int(saved["battleAttributes"]["armor"]) == 4
 
 
+# ---------------------------------------------------------------- 属性上限
+
+
+def test_attribute_cap_is_declared_by_ruleset_plugin():
+    """核心不写死属性上限：由插件派生结果里的 attributeCap 提供（CoC7 = 99）。"""
+    from trpg_server.ruleset.capabilities import attribute_cap
+
+    derived = room_rules.derive_card(_card())
+    assert coc7_rules.ATTRIBUTE_MAX == 99
+    assert derived["attributeCap"] == 99
+    assert attribute_cap(derived) == 99
+    assert attribute_cap({}) is None
+
+
+def test_clamp_attribute_change_only_caps_upward_writes():
+    from trpg_server.ruleset.capabilities import clamp_attribute_change
+
+    derived = {"attributeCap": 99}
+    card = {"attributes": {"STR": 80}}
+    assert clamp_attribute_change(derived, card, "STR", value=150) == (99, None)
+    assert clamp_attribute_change(derived, card, "STR", delta=50) == (None, 19)
+    assert clamp_attribute_change(derived, card, "STR", delta=-30) == (None, -30)
+    # value 优先于 delta，与 apply_attribute_change 的取值顺序一致。
+    assert clamp_attribute_change(derived, card, "STR", value=150, delta=5) == (99, 5)
+    # 未声明上限的规则集原样通过。
+    assert clamp_attribute_change({}, card, "STR", value=150) == (150, None)
+
+
+def test_room_attr_writeback_clamps_to_plugin_cap(tmp_path):
+    from trpg_server.site_agent_auth import Actor, permission_set_for_role
+
+    card_path = _stored_card(tmp_path)
+    app = create_app(
+        {
+            "TESTING": True,
+            "CONFIG_DIR": Path(tmp_path) / "config",
+            "ROOMS_DIR": Path(tmp_path) / "rooms",
+            "CHARACTERS_DIR": Path(tmp_path) / "characters",
+        }
+    )
+    with app.app_context():
+        actor = Actor(
+            user_id=1,
+            username="tester",
+            role="ADMIN",
+            permissions=permission_set_for_role("ADMIN"),
+            room_ids=frozenset(),
+        )
+        character_service.apply_room_changes(
+            actor, "card-2", [{"type": "attr", "key": "STR", "value": 150}]
+        )
+
+    saved = json.loads(card_path.read_text(encoding="utf-8"))
+    attributes = saved.get("attributes") or (saved.get("sheet") or {}).get("attributes") or {}
+    normalized = {str(key).upper(): value for key, value in attributes.items()}
+    assert int(normalized["STR"]) == 99
+
+
 def test_fumble_threshold_derived_rule_only_when_not_customized():
     assert dice._success_level(100, 60) == "fumble"
     assert dice._success_level(96, 60) == "failure"  # 所需值 ≥50：默认只有 100 大失败
