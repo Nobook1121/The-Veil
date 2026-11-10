@@ -5,7 +5,6 @@ from trpg_server.agents.memory import read_room_memory, remember_room_fact
 from trpg_server.agents.room_state import load_room_state, save_room_state
 from trpg_server.agents.tools.base import AgentTool
 from trpg_server.scenario_store import build_trigger_message, iter_scenario_trigger_catalog, load_scenario_by_id
-from trpg_server.json_store import write_json_atomic
 
 
 def _find_scenario(scenarios_dir, scenario_id, scenario_version=None):
@@ -257,7 +256,9 @@ def activate_scenario_scene(arguments: dict[str, Any], context: Any) -> dict[str
         return {"error": "scene_id is not present in the bound scenario", "scene_id": scene_id}
     info["active_scene_id"] = str(module.get("scene_id") or module.get("id"))
     info["active_scene_title"] = module.get("title")
-    write_json_atomic(context.room_dir / "info.json", info)
+    from trpg_server import room_rules
+
+    room_rules.save_room_info(context.room_dir, info)
     # Retrieval (KnowledgeBaseService._room_info) and the runtime snapshot both
     # prefer state.json.active_scene_id, so a stale value there would override
     # the scene this tool just persisted. Mirror the pointer into state.json.

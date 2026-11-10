@@ -1405,7 +1405,7 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
                     if isinstance(room_info, dict) and not room_info.get("completed_at"):
                         room_info["completed_at"] = _timestamp()
                         room_info["completed_by"] = "ai"
-                        write_json_atomic(room_info_path, room_info)
+                        room_rules.save_room_info(agent_context.room_dir, room_info)
             if structured.triggered_files and agent_context.room_dir:
                 scenario_data = (room_snapshot or {}).get("scenario") if isinstance(room_snapshot, dict) else {}
                 room_info = (room_snapshot or {}).get("room") if isinstance(room_snapshot, dict) and isinstance((room_snapshot or {}).get("room"), dict) else {}

@@ -784,7 +784,9 @@ def _sync_room_character_snapshots(character):
             changed = True
         if changed:
             info["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            write_json_atomic(info_path, info)
+            from trpg_server import room_rules
+
+            room_rules.save_room_info(info_path.parent, info)
 
 
 def _unbind_deleted_character_from_rooms(character_id):
@@ -808,7 +810,9 @@ def _unbind_deleted_character_from_rooms(character_id):
                 changed = True
         if changed:
             info["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            write_json_atomic(info_path, info)
+            from trpg_server import room_rules
+
+            room_rules.save_room_info(info_path.parent, info)
 
 
 def _fallback_ruleset_id() -> str:

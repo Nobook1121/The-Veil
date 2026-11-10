@@ -101,7 +101,9 @@ class RulesetKnowledgeStore:
         meta = self._meta(ruleset_id); selected = str(version or meta.get("active_version") or "")
         if not selected or selected not in {str(v) for v in meta.get("versions", [])}: raise ValueError("Unknown knowledge version")
         room = self.rooms_dir / str(room_id); room.mkdir(parents=True, exist_ok=True); path = room / "info.json"; info = read_json(path, default={})
-        bindings = info.get("rulesets", {}) if isinstance(info.get("rulesets"), dict) else {}; bindings[str(ruleset_id)] = selected; info["rulesets"] = bindings; write_json_atomic(path, info)
+        bindings = info.get("rulesets", {}) if isinstance(info.get("rulesets"), dict) else {}; bindings[str(ruleset_id)] = selected; info["rulesets"] = bindings
+        from trpg_server import room_rules
+        room_rules.save_room_info(room, info)
         return bindings
 
     def archive(self, ruleset_id: str) -> dict[str, Any]:

@@ -400,7 +400,10 @@ def _mark_scenario_started(room_dir, user_id):
     started_at = room_info.get("scenario_started_at") or _timestamp()
     room_info["scenario_started_at"] = started_at
     room_info["scenario_started_by"] = user_id
-    write_json_atomic(info_path, room_info)
+
+    from trpg_server import room_rules
+
+    room_rules.save_room_info(room_dir, room_info)
     return started_at
 
 
@@ -427,7 +430,10 @@ def _sync_room_active_scene(room_dir, scene_id, scenario):
     )
     if module:
         info["active_scene_title"] = module.get("title")
-    write_json_atomic(info_path, info)
+
+    from trpg_server import room_rules
+
+    room_rules.save_room_info(room_dir, info)
 
 
 def _json_for_log(value):

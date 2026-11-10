@@ -87,8 +87,17 @@ def load_room_info(room_dir: Any) -> dict[str, Any]:
 
 
 def save_room_info(room_dir: Any, info: dict[str, Any]) -> None:
-    info["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    write_json_atomic(Path(room_dir) / "info.json", info)
+    """房间 ``info.json`` 的唯一整份写入口。
+
+    写入方通常先读后改再整份写回；这里在房间锁内重读磁盘，把期间被时钟推进过的
+    ``game_clock`` 合并回快照再落盘，避免旧快照把游戏时间覆盖回去。
+    """
+    from trpg_server import room_clock
+
+    with room_clock.room_lock(room_dir):
+        room_clock.preserve_stored_clock(room_dir, info)
+        info["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        write_json_atomic(Path(room_dir) / "info.json", info)
 
 
 def resolve_rule_id(info: dict[str, Any] | None, *, scenarios_dir: Any = None) -> str:

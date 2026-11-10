@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 ROOM_CONSOLE_ACTOR = "房间控制台"
 
-# 破坏性命令统一支持 --yes：缺省为预演（只打印将发生的变更），交互确认或 --yes 才执行。
+# 破坏性命令统一支持纯词 yes：缺省为预演（只打印将发生的变更），交互确认或命令末尾加 yes 才执行。
 YES_FLAGS = {"--yes", "-y"}
 DEFAULT_LOG_TAIL = 50
 
@@ -57,7 +57,7 @@ ROOM_COMMAND_WHITELIST: dict[str, set[str]] = {
         "damage", "heal", "treat", "end",
     },
     "rule": {"status", "check", "san", "item", "skill", "attr", "limits"},
-    "time": {"show", "status", "advance", "set", "help"},
+    "time": {"show", "status", "advance", "set", "correct", "help"},
     "interlude": {"status", "request", "start", "settle", "review", "care", "therapy", "end"},
 }
 
@@ -116,11 +116,11 @@ def _confirm_action(
     confirm: Callable[[str], bool] | None,
     prompt: str,
 ) -> RoomCommandResult:
-    """破坏性命令统一入口：``--yes`` 直接执行，否则预演 + 交互确认。"""
+    """破坏性命令统一入口：``yes`` 直接执行，否则预演 + 交互确认。"""
     if assume_yes:
         return apply()
     if confirm is None:
-        return RoomCommandResult(True, preview + "\n（预演模式：确认无误后加 yes 执行；旧 --yes 仍兼容）")
+        return RoomCommandResult(True, preview + "\n（预演模式：确认无误后加 yes 执行）")
     if confirm(f"{prompt} (y/N)"):
         return apply()
     return RoomCommandResult(True, preview + "\n（已取消，未执行）")

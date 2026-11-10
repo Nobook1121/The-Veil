@@ -376,7 +376,10 @@ def _opening_command(
         write_json_atomic(messages_path, existing[-200:])
         info["scenario_started_at"] = info.get("scenario_started_at") or time.strftime("%Y-%m-%d %H:%M:%S")
         info["scenario_started_by"] = info.get("scenario_started_by") or "console"
-        write_json_atomic(room_dir / "info.json", info)
+
+        from trpg_server import room_rules
+
+        room_rules.save_room_info(room_dir, info)
     payload = plan.to_dict()
     payload["published"] = bool(publish)
     payload["message_count"] = len(messages)

@@ -46,6 +46,8 @@ def _normalize_state(value: Any) -> dict[str, Any]:
         state["combat"] = None
     if not isinstance(state.get("chase"), dict):
         state["chase"] = None
+    if not isinstance(state.get("poison_queue"), list):
+        state["poison_queue"] = []
     state["rolling_summary"] = str(state.get("rolling_summary") or "")[:MAX_SUMMARY_LENGTH]
     state["event_log"] = [item for item in state["event_log"] if isinstance(item, dict)][-MAX_EVENT_LOG:]
     return state

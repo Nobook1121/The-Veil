@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.json_store import read_json
 from trpg_server.logging_config import log_user_action
 from trpg_server.room_mode import (
     MODE_PRESETS,
@@ -175,7 +175,7 @@ def archive_room(rooms_dir: Any, room_id: Any, *, app: Any = None) -> dict[str, 
     info["archived"] = True
     info.pop("house_rules", None)
     info["updated_at"] = now
-    write_json_atomic(room_dir / "info.json", info)
+    room_rules.save_room_info(room_dir, info)
 
     try:
         from trpg_server.agents.narrative.state_store import write_keyframe
@@ -204,7 +204,7 @@ def archive_room(rooms_dir: Any, room_id: Any, *, app: Any = None) -> dict[str, 
 
 
 def migrate_room_mode(rooms_dir: Any, room_id: Any, room_mode: str) -> dict[str, Any]:
-    """显式迁移房间模式（默认预演，调用方负责确认与 --yes）。
+    """显式迁移房间模式（默认预演，调用方负责确认或命令末尾加 yes）。
 
     模式创建后默认不可变；这是唯一的变更入口。迁移规则：
     - 目标 freeform：清空剧本绑定与场景指针（无剧本房间禁止再写剧本）；
@@ -242,7 +242,10 @@ def migrate_room_mode(rooms_dir: Any, room_id: Any, room_mode: str) -> dict[str,
     info["ai_kp_enabled"] = preset["ai_kp_enabled"]
     info["scenario_binding"] = preset["scenario_binding"]
     info["updated_at"] = _timestamp()
-    write_json_atomic(room_dir / "info.json", info)
+
+    from trpg_server import room_rules
+
+    room_rules.save_room_info(room_dir, info)
     logger.info(
         "room.mode.migrated room=%s from=%s to=%s removed_scenario=%s",
         info.get("id") or room_id,

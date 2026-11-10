@@ -197,7 +197,7 @@ def create_room():
     with card_binding_lock():
         conflict = _find_card_conflict(member.get("character_card"))
         if not conflict:
-            write_json_atomic(room_dir / "info.json", info)
+            _write_room(room_dir, info)
     if conflict:
         return _card_in_use_response(conflict)
     _write_messages(room_dir, [])
@@ -458,7 +458,7 @@ def migrate_room_scenario(room_id):
     updated["ruleset_id"] = builtin_registry().resolve(
         str(target.get("ruleset_id") or updated.get("ruleset_id") or "")
     ).id
-    write_json_atomic(room_dir / "info.json", updated)
+    _write_room(room_dir, updated)
     return success_response(_room_summary(updated), "Room migrated to scenario version")
 
 def _first_scene(target: dict) -> dict | None:
@@ -532,7 +532,7 @@ def switch_room_scenario(room_id):
         updated.pop("scenario_started_at", None)
         updated.pop("scenario_started_by", None)
     updated["updated_at"] = _timestamp()
-    write_json_atomic(room_dir / "info.json", updated)
+    _write_room(room_dir, updated)
 
     if preserve_progress:
         # 继承进度：保留线索/物品/任务/已触发事件/滚动摘要与开场状态，仅同步场景指针。

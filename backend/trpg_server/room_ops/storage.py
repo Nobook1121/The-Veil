@@ -60,8 +60,11 @@ def _read_room(room_dir):
     return read_json(room_dir / "info.json", default={})
 
 def _write_room(room_dir, info):
-    info["updated_at"] = _timestamp()
-    write_json_atomic(room_dir / "info.json", info)
+    # 统一走 room_rules.save_room_info：房间锁 + 锁内合并 game_clock，
+    # 避免加入/重连/房规保存这类旧快照把时间推进覆盖回去。
+    from trpg_server import room_rules
+
+    room_rules.save_room_info(room_dir, info)
 
 def _global_hints_enabled():
     """Global admin switch. When off, no room may enable action suggestions."""
