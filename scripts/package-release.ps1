@@ -3,7 +3,7 @@
 
   用法：
     powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Version 1.0.0
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Version 1.0.2
 
   产物：
     release/the-veil-v<版本>.zip
@@ -15,11 +15,28 @@
     - 保留预构建前端 dist/public、部署指南、许可证汇总、配置模板、示例剧本与最小运行资源。
 #>
 param(
-    [string]$Version = '1.0.0'
+    [string]$Version = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
+
+# 版本唯一真源：backend/trpg_server/version.py。显式传参只允许与它一致。
+$VersionFile = Join-Path $Root 'backend/trpg_server/version.py'
+if (-not (Test-Path $VersionFile)) {
+    throw "缺少版本真源文件: backend/trpg_server/version.py"
+}
+$VersionSource = [System.IO.File]::ReadAllText($VersionFile, [System.Text.Encoding]::UTF8)
+$VersionMatch = [regex]::Match($VersionSource, 'APP_VERSION\s*=\s*"([^"]+)"')
+if (-not $VersionMatch.Success) {
+    throw "无法从 version.py 解析 APP_VERSION"
+}
+$VersionFromFile = $VersionMatch.Groups[1].Value
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = $VersionFromFile
+} elseif ($Version -ne $VersionFromFile) {
+    throw "传入版本 $Version 与 version.py 的 $VersionFromFile 不一致"
+}
 $Name = "the-veil-v$Version"
 $Staging = Join-Path $env:TEMP "veil-release-$Name"
 $App = Join-Path $Staging $Name
@@ -254,6 +271,40 @@ Get-ChildItem -Path $App -Recurse -Force -File -Include '.env', '.gitignore' | F
 $brandConcepts = Join-Path $App 'frontend/src/assets/brand/concepts'
 if (Test-Path $brandConcepts) {
     Remove-Item -Path $brandConcepts -Recurse -Force
+}
+
+# ---------------------------------------------------------------- 构建清单与致谢校验
+# 发布包内写一份构建清单：关于页优先读 data/runtime/build.json，缺失时回退到这里。
+$Sha = 'local'
+if (Get-Command git -ErrorAction SilentlyContinue) {
+    $Sha = (git -C $Root rev-parse --short HEAD 2>$null)
+    if ([string]::IsNullOrWhiteSpace($Sha)) {
+        $Sha = 'local'
+    }
+}
+$Manifest = [ordered]@{
+    version  = $Version
+    mode     = 'release'
+    sha      = $Sha
+    built_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssK')
+    channel  = 'stable'
+}
+$ManifestPath = Join-Path $App 'backend/trpg_server/build_manifest.json'
+[System.IO.File]::WriteAllText(
+    $ManifestPath,
+    ($Manifest | ConvertTo-Json),
+    (New-Object System.Text.UTF8Encoding($false))
+)
+Write-Host "构建清单: version=$Version sha=$Sha" -ForegroundColor DarkGray
+
+# 占位符不允许进入发布包：credits.json 缺失或含 CHANGE_ME 都直接中止。
+$CreditsPath = Join-Path $App 'backend/trpg_server/resources/credits.json'
+if (-not (Test-Path $CreditsPath)) {
+    throw '缺少 backend/trpg_server/resources/credits.json'
+}
+$CreditsText = [System.IO.File]::ReadAllText($CreditsPath, [System.Text.Encoding]::UTF8)
+if ($CreditsText -match 'CHANGE_ME') {
+    throw 'credits.json 仍包含 CHANGE_ME 占位符，不能进入发布包'
 }
 
 # ---------------------------------------------------------------- 必需内容断言
