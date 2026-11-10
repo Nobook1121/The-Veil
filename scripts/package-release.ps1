@@ -321,6 +321,8 @@ $required = @(
     'backend/trpg_server/__init__.py',
     'data/character_skills.json',
     'data/assets/vendor/font-awesome',
+    'data/assets/vendor/bootstrap/bootstrap.min.css',
+    'data/assets/vendor/bootstrap/bootstrap.bundle.min.js',
     'data/scenarios/scenario-1793438085450/scenario.json'
 )
 foreach ($item in $required) {

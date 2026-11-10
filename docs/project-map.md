@@ -11,7 +11,7 @@
 技术栈：
 
 - 后端：Python 3.11+ / Flask 2.3 / Flask-SocketIO（线程模式）/ SQLite / JSON 文件存储
-- 前端：TypeScript + 原生 DOM（历史页面）+ React 19（侧边栏与首页聊天）/ Bootstrap 5（CDN）
+- 前端：TypeScript + 原生 DOM（历史页面）+ React 19（侧边栏与首页聊天）/ Bootstrap 5（本地随包）
 - 构建：`tsc`（legacy TS → `dist/public/js`）+ `esbuild`（React bundle、3D 骰子 bundle）
 - 3D 骰子：`three` + `cannon-es`（独立 bundle `dist/public/js/dice/dice3d.js`，按需加载）
 - AI：OpenAI 兼容接口（DeepSeek / OpenAI / 阿里百炼 / SiliconFlow / OpenRouter / LM Studio / 任意兼容端点）
@@ -192,8 +192,10 @@ Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送�
 - `data/tools/`：骰子/检定工具脚本
 - `locales/`：i18n JSON
 
-第三方前端库通过 CDN 引入（见 `index/fragments/05-platform-modals-and-scripts.html`）：
-Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓库内裁剪版 `qrcode-generator`（MIT）。
+第三方前端库的引入位置见 `index/fragments/01-head-and-sidebar.html`（样式）与
+`index/fragments/05-platform-modals-and-scripts.html`（脚本）：Bootstrap 5.3.0 由
+`data/assets/vendor/bootstrap/` 本地随包分发，Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16
+仍走 CDN。二维码为仓库内裁剪版 `qrcode-generator`（MIT）。
 
 ## 6. 数据布局（`data/`）
 
@@ -233,7 +235,7 @@ Bootstrap 5.3、Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16。二维码为仓
 - dependencies：`react`、`react-dom`（19.x）、`three` 0.180、`cannon-es` 0.20
 - devDependencies：`typescript` 5.x、`esbuild` 0.28、`@types/react`、`@types/react-dom`、`@types/three` 0.180
 - `three` / `cannon-es` 仅用于 3D 骰子 bundle，均为 MIT
-- 运行时前端库走 CDN：Bootstrap、Socket.IO client、marked、DOMPurify
+- 运行时前端库：Bootstrap 5.3 本地随包（`data/assets/vendor/bootstrap/`），Socket.IO client、marked、DOMPurify 走 CDN
 - 仓库内置：裁剪版 qrcode-generator
 
 许可证与合规：见 [THIRD-PARTY-LICENSES.md](../THIRD-PARTY-LICENSES.md)。**PyMuPDF 为 AGPL-3.0 / Artifex 商业双许可**，分发前必须确认。

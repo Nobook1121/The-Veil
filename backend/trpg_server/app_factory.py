@@ -37,7 +37,8 @@ socketio = SocketIO(async_mode="threading")
 logger = logging.getLogger(__name__)
 
 # 安全响应头。CSP 的白名单与前端实际引用的资源保持一致：
-# 脚本来自自身站点、jsDelivr（Bootstrap/marked/DOMPurify）与 cdn.socket.io；
+# 脚本来自自身站点、jsDelivr（marked/DOMPurify）与 cdn.socket.io；
+# Bootstrap 5.3.0 已随包本地分发（/assets/vendor/bootstrap/），不再需要外域。
 # 图片/媒体/请求目标放宽到 http(s)，因为 KP 可在消息里引用外链素材，
 # 且 AI 平台的「测试连接」会直连管理员配置的任意地址（含本机 LM Studio）。
 CONTENT_SECURITY_POLICY = "; ".join([
