@@ -201,6 +201,21 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec("max_entries", "room_console", ("max_entries",), clamped_int(minimum=50, maximum=5000), 500),
     FieldSpec("view_role", "room_console", ("view_role",), as_text, "admin"),
     FieldSpec("execute_role", "room_console", ("execute_role",), as_text, "admin"),
+    # [room_log]
+    # 团录导出：单次最多消息数、产物保留天数、并发导出数与字体覆盖路径。
+    FieldSpec("enabled", "room_log", ("enabled",), as_bool, True),
+    FieldSpec("members_can_export", "room_log", ("members_can_export",), as_bool, True),
+    FieldSpec("default_template", "room_log", ("default_template",), as_text, "archive"),
+    FieldSpec("include_ooc", "room_log", ("include_ooc",), as_bool, True),
+    FieldSpec("include_dice", "room_log", ("include_dice",), as_bool, True),
+    FieldSpec("include_images", "room_log", ("include_images",), as_bool, True),
+    FieldSpec("max_messages_per_export", "room_log", ("max_messages_per_export",),
+              clamped_int(minimum=100, maximum=200000), 20000),
+    FieldSpec("keep_exports_days", "room_log", ("keep_exports_days",),
+              clamped_int(minimum=0, maximum=365), 7),
+    FieldSpec("max_concurrent_exports", "room_log", ("max_concurrent_exports",),
+              clamped_int(minimum=1, maximum=4), 2),
+    FieldSpec("font_file", "room_log", ("font_file",), as_text, ""),
     # [rooms]
     # 未激活房间自动回收期限（天）；0 表示不回收。只清理未归档、无活跃成员且
     # 最后活动时间超过阈值的房间，不触碰角色卡与用户数据。

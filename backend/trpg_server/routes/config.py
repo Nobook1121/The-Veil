@@ -91,6 +91,8 @@ def _get_permission_config_file():
 def _config_permission_node(config_name):
     return {
         "general": "settings.general",
+        # 团录导出配置属于站点级设置，沿用「常规设置」的权限口径。
+        "room_log": "settings.general",
     }.get(config_name, "settings.general")
 
 

@@ -366,6 +366,7 @@ def register_blueprints(app):
     from trpg_server.routes.rooms import bp as rooms_bp
     from trpg_server.routes.room_narrative import bp as room_narrative_bp
     from trpg_server.routes.room_console import bp as room_console_bp
+    from trpg_server.routes.room_log import bp as room_log_bp
     from trpg_server.routes.room_rules import bp as room_rules_bp
     from trpg_server.routes.dice_rolls import bp as dice_rolls_bp
     from trpg_server.routes.dice_textures import bp as dice_textures_bp
@@ -402,6 +403,7 @@ def register_blueprints(app):
     app.register_blueprint(rooms_bp)
     app.register_blueprint(room_narrative_bp)
     app.register_blueprint(room_console_bp)
+    app.register_blueprint(room_log_bp)
     app.register_blueprint(room_rules_bp)
     app.register_blueprint(dice_rolls_bp)
     app.register_blueprint(dice_textures_bp)

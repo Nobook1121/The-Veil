@@ -31,6 +31,22 @@ max_entries = 500
 view_role = "admin"
 execute_role = "admin"
 
+[room_log]
+# 团录导出 PDF：离线渲染，产物默认保留在 data/runtime/logs/exports/。
+# max_messages_per_export：单次导出最多消息数，超出后截断并在封面标注。
+# keep_exports_days：产物保留天数，0 表示不自动清理。
+# font_file：可选的中文字体绝对路径；留空则自动探测系统字体（黑体/雅黑/宋体）。
+enabled = true
+members_can_export = true
+default_template = "archive"
+include_ooc = true
+include_dice = true
+include_images = true
+max_messages_per_export = 20000
+keep_exports_days = 7
+max_concurrent_exports = 2
+font_file = ""
+
 [rooms]
 # 未激活房间自动回收期限（天）。只清理未归档、无活跃成员且最后活动时间超过
 # 该天数的房间，服务启动后与每天各检查一次；0 表示不回收。

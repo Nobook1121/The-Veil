@@ -78,8 +78,8 @@ def render_pdf(
     template_id = str(template or (document.get("options") or {}).get("template") or DEFAULT_TEMPLATE)
     meta = load_template(template_id)
     root = template_root(template_id)
-    css = font_css(font_path or resolve_font()[1]) + "\n" + (root / "print.css").read_text(encoding="utf-8")
     resolved_font_path = str(font_path) if font_path else resolve_font()[1]
+    css = font_css(resolved_font_path) + "\n" + (root / "print.css").read_text(encoding="utf-8")
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -131,11 +131,11 @@ def render_pdf(
         final_doc = pymupdf.open()
         cover_file = temp_root / "cover.pdf"
         if meta.get("cover", True) and cover_file.is_file():
-            final_doc.insert_pdf(_open_quiet(cover_file))
+            _insert_pdf(final_doc, cover_file)
         if toc_path is not None:
-            final_doc.insert_pdf(_open_quiet(toc_path))
+            _insert_pdf(final_doc, toc_path)
         for path in chapter_files:
-            final_doc.insert_pdf(_open_quiet(path))
+            _insert_pdf(final_doc, path)
 
         _write_footer(final_doc, resolved_font_path, skip_pages=cover_pages)
         final_doc.set_metadata(
@@ -443,6 +443,15 @@ def _page_count(path: Path) -> int:
 
 def _open_quiet(path: Path):
     return pymupdf.open(str(path))
+
+
+def _insert_pdf(target, path: Path) -> None:
+    """合并后立刻关闭源文档：Windows 上未关闭的句柄会导致临时目录删不掉。"""
+    source = _open_quiet(path)
+    try:
+        target.insert_pdf(source)
+    finally:
+        source.close()
 
 
 def _hex_to_rgb(value: str) -> tuple[float, float, float]:

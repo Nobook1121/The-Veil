@@ -5,15 +5,18 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
 import pymupdf
 
+from trpg_server.app_factory import create_app
 from trpg_server.room_log import fonts as room_log_fonts
 from trpg_server.room_log.markdown import to_html
 from trpg_server.room_log.model import build_document, resolve_image_path
 from trpg_server.room_log.render import RenderError, render_pdf
+from trpg_server.routes import room_log as room_log_routes
 
 
 def _write_room(root: Path, messages: list[dict], members: list[dict] | None = None) -> Path:
@@ -356,3 +359,252 @@ def test_render_pdf_rejects_empty_document(tmp_path):
     document = build_document(_write_room(tmp_path / "room", []), data_dir=tmp_path / "data")
     with pytest.raises(RenderError):
         render_pdf(document, tmp_path / "empty.pdf", data_dir=tmp_path / "data")
+
+
+# ---------------------------------------------------------------- P2 接口
+
+
+class _FakeManager:
+    def __init__(self, role="USER"):
+        self.role = role
+
+    def is_session_current(self, _user_id, _token):
+        return True
+
+    def get_user_by_id(self, user_id):
+        return {"id": user_id, "username": "tester", "role": self.role}
+
+
+def _api_app(tmp_path, role="USER"):
+    return create_app(
+        {
+            "TESTING": True,
+            "USER_MANAGER": _FakeManager(role),
+            "CONFIG_DIR": tmp_path / "config",
+            "ROOMS_DIR": tmp_path / "rooms",
+            "SCENARIOS_DIR": tmp_path / "scenarios",
+            "CHARACTERS_DIR": tmp_path / "characters",
+            "ROOM_ARCHIVES_DIR": tmp_path / "room-archives",
+            "HISTORY_DIR": tmp_path / "history",
+            "ROOM_LOG_EXPORT_DIR": tmp_path / "exports",
+        }
+    )
+
+
+def _login(client, user_id=1, username="tester", role="USER"):
+    with client.session_transaction() as session:
+        session.update(
+            user_id=user_id,
+            username=username,
+            role=role,
+            session_token="token",
+            csrf_token="csrf",
+        )
+
+
+def _api_room(tmp_path, *, messages=None, members_can_export=None):
+    room_id = "r-log"
+    room_dir = tmp_path / "rooms" / room_id
+    room_dir.mkdir(parents=True, exist_ok=True)
+    info = {
+        "id": room_id,
+        "name": "谢娘娘点化",
+        "creator_id": 1,
+        "scenario_title": "《谢娘娘点化》",
+        "members": [
+            {"user_id": 1, "username": "owner", "role": "USER", "status": "active",
+             "is_active": True, "room_role": "owner"},
+            {"user_id": 2, "username": "player", "role": "USER", "status": "active",
+             "is_active": True, "room_role": "member"},
+        ],
+    }
+    (room_dir / "info.json").write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+    default_messages = [
+        _msg("第一天，夜色沉沉。", created_at="2026-10-01 20:00:00"),
+        _msg("(( 场外讨论 ))", created_at="2026-10-01 20:01:00"),
+        _msg("我推开门。", msg_type="player", sender_id=2, sender_name="player",
+             created_at="2026-10-01 20:02:00"),
+    ]
+    (room_dir / "messages.json").write_text(
+        json.dumps(messages if messages is not None else default_messages, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    if members_can_export is not None:
+        config_dir = tmp_path / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "general.toml").write_text(
+            f"[room_log]\nmembers_can_export = {str(members_can_export).lower()}\n",
+            encoding="utf-8",
+        )
+    return room_id
+
+
+def test_preview_returns_contract_fields(tmp_path):
+    room_id = _api_room(tmp_path)
+    client = _api_app(tmp_path).test_client()
+    _login(client, user_id=2, username="player")
+
+    response = client.get(f"/api/rooms/{room_id}/log/preview")
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["can_export"] is True
+    assert data["can_export_reason"] is None
+    assert [item["id"] for item in data["templates"]] == ["archive"]
+    assert data["templates"][0]["name"]
+    assert data["templates"][0]["available"] is True
+    assert data["stats"]["estimated_pages"] > 0
+
+
+def test_preview_options_change_stats(tmp_path):
+    room_id = _api_room(tmp_path)
+    client = _api_app(tmp_path).test_client()
+    _login(client)
+
+    with_ooc = client.get(f"/api/rooms/{room_id}/log/preview?include_ooc=1").get_json()["data"]
+    without_ooc = client.get(f"/api/rooms/{room_id}/log/preview?include_ooc=0").get_json()["data"]
+    assert with_ooc["stats"]["messages_exported"] == 3
+    assert without_ooc["stats"]["messages_exported"] == 2
+
+
+def test_preview_rejects_non_member(tmp_path):
+    room_id = _api_room(tmp_path)
+    client = _api_app(tmp_path).test_client()
+    _login(client, user_id=99, username="stranger")
+
+    response = client.get(f"/api/rooms/{room_id}/log/preview")
+
+    assert response.status_code == 403
+    assert response.get_json()["error"] == "log.forbidden"
+
+
+def test_preview_members_disabled_reports_reason(tmp_path):
+    room_id = _api_room(tmp_path, members_can_export=False)
+
+    player_client = _api_app(tmp_path).test_client()
+    _login(player_client, user_id=2, username="player")
+    data = player_client.get(f"/api/rooms/{room_id}/log/preview").get_json()["data"]
+    assert data["can_export"] is False
+    assert data["can_export_reason"] == "members_disabled"
+
+    owner_client = _api_app(tmp_path).test_client()
+    _login(owner_client, user_id=1, username="owner")
+    owner_data = owner_client.get(f"/api/rooms/{room_id}/log/preview").get_json()["data"]
+    assert owner_data["can_export"] is True
+
+
+def test_preview_reports_font_missing_without_503(tmp_path, monkeypatch):
+    room_id = _api_room(tmp_path)
+    monkeypatch.setattr(
+        room_log_routes, "resolve_font", lambda *_a, **_k: (_ for _ in ()).throw(room_log_fonts.FontMissing())
+    )
+    client = _api_app(tmp_path).test_client()
+    _login(client)
+
+    response = client.get(f"/api/rooms/{room_id}/log/preview")
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["can_export"] is False
+    assert data["can_export_reason"] == "font_missing"
+    assert data["templates"][0]["available"] is False
+
+
+def test_create_export_rejects_normal_member_when_disabled(tmp_path):
+    room_id = _api_room(tmp_path, members_can_export=False)
+    client = _api_app(tmp_path).test_client()
+    _login(client, user_id=2, username="player")
+
+    response = client.post(
+        f"/api/rooms/{room_id}/log/exports",
+        json={"template": "archive"},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["error"] == "log.forbidden"
+
+
+def test_create_export_empty_room_reports_empty(tmp_path):
+    room_id = _api_room(tmp_path, messages=[])
+    client = _api_app(tmp_path).test_client()
+    _login(client)
+
+    response = client.post(
+        f"/api/rooms/{room_id}/log/exports",
+        json={"template": "archive"},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "log.empty"
+
+
+def test_create_export_returns_503_when_font_missing(tmp_path, monkeypatch):
+    room_id = _api_room(tmp_path)
+    monkeypatch.setattr(
+        room_log_routes, "resolve_font", lambda *_a, **_k: (_ for _ in ()).throw(room_log_fonts.FontMissing())
+    )
+    client = _api_app(tmp_path).test_client()
+    _login(client)
+
+    response = client.post(
+        f"/api/rooms/{room_id}/log/exports",
+        json={"template": "archive"},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+
+    assert response.status_code == 503
+    assert response.get_json()["error"] == "log.font_missing"
+
+
+def test_export_job_completes_and_downloads_pdf(tmp_path):
+    room_id = _api_room(tmp_path)
+    client = _api_app(tmp_path).test_client()
+    _login(client)
+
+    created = client.post(
+        f"/api/rooms/{room_id}/log/exports",
+        json={"template": "archive", "include_ooc": False},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert created.status_code == 202
+    job = created.get_json()["data"]
+    export_id = job["export_id"]
+    assert job["status"] == "queued"
+
+    status = None
+    for _ in range(200):
+        payload = client.get(f"/api/rooms/{room_id}/log/exports/{export_id}").get_json()["data"]
+        if payload["status"] in {"done", "failed"}:
+            status = payload
+            break
+        time.sleep(0.05)
+
+    assert status is not None and status["status"] == "done", status
+    assert status["file"]["pages"] > 0
+    assert status["file"]["bytes"] > 0
+
+    download = client.get(f"/api/rooms/{room_id}/log/exports/{export_id}/file")
+    assert download.status_code == 200
+    assert download.mimetype == "application/pdf"
+    assert "attachment" in download.headers["Content-Disposition"]
+    assert download.headers["Content-Disposition"].endswith(".pdf")
+
+    stranger = _api_app(tmp_path).test_client()
+    _login(stranger, user_id=99, username="stranger")
+    denied = stranger.get(f"/api/rooms/{room_id}/log/exports/{export_id}/file")
+    assert denied.status_code == 403
+    assert denied.get_json()["error"] == "log.forbidden"
+
+
+def test_export_job_not_found(tmp_path):
+    room_id = _api_room(tmp_path)
+    client = _api_app(tmp_path).test_client()
+    _login(client)
+
+    response = client.get(f"/api/rooms/{room_id}/log/exports/deadbeef")
+
+    assert response.status_code == 404
+    assert response.get_json()["error"] == "log.export_not_found"
+
