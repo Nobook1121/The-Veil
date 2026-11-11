@@ -69,6 +69,8 @@ htmlcov/
 *.old
 /tmp/
 /temp/
+/.pytest-temp/
+/.pytest-temp-global/
 
 # Package manager debug logs
 npm-debug.log*

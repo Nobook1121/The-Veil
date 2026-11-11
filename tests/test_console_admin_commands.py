@@ -304,12 +304,33 @@ def test_backup_create_preview_and_apply(tmp_path, monkeypatch):
 
     out_dir = (tmp_path / "backups").as_posix()
 
-    preview = execute_console_command(f"backup create --out {out_dir}")
+    preview = execute_console_command(f'backup create --out "{out_dir}"')
     assert preview.ok and "预演" in preview.message
 
-    created = execute_console_command(f"backup create --out {out_dir} --yes")
+    created = execute_console_command(f'backup create --out "{out_dir}" --yes')
     assert created.ok and "备份已完成" in created.message
     assert list(Path(out_dir).glob("*.zip"))
+
+
+def test_backup_create_accepts_quoted_out_dir_with_spaces(tmp_path, monkeypatch):
+    """带空格的输出目录必须用引号包裹，解析后仍是一个参数。"""
+    from trpg_server import backup_admin
+    from trpg_server.console_commands import execute_console_command
+
+    source = tmp_path / "cfg"
+    source.mkdir()
+    (source / "a.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(backup_admin, "_BACKUP_SOURCES", {"config": source})
+
+    out_dir = tmp_path / "with space" / "backups"
+
+    preview = execute_console_command(f'backup create --out "{out_dir.as_posix()}"')
+    assert preview.ok and "预演" in preview.message
+
+    created = execute_console_command(f'backup create --out "{out_dir.as_posix()}" --yes')
+    assert created.ok, created.message
+    assert "备份已完成" in created.message
+    assert list(out_dir.glob("*.zip"))
 
 
 def test_network_status_command():
