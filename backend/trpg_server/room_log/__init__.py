@@ -1,9 +1,13 @@
-"""房间级日志（内嵌 Web 控制台）存储与事件桥接。
+"""房间级日志（内嵌 Web 控制台）存储与事件桥接，兼团录导出包的入口。
 
 房间事件不再写入 root logger（避免刷屏服务器控制台），而是落到房间目录下的
 ``console.jsonl``（JSONL 追加写，超限裁剪），随房间目录一起保留、随房间归档
 一并归档。本模块不依赖 Flask 上下文，仅使用 ``json_store`` / ``settings``，
 并通过注入的广播回调把新条目实时推送给房间内的在线用户。
+
+导出相关能力放在同包子模块（``model`` / ``markdown`` / ``fonts`` / ``render`` /
+``jobs``）。为避免 ``import trpg_server.room_log`` 时连带导入 PyMuPDF，这里用
+PEP 562 的模块级 ``__getattr__`` 做惰性导出。
 """
 from __future__ import annotations
 
@@ -267,3 +271,23 @@ def log_room_event(
     if settings.get("mirror_to_server_console") and logger_ is not None:
         log_user_action(logger_, message, **details)
     return entry
+
+
+_LAZY_EXPORTS = {
+    "build_document": (".model", "build_document"),
+    "normalize_options": (".model", "normalize_options"),
+    "resolve_image_path": (".model", "resolve_image_path"),
+    "resolve_font": (".fonts", "resolve_font"),
+    "FontMissing": (".fonts", "FontMissing"),
+    "render_pdf": (".render", "render_pdf"),
+}
+
+
+def __getattr__(name):
+    target = _LAZY_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from importlib import import_module
+
+    module = import_module(target[0], __name__)
+    return getattr(module, target[1])
