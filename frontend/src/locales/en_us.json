@@ -1079,8 +1079,6 @@
     "settings.search.empty": "No matching settings. Try another keyword.",
     "settings.hint.show": "Show description",
     "settings.hint.hide": "Hide description",
-    "settings.hint.section": "Details",
-    "settings.hint.hide_section": "Hide",
     "settings.section.notifications": "Notification settings",
     "settings.notifications.sound": "Enable sound",
     "settings.notifications.desktop": "Enable desktop notifications",

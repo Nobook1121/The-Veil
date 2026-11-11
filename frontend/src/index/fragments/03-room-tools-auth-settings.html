@@ -1550,15 +1550,15 @@
                                 <div class="tool-panel-header"><h4>知识库管理</h4><span>查看剧本与规则知识库状态、位置及向量数量</span></div>
                                 <div id="embeddingModelStatus" class="embedding-status" data-state="loading" aria-label="Embedding 模型状态">
                                     <span class="embedding-status-dot" aria-hidden="true"></span>
-                                    <div class="embedding-status-main">
-                                        <p class="embedding-status-title" data-embedding-title role="status" aria-live="polite">正在检查 Embedding 模型…</p>
+                                    <div class="embedding-status-main setting-hint-host">
+                                        <p class="embedding-status-title" role="status" aria-live="polite"><span data-embedding-title>正在检查 Embedding 模型…</span><button class="setting-hint-toggle" type="button" id="embeddingStatusInfo" title="显示说明" aria-label="显示说明" aria-expanded="false" hidden><i class="fa fa-info-circle" aria-hidden="true"></i></button></p>
                                         <div class="embedding-status-metrics">
                                             <span class="embedding-status-chip" data-embedding-model hidden></span>
                                             <span class="embedding-status-chip" data-embedding-dimensions hidden></span>
                                             <span class="embedding-status-chip" data-embedding-backend hidden></span>
                                             <span class="embedding-status-chip" data-embedding-indexed hidden></span>
                                         </div>
-                                        <p class="embedding-status-note" data-embedding-note hidden></p>
+                                        <p class="embedding-status-note setting-hint" data-embedding-note></p>
                                     </div>
                                     <button class="btn btn-sm btn-outline-secondary embedding-status-refresh" id="embeddingStatusRefresh" type="button">刷新状态</button>
                                 </div>

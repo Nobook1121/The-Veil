@@ -1079,8 +1079,6 @@
     "settings.search.empty": "没有匹配的设置，换个关键词试试",
     "settings.hint.show": "显示说明",
     "settings.hint.hide": "收起说明",
-    "settings.hint.section": "说明",
-    "settings.hint.hide_section": "收起",
     "settings.section.notifications": "通知设置",
     "settings.notifications.sound": "启用提示音",
     "settings.notifications.desktop": "启用桌面通知",

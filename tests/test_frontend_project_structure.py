@@ -235,6 +235,28 @@ def test_user_changed_event_fires_after_admin_navigation_refresh():
     assert state_ts.index("window.refreshAdminNavigation?.()") < state_ts.index('dispatchEvent(new CustomEvent("trpg:user-changed"')
 
 
+def test_settings_descriptions_are_collapsed_behind_one_info_toggle():
+    assistant = (ROOT / "frontend/src/app/settings/settingsAssistant.ts").read_text(encoding="utf-8")
+    settings_fragment = (ROOT / "frontend/src/index/fragments/03-room-tools-auth-settings.html").read_text(encoding="utf-8")
+    styles = (ROOT / "frontend/src/styles/03-tools-settings-platform.css").read_text(encoding="utf-8")
+
+    # 分区描述、面板头说明与条目帮助文字走同一套 setting-hint 收起机制。
+    assert "INFO_HINT_SELECTOR" in assistant
+    assert ".settings-section-desc" in assistant
+    assert ".tool-panel-header > span" in assistant
+    assert 'hint.classList.add("setting-hint")' in assistant
+    assert "new MutationObserver(schedule)" in assistant
+    # 旧的「说明/收起」文字按钮已并入 ⓘ，不应残留。
+    assert "setting-section-hint" not in assistant
+    assert "setting-section-toggle" not in assistant
+    assert "setting-section-hint" not in styles
+    assert "setting-section-toggle" not in styles
+    assert ".setting-hint-toggle" in styles
+    # 状态条说明也收进 ⓘ，错误结论留在常显标题里。
+    assert 'id="embeddingStatusInfo"' in settings_fragment
+    assert 'class="embedding-status-note setting-hint"' in settings_fragment
+
+
 def test_improvement_sidebar_exposes_discovery_and_admin_gated_settings():
     sidebar = (ROOT / "frontend/src/react/shell/Sidebar.tsx").read_text(encoding="utf-8")
 

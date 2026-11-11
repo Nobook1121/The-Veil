@@ -15,17 +15,11 @@ const SettingsAssistant = (() => {
     }
 
     const EXCLUDED = [
-        ".permission-settings-panel",
         ".permission-matrix",
-        ".user-management-panel",
-        ".role-config-settings",
         ".settings-search",
         ".table-responsive",
         ".modal",
         "#adminDiceTextures",
-        "#adminDiceTexturesSection",
-        "#ai-platforms-container",
-        "#aiPlatformsContainer",
         "#knowledgeList",
         ".about-hero",
         ".about-links",
@@ -36,10 +30,34 @@ const SettingsAssistant = (() => {
         "#aboutDependencies",
         "[data-settings-assist='off']",
     ].join(", ");
+    // 标题旁的说明块：分区描述、面板头说明、条目下帮助文字都走同一套收起机制。
+    const INFO_HINT_SELECTOR = [
+        ".settings-section-desc",
+        "p.text-muted",
+        "small.text-muted",
+        "small.form-text",
+        ".form-text",
+        ".tool-panel-header > span",
+    ].join(", ");
+    // 实时状态、错误提示、表格与详情列表不是「设置说明」，保持常显。
+    const INFO_EXCLUDED = [
+        ".settings-message",
+        ".table-responsive",
+        ".settings-search",
+        ".modal",
+        "#updateNotes",
+        "#sponsorList",
+        "#aboutDependencies",
+        "#aboutContributors",
+        "#aiTokenSegmentSummary",
+        "[data-settings-assist='off']",
+    ].join(", ");
     const HINT_SELECTOR = "small.form-text, small.text-muted, .form-text";
     const HIGHLIGHT_CLASS = "settings-search-highlight";
 
     let initialized = false;
+    let hintGroupSeq = 0;
+    const hintGroups = new WeakMap<HTMLElement, string>();
 
     function t(key: string, fallback: string): string {
         return window.TrpgI18n?.t(key, fallback) || fallback;
@@ -61,19 +79,14 @@ const SettingsAssistant = (() => {
         return Boolean(element?.closest(EXCLUDED));
     }
 
-    function createHintToggle(label?: string): HTMLButtonElement {
+    function createHintToggle(): HTMLButtonElement {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "setting-hint-toggle";
         button.dataset.i18nDynamic = "true";
-        if (label) {
-            button.textContent = label;
-            button.classList.add("setting-section-toggle");
-        } else {
-            button.innerHTML = '<i class="fa fa-info-circle" aria-hidden="true"></i>';
-            button.title = t("settings.hint.show", "显示说明");
-            button.setAttribute("aria-label", button.title);
-        }
+        button.innerHTML = '<i class="fa fa-info-circle" aria-hidden="true"></i>';
+        button.title = t("settings.hint.show", "显示说明");
+        button.setAttribute("aria-label", button.title);
         button.setAttribute("aria-expanded", "false");
         return button;
     }
@@ -82,14 +95,8 @@ const SettingsAssistant = (() => {
         const open = !host.classList.contains("setting-hint-open");
         host.classList.toggle("setting-hint-open", open);
         toggle.setAttribute("aria-expanded", String(open));
-        if (!labelToggle(toggle) && toggle.title) {
-            toggle.title = open ? t("settings.hint.hide", "收起说明") : t("settings.hint.show", "显示说明");
-            toggle.setAttribute("aria-label", toggle.title);
-        }
-    }
-
-    function labelToggle(toggle: HTMLButtonElement): boolean {
-        return toggle.classList.contains("setting-section-toggle");
+        toggle.title = open ? t("settings.hint.hide", "收起说明") : t("settings.hint.show", "显示说明");
+        toggle.setAttribute("aria-label", toggle.title);
     }
 
     /** 设置项说明：默认隐藏，点击 ⓘ / 聚焦控件后展开。 */
@@ -101,10 +108,11 @@ const SettingsAssistant = (() => {
             if (group.classList.contains("form-check") && group.closest(".form-group")) return;
 
             const hints = Array.from(group.querySelectorAll<HTMLElement>(HINT_SELECTOR))
-                .filter((hint) => !isExcluded(hint) && !hint.closest(".setting-section-hint"));
+                .filter((hint) => !isExcluded(hint) && !hint.closest(".setting-hint") && !hint.closest(INFO_EXCLUDED));
             const anchor = group.querySelector<HTMLElement>(":scope > label")
                 || group.querySelector<HTMLElement>(".form-check-label")
-                || group.querySelector<HTMLElement>(":scope > .form-check");
+                || group.querySelector<HTMLElement>(":scope > .form-check")
+                || group.querySelector<HTMLElement>(":scope > h4, :scope > h5, :scope > h6");
             // 没有标题的分组（按钮行、状态块）不进索引；有标题但无说明的分组仍要能被搜索命中。
             if (!anchor) return;
 
@@ -133,39 +141,80 @@ const SettingsAssistant = (() => {
         });
     }
 
-    /** 分区级说明（整段灰色文字）：收进标题旁的「说明」按钮。 */
-    function decorateSections(content: HTMLElement): void {
-        content.querySelectorAll<HTMLElement>(".mb-4").forEach((section) => {
-            if (isExcluded(section)) return;
-            const hints = Array.from(section.children).filter((child) => {
-                if (!(child instanceof HTMLElement)) return false;
-                if (child.id || child.dataset.noSettingsHint !== undefined) return false;
-                return child.matches("small.form-text, small.text-muted, .form-text")
-                    || (child.matches("p") && child.classList.contains("text-muted"));
-            }) as HTMLElement[];
-            if (hints.length === 0) return;
+    /** 找到说明块所属的标题：标题可能紧邻其前，也可能在同一容器内。 */
+    function anchorHeading(hint: HTMLElement): HTMLElement | null {
+        let node: HTMLElement | null = hint;
+        for (let depth = 0; node && depth < 4; depth += 1) {
+            let sibling = node.previousElementSibling;
+            while (sibling) {
+                if (sibling.matches("h1, h2, h3, h4, h5, h6")) return sibling as HTMLElement;
+                // 允许标题藏在一层容器里（如 .settings-section-head > .settings-section-heading > h3）。
+                const nested = sibling.querySelector<HTMLElement>(":scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6, :scope > * > h1, :scope > * > h2, :scope > * > h3, :scope > * > h4, :scope > * > h5, :scope > * > h6");
+                if (nested) return nested;
+                sibling = sibling.previousElementSibling;
+            }
+            node = node.parentElement;
+            if (!node || node.classList.contains("settings-content")) return null;
+        }
+        return null;
+    }
 
-            const heading = section.querySelector<HTMLElement>(":scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6");
+    /** 标题与它名下所有说明的最近共同容器：一个标题只挂一个 ⓘ。 */
+    function sharedHost(heading: HTMLElement, hints: HTMLElement[]): HTMLElement | null {
+        let host = heading.parentElement;
+        while (host && !hints.every((hint) => host!.contains(hint))) {
+            host = host.parentElement;
+        }
+        return host;
+    }
+
+    function hintGroupOf(host: HTMLElement): string {
+        const existing = hintGroups.get(host);
+        if (existing) return existing;
+        hintGroupSeq += 1;
+        const group = `hint-${hintGroupSeq}`;
+        hintGroups.set(host, group);
+        host.dataset.hintGroup = group;
+        host.classList.add("setting-hint-host");
+        return group;
+    }
+
+    /**
+     * 面板头与分区标题的说明统一收起：说明块默认隐藏，标题后插入 ⓘ，
+     * 点击 ⓘ 或聚焦该区域的控件时展开。与表单分组共用同一套类名与交互。
+     */
+    function decorateInfoBlocks(content: HTMLElement): void {
+        const pending = new Map<HTMLElement, HTMLElement[]>();
+        content.querySelectorAll<HTMLElement>(INFO_HINT_SELECTOR).forEach((hint) => {
+            if (hint.dataset.hintDecorated === "1") return;
+            // 带 id 的实时文本、状态提示与错误信息不是「设置说明」，保持常显。
+            if (hint.id || hint.closest(INFO_EXCLUDED) || isExcluded(hint)) return;
+            // 表单分组内的说明交给 decorateGroups，避免同一处出现两个 ⓘ。
+            if (hint.closest(".form-group, .form-check")) return;
+            const heading = anchorHeading(hint);
             if (!heading) return;
+            const list = pending.get(heading) || [];
+            list.push(hint);
+            pending.set(heading, list);
+        });
 
-            hints.forEach((hint) => hint.classList.add("setting-section-hint"));
-            const toggle = createHintToggle(t("settings.hint.section", "说明"));
-            // 标题与「说明」按钮放在同一行，避免按钮独占一行挤到标题下方。
-            const headingRow = document.createElement("div");
-            headingRow.className = "setting-section-heading";
-            heading.insertAdjacentElement("beforebegin", headingRow);
-            headingRow.appendChild(heading);
-            headingRow.appendChild(toggle);
+        pending.forEach((hints, heading) => {
+            const host = sharedHost(heading, hints);
+            if (!host) return;
+            hints.forEach((hint) => {
+                hint.dataset.hintDecorated = "1";
+                hint.classList.add("setting-hint");
+            });
+            const group = hintGroupOf(host);
+            if (heading.querySelector(`.setting-hint-toggle[data-hint-group="${group}"]`)) return;
 
-            const setOpen = (open: boolean): void => {
-                hints.forEach((hint) => hint.classList.toggle("setting-hint-open", open));
-                toggle.setAttribute("aria-expanded", String(open));
-                toggle.textContent = open ? t("settings.hint.hide_section", "收起") : t("settings.hint.section", "说明");
-            };
-            toggle.addEventListener("click", (event) => {
+            const button = createHintToggle();
+            button.dataset.hintGroup = group;
+            heading.appendChild(button);
+            button.addEventListener("click", (event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                setOpen(toggle.getAttribute("aria-expanded") !== "true");
+                toggleHintHost(host, button);
             });
         });
     }
@@ -193,12 +242,12 @@ const SettingsAssistant = (() => {
                 entries.push({ tab, host, title, hint, section: sectionTitle(host), kind: "setting" });
             });
 
-            content.querySelectorAll<HTMLElement>(".mb-4, .settings-section").forEach((section) => {
+            content.querySelectorAll<HTMLElement>(".settings-section, .mb-4, .about-card, .tool-panel, .permission-settings-panel").forEach((section) => {
                 if (isExcluded(section)) return;
                 const heading = section.querySelector<HTMLElement>("h1, h2, h3, h4, h5, h6");
                 const title = headingText(heading);
                 if (!title) return;
-                const hint = Array.from(section.querySelectorAll<HTMLElement>(".settings-section-desc, .setting-section-hint"))
+                const hint = Array.from(section.querySelectorAll<HTMLElement>(".setting-hint"))
                     .map((child) => headingText(child))
                     .join(" ");
                 entries.push({ tab, host: section, title, hint, section: "", kind: "section" });
@@ -279,12 +328,9 @@ const SettingsAssistant = (() => {
         entry.host.classList.add(HIGHLIGHT_CLASS);
         window.setTimeout(() => entry.host.classList.remove(HIGHLIGHT_CLASS), 2600);
 
-        if (entry.kind === "section") {
-            entry.host.querySelectorAll<HTMLElement>(".setting-section-hint").forEach((hint) => hint.classList.add("setting-hint-open"));
-        } else {
-            entry.host.classList.add("setting-hint-open");
-            entry.host.querySelectorAll<HTMLElement>(".setting-hint-toggle").forEach((toggle) => toggle.setAttribute("aria-expanded", "true"));
-        }
+        entry.host.querySelectorAll<HTMLElement>(".setting-hint-host").forEach((host) => host.classList.add("setting-hint-open"));
+        if (entry.kind !== "section") entry.host.classList.add("setting-hint-open");
+        entry.host.querySelectorAll<HTMLElement>(".setting-hint-toggle").forEach((toggle) => toggle.setAttribute("aria-expanded", "true"));
         window.requestAnimationFrame(() => {
             entry.host.scrollIntoView({ behavior: "smooth", block: "center" });
         });
@@ -390,8 +436,24 @@ const SettingsAssistant = (() => {
     function decorateAll(): void {
         document.querySelectorAll<HTMLElement>(".settings-content").forEach((content) => {
             decorateGroups(content);
-            decorateSections(content);
+            decorateInfoBlocks(content);
         });
+    }
+
+    /** 设置页内容会按权限与平台配置动态重建，重建后重新收起新出现的说明。 */
+    function observeSettings(): void {
+        const root = document.getElementById("settings");
+        if (!root) return;
+        let scheduled = false;
+        const schedule = (): void => {
+            if (scheduled) return;
+            scheduled = true;
+            window.requestAnimationFrame(() => {
+                scheduled = false;
+                decorateAll();
+            });
+        };
+        new MutationObserver(schedule).observe(root, { childList: true, subtree: true });
     }
 
     function init(): void {
@@ -400,10 +462,11 @@ const SettingsAssistant = (() => {
         if (!search) return;
         initialized = true;
         decorateAll();
+        observeSettings();
         bindSearch();
     }
 
-    return { init, runSearch };
+    return { init, runSearch, refresh: decorateAll };
 })();
 
 window.TrpgSettingsAssistant = SettingsAssistant;

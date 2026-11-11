@@ -281,6 +281,17 @@ function initSettingsTabs(): void {
         void loadEmbeddingHealth();
     });
 
+    document.getElementById("embeddingStatusInfo")?.addEventListener("click", () => {
+        const host = document.querySelector<HTMLElement>("#embeddingModelStatus .setting-hint-host");
+        const toggle = document.getElementById("embeddingStatusInfo") as HTMLButtonElement | null;
+        if (!host || !toggle) return;
+        const open = !host.classList.contains("setting-hint-open");
+        host.classList.toggle("setting-hint-open", open);
+        toggle.setAttribute("aria-expanded", String(open));
+        toggle.title = open ? "收起说明" : "显示说明";
+        toggle.setAttribute("aria-label", toggle.title);
+    });
+
     bindGeneralSelectSetting("themeSelect", "appearance", "theme");
     bindGeneralTextSetting("enabledThemesInput", "appearance", "enabled_themes");
     bindGeneralTextSetting("themeOverridesInput", "appearance", "theme_overrides");
@@ -611,12 +622,25 @@ function formatEmbeddingTimestamp(value: unknown): string {
     return Number.isNaN(date.getTime()) ? text : date.toLocaleString();
 }
 
+/** 状态条的说明收进 ⓘ：没有可解释内容时连按钮一起隐藏。 */
+function setEmbeddingNote(text: string): void {
+    const note = document.querySelector<HTMLElement>("#embeddingModelStatus [data-embedding-note]");
+    const toggle = document.getElementById("embeddingStatusInfo") as HTMLButtonElement | null;
+    const host = note?.parentElement;
+    if (!note || !host) return;
+    note.textContent = text;
+    if (toggle) toggle.hidden = !text;
+    if (!text) {
+        host.classList.remove("setting-hint-open");
+        toggle?.setAttribute("aria-expanded", "false");
+    }
+}
+
 async function loadEmbeddingHealth(): Promise<void> {
     const target = document.getElementById("embeddingModelStatus");
     if (!target) return;
     const button = document.getElementById("embeddingStatusRefresh") as HTMLButtonElement | null;
     const title = target.querySelector<HTMLElement>("[data-embedding-title]");
-    const note = target.querySelector<HTMLElement>("[data-embedding-note]");
     const chipModel = target.querySelector<HTMLElement>("[data-embedding-model]");
     const chipDimensions = target.querySelector<HTMLElement>("[data-embedding-dimensions]");
     const chipBackend = target.querySelector<HTMLElement>("[data-embedding-backend]");
@@ -640,7 +664,7 @@ async function loadEmbeddingHealth(): Promise<void> {
         target.dataset.state = fallback ? "fallback" : !ready ? "error" : verified ? "ready" : "unverified";
         if (title) {
             title.textContent = target.dataset.state === "error"
-                ? "Embedding 模型不可用"
+                ? error ? `Embedding 模型不可用：${error}` : "Embedding 模型不可用"
                 : target.dataset.state === "fallback"
                     ? "Embedding 模型已加载（哈希兜底）"
                     : target.dataset.state === "unverified"
@@ -654,21 +678,17 @@ async function loadEmbeddingHealth(): Promise<void> {
             const indexed = formatEmbeddingTimestamp(vector.last_indexed_at);
             setEmbeddingChip(chipIndexed, indexed ? `最近索引：${indexed}` : "最近索引：暂无");
         }
-        if (note) {
-            note.textContent = error
-                || (fallback
-                    ? "当前使用哈希兜底向量：检索可用，但语义精度有限。"
-                    : verified ? "" : "云端 Embedding 接口是否可达会在首次调用时确认，失败时会自动退回哈希向量。");
-            note.hidden = !note.textContent;
-        }
+        // 错误结论放在标题里常显；这里的说明只解释「为什么是当前状态」，收进 ⓘ。
+        setEmbeddingNote(
+            fallback
+                ? "当前使用哈希兜底向量：检索可用，但语义精度有限。"
+                : verified ? "" : "云端 Embedding 接口是否可达会在首次调用时确认，失败时会自动退回哈希向量。"
+        );
     } catch (error) {
         if (requestId !== embeddingHealthRequestId) return;
         target.dataset.state = "error";
         if (title) title.textContent = "无法读取 Embedding 模型状态";
-        if (note) {
-            note.textContent = settingsErrorMessage(error);
-            note.hidden = false;
-        }
+        setEmbeddingNote(settingsErrorMessage(error));
         [chipModel, chipDimensions, chipBackend, chipIndexed].forEach((chip) => {
             if (chip) chip.hidden = true;
         });
