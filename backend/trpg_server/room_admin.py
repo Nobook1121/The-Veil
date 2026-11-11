@@ -7,13 +7,13 @@
 from __future__ import annotations
 
 import logging
-import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from trpg_server.json_store import read_json
+from trpg_server.json_store import remove_tree
 from trpg_server.logging_config import log_user_action
 from trpg_server.room_mode import (
     MODE_PRESETS,
@@ -305,7 +305,7 @@ def remove_room(rooms_dir: Any, room_id: Any) -> bool:
     room_dir = _find_room_dir(rooms_dir, room_id)
     if room_dir is None:
         return False
-    shutil.rmtree(room_dir)
+    remove_tree(room_dir)
     return True
 
 
@@ -371,7 +371,7 @@ def cleanup_inactive_rooms(
             阈值天数=int(days),
         )
         try:
-            shutil.rmtree(room_dir)
+            remove_tree(room_dir)
         except OSError:
             logger.warning("room.cleanup.remove_failed room=%s", room_id, exc_info=True)
             continue

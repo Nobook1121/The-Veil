@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from trpg_server.config import load_settings
-from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.json_store import read_json, remove_tree, write_json_atomic
 from trpg_server.media_defaults import LEGACY_DEFAULT_COVERS, normalize_cover
 from trpg_server.ruleset import default_ruleset_id
 from trpg_server.security import normalize_filename, safe_join
@@ -879,26 +879,16 @@ def save_scenario_record(
 
 
 def delete_scenario_record(descriptor_path: Path) -> None:
+    """删除剧本记录及其 storage 目录（先改名再删，避免并发写入引起的 145）。"""
     if descriptor_path.is_dir():
-        for child in sorted(descriptor_path.rglob("*"), reverse=True):
-            if child.is_file():
-                child.unlink()
-            elif child.is_dir():
-                child.rmdir()
-        descriptor_path.rmdir()
+        remove_tree(descriptor_path)
         return
 
     storage_dir = descriptor_path.parent
     if descriptor_path.exists():
-        descriptor_path.unlink()
+        remove_tree(descriptor_path)
     if storage_dir.name.startswith("scenario-") and storage_dir.exists():
-        for child in sorted(storage_dir.rglob("*"), reverse=True):
-            if child.is_file():
-                child.unlink()
-            elif child.is_dir():
-                child.rmdir()
-        if storage_dir.exists():
-            storage_dir.rmdir()
+        remove_tree(storage_dir)
 
 
 def _iter_scene_sources(scenario: dict[str, Any]) -> list[dict[str, Any]]:

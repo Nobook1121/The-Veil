@@ -1,10 +1,12 @@
 import json
 import logging
 import os
+import shutil
 import stat
 import tempfile
 import time
 from pathlib import Path
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,38 @@ def replace_with_retry(temp_path, json_path):
             if attempt == 0:
                 _clear_readonly(json_path)
     raise last_error
+
+
+def remove_tree(path):
+    """删除文件或目录；先改名再删，返回是否真的删除了。
+
+    直接 rmtree 一个仍被并发写入的目录时，Windows 上会抛
+    ``WinError 145（目录不是空的）``：遍历完之后、rmdir 之前又有新文件落进去。
+    这里先 ``os.replace`` 改成同目录下的 ``.deleting-<uuid>``，原路径立即消失，
+    写入方不会再把新文件写进待删目录；随后删掉改名后的目标。文件同样适用。
+    """
+    target = Path(path)
+    if not target.exists():
+        return False
+    pending = target.with_name(f".deleting-{uuid4().hex}")
+    for attempt, delay in enumerate(_REPLACE_RETRY_DELAYS):
+        if delay:
+            time.sleep(delay)
+        try:
+            os.replace(target, pending)
+            break
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            transient = getattr(error, "winerror", None) in (5, 32)
+            if not transient or attempt == len(_REPLACE_RETRY_DELAYS) - 1:
+                logger.warning("remove_tree.rename_failed path=%s error=%s", target, error)
+                raise
+    if pending.is_dir():
+        shutil.rmtree(pending)
+    else:
+        pending.unlink(missing_ok=True)
+    return True
 
 
 def write_json_atomic(path, data):

@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import threading
 import time
@@ -30,6 +31,8 @@ from uuid import uuid4
 
 from trpg_server import room_rules
 from trpg_server.json_store import read_json
+
+logger = logging.getLogger(__name__)
 
 # 固定本地时区：用显式 tzinfo 做换算，避免 Windows 上 ``astimezone()`` /
 # ``localtime`` 处理 1970 年前的游戏时间时抛 OSError。
@@ -51,8 +54,15 @@ MAX_CORRECTIONS = 20
 # 它是**房间级**状态锁：时钟、毒剂队列以及所有 info.json 写入共用同一把锁。
 LOCK_FILENAME = "info.json.lock"
 LOCK_TIMEOUT_SECONDS = 10.0
-LOCK_STALE_SECONDS = 30.0
+# 陈旧阈值必须小于获取超时：反过来（10s 超时 / 30s 陈旧）时，等待方在
+# 30s 之前就先超时了，残留锁永远等不到回收，每次竞争都白等满 10s 再报
+# clock_busy。回收前还会校验持有者进程是否仍存活，所以阈值调小不会误抢
+# 活着的写入方的锁。
+LOCK_STALE_SECONDS = 5.0
 LOCK_POLL_SECONDS = 0.05
+# 释放锁文件失败时重试几次（Windows 上可能被短暂占用），仍失败记 WARNING。
+LOCK_UNLINK_ATTEMPTS = 3
+LOCK_UNLINK_RETRY_SECONDS = 0.02
 
 # 进程内锁：同一 worker 的线程先串行，再竞争跨进程文件锁。
 _LOCK = threading.RLock()
@@ -94,18 +104,113 @@ def _read_lock_token(path: Path) -> str | None:
         return None
 
 
-def _remove_lock_if_owner(path: Path, token: str) -> bool:
-    """仅当锁文件内容仍是 ``token`` 时删除，避免误删后来者新建的锁（ABA）。"""
-    if _read_lock_token(path) != token:
-        return False
+def _token_pid(token: str | None) -> int | None:
+    """从 token（``pid uuid``）里取出持有者 pid；格式不认识返回 ``None``。"""
+    if not token:
+        return None
+    head = token.split(" ", 1)[0]
     try:
-        path.unlink()
-        return True
-    except FileNotFoundError:
+        return int(head)
+    except ValueError:
+        return None
+
+
+def _pid_alive(pid: int) -> bool:
+    """判断进程是否仍存活；查询能力不可用 / 查询失败时保守地按存活处理。"""
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        # Windows 上 ``os.kill(pid, 0)`` 会直接终止目标进程，只能用 OpenProcess
+        # 查询退出码（STILL_ACTIVE = 259）。
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                # 87 = ERROR_INVALID_PARAMETER，即该 pid 不存在；其他错误按存活处理。
+                return kernel32.GetLastError() != 87
+            try:
+                code = wintypes.DWORD()
+                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                    return True
+                return code.value == 259
+            finally:
+                kernel32.CloseHandle(handle)
+        except Exception:  # noqa: BLE001 - 平台查询不可用时宁可等待也不误抢
+            return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
         return False
     except OSError:
-        # Windows 上锁文件可能正被杀毒软件短暂占用；保留它，等超时 / 陈旧清理。
+        return True
+    return True
+
+
+def _unlink_with_retry(path: Path, token: str) -> bool:
+    """删除锁文件；失败重试几次，仍失败打 WARNING（不静默吞掉）。"""
+    for attempt in range(1, LOCK_UNLINK_ATTEMPTS + 1):
+        try:
+            path.unlink()
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError as exc:
+            if attempt >= LOCK_UNLINK_ATTEMPTS:
+                logger.warning(
+                    "room_clock.lock_unlink_failed path=%s token=%s attempts=%s error=%s",
+                    path,
+                    token,
+                    attempt,
+                    exc,
+                )
+                return False
+            time.sleep(LOCK_UNLINK_RETRY_SECONDS)
+    return False
+
+
+def _remove_lock_if_owner(path: Path, token: str) -> bool:
+    """仅当锁文件内容仍是 ``token`` 时删除，避免误删后来者新建的锁（ABA）。"""
+    current = _read_lock_token(path)
+    if current is None:
+        if not path.exists():
+            return True
+        logger.warning("room_clock.lock_token_unreadable path=%s token=%s", path, token)
         return False
+    if current != token:
+        return False
+    return _unlink_with_retry(path, token)
+
+
+def _discard_created_lock(path: Path, token: str) -> None:
+    """获取中途失败时清掉自己刚创建、可能还没写完 token 的锁文件。"""
+    current = _read_lock_token(path)
+    if current is not None and current != token and not token.startswith(current):
+        # 内容已不是本进程写入的（极端情况下被替换），交给陈旧回收处理。
+        return
+    _unlink_with_retry(path, token)
+
+
+def _reclaimable(token: str | None, age: float | None) -> bool:
+    """判断残留锁能否安全回收。
+
+    - 持有者 pid 就是本进程：一定是泄漏的残锁。安全依据是 :func:`room_lock`
+      全程在 ``with _LOCK`` 内才持有文件锁，本进程不可能有另一个线程正持有它
+      却不在 ``_held_paths()`` 里。
+    - 锁文件已超过陈旧阈值，且持有者进程已不存在（token 解析不出 pid 的旧格式
+      同样按残留处理）。活着的持有者即使持锁超过阈值也不会被抢，因此把阈值调到
+      小于获取超时不会引入并发写入。
+    """
+    pid = _token_pid(token)
+    if pid == os.getpid():
+        return True
+    if age is None or age <= LOCK_STALE_SECONDS:
+        return False
+    if pid is None:
+        return True
+    return not _pid_alive(pid)
 
 
 @contextlib.contextmanager
@@ -114,14 +219,17 @@ def _file_lock(room_dir: Any) -> Iterator[None]:
 
     用 ``O_CREAT | O_EXCL`` 创建 ``info.json.lock`` 实现；锁文件内容写入
     ``pid + uuid`` 作为唯一 token。获取不到时轮询等待，超过
-    ``LOCK_TIMEOUT_SECONDS`` 抛 ``clock_busy``。锁文件 mtime 超过
-    ``LOCK_STALE_SECONDS`` 视为进程异常退出残留，仅当 token 未变化时才清理。
+    ``LOCK_TIMEOUT_SECONDS`` 抛 ``clock_busy``。锁文件超过 ``LOCK_STALE_SECONDS``
+    且持有者已不存在时视为残留并回收（回收前比对 token 防 ABA）。
+
+    本函数不创建房间目录：目录被删除后再 mkdir 会把它“复活”，与删除方的
+    rmtree 反复拉扯（Windows 上表现为 WinError 145）。目录不存在直接报错。
     """
     path = _lock_path(room_dir)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise ClockError(f"无法创建房间目录以加锁：{exc}", code="clock_lock_failed") from exc
+    if not path.parent.is_dir():
+        raise ClockError(
+            f"房间目录不存在，无法加锁：{path.parent}", code="clock_lock_failed"
+        )
 
     deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
     token = f"{os.getpid()} {uuid4().hex}"
@@ -132,28 +240,32 @@ def _file_lock(room_dir: Any) -> Iterator[None]:
             try:
                 fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             except FileExistsError:
+                age = _lock_age(path)
+                holder = _read_lock_token(path)
+                if holder is not None and _reclaimable(holder, age):
+                    if _remove_lock_if_owner(path, holder):
+                        continue
                 if time.monotonic() >= deadline:
                     raise ClockError(
                         "游戏时钟正在被其他操作占用，请稍后重试", code="clock_busy"
                     )
-                age = _lock_age(path)
-                if age is None:
-                    # stat 失败通常是刚被其他进程释放；同样受 deadline 约束地轮询，
-                    # 否则会空转占满 CPU。
-                    time.sleep(LOCK_POLL_SECONDS)
-                    continue
-                if age > LOCK_STALE_SECONDS:
-                    stale_token = _read_lock_token(path)
-                    if stale_token is not None and _remove_lock_if_owner(path, stale_token):
-                        continue
                 time.sleep(LOCK_POLL_SECONDS)
             except OSError as exc:
                 raise ClockError(f"无法创建时钟文件锁：{exc}", code="clock_lock_failed") from exc
+        write_error: OSError | None = None
         try:
             os.write(fd, token.encode("utf-8"))
+        except OSError as exc:
+            write_error = exc
         finally:
             os.close(fd)
             fd = None
+        if write_error is not None:
+            # 先把半成品锁文件删掉再抛，否则下一次获取会一直撞上它。
+            _discard_created_lock(path, token)
+            raise ClockError(
+                f"无法写入时钟文件锁：{write_error}", code="clock_lock_failed"
+            ) from write_error
         acquired = True
         yield
     finally:

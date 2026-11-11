@@ -5,6 +5,7 @@ from flask import session
 from trpg_server.agents.room_state import save_room_state
 from trpg_server.agents.versioning import migrate_room_binding
 from trpg_server.json_store import read_json
+from trpg_server.json_store import remove_tree
 from trpg_server.json_store import write_json_atomic
 from trpg_server.logging_config import log_user_action
 from trpg_server.logging_config import user_action_text
@@ -137,6 +138,9 @@ def create_room():
         )
     room_id = uuid4().hex
     room_dir = _room_dir(room_id)
+    # 目录由建房方显式创建：房间锁不再替调用方 mkdir（否则已删除的房间会被
+    # 后续写入“复活”，删除与写入在 Windows 上互相拉扯出 145）。
+    room_dir.mkdir(parents=True, exist_ok=True)
     member = _current_member(data.get("character_card"))
     member["room_role"] = ROOM_ROLE_OWNER
     now = _timestamp()
@@ -593,9 +597,7 @@ def delete_room(room_id):
     if info.get("completed_at") and not info.get("archived"):
         return error_response("Please archive the completed room first", 409, "Completed rooms must be archived so their messages are preserved")
 
-    import shutil
-
-    shutil.rmtree(room_dir)
+    remove_tree(room_dir)
     log_user_action(
         logger,
         user_action_text(session.get("username"), "删除了房间"),
