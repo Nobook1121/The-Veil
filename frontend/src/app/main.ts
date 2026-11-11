@@ -31,6 +31,8 @@ async function initializeApplication(): Promise<void> {
     initRoomManagement();
     initSidebarToggle();
     await autoLoadLastRoom();
+    // 鉴权完成后才能判断管理员面板是否可见，深链接恢复放到最后，避免打开空白面板。
+    initSettingsDeepLinks();
 
     dom.on(document, "hidden.bs.modal", () => {
         setTimeout(() => {

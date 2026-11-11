@@ -51,3 +51,16 @@ def test_embedded_store_initializes_lazily_and_reports_health(tmp_path: Path):
     assert store.health()["available"] is True
     assert store.health()["backend"] == "embedded"
     assert (tmp_path / "nested" / "vectors" / "vectors.sqlite3").exists()
+
+
+def test_embedded_store_health_returns_error_instead_of_raising(tmp_path: Path):
+    store = EmbeddedVectorStore(tmp_path / "vectors")
+    # 把库文件换成目录，SQLite 无法打开；探活应回传 error，而不是抛异常或长时间等待。
+    store.db_path.unlink()
+    store.db_path.mkdir()
+
+    health = store.health()
+
+    assert health["available"] is False
+    assert health["backend"] == "embedded"
+    assert health["error"]

@@ -76,12 +76,6 @@ function handleMainNavigationClick(
 
     targetTab.classList.add("active");
     console.log(`切换到标签页: ${tabId}`);
-
-    // 设置页在页面顶部提供横向子标签，因此仅在 hash 明确指向 settings-* 时切换。
-    if (tabId === "settings") {
-        const hash = link.hash.replace("#", "");
-        if (hash.startsWith("settings-")) switchSettingsTab(hash.slice("settings-".length));
-    }
 }
 
 function switchMainTab(tabId: string, options: { clearNav?: boolean } = {}): void {
@@ -168,19 +162,52 @@ function closeDropdownButtons(): void {
     });
 }
 
+const SETTINGS_TAB_NAMES = ["general", "play", "model", "knowledge", "system", "access", "immersive", "about"];
+
+// 旧分类名只用于把历史 hash / 书签迁移到新分类，不参与运行时切换。
+const LEGACY_SETTINGS_TAB_NAMES: Record<string, string> = {
+    theme: "general",
+    character: "play",
+    network: "system",
+    permissions: "access",
+    users: "access",
+    bgm: "immersive",
+};
+
+function isSettingsTabName(name: string): boolean {
+    return SETTINGS_TAB_NAMES.includes(name);
+}
+
+function migrateLegacySettingsTabName(name: string): string {
+    return LEGACY_SETTINGS_TAB_NAMES[name] || name;
+}
+
+function settingsTabElement(name: string): HTMLElement | null {
+    return document.querySelector<HTMLElement>(`.settings-tab[data-settings="${CSS.escape(name)}"]`);
+}
+
+function settingsContentElement(name: string): HTMLElement | null {
+    return document.getElementById(`${name}-settings-content`);
+}
+
+/** 非管理员的面板会被 hidden，不能作为激活目标。 */
+function isSettingsTabUsable(name: string): boolean {
+    const tab = settingsTabElement(name);
+    const content = settingsContentElement(name);
+    return Boolean(tab && !tab.hidden && content && !content.hidden);
+}
+
 function switchSettingsTab(tabName: string): void {
-    // 兼容旧链接/书签：分类合并后保留旧入口。
-    const aliases: Record<string, string> = {
-        bgm: "immersive",
-        theme: "general",
-        character: "play",
-        network: "system",
-        permissions: "access",
-        users: "access",
-    };
-    const normalized = aliases[tabName] || tabName;
     const settingsTabs = document.querySelectorAll<HTMLElement>(".settings-tab");
     const settingsContents = document.querySelectorAll<HTMLElement>(".settings-content");
+    const activeName = document.querySelector<HTMLElement>(".settings-content.active")?.id.replace(/-settings-content$/, "") || "";
+
+    // 未知或当前不可用的分类回落到当前分类，再不行回落到「基础」，绝不把内容区清空。
+    let normalized = tabName;
+    if (!isSettingsTabName(normalized) || !isSettingsTabUsable(normalized)) {
+        normalized = isSettingsTabName(activeName) && isSettingsTabUsable(activeName) ? activeName : "general";
+    }
+    if (!isSettingsTabUsable(normalized)) normalized = "general";
 
     settingsTabs.forEach((tab) => {
         const active = tab.dataset.settings === normalized;
@@ -190,8 +217,8 @@ function switchSettingsTab(tabName: string): void {
     });
     settingsContents.forEach((content) => content.classList.remove("active"));
 
-    const targetTab = document.querySelector<HTMLElement>(`.settings-tab[data-settings="${CSS.escape(normalized)}"]`);
-    const targetContent = document.getElementById(`${normalized}-settings-content`);
+    const targetTab = settingsTabElement(normalized);
+    const targetContent = settingsContentElement(normalized);
     targetContent?.classList.add("active");
     if (normalized === "access") {
         void loadPermissionConfig();
@@ -250,6 +277,9 @@ function initSettingsTabs(): void {
         void saveGeneralSettingsChanges();
     });
     document.getElementById("cancelGeneralSettingsChanges")?.addEventListener("click", cancelGeneralSettingsChanges);
+    document.getElementById("embeddingStatusRefresh")?.addEventListener("click", () => {
+        void loadEmbeddingHealth();
+    });
 
     bindGeneralSelectSetting("themeSelect", "appearance", "theme");
     bindGeneralTextSetting("enabledThemesInput", "appearance", "enabled_themes");
@@ -478,6 +508,32 @@ function initSettingsBackToTop(): void {
     sync();
 }
 
+/** 深链接：#settings 打开设置页；#settings-<分类> 额外切到该分类，旧分类名在这里一次性迁移。 */
+function initSettingsDeepLinks(): void {
+    const applyHash = (): void => {
+        const raw = window.location.hash.replace(/^#/, "");
+        if (raw !== "settings" && !raw.startsWith("settings-")) return;
+        const settingsLink = document.querySelector<HTMLAnchorElement>('#sidebar .nav-link[data-tab="settings"]');
+        if (!settingsLink || settingsLink.hidden) return;
+        if (raw === "settings") {
+            if (!document.getElementById("settings")?.classList.contains("active")) switchMainTab("settings");
+            return;
+        }
+        const requested = migrateLegacySettingsTabName(raw.slice("settings-".length));
+        const normalized = isSettingsTabName(requested) && isSettingsTabUsable(requested) ? requested : "general";
+        const canonicalHash = `#settings-${normalized}`;
+        if (window.location.hash !== canonicalHash) {
+            window.history.replaceState(null, "", canonicalHash);
+        }
+        if (!document.getElementById("settings")?.classList.contains("active")) switchMainTab("settings");
+        switchSettingsTab(normalized);
+    };
+    applyHash();
+    window.addEventListener("hashchange", applyHash);
+    // 登录后才可能看到管理员分类，登录完成时按当前 hash 再恢复一次。
+    window.addEventListener("trpg:user-changed", applyHash);
+}
+
 async function loadRulesetKnowledge(): Promise<void> {
     const list = document.getElementById("rulesetList");
     const select = document.getElementById("rulesetSelect") as HTMLSelectElement | null;
@@ -541,20 +597,87 @@ async function loadScenarioKnowledge(): Promise<void> {
     } catch (error) { list.textContent = settingsErrorMessage(error); }
 }
 
+let embeddingHealthRequestId = 0;
+
+function setEmbeddingChip(target: HTMLElement, value: string): void {
+    target.textContent = value;
+    target.hidden = !value;
+}
+
+function formatEmbeddingTimestamp(value: unknown): string {
+    const text = String(value || "");
+    if (!text) return "";
+    const date = new Date(text);
+    return Number.isNaN(date.getTime()) ? text : date.toLocaleString();
+}
+
 async function loadEmbeddingHealth(): Promise<void> {
     const target = document.getElementById("embeddingModelStatus");
     if (!target) return;
+    const button = document.getElementById("embeddingStatusRefresh") as HTMLButtonElement | null;
+    const title = target.querySelector<HTMLElement>("[data-embedding-title]");
+    const note = target.querySelector<HTMLElement>("[data-embedding-note]");
+    const chipModel = target.querySelector<HTMLElement>("[data-embedding-model]");
+    const chipDimensions = target.querySelector<HTMLElement>("[data-embedding-dimensions]");
+    const chipBackend = target.querySelector<HTMLElement>("[data-embedding-backend]");
+    const chipIndexed = target.querySelector<HTMLElement>("[data-embedding-indexed]");
+    const requestId = ++embeddingHealthRequestId;
+    if (button) {
+        button.disabled = true;
+        button.setAttribute("aria-busy", "true");
+    }
     try {
         const response = await TrpgApi.get<ApiResponse<Record<string, unknown>>>("/api/vector/health");
+        // 快速连点时丢弃过期响应，避免旧结果覆盖新结果。
+        if (requestId !== embeddingHealthRequestId) return;
         const embedding = (response.data?.embedding || {}) as Record<string, unknown>;
-        const loaded = embedding.loaded === true;
-        const label = loaded ? "Embedding 模型已加载" : "Embedding 模型未成功加载";
-        (loaded ? console.info : console.warn)(`[Embedding] ${label}`, embedding);
-        target.className = `alert ${loaded ? "alert-success" : "alert-warning"}`;
-        target.textContent = `${label} · 后端：${String(embedding.backend || "unknown")} · 维度：${String(embedding.dimensions || "未知")}${embedding.model ? ` · 模型：${String(embedding.model)}` : ""}${embedding.error ? ` · ${String(embedding.error)}` : ""}`;
+        const vector = (response.data?.vector || {}) as Record<string, unknown>;
+        const error = String(embedding.error || "");
+        const ready = embedding.ready === true;
+        const fallback = embedding.fallback === true;
+        // 云端后端只能确认「已配置」，可达性待首次调用验证，单独区分于真的失败。
+        const verified = embedding.verified !== false;
+        target.dataset.state = fallback ? "fallback" : !ready ? "error" : verified ? "ready" : "unverified";
+        if (title) {
+            title.textContent = target.dataset.state === "error"
+                ? "Embedding 模型不可用"
+                : target.dataset.state === "fallback"
+                    ? "Embedding 模型已加载（哈希兜底）"
+                    : target.dataset.state === "unverified"
+                        ? "Embedding 模型已配置（可达性待验证）"
+                        : "Embedding 模型已就绪";
+        }
+        if (chipModel) setEmbeddingChip(chipModel, embedding.model ? `模型：${String(embedding.model)}` : "");
+        if (chipDimensions) setEmbeddingChip(chipDimensions, embedding.dimensions ? `维度：${String(embedding.dimensions)}` : "");
+        if (chipBackend) setEmbeddingChip(chipBackend, embedding.backend ? `后端：${String(embedding.backend)}` : "");
+        if (chipIndexed) {
+            const indexed = formatEmbeddingTimestamp(vector.last_indexed_at);
+            setEmbeddingChip(chipIndexed, indexed ? `最近索引：${indexed}` : "最近索引：暂无");
+        }
+        if (note) {
+            note.textContent = error
+                || (fallback
+                    ? "当前使用哈希兜底向量：检索可用，但语义精度有限。"
+                    : verified ? "" : "云端 Embedding 接口是否可达会在首次调用时确认，失败时会自动退回哈希向量。");
+            note.hidden = !note.textContent;
+        }
     } catch (error) {
-        target.className = "alert alert-warning";
-        target.textContent = `无法读取 Embedding 模型状态：${settingsErrorMessage(error)}`;
+        if (requestId !== embeddingHealthRequestId) return;
+        target.dataset.state = "error";
+        if (title) title.textContent = "无法读取 Embedding 模型状态";
+        if (note) {
+            note.textContent = settingsErrorMessage(error);
+            note.hidden = false;
+        }
+        [chipModel, chipDimensions, chipBackend, chipIndexed].forEach((chip) => {
+            if (chip) chip.hidden = true;
+        });
+        console.warn("[Embedding] 状态读取失败", error);
+    } finally {
+        if (requestId === embeddingHealthRequestId && button) {
+            button.disabled = false;
+            button.removeAttribute("aria-busy");
+        }
     }
 }
 
@@ -571,6 +694,7 @@ async function uploadRulesetSource(): Promise<void> {
         if (message) message.textContent = "上传并索引成功";
         const list = document.getElementById("rulesetList"); if (list) list.dataset.loaded = "";
         await loadRulesetKnowledge();
+        void loadEmbeddingHealth();
     } catch (error) { if (message) message.textContent = settingsErrorMessage(error); }
 }
 

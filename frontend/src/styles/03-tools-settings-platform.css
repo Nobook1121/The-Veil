@@ -634,27 +634,8 @@
     display: flex;
     flex-direction: column;
     gap: 20px;
-    max-height: 70vh;
-    overflow-y: auto;
+    /* 平台列表随设置内容区一起滚动，避免与内容区形成双层纵向滚动。 */
     padding-right: 10px;
-}
-
-.ai-platforms-container::-webkit-scrollbar {
-    width: 8px;
-}
-
-.ai-platforms-container::-webkit-scrollbar-track {
-    background: var(--theme-scrollbar-track);
-    border-radius: var(--theme-radius-sm);
-}
-
-.ai-platforms-container::-webkit-scrollbar-thumb {
-    background: var(--theme-scrollbar-thumb);
-    border-radius: var(--theme-radius-sm);
-}
-
-.ai-platforms-container::-webkit-scrollbar-thumb:hover {
-    background: var(--theme-scrollbar-thumb-hover);
 }
 
 .ai-platform-card {

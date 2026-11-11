@@ -387,9 +387,7 @@ body.immersive-lightbox-open {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 260px;
-    overflow-y: auto;
-    scrollbar-width: thin;
+    /* 与模型面板其他列表一致，随设置内容区滚动，不再单独产生纵向滚动条。 */
 }
 
 .immersive-platform-card {

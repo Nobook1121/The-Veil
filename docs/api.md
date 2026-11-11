@@ -185,7 +185,7 @@
 - `POST /api/knowledge-bases/<ruleset_id>/enable`：启用规则集。
 - `POST /api/knowledge-bases/<ruleset_id>/archive`：归档规则集。
 - `POST /api/rooms/<room_id>/rulesets`：为房间指定规则集。
-- `GET /api/vector/health`：查看向量库、Embedding 与 OCR 的可用性（不返回密钥）。
+- `GET /api/vector/health`：查看向量库、Embedding 与 OCR 的可用性（不返回密钥）。`data.embedding` 含 `ready`（当前是否有可用的向量生成路径，哈希兜底也算可用）、`fallback`（运行时是否会使用哈希兜底，本地模型加载失败时为 `true`）、`verified`（后端是否无需网络验证即可确认；云端 OpenAI 兼容后端为 `false`，可达性要等首次调用）；`data.vector.last_indexed_at` 为最近一次索引时间（ISO8601，空表为 `null`），探活失败时 `data.vector.error` 携带原因。
 
 ---
 

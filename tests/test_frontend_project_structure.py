@@ -221,6 +221,19 @@ def test_settings_exposes_data_driven_permission_matrix():
     assert "savePermissionConfig" in tabs_ts
     assert "permission-node-card" in styles
 
+    # Embedding 状态条由 API 驱动并自绘；旧分类只允许在深链接迁移表中出现。
+    assert 'class="embedding-status"' in settings_fragment
+    assert 'id="embeddingStatusRefresh"' in settings_fragment
+    assert "initSettingsDeepLinks" in tabs_ts
+    assert "LEGACY_SETTINGS_TAB_NAMES" in tabs_ts
+
+
+def test_user_changed_event_fires_after_admin_navigation_refresh():
+    state_ts = (ROOT / "frontend/src/app/auth/state.ts").read_text(encoding="utf-8")
+
+    # 深链接监听 trpg:user-changed；必须等管理员导航刷新后再派发，否则管理员页签仍是 hidden。
+    assert state_ts.index("window.refreshAdminNavigation?.()") < state_ts.index('dispatchEvent(new CustomEvent("trpg:user-changed"')
+
 
 def test_improvement_sidebar_exposes_discovery_and_admin_gated_settings():
     sidebar = (ROOT / "frontend/src/react/shell/Sidebar.tsx").read_text(encoding="utf-8")

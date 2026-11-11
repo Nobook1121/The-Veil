@@ -37,8 +37,6 @@ namespace AuthModule {
 
     export function setCurrentUser(user: CurrentUser | null): void {
         window.currentUser = user;
-        // 通知依赖账号身份的模块（如按用户隔离的配乐/环境音开关）重新校准。
-        window.dispatchEvent(new CustomEvent("trpg:user-changed", { detail: user }));
         const name = document.getElementById("userName");
         const avatar = document.querySelector<HTMLImageElement>(".user-avatar img");
         const cardName = document.getElementById("userCardName");
@@ -103,6 +101,9 @@ namespace AuthModule {
         if (user && (user.role === "ADMIN" || user.role === "OWNER")) {
             window.TrpgAdminDiceTextures?.init();
         }
+        // 放在最后派发：监听方（如设置页深链接）需要看到已完成角色同步的导航状态，
+        // 否则普通用户升级为管理员时，管理员标签仍是 hidden，深链接会被误判为不可用。
+        window.dispatchEvent(new CustomEvent("trpg:user-changed", { detail: user }));
     }
 
     function presenceLabel(presence: CurrentUser["presence"]): string {

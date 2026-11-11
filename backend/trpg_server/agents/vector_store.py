@@ -121,8 +121,8 @@ class EmbeddedVectorStore(VectorStore):
         self.db_path = raw if raw.suffix in {".sqlite", ".sqlite3", ".db"} else raw / "vectors.sqlite3"
         self._initialise()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path, timeout=30)
+    def _connect(self, timeout: float = 30) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.db_path, timeout=timeout)
         connection.row_factory = sqlite3.Row
         return connection
 
@@ -273,11 +273,26 @@ class EmbeddedVectorStore(VectorStore):
         return len(self._rows(filter))
 
     def health(self) -> dict[str, Any]:
+        """轻量探活：短 busy timeout，避免知识库页刷新被库锁拖住几十秒。"""
+        connection: sqlite3.Connection | None = None
         try:
-            self._initialise()
-            return {"available": True, "backend": "embedded", "path": str(self.db_path)}
-        except Exception:
-            return {"available": False, "backend": "embedded"}
+            # 不再走 _initialise：建表与建目录同样要排队等锁，探活只需要读一次。
+            connection = self._connect(timeout=1.0)
+            row = connection.execute("SELECT MAX(updated_at) FROM vectors").fetchone()
+            raw_time = str(row[0]) if row and row[0] else ""
+            # SQLite CURRENT_TIMESTAMP 是 UTC 的 "YYYY-MM-DD HH:MM:SS"，转成 ISO8601。
+            last_indexed_at = f"{raw_time.replace(' ', 'T')}Z" if raw_time else None
+            return {
+                "available": True,
+                "backend": "embedded",
+                "path": str(self.db_path),
+                "last_indexed_at": last_indexed_at,
+            }
+        except Exception as exc:
+            return {"available": False, "backend": "embedded", "last_indexed_at": None, "error": str(exc)}
+        finally:
+            if connection is not None:
+                connection.close()
 
     def scenario_ids(self) -> set[str] | None:
         with self._lock, self._session() as connection:
@@ -305,12 +320,12 @@ class QdrantVectorStore(VectorStore):
 
     def health(self):
         if not self.client:
-            return {"available": False, "backend": "qdrant"}
+            return {"available": False, "backend": "qdrant", "last_indexed_at": None}
         try:
             self.client.get_collections()
-            return {"available": True, "backend": "qdrant"}
+            return {"available": True, "backend": "qdrant", "last_indexed_at": None}
         except Exception:
-            return {"available": False, "backend": "qdrant"}
+            return {"available": False, "backend": "qdrant", "last_indexed_at": None}
 
     def upsert(self, chunks: Iterable[Any], points: Iterable[dict[str, Any]] | None = None) -> bool:
         if not self.client:

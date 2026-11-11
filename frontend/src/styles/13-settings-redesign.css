@@ -779,3 +779,108 @@
         transform: none;
     }
 }
+
+/* ---------- Embedding 状态条 ----------
+   数据来自 /api/vector/health，颜色全部走主题 token，避免深色主题下
+   Bootstrap 浅色 alert 与页面脱节。 */
+.embedding-status {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--theme-border-subtle);
+    border-radius: 10px;
+    background: var(--theme-bg-panel-muted);
+    color: var(--theme-text-primary);
+}
+
+.embedding-status-dot {
+    flex: 0 0 auto;
+    width: 9px;
+    height: 9px;
+    margin-top: 0.42em;
+    border-radius: 50%;
+    background: var(--theme-text-secondary);
+    box-shadow: 0 0 0 3px transparent;
+}
+
+.embedding-status[data-state="ready"] .embedding-status-dot {
+    background: var(--theme-success);
+    box-shadow: 0 0 0 3px var(--theme-success-soft);
+}
+
+.embedding-status[data-state="fallback"] .embedding-status-dot {
+    background: var(--theme-accent-primary);
+    box-shadow: 0 0 0 3px var(--theme-accent-soft);
+}
+
+.embedding-status[data-state="error"] .embedding-status-dot {
+    background: var(--theme-danger);
+    box-shadow: 0 0 0 3px var(--theme-danger-soft);
+}
+
+.embedding-status-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.embedding-status-title {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--theme-text-primary);
+}
+
+.embedding-status-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.embedding-status-chip {
+    padding: 1px 8px;
+    border: 1px solid var(--theme-border-subtle);
+    border-radius: 999px;
+    background: var(--theme-bg-panel);
+    font-size: 0.76rem;
+    line-height: 1.6;
+    color: var(--theme-text-secondary);
+}
+
+.embedding-status-note {
+    margin: 6px 0 0;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--theme-text-secondary);
+}
+
+.embedding-status[data-state="error"] .embedding-status-note {
+    color: var(--theme-danger);
+}
+
+.embedding-status-refresh {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    border: 1px solid var(--theme-border-subtle);
+    background: var(--theme-bg-panel);
+    color: var(--theme-text-secondary);
+}
+
+.embedding-status-refresh:hover,
+.embedding-status-refresh:focus-visible {
+    border-color: var(--theme-accent-primary);
+    background: var(--theme-accent-soft);
+    color: var(--theme-accent-primary);
+}
+
+@media (max-width: 720px) {
+    .embedding-status {
+        flex-wrap: wrap;
+    }
+
+    .embedding-status-refresh {
+        margin-left: 19px;
+    }
+}
