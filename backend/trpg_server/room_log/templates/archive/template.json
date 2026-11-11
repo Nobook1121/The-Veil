@@ -1,0 +1,10 @@
+{
+  "id": "archive",
+  "name": "档案卷宗",
+  "description": "深色封面 + 卷宗内页，适合长篇团录",
+  "toc": true,
+  "cover": true,
+  "page": { "size": "a4", "margin": [18, 16, 18, 16] },
+  "fonts": { "body": "VeilBody", "heading": "VeilBody" },
+  "options": { "theme_color": "#0d1f1a", "accent": "#b9a06a" }
+}

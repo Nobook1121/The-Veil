@@ -1,0 +1,223 @@
+/* archive 档案卷宗 —— 仅使用 PyMuPDF Story 实测支持的 CSS 子集。 */
+body {
+  font-family: VeilBody;
+  font-size: 10.5pt;
+  line-height: 1.75;
+  color: #1c2b26;
+}
+
+p {
+  margin: 0 0 6pt 0;
+}
+
+h1, h2, h3 {
+  font-family: VeilBody;
+  color: #0d1f1a;
+}
+
+div.narr {
+  border-left: 3px solid #b9a06a;
+  padding-left: 8pt;
+  margin: 0 0 8pt 0;
+}
+
+div.narr p {
+  margin-bottom: 6pt;
+}
+
+div.dial {
+  margin-left: 10pt;
+  border-left: 2px solid #b9a06a;
+  padding-left: 8pt;
+  color: #3a4a44;
+  margin-bottom: 8pt;
+}
+
+div.dial p {
+  margin-bottom: 6pt;
+}
+
+table.speaker {
+  width: 100%;
+  margin-top: 4pt;
+}
+
+td.who {
+  text-align: left;
+  color: #0d1f1a;
+}
+
+td.when {
+  text-align: right;
+  color: #8a8a8a;
+  font-size: 9pt;
+}
+
+span.character {
+  color: #6b7a72;
+  font-size: 9.5pt;
+}
+
+div.speech {
+  border-left: 2px solid #ded6c3;
+  padding-left: 8pt;
+  margin: 2pt 0 8pt 0;
+}
+
+div.speech p {
+  margin-bottom: 4pt;
+}
+
+table.dice {
+  width: 100%;
+  background-color: #f2f0ea;
+  border: 1px solid #e0dccf;
+  margin: 4pt 0 8pt 0;
+}
+
+td.dice-left {
+  text-align: left;
+  color: #6b6b6b;
+  font-size: 9pt;
+}
+
+td.dice-right {
+  text-align: right;
+}
+
+td.dice-judge {
+  text-align: right;
+  color: #8a5a2b;
+  font-size: 9pt;
+}
+
+p.system {
+  text-align: center;
+  color: #8a8a8a;
+  font-size: 9pt;
+  margin: 4pt 0;
+}
+
+table.figure {
+  width: 100%;
+  margin: 6pt 0;
+}
+
+td.figure-cell {
+  text-align: center;
+}
+
+td.figure-caption {
+  text-align: center;
+  color: #6b6b6b;
+  font-size: 9pt;
+  padding-top: 3pt;
+}
+
+/* 章节头 */
+p.chapter-index {
+  color: #b9a06a;
+  font-size: 9pt;
+  margin: 0;
+}
+
+h1.chapter-title {
+  font-size: 24pt;
+  margin: 0;
+}
+
+p.chapter-sub {
+  color: #5b6b64;
+  font-size: 11pt;
+  margin: 2pt 0 0 0;
+}
+
+hr.chapter-rule {
+  border-top: 1px solid #b9a06a;
+  margin: 8pt 0 14pt 0;
+}
+
+/* 目录 */
+h1.toc-title {
+  font-size: 18pt;
+  color: #0d1f1a;
+  margin: 0 0 16pt 0;
+}
+
+table.toc {
+  width: 100%;
+}
+
+td.toc-no {
+  width: 8%;
+  text-align: left;
+  color: #b9a06a;
+  font-size: 9.5pt;
+  padding: 4pt 0;
+  border-bottom: 1px solid #e6e0d2;
+}
+
+td.toc-name {
+  text-align: left;
+  padding: 4pt 0;
+  border-bottom: 1px solid #e6e0d2;
+}
+
+td.toc-page {
+  width: 8%;
+  text-align: right;
+  color: #3a4a44;
+  padding: 4pt 0;
+  border-bottom: 1px solid #e6e0d2;
+}
+
+/* 封面 */
+p.cover-kicker {
+  text-align: center;
+  color: #b9a06a;
+  font-size: 9pt;
+  margin: 0 0 70pt 0;
+}
+
+h1.cover-title {
+  text-align: center;
+  color: #f2efe6;
+  font-size: 30pt;
+  margin: 0 0 12pt 0;
+}
+
+p.cover-sub {
+  text-align: center;
+  color: #cfc8b6;
+  font-size: 12pt;
+  margin: 0;
+}
+
+hr.cover-rule {
+  border-top: 1px solid #b9a06a;
+  margin: 20pt 36pt;
+}
+
+p.cover-meta {
+  text-align: center;
+  color: #a9a292;
+  font-size: 9.5pt;
+  margin: 4pt 0 0 0;
+}
+
+table.frame {
+  width: 100%;
+  border: 1px solid #b9a06a;
+  margin-top: 96pt;
+}
+
+td.frame-cell {
+  padding: 48pt 24pt 40pt 24pt;
+}
+
+p.cover-foot {
+  text-align: center;
+  color: #6f7f76;
+  font-size: 9pt;
+  margin-top: 80pt;
+}

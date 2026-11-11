@@ -8,10 +8,12 @@ import json
 from pathlib import Path
 
 import pytest
+import pymupdf
 
 from trpg_server.room_log import fonts as room_log_fonts
 from trpg_server.room_log.markdown import to_html
 from trpg_server.room_log.model import build_document, resolve_image_path
+from trpg_server.room_log.render import RenderError, render_pdf
 
 
 def _write_room(root: Path, messages: list[dict], members: list[dict] | None = None) -> Path:
@@ -297,3 +299,60 @@ def test_resolve_font_finds_system_font():
     family, path = room_log_fonts.resolve_font()
     assert family == room_log_fonts.FONT_FAMILY
     assert Path(path).is_file()
+
+
+def test_estimated_pages_is_close_to_actual(tmp_path):
+    room = _write_room(
+        tmp_path / "room",
+        [
+            _msg("夜色沉沉，雨点敲打着车窗。" * 12, created_at="2026-10-01 20:00:00"),
+            _msg("我推开门。", msg_type="player", sender_id=1, created_at="2026-10-01 20:01:00"),
+            _msg("1d100 = 42 成功", msg_type="dice", created_at="2026-10-01 20:02:00"),
+        ],
+    )
+    document = build_document(room, data_dir=tmp_path / "data")
+    result = render_pdf(document, tmp_path / "estimate.pdf", room_dir=room, data_dir=tmp_path / "data")
+    estimated = document["stats"]["estimated_pages"]
+    assert abs(estimated - result["pages"]) <= max(3, result["pages"] // 2)
+
+
+def test_render_pdf_contains_chinese_and_footer(tmp_path):
+    room = _write_room(
+        tmp_path / "room",
+        [
+            _msg("第一天，夜色沉沉，雨点敲打着车窗。", created_at="2026-10-01 20:00:00"),
+            _msg("“你终于来了。”他低声说。", created_at="2026-10-01 20:01:00"),
+            _msg("我推开门。", msg_type="player", sender_id=1, created_at="2026-10-01 20:02:00"),
+        ],
+        members=[
+            {"user_id": "1", "username": "tester", "room_role": "owner", "is_active": True,
+             "character_card": {"name": "何清越"}}
+        ],
+    )
+    document = build_document(room, data_dir=tmp_path / "data")
+    output = tmp_path / "room-log.pdf"
+    result = render_pdf(document, output, room_dir=room, data_dir=tmp_path / "data")
+
+    assert result["pages"] >= 3
+    assert output.stat().st_size < 25 * 1024 * 1024
+    pdf = pymupdf.open(output)
+    try:
+        assert pdf.metadata["title"] == "测试房间 · 团录"
+        full_text = "".join(page.get_text() for page in pdf)
+        assert "夜色沉沉" in full_text
+        assert "何清越" in full_text
+        assert "第 3 页 / 共" in full_text
+        # 目录里的页码必须与章节实际起始页一致。
+        chapter_page = next(
+            index + 1 for index, page in enumerate(pdf) if index > 1 and "夜色沉沉" in page.get_text()
+        )
+        toc_text = pdf[1].get_text()
+        assert str(chapter_page) in toc_text
+    finally:
+        pdf.close()
+
+
+def test_render_pdf_rejects_empty_document(tmp_path):
+    document = build_document(_write_room(tmp_path / "room", []), data_dir=tmp_path / "data")
+    with pytest.raises(RenderError):
+        render_pdf(document, tmp_path / "empty.pdf", data_dir=tmp_path / "data")
