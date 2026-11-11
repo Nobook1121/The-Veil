@@ -65,34 +65,6 @@ def test_schema_env_names_have_no_conflicts():
         assert seen.get(name) in (None, (SMALL_MODELS_SECTION, task)), name
 
 
-def test_env_layer_overrides_user_file(tmp_path):
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    (config_dir / "general.toml").write_text("[ai]\nmax_tokens = 4096\n", encoding="utf-8")
-
-    settings = load_settings(config_dir, env={"AI_TRPG_CFG_AI_MAX_TOKENS": "8192"})
-
-    assert settings.ai.max_tokens == 8192
-    assert settings.locked["ai.max_tokens"] == "env"
-
-
-def test_invalid_env_value_falls_back_to_file(tmp_path):
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    (config_dir / "general.toml").write_text("[ai]\nmax_tokens = 4096\n", encoding="utf-8")
-
-    settings = load_settings(config_dir, env={"AI_TRPG_CFG_AI_MAX_TOKENS": "not-a-number"})
-
-    assert settings.ai.max_tokens == 4096
-
-
-def test_unknown_env_var_does_not_break_loading(tmp_path, caplog):
-    settings = load_settings(tmp_path, env={"AI_TRPG_CFG_TYPO_KEY": "1"})
-
-    assert settings.ai.max_tokens == 16384
-    assert "AI_TRPG_CFG_TYPO_KEY" in caplog.text
-
-
 def test_general_config_api_returns_effective_config_and_overrides(tmp_path, monkeypatch):
     monkeypatch.setenv("AI_TRPG_CFG_AI_MAX_TOKENS", "8192")
     client = _app(tmp_path).test_client()

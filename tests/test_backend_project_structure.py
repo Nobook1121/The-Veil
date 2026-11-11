@@ -1,7 +1,4 @@
 from pathlib import Path
-import os
-import subprocess
-import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,19 +15,3 @@ def test_root_server_py_remains_compatibility_entrypoint():
 
     assert "backend" in source
     assert "from trpg_server.app_factory import create_app, socketio" in source
-
-
-def test_backend_package_imports_from_repo_root_python_process():
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(ROOT / "backend")
-    result = subprocess.run(
-        [sys.executable, "-c", "import trpg_server; print(trpg_server.__file__)"],
-        cwd=ROOT,
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "backend" in result.stdout

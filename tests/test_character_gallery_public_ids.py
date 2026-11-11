@@ -175,21 +175,9 @@ def test_gallery_export_returns_same_bundle_as_personal_export(tmp_path: Path):
     assert json.loads(bundle["jsonText"])["name"] == "广场角色"
     assert bundle["encoded"]
 
-
-def test_gallery_export_denies_other_users_but_allows_admin(tmp_path: Path):
-    app = _make_gallery_app(tmp_path)
-    client = app.test_client()
-
     _login(client, "2")
     assert client.get("/api/character-gallery/abc123/export").status_code == 403
 
     _login(client, "3", role="ADMIN")
     assert client.get("/api/character-gallery/abc123/export").status_code == 200
-
-
-def test_gallery_export_missing_card_returns_404(tmp_path: Path):
-    app = _make_gallery_app(tmp_path)
-    client = app.test_client()
-    _login(client, "1")
-
     assert client.get("/api/character-gallery/missing/export").status_code == 404

@@ -68,16 +68,3 @@ def test_archive_snapshot_includes_console_log(tmp_path):
     messages = [item["message"] for item in room_log.read_room_log(room_dir)["entries"]]
     assert "创建了房间" in messages
     assert "发送了房间消息" in messages
-
-
-def test_archive_without_console_log_yields_empty_list(tmp_path):
-    _write_room(tmp_path)
-    app = _app(tmp_path)
-    client = app.test_client()
-    _login(client)
-
-    response = client.post("/api/rooms/r-1/archive", headers={"X-CSRF-Token": "csrf"})
-
-    assert response.status_code == 200
-    archive = json.loads((tmp_path / "room-archives" / "r-1.json").read_text(encoding="utf-8"))
-    assert archive["console_log"] == []

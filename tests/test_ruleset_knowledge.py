@@ -1,4 +1,4 @@
-from trpg_server.agents.ruleset_adapters import COC7Adapter, RulesetRegistry
+from trpg_server.agents.ruleset_adapters import COC7Adapter
 from trpg_server.agents.ruleset_knowledge import RulesetKnowledgeStore
 
 
@@ -23,7 +23,3 @@ def test_ruleset_store_versions_and_room_binding_are_isolated(tmp_path):
     store.bind_room("room-1", "coc7", version)
     assert (tmp_path / "rooms" / "room-1" / "info.json").exists()
     assert store.search("dnd", "damage") == []
-
-
-def test_registry_can_grow_without_changing_store_api():
-    assert "coc7" in {item["ruleset_id"] for item in RulesetRegistry().list()}

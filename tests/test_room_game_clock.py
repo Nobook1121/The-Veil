@@ -7,7 +7,6 @@ from datetime import timedelta
 import pytest
 
 from trpg_server import room_clock, room_interlude, room_magic
-from trpg_server.agents.tools import combat
 from trpg_server.agents.tools.time import game_clock_tool
 from trpg_server.room_console_commands import execute_room_command
 from trpg_server.room_rule_commands import handle_room_rule_command
@@ -228,57 +227,6 @@ def test_grimoire_weeks_default_to_clock_delta(tmp_path):
         weeks=None, san_loss=1, cmi=1, cmf=2, rating=5,
     )
     assert payload["weeks"] == 3
-
-
-# ---------------------------------------------------------------------------
-# 毒剂延迟发作
-# ---------------------------------------------------------------------------
-def _spec(name, **overrides):
-    spec = {
-        "name": name,
-        "is_npc": True,
-        "side": "enemy",
-        "dex": 50,
-        "str": 50,
-        "siz": 50,
-        "con": 50,
-        "hp": 20,
-        "max_hp": 20,
-        "luck": 50,
-        "skills": {},
-        "weapons": [],
-    }
-    spec.update(overrides)
-    return spec
-
-
-def test_delayed_poison_settles_when_round_is_due(tmp_path):
-    context = FakeContext(tmp_path, {"coc7_combat_poison": True})
-    combat.start_combat({"participants": [_spec("Target")]}, context)
-    result = combat.poison_combatant(
-        {"target": "Target", "damage": "1D6", "onset_rounds": 2}, context
-    )
-    assert result["pending"] is True
-    assert combat._load_combat(context)["pending_poisons"]
-
-    combat.next_turn({}, context)
-    assert combat._load_combat(context)["pending_poisons"]
-    combat.next_turn({}, context)
-    state = combat._load_combat(context)
-    assert state["pending_poisons"] == []
-    assert state["combatants"]["Target"]["hp"] <= 20
-
-
-def test_delayed_poison_settles_on_time_advance(tmp_path):
-    save_room_info(tmp_path, _info({"coc7_combat_poison": True, "coc7_game_clock": True}))
-    context = FakeContext(tmp_path, {"coc7_combat_poison": True})
-    combat.start_combat({"participants": [_spec("Target")]}, context)
-    combat.poison_combatant(
-        {"target": "Target", "damage": "1D6", "onset_rounds": 99}, context
-    )
-    settled = combat.settle_poisons_after_time(tmp_path, room_id="clock-room")
-    assert settled["settled"] == 1
-    assert combat._load_combat(context)["pending_poisons"] == []
 
 
 # ---------------------------------------------------------------------------

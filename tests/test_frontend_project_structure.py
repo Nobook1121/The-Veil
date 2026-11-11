@@ -6,14 +6,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_frontend_browser_sources_live_under_app_directory():
+def test_frontend_source_tree_layout_is_stable():
     assert not (ROOT / "frontend/src/js").exists()
     assert (ROOT / "frontend/src/app/main.ts").is_file()
     assert (ROOT / "frontend/src/app/auth/api.ts").is_file()
     assert (ROOT / "frontend/src/app/controllers/ScenarioController.ts").is_file()
-
-
-def test_frontend_source_tree_separates_types_and_build_artifacts():
     assert (ROOT / "frontend/src/types/global.d.ts").is_file()
     assert not (ROOT / "frontend/src/app/types.d.ts").exists()
     assert not (ROOT / "frontend/dist").exists()

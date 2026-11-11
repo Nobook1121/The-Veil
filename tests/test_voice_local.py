@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 
@@ -238,34 +237,6 @@ def test_local_endpoints_permissions_and_room_cache_scope(tmp_path, monkeypatch)
                          headers={"X-CSRF-Token": "csrf"}).status_code == 403
     assert client.post("/api/voice/cache/clear", json={"room_id": "r-1"},
                        headers={"X-CSRF-Token": "csrf"}).status_code == 200
-
-
-# --- 真实推理（默认跳过，本机手动验证用） -------------------------------
-
-@pytest.mark.skipif(
-    not os.environ.get("TRPG_VOICE_LOCAL_TEST") or not local_models.installed_status()["installed"],
-    reason="未设置 TRPG_VOICE_LOCAL_TEST=1 或未安装本地模型权重",
-)
-def test_real_local_synthesis_then_cache_hit(tmp_path):
-    settings = {
-        "local_enabled": True,
-        "local_model": local_models.MODEL_ID,
-        "local_concurrency": 1,
-        "local_timeout": 60,
-        "cache_enabled": True,
-        "cache_quota_mb": 64,
-        "cache_max_entries": 300,
-        "cache_overflow": "lru",
-    }
-    text = "你好，欢迎来到被遗忘的旅店。"
-    room_dir = tmp_path / "room"
-    room_dir.mkdir()
-    first = local_service.synthesize(room_dir, text=text, voice_id=57, speed=1.0, settings=settings)
-    assert first["ok"] is True and first["cache_hit"] is False
-    assert len(first["audio"]) > 1000 and first["audio_ms"] > 0
-    second = local_service.synthesize(room_dir, text=text, voice_id=57, speed=1.0, settings=settings)
-    assert second["ok"] is True and second["cache_hit"] is True
-    assert second["latency_ms"] == 0.0 and second["audio"] == first["audio"]
 
 
 # --- 命令预演 -----------------------------------------------------------

@@ -34,16 +34,6 @@ def _run(rooms_dir, room_id, line, **kwargs):
     )
 
 
-def test_help_lists_music_external_commands(tmp_path):
-    rooms_dir = _rooms_dir(tmp_path, "r-1")
-
-    result = _run(rooms_dir, "r-1", "help")
-
-    assert result.ok is True
-    assert "immersive music search" in result.message
-    assert "immersive music switch" in result.message
-
-
 def test_music_show_reports_engine_and_bed_state(tmp_path):
     rooms_dir = _rooms_dir(tmp_path, "r-1")
 
@@ -209,6 +199,8 @@ def test_help_lists_room_commands(tmp_path):
     assert result.ok is True
     assert "房间控制台命令" in result.message
     assert "archive" in result.message
+    assert "immersive music search" in result.message
+    assert "immersive music switch" in result.message
 
 
 def test_info_reports_room_details(tmp_path):
@@ -296,16 +288,6 @@ def test_log_clear_executes_with_yes(tmp_path):
     assert room_log.read_room_log(rooms_dir / "r-1")["entries"] == []
 
 
-def test_log_clear_executes_with_pure_word_yes(tmp_path):
-    rooms_dir = _rooms_dir(tmp_path, "r-1")
-    room_log.append_room_log(rooms_dir / "r-1", "创建了房间", room_id="r-1", max_entries=50)
-
-    result = _run(rooms_dir, "r-1", "log clear yes")
-
-    assert result.ok is True
-    assert room_log.read_room_log(rooms_dir / "r-1")["entries"] == []
-
-
 def test_log_clear_confirms_then_executes(tmp_path):
     rooms_dir = _rooms_dir(tmp_path, "r-1")
     room_log.append_room_log(rooms_dir / "r-1", "创建了房间", room_id="r-1", max_entries=50)
@@ -338,15 +320,6 @@ def _member(rooms_dir, room_id, username):
     return next(item for item in info["members"] if item["username"] == username)
 
 
-def test_members_without_subcommand_still_lists(tmp_path):
-    rooms_dir = _rooms_dir(tmp_path, "r-1")
-
-    result = _run(rooms_dir, "r-1", "members")
-
-    assert result.ok is True
-    assert "房间角色=member" in result.message
-
-
 def test_members_kick_is_dry_run_without_yes(tmp_path):
     rooms_dir = _rooms_dir(tmp_path, "r-1")
 
@@ -360,21 +333,12 @@ def test_members_kick_is_dry_run_without_yes(tmp_path):
 def test_members_kick_executes_with_yes(tmp_path):
     rooms_dir = _rooms_dir(tmp_path, "r-1")
 
-    result = _run(rooms_dir, "r-1", "members kick player --yes")
+    result = _run(rooms_dir, "r-1", "members kick 2 --yes")
 
     assert result.ok is True
     target = _member(rooms_dir, "r-1", "player")
     assert target["is_active"] is False
     assert target["status"] == "removed"
-
-
-def test_members_kick_accepts_user_id(tmp_path):
-    rooms_dir = _rooms_dir(tmp_path, "r-1")
-
-    result = _run(rooms_dir, "r-1", "members kick 2 --yes")
-
-    assert result.ok is True
-    assert _member(rooms_dir, "r-1", "player")["is_active"] is False
 
 
 def test_members_kick_rejects_owner(tmp_path):

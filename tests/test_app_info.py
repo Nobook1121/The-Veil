@@ -30,8 +30,6 @@ def test_build_app_info_has_stable_shape():
     assert info["repo"]["github"] == "Nobook1121/The-Veil"
     assert isinstance(info["runtime"]["python"], str)
 
-
-def test_load_credits_returns_lists():
     credits = load_credits()
     for key in ("contributors", "special_thanks", "dependencies", "sponsor_channels", "sponsors"):
         assert isinstance(credits[key], list)

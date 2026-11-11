@@ -37,8 +37,8 @@ def _login(client):
         session.update(user_id=1, username="tester", role="ADMIN", session_token="token", csrf_token="csrf")
 
 
-def _write_room(tmp_path):
-    room_dir = tmp_path / "rooms" / "r-1"
+def _write_room(tmp_path, room_id="r-1"):
+    room_dir = tmp_path / "rooms" / room_id
     room_dir.mkdir(parents=True, exist_ok=True)
     card = {
         "name": "调查员",
@@ -54,7 +54,7 @@ def _write_room(tmp_path):
         "maxSan": 60,
     }
     info = {
-        "id": "r-1",
+        "id": room_id,
         "name": "Test Room",
         "creator_id": 1,
         "members": [
@@ -174,6 +174,17 @@ def test_end_requires_confirmation_and_archives(tmp_path):
     started = client.post("/api/rooms/r-1/interlude/start", headers={"X-CSRF-Token": "csrf"}, json={})
     assert started.status_code == 200, started.get_json()
 
+    ok, preview = room_interlude.handle_console_command(
+        ["end"],
+        room_id="r-1",
+        room_dir=room_dir,
+        actor="tester",
+        actor_id=1,
+        actor_rank=3,
+    )
+    assert ok is True
+    assert "yes" in preview
+
     blocked = client.post("/api/rooms/r-1/interlude/end", headers={"X-CSRF-Token": "csrf"}, json={})
     assert blocked.status_code == 409
     assert "confirm" in blocked.get_json()["message"].lower() or "确认" in blocked.get_json()["message"]
@@ -187,26 +198,12 @@ def test_end_requires_confirmation_and_archives(tmp_path):
     assert (tmp_path / "room-archives").exists()
     assert list((tmp_path / "room-archives").iterdir())
 
-
-def test_console_end_accepts_pure_word_yes(tmp_path):
-    room_dir, info = _write_room(tmp_path)
-    room_interlude.start_interlude(room_dir, info, actor="tester", actor_id=1, rng=_queue_rng([60, 5, 3, 4]))
-
-    ok, preview = room_interlude.handle_console_command(
-        ["end"],
-        room_id="r-1",
-        room_dir=room_dir,
-        actor="tester",
-        actor_id=1,
-        actor_rank=3,
-    )
-    assert ok is True
-    assert "yes" in preview
-
+    room_dir2, info2 = _write_room(tmp_path, "r-2")
+    room_interlude.start_interlude(room_dir2, info2, actor="tester", actor_id=1, rng=_queue_rng([60, 5, 3, 4]))
     ok, message = room_interlude.handle_console_command(
         ["end", "yes"],
-        room_id="r-1",
-        room_dir=room_dir,
+        room_id="r-2",
+        room_dir=room_dir2,
         actor="tester",
         actor_id=1,
         actor_rank=3,

@@ -44,18 +44,6 @@ def _member(username: str = "玩家甲") -> dict:
     return {"user_id": f"{username}-id", "username": username, "character_card": _card()}
 
 
-def test_social_check_auto_success_skips_roll():
-    result = check_service.run_room_social_check(
-        _member(),
-        player_name="玩家甲",
-        name="说服",
-        target_card={"name": "NPC", "skills": [{"name": "说服", "value": 90}]},
-        attitude="supportive",
-    )
-    assert result["auto_success"] is True
-    assert result["roll"] is None
-
-
 def test_social_check_uses_plugin_difficulty_and_single_roll():
     result = check_service.run_room_social_check(
         _member(),
@@ -68,8 +56,18 @@ def test_social_check_uses_plugin_difficulty_and_single_roll():
     assert result["success"] is True
 
 
-def test_combined_check_rolls_once_for_all_skills():
-    result = check_service.run_room_combined_check(
+def test_check_service_wiring_for_batch1_rules():
+    social = check_service.run_room_social_check(
+        _member(),
+        player_name="玩家甲",
+        name="说服",
+        target_card={"name": "NPC", "skills": [{"name": "说服", "value": 90}]},
+        attitude="supportive",
+    )
+    assert social["auto_success"] is True
+    assert social["roll"] is None
+
+    combined = check_service.run_room_combined_check(
         _member(),
         player_name="玩家甲",
         names=["说服", "侦查"],
@@ -77,32 +75,28 @@ def test_combined_check_rolls_once_for_all_skills():
         difficulty="regular",
         rng=_rng(10),
     )
-    assert result["roll"] == 10
-    assert [row["success"] for row in result["skills"]] == [True, True]
-    assert result["success"] is True
+    assert combined["roll"] == 10
+    assert [row["success"] for row in combined["skills"]] == [True, True]
+    assert combined["success"] is True
 
-
-def test_group_luck_picks_lowest_luck_member():
     high = _member("甲")
     low = _member("乙")
     high["character_card"]["attributes"]["LUC"] = 80
     low["character_card"]["attributes"]["LUC"] = 30
-    result = check_service.run_room_group_luck([high, low], rng=_rng(20))
-    assert result["player_name"] == "乙"
-    assert result["luck"] == 30
-    assert result["success"] is True
+    luck = check_service.run_room_group_luck([high, low], rng=_rng(20))
+    assert luck["player_name"] == "乙"
+    assert luck["luck"] == 30
+    assert luck["success"] is True
 
-
-def test_contact_check_and_outcome_are_merged():
-    result = check_service.run_room_contact_check(
+    contact = check_service.run_room_contact_check(
         _member(),
         player_name="玩家甲",
         name="母语",
         remote=True,
         rng=_rng(30),
     )
-    assert result["contact"]["difficulty"] == "hard"
-    assert result["contact"]["state"] == "contact"
+    assert contact["contact"]["difficulty"] == "hard"
+    assert contact["contact"]["state"] == "contact"
 
 
 def test_economy_is_read_only_and_does_not_touch_card():

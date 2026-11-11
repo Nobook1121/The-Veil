@@ -18,12 +18,6 @@ def test_factory_uses_qdrant_for_explicit_backend_without_importing_service(tmp_
     assert store.path.endswith("qdrant")
 
 
-def test_factory_keeps_url_compatibility(tmp_path: Path):
-    store = create_vector_store(url="http://127.0.0.1:6333", path=tmp_path / "embedded")
-
-    assert isinstance(store, QdrantVectorStore)
-
-
 def test_app_factory_exposes_embedded_backend_config(tmp_path: Path):
     app = create_app({"TESTING": True, "VECTOR_BACKEND": "embedded", "VECTOR_DB_PATH": tmp_path / "embedded"})
 

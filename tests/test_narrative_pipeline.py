@@ -47,15 +47,12 @@ def test_full_pipeline_produces_stable_outputs():
 
     payload = report.to_dict()
     assert payload["topology"] == bundle.topology
-    assert isinstance(payload["issues"], list)
-    assert payload["error_count"] >= 0
+    assert payload["error_count"] == 3
+    assert {issue["code"] for issue in payload["issues"] if issue["level"] == "error"} == {
+        "visibility.kp_only_in_public_exits",
+        "graph.unreachable_ending",
+        "gate.unsatisfiable",
+    }
 
     simulated = simulate_any_order(bundle)
-    assert isinstance(simulated, list)
-
-
-def test_extract_edges_do_not_create_next_from_order():
-    bundle = _bundle()
-    assert not any(edge.type == "next" for edge in bundle.edges)
-    # 正文明确写了“与玄关相连”，应产生移动边。
-    assert any(edge.type == "adjacent" for edge in bundle.edges)
+    assert [issue.code for issue in simulated] == ["order_simulation.unreachable_ending"]

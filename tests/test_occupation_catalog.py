@@ -45,14 +45,12 @@ def _walk_skill_keys(entries):
             yield from _walk_skill_keys([nested])
 
 
-def test_occupation_catalog_has_all_builtin_files():
+def test_occupation_required_fields_and_file_name():
     files = _occupation_files()
-    assert len(files) >= 1
+    assert files, "职业目录不能为空"
     ids = [json.loads(path.read_text(encoding="utf-8"))["id"] for path in files]
     assert len(ids) == len(set(ids)), "职业 id 必须全局唯一"
 
-
-def test_occupation_required_fields_and_file_name():
     for path, occupation in _load_occupations():
         assert occupation["id"] == path.stem, f"{path.name} 的 id 必须与文件名一致"
         for field in ("id", "nameKey", "name", "categoryKey", "category", "order"):
