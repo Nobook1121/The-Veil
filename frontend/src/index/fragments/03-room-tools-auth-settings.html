@@ -1111,6 +1111,76 @@
                                     <small class="form-text text-muted" data-i18n="settings.room_console.hint">房间日志记录在房间目录内，随房间一起归档；关闭后房间事件将像以前一样输出到服务器控制台。</small>
                                                 </div>
                                             </section>
+                                            <section class="settings-section" id="settings-section-room-log">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title" data-i18n="settings.section.room_log">团录导出</h3>
+                                                        <p class="settings-section-desc" data-i18n="settings.room_log.desc">把房间聊天记录导出为可搜索的 PDF，并限制单次消息量、产物保留时间与并发数。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                                    <div class="form-group">
+                                                        <div class="form-check">
+                                                            <input type="checkbox" class="form-check-input" id="roomLogEnabled" checked>
+                                                            <label class="form-check-label" for="roomLogEnabled" data-i18n="settings.room_log.enabled">启用团录导出</label>
+                                                        </div>
+                                                        <small class="form-text text-muted" data-i18n="settings.room_log.enabled_hint">关闭后所有房间都不能预览或生成团录 PDF。</small>
+                                                    </div>
+                                                    <div class="form-group mt-2">
+                                                        <div class="form-check">
+                                                            <input type="checkbox" class="form-check-input" id="roomLogMembersCanExport" checked>
+                                                            <label class="form-check-label" for="roomLogMembersCanExport" data-i18n="settings.room_log.members_can_export">允许普通成员导出</label>
+                                                        </div>
+                                                        <small class="form-text text-muted" data-i18n="settings.room_log.members_can_export_hint">关闭后只有房主、房管与站点管理员可以导出；房主仍可在房间内进一步收紧。</small>
+                                                    </div>
+                                                    <div class="form-group mt-2">
+                                                        <label for="roomLogDefaultTemplate" data-i18n="settings.room_log.default_template">默认版式</label>
+                                                        <select class="form-control" id="roomLogDefaultTemplate">
+                                                            <option value="archive" data-i18n="roomLog.template.archive">档案卷宗</option>
+                                                            <option value="letter" data-i18n="roomLog.template.letter">手记信纸</option>
+                                                            <option value="minimal" data-i18n="roomLog.template.minimal">极简排版</option>
+                                                        </select>
+                                                        <small class="form-text text-muted" data-i18n="settings.room_log.default_template_hint">导出窗口打开时默认选中的版式，成员仍可临时切换。</small>
+                                                    </div>
+                                                    <div class="form-group mt-3">
+                                                        <label data-i18n="settings.room_log.include">默认包含的内容</label>
+                                                        <div class="form-check">
+                                                            <input type="checkbox" class="form-check-input" id="roomLogIncludeOocDefault" checked>
+                                                            <label class="form-check-label" for="roomLogIncludeOocDefault" data-i18n="settings.room_log.include_ooc">包含场外发言</label>
+                                                        </div>
+                                                        <div class="form-check">
+                                                            <input type="checkbox" class="form-check-input" id="roomLogIncludeDiceDefault" checked>
+                                                            <label class="form-check-label" for="roomLogIncludeDiceDefault" data-i18n="settings.room_log.include_dice">包含骰子记录</label>
+                                                        </div>
+                                                        <div class="form-check">
+                                                            <input type="checkbox" class="form-check-input" id="roomLogIncludeImagesDefault" checked>
+                                                            <label class="form-check-label" for="roomLogIncludeImagesDefault" data-i18n="settings.room_log.include_images">包含图片</label>
+                                                        </div>
+                                                        <small class="form-text text-muted" data-i18n="settings.room_log.include_hint">这里只决定导出窗口的默认勾选状态，成员可以在导出时取消勾选。</small>
+                                                    </div>
+                                                    <div class="form-group mt-3">
+                                                        <label for="roomLogMaxMessages" data-i18n="settings.room_log.max_messages">单次导出消息上限</label>
+                                                        <input type="number" class="form-control" id="roomLogMaxMessages" value="20000" min="100" max="200000">
+                                                        <small class="form-text text-muted" data-i18n="settings.room_log.max_messages_hint">单次导出最多处理的消息条数，超出部分不会写入 PDF。</small>
+                                                    </div>
+                                                    <div class="form-group mt-2">
+                                                        <label for="roomLogKeepDays" data-i18n="settings.room_log.keep_days">导出产物保留天数</label>
+                                                        <input type="number" class="form-control" id="roomLogKeepDays" value="7" min="0" max="365">
+                                                        <small class="form-text text-muted" data-i18n="settings.room_log.keep_days_hint">超期的 PDF 会自动清理；填 0 表示不自动清理。</small>
+                                                    </div>
+                                                    <div class="form-group mt-2">
+                                                        <label for="roomLogMaxConcurrent" data-i18n="settings.room_log.max_concurrent">并发导出任务数</label>
+                                                        <input type="number" class="form-control" id="roomLogMaxConcurrent" value="2" min="1" max="4">
+                                                        <small class="form-text text-muted" data-i18n="settings.room_log.max_concurrent_hint">同时生成的 PDF 数量上限，过高会明显占用服务器 CPU。</small>
+                                                    </div>
+                                                    <div class="form-group mt-2">
+                                                        <label for="roomLogFontFile" data-i18n="settings.room_log.font_file">中文字体文件</label>
+                                                        <input type="text" class="form-control" id="roomLogFontFile" data-i18n-placeholder="settings.room_log.font_file_placeholder" placeholder="留空则自动查找系统字体">
+                                                        <small class="form-text text-muted" data-i18n="settings.room_log.font_file_hint">可填字体文件名或绝对路径；缺失时导出入口会被禁用并提示原因。</small>
+                                                    </div>
+                                                </div>
+                                            </section>
                                             <section class="settings-section" id="settings-section-room-cleanup">
                                                 <header class="settings-section-head">
                                                     <div class="settings-section-heading">

@@ -232,6 +232,36 @@ def test_user_changed_event_fires_after_admin_navigation_refresh():
     assert state_ts.index("window.refreshAdminNavigation?.()") < state_ts.index('dispatchEvent(new CustomEvent("trpg:user-changed"')
 
 
+def test_room_log_export_follows_backend_contract_and_settings_expose_room_log():
+    room_log = (ROOT / "frontend/src/app/room-log.ts").read_text(encoding="utf-8")
+    settings_fragment = (ROOT / "frontend/src/index/fragments/03-room-tools-auth-settings.html").read_text(encoding="utf-8")
+    zh = json.loads((ROOT / "frontend/src/locales/zh_cn.json").read_text(encoding="utf-8"))["translations"]
+    en = json.loads((ROOT / "frontend/src/locales/en_us.json").read_text(encoding="utf-8"))["translations"]
+
+    # 权限与页数以后端 preview 为准，前端不再做角色硬编码或经验估算。
+    assert "can_export_reason" in room_log
+    assert "estimated_pages" in room_log
+    assert "MESSAGES_PER_PAGE_ESTIMATE" not in room_log
+    assert 'room_role === "owner"' not in room_log
+    assert "renderTemplates" in room_log
+
+    # [room_log] 归属 system 分类，十个键都有控件。
+    assert 'id="settings-section-room-log"' in settings_fragment
+    for control in [
+        "roomLogEnabled", "roomLogMembersCanExport", "roomLogDefaultTemplate",
+        "roomLogIncludeOocDefault", "roomLogIncludeDiceDefault", "roomLogIncludeImagesDefault",
+        "roomLogMaxMessages", "roomLogKeepDays", "roomLogMaxConcurrent", "roomLogFontFile",
+    ]:
+        assert f'id="{control}"' in settings_fragment
+
+    for key in [
+        "log.forbidden", "log.invalid_option", "log.export_not_found", "log.not_ready",
+        "log.empty", "log.font_missing", "log.render_failed",
+        "settings.room_log.font_file_hint",
+    ]:
+        assert key in zh and key in en
+
+
 def test_settings_descriptions_are_collapsed_behind_one_info_toggle():
     assistant = (ROOT / "frontend/src/app/settings/settingsAssistant.ts").read_text(encoding="utf-8")
     settings_fragment = (ROOT / "frontend/src/index/fragments/03-room-tools-auth-settings.html").read_text(encoding="utf-8")

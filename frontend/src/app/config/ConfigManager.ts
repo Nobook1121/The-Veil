@@ -133,6 +133,17 @@ class ConfigManager {
         configSetCheckboxValue("enableRoomConsole", this.get("general", "room_console", "enabled", true));
         configSetCheckboxValue("mirrorRoomConsole", this.get("general", "room_console", "mirror_to_server_console", false));
         configSetInputValue("roomConsoleMaxEntries", this.get("general", "room_console", "max_entries", 500));
+        // 团录导出：入口开关、成员导出权限、默认选项与容量限制。
+        configSetCheckboxValue("roomLogEnabled", this.get("general", "room_log", "enabled", true));
+        configSetCheckboxValue("roomLogMembersCanExport", this.get("general", "room_log", "members_can_export", true));
+        configSetSelectValue("roomLogDefaultTemplate", this.get("general", "room_log", "default_template", "archive"));
+        configSetCheckboxValue("roomLogIncludeOocDefault", this.get("general", "room_log", "include_ooc", true));
+        configSetCheckboxValue("roomLogIncludeDiceDefault", this.get("general", "room_log", "include_dice", true));
+        configSetCheckboxValue("roomLogIncludeImagesDefault", this.get("general", "room_log", "include_images", true));
+        configSetInputValue("roomLogMaxMessages", this.get("general", "room_log", "max_messages_per_export", 20000));
+        configSetInputValue("roomLogKeepDays", this.get("general", "room_log", "keep_exports_days", 7));
+        configSetInputValue("roomLogMaxConcurrent", this.get("general", "room_log", "max_concurrent_exports", 2));
+        configSetInputValue("roomLogFontFile", this.get("general", "room_log", "font_file", ""));
         // 未激活房间自动回收期限：0 表示不回收。
         configSetInputValue("roomCleanupInactiveDays", this.get("general", "rooms", "cleanup_inactive_days", 7));
         // 世界意志限频：站点默认值；房间只能收紧。

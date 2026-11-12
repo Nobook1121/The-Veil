@@ -357,6 +357,17 @@ function initSettingsTabs(): void {
     bindGeneralCheckboxSetting("enableRoomConsole", "room_console", "enabled");
     bindGeneralCheckboxSetting("mirrorRoomConsole", "room_console", "mirror_to_server_console");
     bindGeneralNumberSetting("roomConsoleMaxEntries", "room_console", "max_entries", 50, 5000);
+    // 团录导出：站点级开关、默认选项与容量限制
+    bindGeneralCheckboxSetting("roomLogEnabled", "room_log", "enabled");
+    bindGeneralCheckboxSetting("roomLogMembersCanExport", "room_log", "members_can_export");
+    bindGeneralSelectSetting("roomLogDefaultTemplate", "room_log", "default_template");
+    bindGeneralCheckboxSetting("roomLogIncludeOocDefault", "room_log", "include_ooc");
+    bindGeneralCheckboxSetting("roomLogIncludeDiceDefault", "room_log", "include_dice");
+    bindGeneralCheckboxSetting("roomLogIncludeImagesDefault", "room_log", "include_images");
+    bindGeneralNumberSetting("roomLogMaxMessages", "room_log", "max_messages_per_export", 100, 200000);
+    bindGeneralNumberSetting("roomLogKeepDays", "room_log", "keep_exports_days", 0, 365);
+    bindGeneralNumberSetting("roomLogMaxConcurrent", "room_log", "max_concurrent_exports", 1, 4);
+    bindGeneralTextSetting("roomLogFontFile", "room_log", "font_file");
     bindGeneralNumberSetting("roomCleanupInactiveDays", "rooms", "cleanup_inactive_days", 0, 3650);
     bindGeneralNumberSetting("worldOverrideCooldownSeconds", "world_override", "cooldown_seconds", 0, 3600);
     bindGeneralNumberSetting("worldOverrideHourlyLimit", "world_override", "hourly_limit", 0, 10000);
