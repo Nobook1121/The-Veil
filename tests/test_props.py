@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import tempfile
 import threading
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from trpg_server.props import (
     prepare as props_prepare,
     prompt as props_prompt,
     registry,
+    render as props_render,
     store,
 )
 from trpg_server.props.render import RenderError, fill_page_html, render_cached, render_prop
@@ -304,6 +306,47 @@ def test_render_unknown_template():
 def test_render_rejects_unknown_format(tmp_path):
     with pytest.raises(RenderError):
         render_prop(_letter_spec(), tmp_path / "x", fmt="svg")
+
+
+def _temp_render_entries() -> set[str]:
+    """工作目录与临时根里所有 ``props-render-*`` 的名字，用于比较渲染前后。"""
+    roots = {Path.cwd().resolve(), Path(tempfile.gettempdir()).resolve()}
+    names: set[str] = set()
+    for root in roots:
+        names.update(path.name for path in root.glob("props-render-*"))
+    return names
+
+
+def test_render_success_leaves_no_temp_artifacts(tmp_path):
+    font = _font_path()
+    before = _temp_render_entries()
+    render_prop(_letter_spec(), tmp_path / "letter.pdf", font_path=font)
+    render_prop(_letter_spec(), tmp_path / "letter.png", font_path=font, fmt="png")
+    assert _temp_render_entries() == before
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["letter.pdf", "letter.png"]
+
+
+def test_render_failure_leaves_no_temp_artifacts(tmp_path, monkeypatch):
+    font = _font_path()
+    before = _temp_render_entries()
+
+    def _boom(*_args, **_kwargs):
+        raise RenderError("模拟渲染失败")
+
+    monkeypatch.setattr(props_render, "_story_to_pdf_bytes", _boom)
+    output = tmp_path / "broken.pdf"
+    with pytest.raises(RenderError):
+        render_prop(_letter_spec(), output, font_path=font)
+    assert _temp_render_entries() == before
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_render_unavailable_template_leaves_no_temp_artifacts(tmp_path):
+    before = _temp_render_entries()
+    with pytest.raises(registry.UnknownTemplate):
+        render_prop(_letter_spec(template_id="missing-template"), tmp_path / "unused.pdf")
+    assert _temp_render_entries() == before
+    assert list(tmp_path.iterdir()) == []
 
 
 # ---------------------------------------------------------------- 接口

@@ -8,13 +8,10 @@ transform / column-count。中文靠 ``room_log/fonts.py`` 的探测与归档，
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
-import os
 import re
-import shutil
-import tempfile
-import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -161,16 +158,16 @@ def render_prop(
     page_rect, margins = _page_geometry(manifest)
     archive = _build_archive(resolved_font, root, room_dir, spec)
 
-    temp_root = Path(tempfile.mkdtemp(prefix="props-render-"))
-    try:
-        if suffix == "pdf":
-            pages = _write_pdf(html, css, archive, page_rect, margins, output, spec)
-        else:
-            temp_pdf = temp_root / "render.pdf"
-            pages = _write_pdf(html, css, archive, page_rect, margins, temp_pdf, spec)
-            _pdf_to_png(temp_pdf, output)
-    finally:
-        shutil.rmtree(temp_root, ignore_errors=True)
+    # 中间产物全部留在内存里：Story 的 DocumentWriter 支持写 BytesIO，PDF 后处理
+    # 与 PNG 转换都能直接从字节流读。这样既不需要临时目录，也不需要在 finally
+    # 里删文件——删除失败（Windows 句柄未释放、受限环境拦截删除）不会再留残留。
+    pages, payload = _finalize_pdf(
+        _story_to_pdf_bytes(html, css, archive, page_rect, margins), spec
+    )
+    if suffix == "pdf":
+        output.write_bytes(payload)
+    else:
+        _pdf_to_png(payload, output)
 
     return {
         "path": str(output),
@@ -254,33 +251,15 @@ def _page_geometry(manifest: Mapping[str, Any]) -> tuple["pymupdf.Rect", tuple[f
     return rect, (top, right, bottom, left)
 
 
-def _write_pdf(
-    html: str,
-    css: str,
-    archive,
-    page_rect,
-    margins: tuple[float, float, float, float],
-    output: Path,
-    spec: Mapping[str, Any],
-) -> int:
-    # Windows 上 DocumentWriter 直到对象被回收才真正释放文件句柄，所以先写到
-    # 临时 PDF，再在 writer 出栈后重新保存到目标路径（不要在它仍存活时
-    # os.replace 目标文件，否则会 WinError 5）。
-    temp_pdf = output.with_name(f"{output.stem}.{uuid.uuid4().hex[:8]}.tmp.pdf")
-    try:
-        _story_to_pdf(html, css, archive, page_rect, margins, temp_pdf)
-        pages = _finalize_pdf(temp_pdf, output, spec)
-    finally:
-        temp_pdf.unlink(missing_ok=True)
-    return pages
-
-
-def _story_to_pdf(html: str, css: str, archive, page_rect, margins, target: Path) -> int:
+def _story_to_pdf_bytes(html: str, css: str, archive, page_rect, margins) -> bytes:
     top, right, bottom, left = margins
     where = page_rect + (left, top, -right, -bottom)
     if where.is_empty or where.width <= 0 or where.height <= 0:
         raise RenderError("页面边距大于纸张尺寸")
-    writer = pymupdf.DocumentWriter(str(target))
+    buffer = io.BytesIO()
+    # Windows 上 DocumentWriter 直到对象被回收才真正释放文件句柄；写 BytesIO
+    # 没有句柄问题，调用方拿到字节后即可丢弃 PDF 中间态。
+    writer = pymupdf.DocumentWriter(buffer)
     story = pymupdf.Story(html=html, user_css=css, archive=archive)
     more = 1
     pages = 0
@@ -295,14 +274,14 @@ def _story_to_pdf(html: str, css: str, archive, page_rect, margins, target: Path
             writer.end_page()
     finally:
         writer.close()
-    return pages
+    return buffer.getvalue()
 
 
-def _finalize_pdf(source: Path, output: Path, spec: Mapping[str, Any]) -> int:
-    """裁掉尾部纯装饰页，铺纸纹与做旧，补元数据 + 字体子集化后另存。"""
+def _finalize_pdf(source: bytes, spec: Mapping[str, Any]) -> tuple[int, bytes]:
+    """裁掉尾部纯装饰页，铺纸纹与做旧，补元数据 + 字体子集化，返回 (页数, 字节)。"""
     doc = None
     try:
-        doc = pymupdf.open(str(source))
+        doc = pymupdf.open(stream=source, filetype="pdf")
         _trim_trailing_decoration(doc)
         _apply_dressing(doc, spec)
         doc.set_metadata(
@@ -317,14 +296,12 @@ def _finalize_pdf(source: Path, output: Path, spec: Mapping[str, Any]) -> int:
             doc.subset_fonts()
         except Exception:  # noqa: BLE001 - 子集化失败只影响体积
             logger.warning("props subset_fonts failed", exc_info=True)
-        doc.save(str(output), garbage=4, deflate=True, clean=True)
-        return doc.page_count
+        return doc.page_count, doc.tobytes(garbage=4, deflate=True, clean=True)
     except Exception:  # noqa: BLE001 - 元数据/子集化失败时保留原始 PDF
-        logger.warning("props pdf postprocess failed path=%s", output, exc_info=True)
-        shutil.copyfile(source, output)
-        fallback = pymupdf.open(str(output))
+        logger.warning("props pdf postprocess failed", exc_info=True)
+        fallback = pymupdf.open(stream=source, filetype="pdf")
         try:
-            return fallback.page_count
+            return fallback.page_count, source
         finally:
             fallback.close()
     finally:
@@ -405,8 +382,8 @@ def _wear_rect(name: str, rect: "pymupdf.Rect", strength: float) -> "pymupdf.Rec
     return None
 
 
-def _pdf_to_png(pdf_path: Path, output: Path) -> None:
-    doc = pymupdf.open(str(pdf_path))
+def _pdf_to_png(pdf_data: bytes, output: Path) -> None:
+    doc = pymupdf.open(stream=pdf_data, filetype="pdf")
     try:
         if doc.page_count < 1:
             raise RenderError("渲染结果为空")

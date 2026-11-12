@@ -83,7 +83,10 @@ def render_pdf(
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    temp_root = Path(tempfile.mkdtemp(prefix="roomlog-render-"))
+    # 用 TemporaryDirectory 而不是手写 mkdtemp + rmtree：清理时机由上下文对象
+    # 负责，失败时能拿到异常并记录，而不是 ignore_errors=True 静默吞掉。
+    temp = tempfile.TemporaryDirectory(prefix="roomlog-render-")
+    temp_root = Path(temp.name)
     _report(progress, 5)
     try:
         build_dir = temp_root / "assets"
@@ -161,7 +164,10 @@ def render_pdf(
         final_doc.close()
         os.replace(temp_output, output)
     finally:
-        shutil.rmtree(temp_root, ignore_errors=True)
+        try:
+            temp.cleanup()
+        except OSError:  # noqa: BLE001 - 产物已落盘，清理失败只记录残留位置
+            logger.warning("room_log temp cleanup failed dir=%s", temp_root, exc_info=True)
 
     _report(progress, 100)
     return {
