@@ -24,6 +24,12 @@ PROPS_TOOL_NAMES = {TOOL_CREATE, TOOL_REVEAL, TOOL_UPDATE}
 
 _WEAR_KEYS = ("stain", "fold", "burn", "tear")
 _MISSING_PROP_TEXT = "该道具不存在或不可见。"
+_KP_ONLY_TEXT = "props tools are KP-only"
+
+
+def _is_kp_agent(context: Any) -> bool:
+    """C12：props 工具只允许 KP agent 调用，避免非 KP 角色误用道具写操作。"""
+    return str(getattr(context, "agent_id", "") or "") == "kp"
 
 
 def _settings(context: Any) -> dict[str, Any]:
@@ -189,6 +195,8 @@ def _deliver(
 
 
 def execute_create_prop(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    if not _is_kp_agent(context):
+        return {"ok": False, "error": _KP_ONLY_TEXT}
     settings = _settings(context)
     if not settings.get("enabled", True):
         return {"ok": False, "error": "道具工坊未启用，无法创建道具。"}
@@ -303,6 +311,8 @@ def execute_create_prop(arguments: dict[str, Any], context: Any) -> dict[str, An
 
 
 def execute_reveal_prop(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    if not _is_kp_agent(context):
+        return {"ok": False, "error": _KP_ONLY_TEXT}
     settings = _settings(context)
     if not settings.get("enabled", True):
         return {"ok": False, "error": "道具工坊未启用，无法投递道具。"}
@@ -337,6 +347,8 @@ def execute_reveal_prop(arguments: dict[str, Any], context: Any) -> dict[str, An
 
 
 def execute_update_prop(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    if not _is_kp_agent(context):
+        return {"ok": False, "error": _KP_ONLY_TEXT}
     settings = _settings(context)
     if not settings.get("enabled", True):
         return {"ok": False, "error": "道具工坊未启用，无法修改道具。"}

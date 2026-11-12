@@ -1542,3 +1542,178 @@ def test_hard_render_time_opens_circuit(tmp_path, monkeypatch):
     room = tmp_path / "room-hard"
     props_render._record_render_result(room, "letter-1920", 1, 31000)
     assert props_render.render_circuit_open(room) is True
+
+
+# ---------------------------------------------------------------- C12 双层校验
+
+
+def test_props_tools_are_kp_only(tmp_path):
+    """C12：非 KP agent 调用三个写工具一律拒绝；KP（房主）正常路径不变。"""
+    context = _tool_context(tmp_path)
+    outsider = AgentRequestContext(
+        room_id=context.room_id,
+        room_dir=context.room_dir,
+        config_dir=context.config_dir,
+        user_id=1,
+        agent_id="npc",
+    )
+    for execute, arguments in (
+        (execute_create_prop, _tool_create_args()),
+        (execute_reveal_prop, {"prop_id": "prop-1-aaaaaa", "to": "all"}),
+        (execute_update_prop, {"prop_id": "prop-1-aaaaaa", "fields": {"body": "x"}}),
+    ):
+        assert execute(arguments, outsider) == {"ok": False, "error": "props tools are KP-only"}
+    assert execute_create_prop(_tool_create_args(), context)["ok"] is True
+
+
+def test_kp_role_selection_requires_room_manager():
+    """C12：请求体 role_id=kp 只对房主/creator/房管/站点管理员生效，玩家不可用。"""
+    from trpg_server.agents import turn_pipeline
+
+    room_info = {
+        "creator_id": 1,
+        "members": [
+            {"user_id": 1, "is_active": True, "room_role": "owner"},
+            {"user_id": 2, "is_active": True, "room_role": "member"},
+            {"user_id": 3, "is_active": True, "room_role": "admin"},
+        ],
+    }
+    kp_role = {"id": "kp"}
+    assert turn_pipeline._requested_role_allowed(kp_role, room_info, 1, "USER")  # creator
+    assert turn_pipeline._requested_role_allowed(kp_role, room_info, 3, "USER")  # 房管
+    assert not turn_pipeline._requested_role_allowed(kp_role, room_info, 2, "USER")
+    assert turn_pipeline._requested_role_allowed(kp_role, room_info, 99, "ADMIN")
+    # 非 KP 角色沿用原有按请求体选择的行为。
+    assert turn_pipeline._requested_role_allowed({"id": "npc"}, room_info, 2, "USER")
+
+
+# ---------------------------------------------------------------- 计划缺测补全
+
+
+def test_user_template_manifest_oversize_and_box_shadow_rejected(user_templates):
+    _write_user_template(
+        user_templates,
+        "huge-manifest",
+        manifest={"description": "x" * (registry.MAX_MANIFEST_BYTES + 1024)},
+    )
+    _write_user_template(
+        user_templates, "css-box-shadow", css=".x { box-shadow: 0 0 4px #000; }"
+    )
+    ids = registry.available_ids()
+    assert "huge-manifest" not in ids and "css-box-shadow" not in ids
+    reasons = {item["id"]: item["reason"] for item in registry.list_unavailable()}
+    assert "大小上限" in reasons["huge-manifest"]
+    assert "box-shadow" in reasons["css-box-shadow"]
+
+
+def test_user_template_root_and_manifest_symlinks_are_rejected(user_templates, tmp_path):
+    target = _write_user_template(tmp_path, "outside-root")
+    try:
+        os.symlink(target, user_templates / "root-link", target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("当前环境不允许创建符号链接")
+    manifest_target = _write_user_template(tmp_path, "outside-manifest")
+    linked = _write_user_template(user_templates, "linked-manifest")
+    (linked / "manifest.json").unlink()
+    os.symlink(manifest_target / "manifest.json", linked / "manifest.json")
+
+    ids = registry.available_ids()
+    assert "root-link" not in ids and "linked-manifest" not in ids
+    reasons = " ".join(item["reason"] for item in registry.list_unavailable())
+    assert "模板目录不允许符号链接" in reasons
+    assert "manifest.json 不允许符号链接" in reasons
+
+
+def test_render_returns_busy_when_queue_full(tmp_path, monkeypatch):
+    _font_path()
+    room_id = _api_room(tmp_path)
+    client = _api_app(tmp_path).test_client()
+    _login(client)
+    created = _create(client, room_id)
+    monkeypatch.setattr("trpg_server.routes.props._RENDER_WAITING", 8)
+    response = client.get(f"/api/rooms/{room_id}/props/{created['id']}/render")
+    assert response.status_code == 429
+    assert response.get_json()["error"] == "prop.render_busy"
+
+
+def test_render_returns_timeout_when_semaphore_unavailable(tmp_path, monkeypatch):
+    _font_path()
+    room_id = _api_room(tmp_path)
+    client = _api_app(tmp_path).test_client()
+    _login(client)
+    created = _create(client, room_id)
+
+    class _NoSlot:
+        def acquire(self, timeout=None):  # noqa: ARG002 - 对齐 Semaphore 签名
+            return False
+
+        def release(self):  # pragma: no cover - 超时路径不会 release
+            raise AssertionError("release should not be called")
+
+    monkeypatch.setattr("trpg_server.routes.props._RENDER_SEMAPHORE", _NoSlot())
+    response = client.get(f"/api/rooms/{room_id}/props/{created['id']}/render")
+    assert response.status_code == 503
+    assert response.get_json()["error"] == "prop.render_timeout"
+
+
+def test_unknown_room_returns_room_not_found(tmp_path):
+    client = _api_app(tmp_path).test_client()
+    _login(client)
+    response = client.get("/api/rooms/no-such-room/props")
+    assert response.status_code == 404
+    assert response.get_json()["error"] == "prop.room_not_found"
+
+
+def test_render_failure_does_not_leak_internal_error(tmp_path, monkeypatch):
+    _font_path()
+    room_id = _api_room(tmp_path)
+    client = _api_app(tmp_path).test_client()
+    _login(client)
+    created = _create(client, room_id)
+
+    def boom(*_args, **_kwargs):
+        raise RenderError("secret /tmp/internal-path token")
+
+    monkeypatch.setattr("trpg_server.routes.props.render_cached", boom)
+    response = client.get(f"/api/rooms/{room_id}/props/{created['id']}/render")
+    assert response.status_code == 500
+    payload = response.get_json()
+    assert payload["error"] == "prop.render_failed"
+    assert payload.get("trace_id")
+    assert "secret" not in json.dumps(payload, ensure_ascii=False)
+
+
+def test_partial_reveal_socket_audience_limited(tmp_path, monkeypatch):
+    """C1：partial 投递的 socket 推送只发给收件人与房管，不广播全房。"""
+    from trpg_server.immersive import broadcast as broadcast_module
+
+    room_id = _api_room(tmp_path)
+    client = _api_app(tmp_path).test_client()
+    _login(client)
+    created = _create(client, room_id)
+    captured = []
+
+    def capture(event, payload, audience=None):
+        captured.append((event, payload, audience))
+
+    monkeypatch.setattr(broadcast_module, "emit", capture)
+    response = client.post(
+        f"/api/rooms/{room_id}/props/{created['id']}/reveal",
+        json={"to": [2]},
+        headers=_headers(),
+    )
+    assert response.status_code == 200
+    event, payload, audience = captured[-1]
+    assert event == "new_message"
+    assert payload["metadata"]["prop_id"] == created["id"]
+    assert set(audience or []) == {1, 2}
+    assert 3 not in (audience or [])
+
+    # all=true 仍走房间广播（audience=None），不能被 partial 逻辑误伤。
+    second = _create(client, room_id)
+    client.post(
+        f"/api/rooms/{room_id}/props/{second['id']}/reveal",
+        json={"all": True},
+        headers=_headers(),
+    )
+    assert captured[-1][2] is None

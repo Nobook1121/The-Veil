@@ -11,7 +11,7 @@ import secrets
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import requests
 from flask import Blueprint, current_app, request, session
@@ -325,6 +325,27 @@ def _opening_fallback_payload(opening_plan, scenario_started_at, room_id):
 
 
 
+def _is_kp_role(role: Mapping[str, Any] | None) -> bool:
+    """角色配置是否指向 KP：后端约定的 KP 角色 id 为 ``kp``。"""
+    return str((role or {}).get("id") or "").strip().lower() == "kp"
+
+
+def _requested_role_allowed(
+    role: Mapping[str, Any] | None,
+    room_info: Mapping[str, Any],
+    user_id: Any,
+    global_role: Any,
+) -> bool:
+    """C12：不信任请求体 ``role_id``；显式选择 KP 角色仅房间管理者可指定。
+
+    非 KP 角色沿用原有行为（允许按请求体选择）。返回 ``False`` 时，
+    调用方必须回落到默认角色，而不是使用请求体指定的角色。
+    """
+    if role is None or not _is_kp_role(role):
+        return True
+    return _can_start_scenario(room_info, user_id, global_role)
+
+
 def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
     """执行一次 AI 对话回合；返回值与拆分前的 ``chat()`` 完全一致。"""
     scenario_started_at = None
@@ -375,7 +396,23 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
         requested_role_id = str(message_data.get("role_id") or "").strip()
         if requested_role_id:
             roles = load_roles(_get_role_config_file(), _get_kp_prompt_file(), _get_ai_platform_dir())
-            role_config = next((role for role in roles if str(role.get("id")) == requested_role_id), None) or _load_role_for_content(content)
+            requested_role = next(
+                (role for role in roles if str(role.get("id")) == requested_role_id), None
+            )
+            if requested_role is not None and not _requested_role_allowed(
+                requested_role,
+                room_info_for_mode,
+                session.get("user_id"),
+                session.get("role"),
+            ):
+                # C12：普通玩家不能凭请求体切到 KP 角色；忽略该选择并回落默认角色。
+                logger.warning(
+                    "ignoring untrusted KP role selection user=%s room=%s",
+                    session.get("user_id"),
+                    room_id,
+                )
+                requested_role = None
+            role_config = requested_role or _load_role_for_content(content)
         else:
             role_config = _load_role_for_content(content)
         room_ruleset_id = room_rules.resolve_rule_id(
