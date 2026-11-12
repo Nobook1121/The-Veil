@@ -306,6 +306,58 @@ function Test-VenvUsable {
     }
 }
 
+# 依赖是否真的装齐了：在 .venv 里读已安装包的元数据，逐条比对 requirements.txt。
+# 不联网、不调用 pip，用于避免「requirements.txt 只改了一个字符（甚至只改了注释）
+# 就被判定成需要整包重装」这种误判——那会让每次启动都白跑一遍安装流程。
+$RequirementsProbe = @'
+import sys
+from importlib import metadata
+
+try:
+    from packaging.requirements import Requirement
+except Exception:
+    from pip._vendor.packaging.requirements import Requirement
+
+missing = []
+with open(sys.argv[1], encoding='utf-8') as fh:
+    for raw in fh:
+        line = raw.split('#', 1)[0].strip()
+        if not line:
+            continue
+        try:
+            req = Requirement(line)
+        except Exception:
+            continue
+        if req.marker is not None and not req.marker.evaluate():
+            continue
+        try:
+            dist = metadata.distribution(req.name)
+        except metadata.PackageNotFoundError:
+            missing.append(req.name + '（未安装）')
+            continue
+        if req.specifier and not req.specifier.contains(dist.version, prereleases=True):
+            missing.append('%s %s（当前 %s）' % (req.name, req.specifier, dist.version))
+
+for item in missing:
+    print(item)
+sys.exit(1 if missing else 0)
+'@
+
+function Get-UnsatisfiedRequirements {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $VenvPython -c $RequirementsProbe $Requirements 2>$null
+        $code = $LASTEXITCODE
+    } catch {
+        $output = @()
+        $code = 1
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    return @{ Satisfied = ($code -eq 0); Missing = @($output | Where-Object { $_ }) }
+}
+
 # 虚拟环境里是否带 pip。用 uv 或 --without-pip 创建的 .venv 只有 Python 本体，
 # 直接跑 `python -m pip` 会报 "No module named pip"。
 function Test-VenvPip {
@@ -416,6 +468,18 @@ function Ensure-Dependencies {
         }
     }
 
+    # 标记缺失或与 requirements.txt 不一致时，再按真实安装情况确认一次：包其实都在时
+    # 只刷新标记、不重新跑 pip（改注释、放宽版本区间都会让文件哈希变化）。
+    if (-not $Force) {
+        $check = Get-UnsatisfiedRequirements
+        if ($check.Satisfied) {
+            if (-not $DryRun) { Set-Content -Path $MarkerFile -Value $hash -Encoding ascii }
+            Write-Ok '运行依赖已全部满足（跳过安装）'
+            return
+        }
+        Write-Note ('已安装内容与 requirements.txt 不一致，缺少：' + ($check.Missing -join '；'))
+    }
+
     if ($DryRun) {
         Write-Note '（DryRun）将安装 requirements.txt 中的运行依赖'
         return
@@ -427,6 +491,8 @@ function Ensure-Dependencies {
     Write-Note '正在安装运行依赖（首次可能需要几分钟，请耐心等待）...'
 
     # 先用选中的源顺手升级 pip；失败不影响后续安装。
+    # 这一步是静默执行的，先打一行提示，避免窗口看起来像卡死。
+    Write-Note '正在升级 pip ...'
     $upgradeIndex = $indexes[0]
     $upgradeArgs = New-PipArguments @('install', '--upgrade', 'pip')
     if ($upgradeIndex) { $upgradeArgs += @('--index-url', $upgradeIndex) }
