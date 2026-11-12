@@ -435,6 +435,18 @@
     transform: scale(1.85);
 }
 
+.prop-template-picker {
+    display: flex;
+    align-items: center;
+    gap: var(--theme-space-xs);
+    min-width: 0;
+}
+
+.prop-template-picker .form-select {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
 .prop-draft {
     margin: 0 0 var(--theme-space-sm);
     border: 1px dashed var(--theme-border-color);

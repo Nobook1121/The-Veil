@@ -261,9 +261,27 @@ def list_prop_templates(room_id):
     if not _can_access(info):
         return _write_forbidden()
     return success_response(
-        {"templates": registry.list_templates(), "groups": registry.list_template_groups()},
+        {
+            "templates": registry.list_templates(),
+            "groups": registry.list_template_groups(),
+            "unavailable": registry.list_unavailable(),
+        },
         "Prop templates loaded",
     )
+
+
+@bp.route("/api/props/templates/rescan", methods=["POST"])
+def rescan_prop_templates():
+    """重新扫描内置 + 用户模板；仅站点管理员可触发。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    if str(session.get("role") or "").upper() not in {"ADMIN", "OWNER"}:
+        return error_response("Forbidden", 403, "prop.forbidden")
+    if _disabled():
+        return _disabled_response()
+    result = registry.rescan()
+    return success_response(result, "Prop templates rescanned")
 
 
 @bp.route("/api/rooms/<room_id>/props/draft", methods=["POST"])

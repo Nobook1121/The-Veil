@@ -92,8 +92,11 @@ interface Window {
         const select = byId<HTMLSelectElement>("propEditorTemplate");
         if (!select) return;
         const groups: Array<{ name: string; items: PropTemplate[] }> = [];
+        const userGroupName = t("prop.group.user", "用户模板");
         templates.forEach((template) => {
-            const name = template.group_name || t("prop.group.other", "其他");
+            const name = template.source === "user"
+                ? userGroupName
+                : template.group_name || t("prop.group.other", "其他");
             let group = groups.find((item) => item.name === name);
             if (!group) {
                 group = { name, items: [] };
@@ -235,6 +238,32 @@ interface Window {
         }
     }
 
+    async function rescanTemplates(): Promise<void> {
+        const button = byId<HTMLButtonElement>("propTemplateRescan");
+        if (button) button.disabled = true;
+        setStatus(t("prop.rescan.running", "正在重新扫描模板…"));
+        try {
+            const result = await api().rescanTemplates();
+            templates = await api().templates(roomId);
+            renderTemplateSelect();
+            const missing = result.unavailable.length;
+            const message = missing
+                ? t("prop.rescan.done_unavailable", `已重新扫描：{count} 个模板可用，{unavailable} 个不可用`)
+                    .replace("{count}", String(result.templates))
+                    .replace("{unavailable}", String(missing))
+                : t("prop.rescan.done", `已重新扫描：{count} 个模板可用`).replace("{count}", String(result.templates));
+            setStatus(message, missing ? "error" : "ok");
+            global.showNotification?.(message, missing ? "warning" : "success");
+        } catch (error) {
+            const runtime = api();
+            const message = runtime.errorText(error, t("prop.rescan.failed", "重新扫描失败"));
+            global.showNotification?.(message, "error");
+            setStatus(message, "error");
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
     async function runDraft(): Promise<void> {
         if (drafting || !currentSpec) return;
         const manifest = currentTemplate();
@@ -339,6 +368,11 @@ interface Window {
         modal = new bootstrap.Modal(modalElement);
         byId<HTMLButtonElement>("propEditorSave")?.addEventListener("click", () => { void save(); });
         byId<HTMLButtonElement>("propDraftRun")?.addEventListener("click", () => { void runDraft(); });
+        const rescanButton = byId<HTMLButtonElement>("propTemplateRescan");
+        if (rescanButton) {
+            rescanButton.hidden = !["ADMIN", "OWNER"].includes(String(global.currentUser?.role || ""));
+            rescanButton.addEventListener("click", () => { void rescanTemplates(); });
+        }
         byId<HTMLElement>("propEditorTemplate")?.addEventListener("change", () => {
             const values = fieldValues();
             const manifest = currentTemplate();

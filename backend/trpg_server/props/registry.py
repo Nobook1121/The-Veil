@@ -1,8 +1,13 @@
-"""模板注册表：扫描 ``templates/*/manifest.json``、校验字段、进程内缓存（§4.6）。
+"""模板注册表：合并内置模板与用户模板、校验字段、进程内缓存（§4.6）。
 
-模板目录就是未来插件化的单位：只要 ``manifest.json`` 合法，新增一个目录即等于
-新增一个模板，不需要改代码。缓存以 ``manifest.json`` 的 ``mtime_ns`` + 大小做键，
-开发时改模板无需重启服务。
+来源有两套：
+
+- 内置：``backend/trpg_server/props/templates/<id>/``
+- 用户：``data/props/templates/<id>/``
+
+两者结构相同；用户模板额外经过 ``template_validation`` 的标签/资源安全校验。
+id 冲突时内置优先，用户模板被标记为不可用并 warning。任何一个用户模板坏掉
+只影响它自己，不会打挂整个模板列表。
 """
 from __future__ import annotations
 
@@ -14,18 +19,25 @@ import threading
 from pathlib import Path
 from typing import Any, Mapping
 
+from trpg_server.config.paths import DATA_DIR
+
 logger = logging.getLogger(__name__)
 
-TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+BUILTIN_TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+USER_TEMPLATES_DIR = DATA_DIR / "props" / "templates"
+# 兼容旧引用：渲染器仍可从 ``TEMPLATES_DIR`` 推导内置资源目录。
+TEMPLATES_DIR = BUILTIN_TEMPLATES_DIR
 REQUIRED_MANIFEST_KEYS = ("id", "name", "fields")
 _TEMPLATE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
-_CACHE: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}
-_CACHE_LOCK = threading.Lock()
+_CACHE: dict[str, tuple[tuple, dict[str, Any]]] = {}
+_CACHE_LOCK = threading.RLock()
+_ROOTS: dict[str, Path] = {}
+_UNAVAILABLE: list[dict[str, Any]] = []
 
 
 class TemplateError(RuntimeError):
-    """模板清单非法（缺字段、JSON 损坏、id 不合理）。"""
+    """模板清单非法（缺字段、JSON 损坏、id 不合理或安全校验失败）。"""
 
 
 class UnknownTemplate(TemplateError):
@@ -40,7 +52,11 @@ def template_dir(template_id: str) -> Path:
     key = str(template_id or "").strip()
     if not _TEMPLATE_ID_RE.match(key):
         raise UnknownTemplate(f"模板不存在，可用：{_available_text()}")
-    return TEMPLATES_DIR / key
+    _manifests()
+    root = _ROOTS.get(key)
+    if root is None:
+        raise UnknownTemplate(f"模板不存在，可用：{_available_text()}")
+    return root
 
 
 def _available_text() -> str:
@@ -53,10 +69,10 @@ def available_ids() -> list[str]:
 
 
 def list_templates() -> list[dict[str, Any]]:
-    """返回全部模板清单（含字段 schema），按 manifest.order 排序。
+    """返回全部可用模板（含 ``source``），按 manifest.order 排序。
 
-    目录扫描顺序受文件系统影响，会随部署环境变化；``order`` 由模板自己声明，
-    缺失时回落到 id，保证 ``templates`` 接口的顺序在进程重启后仍然一致。
+    目录扫描顺序受文件系统影响；``order`` 由模板自己声明，缺失时回落到 id，
+    保证 ``templates`` 接口的顺序在进程重启后仍然一致。
     """
     return [
         copy.deepcopy(manifest)
@@ -81,6 +97,20 @@ def list_template_groups() -> list[dict[str, Any]]:
             groups.append(group)
         group["template_ids"].append(str(manifest.get("id")))
     return groups
+
+
+def list_unavailable() -> list[dict[str, Any]]:
+    """返回不可用模板及原因（用户模板为主，含 id 冲突与安全校验失败）。"""
+    _manifests()
+    return copy.deepcopy(_UNAVAILABLE)
+
+
+def rescan() -> dict[str, Any]:
+    """清空缓存并重新扫描；供「重新扫描」接口调用，无需重启服务。"""
+    with _CACHE_LOCK:
+        _CACHE.clear()
+    manifests = _manifests()
+    return {"templates": len(manifests), "unavailable": list_unavailable()}
 
 
 def _order_of(manifest: Mapping[str, Any]) -> int:
@@ -147,32 +177,110 @@ def _positive_int(value: Any) -> int | None:
 
 def _manifests() -> dict[str, dict[str, Any]]:
     with _CACHE_LOCK:
-        fresh: dict[str, dict[str, Any]] = {}
-        roots = sorted(TEMPLATES_DIR.iterdir()) if TEMPLATES_DIR.is_dir() else []
-        for root in roots:
+        return _scan()
+
+
+def _scan() -> dict[str, dict[str, Any]]:
+    manifests: dict[str, dict[str, Any]] = {}
+    roots: dict[str, Path] = {}
+    unavailable: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+
+    # 用模块级 TEMPLATES_DIR 而不是常量：测试与部分部署会临时改写内置目录。
+    for source, base in (("builtin", TEMPLATES_DIR), ("user", USER_TEMPLATES_DIR)):
+        if not base.is_dir():
+            continue
+        for root in sorted(base.iterdir()):
+            if not root.is_dir():
+                continue
             manifest_path = root / "manifest.json"
             if not manifest_path.is_file():
+                if source == "user":
+                    unavailable.append(_unavailable_entry(root, source, "缺少 manifest.json"))
                 continue
-            try:
-                stat = manifest_path.stat()
-            except OSError:
-                continue
-            signature = (stat.st_mtime_ns, stat.st_size)
-            cached = _CACHE.get(root.name)
+            signature = _signature(root)
+            cache_key = f"{source}:{root.name}"
+            seen_keys.add(cache_key)
+            cached = _CACHE.get(cache_key)
+            manifest: dict[str, Any] | None = None
             if cached is not None and cached[0] == signature:
-                fresh[root.name] = cached[1]
+                manifest = cached[1]
+            else:
+                try:
+                    manifest = _read_manifest(manifest_path)
+                    if source == "user":
+                        from .template_validation import validate_user_template
+
+                        validate_user_template(root, manifest)
+                    manifest["source"] = source
+                except TemplateError as exc:
+                    _CACHE.pop(cache_key, None)
+                    unavailable.append(_unavailable_entry(root, source, str(exc)))
+                    logger.warning(
+                        "props template invalid id=%s source=%s reason=%s",
+                        root.name,
+                        source,
+                        exc,
+                    )
+                    continue
+                except Exception as exc:  # noqa: BLE001 - 单个坏模板不影响列表
+                    _CACHE.pop(cache_key, None)
+                    unavailable.append(_unavailable_entry(root, source, f"校验失败：{exc}"))
+                    logger.warning(
+                        "props template validation crashed id=%s source=%s",
+                        root.name,
+                        source,
+                        exc_info=True,
+                    )
+                    continue
+                _CACHE[cache_key] = (signature, manifest)
+
+            template_id = str(manifest.get("id") or "")
+            if template_id in manifests:
+                reason = (
+                    "与内置模板 id 冲突，用户模板已跳过"
+                    if source == "user"
+                    else "模板 id 与另一个内置模板重复"
+                )
+                unavailable.append(_unavailable_entry(root, source, reason))
+                logger.warning("props template conflict id=%s source=%s", template_id, source)
                 continue
-            try:
-                manifest = _read_manifest(manifest_path)
-            except TemplateError:
-                logger.warning("props template invalid id=%s", root.name, exc_info=True)
-                continue
-            fresh[root.name] = manifest
-            _CACHE[root.name] = (signature, manifest)
-        for name in list(_CACHE):
-            if name not in fresh:
-                _CACHE.pop(name, None)
-        return fresh
+            manifests[template_id] = manifest
+            roots[template_id] = root
+
+    for key in list(_CACHE):
+        if key not in seen_keys:
+            _CACHE.pop(key, None)
+    _ROOTS.clear()
+    _ROOTS.update(roots)
+    _UNAVAILABLE[:] = unavailable
+    return manifests
+
+
+def _unavailable_entry(root: Path, source: str, reason: str) -> dict[str, Any]:
+    return {"id": root.name, "dir": str(root), "source": source, "reason": reason}
+
+
+def _signature(root: Path) -> tuple:
+    """缓存签名：manifest + page/style + assets 的 mtime/size 摘要。"""
+    signature: list[Any] = [root.name]
+    for name in ("manifest.json", "page.html", "style.css"):
+        try:
+            stat = (root / name).stat()
+            signature.extend([stat.st_mtime_ns, stat.st_size])
+        except OSError:
+            signature.extend([0, 0])
+    assets = root / "assets"
+    if assets.is_dir():
+        signature.append(assets.stat().st_mtime_ns)
+        for entry in sorted(assets.iterdir()):
+            if entry.is_file():
+                try:
+                    stat = entry.stat()
+                except OSError:
+                    continue
+                signature.extend([entry.name, stat.st_mtime_ns, stat.st_size])
+    return tuple(signature)
 
 
 def _read_manifest(path: Path) -> dict[str, Any]:
@@ -221,15 +329,19 @@ def _read_manifest(path: Path) -> dict[str, Any]:
 
 
 __all__ = [
+    "BUILTIN_TEMPLATES_DIR",
     "FieldError",
     "REQUIRED_MANIFEST_KEYS",
     "TEMPLATES_DIR",
     "TemplateError",
+    "USER_TEMPLATES_DIR",
     "UnknownTemplate",
     "available_ids",
     "get_template",
     "list_template_groups",
     "list_templates",
+    "list_unavailable",
+    "rescan",
     "template_dir",
     "validate_fields",
 ]

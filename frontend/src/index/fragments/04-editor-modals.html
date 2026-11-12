@@ -1148,7 +1148,12 @@
                                 </div>
                                 <div class="prop-editor-row-side">
                                     <label class="form-label" for="propEditorTemplate" data-i18n="prop.label.template">模板</label>
-                                    <select class="form-select" id="propEditorTemplate"></select>
+                                    <div class="prop-template-picker">
+                                        <select class="form-select" id="propEditorTemplate"></select>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="propTemplateRescan" hidden data-i18n-title="prop.action.rescan_templates" title="重新扫描模板">
+                                            <i class="fa fa-refresh"></i>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                             <div class="prop-editor-field">

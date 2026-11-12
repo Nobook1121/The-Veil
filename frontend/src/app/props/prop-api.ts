@@ -16,6 +16,7 @@ interface PropTemplateField {
 interface PropTemplate {
     id: string;
     name?: string;
+    source?: "builtin" | "user";
     order?: number;
     group?: string;
     group_name?: string;
@@ -32,6 +33,13 @@ interface PropTemplateGroup {
     id: string;
     name: string;
     template_ids: string[];
+}
+
+interface PropTemplateUnavailable {
+    id: string;
+    dir?: string;
+    source?: "builtin" | "user";
+    reason: string;
 }
 
 interface PropRedaction {
@@ -122,6 +130,7 @@ class PropApiError extends Error {
 interface TrpgPropApiRuntime {
     PropApiError: typeof PropApiError;
     templates(roomId: string): Promise<PropTemplate[]>;
+    rescanTemplates(): Promise<{ templates: number; unavailable: PropTemplateUnavailable[] }>;
     cachedTemplates(roomId?: string): PropTemplate[];
     findTemplate(roomId: string, templateId: string): PropTemplate | null;
     list(roomId: string): Promise<PropIndexEntry[]>;
@@ -187,6 +196,19 @@ interface Window {
         const list = Array.isArray(data.templates) ? data.templates : [];
         templateCache.set(roomId, list);
         return list;
+    }
+
+    async function rescanTemplates(): Promise<{ templates: number; unavailable: PropTemplateUnavailable[] }> {
+        const payload = await api().post<ApiResponse<{ templates?: number; unavailable?: PropTemplateUnavailable[] }>>(
+            "/api/props/templates/rescan",
+            {},
+        );
+        const data = unwrap(payload, "rescan templates failed");
+        templateCache.clear();
+        return {
+            templates: Number(data.templates || 0),
+            unavailable: Array.isArray(data.unavailable) ? data.unavailable : [],
+        };
     }
 
     function cachedTemplates(roomId?: string): PropTemplate[] {
@@ -298,6 +320,7 @@ interface Window {
     global.TrpgPropApi = {
         PropApiError,
         templates,
+        rescanTemplates,
         cachedTemplates,
         findTemplate,
         list,

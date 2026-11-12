@@ -5,6 +5,7 @@ PDF 渲染与缓存，以及接口层的 404 防泄露与写权限。
 """
 from __future__ import annotations
 
+import base64
 import json
 import threading
 from pathlib import Path
@@ -1023,6 +1024,110 @@ def test_wear_strength_changes_output(tmp_path):
         assert weak_bytes != strong_bytes
         checked += 1
     assert checked == 3
+
+
+_TINY_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
+
+
+@pytest.fixture
+def user_templates(tmp_path, monkeypatch):
+    base = tmp_path / "user_templates"
+    base.mkdir()
+    monkeypatch.setattr(registry, "USER_TEMPLATES_DIR", base)
+    registry.rescan()
+    try:
+        yield base
+    finally:
+        monkeypatch.undo()
+        registry.rescan()
+
+
+def _write_user_template(base, template_id, *, page_html=None, css=None, manifest=None, assets=None):
+    root = base / template_id
+    root.mkdir(parents=True)
+    payload = {
+        "id": template_id,
+        "name": f"用户模板 {template_id}",
+        "order": 900,
+        "group": "user",
+        "group_name": "用户模板",
+        "fields": [{"key": "body", "label": "正文", "type": "textarea", "max": 200, "required": True}],
+    }
+    if manifest:
+        payload.update(manifest)
+    (root / "manifest.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    (root / "page.html").write_text(
+        page_html or '<div class="user-note"><p>{{body}}</p></div>',
+        encoding="utf-8",
+    )
+    (root / "style.css").write_text(css or "body { color: #222; }", encoding="utf-8")
+    if assets:
+        asset_dir = root / "assets"
+        asset_dir.mkdir()
+        for name, content in assets.items():
+            (asset_dir / name).write_bytes(content)
+    return root
+
+
+def test_user_template_listed_with_source_and_renders(user_templates, tmp_path):
+    _write_user_template(user_templates, "user-note", assets={"dot.png": _TINY_PNG})
+    manifests = {item["id"]: item for item in registry.list_templates()}
+    assert manifests["user-note"]["source"] == "user"
+    assert manifests["letter-1920"]["source"] == "builtin"
+    assert registry.template_dir("user-note") == user_templates / "user-note"
+
+    spec = {
+        "schema_version": 1,
+        "id": store.new_prop_id(),
+        "room_id": "",
+        "template_id": "user-note",
+        "title": "用户便条",
+        "fields": {"body": "这是一张用户模板。"},
+        "style": {},
+        "wear": {},
+        "redaction": [],
+        "assets": {},
+    }
+    result = render_prop(spec, tmp_path / "user-note.pdf")
+    assert result["pages"] == 1
+
+
+def test_user_template_cannot_override_builtin(user_templates):
+    _write_user_template(user_templates, "letter-1920", manifest={"name": "伪造书信"})
+    manifests = {item["id"]: item for item in registry.list_templates()}
+    assert manifests["letter-1920"]["source"] == "builtin"
+    assert manifests["letter-1920"]["name"] == "私人书信"
+    reasons = [item for item in registry.list_unavailable() if item["id"] == "letter-1920"]
+    assert reasons and "冲突" in reasons[0]["reason"]
+
+
+def test_user_template_unsafe_html_and_assets_are_isolated(user_templates):
+    _write_user_template(
+        user_templates,
+        "evil-script",
+        page_html='<div><script>alert(1)</script><p>{{body}}</p></div>',
+    )
+    _write_user_template(
+        user_templates,
+        "evil-asset",
+        assets={"fake.png": b"not an image"},
+    )
+    _write_user_template(user_templates, "good-user")
+    ids = registry.available_ids()
+    assert "evil-script" not in ids and "evil-asset" not in ids
+    assert "good-user" in ids
+    assert any("禁止使用 <script>" in item["reason"] for item in registry.list_unavailable())
+    assert any("不是有效的 png/jpg" in item["reason"] for item in registry.list_unavailable())
+
+
+def test_user_template_rescan_picks_up_new_template(user_templates):
+    assert "late-user" not in registry.available_ids()
+    _write_user_template(user_templates, "late-user")
+    result = registry.rescan()
+    assert "late-user" in registry.available_ids()
+    assert result["templates"] >= 13
 
 
 def test_photo_generation_platform_failure_degrades(tmp_path):
