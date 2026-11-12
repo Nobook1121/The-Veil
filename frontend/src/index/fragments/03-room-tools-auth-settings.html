@@ -844,6 +844,9 @@
                                 <button class="settings-tab" type="button" role="tab" id="settings-tab-system" data-settings="system" aria-selected="false" aria-controls="system-settings-content">
                                     <i class="fa fa-sitemap" aria-hidden="true"></i><span data-i18n="settings.tab.system">系统与网络</span><span class="settings-tab-dirty" hidden></span>
                                 </button>
+                                <button class="settings-tab" type="button" role="tab" id="settings-tab-plugins" data-settings="plugins" data-admin-only="true" aria-selected="false" aria-controls="plugins-settings-content">
+                                    <i class="fa fa-plug" aria-hidden="true"></i><span data-i18n="settings.tab.plugins">插件</span><span class="settings-tab-dirty" hidden></span>
+                                </button>
                                 <button class="settings-tab" type="button" role="tab" id="settings-tab-access" data-settings="access" aria-selected="false" aria-controls="access-settings-content">
                                     <i class="fa fa-user-secret" aria-hidden="true"></i><span data-i18n="settings.tab.access">用户与权限</span><span class="settings-tab-dirty" hidden></span>
                                 </button>
@@ -1786,6 +1789,28 @@
                                         </div>
                                                 </div>
                                             </section>
+                                    </div>
+
+                                    <div id="plugins-settings-content" class="settings-content" data-admin-only="true" role="tabpanel" aria-labelledby="settings-tab-plugins">
+                                        <section class="settings-section" id="settings-section-plugins">
+                                            <header class="settings-section-head">
+                                                <div class="settings-section-heading">
+                                                    <h3 class="settings-section-title" data-i18n="settings.section.plugins">第三方插件</h3>
+                                                    <p class="settings-section-desc" data-i18n="settings.plugins.security_note">第三方插件默认不启用，只有出现在 enabled.json 启用列表里的插件才会被加载。启用后插件代码以本服务进程的权限运行，请只安装你信任的来源。</p>
+                                                </div>
+                                                <span class="settings-scope-chip" data-i18n="settings.scope.deployment">部署级</span>
+                                            </header>
+                                            <div class="settings-section-body">
+                                                <div class="plugins-toolbar">
+                                                    <div class="plugins-summary" id="pluginsSummary" data-i18n-dynamic="true"></div>
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="pluginsRescanButton">
+                                                        <i class="fa fa-refresh" aria-hidden="true"></i> <span data-i18n="settings.plugins.rescan">重新扫描</span>
+                                                    </button>
+                                                </div>
+                                                <div class="plugins-list" id="pluginsList" aria-live="polite" data-i18n-dynamic="true"></div>
+                                                <div class="settings-message" id="pluginsMessage" aria-live="polite" data-i18n-dynamic="true"></div>
+                                            </div>
+                                        </section>
                                     </div>
 
                                     <div id="access-settings-content" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-access">

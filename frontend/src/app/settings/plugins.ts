@@ -1,0 +1,348 @@
+/**
+ * 设置页「插件」分类：第三方插件清单、启用/禁用、重新扫描与卸载。
+ *
+ * 数据全部来自 `/api/plugins`（仅 ADMIN/OWNER 可访问），前端不猜测插件状态：
+ * - 状态、失败原因码与可读原因按接口原样展示；
+ * - 启用/禁用接口返回的 `restart_required` 表示「代码插件已禁用，但已注册的
+ *   HTTP 路由仍在当前进程里」，需要重启服务才能彻底回滚，这里原样提示；
+ * - 卸载必须第一次确认后手动输入插件 id，DELETE 请求再带回 `{confirm: id}`。
+ */
+interface SettingsPluginManifest {
+    id: string;
+    name: string;
+    version: string;
+    description: string;
+    author: string;
+    has_code: boolean;
+}
+
+interface SettingsPluginRecord {
+    id: string;
+    state: string;
+    enabled: boolean;
+    reason: string;
+    reason_code: string;
+    dir: string;
+    capabilities: string[];
+    manifest: SettingsPluginManifest | null;
+}
+
+interface SettingsPluginSummary {
+    root: string;
+    app_version: string;
+    api_version: number;
+    disabled_all: boolean;
+    loaded_at: string;
+    counts: Record<string, number>;
+    plugins: SettingsPluginRecord[];
+}
+
+interface SettingsPluginMutation {
+    plugin: SettingsPluginRecord | null;
+    restart_required: boolean;
+    enabled_ids: string[];
+}
+
+interface TrpgPluginsApi {
+    init: () => void;
+}
+
+(function initializeSettingsPlugins(global: Window) {
+    "use strict";
+
+    const STATE_KEYS: Record<string, string> = {
+        loaded: "settings.plugins.state.loaded",
+        disabled: "settings.plugins.state.disabled",
+        failed: "settings.plugins.state.failed",
+        available: "settings.plugins.state.available",
+        pending_restart: "settings.plugins.state.pending_restart",
+    };
+
+    let initialized = false;
+    let loading = false;
+    let lastSummary: SettingsPluginSummary | null = null;
+    const busy = new Set<string>();
+
+    function byId<T extends HTMLElement = HTMLElement>(id: string): T | null {
+        return document.getElementById(id) as T | null;
+    }
+
+    function t(key: string, fallback: string, values: Record<string, string | number> = {}): string {
+        return global.TrpgI18n?.t(key, fallback, values) || fallback;
+    }
+
+    function escapeHtml(value: unknown): string {
+        return String(value ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    function errorText(error: unknown): string {
+        if (error instanceof Error && error.message) return error.message;
+        return String(error ?? "");
+    }
+
+    function apiError(response: ApiResponse<unknown> | null | undefined, fallback: string): string {
+        return response?.message || response?.error || fallback;
+    }
+
+    function setMessage(text: string, tone: "" | "success" | "error"): void {
+        const message = byId("pluginsMessage");
+        if (!message) return;
+        message.textContent = text;
+        message.className = `settings-message${tone ? ` ${tone}` : ""}`;
+    }
+
+    function stateLabel(state: string): string {
+        const key = STATE_KEYS[state];
+        return key ? t(key, state) : t("settings.plugins.state.unknown", "未知状态");
+    }
+
+    /** 来源按清单推导：带代码入口的是插件目录，纯数据插件即用户模板包。 */
+    function sourceLabel(record: SettingsPluginRecord): string {
+        if (!record.manifest) return t("settings.plugins.source.unknown", "未知");
+        return record.manifest.has_code
+            ? t("settings.plugins.source.directory", "插件目录")
+            : t("settings.plugins.source.pack", "用户模板包");
+    }
+
+    function renderSummary(summary: SettingsPluginSummary | null): void {
+        const host = byId("pluginsSummary");
+        if (!host) return;
+        if (!summary) {
+            host.textContent = "";
+            return;
+        }
+        const counts = summary.counts || {};
+        const total = Array.isArray(summary.plugins) ? summary.plugins.length : 0;
+        const parts = [
+            `<span>${escapeHtml(t("settings.plugins.summary", "插件目录：{root} · 共 {count} 个", { root: summary.root, count: total }))}</span>`,
+            `<span>${escapeHtml(t("settings.plugins.counts", "已加载 {loaded} · 已禁用 {disabled} · 失败 {failed}", {
+                loaded: counts.loaded || 0,
+                disabled: counts.disabled || 0,
+                failed: counts.failed || 0,
+            }))}</span>`,
+        ];
+        if (summary.disabled_all) {
+            parts.push(
+                `<span class="plugin-summary-warning">${escapeHtml(t("settings.plugins.disabled_all", "运维参数已禁用全部第三方插件（--no-plugins / TRPG_PLUGINS_DISABLED），重启前不会加载任何插件。"))}</span>`,
+            );
+        }
+        host.innerHTML = parts.join("");
+    }
+
+    function renderCard(record: SettingsPluginRecord): string {
+        const manifest = record.manifest;
+        const name = manifest?.name || record.id;
+        const version = manifest?.version || "—";
+        const author = manifest?.author || "—";
+        const description = manifest?.description || t("settings.plugins.no_description", "该插件未提供说明。");
+        const isBusy = busy.has(record.id);
+        const checked = record.enabled || record.state === "loaded";
+        const failure = record.state === "failed"
+            ? `<p class="plugin-card-error"><span>${escapeHtml(t("settings.plugins.reason_code_label", "失败码"))}</span>`
+                + `<code class="plugin-card-error-code">${escapeHtml(record.reason_code || "unknown")}</code>`
+                + `<span>${escapeHtml(record.reason || t("settings.plugins.reason_unknown", "插件加载失败，详情见服务端日志。"))}</span></p>`
+            : "";
+        return `
+            <article class="plugin-card" data-state="${escapeHtml(record.state)}" data-plugin-id="${escapeHtml(record.id)}">
+                <div class="plugin-card-top">
+                    <div class="plugin-card-heading">
+                        <h4 class="plugin-card-name">${escapeHtml(name)}<code class="plugin-card-id">${escapeHtml(record.id)}</code></h4>
+                        <p class="settings-section-desc">${escapeHtml(description)}</p>
+                    </div>
+                    <div class="plugin-card-actions">
+                        <span class="plugin-state-badge" data-state="${escapeHtml(record.state)}">${escapeHtml(stateLabel(record.state))}</span>
+                        <label class="plugin-switch">
+                            <input type="checkbox" data-plugin-toggle="${escapeHtml(record.id)}"${checked ? " checked" : ""}${isBusy ? " disabled" : ""}>
+                            <span>${escapeHtml(t("settings.plugins.enable_label", "启用"))}</span>
+                        </label>
+                        <button type="button" class="btn btn-sm btn-outline-danger" data-plugin-uninstall="${escapeHtml(record.id)}"${isBusy ? " disabled" : ""}>
+                            <i class="fa fa-trash-o" aria-hidden="true"></i> ${escapeHtml(t("settings.plugins.uninstall", "卸载"))}
+                        </button>
+                    </div>
+                </div>
+                <dl class="plugin-facts">
+                    <div><dt>${escapeHtml(t("settings.plugins.version", "版本"))}</dt><dd>${escapeHtml(version)}</dd></div>
+                    <div><dt>${escapeHtml(t("settings.plugins.author", "作者"))}</dt><dd>${escapeHtml(author)}</dd></div>
+                    <div><dt>${escapeHtml(t("settings.plugins.source", "来源"))}</dt><dd>${escapeHtml(sourceLabel(record))}</dd></div>
+                </dl>
+                ${failure}
+            </article>`;
+    }
+
+    function renderList(summary: SettingsPluginSummary): void {
+        const list = byId("pluginsList");
+        if (!list) return;
+        const plugins = Array.isArray(summary.plugins) ? summary.plugins : [];
+        if (plugins.length === 0) {
+            list.innerHTML = `<div class="plugin-empty"><i class="fa fa-plug" aria-hidden="true"></i>`
+                + `<p>${escapeHtml(t("settings.plugins.empty", "还没有发现任何插件。把插件文件夹放进上面的插件目录后，点「重新扫描」。"))}</p></div>`;
+            return;
+        }
+        list.innerHTML = plugins.map(renderCard).join("");
+    }
+
+    function renderAll(): void {
+        renderSummary(lastSummary);
+        if (lastSummary) renderList(lastSummary);
+    }
+
+    async function load(showLoading: boolean): Promise<void> {
+        if (loading) return;
+        loading = true;
+        const list = byId("pluginsList");
+        if (showLoading) {
+            setMessage("", "");
+            if (list) {
+                list.innerHTML = `<div class="plugin-empty"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i>`
+                    + `<p>${escapeHtml(t("settings.plugins.loading", "正在读取插件列表…"))}</p></div>`;
+            }
+        }
+        try {
+            const response = await TrpgApi.get<ApiResponse<SettingsPluginSummary>>("/api/plugins");
+            if (!response?.success || !response.data) {
+                throw new Error(apiError(response, t("settings.plugins.load_failed", "插件列表加载失败")));
+            }
+            lastSummary = response.data;
+            renderAll();
+        } catch (error) {
+            lastSummary = null;
+            renderSummary(null);
+            const message = `${t("settings.plugins.load_failed", "插件列表加载失败")}：${errorText(error)}`;
+            if (list) {
+                list.innerHTML = `<div class="plugin-empty plugin-empty-error"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i>`
+                    + `<p>${escapeHtml(message)}</p>`
+                    + `<button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-plugin-retry>${escapeHtml(t("settings.plugins.retry", "重试"))}</button></div>`;
+            }
+            setMessage(message, "error");
+        } finally {
+            loading = false;
+        }
+    }
+
+    async function setEnabled(id: string, enabled: boolean, input: HTMLInputElement | null): Promise<void> {
+        if (!id || busy.has(id)) return;
+        busy.add(id);
+        if (input) input.disabled = true;
+        try {
+            const action = enabled ? "enable" : "disable";
+            const response = await TrpgApi.post<ApiResponse<SettingsPluginMutation>>(
+                `/api/plugins/${encodeURIComponent(id)}/${action}`,
+            );
+            if (!response?.success) {
+                throw new Error(apiError(response, t("settings.plugins.toggle_failed", "操作失败")));
+            }
+            if (response.data?.restart_required) {
+                setMessage(t("settings.plugins.restart_required", "已禁用。该插件注册的 HTTP 路由仍在当前进程中，需重启服务才能完全回滚。"), "success");
+            } else {
+                setMessage(
+                    enabled
+                        ? t("settings.plugins.enable_done", "已启用该插件。")
+                        : t("settings.plugins.disable_done", "已禁用该插件。"),
+                    "success",
+                );
+            }
+        } catch (error) {
+            setMessage(`${t("settings.plugins.toggle_failed", "操作失败")}：${errorText(error)}`, "error");
+        } finally {
+            busy.delete(id);
+            if (input) input.disabled = false;
+            await load(false);
+        }
+    }
+
+    async function rescan(): Promise<void> {
+        const button = byId<HTMLButtonElement>("pluginsRescanButton");
+        if (button) button.disabled = true;
+        try {
+            const response = await TrpgApi.post<ApiResponse<SettingsPluginSummary>>("/api/plugins/rescan");
+            if (!response?.success || !response.data) {
+                throw new Error(apiError(response, t("settings.plugins.rescan_failed", "重新扫描失败")));
+            }
+            lastSummary = response.data;
+            renderAll();
+            setMessage(t("settings.plugins.rescan_done", "已重新扫描插件目录。"), "success");
+        } catch (error) {
+            setMessage(`${t("settings.plugins.rescan_failed", "重新扫描失败")}：${errorText(error)}`, "error");
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
+    async function uninstall(id: string): Promise<void> {
+        if (!id || busy.has(id)) return;
+        const record = lastSummary?.plugins.find((item) => item.id === id) || null;
+        if (record && (record.enabled || record.state === "loaded")) {
+            setMessage(t("settings.plugins.uninstall_need_disable", "请先禁用该插件再卸载。"), "error");
+            return;
+        }
+        const dialog = global.TrpgDialog;
+        if (!dialog) return;
+        const answer = await dialog.prompt({
+            title: t("settings.plugins.uninstall_title", "卸载插件"),
+            message: t("settings.plugins.uninstall_message", "卸载会删除插件目录 {id}，操作不可恢复。请输入插件 id 以确认。", { id }),
+            confirmText: t("settings.plugins.uninstall_confirm", "确认卸载"),
+            danger: true,
+        });
+        if (answer === null) return;
+        if (answer.trim() !== id) {
+            setMessage(t("settings.plugins.uninstall_mismatch", "输入的 id 与插件 id 不一致，已取消卸载。"), "error");
+            return;
+        }
+        busy.add(id);
+        try {
+            const response = await TrpgApi.del<ApiResponse<{ id: string; removed: boolean }>>(
+                `/api/plugins/${encodeURIComponent(id)}`,
+                { body: { confirm: id } },
+            );
+            if (!response?.success) {
+                throw new Error(apiError(response, t("settings.plugins.uninstall_failed", "卸载失败")));
+            }
+            setMessage(t("settings.plugins.uninstall_done", "已卸载 {id}。", { id }), "success");
+        } catch (error) {
+            setMessage(`${t("settings.plugins.uninstall_failed", "卸载失败")}：${errorText(error)}`, "error");
+        } finally {
+            busy.delete(id);
+            await load(false);
+        }
+    }
+
+    function bindOnce(): void {
+        if (initialized) return;
+        initialized = true;
+        byId<HTMLButtonElement>("pluginsRescanButton")?.addEventListener("click", () => void rescan());
+        const list = byId("pluginsList");
+        list?.addEventListener("change", (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLInputElement)) return;
+            const id = target.dataset.pluginToggle;
+            if (!id) return;
+            void setEnabled(id, target.checked, target);
+        });
+        list?.addEventListener("click", (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            const uninstallButton = target.closest<HTMLElement>("[data-plugin-uninstall]");
+            if (uninstallButton) {
+                void uninstall(uninstallButton.dataset.pluginUninstall || "");
+                return;
+            }
+            if (target.closest("[data-plugin-retry]")) void load(true);
+        });
+        global.addEventListener("trpg:locale-changed", () => {
+            if (lastSummary) renderAll();
+        });
+    }
+
+    function init(): void {
+        if (!byId("plugins-settings-content")) return;
+        bindOnce();
+        void load(true);
+    }
+
+    global.TrpgPlugins = { init };
+})(window);

@@ -97,6 +97,9 @@ interface Window {
     TrpgAbout?: {
         init: () => void;
     };
+    TrpgPlugins?: {
+        init: () => void;
+    };
 }
 
 interface TrpgDialogOptions {

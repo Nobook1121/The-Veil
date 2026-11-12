@@ -162,7 +162,7 @@ function closeDropdownButtons(): void {
     });
 }
 
-const SETTINGS_TAB_NAMES = ["general", "play", "model", "knowledge", "system", "access", "immersive", "about"];
+const SETTINGS_TAB_NAMES = ["general", "play", "model", "knowledge", "system", "plugins", "access", "immersive", "about"];
 
 // 旧分类名只用于把历史 hash / 书签迁移到新分类，不参与运行时切换。
 const LEGACY_SETTINGS_TAB_NAMES: Record<string, string> = {
@@ -237,6 +237,9 @@ function switchSettingsTab(tabName: string): void {
         window.TrpgImmersive?.renderSettings?.();
         // 音乐库已并入「实时沉浸」标签卡，切换到这里时按需加载列表。
         void window.TrpgBgm?.loadLibraryPanel();
+    }
+    if (normalized === "plugins") {
+        window.TrpgPlugins?.init();
     }
     if (normalized === "about") {
         window.TrpgAbout?.init?.();
