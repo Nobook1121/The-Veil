@@ -206,6 +206,8 @@ templates/hello-note/
 - **纯数据插件**（只有 `prop_templates` / `settings_sections` / `frontend_assets`）：立即生效，模板来源会重新扫描；
 - **代码插件**（`rulesets` / `agent_tools` / `http_blueprints`）：启用/禁用会立即更新状态与模板来源；入口模块按文件签名缓存，**禁用后已注册的 HTTP 路由仍在**，完整回滚请重启服务（接口返回 `restart_required`）。
 
+> **当前限制**：Flask 的蓝图注册不可撤销，代码插件被禁用后其路由在本次进程内仍然可访问。`restart_required: true` 就是提示必须重启才能彻底回滚；对安全敏感的回滚请直接用 `--no-plugins` 重启。
+
 卸载：先 `disable`，再 `DELETE /api/plugins/<id>` 且 body 里 `confirm` 填插件 id。宿主只删除插件目录本身；符号链接插件只删链接。
 
 ---
