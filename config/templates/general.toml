@@ -47,6 +47,23 @@ keep_exports_days = 7
 max_concurrent_exports = 2
 font_file = ""
 
+[props]
+# 道具工坊：把线索做成可拿在手里看的纸质道具（信/报纸/票据等）。
+# 关闭后所有房间都不能创建、投递或渲染道具。
+enabled = true
+# 单房间道具数量上限；超出后创建接口返回 prop.limit_reached。
+max_props_per_room = 200
+# 单个字段的最大字符数；与模板 manifest 的 max 取较小值后截断。
+max_field_chars = 4000
+# AI 生图照片道具的每日预算（张，0 表示不限制）。
+image_daily_budget = 20
+# 渲染缓存保留天数；0 表示不自动清理。
+render_cache_days = 7
+# 是否允许编辑器里的「让 AI 起草」。
+ai_draft_enabled = true
+# 剧本导入后是否自动批量备道具。
+auto_prepare_on_import = false
+
 [rooms]
 # 未激活房间自动回收期限（天）。只清理未归档、无活跃成员且最后活动时间超过
 # 该天数的房间，服务启动后与每天各检查一次；0 表示不回收。

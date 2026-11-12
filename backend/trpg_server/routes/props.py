@@ -1,0 +1,622 @@
+"""道具工坊 REST 接口（设计稿 §5.2）。
+
+- ``GET    /api/rooms/<room_id>/props/templates``  模板清单
+- ``GET    /api/rooms/<room_id>/props``            道具索引（按可见性过滤）
+- ``POST   /api/rooms/<room_id>/props``            创建
+- ``GET    /api/rooms/<room_id>/props/<prop_id>``  单个（按可见性脱敏）
+- ``PATCH  /api/rooms/<room_id>/props/<prop_id>``  修改
+- ``DELETE /api/rooms/<room_id>/props/<prop_id>``  删除
+- ``GET    /api/rooms/<room_id>/props/<prop_id>/render`` 渲染 PDF/PNG
+- ``POST   /api/rooms/<room_id>/props/<prop_id>/reveal`` 投递
+- ``POST   /api/rooms/<room_id>/props/<prop_id>/redact`` 追加脱敏区间
+
+读写权限：站点管理员 / 房主 / 房管；玩家只能 GET 已揭示的道具，未揭示一律
+404（不泄露存在性）。所有路径经 ``store`` 内的 ``safe_join``。
+"""
+from __future__ import annotations
+
+import logging
+import threading
+import time
+import uuid
+from typing import Any, Mapping
+
+from flask import Blueprint, current_app, request, send_file, session
+
+from trpg_server import props as props_config
+from trpg_server.props import policy, registry, store
+from trpg_server.props.render import RenderError, render_cached
+from trpg_server.responses import error_response, success_response
+from trpg_server.room_log.fonts import FontMissing, resolve_font
+from trpg_server.routes.rooms import (
+    ROOM_ROLE_ADMIN,
+    ROOM_ROLE_OWNER,
+    _can_access,
+    _find_member,
+    _find_room,
+    _is_elevated,
+    _read_messages,
+    _require_login,
+    _room_permission,
+    _timestamp,
+    _write_messages,
+)
+
+bp = Blueprint("props", __name__)
+logger = logging.getLogger(__name__)
+
+_RENDER_SEMAPHORE = threading.Semaphore(2)
+_FORMATS = {"pdf": "application/pdf", "png": "image/png"}
+_WRITE_ROLES = {ROOM_ROLE_OWNER, ROOM_ROLE_ADMIN}
+_WRITE_KEYS = {"title", "fields", "style", "wear", "visibility", "redaction"}
+_WEAR_NAMES = ("stain", "fold", "burn", "tear")
+
+
+def _settings() -> dict[str, Any]:
+    return props_config.props_settings(current_app.config.get("CONFIG_DIR"))
+
+
+def _disabled() -> bool:
+    return not bool(_settings().get("enabled", True))
+
+
+def _disabled_response():
+    return error_response("Prop workshop is disabled", 403, "prop.disabled")
+
+
+def _not_found():
+    return error_response("Prop not found", 404, "prop.not_found")
+
+
+def _load_room(room_id: str):
+    room_dir, info = _find_room(room_id)
+    if not room_dir:
+        return None, None, error_response("Room not found", 404, "Room not found")
+    return room_dir, info, None
+
+
+def _is_kp(info: Mapping[str, Any]) -> bool:
+    if _is_elevated():
+        return True
+    member = _find_member(info, user_id=session.get("user_id"), active_only=True)
+    return _room_permission(member, info) in _WRITE_ROLES
+
+
+def _write_forbidden():
+    return error_response("Permission denied", 403, "prop.forbidden")
+
+
+# ---------------------------------------------------------------- 参数规整
+
+
+class BodyError(ValueError):
+    """请求体字段非法。"""
+
+
+def _payload() -> dict[str, Any]:
+    data = request.get_json(silent=True)
+    return dict(data) if isinstance(data, Mapping) else {}
+
+
+def _normalize_title(raw: Any, fallback: str) -> str:
+    title = str(raw or "").strip() or fallback
+    return title[:200]
+
+
+def _normalize_style(raw: Any, previous: Mapping[str, Any] | None = None) -> dict[str, str]:
+    base = dict(previous or {})
+    if not isinstance(raw, Mapping):
+        return base
+    for key in ("paper", "ink", "accent", "font"):
+        if key in raw:
+            value = str(raw.get(key) or "").strip()
+            if value:
+                base[key] = value[:40]
+            else:
+                base.pop(key, None)
+    return base
+
+
+def _normalize_wear(raw: Any, previous: Mapping[str, Any] | None = None) -> dict[str, float]:
+    base = {name: float(previous.get(name) or 0.0) for name in _WEAR_NAMES} if previous else {}
+    if not isinstance(raw, Mapping):
+        return base
+    for name in _WEAR_NAMES:
+        if name not in raw:
+            continue
+        try:
+            value = float(raw.get(name))
+        except (TypeError, ValueError):
+            continue
+        base[name] = max(0.0, min(1.0, value))
+    return base
+
+
+def _normalize_redaction(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, (list, tuple)):
+        raise BodyError("redaction 必须是数组")
+    items: list[dict[str, Any]] = []
+    for entry in raw:
+        if not isinstance(entry, Mapping):
+            raise BodyError("redaction 元素必须是对象")
+        field = str(entry.get("field") or "").strip()
+        if not field:
+            raise BodyError("redaction 缺少 field")
+        try:
+            start = int(entry.get("start"))
+            end = int(entry.get("end"))
+        except (TypeError, ValueError) as exc:
+            raise BodyError("redaction 的 start/end 必须是整数") from exc
+        if end <= start:
+            continue
+        mode = str(entry.get("mode") or "burn").strip().lower()
+        if mode not in {"burn", "ink"}:
+            mode = "burn"
+        items.append({"field": field, "start": start, "end": end, "mode": mode})
+    return items
+
+
+def _normalize_visibility(raw: Any, previous: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    if raw is None:
+        return dict(previous or {"mode": "hidden", "revealed_to": []})
+    if not isinstance(raw, Mapping):
+        raise BodyError("visibility 必须是对象")
+    mode = str(raw.get("mode") or "hidden").strip().lower()
+    if mode not in policy.VISIBILITY_MODES:
+        raise BodyError("visibility.mode 非法")
+    recipients = raw.get("revealed_to")
+    ids: list[int] = []
+    if mode == "partial":
+        if not isinstance(recipients, (list, tuple)) or not recipients:
+            raise BodyError("partial 可见性需要 revealed_to")
+        for item in recipients:
+            try:
+                ids.append(int(item))
+            except (TypeError, ValueError) as exc:
+                raise BodyError("revealed_to 必须是用户 id 数组") from exc
+    return {"mode": mode, "revealed_to": ids}
+
+
+def _clamp_redaction(spec: dict[str, Any], items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按当前字段长度裁剪区间，越界/空区间直接丢弃。"""
+    fields = spec.get("fields") if isinstance(spec.get("fields"), Mapping) else {}
+    kept: list[dict[str, Any]] = []
+    for item in items:
+        text = fields.get(item["field"])
+        if text is None:
+            continue
+        length = len(str(text))
+        start = max(0, min(int(item["start"]), length))
+        end = max(0, min(int(item["end"]), length))
+        if end <= start:
+            continue
+        kept.append({**item, "start": start, "end": end})
+    return kept
+
+
+def _build_spec(room_id: str, body: Mapping[str, Any], settings: Mapping[str, Any]) -> dict[str, Any]:
+    template_id = str(body.get("template_id") or "").strip()
+    manifest = registry.get_template(template_id)
+    fields = registry.validate_fields(
+        template_id,
+        body.get("fields") if isinstance(body.get("fields"), Mapping) else {},
+        max_field_chars=int(settings.get("max_field_chars") or 0) or None,
+    )
+    now = _timestamp()
+    spec = {
+        "schema_version": 1,
+        "id": store.new_prop_id(),
+        "room_id": str(room_id),
+        "template_id": template_id,
+        "title": _normalize_title(body.get("title"), str(manifest.get("name") or template_id)),
+        "fields": fields,
+        "style": _normalize_style(body.get("style")),
+        "wear": _normalize_wear(body.get("wear")),
+        "redaction": _normalize_redaction(body.get("redaction") or []),
+        "visibility": _normalize_visibility(body.get("visibility")),
+        "source": _normalize_source(body.get("source")),
+        "assets": {},
+        "created_by": _user_id(),
+        "created_at": now,
+        "updated_at": now,
+    }
+    spec["redaction"] = _clamp_redaction(spec, spec["redaction"])
+    return spec
+
+
+def _normalize_source(raw: Any) -> dict[str, Any]:
+    source = dict(raw) if isinstance(raw, Mapping) else {}
+    kind = str(source.get("kind") or "manual").strip().lower()
+    if kind not in {"ai", "manual", "imported"}:
+        kind = "manual"
+    return {
+        "kind": kind,
+        "clue_id": source.get("clue_id"),
+        "scenario_id": source.get("scenario_id"),
+        "ai_request_id": source.get("ai_request_id"),
+    }
+
+
+def _user_id() -> int | str | None:
+    value = session.get("user_id")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+
+# ---------------------------------------------------------------- 模板与索引
+
+
+@bp.route("/api/rooms/<room_id>/props/templates", methods=["GET"])
+def list_prop_templates(room_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    if _disabled():
+        return _disabled_response()
+    _room_dir, info, error = _load_room(room_id)
+    if error:
+        return error
+    if not _can_access(info):
+        return _write_forbidden()
+    return success_response({"templates": registry.list_templates()}, "Prop templates loaded")
+
+
+@bp.route("/api/rooms/<room_id>/props", methods=["GET"])
+def list_props(room_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    if _disabled():
+        return _disabled_response()
+    room_dir, info, error = _load_room(room_id)
+    if error:
+        return error
+    if not _can_access(info):
+        return _write_forbidden()
+
+    is_kp = _is_kp(info)
+    user_id = session.get("user_id")
+    entries: list[dict[str, Any]] = []
+    for entry in store.list_index(room_dir):
+        spec = store.read_prop(room_dir, str(entry.get("id") or ""))
+        if spec is None:
+            continue
+        view = policy.visible_spec(spec, user_id, is_kp=is_kp)
+        if view is None:
+            continue
+        entries.append(store.index_entry(spec))
+    return success_response({"props": entries}, "Props loaded")
+
+
+# ---------------------------------------------------------------- 创建
+
+
+@bp.route("/api/rooms/<room_id>/props", methods=["POST"])
+def create_prop(room_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    settings = _settings()
+    if not settings.get("enabled", True):
+        return _disabled_response()
+    room_dir, info, error = _load_room(room_id)
+    if error:
+        return error
+    if not _can_access(info):
+        return _write_forbidden()
+    if not _is_kp(info):
+        return _write_forbidden()
+    if len(store.list_index(room_dir)) >= int(settings.get("max_props_per_room") or 200):
+        return error_response("Prop limit reached", 400, "prop.limit_reached")
+
+    body = _payload()
+    try:
+        spec = _build_spec(room_id, body, settings)
+    except registry.UnknownTemplate as exc:
+        return error_response(str(exc), 400, "prop.unknown_template")
+    except registry.FieldError as exc:
+        return error_response(str(exc), 400, "prop.invalid_fields")
+    except BodyError as exc:
+        return error_response(str(exc), 400, "prop.invalid_body")
+
+    store.write_prop(room_dir, spec)
+    return success_response(store.read_prop(room_dir, spec["id"]), "Prop created", status=201)
+
+
+# ---------------------------------------------------------------- 单个
+
+
+@bp.route("/api/rooms/<room_id>/props/<prop_id>", methods=["GET"])
+def get_prop(room_id, prop_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    if _disabled():
+        return _disabled_response()
+    room_dir, info, error = _load_room(room_id)
+    if error:
+        return error
+    if not _can_access(info):
+        return _write_forbidden()
+    if not store.is_valid_prop_id(prop_id):
+        return _not_found()
+    spec = store.read_prop(room_dir, prop_id)
+    view = policy.visible_spec(spec, session.get("user_id"), is_kp=_is_kp(info))
+    if view is None:
+        return _not_found()
+    return success_response(view, "Prop loaded")
+
+
+@bp.route("/api/rooms/<room_id>/props/<prop_id>", methods=["PATCH"])
+def update_prop(room_id, prop_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    settings = _settings()
+    if not settings.get("enabled", True):
+        return _disabled_response()
+    room_dir, info, error = _load_room(room_id)
+    if error:
+        return error
+    if not _can_access(info):
+        return _write_forbidden()
+    if not _is_kp(info):
+        return _write_forbidden()
+    if not store.is_valid_prop_id(prop_id):
+        return _not_found()
+    body = _payload()
+    unknown = set(body) - _WRITE_KEYS
+    if unknown:
+        return error_response("不可修改的字段：" + ", ".join(sorted(unknown)), 400, "prop.invalid_body")
+
+    failure: dict[str, Any] = {}
+
+    def mutate(current: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            if "title" in body:
+                current["title"] = _normalize_title(body.get("title"), str(current.get("title") or ""))
+            if "fields" in body:
+                merged = dict(current.get("fields") or {})
+                if isinstance(body.get("fields"), Mapping):
+                    merged.update(body["fields"])
+                current["fields"] = registry.validate_fields(
+                    str(current.get("template_id") or ""),
+                    merged,
+                    max_field_chars=int(settings.get("max_field_chars") or 0) or None,
+                )
+            if "style" in body:
+                current["style"] = _normalize_style(body.get("style"), current.get("style"))
+            if "wear" in body:
+                current["wear"] = _normalize_wear(body.get("wear"), current.get("wear"))
+            if "visibility" in body:
+                current["visibility"] = _normalize_visibility(body.get("visibility"))
+            if "redaction" in body:
+                current["redaction"] = _normalize_redaction(body.get("redaction"))
+            current["redaction"] = _clamp_redaction(current, current.get("redaction") or [])
+            current["updated_at"] = _timestamp()
+            return current
+        except (registry.TemplateError, BodyError) as exc:
+            failure["error"] = exc
+            return None
+
+    updated = store.update_prop(room_dir, prop_id, mutate)
+    if failure:
+        exc = failure["error"]
+        code = "prop.invalid_fields" if isinstance(exc, registry.TemplateError) else "prop.invalid_body"
+        return error_response(str(exc), 400, code)
+    if updated is None:
+        return _not_found()
+    return success_response(updated, "Prop updated")
+
+
+@bp.route("/api/rooms/<room_id>/props/<prop_id>", methods=["DELETE"])
+def delete_prop(room_id, prop_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    if _disabled():
+        return _disabled_response()
+    room_dir, info, error = _load_room(room_id)
+    if error:
+        return error
+    if not _can_access(info):
+        return _write_forbidden()
+    if not _is_kp(info):
+        return _write_forbidden()
+    if not store.is_valid_prop_id(prop_id):
+        return _not_found()
+    deleted = store.delete_prop(room_dir, prop_id)
+    return success_response({"deleted": bool(deleted)}, "Prop deleted")
+
+
+# ---------------------------------------------------------------- 渲染
+
+
+@bp.route("/api/rooms/<room_id>/props/<prop_id>/render", methods=["GET"])
+def render_prop_file(room_id, prop_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    settings = _settings()
+    if not settings.get("enabled", True):
+        return _disabled_response()
+    room_dir, info, error = _load_room(room_id)
+    if error:
+        return error
+    if not _can_access(info):
+        return _write_forbidden()
+    if not store.is_valid_prop_id(prop_id):
+        return _not_found()
+
+    fmt = str(request.args.get("format") or "pdf").strip().lower()
+    if fmt not in _FORMATS:
+        return error_response("format 只支持 pdf / png", 400, "prop.invalid_format")
+    spec = store.read_prop(room_dir, prop_id)
+    view = policy.visible_spec(spec, session.get("user_id"), is_kp=_is_kp(info))
+    if view is None:
+        return _not_found()
+
+    trace_id = uuid.uuid4().hex[:12]
+    try:
+        _family, font_path = resolve_font()
+    except FontMissing:
+        return error_response("No usable CJK font", 503, "prop.font_missing")
+
+    try:
+        with _RENDER_SEMAPHORE:
+            result = render_cached(
+                room_dir,
+                view,
+                fmt,
+                settings=settings,
+                font_path=font_path,
+                data_dir=current_app.config.get("DATA_DIR"),
+            )
+    except RenderError as exc:
+        logger.exception("props render failed room=%s id=%s trace=%s", room_id, prop_id, trace_id)
+        return error_response(f"Prop render failed: {exc}", 500, "prop.render_failed", trace_id=trace_id)
+    except Exception:  # noqa: BLE001 - 不把内部异常文本回给客户端
+        logger.exception("props render failed room=%s id=%s trace=%s", room_id, prop_id, trace_id)
+        return error_response("Prop render failed", 500, "prop.render_failed", trace_id=trace_id)
+
+    title = str(view.get("title") or prop_id)
+    response = send_file(
+        result["path"],
+        mimetype=_FORMATS[fmt],
+        as_attachment=False,
+        download_name=f"{title}.{fmt}",
+        conditional=True,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Prop-Render-Cached"] = "1" if result.get("cached") else "0"
+    return response
+
+
+# ---------------------------------------------------------------- 投递与脱敏
+
+
+@bp.route("/api/rooms/<room_id>/props/<prop_id>/reveal", methods=["POST"])
+def reveal_prop(room_id, prop_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    if _disabled():
+        return _disabled_response()
+    room_dir, info, error = _load_room(room_id)
+    if error:
+        return error
+    if not _can_access(info):
+        return _write_forbidden()
+    if not _is_kp(info):
+        return _write_forbidden()
+    if not store.is_valid_prop_id(prop_id):
+        return _not_found()
+
+    body = _payload()
+    recipients: list[int] = []
+    if body.get("all") is True:
+        visibility = {"mode": "revealed", "revealed_to": []}
+    else:
+        raw = body.get("to")
+        if not isinstance(raw, (list, tuple)) or not raw:
+            return error_response("需要 to 数组或 all=true", 400, "prop.invalid_body")
+        member_ids = {
+            str(member.get("user_id"))
+            for member in info.get("members") or []
+            if member.get("is_active", True) is not False
+        }
+        for item in raw:
+            try:
+                value = int(item)
+            except (TypeError, ValueError):
+                continue
+            if str(value) in member_ids and value not in recipients:
+                recipients.append(value)
+        if not recipients:
+            return error_response("收件人不在房间内", 400, "prop.invalid_recipients")
+        visibility = {"mode": "partial", "revealed_to": recipients}
+
+    updated = store.update_prop(
+        room_dir,
+        prop_id,
+        lambda current: {**current, "visibility": visibility, "updated_at": _timestamp()},
+    )
+    if updated is None:
+        return _not_found()
+
+    content = str(body.get("message") or "").strip() or f"递来一件道具：{updated.get('title') or ''}"
+    message = {
+        "id": uuid.uuid4().hex,
+        "type": "prop",
+        "sender_id": None,
+        "sender_name": "KP",
+        "avatar": "/assets/avatars/default_kp.jpg",
+        "content": content[:500],
+        "time": time.strftime("%H:%M"),
+        "created_at": _timestamp(),
+        "metadata": {
+            "prop_id": prop_id,
+            "preview": str(updated.get("template_id") or ""),
+            "revealed_to": recipients,
+        },
+    }
+    messages = _read_messages(room_dir)
+    messages.append(message)
+    _write_messages(room_dir, messages)
+
+    try:
+        from trpg_server.immersive import broadcast
+
+        broadcast.emit("new_message", {**message, "room_id": str(room_id)})
+    except Exception:  # noqa: BLE001 - 广播失败不回滚已落库的消息
+        logger.warning("props reveal broadcast failed room=%s id=%s", room_id, prop_id, exc_info=True)
+
+    return success_response({"prop": updated, "message": message}, "Prop revealed")
+
+
+@bp.route("/api/rooms/<room_id>/props/<prop_id>/redact", methods=["POST"])
+def redact_prop(room_id, prop_id):
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    if _disabled():
+        return _disabled_response()
+    room_dir, info, error = _load_room(room_id)
+    if error:
+        return error
+    if not _can_access(info):
+        return _write_forbidden()
+    if not _is_kp(info):
+        return _write_forbidden()
+    if not store.is_valid_prop_id(prop_id):
+        return _not_found()
+
+    body = _payload()
+    raw = body.get("redactions") if "redactions" in body else [body]
+    try:
+        incoming = _normalize_redaction(raw)
+    except BodyError as exc:
+        return error_response(str(exc), 400, "prop.invalid_body")
+
+    failure: dict[str, Any] = {}
+
+    def mutate(current: dict[str, Any]) -> dict[str, Any] | None:
+        merged = list(current.get("redaction") or []) + incoming
+        current["redaction"] = _clamp_redaction(current, merged)
+        if not current["redaction"]:
+            failure["empty"] = True
+            return None
+        current["updated_at"] = _timestamp()
+        return current
+
+    updated = store.update_prop(room_dir, prop_id, mutate)
+    if updated is None:
+        if failure.get("empty"):
+            return error_response("脱敏区间无效", 400, "prop.invalid_body")
+        return _not_found()
+    return success_response(updated, "Prop redaction added")
+
+
+__all__ = ["bp"]

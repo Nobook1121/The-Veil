@@ -216,6 +216,19 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec("max_concurrent_exports", "room_log", ("max_concurrent_exports",),
               clamped_int(minimum=1, maximum=4), 2),
     FieldSpec("font_file", "room_log", ("font_file",), as_text, ""),
+    # [props]
+    # 道具工坊：房间级纸质道具的模板化生成与导出。
+    FieldSpec("enabled", "props", ("enabled",), as_bool, True),
+    FieldSpec("max_props_per_room", "props", ("max_props_per_room",),
+              clamped_int(minimum=1, maximum=2000), 200),
+    FieldSpec("max_field_chars", "props", ("max_field_chars",),
+              clamped_int(minimum=100, maximum=20000), 4000),
+    FieldSpec("image_daily_budget", "props", ("image_daily_budget",),
+              clamped_int(minimum=0, maximum=10000), 20),
+    FieldSpec("render_cache_days", "props", ("render_cache_days",),
+              clamped_int(minimum=0, maximum=365), 7),
+    FieldSpec("ai_draft_enabled", "props", ("ai_draft_enabled",), as_bool, True),
+    FieldSpec("auto_prepare_on_import", "props", ("auto_prepare_on_import",), as_bool, False),
     # [rooms]
     # 未激活房间自动回收期限（天）；0 表示不回收。只清理未归档、无活跃成员且
     # 最后活动时间超过阈值的房间，不触碰角色卡与用户数据。
