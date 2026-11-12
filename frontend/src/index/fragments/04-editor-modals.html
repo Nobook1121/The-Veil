@@ -1100,3 +1100,81 @@
     </div>
 
     <!-- 添加模型模态窗口 -->
+
+    <!-- 道具工坊：道具袋 -->
+    <div class="modal fade" id="propLibraryModal" tabindex="-1" aria-labelledby="propLibraryModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="propLibraryModalLabel" data-i18n="prop.title.library">道具袋</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="prop-library-toolbar">
+                        <div class="prop-filter-group" id="propLibraryFilter" role="group" aria-label="筛选">
+                            <button type="button" class="btn btn-sm btn-outline-secondary is-active" data-filter="all" data-i18n="prop.filter.all">全部</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-filter="hidden" data-i18n="prop.filter.hidden">未揭示</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-filter="revealed" data-i18n="prop.filter.revealed">已揭示</button>
+                        </div>
+                        <div class="prop-library-actions">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="propLibraryRefresh" data-i18n-title="prop.action.refresh">
+                                <i class="fa fa-refresh" aria-hidden="true"></i>
+                            </button>
+                            <button type="button" class="btn btn-primary btn-sm" id="propLibraryNew" data-i18n="prop.action.create">新建道具</button>
+                        </div>
+                    </div>
+                    <div class="prop-status" id="propLibraryStatus" role="status" aria-live="polite"></div>
+                    <div class="prop-grid" id="propLibraryGrid"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 道具工坊：编辑器 -->
+    <div class="modal fade" id="propEditorModal" tabindex="-1" aria-labelledby="propEditorModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="propEditorModalLabel" data-i18n="prop.title.editor_new">新建道具</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="prop-editor-layout">
+                        <div class="prop-editor-form">
+                            <div class="prop-editor-row">
+                                <div class="prop-editor-row-main">
+                                    <label class="form-label" for="propEditorTitle" data-i18n="prop.label.title">标题</label>
+                                    <input type="text" class="form-control" id="propEditorTitle" maxlength="200">
+                                </div>
+                                <div class="prop-editor-row-side">
+                                    <label class="form-label" for="propEditorTemplate" data-i18n="prop.label.template">模板</label>
+                                    <select class="form-select" id="propEditorTemplate"></select>
+                                </div>
+                            </div>
+                            <div class="prop-editor-field">
+                                <label class="form-label" for="propEditorPaper" data-i18n="prop.label.paper">纸张</label>
+                                <select class="form-select" id="propEditorPaper"></select>
+                            </div>
+                            <div class="prop-editor-fields" id="propEditorFields"></div>
+                            <div class="prop-wear-block">
+                                <div class="prop-editor-section-title" data-i18n="prop.label.wear">做旧</div>
+                                <div class="prop-wear-grid" id="propWearGrid"></div>
+                            </div>
+                        </div>
+                        <div class="prop-editor-preview">
+                            <div class="prop-editor-section-title" data-i18n="prop.label.preview">预览</div>
+                            <div class="prop-preview-stage">
+                                <iframe id="propEditorPreviewFrame" class="prop-preview-frame" title="道具预览" sandbox="" hidden></iframe>
+                                <div class="prop-preview-empty" id="propEditorPreviewEmpty" data-i18n="prop.status.preview_hint">保存后可预览</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <span class="prop-status" id="propEditorStatus" role="status" aria-live="polite"></span>
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" data-i18n="prop.action.cancel">取消</button>
+                    <button type="button" class="btn btn-primary" id="propEditorSave" data-i18n="prop.action.save">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
