@@ -1,7 +1,7 @@
 ---
 app: The Veil (帷幕)
-version: 1.0.2
-package: the-veil-v1.0.2.zip
+version: 1.0.3
+package: the-veil-v1.0.3.zip
 install_mode: bundled_frontend
 python_requires: ">=3.11"
 run_command_windows: ".venv\\Scripts\\python.exe server.py"

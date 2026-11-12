@@ -3,7 +3,7 @@
 
   用法：
     powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Version 1.0.2
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Version 1.0.3
 
   产物：
     release/the-veil-v<版本>.zip
