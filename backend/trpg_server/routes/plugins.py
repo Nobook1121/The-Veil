@@ -18,6 +18,7 @@ import logging
 from flask import Blueprint, request, session
 
 from trpg_server.plugins import bootstrap, plugin_registry
+from trpg_server.plugins.builtin import system_plugin_entries
 from trpg_server.plugins.manifest import manifest_json_schema
 from trpg_server.plugins.registry import PluginNotFound, PluginStateError
 from trpg_server.responses import error_response, server_error, success_response
@@ -47,6 +48,13 @@ def _registry():
     return registry, None
 
 
+def _summary(registry) -> dict:
+    """第三方清单 + 只读的系统内置插件分组，原有键保持不变。"""
+    payload = registry.summary()
+    payload["system_plugins"] = system_plugin_entries()
+    return payload
+
+
 @bp.route("/api/plugins", methods=["GET"])
 def list_plugins():
     denied = _guard()
@@ -55,7 +63,7 @@ def list_plugins():
     registry, error = _registry()
     if error:
         return error
-    return success_response(registry.summary(), "Plugins loaded")
+    return success_response(_summary(registry), "Plugins loaded")
 
 
 @bp.route("/api/plugins/schema", methods=["GET"])
@@ -79,7 +87,7 @@ def rescan_plugins():
     except Exception:  # noqa: BLE001 - 扫描失败要回稳定 500，而不是 Flask 默认页
         logger.exception("plugin_rescan_failed root=%s", getattr(registry, "root", ""))
         return server_error("Plugin rescan failed")
-    return success_response(registry.summary(), "Plugins rescanned")
+    return success_response(_summary(registry), "Plugins rescanned")
 
 
 @bp.route("/api/plugins/<plugin_id>/enable", methods=["POST"])

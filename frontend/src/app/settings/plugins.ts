@@ -21,9 +21,12 @@ interface SettingsPluginRecord {
     enabled: boolean;
     reason: string;
     reason_code: string;
-    dir: string;
-    /** 发现位置，由后端给出：plugin_dir | template_pack（预留）。 */
+    /** 系统内置插件为只读条目，没有插件目录。 */
+    dir?: string;
+    /** 发现位置，由后端给出：plugin_dir | template_pack | system。 */
     source?: string;
+    /** 系统内置（随包发布的规则集），不可启用/禁用/卸载。 */
+    system?: boolean;
     capabilities: string[];
     pending_restart?: boolean;
     manifest: SettingsPluginManifest | null;
@@ -36,7 +39,10 @@ interface SettingsPluginSummary {
     disabled_all: boolean;
     loaded_at: string;
     counts: Record<string, number>;
+    /** data/plugins 下的第三方插件。 */
     plugins: SettingsPluginRecord[];
+    /** 随包发布的系统内置插件（只读，不计入 counts）。 */
+    system_plugins?: SettingsPluginRecord[];
 }
 
 interface SettingsPluginMutation {
@@ -107,6 +113,7 @@ interface TrpgPluginsApi {
     const SOURCE_LABELS: Record<string, [string, string]> = {
         plugin_dir: ["settings.plugins.source.directory", "插件目录"],
         template_pack: ["settings.plugins.source.pack", "模板包"],
+        system: ["settings.plugins.source.system", "系统内置"],
     };
 
     function sourceLabel(record: SettingsPluginRecord): string {
@@ -125,8 +132,8 @@ interface TrpgPluginsApi {
         const counts = summary.counts || {};
         const total = Array.isArray(summary.plugins) ? summary.plugins.length : 0;
         const parts = [
-            `<span>${escapeHtml(t("settings.plugins.summary", "插件目录：{root} · 共 {count} 个", { root: summary.root, count: total }))}</span>`,
-            `<span>${escapeHtml(t("settings.plugins.counts", "已加载 {loaded} · 已禁用 {disabled} · 失败 {failed}", {
+            `<span>${escapeHtml(t("settings.plugins.summary", "第三方插件目录：{root} · 共 {count} 个", { root: summary.root, count: total }))}</span>`,
+            `<span>${escapeHtml(t("settings.plugins.counts", "第三方：已加载 {loaded} · 已禁用 {disabled} · 失败 {failed}", {
                 loaded: counts.loaded || 0,
                 disabled: counts.disabled || 0,
                 failed: counts.failed || 0,
@@ -142,6 +149,7 @@ interface TrpgPluginsApi {
 
     function renderCard(record: SettingsPluginRecord): string {
         const manifest = record.manifest;
+        const isSystem = Boolean(record.system);
         const name = manifest?.name || record.id;
         const version = manifest?.version || "—";
         const author = manifest?.author || "—";
@@ -162,22 +170,27 @@ interface TrpgPluginsApi {
                 record.reason || t("settings.plugins.restart_required", "已禁用。该插件注册的 HTTP 路由仍在当前进程中，需重启服务才能完全回滚。")
             )}</span></p>`
             : "";
-        return `
-            <article class="plugin-card" data-state="${escapeHtml(displayState)}" data-plugin-id="${escapeHtml(record.id)}">
-                <div class="plugin-card-top">
-                    <div class="plugin-card-heading">
-                        <h4 class="plugin-card-name">${escapeHtml(name)}<code class="plugin-card-id">${escapeHtml(record.id)}</code></h4>
-                        <p class="settings-section-desc">${escapeHtml(description)}</p>
-                    </div>
-                    <div class="plugin-card-actions">
-                        <span class="plugin-state-badge" data-state="${escapeHtml(displayState)}">${escapeHtml(stateLabel(displayState))}</span>
+        // 系统内置插件随包发布，不可启用/禁用/卸载，只展示状态与来源。
+        const actions = isSystem
+            ? `<span class="plugin-state-badge" data-state="${escapeHtml(displayState)}">${escapeHtml(stateLabel(displayState))}</span>`
+                + `<span class="plugin-readonly">${escapeHtml(t("settings.plugins.builtin_readonly", "内置只读"))}</span>`
+            : `<span class="plugin-state-badge" data-state="${escapeHtml(displayState)}">${escapeHtml(stateLabel(displayState))}</span>
                         <label class="plugin-switch">
                             <input type="checkbox" data-plugin-toggle="${escapeHtml(record.id)}"${checked ? " checked" : ""}${isBusy ? " disabled" : ""}>
                             <span>${escapeHtml(t("settings.plugins.enable_label", "启用"))}</span>
                         </label>
                         <button type="button" class="btn btn-sm btn-outline-danger" data-plugin-uninstall="${escapeHtml(record.id)}"${isBusy ? " disabled" : ""}>
                             <i class="fa fa-trash-o" aria-hidden="true"></i> ${escapeHtml(t("settings.plugins.uninstall", "卸载"))}
-                        </button>
+                        </button>`;
+        return `
+            <article class="plugin-card" data-state="${escapeHtml(displayState)}"${isSystem ? ' data-system="true"' : ""} data-plugin-id="${escapeHtml(record.id)}">
+                <div class="plugin-card-top">
+                    <div class="plugin-card-heading">
+                        <h4 class="plugin-card-name">${escapeHtml(name)}<code class="plugin-card-id">${escapeHtml(record.id)}</code></h4>
+                        <p class="settings-section-desc">${escapeHtml(description)}</p>
+                    </div>
+                    <div class="plugin-card-actions">
+                        ${actions}
                     </div>
                 </div>
                 <dl class="plugin-facts">
@@ -190,16 +203,47 @@ interface TrpgPluginsApi {
             </article>`;
     }
 
+    function renderGroup(
+        key: string,
+        title: string,
+        records: SettingsPluginRecord[],
+        emptyText: string,
+    ): string {
+        const body = records.length
+            ? records.map(renderCard).join("")
+            : `<div class="plugin-empty plugin-empty--group"><p>${escapeHtml(emptyText)}</p></div>`;
+        return `
+            <section class="plugin-group" data-plugin-group="${escapeHtml(key)}">
+                <header class="plugin-group-head">
+                    <div class="plugin-group-heading">
+                        <h4 class="plugin-group-title">${escapeHtml(title)}<span class="plugin-group-count">${records.length}</span></h4>
+                        <p class="settings-section-desc">${escapeHtml(
+                            key === "system"
+                                ? t("settings.plugins.group.system_note", "随程序发布的规则集，只读展示，不支持启用、禁用或卸载。")
+                                : t("settings.plugins.group.third_party_note", "放在插件目录中、由站点管理员安装的插件，默认不启用。")
+                        )}</p>
+                    </div>
+                </header>
+                <div class="plugin-group-body">${body}</div>
+            </section>`;
+    }
+
     function renderList(summary: SettingsPluginSummary): void {
         const list = byId("pluginsList");
         if (!list) return;
-        const plugins = Array.isArray(summary.plugins) ? summary.plugins : [];
-        if (plugins.length === 0) {
+        const thirdParty = Array.isArray(summary.plugins) ? summary.plugins : [];
+        const system = Array.isArray(summary.system_plugins) ? summary.system_plugins : [];
+        if (thirdParty.length === 0 && system.length === 0) {
             list.innerHTML = `<div class="plugin-empty"><i class="fa fa-plug" aria-hidden="true"></i>`
-                + `<p>${escapeHtml(t("settings.plugins.empty", "还没有发现任何插件。把插件文件夹放进上面的插件目录后，点「重新扫描」。"))}</p></div>`;
+                + `<p>${escapeHtml(t("settings.plugins.empty", "当前版本没有内置插件，也没有安装第三方插件。"))}</p></div>`;
             return;
         }
-        list.innerHTML = plugins.map(renderCard).join("");
+        list.innerHTML = [
+            renderGroup("system", t("settings.plugins.group.system", "系统插件"), system,
+                t("settings.plugins.empty_system", "当前版本没有可用的系统插件。")),
+            renderGroup("third_party", t("settings.plugins.group.third_party", "第三方插件"), thirdParty,
+                t("settings.plugins.empty_third_party", "还没有安装第三方插件。把插件文件夹放进上面的插件目录后，点「重新扫描」。")),
+        ].join("");
     }
 
     function renderAll(): void {

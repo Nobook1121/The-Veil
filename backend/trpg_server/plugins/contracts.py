@@ -67,7 +67,13 @@ CAPABILITY_NAMES: tuple[str, ...] = tuple(CAPABILITY_LABELS)
 # - ``template_pack``：预留给「模板包也进清单」的纯模板来源。
 PLUGIN_SOURCE_DIR = "plugin_dir"
 PLUGIN_SOURCE_TEMPLATE_PACK = "template_pack"
-PLUGIN_SOURCES: tuple[str, ...] = (PLUGIN_SOURCE_DIR, PLUGIN_SOURCE_TEMPLATE_PACK)
+# 系统内置（随包发布的规则集），不属于用户可安装插件。
+PLUGIN_SOURCE_SYSTEM = "system"
+PLUGIN_SOURCES: tuple[str, ...] = (
+    PLUGIN_SOURCE_DIR,
+    PLUGIN_SOURCE_TEMPLATE_PACK,
+    PLUGIN_SOURCE_SYSTEM,
+)
 
 # 生命周期状态。``available`` 表示「在磁盘上发现了，但不在启用列表里」。
 STATE_AVAILABLE = "available"
@@ -238,6 +244,7 @@ __all__ = [
     "PLUGIN_MANIFEST_VERSION",
     "PLUGIN_SOURCES",
     "PLUGIN_SOURCE_DIR",
+    "PLUGIN_SOURCE_SYSTEM",
     "PLUGIN_SOURCE_TEMPLATE_PACK",
     "PluginError",
     "PluginManifest",
