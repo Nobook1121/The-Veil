@@ -29,10 +29,23 @@ from trpg_server.version import (
 logger = logging.getLogger(__name__)
 
 _CREDITS_PATH = Path(__file__).resolve().parent / "resources" / "credits.json"
+_CREDITS_SCHEMA_VERSION = 1
 _credits_lock = threading.Lock()
 _credits_cache: tuple[float, dict[str, Any]] | None = None
 
+# 每类条目的已知字段。归一化时补齐为空字符串，旧文件缺字段也不会让前端拿到
+# undefined；条目里额外的自定义字段原样保留，不因归一化丢失。
+_ENTRY_FIELDS: dict[str, tuple[str, ...]] = {
+    "contributors": ("name", "role", "url", "note"),
+    "special_thanks": ("name", "note"),
+    "dependencies": ("name", "version", "license", "url", "usage"),
+    "sponsor_channels": ("id", "label", "url", "note"),
+    "sponsors": ("name", "tier", "since", "url", "message"),
+}
+
 _EMPTY_CREDITS: dict[str, Any] = {
+    "schema_version": _CREDITS_SCHEMA_VERSION,
+    "updated_at": "",
     "contributors": [],
     "special_thanks": [],
     "dependencies": [],
@@ -41,8 +54,44 @@ _EMPTY_CREDITS: dict[str, Any] = {
 }
 
 
+def _empty_credits() -> dict[str, Any]:
+    return {key: (list(value) if isinstance(value, list) else value) for key, value in _EMPTY_CREDITS.items()}
+
+
 def _normalize_list(value: Any) -> list[Any]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _normalize_entries(value: Any, fields: tuple[str, ...]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for item in _normalize_list(value):
+        entry = dict(item)
+        for field in fields:
+            raw = item.get(field)
+            entry[field] = str(raw).strip() if raw is not None else ""
+        entries.append(entry)
+    return entries
+
+
+def _normalize_sponsor_channels(value: Any) -> list[dict[str, Any]]:
+    """赞助渠道必须是可点击的真实地址：缺 id/url 或仍是占位文本的条目不进 release。"""
+    channels: list[dict[str, Any]] = []
+    for entry in _normalize_entries(value, _ENTRY_FIELDS["sponsor_channels"]):
+        if not entry["id"] or not entry["url"]:
+            continue
+        if any("CHANGE_ME" in item for item in entry.values()):
+            logger.warning("credits.json contains a placeholder sponsor channel; entry skipped")
+            continue
+        channels.append(entry)
+    return channels
+
+
+def _normalize_schema_version(value: Any) -> int:
+    try:
+        version = int(value)
+    except (TypeError, ValueError):
+        return _CREDITS_SCHEMA_VERSION
+    return version if version > 0 else _CREDITS_SCHEMA_VERSION
 
 
 def load_credits() -> dict[str, Any]:
@@ -51,7 +100,7 @@ def load_credits() -> dict[str, Any]:
     try:
         mtime = _CREDITS_PATH.stat().st_mtime
     except OSError:
-        return dict(_EMPTY_CREDITS)
+        return _empty_credits()
     with _credits_lock:
         if _credits_cache and _credits_cache[0] == mtime:
             return _credits_cache[1]
@@ -60,15 +109,17 @@ def load_credits() -> dict[str, Any]:
         if not isinstance(raw, dict):
             raise ValueError("credits must be an object")
         credits = {
-            "contributors": _normalize_list(raw.get("contributors")),
-            "special_thanks": _normalize_list(raw.get("special_thanks")),
-            "dependencies": _normalize_list(raw.get("dependencies")),
-            "sponsor_channels": _normalize_list(raw.get("sponsor_channels")),
-            "sponsors": _normalize_list(raw.get("sponsors")),
+            "schema_version": _normalize_schema_version(raw.get("schema_version")),
+            "updated_at": str(raw.get("updated_at") or "").strip(),
+            "contributors": _normalize_entries(raw.get("contributors"), _ENTRY_FIELDS["contributors"]),
+            "special_thanks": _normalize_entries(raw.get("special_thanks"), _ENTRY_FIELDS["special_thanks"]),
+            "dependencies": _normalize_entries(raw.get("dependencies"), _ENTRY_FIELDS["dependencies"]),
+            "sponsor_channels": _normalize_sponsor_channels(raw.get("sponsor_channels")),
+            "sponsors": _normalize_entries(raw.get("sponsors"), _ENTRY_FIELDS["sponsors"]),
         }
     except (OSError, ValueError):
         logger.warning("credits.json is unreadable", exc_info=True)
-        credits = dict(_EMPTY_CREDITS)
+        credits = _empty_credits()
     with _credits_lock:
         _credits_cache = (mtime, credits)
     return credits
@@ -155,7 +206,10 @@ def build_app_info(app: Flask | None = None) -> dict[str, Any]:
         "repo": _repo_payload(repo),
         "runtime": {
             "python": platform_module.python_version(),
+            # platform 保留「系统-内核版本」完整字段（旧前端契约），system 是只含系统名的
+            # 简化字段；两者都不包含主机名/用户名等本机信息（计划 §8.8）。
             "platform": f"{platform_module.system()}-{platform_module.release()}",
+            "system": platform_module.system(),
         },
         "credits": credits,
     }

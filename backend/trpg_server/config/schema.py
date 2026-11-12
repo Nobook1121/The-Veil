@@ -300,8 +300,10 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     # auto_update 的语义是「自动下载」，不做自动安装/替换（见 update_service）
     FieldSpec("auto_update", "update", ("auto_update",), as_bool, False),
     FieldSpec("repo", "update", ("repo",), as_text, "Nobook1121/The-Veil"),
-    FieldSpec("channel", "update", ("channel",), as_text, "stable"),
-    FieldSpec("request_timeout_seconds", "update", ("request_timeout_seconds",), clamped_int(minimum=3, maximum=15), 8),
+    # channel：stable 只看正式版，prerelease 也接受预发布（见 update_service）。
+    FieldSpec("channel", "update", ("channel",), as_enum("channel", frozenset({"stable", "prerelease"})), "stable"),
+    # 配置允许 3-30 秒；实际单次请求仍按 update_service 的上限收紧（计划 §8.3.2）。
+    FieldSpec("request_timeout_seconds", "update", ("request_timeout_seconds",), clamped_int(minimum=3, maximum=30), 8),
     # [site_agent]（与 site_agent_config.SiteAgentConfig 默认值/边界保持一致）
     FieldSpec("enabled", "site_agent", ("enabled",), as_bool, True),
     FieldSpec("max_tool_rounds", "site_agent", ("max_tool_rounds",), clamped_int(minimum=1, maximum=20), 6),

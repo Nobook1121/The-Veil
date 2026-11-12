@@ -1,37 +1,99 @@
 {
+  "schema_version": 1,
+  "updated_at": "2026-11-12",
   "contributors": [
     {
       "name": "Nobook1121",
       "role": "项目发起与维护",
-      "url": "https://github.com/Nobook1121"
+      "url": "https://github.com/Nobook1121",
+      "note": "服务端、规则引擎、前端与发布维护"
     }
   ],
   "special_thanks": [],
   "dependencies": [
     {
       "name": "Flask",
+      "version": "2.3.3",
       "license": "BSD-3-Clause",
-      "url": "https://flask.palletsprojects.com/"
+      "url": "https://flask.palletsprojects.com/",
+      "usage": "服务端 Web 框架与路由"
     },
     {
       "name": "Flask-SocketIO",
+      "version": "5.3.6",
       "license": "MIT",
-      "url": "https://github.com/miguelgrinberg/Flask-SocketIO"
+      "url": "https://flask-socketio.readthedocs.io/",
+      "usage": "房间实时消息推送"
+    },
+    {
+      "name": "requests",
+      "version": "2.31+",
+      "license": "Apache-2.0",
+      "url": "https://requests.readthedocs.io/",
+      "usage": "更新检查与外部 HTTP 调用"
+    },
+    {
+      "name": "PyMuPDF",
+      "version": "1.24+",
+      "license": "AGPL-3.0 / 商业双许可",
+      "url": "https://pymupdf.readthedocs.io/",
+      "usage": "PDF 规则书与剧本导入（分发需确认合规）"
+    },
+    {
+      "name": "tomlkit",
+      "version": "0.12+",
+      "license": "MIT",
+      "url": "https://github.com/topper-123/tomlkit",
+      "usage": "TOML 配置读写与格式保留"
+    },
+    {
+      "name": "sherpa-onnx",
+      "version": "2.0.1",
+      "license": "Apache-2.0",
+      "url": "https://github.com/k2-fsa/sherpa-onnx",
+      "usage": "本地多音色语音合成"
+    },
+    {
+      "name": "numpy",
+      "version": "1.26+",
+      "license": "BSD-3-Clause",
+      "url": "https://numpy.org/",
+      "usage": "向量与数值计算"
+    },
+    {
+      "name": "React",
+      "version": "19.2.7",
+      "license": "MIT",
+      "url": "https://react.dev/",
+      "usage": "前端界面"
+    },
+    {
+      "name": "Three.js",
+      "version": "0.180.0",
+      "license": "MIT",
+      "url": "https://threejs.org/",
+      "usage": "3D 骰子渲染"
     },
     {
       "name": "Bootstrap",
+      "version": "5.3.0",
       "license": "MIT",
-      "url": "https://getbootstrap.com/"
+      "url": "https://getbootstrap.com/",
+      "usage": "前端基础样式"
     },
     {
       "name": "Font Awesome",
-      "license": "OFL-1.1 / MIT",
-      "url": "https://fontawesome.com/"
+      "version": "4.7.0",
+      "license": "Font: SIL OFL 1.1 / CSS: MIT",
+      "url": "https://fontawesome.com/v4/",
+      "usage": "图标字体"
     },
     {
-      "name": "CodeMirror",
+      "name": "KaTeX",
+      "version": "0.16.11",
       "license": "MIT",
-      "url": "https://codemirror.net/"
+      "url": "https://katex.org/",
+      "usage": "公式渲染"
     }
   ],
   "sponsor_channels": [],
