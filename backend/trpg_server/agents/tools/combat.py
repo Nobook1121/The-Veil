@@ -26,6 +26,7 @@ from trpg_server.agents.tools.dice import (
     _find_member,
     _lookup_check_value,
     _log_roll_result,
+    _normalize_bonus_penalty,
     _percentile_roll,
     _result_message,
     _success_level,
@@ -262,6 +263,10 @@ def _combat_summary_state(combat: dict[str, Any]) -> dict[str, Any]:
                 "ready_weapon": bool(combatant.get("ready_weapon")),
                 "disengaged": bool(combatant.get("disengaged")),
                 "dying": bool(combatant.get("dying")),
+                "stunned": bool(combatant.get("stunned")),
+                "knockout_rounds": int(combatant.get("knockout_rounds") or 0),
+                "poisoned": bool(combatant.get("poisoned")),
+                "poison": combatant.get("poison") or None,
                 "surprised": _is_surprised(combat, combatant),
             }
         )
@@ -1537,9 +1542,6 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     reaction_limit = ruleset.reaction_limit(target, settings)
     if defense != "none" and int(target.get("reactions_this_round") or 0) >= reaction_limit:
         bonus = min(2, bonus + 1)
-    if bonus and penalty:
-        return {"error": "bonus_dice 与 penalty_dice 不能同时使用"}
-
     target_card = _player_card(target, context)
     if defense == "counter":
         defense_value, defense_label = _resolve_skill_value(
@@ -1559,8 +1561,9 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             return {"error": f"目标体格比攻击者大 {difference} 级，战技无效"}
         if difference >= 1:
             penalty = min(2, penalty + difference)
-        if penalty and bonus:
-            return {"error": "bonus_dice 与 penalty_dice 不能同时使用"}
+
+    # 奖励骰与惩罚骰按规则书 p.79 先抵消，剩余量再夹到 ±2。
+    bonus, penalty = _normalize_bonus_penalty(bonus, penalty)
 
     rolled = _opposed_rolls(
         context,
@@ -1859,17 +1862,16 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     in_melee = bool(arguments.get("in_melee"))
     if friendly_fire and in_melee:
         penalty += detail_rules.friendly_fire_penalty(True)
-    build_value = int(attacker.get("build") or 0)
-    if build_value <= -2:
-        penalty += 1
-    elif build_value >= 4:
-        bonus += 1
-    if penalty:
-        bonus = 0
-    if bonus > 2:
-        bonus = 2
-    if penalty > 2:
-        penalty = 2
+    # 体格差：目标比攻击者越大越难命中，越小越容易（规则书 p.96-97）。
+    # 骰数取 (目标体格 − 攻击者体格) 并夹到 ±2；正差给惩罚骰、负差给奖励骰。
+    build_diff = int(target.get("build") or 0) - int(attacker.get("build") or 0)
+    build_diff = max(-2, min(2, build_diff))
+    if build_diff > 0:
+        penalty += build_diff
+    elif build_diff < 0:
+        bonus += -build_diff
+    # 奖励骰与惩罚骰按规则书 p.79 先抵消，剩余量再夹到 ±2。
+    bonus, penalty = _normalize_bonus_penalty(bonus, penalty)
 
     requested = max(1, min(MAX_BURST, _as_int(arguments.get("burst"), 1)))
     allowance = int((rules.get("attacks") or {}).get("burst") or 1)
@@ -2470,6 +2472,15 @@ def _resolve_poison(
         f"{target.get('name')} 中毒（毒性 {potency}，CON {con}，d100={roll}，{level}）："
         f"{verdict}，耐久 {applied.get('hp_before')}→{applied.get('hp_after')}。"
     )
+    # 状态位：批次 4 约定 status.poisoned 可查询（中毒记录随战斗状态保存）。
+    target["poisoned"] = True
+    target["poison"] = {
+        "potency": potency,
+        "damage": expression,
+        "applied": applied_amount,
+        "resisted": resisted,
+        "doses": dose_count,
+    }
     return {
         "target": target.get("name"),
         "check": {"roll": roll, "candidates": candidates, "level": level, "target": con},
@@ -3107,6 +3118,66 @@ COMBAT_HEAL_TOOL = AgentTool(
     handler=heal_combatant,
 )
 
+def knockout_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """击晕（批次 4 房规）：钝器战技命中后只造成 1 点伤害并使目标昏迷 1D10 轮。"""
+    room_options = _coc7_room_options(context)
+    settings = _combat_settings(context)
+    detail_rules = _combat_detail_rules(settings)
+    if not (room_options and room_options.combat_knockout and detail_rules):
+        return {"error": "击晕房规未开启，请先在房规中开启「击晕」"}
+    combat = _load_combat(context)
+    if not combat.get("active"):
+        return {"error": "当前没有进行中的战斗，请先 combat start"}
+    label = _as_text(arguments.get("target"))
+    target = _resolve_combatant(combat, label)
+    if target is None:
+        return {"error": f"找不到战斗参与者：{label or '（未提供 target）'}"}
+    if target.get("dead"):
+        return {"error": f"{target.get('name')} 已死亡，无法击晕"}
+    damage = _apply_damage(
+        context,
+        target,
+        detail_rules.KNOCKOUT_DAMAGE,
+        settings=settings,
+    )
+    outcome = detail_rules.knockout_result(_roller(10))
+    target["unconscious"] = True
+    target["status"] = "unconscious"
+    target["stunned"] = True
+    target["knockout_rounds"] = outcome["rounds"]
+    summary = (
+        f"{target.get('name')} 被击晕，昏迷 {outcome['rounds']} 轮；"
+        f"耐久 {damage.get('hp_before')}→{damage.get('hp_after')}。"
+    )
+    _append_log(combat, summary, context)
+    _save_combat(context, combat)
+    return {
+        **_combat_summary_state(combat),
+        "knockout": outcome,
+        "damage": damage,
+        "summary": summary,
+    }
+
+
+def hit_location_check(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """部位命中（批次 4 房规）：掷 1D20 定位，可附重伤后果描述。"""
+    settings = _combat_settings(context)
+    detail_rules = _combat_detail_rules(settings)
+    room_options = _coc7_room_options(context)
+    if not (room_options and room_options.combat_hit_locations and detail_rules):
+        return {"error": "部位命中房规未开启，请先在房规中开启「部位命中」"}
+    raw = arguments.get("roll")
+    roll = _as_int(raw, 0) if raw not in (None, "") else _roller(20)
+    location = detail_rules.hit_location(roll)
+    payload: dict[str, Any] = {"hit_location": location, "summary": f"命中部位：{location['location']}"}
+    if arguments.get("major_wound"):
+        effect = detail_rules.major_wound_effect(location["location"])
+        if effect:
+            payload["major_wound_effect"] = effect
+            payload["summary"] = f"{payload['summary']}；{effect}"
+    return payload
+
+
 COMBAT_POISON_TOOL = AgentTool(
     name="combat.poison",
     description="毒剂结算：体质抵抗成功伤害减半。onset_rounds 大于 0 时登记到期轮，战斗轮推进到该轮时自动结算。",
@@ -3150,6 +3221,38 @@ COMBAT_POISON_QUEUE_TOOL = AgentTool(
         "required": ["action"],
     },
     handler=poison_queue,
+)
+
+COMBAT_KNOCKOUT_TOOL = AgentTool(
+    name="combat.knockout",
+    description=(
+        "击晕（批次 4 房规）：钝器战技命中后结算，造成 1 点伤害并使目标昏迷 1D10 轮。"
+        "需要房规 combat.knockout 开启，且必须有进行中的战斗。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "战斗参与者名 / 角色名"},
+        },
+        "required": ["target"],
+    },
+    handler=knockout_combatant,
+)
+
+COMBAT_HIT_LOCATION_TOOL = AgentTool(
+    name="combat.hit_location",
+    description=(
+        "部位命中（批次 4 房规）：掷 1D20 返回命中部位；major_wound=true 时附部位重伤后果。"
+        "需要房规 combat.hit_locations 开启。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "roll": {"type": "integer", "minimum": 1, "maximum": 20, "description": "省略则现掷 1D20"},
+            "major_wound": {"type": "boolean", "description": "是否重伤（附带部位后果）"},
+        },
+    },
+    handler=hit_location_check,
 )
 
 COMBAT_DELAY_TOOL = AgentTool(
@@ -3239,6 +3342,8 @@ COMBAT_TOOLS = [
     COMBAT_HEAL_TOOL,
     COMBAT_POISON_TOOL,
     COMBAT_POISON_QUEUE_TOOL,
+    COMBAT_KNOCKOUT_TOOL,
+    COMBAT_HIT_LOCATION_TOOL,
     COMBAT_TREAT_TOOL,
     COMBAT_END_TOOL,
 ]

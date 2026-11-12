@@ -49,6 +49,7 @@ RULE_VALUE_OPTIONS = {
     "attitude",
     "target-skill",
     "mode",
+    "skills",
     "era",
     "assets",
     "qty",
@@ -89,7 +90,7 @@ ROOM_RULE_HELP = "\n".join(
     [
         "  rule                        （查看本房间规则集、生效限频与成员 SAN 概览）",
         "  rule status                 （同上，只读）",
-        "  rule check <玩家> <技能/属性> [difficulty normal|hard|extreme] [adjustment ±N] [bonus N] [penalty N]（结算一次检定）",
+        "  rule check <玩家> <技能/属性> [difficulty normal|hard|extreme] [adjustment ±N] [bonus N] [penalty N]（结算一次检定；--skills=A,B --mode=all 走组合检定，--group=luck 走团体幸运）",
         "  rule social <玩家> <技能> [attitude supportive|neutral|opposed|hostile] [leverage] [target-skill N]（房规：社交难度）",
         "  rule combined <玩家> <技能1> <技能2> [...] [mode all|any] [difficulty normal|hard|extreme] [bonus N] [penalty N]（房规：组合检定只掷一次）",
         "  rule groupluck              （房规：由在场最低幸运者代掷团体幸运）",
@@ -104,6 +105,12 @@ ROOM_RULE_HELP = "\n".join(
         "  rule san habituation tick [玩家]   （房规：幕间习惯恐惧累计 −1；省略玩家则全房间）",
         "  rule san reality <玩家> [成功|失败|大成功|大失败] [来源说明]（房规：用当前 SAN 做现实认知检定，成功获得对幻觉的抗性）",
         "  rule san trait [phobia|mania] [关键词|roll]（房规：按需查询恐惧症 / 躁狂症表）",
+        "  rule san treat <玩家> [成功|失败|大失败] [月数] [备注]（心理治疗：成功 +1D3 SAN，大失败 −1D6）",
+        "  rule growth [玩家] [技能]（查看成长标记；给玩家+技能则立即结算该技能的一次成长检定）",
+        "  rule train <玩家> <技能> [weeks N]（房规：幕间训练，每 4 周一次成长检定）",
+        "  rule combat knockout <目标>（同 combat knockout）",
+        "  rule combat hit-location [1-20] [major]（同 combat hit-location）",
+        "  rule combat poison <目标> <XdY+N> [potency N] [onset N]（同 combat poison）",
         "  rule item <玩家> <物品名> [qty N] [weapon] [persist] [reason 原因]（追加物品/武器；persist 才写回持久卡）",
         "  rule skill <玩家> <技能名> <值|±N> [persist] [reason 原因] [yes]（修改技能；默认预演）",
         "  rule attr <玩家> <属性> <值|±N> [persist] [reason 原因] [yes]（修改 STR/DEX/INT 等基础属性；默认预演）",
@@ -151,6 +158,9 @@ RULE_SUBS = {
     "heal",
     "chase",
     "spell",
+    "growth",
+    "train",
+    "combat",
     "limits",
 }
 
@@ -290,6 +300,7 @@ def handle_room_rule_command(
         "heal": coc7_options.healing_natural or coc7_options.game_clock,
         "chase": coc7_options.chase_enabled,
         "spell": coc7_options.magic_enabled or coc7_options.magic_catalog_enabled,
+        "train": coc7_options.growth_training,
     }
     if sub in optional_subs and not optional_subs[sub]:
         return False, f"未知的规则命令：rule {sub}\n{ROOM_RULE_HELP}"
@@ -402,6 +413,12 @@ def handle_room_rule_command(
         return True, str(result.get("summary") or "检定完成")
 
     if sub == "economy":
+        # 计划 §5 的写法：rule economy spend <玩家> <金额>（等价 rule economy <玩家> <金额> apply）。
+        if rest and rest[0].lower() in {"spend", "expense"}:
+            rest = rest[1:]
+            flags = set(flags) | {"--apply"}
+            if not rest:
+                return False, "用法：rule economy spend <玩家> <金额> [era 1920s|modern] [reason 原因]"
         if not rest:
             return False, (
                 "用法：rule economy <玩家> [金额] [era 1920s|modern] [assets N] "
@@ -444,6 +461,56 @@ def handle_room_rule_command(
         return True, str(result.get("summary") or "计算完成")
 
     if sub == "check":
+        # 计划 §5 的命令写法：rule check --skills=A,B --mode=all / --group=luck。
+        # 等价于 rule combined / rule groupluck，保留旧子命令。
+        if options.get("skills"):
+            raw = str(options.get("skills") or "")
+            names = [part.strip() for part in raw.replace("，", ",").split(",") if part.strip()]
+            if not names:
+                return False, "用法：rule check <玩家> --skills=侦查,聆听 [--mode all|any]"
+            if not coc7_options.combined_checks:
+                return False, "组合检定房规未开启（coc7_combined_checks）"
+            try:
+                member = room_rules.resolve_member(
+                    info,
+                    rest[0] if rest else actor_id,
+                    actor_id=actor_id,
+                    actor_rank=actor_rank,
+                )
+                result = room_rules.roll_combined_check(
+                    room_dir,
+                    info,
+                    member,
+                    names,
+                    mode=str(options.get("mode") or "all"),
+                    difficulty=str(options.get("difficulty") or "regular"),
+                    bonus=_as_int(options.get("bonus"), 0),
+                    penalty=_as_int(options.get("penalty"), 0),
+                    actor=actor or ROOM_RULE_ACTOR,
+                    actor_id=actor_id,
+                    config_dir=config_dir,
+                    room_id=room_id,
+                )
+            except room_rules.RuleOperationError as exc:
+                return False, exc.message
+            return True, str(result.get("summary") or "组合检定完成")
+
+        if str(options.get("group") or "").lower() in {"luck", "groupluck", "group-luck"}:
+            if not coc7_options.group_luck:
+                return False, "团体幸运房规未开启（coc7_group_luck）"
+            try:
+                result = room_rules.roll_group_luck(
+                    room_dir,
+                    info,
+                    actor=actor or ROOM_RULE_ACTOR,
+                    actor_id=actor_id,
+                    config_dir=config_dir,
+                    room_id=room_id,
+                )
+            except room_rules.RuleOperationError as exc:
+                return False, exc.message
+            return True, str(result.get("summary") or "团体幸运检定完成")
+
         if len(rest) < 2:
             return False, "用法：rule check <玩家> <技能/属性> [difficulty normal|hard|extreme]"
         try:
@@ -553,6 +620,88 @@ def handle_room_rule_command(
             actor_rank=actor_rank,
             config_dir=config_dir,
             room_id=room_id,
+        )
+
+    if sub == "growth":
+        from trpg_server import room_interlude
+
+        try:
+            if len(rest) >= 2:
+                member = room_rules.resolve_member(info, rest[0], actor_id=actor_id, actor_rank=actor_rank)
+                result = room_interlude.experience_check(
+                    room_dir,
+                    info,
+                    member,
+                    skill=" ".join(rest[1:]),
+                    actor=actor or ROOM_RULE_ACTOR,
+                    actor_id=actor_id,
+                )
+                return True, str(result.get("summary") or "成长检定完成")
+            targets = [room_rules.resolve_member(info, rest[0], actor_id=actor_id, actor_rank=actor_rank)] if rest else [
+                item for item in (info.get("members") or []) if isinstance(item, dict) and item.get("character_card")
+            ]
+            lines: list[str] = []
+            for member in targets:
+                card = room_rules.member_card(member)
+                growth = room_rules._growth_capability(card)
+                if growth is None:
+                    continue
+                state = member.get("character_state") if isinstance(member.get("character_state"), dict) else {}
+                marks = growth.read_marks(card, state.get("growth_marks"))
+                if not marks:
+                    continue
+                names = [str(row.get("skill") or row.get("name") or "") for row in marks]
+                lines.append(f"{room_rules.member_display_name(member)}：{'、'.join(name for name in names if name)}")
+            return True, ("成长标记：\n" + "\n".join(lines)) if lines else "当前没有成长标记。"
+        except (room_rules.RuleOperationError, room_interlude.InterludeError) as exc:
+            return False, getattr(exc, "message", str(exc))
+
+    if sub == "train":
+        from trpg_server import room_interlude
+
+        if len(rest) < 2:
+            return False, "用法：rule train <玩家> <技能> [weeks N]"
+        weeks = options.get("weeks")
+        if weeks is None:
+            for index, item in enumerate(rest[2:], start=2):
+                if str(item).isdigit():
+                    weeks = item
+                    rest = [*rest[:index], *rest[index + 1:]]
+                    break
+        try:
+            member = room_rules.resolve_member(info, rest[0], actor_id=actor_id, actor_rank=actor_rank)
+            result = room_interlude.train_skill(
+                room_dir,
+                info,
+                member,
+                skill=" ".join(rest[1:]),
+                weeks=weeks,
+                actor=actor or ROOM_RULE_ACTOR,
+                actor_id=actor_id,
+                reason=str(options.get("reason") or ""),
+            )
+            record = result.get("record") or {}
+            return True, (
+                f"{room_rules.member_display_name(member)} 训练「{record.get('skill')}」"
+                f"{record.get('weeks')} 周：{record.get('before')}→{record.get('after')}"
+            )
+        except (room_rules.RuleOperationError, room_interlude.InterludeError) as exc:
+            return False, getattr(exc, "message", str(exc))
+
+    if sub == "combat":
+        from trpg_server.room_combat_commands import handle_room_combat_command
+
+        if not rest:
+            return False, "用法：rule combat <knockout|hit-location|poison> ...（同 combat 子命令）"
+        return handle_room_combat_command(
+            rest,
+            room_id=room_id,
+            room_dir=room_dir,
+            config_dir=config_dir,
+            actor=actor or ROOM_RULE_ACTOR,
+            actor_id=actor_id,
+            actor_rank=actor_rank,
+            confirm=confirm,
         )
 
     if sub in {"skill", "attr"}:

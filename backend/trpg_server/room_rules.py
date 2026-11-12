@@ -471,6 +471,16 @@ def _growth_capability(card: dict[str, Any]) -> Any:
         return None
 
 
+def _training_capability(card: dict[str, Any]) -> Any:
+    """按卡片规则集取幕间训练能力（纯计算模块）；无此能力按不可用处理。"""
+    try:
+        from trpg_server.ruleset import get_plugin
+
+        return getattr(get_plugin(card.get("rulesetId")), "training", None)
+    except Exception:  # noqa: BLE001 - 插件异常按无训练能力处理
+        return None
+
+
 def record_growth_mark_for_check(
     room_dir: Any,
     info: dict[str, Any],

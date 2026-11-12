@@ -99,6 +99,8 @@ HOUSE_RULE_DEFINITIONS = {
     "coc7_contacts": {"type": "boolean", "default": False, "ai_prompt": False},
     # 年龄调整：建卡年龄修正与老化 / EDU 增强检定。
     "coc7_age_adjustments": {"type": "boolean", "default": False, "ai_prompt": False},
+    # 幕间训练（批次 2 可选规则）：KP 批准投入周数换成长检定；默认关闭。
+    "coc7_growth_training": {"type": "boolean", "default": False, "ai_prompt": False},
     # 战斗规则留白配置（报告 §9）。这些都不是 CoC7 核心规则，默认值取最保守解释。
     # 突袭：bonus_die = 未准备目标近战给攻击者 1 奖励骰；auto_success = 自动成功（除大失败）。
     "combat_surprise_model": {

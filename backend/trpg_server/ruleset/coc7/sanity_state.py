@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import time
 from typing import Any, Mapping
 
 # 服务器本地时区与 epoch 基准：用纯日期运算换算，兼容 Windows 上 1970 年前的
@@ -34,6 +35,7 @@ MENTAL_VERSION = 2
 BOUT_HISTORY_LIMIT = 10
 TRAIT_LIMIT = 40
 REALITY_CHECK_LIMIT = 10
+TREATMENT_LIMIT = 20
 # 规则书：发作即时症状 1D10 战斗轮，总结症状 1D10 小时。
 BOUT_MAX_HOURS = 10
 BOUT_MAX_ROUNDS = 10
@@ -108,6 +110,7 @@ def default_block() -> dict[str, Any]:
         "habituations": {},
         "realityImmunity": False,
         "realityChecks": [],
+        "treatment": [],
         "mythosMadnessCount": 0,
         "lastLossAt": "",
     }
@@ -184,6 +187,8 @@ def normalize(raw: Any) -> dict[str, Any]:
     block["habituations"] = cleaned
     block["realityImmunity"] = bool(data.get("realityImmunity"))
     block["realityChecks"] = _dict_list(data.get("realityChecks"))[-REALITY_CHECK_LIMIT:]
+    # 批次 3：心理治疗记录（extensions.mental.treatment）；旧卡缺省为空。
+    block["treatment"] = _dict_list(data.get("treatment"))[-TREATMENT_LIMIT:]
     try:
         block["mythosMadnessCount"] = max(0, int(data.get("mythosMadnessCount") or 0))
     except (TypeError, ValueError):
@@ -669,6 +674,35 @@ def decay_habituations(block: dict[str, Any], steps: int = 1) -> list[str]:
             row["updated_at"] = now_text()
     block["habituations"] = rows
     return removed
+
+
+def record_treatment(
+    block: dict[str, Any],
+    *,
+    level: str,
+    months: int,
+    delta: int,
+    note: str = "",
+    source: str = "",
+) -> dict[str, Any]:
+    """记录一次心理治疗（extensions.mental.treatment，批次 3）。
+
+    只负责留痕；SAN 数字由调用方按 ``treatment.monthly_san_delta`` 结算后传入。
+    """
+    rows = block.get("treatment") if isinstance(block.get("treatment"), list) else []
+    record = {
+        "id": f"trt-{int(time.time() * 1000)}",
+        "level": str(level or ""),
+        "months": max(1, _as_int(months, 1)),
+        "delta": _as_int(delta, 0),
+        "note": str(note or "")[:120],
+        "source": str(source or "")[:60],
+        "at": now_text(),
+    }
+    rows.insert(0, record)
+    del rows[TREATMENT_LIMIT:]
+    block["treatment"] = rows
+    return record
 
 
 def _match_key(value: Any) -> str:

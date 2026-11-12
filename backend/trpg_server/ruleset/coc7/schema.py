@@ -48,6 +48,20 @@ SHEET_FIELDS = (
     "extensions",
 )
 
+# 规则扩展命名空间（批次 0）：每个命名空间一个只增不删的 schemaVersion。
+# 批次 0 只声明契约；后续批次各自写自己的命名空间，旧卡缺省时按空结构处理。
+EXTENSION_SCHEMA_VERSIONS = {
+    "growth": 1,
+    "mental": 2,
+    "social": 1,
+    "economy": 1,
+    "contacts": 1,
+    "training": 1,
+    "age": 1,
+    "chase": 1,
+    "magic": 1,
+}
+
 ATTRIBUTE_KEYS = ("str", "dex", "con", "app", "pow", "siz", "edu", "int", "luc")
 RESOURCE_KEYS = ("sanity", "hp", "mp")
 DERIVED_KEYS = ("db", "build", "mov")
@@ -103,6 +117,34 @@ class Coc7CharacterSchema:
     derived_keys = DERIVED_KEYS
     status_body_keys = STATUS_BODY_KEYS
     status_mental_keys = STATUS_MENTAL_KEYS
+    extension_schema_versions = EXTENSION_SCHEMA_VERSIONS
+
+    def extension_namespaces(self) -> tuple[str, ...]:
+        """声明过的扩展命名空间（顺序稳定，便于测试与文档）。"""
+        return tuple(EXTENSION_SCHEMA_VERSIONS)
+
+    def default_extensions(self) -> dict[str, dict[str, Any]]:
+        """全部命名空间的空结构（读取旧卡时用于补默认，不写回）。"""
+        return {
+            name: {"schemaVersion": version}
+            for name, version in EXTENSION_SCHEMA_VERSIONS.items()
+        }
+
+    def normalize_extensions(self, raw: Any) -> dict[str, Any]:
+        """补齐已声明命名空间的 schemaVersion；不改动未知命名空间的内容。
+
+        只返回新结构，不修改传入的 ``raw``，避免把补默认写成卡面变更。
+        """
+        data = dict(raw) if isinstance(raw, Mapping) else {}
+        for name, version in EXTENSION_SCHEMA_VERSIONS.items():
+            block = data.get(name)
+            if isinstance(block, Mapping):
+                merged = dict(block)
+                merged.setdefault("schemaVersion", version)
+                data[name] = merged
+            elif block is None:
+                data[name] = {"schemaVersion": version}
+        return data
 
     def derived_card_keys(self) -> tuple[str, ...]:
         """需要从派生值写回卡面的键。"""

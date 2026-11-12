@@ -36,6 +36,39 @@ def is_growth_eligible(skill_name: Any) -> bool:
     return True
 
 
+def mark_decision(
+    skill_name: Any,
+    value: Any,
+    *,
+    success: bool,
+    bonus_dice: int = 0,
+    luck_spent: bool = False,
+    opposed_failed: bool = False,
+) -> dict[str, Any]:
+    """返回一次技能检定是否打勾以及原因（供留痕与调试）。
+
+    ``eligible=True`` 时 ``reason="check_success"``；否则 reason 说明被哪条
+    排除项挡下，便于写进 ``extensions.growth.marks`` 的留痕字段。
+    """
+    if not success:
+        return {"eligible": False, "reason": "not_success"}
+    if int(bonus_dice or 0) > 0:
+        return {"eligible": False, "reason": "bonus_dice"}
+    if luck_spent:
+        return {"eligible": False, "reason": "luck_spent"}
+    if opposed_failed:
+        return {"eligible": False, "reason": "opposed_failed"}
+    if not is_growth_eligible(skill_name):
+        return {"eligible": False, "reason": "not_growth_eligible"}
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return {"eligible": False, "reason": "invalid_value"}
+    if not (0 <= number <= SKILL_MAX):
+        return {"eligible": False, "reason": "out_of_range"}
+    return {"eligible": True, "reason": "check_success"}
+
+
 def should_mark(
     skill_name: Any,
     value: Any,
@@ -50,19 +83,40 @@ def should_mark(
     口径：只有成功、未使用奖励骰、未花费幸运、对抗未失败的技能检定才打勾。
     属性检定、神话与信用评级不打勾。
     """
-    if not success:
-        return False
-    if int(bonus_dice or 0) > 0:
-        return False
-    if luck_spent or opposed_failed:
-        return False
-    if not is_growth_eligible(skill_name):
-        return False
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        return False
-    return 0 <= number <= SKILL_MAX
+    return mark_decision(
+        skill_name,
+        value,
+        success=success,
+        bonus_dice=bonus_dice,
+        luck_spent=luck_spent,
+        opposed_failed=opposed_failed,
+    )["eligible"]
+
+
+# 角色卡扩展里成长标记的命名空间与键（批次 2；旧数据仍在成员快照里）。
+EXTENSION_NAMESPACE = "growth"
+EXTENSION_MARKS_KEY = "marks"
+EXTENSION_HISTORY_LIMIT = 20
+
+
+def marks_from_card(card: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """读 ``extensions.growth.marks``（新位置）；结构不对时返回空列表。"""
+    extensions = card.get("extensions") if isinstance(card.get("extensions"), Mapping) else {}
+    block = extensions.get(EXTENSION_NAMESPACE) if isinstance(extensions, Mapping) else None
+    marks = block.get(EXTENSION_MARKS_KEY) if isinstance(block, Mapping) else None
+    if not isinstance(marks, list):
+        return []
+    return [row for row in marks if isinstance(row, Mapping)]
+
+
+def read_marks(card: Mapping[str, Any], fallback: Any = None) -> list[dict[str, Any]]:
+    """优先读角色卡扩展里的标记；旧房间快照里的标记作为兼容回退。"""
+    marks = marks_from_card(card)
+    if marks:
+        return marks
+    if isinstance(fallback, list):
+        return [row for row in fallback if isinstance(row, Mapping)]
+    return []
 
 
 def growth_check(value: Any, *, roll: int, gain_roll: int) -> dict[str, Any]:
@@ -133,10 +187,15 @@ def high_skill_san_awards(card: Mapping[str, Any], rng: Callable[[int], int]) ->
 
 
 __all__ = [
+    "EXTENSION_MARKS_KEY",
+    "EXTENSION_NAMESPACE",
     "HIGH_SKILL_SAN_THRESHOLD",
     "growth_check",
     "high_skill_san_awards",
     "is_growth_eligible",
+    "mark_decision",
+    "marks_from_card",
+    "read_marks",
     "resolve_member_growth",
     "should_mark",
 ]

@@ -55,8 +55,13 @@ ROOM_COMMAND_WHITELIST: dict[str, set[str]] = {
         "status", "state", "order", "start", "join", "next", "end-turn", "endturn",
         "delay", "disengage", "reload", "ready", "cast",
         "damage", "heal", "treat", "end",
+        "knockout", "hit-location", "hitlocation", "poison",
     },
-    "rule": {"status", "check", "san", "item", "skill", "attr", "limits"},
+    "rule": {
+        "status", "check", "social", "combined", "groupluck", "contact", "economy",
+        "san", "item", "skill", "attr", "heal", "chase", "spell", "growth",
+        "train", "combat", "limits",
+    },
     "time": {"show", "status", "advance", "set", "correct", "help"},
     "interlude": {"status", "request", "start", "settle", "review", "care", "therapy", "end"},
 }

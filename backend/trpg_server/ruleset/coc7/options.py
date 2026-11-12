@@ -47,6 +47,8 @@ class Coc7RuleOptions:
     contacts: bool = False
     # 年龄调整：建卡年龄修正与老化/EDU 增强检定。
     age_adjustments: bool = False
+    # 幕间训练（批次 2 可选规则）：KP 批准投入时间换成长检定机会；默认关闭。
+    growth_training: bool = False
     # 瞄准跟踪：须上一轮声明，下一轮射击获得奖励骰；受伤或移动后失效。
     combat_aim_tracking: bool = False
     # 掩体与闪避：目标借掩体闪避成功后，攻击者失去下一次攻击。
@@ -99,6 +101,7 @@ class Coc7RuleOptions:
             economy=_flag(data, "coc7_economy"),
             contacts=_flag(data, "coc7_contacts"),
             age_adjustments=_flag(data, "coc7_age_adjustments"),
+            growth_training=_flag(data, "coc7_growth_training"),
             combat_aim_tracking=_flag(data, "coc7_combat_aim_tracking"),
             combat_cover_dodge=_flag(data, "coc7_combat_cover_dodge"),
             combat_friendly_fire=_flag(data, "coc7_combat_friendly_fire"),

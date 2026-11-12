@@ -27,6 +27,7 @@ COMBAT_DESTRUCTIVE = {
     "start", "join", "next", "end-turn", "endturn",
     "delay", "disengage", "reload", "ready", "cast",
     "damage", "heal", "treat", "end",
+    "knockout", "hit-location", "hitlocation", "poison",
 }
 
 _DICE_PATTERN = re.compile(r"^(?P<count>\d{1,2})[dD](?P<size>\d{1,3})(?P<mod>[+-]\d+)?$")
@@ -48,6 +49,9 @@ ROOM_COMBAT_HELP = "\n".join(
         "  combat damage <目标> <数值|XdY+N> [ignore-armor] [yes]（手动伤害）",
         "  combat heal <目标> <数值> [yes]（手动恢复耐久）",
         "  combat treat <目标> [first-aid|medicine] [healer 名字] [yes]（急救/医学检定）",
+        "  combat knockout <目标> [yes]（击晕：1 点伤害 + 昏迷 1D10 轮，需击晕房规）",
+        "  combat hit-location [1-20] [major]（部位命中，需部位命中房规）",
+        "  combat poison <目标> <XdY+N> [potency 0-2] [doses N] [onset N]（毒剂结算，需毒剂房规）",
         "  combat end [reason 原因] [yes]（结束战斗，破坏性）",
         "  参数用空格分隔的纯词；旧的 --xxx / --key=value 写法仍然可用。",
     ]
@@ -61,6 +65,10 @@ COMBAT_ARG_SPECS = {
     "damage": ConsoleArgSpec.of(flags={"ignore-armor", "ignore-armour", "yes"}),
     "heal": ConsoleArgSpec.of(flags={"yes"}),
     "treat": ConsoleArgSpec.of(flags={"yes"}, values={"healer"}),
+    "knockout": ConsoleArgSpec.of(flags={"yes"}),
+    "hit-location": ConsoleArgSpec.of(flags={"major", "major-wound"}),
+    "hitlocation": ConsoleArgSpec.of(flags={"major", "major-wound"}),
+    "poison": ConsoleArgSpec.of(values={"potency", "doses", "onset"}),
     "end": ConsoleArgSpec.of(flags={"yes"}, trailing={"reason"}),
 }
 
@@ -161,6 +169,11 @@ def _format_state(state: dict[str, Any]) -> str:
             extra.append("脱离")
         if item.get("ready_weapon"):
             extra.append("已备武器")
+        if item.get("stunned") or item.get("knockout_rounds"):
+            rounds = int(item.get("knockout_rounds") or 0)
+            extra.append(f"击晕 {rounds} 轮" if rounds else "击晕")
+        if item.get("poisoned"):
+            extra.append("中毒")
         suffix = f" [{'/'.join(extra)}]" if extra else ""
         lines.append(
             f"{marker} {index + 1}. {item.get('name')}  DEX {item.get('dex')}  先攻 {item.get('initiative')}  "
@@ -302,6 +315,34 @@ def handle_room_combat_command(
         if options.get("healer"):
             payload["healer"] = options["healer"]
         result = combat.treat_combatant(payload, context)
+    elif sub == "knockout":
+        if not active:
+            return False, "当前没有进行中的战斗，请先 combat start"
+        if not rest:
+            return False, "用法：combat knockout <目标>"
+        result = combat.knockout_combatant({"target": rest[0]}, context)
+    elif sub in {"hit-location", "hitlocation"}:
+        payload = {}
+        if rest:
+            try:
+                payload["roll"] = int(rest[0])
+            except ValueError:
+                return False, "用法：combat hit-location [1-20] [major]"
+        payload["major_wound"] = bool(flags & {"--major", "--major-wound"})
+        result = combat.hit_location_check(payload, context)
+    elif sub == "poison":
+        if not active:
+            return False, "当前没有进行中的战斗，请先 combat start"
+        if len(rest) < 2:
+            return False, "用法：combat poison <目标> <XdY+N> [potency 0-2] [doses N] [onset N]"
+        payload = {"target": rest[0], "damage": rest[1]}
+        if options.get("potency") is not None:
+            payload["potency"] = _as_option_int(options.get("potency"))
+        if options.get("doses") is not None:
+            payload["doses"] = max(1, _as_option_int(options.get("doses")))
+        if options.get("onset") is not None:
+            payload["onset_rounds"] = _as_option_int(options.get("onset"))
+        result = combat.poison_combatant(payload, context)
     else:  # end
         if not active:
             return False, "当前没有进行中的战斗"

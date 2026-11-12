@@ -399,7 +399,7 @@ def settle_interlude(
     state = _ensure_state(info)
     if not state["active"]:
         raise InterludeError("房间尚未进入幕间", code="not_active", status=409)
-    rng = rng or random.randint
+    rng = rng or _default_rng
     settlement = state.get("settlement") if isinstance(state.get("settlement"), dict) else {}
     state["settlement"] = settlement
 
@@ -412,8 +412,8 @@ def settle_interlude(
             if not isinstance(member_state, dict):
                 member_state = {}
                 member["character_state"] = member_state
-            marks = member_state.get("growth_marks") if isinstance(member_state.get("growth_marks"), list) else []
             growth = room_rules._growth_capability(card)
+            marks = growth.read_marks(card, member_state.get("growth_marks")) if growth is not None else []
             entry: dict[str, Any] = {
                 "player": room_rules.member_display_name(member),
                 "growth": [],
@@ -445,6 +445,8 @@ def settle_interlude(
                                 continue
                         entry["growth"].append(row)
                     member_state["growth_marks"] = []
+                    _clear_growth_marks(card)
+                    _append_growth_history(card, rows, player=entry["player"])
                 # 成长后再结算 90%+ 技能恢复，避免刚跨过 90 的技能漏发。
                 try:
                     awards = growth.high_skill_san_awards(card, rng)
@@ -679,7 +681,7 @@ def apply_therapy(
     state = _ensure_state(info)
     if not state["active"]:
         raise InterludeError("房间当前不在幕间", code="not_active", status=409)
-    rng = rng or random.randint
+    rng = rng or _default_rng
     try:
         member = room_rules.resolve_member(
             info, str(player or ""), actor_id=actor_id, actor_rank=OPERATOR_RANK
@@ -801,6 +803,54 @@ def add_review(
     return record
 
 
+def _default_rng(sides: int) -> int:
+    """默认骰子函数：接受面数（与注入的 rng(sides) 同签名）。"""
+    return random.randint(1, sides)
+
+
+def _growth_block(card: dict[str, Any]) -> dict[str, Any]:
+    """取（并按需创建）角色卡 extensions.growth。"""
+    extensions = card.get("extensions")
+    if not isinstance(extensions, dict):
+        extensions = {}
+        card["extensions"] = extensions
+    block = extensions.get("growth")
+    if not isinstance(block, dict):
+        block = {}
+        extensions["growth"] = block
+    return block
+
+
+def _clear_growth_marks(card: dict[str, Any]) -> None:
+    _growth_block(card)["marks"] = []
+
+
+def _append_growth_history(
+    card: dict[str, Any], rows: list[dict[str, Any]], *, player: str = ""
+) -> None:
+    """幕间结算后把成长结果追加到 extensions.growth.history（保留最近 20 条）。"""
+    if not rows:
+        return
+    block = _growth_block(card)
+    history = block.get("history") if isinstance(block.get("history"), list) else []
+    for row in rows:
+        history.insert(0, {**row, "player": player, "at": _now(), "source": "interlude"})
+    del history[20:]
+    block["history"] = history
+
+
+def _training_block(card: dict[str, Any]) -> dict[str, Any]:
+    extensions = card.get("extensions")
+    if not isinstance(extensions, dict):
+        extensions = {}
+        card["extensions"] = extensions
+    block = extensions.get("training")
+    if not isinstance(block, dict):
+        block = {}
+        extensions["training"] = block
+    return block
+
+
 def record_growth_mark(
     room_dir: Any,
     info: dict[str, Any],
@@ -833,8 +883,182 @@ def record_growth_mark(
     marks.insert(0, record)
     del marks[MAX_MARKERS:]
     state["growth_marks"] = marks
+    # 批次 2：成长标记同时写入角色卡 extensions.growth.marks，归档时随卡保留；
+    # 旧位置（成员快照）继续维护，读侧优先新位置、回退旧位置。
+    card = member.get("character_card") if isinstance(member.get("character_card"), dict) else None
+    if card is not None:
+        extensions = card.get("extensions")
+        if not isinstance(extensions, dict):
+            extensions = {}
+            card["extensions"] = extensions
+        block = extensions.get("growth")
+        if not isinstance(block, dict):
+            block = {}
+            extensions["growth"] = block
+        card_marks = block.get("marks")
+        if not isinstance(card_marks, list):
+            card_marks = []
+        card_marks.insert(0, {**record, "eligible": True, "reason": "check_success"})
+        del card_marks[MAX_MARKERS:]
+        block["marks"] = card_marks
     room_rules.save_room_info(room_dir, info)
     return record
+
+
+def train_skill(
+    room_dir: Any,
+    info: dict[str, Any],
+    member: dict[str, Any],
+    *,
+    skill: str,
+    weeks: Any,
+    actor: Any = None,
+    actor_id: Any = None,
+    reason: str = "",
+    rng: Any = None,
+) -> dict[str, Any]:
+    """幕间训练（可选房规）：KP 批准投入周数，按 WEEKS_PER_GAIN 掷成长检定。
+
+    记录写入 ``extensions.training.records``；技能变化走 ``apply_skill_change``，
+    与幕间成长共用同一条写回 / 留痕链路。
+    """
+    from trpg_server.ruleset.coc7.options import resolve_options
+
+    if not resolve_options(info).growth_training:
+        raise InterludeError(
+            "幕间训练房规未开启（coc7_growth_training）", code="training_disabled", status=403
+        )
+    state = _ensure_state(info)
+    if not state["active"]:
+        raise InterludeError("房间尚未进入幕间", code="not_active", status=409)
+    card = member.get("character_card") if isinstance(member.get("character_card"), dict) else None
+    if card is None:
+        raise InterludeError("该成员还没有绑定角色卡", code="no_card", status=409)
+    training = room_rules._training_capability(card)
+    if training is None:
+        raise InterludeError("该角色卡的规则集不支持幕间训练", code="unsupported", status=409)
+    name = str(skill or "").strip()
+    row = room_rules._find_skill_row(card, name)
+    if row is None:
+        raise InterludeError(f"角色卡上没有技能：{name}", code="unknown_skill", status=404)
+    rng = rng or _default_rng
+    result = training.train_skill(row.get("value"), weeks=weeks, rng=rng)
+    record = {
+        "id": _new_id("itl-train"),
+        "skill": str(row.get("name") or name),
+        "weeks": result["weeks"],
+        "unit": getattr(training, "TIME_UNIT", "week"),
+        "before": result["before"],
+        "after": result["after"],
+        "gain": result["gain"],
+        "checks": result["checks"],
+        "at": _now(),
+        "actor": str(actor or ""),
+        "reason": str(reason or ""),
+    }
+    if result["gain"]:
+        room_rules.apply_skill_change(
+            room_dir,
+            info,
+            member,
+            name=str(row.get("name") or name),
+            value=result["after"],
+            reason=reason or f"幕间训练 {result['weeks']} 周",
+            actor=actor,
+            actor_id=actor_id,
+            source="interlude",
+        )
+    block = _training_block(card)
+    records = block.get("records") if isinstance(block.get("records"), list) else []
+    records.insert(0, record)
+    del records[max(1, int(getattr(training, "MAX_RECORDS", 12))):]
+    block["records"] = records
+    room_rules.save_room_info(room_dir, info)
+    return {"record": record, "result": result}
+
+
+def experience_check(
+    room_dir: Any,
+    info: dict[str, Any],
+    member: dict[str, Any],
+    *,
+    skill: str,
+    actor: Any = None,
+    actor_id: Any = None,
+    rng: Any = None,
+) -> dict[str, Any]:
+    """对单个已打勾技能立即结算成长检定（批次 2 薄入口）。
+
+    正常流程由 :func:`settle_interlude` 一次性结算全部标记；本函数供 KP 手动逐项确认，
+    跳过 ``settle`` 的批量口径，但复用同一 ``growth.growth_check`` 与写回链路。
+    """
+    if not is_active(info):
+        raise InterludeError(
+            "剧情进行中不结算成长检定，请进入幕间后再试", code="not_active", status=409
+        )
+    card = member.get("character_card") if isinstance(member.get("character_card"), dict) else None
+    if card is None:
+        raise InterludeError("该成员还没有绑定角色卡", code="no_card", status=409)
+    growth = room_rules._growth_capability(card)
+    if growth is None:
+        raise InterludeError("该角色卡的规则集不支持成长检定", code="unsupported", status=409)
+    name = str(skill or "").strip()
+    if not name:
+        raise InterludeError("请提供技能名", code="bad_arguments", status=400)
+    state = member.get("character_state")
+    if not isinstance(state, dict):
+        state = {}
+        member["character_state"] = state
+    marks = growth.read_marks(card, state.get("growth_marks"))
+    key = name.casefold()
+    mark = next(
+        (
+            row
+            for row in marks
+            if isinstance(row, dict)
+            and str(row.get("skill") or row.get("name") or "").strip().casefold() == key
+        ),
+        None,
+    )
+    if mark is None:
+        raise InterludeError(f"技能「{name}」没有成长标记", code="no_mark", status=404)
+    row = room_rules._find_skill_row(card, name)
+    if row is None:
+        raise InterludeError(f"角色卡上没有技能：{name}", code="unknown_skill", status=404)
+    rng = rng or _default_rng
+    outcome = growth.growth_check(row.get("value"), roll=rng(100), gain_roll=rng(10))
+    result = {
+        "skill": str(row.get("name") or name),
+        "value": row.get("value"),
+        **outcome,
+        "mark_id": mark.get("id"),
+    }
+    if outcome["gain"]:
+        room_rules.apply_skill_change(
+            room_dir,
+            info,
+            member,
+            name=result["skill"],
+            value=result["after"],
+            reason="幕间成长检定",
+            actor=actor,
+            actor_id=actor_id,
+            source="interlude",
+        )
+    remaining = [row for row in marks if row is not mark and row.get("id") != mark.get("id")]
+    _growth_block(card)["marks"] = remaining
+    state["growth_marks"] = [
+        row
+        for row in (state.get("growth_marks") or [])
+        if isinstance(row, dict) and row.get("id") != mark.get("id")
+    ]
+    _append_growth_history(card, [result], player=room_rules.member_display_name(member))
+    room_rules.save_room_info(room_dir, info)
+    summary = (
+        f"{room_rules.member_display_name(member)} 成长检定「{result['skill']}」："
+        f"{result['value']}→{result['after']}"
+    )
+    return {"record": result, "mark": mark, "summary": summary}
 
 
 def review_context(room_dir: Any, info: dict[str, Any]) -> dict[str, Any]:

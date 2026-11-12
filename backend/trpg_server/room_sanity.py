@@ -22,11 +22,11 @@ from typing import Any, Callable, Iterable
 from trpg_server import room_clock, room_rules
 from trpg_server.ruleset import get_plugin
 from trpg_server.ruleset.capabilities import checks_of, sanity_of
-from trpg_server.ruleset.coc7 import sanity_state, traits
+from trpg_server.ruleset.coc7 import sanity_state, traits, treatment
 from trpg_server.ruleset.coc7.options import resolve_options
 from trpg_server.ruleset.contracts import CheckRequest
 
-SAN_COMMAND_SUBS = {"bout", "habituation", "habits", "reality", "trait", "traits"}
+SAN_COMMAND_SUBS = {"bout", "habituation", "habits", "reality", "trait", "traits", "treat"}
 FEATURE_LABELS = {
     "sanity_state": "理智结构化",
     "sanity_habituation": "习惯恐惧",
@@ -192,6 +192,71 @@ def record_habituation(
     else:
         summary = f"{_member_label(member)} 对「{key}」累计理智损失 {total}/{result['cap'] or '?'}。"
     return {"player_name": _member_label(member), "habituation": result, "mental": block, "summary": summary}
+
+
+def treatment_session(
+    room_dir: Any,
+    info: dict[str, Any],
+    member: dict[str, Any],
+    *,
+    level: str = "regular",
+    months: int = 1,
+    d3: int | None = None,
+    d6: int | None = None,
+    note: str = "",
+    actor: str = "",
+    actor_id: str = "",
+    rng: Callable[[int], int] | None = None,
+) -> dict[str, Any]:
+    """心理治疗（批次 3）：按月掷精神分析结果，SAN 变化走房间写回链路。
+
+    ``level`` 是本月精神分析检定的结果（regular/hard/extreme/failure/fumble）；
+    成功 +1D3、大失败 −1D6、其余 0（规则书 p.129）。记录写
+    ``extensions.mental.treatment``（保留最近 20 条）。
+    """
+    options = options_for(info)
+    if not options.sanity_state:
+        raise _disabled("sanity_state")
+    level_text = str(level or "").strip().lower()
+    month_count = max(1, min(12, int(months or 1)))
+    rng = rng or (lambda sides: random.randint(1, sides))
+    block = mental_block(member)
+    total = 0
+    for _ in range(month_count):
+        total += treatment.monthly_san_delta(
+            level_text,
+            d3=d3 if d3 is not None else rng(3),
+            d6=d6 if d6 is not None else rng(6),
+        )
+    record = sanity_state.record_treatment(
+        block,
+        level=level_text,
+        months=month_count,
+        delta=total,
+        note=note,
+        source="rule",
+    )
+    applied = None
+    if total:
+        applied = room_rules.apply_san_change(
+            room_dir,
+            info,
+            member,
+            delta=total,
+            reason=f"心理治疗（{level_text}，{month_count} 个月）",
+            actor=actor,
+            actor_id=actor_id,
+            source="interlude",
+        )
+    room_rules._add_pending_change(_state(member), _pending(block, "心理治疗"))
+    _save(room_dir, info)
+    if total > 0:
+        summary = f"{_member_label(member)} 心理治疗（{level_text}，{month_count} 个月）：SAN +{total}。"
+    elif total < 0:
+        summary = f"{_member_label(member)} 心理治疗失败（{level_text}）：SAN {total}。"
+    else:
+        summary = f"{_member_label(member)} 心理治疗（{level_text}，{month_count} 个月）：SAN 无变化。"
+    return {"player_name": _member_label(member), "treatment": record, "applied": applied, "mental": block, "summary": summary}
 
 
 def habituation_rows(member: dict[str, Any], info: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -590,9 +655,33 @@ def handle_command(
         "reality": options.sanity_state and options.sanity_reality,
         "trait": options.sanity_state and options.sanity_traits,
         "traits": options.sanity_state and options.sanity_traits,
+        "treat": options.sanity_state,
     }
     if not required.get(sub, False):
         return False, ""
+    if sub == "treat":
+        if len(args) < 2:
+            return True, "用法：rule san treat <玩家> [成功|失败|大失败] [月数] [备注]"
+        member = _resolve_member(info, args[1])
+        level = args[2] if len(args) > 2 else "regular"
+        months = 1
+        if len(args) > 3:
+            try:
+                months = max(1, min(12, int(args[3])))
+            except ValueError:
+                months = 1
+        note = " ".join(args[4:]) if len(args) > 4 else ""
+        outcome = treatment_session(
+            room_dir,
+            info,
+            member,
+            level=level,
+            months=months,
+            note=note,
+            actor=actor,
+            actor_id=actor_id,
+        )
+        return True, outcome["summary"]
     if sub in {"trait", "traits"}:
         payload = trait_query(
             args[1] if len(args) > 1 else None,

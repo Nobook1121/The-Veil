@@ -327,12 +327,197 @@ ECONOMY_TOOL = AgentTool(
     handler=execute_economy,
 )
 
+def execute_spend(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """``character.spend``：结算一笔开销，等价于 ``coc7.economy`` 的 apply 模式。"""
+    return execute_economy({**arguments, "apply": True}, context)
+
+
+def execute_experience_check(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """``character.experience_check``：对单个已打勾技能立即结算成长。"""
+    from trpg_server.room_interlude import InterludeError, experience_check
+
+    info = context.room_info()
+    try:
+        member = _member(info, arguments, context)
+        result = experience_check(
+            context.room_dir,
+            info,
+            member,
+            skill=str(arguments.get("skill") or ""),
+            actor=getattr(context, "username", None) or "AI KP",
+            actor_id=getattr(context, "user_id", None),
+        )
+    except (room_rules.RuleOperationError, InterludeError, ValueError, TypeError) as exc:
+        return {"ok": False, "error": getattr(exc, "message", str(exc))}
+    return {"ok": True, **result}
+
+
+def execute_train(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """``character.train``：幕间花周数训练技能（可选房规）。"""
+    from trpg_server.room_interlude import InterludeError, train_skill
+
+    info = context.room_info()
+    try:
+        member = _member(info, arguments, context)
+        result = train_skill(
+            context.room_dir,
+            info,
+            member,
+            skill=str(arguments.get("skill") or ""),
+            weeks=arguments.get("weeks"),
+            reason=str(arguments.get("reason") or ""),
+            actor=getattr(context, "username", None) or "AI KP",
+            actor_id=getattr(context, "user_id", None),
+        )
+    except (room_rules.RuleOperationError, InterludeError, ValueError, TypeError) as exc:
+        return {"ok": False, "error": getattr(exc, "message", str(exc))}
+    return {"ok": True, **result}
+
+
+def execute_san_treat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """``san.treat``：月度心理治疗的薄入口，数字委托 ``ruleset/coc7/treatment.py``。"""
+    from trpg_server import room_sanity
+
+    info = context.room_info()
+    try:
+        member = _member(info, arguments, context)
+        result = room_sanity.treatment_session(
+            context.room_dir,
+            info,
+            member,
+            level=str(arguments.get("level") or "regular"),
+            months=int(arguments.get("months") or 1),
+            note=str(arguments.get("note") or ""),
+            actor=getattr(context, "username", None) or "AI KP",
+            actor_id=getattr(context, "user_id", None),
+        )
+    except (room_rules.RuleOperationError, ValueError, TypeError) as exc:
+        return {"ok": False, "error": getattr(exc, "message", str(exc))}
+    return {"ok": True, **result}
+
+
+CHECK_COMBINED_TOOL = AgentTool(
+    name="check.combined",
+    description=(
+        "Roadmap alias of coc7.combined_check: one roll compared against several skills. "
+        "mode=all requires every skill to pass, mode=any requires one. Requires the combined "
+        "check house rule."
+    ),
+    parameters=COMBINED_CHECK_TOOL.parameters,
+    handler=execute_combined_check,
+)
+
+CHECK_GROUP_TOOL = AgentTool(
+    name="check.group",
+    description=(
+        "Roadmap alias of coc7.group_luck: the active investigator with the lowest Luck rolls "
+        "once for the whole group. Requires the group luck house rule."
+    ),
+    parameters=GROUP_LUCK_TOOL.parameters,
+    handler=execute_group_luck,
+)
+
+CHARACTER_CONTACTS_TOOL = AgentTool(
+    name="character.contacts",
+    description=(
+        "Roadmap alias of coc7.contact_check: resolve a contact-making check, with hometown / "
+        "remote / same profession modifiers and pushed failures. Requires the contacts house rule."
+    ),
+    parameters=CONTACT_CHECK_TOOL.parameters,
+    handler=execute_contact_check,
+)
+
+CHARACTER_SPEND_TOOL = AgentTool(
+    name="character.spend",
+    description=(
+        "Settle one expense: cash is deducted immediately and the cash change is queued for "
+        "write-back on archive. Other assets stay free text. Requires the economy house rule."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "player_name": {"type": "string", "description": "Room member's login username or character card name."},
+            "amount": {"type": "number", "description": "Expense amount."},
+            "era": {"type": "string", "enum": ["1920s", "modern"], "description": "Price table era."},
+            "reason": {"type": "string", "description": "Short reason recorded with the pending cash change."},
+        },
+        "required": ["player_name", "amount"],
+    },
+    handler=execute_spend,
+)
+
+CHARACTER_EXPERIENCE_CHECK_TOOL = AgentTool(
+    name="character.experience_check",
+    description=(
+        "Roll one growth check for a single marked skill during the interlude. Only skills that "
+        "already have a growth mark can be checked; the normal batch settlement is interlude settle."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "player_name": {"type": "string", "description": "Room member's login username or character card name."},
+            "skill": {"type": "string", "description": "Skill that already has a growth mark."},
+        },
+        "required": ["player_name", "skill"],
+    },
+    handler=execute_experience_check,
+)
+
+CHARACTER_TRAIN_TOOL = AgentTool(
+    name="character.train",
+    description=(
+        "Spend interlude weeks training one skill with Keeper approval: every 4 weeks grants one "
+        "growth check. Requires the optional training house rule (coc7_growth_training)."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "player_name": {"type": "string", "description": "Room member's login username or character card name."},
+            "skill": {"type": "string", "description": "Skill to train."},
+            "weeks": {"type": "integer", "minimum": 1, "maximum": 12, "description": "Weeks spent; every 4 weeks = 1 check."},
+            "reason": {"type": "string", "description": "Short note recorded with the training."},
+        },
+        "required": ["player_name", "skill", "weeks"],
+    },
+    handler=execute_train,
+)
+
+SAN_TREAT_TOOL = AgentTool(
+    name="san.treat",
+    description=(
+        "Resolve monthly psychotherapy: a successful Psychoanalysis check restores +1D3 SAN, a "
+        "fumble costs 1D6 SAN, other results change nothing. Requires structured sanity state."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "player_name": {"type": "string", "description": "Room member's login username or character card name."},
+            "level": {
+                "type": "string",
+                "enum": ["regular", "hard", "extreme", "critical", "success", "failure", "fumble"],
+                "description": "This month's Psychoanalysis result.",
+            },
+            "months": {"type": "integer", "minimum": 1, "maximum": 12, "description": "Number of months treated."},
+            "note": {"type": "string", "description": "Optional note stored with the treatment record."},
+        },
+        "required": ["player_name"],
+    },
+    handler=execute_san_treat,
+)
+
 COC7_EXTRA_TOOLS = (
     SOCIAL_CHECK_TOOL,
     COMBINED_CHECK_TOOL,
     GROUP_LUCK_TOOL,
     CONTACT_CHECK_TOOL,
     ECONOMY_TOOL,
+    CHECK_COMBINED_TOOL,
+    CHECK_GROUP_TOOL,
+    CHARACTER_CONTACTS_TOOL,
+    CHARACTER_SPEND_TOOL,
+    CHARACTER_EXPERIENCE_CHECK_TOOL,
+    CHARACTER_TRAIN_TOOL,
+    SAN_TREAT_TOOL,
 )
 
 COC7_EXTRA_TOOL_NAMES = tuple(tool.name for tool in COC7_EXTRA_TOOLS)
