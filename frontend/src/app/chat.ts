@@ -12,6 +12,8 @@ interface PendingAIMessage {
     time: string;
     /** 该条消息是否为「世界意志」直执行，请求时携带 world_override 标记。 */
     worldOverride?: boolean;
+    /** §6.6「问问 KP」：随请求携带的道具 id，队列里的消息也要保留。 */
+    propId?: string;
 }
 
 interface KnowledgeUsage {
@@ -382,6 +384,7 @@ async function askAboutProp(propId: string, question: string): Promise<void> {
         content,
         role,
         time: new Date().toLocaleTimeString(),
+        propId: id,
     });
     if (isAIThinking) {
         showNotification("消息已加入队列，请等待 AI 回复完成后发送", "info");
@@ -393,6 +396,10 @@ async function askAboutProp(propId: string, question: string): Promise<void> {
 async function sendToAI(chatInput: HTMLInputElement, sendButton: HTMLButtonElement, options: SendAIOptions = {}): Promise<void> {
     if (pendingMessages.length === 0) return;
     const requestMessages = pendingMessages.slice();
+    const propId = options.propId || requestMessages.find((message) => message.propId)?.propId || "";
+    // 带 prop_id 的答复只包含提问者可见（可能被脱敏）的道具内容，
+    // 不能落库/广播给全房，否则等于把定向内容公开（B2）。
+    const isPropQuestion = Boolean(propId);
 
     isAIThinking = true;
     updateInputState(chatInput, sendButton);
@@ -421,7 +428,7 @@ async function sendToAI(chatInput: HTMLInputElement, sendButton: HTMLButtonEleme
                 world_override: options.worldOverride === true || requestMessages.some((message) => message.worldOverride === true),
                 // 个人沉浸偏好：后端在站点允许范围内再次 clamp，房间仍可收紧。
                 immersive_personal: window.TrpgImmersive?.getPersonalPreferences?.() || undefined,
-                prop_id: options.propId || undefined,
+                prop_id: propId || undefined,
             },
         });
         if (!response.ok) {
@@ -452,21 +459,23 @@ async function sendToAI(chatInput: HTMLInputElement, sendButton: HTMLButtonEleme
         broadcastAIThinkingEnd(aiRequestId);
         clearPersistedThinkingState(aiRequestId);
 
-        const persisted = await persistRoomMessage("kp", messageContent, {
-            processingTime,
-            tokenCount,
-            roleId: role.id,
-            aiRequestId,
-            senderName: role.name || "KP",
-            promptTokens: data.prompt_tokens,
-            completionTokens: data.completion_tokens,
-            cachedTokens: data.cached_tokens,
-            cacheHitRate: data.cache_hit_rate,
-            cacheKey: data.cache_key,
-            knowledgeUsage: data.knowledge_usage,
-            // 配音片段随消息 metadata 持久化，历史回看也能单条重播。
-            ...(data.voice ? { voice: data.voice, voice_segments: data.voice.segments } : {}),
-        });
+        const persisted = isPropQuestion
+            ? null
+            : await persistRoomMessage("kp", messageContent, {
+                processingTime,
+                tokenCount,
+                roleId: role.id,
+                aiRequestId,
+                senderName: role.name || "KP",
+                promptTokens: data.prompt_tokens,
+                completionTokens: data.completion_tokens,
+                cachedTokens: data.cached_tokens,
+                cacheHitRate: data.cache_hit_rate,
+                cacheKey: data.cache_key,
+                knowledgeUsage: data.knowledge_usage,
+                // 配音片段随消息 metadata 持久化，历史回看也能单条重播。
+                ...(data.voice ? { voice: data.voice, voice_segments: data.voice.segments } : {}),
+            });
         if (persisted) {
             persisted.sender_name = role.name || "KP";
             broadcastMessage(persisted);

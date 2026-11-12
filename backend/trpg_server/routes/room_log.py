@@ -31,6 +31,7 @@ from trpg_server.routes.rooms import (
     _is_elevated,
     _require_login,
     _room_permission,
+    viewer_is_kp,
 )
 
 bp = Blueprint("room_log", __name__)
@@ -147,6 +148,20 @@ def _permission_state(info: Mapping[str, Any], settings: Mapping[str, Any]) -> t
     return False, "members_disabled"
 
 
+def _can_use_job(info: Mapping[str, Any], job: Mapping[str, Any]) -> bool:
+    """导出产物只对发起人可见；房主/管理员可查看房间内全部任务。
+
+    导出文档按发起人的道具可见性生成，若允许任意成员按 export_id 下载，
+    就等于把发起人视角里的定向道具卡转交给了别人（B2）。
+    """
+    if _is_elevated():
+        return True
+    member = _find_member(info, user_id=session.get("user_id"), active_only=True)
+    if _room_permission(member, info) in {ROOM_ROLE_OWNER, ROOM_ROLE_ADMIN}:
+        return True
+    return str(job.get("creator_id") or "") == str(session.get("user_id"))
+
+
 def _load_room(room_id: str):
     room_dir, info = _find_room(room_id)
     if not room_dir:
@@ -183,7 +198,12 @@ def preview_room_log(room_id):
         can_export, reason = False, "font_missing"
 
     try:
-        document = build_document(room_dir, options)
+        document = build_document(
+            room_dir,
+            options,
+            viewer_id=session.get("user_id"),
+            is_kp=viewer_is_kp(info),
+        )
     except Exception:  # noqa: BLE001 - 读取房间数据失败按渲染失败处理
         logger.exception("room_log preview failed room=%s", room_id)
         return server_error("Room log preview failed")
@@ -230,7 +250,12 @@ def create_room_log_export(room_id):
         return error_response("Invalid export options", 400, "log.invalid_option")
 
     try:
-        document = build_document(room_dir, options)
+        document = build_document(
+            room_dir,
+            options,
+            viewer_id=session.get("user_id"),
+            is_kp=viewer_is_kp(info),
+        )
     except Exception:  # noqa: BLE001
         logger.exception("room_log export build failed room=%s", room_id)
         return server_error("Room log export failed")
@@ -267,6 +292,8 @@ def get_room_log_export(room_id, export_id):
     job = get_store().get(room_id, export_id)
     if job is None:
         return error_response("Export not found", 404, "log.export_not_found")
+    if not _can_use_job(info, job):
+        return _forbidden(room_id)
     return success_response(job, "Room log export status loaded successfully")
 
 
@@ -291,6 +318,8 @@ def download_room_log_export(room_id, export_id):
     job = store.get(room_id, export_id)
     if job is None:
         return error_response("Export not found", 404, "log.export_not_found")
+    if not _can_use_job(info, job):
+        return _forbidden(room_id)
     if job.get("status") != STATUS_DONE:
         return error_response("Export is not ready", 409, "log.not_ready")
     path = store.pdf_path(room_id, export_id)
@@ -323,6 +352,9 @@ def delete_room_log_export(room_id, export_id):
         return _forbidden(room_id, "Room log export is disabled")
     can_export, _reason = _permission_state(info, settings)
     if not can_export:
+        return _forbidden(room_id)
+    job = get_store().get(room_id, export_id)
+    if job is not None and not _can_use_job(info, job):
         return _forbidden(room_id)
     deleted = get_store().delete(room_id, export_id)
     # 幂等：任务已过期或已被清理时同样返回成功，前端无需区分。

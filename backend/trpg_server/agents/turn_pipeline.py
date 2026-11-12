@@ -55,6 +55,7 @@ from trpg_server.agents.narrative.trace import append_trace
 from trpg_server.scenario_store import load_scenario_by_id
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.logging_config import log_access_denied, log_user_action, user_action_text
+from trpg_server.room_access import can_access, is_elevated
 from trpg_server.room_log import log_room_event
 from trpg_server import room_ai_changes, room_interlude, room_rules
 from trpg_server.room_mode import (
@@ -329,7 +330,9 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
     scenario_started_at = None
     opening_plan = None
     try:
-        user_id = message_data.get("user_id", "unknown")
+        # 身份只信任服务端会话：请求体里的 user_id 可被任意伪造，不能作为
+        # 道具可见性、KP 视角或日志归属的依据（B1）。
+        user_id = session.get("user_id")
         content = message_data.get("content", "")
         # 房间模式门控：manual 房间（ai_kp_enabled=false）在入口直接拒绝，
         # 不依赖提示词软约束，也避免先撞上「平台未配置」等无关错误。
@@ -339,6 +342,16 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
             room_dir_for_mode = Path(current_app.config.get("ROOMS_DIR", ROOMS_DIR)) / str(room_id)
             room_info_for_mode = read_json(room_dir_for_mode / "info.json", default={})
             room_info_for_mode = room_info_for_mode if isinstance(room_info_for_mode, dict) else {}
+            # 房间成员的请求才能拿到该房间的提示词上下文（含已揭示道具）。
+            if not can_access(room_info_for_mode, session.get("user_id"), session.get("role", "USER")):
+                log_access_denied(
+                    logger,
+                    user_action_text(session.get("username"), "AI 调用被拒绝"),
+                    用户ID=session.get("user_id"),
+                    房间ID=room_id,
+                    原因="不是房间成员",
+                )
+                return error_response("Permission denied", 403, "Permission denied")
             if room_info_for_mode.get("archived"):
                 log_access_denied(
                     logger,
@@ -1045,6 +1058,7 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
             }
         # 道具工坊：只在启用且有房间时注入；内容只含已揭示道具（AI 侧 4 方块脱敏），
         # 未揭示道具完全不进入上下文，避免模型把隐藏线索说漏。
+        prop_id = str((message_data or {}).get("prop_id") or "").strip()
         props_directive = ""
         if room_id and agent_profile.id == "kp" and props_config_values.get("enabled", True):
             from trpg_server.props import prompt as props_prompt
@@ -1067,22 +1081,22 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
                 specs,
             )
             # §6.6 玩家点道具「问问 KP」：只把该玩家能看到的内容作为请求级上下文，
-            # hidden 道具与脱敏段落不进入模型。
-            prop_id = str((message_data or {}).get("prop_id") or "").strip()
+            # hidden 道具与脱敏段落不进入模型。身份取服务端会话，房主/房管视角
+            # 也只按房间角色判定，绝不读请求体里的 user_id（B1）。
             if prop_id and room_dir_for_props is not None and props_store.is_valid_prop_id(prop_id):
                 from trpg_server.props import policy as props_policy
 
                 question_spec = props_store.read_prop(room_dir_for_props, prop_id)
-                viewer_id = getattr(agent_context, "user_id", None)
-                viewer_info = (
-                    agent_context.room_info() if hasattr(agent_context, "room_info") else {}
-                )
-                is_kp_viewer = False
-                for member in (
-                    viewer_info.get("members") if isinstance(viewer_info, Mapping) else []
-                ) or []:
-                    if str(member.get("user_id")) == str(viewer_id):
-                        is_kp_viewer = str(member.get("room_role") or "") in {"owner", "admin"}
+                viewer_id = session.get("user_id")
+                is_kp_viewer = is_elevated()
+                if not is_kp_viewer:
+                    for member in (room_info_for_mode.get("members") or []):
+                        if str(member.get("user_id")) != str(viewer_id):
+                            continue
+                        is_kp_viewer = (
+                            str(member.get("user_id")) == str(room_info_for_mode.get("creator_id"))
+                            or str(member.get("room_role") or "") in {"owner", "admin"}
+                        )
                         break
                 view = props_policy.visible_spec(
                     question_spec, viewer_id, is_kp=is_kp_viewer
@@ -1153,7 +1167,11 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
             or _request_allows_scene_transition(content)
         )
         # 直执行必须真正送达模型：命中旧缓存会让「世界意志」指令静默失效。
-        cache_lookup_allowed = not scenario_start and not side_effect_requested and not world_override
+        # 带 prop_id 的提问把「当前提问者的可见视图」注入了上下文，缓存键里没有
+        # 这一维，命中别人的旧回复会泄露对方视角，因此一律直连上游（B2）。
+        cache_lookup_allowed = (
+            not scenario_start and not side_effect_requested and not world_override and not prop_id
+        )
         cached_result = None
         if cache_lookup_allowed:
             if not room_id:

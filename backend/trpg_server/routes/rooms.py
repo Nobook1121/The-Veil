@@ -127,6 +127,12 @@ from trpg_server.room_ops.views import (
     _scenario_finished,
 )
 
+from trpg_server.room_ops.visibility import (
+    filter_payload_messages,
+    viewer_is_kp,
+    visible_messages,
+)
+
 from trpg_server.room_ops.autosave import (
     _keyframe_for_autosave,
     _write_room_autosave,

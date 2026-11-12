@@ -9,7 +9,6 @@ from trpg_server.json_store import read_json
 from trpg_server.json_store import write_json_atomic
 from trpg_server.logging_config import user_action_text
 from trpg_server.media_defaults import normalize_avatar
-from trpg_server.props import policy as props_policy
 from trpg_server.responses import error_response
 from trpg_server.responses import success_response
 from trpg_server.room_log import log_room_event
@@ -40,6 +39,7 @@ from trpg_server.room_ops.storage import (
     _write_room,
 )
 from trpg_server.room_ops.views import _room_summary
+from trpg_server.room_ops.visibility import filter_payload_messages, visible_messages
 from trpg_server.scenario_store import load_scenario_by_id
 from trpg_server.security import safe_join
 from uuid import uuid4
@@ -59,9 +59,7 @@ def get_room_messages(room_id):
 
     member = _find_member(info, user_id=session.get("user_id"), active_only=True)
     is_kp = _is_elevated() or str((member or {}).get("room_role") or "") in {"owner", "admin"}
-    messages = props_policy.filter_messages(
-        _read_messages(room_dir), session.get("user_id"), is_kp=is_kp
-    )
+    messages = visible_messages(room_dir, info, session.get("user_id"), is_kp=is_kp)
     return success_response(messages, "Room messages loaded successfully")
 
 @bp.route("/api/rooms/<room_id>/messages", methods=["POST"])
@@ -403,6 +401,8 @@ def create_room_node(room_id):
         "filename": f"{timestamp}.json",
         "created_at": _timestamp(),
         "automatic": False,
+        # 节点文件保留全量消息（供房主/管理员回溯），但响应只回当前查看者
+        # 可见的部分，避免玩家用回档接口拿到别人的定向道具卡（B2）。
         "messages": _read_messages(room_dir),
     }
     write_json_atomic(room_dir / "nodes" / node["filename"], node)
@@ -415,7 +415,9 @@ def create_room_node(room_id):
         用户ID=session.get("user_id"),
         文件=node["filename"],
     )
-    return success_response(node, "Room node created successfully", 201)
+    return success_response(
+        filter_payload_messages(node, info), "Room node created successfully", 201
+    )
 
 @bp.route("/api/rooms/<room_id>/nodes/<node_filename>", methods=["GET"])
 def get_room_node(room_id, node_filename):
@@ -432,7 +434,10 @@ def get_room_node(room_id, node_filename):
     node_file = safe_join(room_dir / "nodes", node_filename)
     if not node_file.exists():
         return error_response("Room node not found", 404, "Room node not found")
-    return success_response(read_json(node_file, default={}), "Room node loaded successfully")
+    node = read_json(node_file, default={})
+    return success_response(
+        filter_payload_messages(node, info), "Room node loaded successfully"
+    )
 
 @bp.route("/api/rooms/<room_id>/nodes/<node_filename>/restore", methods=["POST"])
 def restore_room_node(room_id, node_filename):
@@ -464,7 +469,9 @@ def restore_room_node(room_id, node_filename):
         用户ID=session.get("user_id"),
         文件=node_filename,
     )
-    return success_response(node, "Room node restored successfully")
+    return success_response(
+        filter_payload_messages(node, info), "Room node restored successfully"
+    )
 
 @bp.route("/api/rooms/<room_id>/nodes/<node_filename>", methods=["DELETE"])
 def delete_room_node(room_id, node_filename):

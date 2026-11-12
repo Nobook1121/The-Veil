@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from trpg_server.json_store import read_json
+from trpg_server.props import policy as props_policy
 from trpg_server.security import safe_join
 from trpg_server.settings import DATA_DIR
 
@@ -82,10 +83,14 @@ def build_document(
     options: Mapping[str, Any] | None = None,
     *,
     data_dir: str | Path | None = None,
+    viewer_id: Any = None,
+    is_kp: bool = False,
 ) -> dict[str, Any]:
     """归约一份房间团录文档（只读）。
 
     ``data_dir`` 仅在测试或非常规部署时注入；默认使用项目 ``data/``。
+    ``viewer_id`` 给出时按该查看者的道具可见性过滤消息（B2）；团录不能
+    把只发给部分玩家的道具卡导出给所有人。
     """
     room_path = Path(room_dir)
     info = read_json(room_path / "info.json", default={})
@@ -94,6 +99,8 @@ def build_document(
     messages = read_json(room_path / "messages.json", default=[])
     if not isinstance(messages, list):
         messages = []
+    if viewer_id is not None:
+        messages = props_policy.filter_messages(messages, viewer_id, is_kp=is_kp)
 
     resolved = normalize_options(options)
     data_root = Path(data_dir) if data_dir else DATA_DIR

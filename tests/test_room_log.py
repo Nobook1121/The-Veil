@@ -208,6 +208,35 @@ def test_unknown_type_becomes_system(tmp_path):
     assert document["chapters"][0]["entries"][0]["kind"] == "system"
 
 
+def test_build_document_filters_prop_messages_by_viewer(tmp_path):
+    """团录不能把只发给部分玩家的定向道具卡导出给所有人。"""
+    room = _write_room(
+        tmp_path / "room",
+        [
+            _msg("所有人都能看到的记录"),
+            _msg(
+                "他递来一封密信",
+                msg_type="prop",
+                metadata={"prop_id": "prop-1", "revealed_to": [2]},
+            ),
+        ],
+        members=[
+            {"user_id": "1", "username": "owner", "room_role": "owner", "is_active": True},
+            {"user_id": "2", "username": "reader", "room_role": "member", "is_active": True},
+            {"user_id": "3", "username": "other", "room_role": "member", "is_active": True},
+        ],
+    )
+    recipient = json.dumps(
+        build_document(room, data_dir=tmp_path / "data", viewer_id=2), ensure_ascii=False
+    )
+    bystander = json.dumps(
+        build_document(room, data_dir=tmp_path / "data", viewer_id=3), ensure_ascii=False
+    )
+    assert "密信" in recipient
+    assert "密信" not in bystander
+    assert "所有人都能看到的记录" in bystander
+
+
 def test_player_entry_uses_character_card_name(tmp_path):
     room = _write_room(
         tmp_path / "room",

@@ -11,6 +11,7 @@ from trpg_server.room_ops.autosave import _write_room_autosave
 from trpg_server.room_ops.blueprint import bp
 from trpg_server.room_ops.log import logger
 from trpg_server.room_ops.storage import _find_room, _get_rooms_dir, _read_messages
+from trpg_server.room_ops.visibility import filter_payload_messages
 
 @bp.route("/api/rooms/<room_id>/autosave", methods=["POST"])
 def save_room_autosave(room_id):
@@ -46,7 +47,10 @@ def load_room_autosave(room_id):
         return _denied(room_id)
 
     autosave = read_json(room_dir / "autosave.json", default={"messages": []})
-    return success_response(autosave, "Room autosave loaded successfully")
+    # 自动存档文件保留全量消息（恢复时用），响应按当前查看者过滤（B2）。
+    return success_response(
+        filter_payload_messages(autosave, info), "Room autosave loaded successfully"
+    )
 
 def _interlude_payload(info):
     state = room_interlude.interlude_state(info)

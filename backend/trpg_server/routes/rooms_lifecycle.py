@@ -50,7 +50,6 @@ from trpg_server.room_ops.storage import (
     _iter_room_dirs,
     _new_invite_token,
     _new_room_code,
-    _read_messages,
     _read_room,
     _room_dir,
     _room_name_exists,
@@ -67,6 +66,7 @@ from trpg_server.room_ops.views import (
     _room_visibility,
     _scenario_finished,
 )
+from trpg_server.room_ops.visibility import visible_messages
 from trpg_server.room_usage import load_room_usage
 from trpg_server.ruleset import RulesetSelectionError
 from trpg_server.ruleset import builtin_registry
@@ -341,7 +341,7 @@ def join_room_by_code():
         房间名=info.get("name"),
     )
     data = _room_summary(info)
-    data["messages"] = _read_messages(room_dir)
+    data["messages"] = visible_messages(room_dir, info, user_id)
     usage = _room_usage_for(info, room_dir)
     if usage is not None:
         data["usage"] = usage
@@ -407,7 +407,7 @@ def get_room(room_id):
         return _denied(room_id)
 
     data = _room_summary(info)
-    data["messages"] = _read_messages(room_dir)
+    data["messages"] = visible_messages(room_dir, info, session.get("user_id"))
     usage = _room_usage_for(info, room_dir)
     if usage is not None:
         data["usage"] = usage

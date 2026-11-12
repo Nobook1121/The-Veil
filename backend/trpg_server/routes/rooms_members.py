@@ -36,12 +36,12 @@ from trpg_server.room_ops.constants import (
 from trpg_server.room_ops.log import logger
 from trpg_server.room_ops.storage import (
     _find_room,
-    _read_messages,
     _read_room,
     _timestamp,
     _write_room,
 )
 from trpg_server.room_ops.views import _room_summary
+from trpg_server.room_ops.visibility import visible_messages
 
 @bp.route("/api/rooms/<room_id>/members/<user_id>/character", methods=["PUT"])
 def bind_room_member_character(room_id, user_id):
@@ -85,7 +85,7 @@ def bind_room_member_character(room_id, user_id):
         角色名=target.get("character_card", {}).get("name"),
     )
     data = _room_summary(info)
-    data["messages"] = _read_messages(room_dir)
+    data["messages"] = visible_messages(room_dir, info, session.get("user_id"))
     return success_response(data, "Character bound successfully")
 
 @bp.route("/api/rooms/<room_id>/members/<user_id>", methods=["DELETE"])

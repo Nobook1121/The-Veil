@@ -1220,6 +1220,12 @@ def test_partial_prop_message_filtered_for_other_players(tmp_path):
     player3_messages = player3.get(f"/api/rooms/{room_id}/messages").get_json()["data"]
     assert not any(item.get("type") == "prop" for item in player3_messages)
 
+    # 房间详情、成员绑定等出口也必须同样过滤，不能只在 /messages 上生效。
+    player3_detail = player3.get(f"/api/rooms/{room_id}").get_json()["data"]
+    assert not any(item.get("type") == "prop" for item in player3_detail["messages"])
+    player2_detail = player2.get(f"/api/rooms/{room_id}").get_json()["data"]
+    assert any(item.get("type") == "prop" for item in player2_detail["messages"])
+
     owner_messages = owner.get(f"/api/rooms/{room_id}/messages").get_json()["data"]
     assert any(item.get("type") == "prop" for item in owner_messages)
 

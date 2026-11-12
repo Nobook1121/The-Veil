@@ -61,6 +61,7 @@ from trpg_server.room_mode import (
     normalize_room_mode,
 )
 from trpg_server.responses import error_response, server_error, success_response
+from trpg_server.room_ops.access import _require_login
 from trpg_server.role_config import load_roles, resolve_task_model
 from trpg_server.world_override import (
     facts_from_state,
@@ -144,6 +145,11 @@ from trpg_server.agents.turn_pipeline import (  # noqa: F401 - 兼容旧导入
 
 @bp.route("/api/chat", methods=["POST"])
 def chat():
+    # 身份、房间成员资格与道具可见性都以服务端会话为准；匿名调用会消耗 AI 配额，
+    # 也可能被用来读取任意房间的提示词上下文（B1）。
+    login_error = _require_login()
+    if login_error:
+        return login_error
     message_data = request.get_json(silent=True)
     if not message_data:
         return error_response("Please provide message data", 400, "No data")
@@ -162,7 +168,7 @@ def send_home_message():
         if not message_data:
             return error_response("Please provide message data", 400, "No data")
 
-        user_id = message_data.get("user_id", "unknown")
+        user_id = session.get("user_id") or message_data.get("user_id", "unknown")
         message_content = message_data.get("content", "")
         if not message_content:
             return error_response(
@@ -190,7 +196,7 @@ def send_message(script_id):
         if not message_data:
             return error_response("Please provide message data", 400, "No data")
 
-        user_id = message_data.get("user_id", "unknown")
+        user_id = session.get("user_id") or message_data.get("user_id", "unknown")
         message_content = message_data.get("content", "")
         if not message_content:
             return error_response(
