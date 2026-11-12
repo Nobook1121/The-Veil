@@ -244,6 +244,20 @@ def _file_lock(room_dir: Any) -> Iterator[None]:
                 holder = _read_lock_token(path)
                 if holder is not None and _reclaimable(holder, age):
                     if _remove_lock_if_owner(path, holder):
+                        # 删除返回成功不等于文件已经消失：Windows 上删除可能只是
+                        # 进入“删除挂起”，立刻用 O_EXCL 重试会持续 EEXIST。这里必须
+                        # 回到统一的 deadline 检查并 sleep，否则会无 sleep 空转成死循环。
+                        if time.monotonic() >= deadline:
+                            logger.warning(
+                                "room_clock.lock_reclaimed_but_still_present path=%s token=%s age=%s",
+                                path,
+                                holder,
+                                age,
+                            )
+                            raise ClockError(
+                                "游戏时钟正在被其他操作占用，请稍后重试", code="clock_busy"
+                            )
+                        time.sleep(LOCK_POLL_SECONDS)
                         continue
                 if time.monotonic() >= deadline:
                     raise ClockError(

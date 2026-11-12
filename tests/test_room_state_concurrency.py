@@ -95,6 +95,37 @@ def test_file_lock_polls_with_deadline_when_stat_keeps_failing(tmp_path, monkeyp
     assert elapsed < 2.0
 
 
+def test_file_lock_holds_deadline_when_unlink_succeeds_but_file_remains(tmp_path, monkeypatch, caplog):
+    """删除返回成功但锁文件仍在（Windows 删除挂起）时必须按 deadline 退出。
+
+    之前 ``_remove_lock_if_owner`` 返回 True 后直接 ``continue``，跳过了 deadline
+    检查也没 sleep，于是 ``os.open`` 一直撞 EEXIST，形成无 sleep 死循环。
+    """
+    room_rules.save_room_info(tmp_path, _info())
+    lock_path = tmp_path / room_clock.LOCK_FILENAME
+    # 本进程 pid：_reclaimable 直接判定为泄漏残锁，每次都走回收分支。
+    lock_path.write_text(f"{os.getpid()} deadbeef", encoding="utf-8")
+    monkeypatch.setattr(room_clock, "LOCK_TIMEOUT_SECONDS", 0.1)
+    monkeypatch.setattr(room_clock, "LOCK_POLL_SECONDS", 0.01)
+    # 模拟“unlink 成功、文件仍存在”。
+    monkeypatch.setattr(room_clock, "_unlink_with_retry", lambda _path, _token: True)
+
+    started = time.monotonic()
+    with caplog.at_level("WARNING", logger=room_clock.logger.name):
+        with pytest.raises(room_clock.ClockError) as raised:
+            room_clock.advance_clock(tmp_path, hours=1)
+    elapsed = time.monotonic() - started
+
+    assert raised.value.code == "clock_busy"
+    # 必须按 deadline 退出，且期间真的 sleep 轮询过（而不是空转）。
+    assert elapsed >= 0.09
+    assert elapsed < 2.0
+    assert lock_path.exists()
+    # 超时日志要带锁文件路径与持有 token，方便定位是谁留下的残锁。
+    assert str(lock_path) in caplog.text
+    assert f"{os.getpid()} deadbeef" in caplog.text
+
+
 def test_lock_release_only_removes_own_token(tmp_path):
     lock_path = tmp_path / room_clock.LOCK_FILENAME
 
