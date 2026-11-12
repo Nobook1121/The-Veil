@@ -1,8 +1,10 @@
-# 克苏鲁档案主题设计指南
+# 深渊帷幕主题设计指南（CoC / pattern_coc）
+
+> 2026-11-12 修订：主题内部 id 仍为 `pattern_coc`（历史兼容），但实现已从早期「克苏鲁档案 / Cthulhu Archive」重做为**深渊帷幕 / Abyssal Veil**。用户可见名称以 i18n `profile.theme.coc` 为准（`zh_cn.json:904` =「深渊帷幕」、`en_us.json:904` =「Abyssal Veil」）。本文旧稿中的文件映射已按实际实现更正，旧的 00/01/03/05 样式文件说法不再成立。
 
 ## 主题概述
 
-**克苏鲁档案（Cthulhu Archive）** 是为 CoC7 跑团平台新增的第五款主题，设计目标是营造调查员深入黑暗真相的既视感，让玩家在视觉层面感受到克苏鲁式恐怖的压抑感与诡异氛围。
+**深渊帷幕（Abyssal Veil）** 是 CoC7 跑团平台的第五款主题（注册 id `pattern_coc`），设计目标是营造调查员深入黑暗真相的既视感，让玩家在视觉层面感受到克苏鲁式恐怖的压抑感与诡异氛围。实现由「CSS 主题层」与「Canvas/WebGL 深渊场景引擎」两部分组成。
 
 ---
 
@@ -44,36 +46,29 @@
 
 ## 实施细节
 
-### 文件变更
+### 文件变更（按当前实现校正）
 
-#### 1. **样式定义** (`frontend/src/styles/00-theme-tokens.css`)
-   - 新增 `body.theme-coc` 选择器，包含 50+ CSS 变量
-   - 网格背景层 (`body.theme-coc::before`)
-   - 骰桌与卡片质感增强
+#### 1. **样式层**（`frontend/src/styles/`）
+   - `07-theme-abyss-tokens.css`：`body.theme-coc` 的 token 与变量定义（约 320 行，79 个主题变量），含背景渐变、网格层、暗金/祭祀紫/血红/幽灵白/沉寂蓝色板。
+   - `08-theme-abyss-components.css`：组件级覆盖（聊天光晕、卡片、模态毛玻璃、侧栏、标签页等，`theme-coc` 出现 182 处）。
+   - `06-combat-world-override.css`：世界意志法阵与遮罩（`theme-coc` 出现 29 处）。
+   - 注：旧稿声称的 `00-theme-tokens.css` / `01-foundation-chat.css` / `03-tools-settings-platform.css` / `05-dice-animation.css` 中**没有** `theme-coc` 规则（实测 0 处），相关覆盖已迁移至上列文件。
 
-#### 2. **聊天消息** (`frontend/src/styles/01-foundation-chat.css`)
-   - 玩家、KP、骰子消息的光晕与边框
-   - 透明背景以显示网格
+#### 2. **深渊场景引擎**（`frontend/src/app/themes/abyss/`，9 个模块）
+   - `core.ts`（Canvas 引擎核心）、`main.ts`（入口）、`atmosphere.ts`（WebGL 体积氛围）、`environment.ts`（沉没建筑）、`eye.ts`（注视之眼）、`fx.ts`（交互特效）、`sigils.ts`（法阵）、`spores.ts`（浮游光）、`tentacles.ts`（触手）。
+   - 只在 `body.theme-coc` 下挂载；其它主题不创建 Canvas/法阵 DOM。
 
-#### 3. **骰桌** (`frontend/src/styles/05-dice-animation.css`)
-   - 暗金边框与梯度背景
-   - 骰子总数的文字阴影
-   - 检定结果（成功/失败/大成功）的彩色边框
+#### 3. **主题注册与切换**
+   - `frontend/src/app/themes/contract.ts:444`：`pattern_coc` 注册（`abyssTokens` / `abyssLightTokens`，`theme.detail.abyss` 文案）；主题设置 schema 由该契约统一生成。
+   - `frontend/src/app/config/ConfigManager.ts:287,294`：切换时维护主题 class 列表并给 `body` 加 `theme-coc`。
+   - `frontend/src/app/worldOverride.ts:201`：世界意志法阵仅属于深渊帷幕。
 
-#### 4. **工具面板** (`frontend/src/styles/03-tools-settings-platform.css`)
-   - 面板悬停时的动态阴影与紫光
-   - 活跃标签页的暗金色与文字发光
+#### 4. **HTML 选项**（`frontend/src/index/fragments/03-room-tools-auth-settings.html`）
+   - 两个主题选择器各有一处 `<option value="pattern_coc" data-i18n="profile.theme.coc">`（:733、:922）。静态 fallback 文本仍是旧名「克苏鲁档案」，运行时会被 i18n 覆盖为「深渊帷幕」。
 
-#### 5. **前端逻辑** (`frontend/src/app/config/ConfigManager.ts`)
-   - `applyTheme()` 方法中添加 `pattern_coc` 处理
-   - 主题切换时平滑过渡
-
-#### 6. **HTML 选项** (`frontend/src/index/fragments/03-room-tools-auth-settings.html`)
-   - 两个主题选择器中各添加 `<option value="pattern_coc">`
-
-#### 7. **国际化** 
-   - 中文：`profile.theme.coc: "克苏鲁档案"`
-   - 英文：`profile.theme.coc: "Cthulhu archive"`
+#### 5. **国际化**
+   - `profile.theme.coc`：中文「深渊帷幕」/ 英文「Abyssal Veil」（`zh_cn.json:904`、`en_us.json:904`）。
+   - 主题说明 `theme.detail.abyss`（:911）与深渊特效提示 `profile.abyss.hint`（:967）中英同步。
 
 ---
 
@@ -218,25 +213,30 @@ theme = "pattern_coc"
 
 ---
 
-## 文件清单
-
-**新增/修改文件**（共 7 个）
+## 文件清单（2026-11-12 实测）
 
 ```
 frontend/src/styles/
-  ├─ 00-theme-tokens.css          ↑ 新增 300+ 行（身体部分，由于大小限制）
-  ├─ 01-foundation-chat.css       ↑ 新增 ~40 行
-  ├─ 03-tools-settings-platform.css ↑ 新增 ~50 行
-  └─ 05-dice-animation.css        ↑ 新增 ~70 行
+  ├─ 07-theme-abyss-tokens.css        token / 变量 / 背景层（~320 行）
+  ├─ 08-theme-abyss-components.css    组件覆盖（theme-coc 182 处）
+  └─ 06-combat-world-override.css     世界意志法阵与遮罩（theme-coc 29 处）
 
-frontend/src/
-  ├─ index/fragments/
-  │  └─ 03-room-tools-auth-settings.html ↑ 修改 2 处（添加 option 元素）
-  ├─ app/config/
-  │  └─ ConfigManager.ts          ↑ 修改 1 处（applyTheme 方法）
-  └─ locales/
-     ├─ zh_cn.json               ↑ 新增 1 行翻译
-     └─ en_us.json               ↑ 新增 1 行翻译
+frontend/src/app/themes/
+  ├─ contract.ts                      pattern_coc 注册 + 主题设置 schema
+  ├─ settings-ui.ts                   主题设置面板（schema 驱动）
+  └─ abyss/                           9 个场景引擎模块（core/main/atmosphere/
+                                      environment/eye/fx/sigils/spores/tentacles）
+
+frontend/src/app/
+  ├─ config/ConfigManager.ts          class 切换（theme-coc）
+  └─ worldOverride.ts                 世界意志法阵仅此主题
+
+frontend/src/index/fragments/
+  └─ 03-room-tools-auth-settings.html 两处 <option value="pattern_coc">（:733、:922）
+
+frontend/src/locales/
+  ├─ zh_cn.json                       profile.theme.coc / theme.detail.abyss / profile.abyss.hint
+  └─ en_us.json                       同上（键一致）
 ```
 
 **构建命令**

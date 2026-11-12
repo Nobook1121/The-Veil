@@ -6,11 +6,11 @@
 ## 1. 项目定位
 
 **帷幕 The Veil**：自托管的 AI 跑团（TRPG）平台。AI 担任 KP/守秘人，真人玩家在同一房间聊天中掷骰、交流、推进剧情。
-仓库名 `the-veil`，当前开发版本 `v0.5.11c`（`package.json` 版本号尚未 bump，仍为 `0.5.0-b`），Apache-2.0。
+仓库名 `the-veil`，当前版本 `v1.0.4`（`backend/trpg_server/version.py` 是唯一真源，`package.json` 同源），Apache-2.0。
 
 技术栈：
 
-- 后端：Python 3.11+ / Flask 2.3 / Flask-SocketIO（线程模式）/ SQLite / JSON 文件存储
+- 后端：Python 3.11+（当前验证 3.13）/ Flask 2.3.3 / Werkzeug 2.3.8 / Flask-SocketIO 5.3.6（线程模式）/ SQLite / JSON 文件存储
 - 前端：TypeScript + 原生 DOM（历史页面）+ React 19（侧边栏与首页聊天）/ Bootstrap 5（本地随包）
 - 构建：`tsc`（legacy TS → `dist/public/js`）+ `esbuild`（React bundle、3D 骰子 bundle）
 - 3D 骰子：`three` + `cannon-es`（独立 bundle `dist/public/js/dice/dice3d.js`，按需加载）
@@ -46,7 +46,7 @@
 | `frontend/src/` | 前端源码（TS、HTML 片段、样式、i18n、模板） |
 | `dist/public/` | 前端构建产物（发布包内置，禁止手改） |
 | `data/` | 持久化数据（剧本、资源、配置、运行时数据；`data/config/` 不入库，首次启动生成） |
-| `tests/` | pytest 测试（98 个 `test_*.py`；v0.5.11c 变更日志记录主题契约与结构测试 51 passed） |
+| `tests/` | pytest 测试（147 个 `test_*.py`；2026-11-12 全量 1730 passed / 2 skipped） |
 | `scripts/` | 构建、迁移、验证、导入辅助脚本 |
 | `config/` | 配置模板（`templates/general.toml`、`templates/roles/`、`templates/aiplatform/`）与示例环境配置（`vector-embedding-ocr.example.env`） |
 | `docs/` | 开发文档、API 文档、格式说明、本地 wiki |
@@ -64,6 +64,14 @@
 | `settings.py` | 路径常量（从 `config.paths` 再导出）、模型/向量库/OCR 环境变量、Secret Key 持久化；`DEFAULT_PORT` 派生自 `config.schema.DEFAULT_NETWORK_PORT` |
 | `config/` 包 | 分层配置权威实现：优先级 代码默认(`schema`) < `config/templates` < 遗留 JSON 兼容层 < `data/config/general.toml` < env `AI_TRPG_CFG_*` < CLI `--set`；`paths`（目录/CLI 解析与注入）、`fields`（FieldSpec 与转换器）、`schema`（全部配置项规格 + `AIRuntimeConfig`）、`sources`（tomlkit/遗留 JSON/env 读取）、`merge`（逐层类型化合并 + 缓存）、`writer`（注释保留定点写入）、`bootstrap`（首启种子） |
 | `config_admin.py` (89) | 控制台配置工具：`config show` / `config migrate` / `config path`；迁移只写 TOML 缺失键，并把遗留文件改名 `*.legacy` |
+| `props/` | 道具工坊：`registry`（12 内置 + 用户模板）、`template_validation`（字段白名单 + CSS 禁用清单）、`store`、`policy`（防剧透可见性 / 脱敏）、`render`（PDF/PNG）、`image`（photo 模板生图）、`draft` / `prompt`（AI 起草） |
+| `plugins/` | 第三方插件扩展体系：`manifest` / `contracts` / `registry` / `runtime` / `bootstrap` / `security`（清单解析、启用与能力门控） |
+| `ruleset/` | 规则集插件契约与注册：`contracts` / `registry` / `capabilities` / `descriptors` / `migrations` / `bootstrap` + `coc7/`（检定 / 成长与训练 / 社交 / 理智 / 战斗 / 追逐 / 法术 / 信用 / 治疗等数学与 schema） |
+| `combat/` | 战斗调度：`contracts` / `registry` / `scheduler` / `settings` + `rulesets/coc7.py`（战斗数学委托规则集） |
+| `room_ops/` | 房间域操作：`access` / `autosave` / `cards` / `constants` / `house_rules` / `log` / `storage` / `views` / `visibility` |
+| `immersive/` + `voice/` | 实时沉浸（配乐 / 配图 / 导演 / 外部曲库 / 房间缓存）与语音（TTS 引擎、角色音色、事件、本地模型） |
+| `update_service.py` | 应用更新：releases 检查、channel 过滤、zip 下载 + sha256 校验、60s 节流与互斥锁、DISABLE 开关 |
+| `version.py` / `app_info.py` | 版本唯一真源 / 应用信息载荷（版本、平台、credits、更新状态） |
 | `socket_events.py` | Socket.IO 事件注册（房间聊天、成员/输入状态、房间控制台日志推送等） |
 | `security.py` | `safe_join`、上传扩展名校验、会话守卫 |
 | `json_store.py` | `read_json` / `write_json_atomic`（原子写，防半写文件） |
@@ -71,9 +79,9 @@
 | `responses.py` | 统一 `success/message/data` 响应与错误响应 |
 | `permission_config.py` / `role_config.py` | 权限节点与 OWNER/ADMIN/USER 角色配置 |
 | `ai_platform_config.py` / `ai_capabilities.py` / `ai_admin.py` | AI 平台配置读写、能力检测、管理 |
-| `console_commands.py` | **服务器控制台**命令（用户/剧本/房间/备份/停机等，约 1456 行） |
+| `console_commands.py` | **服务器控制台**命令（用户/剧本/房间/备份/停机等） |
 | `room_console_commands.py` | **房间内嵌控制台**命令（严格限定当前房间） |
-| `room_log.py` | 房间日志 `data/runtime/rooms/<id>/console.jsonl`，随房间归档 |
+| `room_log/` | 房间控制台日志（`console.jsonl`，随房间归档，`room_log/__init__.py`）+ **团录导出**：`model`（归约）/ `markdown` / `fonts` / `render`（PyMuPDF）/ `jobs`（异步任务）+ `templates/` 三版式 |
 | `backup_admin.py` / `server_admin.py` / `user_admin.py` | 备份、服务器、用户管理逻辑 |
 | `scenario_store.py` | 剧本文件存储：`scenario.json` + `versions/` + `trigger-content/` |
 | `scenario_documents.py` / `scenario_importer.py` / `scenario_import_pipeline.py` / `scenario_import_jobs.py` | 剧本导入：文档解析、分块、AI 结构化、任务队列 |
@@ -83,7 +91,7 @@
 | `media_defaults.py` | 媒体与默认封面处理 |
 | `network_discovery.py` / `network_admin.py` | 局域网 IP/端口发现、网络配置 |
 | `setup_embedding.py` / `vector_admin.py` / `knowledge_admin.py` | Embedding 模型下载/上传、向量库与知识库管理 |
-| `site_agent.py` (439) | 网站 Agent 编排层：轮次循环、token 记账、平台故障转移 |
+| `site_agent.py` | 网站 Agent 编排层：轮次循环、token 记账、平台故障转移 |
 | `site_agent_config.py` / `site_agent_auth.py` / `site_agent_prompt.py` / `site_agent_store.py` | Agent 配置（`general.toml [site_agent]`）、统一鉴权（会话→开关→`agent.use`→工具权限→房间范围→业务校验）、系统提示词（不可信数据块包裹）、按用户隔离的会话/待确认操作/审计/用量存储 |
 | `site_agent_tools/` | Agent 工具注册表：`base.py`（JSON Schema 白名单清洗，丢弃身份/路径/命令字段）+ `characters` / `scenarios` / `rooms`（含消息读取/删除/清空）/ `settings`（网站设置读写，ADMIN/OWNER 硬门控）/ `profile`（本人昵称/邮箱/在线状态）/ `permissions` / `users` / `utilities`；只读工具直接执行，写工具只生成 `pending_action` 待确认卡片 |
 | `room_usage.py` | 房间 AI 用量账本：按平台模型单价与币种累加 `data/runtime/rooms/<room_id>/usage.json`（总/输入/输出/缓存 token、调用次数、分模型明细、多币种花费） |
@@ -93,8 +101,19 @@
 
 | 文件（约行数） | 职责 |
 | --- | --- |
-| `rooms.py` (1741) | 房间 CRUD、成员、邀请码、角色、自动存档、归档、切换剧本；`GET /api/rooms/<room_id>/usage` 用量（仅房主/房间管理员） |
-| `chat.py` (1028) + `chat_helpers.py` (676) | 聊天消息、AI KP 对话/流式输出、上下文组装 |
+| `rooms.py` (201) | 房间域入口：共享 helper 与蓝图注册；生命周期 / 成员 / 消息 / 房规 / 幕间见下三行；`GET /api/rooms/<room_id>/usage` 用量（仅房主/房间管理员） |
+| `rooms_lifecycle.py` (642) / `rooms_members.py` (287) / `rooms_messages.py` (498) | 房间创建/加入/邀请/切换剧本/归档；成员与角色卡绑定/房主移交/退出；消息、触发器触发与回档节点 |
+| `rooms_house_rules.py` (291) / `rooms_interlude.py` (233) | 世界意志权限与房规读写；自动存档与幕间（请求/开始/结算/复核/结束） |
+| `chat.py` (217) + `chat_helpers.py` (941) | 聊天入口与兼容 re-export；AI 回合管线在 `agents/turn_pipeline.py`，上下文组装在 `chat_helpers.py` |
+| `props.py` (718) | 道具工坊 12 个接口（模板 / 索引 / 创建 / 修改 / 删除 / 渲染 / 投递 / 脱敏 / photo 生图 / AI 起草） |
+| `room_log.py` (321) | 团录导出 5 个接口（预览 / 创建 202 任务 / 状态 / 下载 PDF / 删除） |
+| `plugins.py` (131) | 第三方插件：列表、schema、rescan、启用 / 停用 / 删除 |
+| `app_info.py` (43) | 应用信息与更新：`GET /api/app/info`、更新检查 / 下载 |
+| `room_rules.py` (385) | 斜杠规则命令：技能 / 属性 / 物品 / SAN 检定 / 通用检定 |
+| `combat.py` (415) | 房间战斗状态与战斗行动 |
+| `room_narrative.py` (185) | 房间叙事图、触发器读取与触发 |
+| `narrative.py` (1262) | 剧本叙事图：节点 / 边 / 触发器 / 可见性审查 / 启动点 / 校验修复 / 生成任务 |
+| `rulesets.py` (18) | 可用规则集列表 |
 | `characters.py` (883) | COC7 角色卡、职业/技能/武器目录、角色卡广场 |
 | `scenarios.py` (790) + `scenario_summary.py` (130) | 剧本 CRUD、模块、版本、摘要 |
 | `scenario_imports.py` (216) | 剧本导入任务与审核发布 |
@@ -102,11 +121,11 @@
 | `users.py` (335) | 用户列表、角色与状态、IP 配置、全局认证设置 |
 | `config.py` (536) | `GET /api/config/general` 返回分层合并后的生效配置 + `overrides` 锁定来源（免登录、密钥掩码）；`POST` 逐键 diff 写入并拒绝锁定/密钥键；AI 平台、提示词、权限配置 |
 | `setup.py` (426) | 首次部署六步向导（站点、AI、Embedding、Owner） |
-| `room_console.py` (180) | 房间控制台 REST 接口与日志读取 |
+| `room_console.py` (316) | 房间控制台命令执行、日志读取/清空、AI 写卡记录查询与回滚 |
 | `site_agent.py` (193) | 网站 Agent HTTP 接口（会话、消息、待确认操作、用量） |
 | `triggers.py` (282) | 触发器资源与附件 |
-| `dice_rolls.py` (202) | 待投掷请求查询/投掷/幂等完成/取消/强制投掷，前端降级上报 |
-| `dice_textures.py` (111) | 骰子贴图上传、桌面皮肤、逐面皮肤、删除引用保护 |
+| `dice_rolls.py` (398) | 待投掷请求查询/投掷/幂等完成/取消/强制投掷，前端降级上报 |
+| `dice_textures.py` (131) | 骰子贴图上传、桌面皮肤、逐面皮肤、删除引用保护 |
 | `knowledge_bases.py` (153) | 规则书知识库 |
 | `network.py` (212) | 局域网/内网穿透配置 |
 | `themes.py` (174) | 主题资源 |
@@ -121,7 +140,8 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `runtime.py` (554) | Agent 主循环：消息组装、工具调用、工具结果折叠、usage 记录 |
+| `runtime.py` | Agent 主循环：消息组装、工具调用、工具结果折叠、usage 记录 |
+| `turn_pipeline.py` (~1670) | 一次房间回合的完整管线：模式门控、上下文与提示词、AI 调用、工具执行、叙事守卫与写回 |
 | `prompt_builder.py` (158) | KP/NPC 提示词拼装 |
 | `latex.py` | LaTeX 氛围排版：站点开关解析、提示词片段、历史公式清洗（`flatten_latex` / `clean_history_for_model`）与缓存指纹 variant |
 | `profiles.py` (62) | AgentProfile 与默认 KP 工具集 |
@@ -146,6 +166,10 @@ Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送�
 - `knowledge.py`：规则书检索
 - `trigger.py`：揭示剧本触发器
 - `suggest.py`：建议行动
+- `combat.py`：战斗（瞄准 / 掩体 / 部位 / 击晕 / 毒 / 自然恢复 / 追逐…）
+- `coc7.py`：规则集扩展（社交 / 组合检定 / 团体幸运 / 信用 / 联系人 / 成长 / 训练…）
+- `props.py`：道具创建 / 投递 / 修改（仅 KP 可调用）
+- `narrative.py` / `character_items.py` / `character_stats.py`：叙事图查询、物品与属性写回
 - `base.py`：ToolRegistry 与 API 工具名规范化
 
 ### 4.4 用户与认证（`backend/trpg_server/users/`）
@@ -169,6 +193,10 @@ Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送�
 | `app/controllers/` | `ScenarioController.ts` 等控制器 |
 | `app/models/` | `ScenarioModel.ts` |
 | `app/config/` | `ConfigManager.ts`、`AIPlatformManager.ts`、`TestRequestConfig.ts` |
+| `app/settings/` | 设置页关于页（`about.ts`）、第三方插件设置（`plugins.ts`）、设置助手（`settingsAssistant.ts`）；标签页容器与绑定主逻辑在 `app/tabs.ts` |
+| `app/props/` | 道具工坊前端：道具库、编辑器、卡片渲染 |
+| `app/room-log.ts` | 团录导出入口、选项模态与任务轮询 |
+| `app/immersive/` | 沉浸配乐/配图前端 |
 | `app/auth/` | 登录/注册/资料/用户卡片/认证状态 |
 | `app/dice/` | 简易动画、3D 适配器、降级记忆、骰子外观、管理员贴图库、`diceOverlay.ts`（覆盖层）、`diceTypes.ts`（共享类型） |
 | `app/diceTable.ts` (~1400) | 虚拟投掷桌：物理骰面结果生成、本地骰桌结算、3D → 简易 → 纯文本逐层降级并上报 |
@@ -178,7 +206,7 @@ Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送�
 | `templates/*.html` | `<template id="...">` 模板源 |
 | `react/` | React 19 局部挂载：`main.tsx`、`shell/Sidebar.tsx`、`home/HomeChat.tsx`，esbuild 打包 |
 | `react/agent/` | 网站 Agent：`AgentProvider`（共享状态）、`AgentBall`（悬浮球）、`AgentWindow`（可拖拽悬浮窗）、`AgentPage`（全屏页）、`AgentChat` / `AgentActionCard`（Markdown 消息与待确认卡片）、`agent-api.ts` / `agent-types.ts` / `agent.css` |
-| `styles/` | 分层 CSS：`00-theme-tokens` → `01-foundation-chat` → `02-scenario-character` → `03-tools-settings-platform` → `04-auth-profile-overrides` → `05-dice-animation` → `06-combat-world-override` → `07/08-theme-abyss-*` → `09/10-theme-cyber-*`（由 `react/app.css` 统一 `@import`） |
+| `styles/` | 分层 CSS：`00-theme-tokens` → `01-foundation-chat` → `02-scenario-character` → `03-tools-settings-platform` → `04-auth-profile-overrides` → `05-dice-animation` → `06-combat-world-override` → `07/08-theme-abyss-*` → `09/10-theme-cyber-*` → `11-immersive` → `12-theme-settings` → `13-settings-redesign` → `14-room-log` → `15-props`（由 `react/app.css` 统一 `@import`） |
 | `locales/zh_cn.json` / `en_us.json` | 中英文案（运行时 `i18n.ts`） |
 | `tools/` | 骰子/检定/工具管理（编译到 `dist/public/data/tools/`） |
 | `types/*.d.ts` | 手写全局类型声明 |
@@ -208,7 +236,8 @@ Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送�
 | `data/config/` | 用户配置（`.gitignore` 已忽略，首次启动从模板幂等生成）：`general.toml` 是唯一「人类设置」入口，段包括 `appearance/language/notification/autosave/room_console/chat/ai*/character_rules/scenario/window/update/site_agent/site/network*`；另有 `roles/`、`aiplatform/`（首次保存时创建）、`aimodel/`；遗留 `site.json`/`network.json`/`penetration.json` 仅兼容读取，用 `config migrate` 并入 TOML |
 | `data/occupations/` / `data/weapons/` / `data/character_skills.json` | 职业、武器目录与角色技能表 |
 | `data/runtime/users/` | `users.sqlite3`、IP 配置 |
-| `data/runtime/rooms/<room_id>/` | `info.json`、`messages.json`、`autosave.json`、`usage.json`、`nodes/`、`console.jsonl` |
+| `data/runtime/rooms/<room_id>/` | `info.json`、`messages.json`、`autosave.json`、`usage.json`、`nodes/`、`console.jsonl`、`props/`（道具 spec 与渲染产物） |
+| `data/runtime/logs/exports/<room_id>/<export_id>/` | 团录导出任务与 PDF（按 `keep_exports_days` 清理） |
 | `data/runtime/agent/` | 网站 Agent：`conversations/<user_id>/`、`actions/`（待确认操作，TTL 默认 5 分钟）、`audit/`（JSONL 滚动审计）、`usage/<user_id>/`（逐日 token） |
 | `data/runtime/room_archives/` | 房间归档快照（含控制台日志） |
 | `data/runtime/characters/` / `character_gallery/` | 角色卡与广场 |
@@ -247,6 +276,7 @@ Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送�
 - 被 env / CLI 覆盖的键自动进入 `overrides` 锁定集合：设置页禁用对应字段，`POST /api/config/general` 会跳过并记录日志；密钥字段（如穿透令牌）GET 掩码、POST 拒写。
 - 前端浏览器源码必须在 `frontend/src/app/`，手写类型放 `frontend/src/types/`；不得出现 `frontend/src/js`、根 `js/`、`frontend/dist/`。
 - 新增路由：`routes/` 下新文件一个业务组，并在 `app_factory.register_blueprints()` 注册。
+- 规则数学进 `ruleset/`（内置 CoC7）或第三方插件；核心模块不得直接 import 具体插件，应通过 `ruleset.capabilities` / 注册表取用（边界清单见 `docs/plans/ruleset-boundary-audit.md`）。
 - 路径拼接用 `security.safe_join`；上传校验用 `is_allowed_upload`；JSON 读写用 `json_store`。
 - 新接口前端优先用 `TrpgApi`（`app/api-client.ts`），DOM 操作用 `TrpgDom`。
 - 禁止 `alert()` / `confirm()` / `prompt()`；用 `showNotification()` 或 `TrpgDialog.confirm()/prompt()`。
@@ -267,7 +297,12 @@ Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送�
 | 全局配置/分层加载/设置页 | `config/`（`schema`/`merge`/`writer`/`bootstrap`）、`config/templates/general.toml`、`routes/config.py`、`config_admin.py`、`frontend/src/app/config/ConfigManager.ts` |
 | 剧本导入/解析 | `scenario_import_pipeline.py`、`scenario_documents.py`、`scenario_import_jobs.py`、`routes/scenario_imports.py` |
 | 剧本 CRUD/版本/模块 | `scenario_store.py`、`routes/scenarios.py`、`frontend/src/app/views/*` |
-| 房间/邀请/成员/自动存档 | `routes/rooms.py`、`room_admin.py`、`data/runtime/rooms/` |
+| 房间/邀请/成员/自动存档 | `routes/rooms.py` + `routes/rooms_*.py`、`room_ops/`、`room_admin.py`、`data/runtime/rooms/` |
+| 道具工坊 | `props/`、`routes/props.py`、`agents/tools/props.py`、`frontend/src/app/props/*`、`styles/15-props.css`、`docs/prop-templates.md` |
+| 团录导出 | `room_log/`、`routes/room_log.py`、`frontend/src/app/room-log.ts`、`styles/14-room-log.css` |
+| 规则集插件 / COC7 规则 | `ruleset/`、`combat/`、`check_service.py`、`agents/tools/coc7.py`、`docs/plans/coc7-rules-roadmap.md` |
+| 第三方插件 | `plugins/`、`routes/plugins.py`、`frontend/src/app/settings/plugins.ts`、`docs/plugin-development.md` |
+| 应用更新 / 关于页 | `update_service.py`、`app_info.py`、`version.py`、`routes/app_info.py`、`frontend/src/app/settings/about.ts`、`styles/13-settings-redesign.css` |
 | 聊天与 Socket 事件 | `routes/chat.py`、`routes/chat_helpers.py`、`socket_events.py`、`frontend/src/app/chat.ts`、`agents/latex.py`、`frontend/src/app/latex.ts`、`styles/01-foundation-chat.css`；LaTeX 开关位于 `general.toml [chat] latex_*` |
 | 角色卡/COC7 检定 | `routes/characters.py`、`character_ai.py`、`frontend/src/app/character-sheet.ts`、`agents/tools/dice.py` |
 | 骰子动画/玩家投掷/贴图 | `agents/dice_settings.py`、`agents/player_roll.py`、`routes/dice_rolls.py`、`routes/dice_textures.py`、`dice_textures.py`、`frontend/src/app/diceTable.ts`、`frontend/src/app/dice/*`、`frontend/src/dice3d/main.ts`、`styles/05-dice-animation.css` |

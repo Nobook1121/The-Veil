@@ -118,6 +118,16 @@
 
 ---
 
+## 致谢 / 赞助 / Star
+
+**Star**：如果帷幕对你有帮助，欢迎到 [GitHub 仓库](https://github.com/Nobook1121/The-Veil) 点一个 Star，或把使用中遇到的问题提成 Issue——这是对项目最直接的鼓励。
+
+**赞助**：赞助用于支付模型 API 额度、测试机与素材授权费用；**赞助不购买功能优先级，也不影响任何内容的开放**。赞助渠道与赞助名单展示在站点「设置 → 关于」页（数据由 `backend/trpg_server/resources/credits.json` 维护，赞助者信息仅在本人同意后加入）。
+
+**致谢**：感谢所有依赖项目与贡献者。完整鸣谢、依赖清单与各自许可证见站点关于页、`credits.json` 与 [第三方许可证汇总](THIRD-PARTY-LICENSES.md)。
+
+---
+
 ## 许可
 
 本项目以 [Apache License 2.0](LICENSE) 发布。请同时遵守你所用剧本、规则书与 AI 服务各自的授权条款。

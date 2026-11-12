@@ -329,3 +329,13 @@ data/rulesets/coc7/catalogs/items.json      # 可空
 - **批次 3（`dd01a5d`）**：`coc7/sanity.py` 声明 `check_name` / `madness_check_name`，SAN 计划与骰桌展示由核心读取插件声明；删除 `room_rules.py` 中未使用的 `MADNESS_LOSS_THRESHOLD` 副本。
 - 三批均先跑金样逐字一致，再跑全量 `pytest`（1328 passed / 1 skipped），逐批提交。
 - **金样未覆盖、仍需注意的路径**：`run_room_economy` 的信用评级消费换算；`combat/rulesets/coc7.py` 与 `agents/tools/combat.py` 内部的 `_success_level` 调用（走同一委托，但未纳入金样）；叙述层 `agents/narrative/*` 与 `agents/tools/narrative.py` 的成功 / 失败词表；前端 `checkTool.ts` 的别名与阈值渲染。
+
+### 11.3 边界复核（2026-11-12）
+
+复核 docs/plans/ruleset-boundary-audit.md 与 coc7-rules-audit.md 的当前状态（只读审计，未改实现）：
+
+- **10 个钩子**：6 个完整（注册表解耦、RollPolicy、SchemaDescriptor、StateKeys、能力降级、Combat 工厂）；4 个部分——`CheckPolicy`（已走 `CheckProvider` + `check_service`）、`ToolBundle`（插件工具已组装，但核心仍持有 `roll_coc_check` / `COC7_EXTRA_TOOLS` 兜底）、版本键（只有卡片信封 + 知识库 `active_version`，没有运行态 `rulesets:{id:version}`）、`COC7Adapter` 默认兜底。
+- **收敛目标**：S1/S4/S9/S10 达成；S2/S5/S6/S7 部分达成。
+- **§11.2 四项金样缺口**：①`run_room_economy` 已补独立测试（`test_coc7_batch1_rules` / `batch1_runtime`，只读 credit/cash），但未纳入 check 金样矩阵；②`combat/_success_level` 确认委托 `dice._success_level`（`combat/rulesets/coc7.py:17-24`、`agents/tools/combat.py:29-38`），数学被金样间接覆盖，combat 链路本身仍无金样；③叙述层词表仍硬编码（`agents/narrative/extract.py:29,67,392`、`resolver.py:34-36`、`tools/narrative.py:223`）；④`checkTool.ts` 的别名 / 难度仍硬编码（`:3,:47,:73`），仅阈值读房间（`:35-39`），无前端测试。
+- **新增回归**：2026-11-09 后在核心模块函数内新增 8 处直接 `import ... ruleset.coc7`（`room_chase.py:29`、`room_interlude.py:25,270`、`room_magic.py:14`、`room_rule_commands.py:258,281,721-862`、`room_sanity.py:25`、`turn_pipeline.py:850`），与「只有 bootstrap 写死插件路径」的约束相悖，「删掉 coc7 后核心仍可启动/导入」尚未达成。
+- **后续收敛方案（未做）**：P1 把这 8 处改走 `capabilities` 并加「断开 coc7 后核心可导入」用例；P2 适配器默认空实现 + 核心注册、运行态版本键；P3 补四项金样与前端测试。B2/B14 已在 2026-11-12 的规则整改中修复（奖惩骰统一净额夹 ±2、射击体格差改 `target − attacker`）。

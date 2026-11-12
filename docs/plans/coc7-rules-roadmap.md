@@ -1,6 +1,6 @@
 # CoC 7e 章节级缺口实施路线图
 
-> 状态：**只出计划，不写代码、不改配置、不改 `coc7-rules-audit.md` 的正文结论**。
+> 状态：**已大部分落地（2026-11-12 复核）**。批次 0–5 的主体实现已进入代码，逐项现状见 §2.1；仍待拍板的事项列在该节末尾。
 > 来源：第二版审查报告 §4「逐章新增」的口径，范围仅限本轮点名的章节级缺口。
 > 前置共识：SAN 初始值 = POW，上限 = 99 − 克苏鲁神话，钳制由另一条线实现，本计划不再涉及。
 > 插件边界：规则数学、表数据、校验优先落在 `backend/trpg_server/ruleset/coc7/`；`check_service` 只做调度；`room_rules` / `character_service` 只做快照与持久化适配；`agents/tools`、`room_rule_commands` 只做薄封装；前端只负责呈现。参见 [ruleset-plugin-design.md](ruleset-plugin-design.md)。
@@ -27,6 +27,25 @@
 | 3 | SAN 状态结构化 + 首次神话 + 习惯恐惧 + 现实认知 + 治疗 + 症状/恐惧表 | H | 第一次改角色卡结构与时间模型，必须独立成批。 |
 | 4 | 战斗细节（瞄准/掩体/近战误伤/击晕/部位/毒剂/自然恢复）+ 房规前端入口 | H（UI 为 L） | 战斗流程最脆，依赖战斗状态与 HP 持久化，放在后面。 |
 | 5 | 追逐整章、法术库与典籍 | H | 新子系统与内容层，投入最大、可并行但不阻塞核心。 |
+
+### 2.1 落地现状（2026-11-12 复核）
+
+| 批次 | 状态 | 落点与差异 |
+| --- | --- | --- |
+| 0 契约冻结 | ✅ | `ruleset/coc7/schema.py:53` `EXTENSION_SCHEMA_VERSIONS` 9 个命名空间 + `:122-145` default/normalize；`pack/validate` 未强制命名空间（只加声明，旧卡零影响） |
+| 1 纯函数 | ✅（年龄/EDU 除外） | 工具 `coc7.social_check/combined_check/group_luck/contact_check/economy`；命令 `rule social/combined/groupluck/contact/economy`；旧名保留。`extensions.age.profile` / `character.apply_age` 未实现 |
+| 2 成长主线 | ✅（B13 除外） | `growth.py` 成长/排除/90%+ SAN；`training.py` 新增（4 周/次、上限 12 周、`coc7_growth_training` 默认关闭）；marks 写 `extensions.growth.marks` 并兼容旧 `member_state`；`SKILL_MAX=99`（`ruleset/coc7/rules.py:22`）让 >99 不再成长，B13 未动 |
+| 3 SAN 结构化 | ✅（数据文件除外） | `mental_status` v2、首次神话 +5、习惯、现实认知、`san.treat`、100 条恐惧/躁狂已落地；`bout_summary.json` 仍内联在 `sanity_state.BOUT_SYMPTOMS` |
+| 4 战斗细节 | ✅ | 瞄准/掩体/误伤/击晕/部位/毒/自然恢复数学 + `combat.knockout` / `combat.hit_location` / `rule combat` + 前端房规组；`poison.py` / `healing.py` 未拆独立模块（数学在 `combat_rules.py`）；默认全关 |
+| 5 追逐/法术 | ✅ | 追逐存 `info["chase"]` 会话段；法术/典籍 106/99 条，键名 `extensions.magic.spells/grimoires`；无 `content.packs` 内容包开关 |
+
+测试：新增 `tests/test_coc7_roadmap_gaps.py`（27 例）覆盖 training/marks/schema/B2 五组合/B14 体格差/新工具命令/`san.treat`/`rule check` 别名/`status` 字段；定向套件 364 passed。
+
+待拍板：
+1. 房规默认值是否按本计划翻成 `true`（当前全部默认关闭，老房间行为不变；翻开会一次性开启 20+ 项可选规则）。
+2. B13：技能是否允许 >100（影响成长与 `SKILL_MAX`）。
+3. `poison.py` / `healing.py` 拆模块与 `bout_summary.json` 文件化是否要求文件级对齐。
+4. B2 是否允许显式传 3 颗以上奖励骰（当前统一夹到 ±2）。
 
 ## 3. 批次详情
 

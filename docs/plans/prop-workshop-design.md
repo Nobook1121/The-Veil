@@ -3,13 +3,15 @@ name: prop-workshop-design
 description: 道具工坊设计稿 —— 跑团纸质道具的模板化生成、做旧、导出与投递；AI KP 通过工具创建/揭示道具，自动从剧本线索备道具
 metadata:
   type: project
-  status: design-only
+  status: implemented
   date: 2026-11-10
+  updated: 2026-11-12
 ---
 
 # 道具工坊 · 设计稿
 
 > 目标读者：执行 agent。按 §10 顺序做，每包跑 §11 验收。
+> **落地状态（2026-11-12）**：P0–P6 全部实现（提交 `c9150ac`…`fbd6371`，后续 `dfbfe55` 用户模板来源、`189db18` burn/ink + 问问 KP、`96ac2ae` 文档回写、安全整改 `0a68617` / `189db18` / `96ac2ae` / `5a80f44` / `e61a18f` / `3eedbee` / `672e8ed`）。实现位于 `backend/trpg_server/props/`（registry / template_validation / store / policy / render / image / draft）、`routes/props.py`、`agents/tools/props.py`、`frontend/src/app/props/`、`styles/15-props.css`、`docs/prop-templates.md`。已知偏差与遗留见 §14「落地偏差」。
 > 灵感来源：B 站《拾页Ⅱ 135 个模板》（BV16D4c63EEN）——但不复刻它的 135 个模板，只做「少数高价值模板 + AI 自动化」。
 > **核心差异**：拾页是给人手做的工具；帷幕的道具工坊要**让 AI KP 自己写、自己做、自己发**。
 

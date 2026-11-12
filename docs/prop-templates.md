@@ -53,7 +53,7 @@ div p span h1 h2 h3 h4 table tr td ul ol li hr img strong em
 - 禁止 `<script>`、`<iframe>`、`on*` 事件属性、`javascript:`。
 - `src` 与 CSS `url()` 只能引用 `assets/` 内的 png/jpg 文件名，不接受 `http(s)`、`//`、`data:` 或 `..` 路径。
 - `style.css` 同样禁止 `@import`、`javascript:`、`expression()`、`-moz-binding` 和外链 `url(...)`。
-- 不使用 flex / grid / absolute / float / column-count / border-image；布局用文档流与 table。
+- 不使用 flex / grid / absolute / float / column-count / border-image；并禁止 `position` / `transform` / `box-shadow` / `writing-mode` / `direction` / `top` / `right` / `bottom` / `left` / `z-index`（以 `props/template_validation.py` 的 `_DISALLOWED_CSS_PROPS` 为准）；布局用文档流与 table。
 
 ## 资源限制
 
@@ -64,7 +64,7 @@ div p span h1 h2 h3 h4 table tr td ul ol li hr img strong em
 
 ## 失败与冲突时的表现
 
-- 单个用户模板校验失败：只把该模板列入不可用，其他模板照常返回；`templates` 接口的 `unavailable` 数组会带 `id`、`dir`、`source`、`reason`。
+- 单个用户模板校验失败：只把该模板列入不可用，其他模板照常返回；`templates` 接口的 `unavailable` 数组会带 `id`、`source`、`reason`（服务端绝对路径不会下发）。
 - 用户模板 id 与内置冲突：内置保留，用户模板进入 `unavailable`，原因写明「与内置模板 id 冲突」。
 - 目录缺 `manifest.json`、`page.html` 或 `style.css`：该模板不可用，不影响列表。
 - 重新扫描后模板缓存会清空；如果模板正在被编辑，编辑器会按新列表重新渲染选择器。

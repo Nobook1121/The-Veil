@@ -273,6 +273,37 @@
 - `POST /api/dice-textures/dice-skins`：新建 / 更新骰子皮肤（`id` 可选、`name`、`die_type`、`faces` 逐面资产映射）。
 - `DELETE /api/dice-textures/skins/<skin_id>`：删除皮肤。
 
+### 道具工坊（Props）
+
+来源：`routes/props.py`，实现见 `backend/trpg_server/props/`。读接口要求房间成员；创建 / 修改 / 删除 / 渲染 / 投递 / 脱敏要求站点管理员、房主或房管。玩家只能读取**已揭示**的道具，未揭示一律 `404 prop.not_found`（不泄露存在性）。`[props] enabled=false` 时统一返回 `403 prop.disabled`；写接口请求体非法返回 `400 prop.invalid_body`，房间不存在返回 `404 prop.room_not_found`，权限不足返回 `403 prop.forbidden`。
+
+- `GET /api/rooms/<room_id>/props/templates`：模板清单（12 个内置模板 + 用户模板），附不可用模板与原因（已剥离服务端绝对路径）。
+- `POST /api/props/templates/rescan`：重新扫描用户模板目录（仅站点管理员）。
+- `POST /api/rooms/<room_id>/props/draft`：AI 起草——按 `template_id` 与 `era` / `place` / `clues` / `tone` 生成字段草稿，供编辑器预填；受 `[props] ai_draft_enabled` 控制，失败返回 `502 prop.draft_failed`（不阻塞手动填写）。
+- `GET /api/rooms/<room_id>/props`：道具索引，按当前用户可见性过滤（玩家只见已揭示）。
+- `POST /api/rooms/<room_id>/props`：创建道具（标题、字段、样式、做旧程度、可见性、脱敏区间）。
+- `GET /api/rooms/<room_id>/props/<prop_id>`：读取单个道具；未揭示时对玩家返回 404，KP 可见完整内容。
+- `PATCH /api/rooms/<room_id>/props/<prop_id>`：修改道具（字段白名单：`title` / `fields` / `style` / `wear` / `visibility` / `redaction`）。
+- `DELETE /api/rooms/<room_id>/props/<prop_id>`：删除道具及其渲染产物（删除房间目录内文件，不可恢复）。
+- `GET /api/rooms/<room_id>/props/<prop_id>/render?format=pdf|png`：渲染道具。渲染并发上限 2、等待队列上限 8、获取许可超时 15 秒；熔断开启时直接返回可读错误；字体缺失时拒绝渲染而不是产出坏文件。
+- `POST /api/rooms/<room_id>/props/<prop_id>/reveal`：向房间投递道具（写入 `type=prop` 消息，按可见性脱敏；支持 burn / ink 等做旧投递效果）。
+- `POST /api/rooms/<room_id>/props/<prop_id>/redact`：追加脱敏区间（防剧透：未揭示内容不进入任何 AI prompt）。
+- `POST /api/rooms/<room_id>/props/<prop_id>/photo`：为 `photo` 模板道具生成 / 重绘照片（body 可带 `{"force": true}` 强制重绘）；受生图预算限制，预算耗尽或失败时返回 `degraded` 状态而不是 500。
+
+配置键在 `general.toml` 的 `[props]` 段（`enabled`、渲染与预算相关项）；AI 侧工具为 `props.create_prop` / `props.reveal_prop` / `props.update_prop`（仅 KP 可调用，见 [控制台命令](console-commands.md) 与道具模板文档）。
+
+### 团录导出（Room Log Export）
+
+来源：`routes/room_log.py`，实现见 `backend/trpg_server/room_log/`。要求登录且为房间成员；是否允许普通成员导出由设置 `room_log.members_can_export` 控制，`room_log.enabled=false` 时一律 `403 log.forbidden`。导出产物按**发起人视角**生成（KP-only 内容与定向道具按发起人可见性取舍），因此只有发起人（或房主 / 房管 / 站点管理员）能查询与下载。
+
+- `GET /api/rooms/<room_id>/log/preview`：导出前预览。返回归约后的文档结构（章节 / 消息统计 `stats`）、`can_export` / `can_export_reason`（`font_missing` / `members_disabled`）与可用模板列表。无可导出消息返回 `400 log.empty`，选项非法返回 `400 log.invalid_option`。
+- `POST /api/rooms/<room_id>/log/exports`：创建异步导出任务，成功返回 `202` 与 `{export_id, status}`。可选参数：`template`（`archive` / `letter` / `minimal`）、`include_kp_only`、`include_dice`、`include_ooc`、`include_images`、`date_from` / `date_to`（`YYYY-MM-DD`）。字体不可用返回 `503 log.font_missing`。
+- `GET /api/rooms/<room_id>/log/exports/<export_id>`：任务状态（`status`、进度、错误信息、模板、创建时间等；失败时额外返回 `trace_id` 便于报障）；未知 id 返回 `404 log.export_not_found`，非发起人且非房主/房管/管理员返回 `403`。任务记录落盘，服务重启后仍可查询；运行中重启的任务标记为 `failed`。
+- `GET /api/rooms/<room_id>/log/exports/<export_id>/file`：下载 PDF（`Content-Disposition: 团录-<房间名>-<日期>.pdf`）；任务未完成返回 `409 log.not_ready`。
+- `DELETE /api/rooms/<room_id>/log/exports/<export_id>`：清理任务记录与产物；非成员 `403`、未知 id `404 log.export_not_found`、运行中 `409 log.not_ready`，删除成功返回 `{"deleted": true}`。
+
+配置键在 `general.toml` 的 `[room_log]` 段（启用、默认模板、是否含骰子 / 场外 / 图片、单次消息上限、`keep_exports_days` 保留天数、字体等）。
+
 ---
 
 ## 十一、聊天（Chat）
