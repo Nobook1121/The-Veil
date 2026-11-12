@@ -11,7 +11,7 @@ import uuid
 from typing import Any, Mapping
 
 from trpg_server.agents.tools.base import AgentTool
-from trpg_server.props import policy, registry, store
+from trpg_server.props import normalize, registry, store
 from trpg_server.props import props_settings
 from trpg_server.room_ops.storage import _read_messages, _timestamp, _write_messages
 
@@ -31,10 +31,11 @@ def _settings(context: Any) -> dict[str, Any]:
 
 
 def _room_dir(context: Any):
-    room_dir = getattr(context, "room_dir", None)
-    if room_dir is None:
-        raise ValueError("当前不在房间内")
-    return room_dir
+    """返回房间目录；不在房间内时返回 ``None``，由调用方回告模型（不抛异常）。"""
+    return getattr(context, "room_dir", None)
+
+
+_MISSING_ROOM_TEXT = "当前不在房间内，无法操作道具。"
 
 
 def _templates_hint() -> str:
@@ -45,56 +46,16 @@ def _templates_hint() -> str:
     return "模板不存在，可用：" + (" / ".join(items) if items else "（无）")
 
 
-def _clamp(value: Any, default: float = 0.0) -> float:
-    try:
-        return max(0.0, min(1.0, float(value)))
-    except (TypeError, ValueError):
-        return default
-
-
 def _normalize_wear(raw: Any, previous: Mapping[str, Any] | None = None) -> dict[str, float]:
-    result = {key: _clamp((previous or {}).get(key)) for key in _WEAR_KEYS}
-    if isinstance(raw, Mapping):
-        for key in _WEAR_KEYS:
-            if key in raw:
-                result[key] = _clamp(raw.get(key))
-    return result
+    return normalize.normalize_wear(raw, previous)
 
 
 def _normalize_style(raw: Any) -> dict[str, str]:
-    if not isinstance(raw, Mapping):
-        return {}
-    result: dict[str, str] = {}
-    for key in ("paper", "ink", "accent", "font"):
-        value = str(raw.get(key) or "").strip()
-        if value:
-            result[key] = value[:40]
-    return result
+    return normalize.normalize_style(raw)
 
 
 def _normalize_redaction(raw: Any, fields: Mapping[str, Any]) -> list[dict[str, Any]]:
-    if not isinstance(raw, (list, tuple)):
-        return []
-    items: list[dict[str, Any]] = []
-    for entry in raw:
-        if not isinstance(entry, Mapping):
-            continue
-        field = str(entry.get("field") or "").strip()
-        if field not in fields:
-            continue
-        try:
-            start = int(entry.get("start"))
-            end = int(entry.get("end"))
-        except (TypeError, ValueError):
-            continue
-        length = len(str(fields.get(field) or ""))
-        start = max(0, min(start, length))
-        end = max(0, min(end, length))
-        if end <= start:
-            continue
-        mode = str(entry.get("mode") or "burn").strip().lower()
-        items.append({"field": field, "start": start, "end": end, "mode": mode if mode in {"burn", "ink"} else "burn"})
-    return items
+    return normalize.normalize_redaction(raw, fields=fields, strict=False)
 
 
 def _truncation_notice(
@@ -152,6 +113,26 @@ def _parse_recipients(raw: Any) -> tuple[str, list[int]] | None:
     return None
 
 
+def _delivery_audience(context: Any, mode: str, recipients: list[int]) -> list[int] | None:
+    """partial 时的 socket 推送名单：收件人 + 房间 owner/admin（C1）。"""
+    if mode == "all":
+        return None
+    audience = list(recipients)
+    info = context.room_info() if hasattr(context, "room_info") else {}
+    for member in (info.get("members") if isinstance(info, Mapping) else []) or []:
+        if not isinstance(member, Mapping) or member.get("is_active") is False:
+            continue
+        if str(member.get("room_role") or "") not in {"owner", "admin"}:
+            continue
+        try:
+            value = int(member.get("user_id"))
+        except (TypeError, ValueError):
+            continue
+        if value not in audience:
+            audience.append(value)
+    return audience
+
+
 def _deliver(
     context: Any,
     spec: Mapping[str, Any],
@@ -160,6 +141,8 @@ def _deliver(
     message: str = "",
 ) -> dict[str, Any]:
     room_dir = _room_dir(context)
+    if room_dir is None:
+        return {"ok": False, "error": _MISSING_ROOM_TEXT}
     room_id = str(getattr(context, "room_id", "") or "")
     visibility = {
         "mode": "revealed" if mode == "all" else "partial",
@@ -195,7 +178,11 @@ def _deliver(
     try:
         from trpg_server.immersive import broadcast
 
-        broadcast.emit("new_message", {**payload, "room_id": room_id})
+        broadcast.emit(
+            "new_message",
+            {**payload, "room_id": room_id},
+            audience=_delivery_audience(context, mode, recipients),
+        )
     except Exception:  # noqa: BLE001 - 广播失败不回滚已落库的消息
         logger.warning("props tool reveal broadcast failed room=%s", room_id, exc_info=True)
     return {"ok": True, "message": payload, "visibility": visibility}
@@ -206,11 +193,20 @@ def execute_create_prop(arguments: dict[str, Any], context: Any) -> dict[str, An
     if not settings.get("enabled", True):
         return {"ok": False, "error": "道具工坊未启用，无法创建道具。"}
 
-    created = int(getattr(context, "tool_state", {}).get("props_created", 0) or 0)
+    state = getattr(context, "tool_state", None)
+    if not isinstance(state, dict):
+        state = {}
+        try:
+            setattr(context, "tool_state", state)
+        except Exception:  # noqa: BLE001 - 冻结的上下文只影响计数，不阻断创建
+            logger.debug("props tool_state is immutable", exc_info=True)
+    created = int(state.get("props_created", 0) or 0)
     if created >= 1:
         return {"ok": False, "error": "本回合已创建过 1 件道具；请先完成叙事，需要修改请用 props.update。"}
 
     room_dir = _room_dir(context)
+    if room_dir is None:
+        return {"ok": False, "error": _MISSING_ROOM_TEXT}
     limit = int(settings.get("max_props_per_room") or 200)
     if len(store.list_index(room_dir)) >= limit:
         return {
@@ -260,7 +256,7 @@ def execute_create_prop(arguments: dict[str, Any], context: Any) -> dict[str, An
         logger.warning("props.create write failed", exc_info=True)
         return {"ok": False, "error": f"道具写入失败：{exc}"}
 
-    context.tool_state["props_created"] = created + 1
+    state["props_created"] = created + 1
     truncated, notice = _truncation_notice(template_id, raw_fields, fields)
 
     delivered = 0
@@ -311,6 +307,8 @@ def execute_reveal_prop(arguments: dict[str, Any], context: Any) -> dict[str, An
     if not settings.get("enabled", True):
         return {"ok": False, "error": "道具工坊未启用，无法投递道具。"}
     room_dir = _room_dir(context)
+    if room_dir is None:
+        return {"ok": False, "error": _MISSING_ROOM_TEXT}
     prop_id = str(arguments.get("prop_id") or "").strip()
     spec = store.read_prop(room_dir, prop_id) if store.is_valid_prop_id(prop_id) else None
     if spec is None:
@@ -343,6 +341,8 @@ def execute_update_prop(arguments: dict[str, Any], context: Any) -> dict[str, An
     if not settings.get("enabled", True):
         return {"ok": False, "error": "道具工坊未启用，无法修改道具。"}
     room_dir = _room_dir(context)
+    if room_dir is None:
+        return {"ok": False, "error": _MISSING_ROOM_TEXT}
     prop_id = str(arguments.get("prop_id") or "").strip()
     spec = store.read_prop(room_dir, prop_id) if store.is_valid_prop_id(prop_id) else None
     if spec is None:
@@ -407,21 +407,7 @@ def execute_update_prop(arguments: dict[str, Any], context: Any) -> dict[str, An
 
 
 def _clamp_redaction(spec: Mapping[str, Any], items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    fields = spec.get("fields") if isinstance(spec.get("fields"), Mapping) else {}
-    result: list[dict[str, Any]] = []
-    for item in items:
-        if not isinstance(item, Mapping):
-            continue
-        field = str(item.get("field") or "")
-        if field not in fields:
-            continue
-        length = len(str(fields.get(field) or ""))
-        start = max(0, min(int(item.get("start") or 0), length))
-        end = max(0, min(int(item.get("end") or 0), length))
-        if end <= start:
-            continue
-        result.append({**dict(item), "start": start, "end": end})
-    return result
+    return normalize.clamp_redaction(spec, items)
 
 
 CREATE_PROP_TOOL = AgentTool(

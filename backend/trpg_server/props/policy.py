@@ -148,13 +148,55 @@ def visible_spec(
     return result
 
 
+def message_visible_to(
+    metadata: Mapping[str, Any] | None, user_id: Any, *, is_kp: bool = False
+) -> bool:
+    """``prop`` 消息是否对当前查看者可见。
+
+    ``revealed_to`` 为空表示投递给全体；非空时只有名单内的玩家与 KP 可见。
+    其他类型的消息不受影响，由调用方只对 ``type == "prop"`` 使用。
+    """
+    if not isinstance(metadata, Mapping):
+        return True
+    raw = metadata.get("revealed_to")
+    if not isinstance(raw, (list, tuple, set)) or not raw:
+        return True
+    if is_kp:
+        return True
+    target = str(user_id if user_id is not None else "").strip()
+    return bool(target) and target in {str(item).strip() for item in raw}
+
+
+def filter_messages(
+    messages: Iterable[Mapping[str, Any]] | None,
+    user_id: Any,
+    *,
+    is_kp: bool = False,
+) -> list[Mapping[str, Any]]:
+    """按收件人过滤消息列表；只处理 ``type == "prop"``，其余原样保留。"""
+    result: list[Mapping[str, Any]] = []
+    for message in messages or []:
+        if not isinstance(message, Mapping):
+            continue
+        if str(message.get("type") or "") == "prop" and not message_visible_to(
+            message.get("metadata") if isinstance(message.get("metadata"), Mapping) else None,
+            user_id,
+            is_kp=is_kp,
+        ):
+            continue
+        result.append(message)
+    return result
+
+
 __all__ = [
     "AI_MASK",
     "PLAYER_MASK",
     "VISIBILITY_MODES",
     "apply_redaction",
     "can_view",
+    "filter_messages",
     "has_redaction",
+    "message_visible_to",
     "redacted_for_ai",
     "revealed_to",
     "visibility_mode",

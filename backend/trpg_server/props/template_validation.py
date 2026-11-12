@@ -35,6 +35,28 @@ _URL_RE = re.compile(r"url\(\s*['\"]?([^'\")]+)", re.IGNORECASE)
 _DANGEROUS_CSS_RE = re.compile(r"(@import|javascript:|expression\s*\(|-moz-binding)", re.IGNORECASE)
 _SAFE_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9 _-]{1,64}$")
+_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_CSS_DECLARATION_RE = re.compile(r"([A-Za-z-]+)\s*:\s*([^;{}]+)")
+_CSS_IMPORTANT_RE = re.compile(r"!\s*important\s*$", re.IGNORECASE)
+_CSS_DIMENSION_PROP_RE = re.compile(r"^(?:min-|max-)?(?:width|height)$")
+_CSS_DIMENSION_VALUE_RE = re.compile(r"^(-?\d+(?:\.\d+)?)\s*(pt|px|em|rem|cm|mm|in|%)?$", re.IGNORECASE)
+_DISALLOWED_CSS_PROPS = frozenset(
+    {
+        "position",
+        "float",
+        "column-count",
+        "border-image",
+        "box-shadow",
+        "transform",
+        "top",
+        "right",
+        "bottom",
+        "left",
+        "z-index",
+    }
+)
+MAX_ABSOLUTE_DIMENSION = 2000.0
+MAX_PERCENT_DIMENSION = 100.0
 
 
 def _fail(message: str) -> None:
@@ -54,6 +76,33 @@ def _read_text(path: Path, limit: int, label: str) -> str:
     except OSError as exc:
         _fail(f"{label} 无法读取")
         raise TemplateError(label) from exc  # pragma: no cover
+
+
+def _check_css_declarations(text: str, label: str) -> None:
+    """拦截 §4.2 禁用的定位/装饰属性与超大尺寸（用户模板 C4）。"""
+    cleaned = _CSS_COMMENT_RE.sub("", text)
+    for match in _CSS_DECLARATION_RE.finditer(cleaned):
+        prop = match.group(1).strip().lower()
+        value = _CSS_IMPORTANT_RE.sub("", match.group(2).strip().lower()).strip()
+        if prop in _DISALLOWED_CSS_PROPS:
+            _fail(f"{label} 禁止使用 {prop}")
+        if not _CSS_DIMENSION_PROP_RE.match(prop):
+            continue
+        dimension = _CSS_DIMENSION_VALUE_RE.match(value)
+        if dimension is None:
+            continue
+        try:
+            number = float(dimension.group(1))
+        except ValueError:  # pragma: no cover - 正则已保证是数字
+            continue
+        unit = (dimension.group(2) or "").lower()
+        if number < 0:
+            _fail(f"{label} 的 {prop} 不能为负数")
+        if unit == "%":
+            if number > MAX_PERCENT_DIMENSION:
+                _fail(f"{label} 的 {prop} 超过 {MAX_PERCENT_DIMENSION:g}%")
+        elif number > MAX_ABSOLUTE_DIMENSION:
+            _fail(f"{label} 的 {prop} 超过 {MAX_ABSOLUTE_DIMENSION:g}{unit or ''}")
 
 
 def _check_css_urls(text: str, label: str) -> None:
@@ -106,6 +155,11 @@ class _HtmlAudit(HTMLParser):
             if key == "style":
                 if _DANGEROUS_CSS_RE.search(value):
                     self.error = "style 属性包含禁止的写法"
+                    return
+                try:
+                    _check_css_declarations(value, "style 属性")
+                except TemplateError as exc:
+                    self.error = str(exc)
                     return
                 for match in _URL_RE.finditer(value):
                     target = match.group(1).strip().strip("'\"")
@@ -219,6 +273,8 @@ def _validate_assets(root: Path) -> None:
 
 def validate_user_template(root: Path, manifest: Mapping[str, Any]) -> None:
     """用户模板的额外校验；失败抛 :class:`TemplateError`（带可读原因）。"""
+    if root.is_symlink():
+        _fail("模板目录不允许符号链接")
     try:
         manifest_path = safe_join(root, "manifest.json")
         page_path = safe_join(root, "page.html")
@@ -226,6 +282,13 @@ def validate_user_template(root: Path, manifest: Mapping[str, Any]) -> None:
     except ValueError:
         _fail("模板路径不合法")
         return
+    for label, path in (
+        ("manifest.json", manifest_path),
+        ("page.html", page_path),
+        ("style.css", style_path),
+    ):
+        if path.is_symlink():
+            _fail(f"{label} 不允许符号链接")
     if not page_path.is_file():
         _fail("缺少 page.html")
     if not style_path.is_file():
@@ -242,6 +305,7 @@ def validate_user_template(root: Path, manifest: Mapping[str, Any]) -> None:
         _fail(f"page.html 无法解析：{exc}")
     if audit.error:
         _fail(audit.error)
+    _check_css_declarations(css, "style.css")
     _check_css_urls(css, "style.css")
     _validate_manifest_extras(manifest)
     _validate_assets(root)

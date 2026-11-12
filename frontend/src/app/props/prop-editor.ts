@@ -66,7 +66,8 @@ interface Window {
     function notifyError(error: unknown): void {
         const runtime = api();
         const fallback = t("prop.error.generic", "操作失败，请稍后重试。");
-        const message = t(`prop.error.${runtime.errorCode(error)}`, runtime.errorText(error, fallback));
+        const code = runtime.errorCode(error).replace(/^prop\./, "");
+        const message = t(`prop.error.${code}`, runtime.errorText(error, fallback));
         global.showNotification?.(message, "error");
         setStatus(message, "error");
     }

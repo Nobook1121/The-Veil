@@ -9,6 +9,7 @@ from trpg_server.json_store import read_json
 from trpg_server.json_store import write_json_atomic
 from trpg_server.logging_config import user_action_text
 from trpg_server.media_defaults import normalize_avatar
+from trpg_server.props import policy as props_policy
 from trpg_server.responses import error_response
 from trpg_server.responses import success_response
 from trpg_server.room_log import log_room_event
@@ -56,7 +57,12 @@ def get_room_messages(room_id):
     if not _can_access(info):
         return _denied(room_id)
 
-    return success_response(_read_messages(room_dir), "Room messages loaded successfully")
+    member = _find_member(info, user_id=session.get("user_id"), active_only=True)
+    is_kp = _is_elevated() or str((member or {}).get("room_role") or "") in {"owner", "admin"}
+    messages = props_policy.filter_messages(
+        _read_messages(room_dir), session.get("user_id"), is_kp=is_kp
+    )
+    return success_response(messages, "Room messages loaded successfully")
 
 @bp.route("/api/rooms/<room_id>/messages", methods=["POST"])
 def create_room_message(room_id):

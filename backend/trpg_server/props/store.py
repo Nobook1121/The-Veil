@@ -37,6 +37,9 @@ _ID_RANDOM = random.SystemRandom()
 
 _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
+# 每房间一把锁且不回收会随房间数无上限增长；限制条目数，超限时淘汰最早
+# 创建的锁。淘汰只可能让长期无操作的房间短暂拿到两把锁，风险远小于泄漏。
+_MAX_ROOM_LOCKS = 1024
 
 
 class PropStoreError(RuntimeError):
@@ -106,6 +109,8 @@ def _room_lock(room_dir: str | Path) -> threading.RLock:
     with _LOCKS_GUARD:
         lock = _LOCKS.get(key)
         if lock is None:
+            if len(_LOCKS) >= _MAX_ROOM_LOCKS:
+                _LOCKS.pop(next(iter(_LOCKS)), None)
             lock = threading.RLock()
             _LOCKS[key] = lock
         return lock

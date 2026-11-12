@@ -30,7 +30,9 @@ USER_TEMPLATES_DIR = DATA_DIR / "props" / "templates"
 # 兼容旧引用：渲染器仍可从 ``TEMPLATES_DIR`` 推导内置资源目录。
 TEMPLATES_DIR = BUILTIN_TEMPLATES_DIR
 REQUIRED_MANIFEST_KEYS = ("id", "name", "fields")
+MAX_MANIFEST_BYTES = 128 * 1024
 _TEMPLATE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+_TEMPLATE_FILES = ("manifest.json", "page.html", "style.css")
 
 _CACHE: dict[str, tuple[tuple, dict[str, Any]]] = {}
 _CACHE_LOCK = threading.RLock()
@@ -51,6 +53,11 @@ class UnknownTemplate(TemplateError):
 
 class FieldError(TemplateError):
     """提交的字段不满足模板 schema。"""
+
+
+def template_signature(template_id: str) -> tuple:
+    """模板文件的 mtime/size 摘要，用于渲染缓存键（模板改动后自动失效）。"""
+    return _signature(template_dir(template_id))
 
 
 def template_dir(template_id: str) -> Path:
@@ -237,12 +244,27 @@ def _scan() -> dict[str, dict[str, Any]]:
         if not base.is_dir():
             continue
         for root in sorted(base.iterdir()):
+            if root.is_symlink():
+                # 符号链接可能把模板根指向数据目录之外，一律拒绝（C3）。
+                unavailable.append(_unavailable_entry(root, source, "模板目录不允许符号链接"))
+                logger.warning("props template symlink rejected id=%s source=%s", root.name, source)
+                continue
             if not root.is_dir():
                 continue
             manifest_path = root / "manifest.json"
             if not manifest_path.is_file():
                 if source != "builtin":
                     unavailable.append(_unavailable_entry(root, source, "缺少 manifest.json"))
+                continue
+            linked = next((name for name in _TEMPLATE_FILES if (root / name).is_symlink()), "")
+            if linked:
+                unavailable.append(_unavailable_entry(root, source, f"{linked} 不允许符号链接"))
+                logger.warning(
+                    "props template symlink rejected id=%s source=%s file=%s",
+                    root.name,
+                    source,
+                    linked,
+                )
                 continue
             signature = _signature(root)
             cache_key = f"{source}:{root.name}"
@@ -333,6 +355,18 @@ def _signature(root: Path) -> tuple:
 
 def _read_manifest(path: Path) -> dict[str, Any]:
     try:
+        if path.is_symlink():
+            raise TemplateError(f"模板清单不允许符号链接：{path.parent.name}")
+        size = path.stat().st_size
+    except TemplateError:
+        raise
+    except OSError as exc:
+        raise TemplateError(f"模板清单无法读取：{path.parent.name}") from exc
+    if size > MAX_MANIFEST_BYTES:
+        raise TemplateError(
+            f"模板清单超过大小上限（{MAX_MANIFEST_BYTES // 1024} KB）：{path.parent.name}"
+        )
+    try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise TemplateError(f"模板清单无法读取：{path.parent.name}") from exc
@@ -394,6 +428,7 @@ __all__ = [
     "reset_template_sources",
     "rescan",
     "template_dir",
+    "template_signature",
     "unregister_template_source",
     "validate_fields",
 ]

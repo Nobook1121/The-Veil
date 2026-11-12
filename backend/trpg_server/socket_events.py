@@ -52,11 +52,17 @@ def register_socket_events(socketio):
     )
 
     # 沉浸系统：配乐导演指令与配图结果都按房间广播，只有房间内客户端可见。
+    # 道具投递带 audience 时逐用户推送，避免部分揭示的内容被非收件人收到。
     from trpg_server.immersive import register_broadcaster as register_immersive_broadcaster
 
-    register_immersive_broadcaster(
-        lambda event, payload: socketio.emit(event, payload, room=payload.get("room_id"))
-    )
+    def _emit_immersive(event, payload, audience=None):
+        if audience:
+            for user_id in audience:
+                socketio.emit(event, payload, room=f"user:{user_id}")
+            return
+        socketio.emit(event, payload, room=payload.get("room_id"))
+
+    register_immersive_broadcaster(_emit_immersive)
 
     def _room_membership():
         return current_app.config.setdefault(USER_ROOM_MEMBERSHIP_KEY, {})

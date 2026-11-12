@@ -11,7 +11,10 @@ import hashlib
 import io
 import json
 import logging
+import os
 import re
+import threading
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -38,6 +41,14 @@ _PAPER_FILES = {
 }
 _DEFAULT_INK = "#2b2b2b"
 _DEFAULT_ACCENT = "#7a5c3e"
+_SAFE_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
+_MAX_TARGET_LOCKS = 256
+_TARGET_LOCKS: dict[str, threading.Lock] = {}
+_TARGET_LOCKS_GUARD = threading.Lock()
+_PRUNE_INTERVAL_SECONDS = 3600.0
+_PRUNE_LOCK = threading.Lock()
+_LAST_PRUNE: dict[str, float] = {}
+_MAX_PRUNE_ROOMS = 512
 # (文件名, 最小像素宽, 最大像素宽)
 _WEAR_FILES = {
     "stain": ("stain.png", 90, 240),
@@ -74,13 +85,17 @@ def fill_page_html(spec: Mapping[str, Any], template: str | Mapping[str, Any]) -
         # to_html 会把单个换行并成同一段，这里额外提供 <br/> 版本。
         values[f"{key}_lines"] = "<br/>".join(escape_html(line) for line in text.splitlines())
 
+    # 便签等模板用 {{title}} 显示主标题；没有对应字段时回落到 PropSpec.title。
+    if not values.get("title"):
+        values["title"] = escape_html(str(spec.get("title") or ""))
+
     style = spec.get("style") if isinstance(spec.get("style"), Mapping) else {}
     paper = str(style.get("paper") or "ivory").strip().lower()
     paper_file = _PAPER_FILES.get(paper, _PAPER_FILES["ivory"])
     values["paper"] = paper_file
     values["paper_style"] = f"background-image:url({paper_file});" if paper_file else ""
-    values["ink"] = str(style.get("ink") or _DEFAULT_INK)
-    values["accent"] = str(style.get("accent") or _DEFAULT_ACCENT)
+    values["ink"] = _safe_color(style.get("ink"), _DEFAULT_INK)
+    values["accent"] = _safe_color(style.get("accent"), _DEFAULT_ACCENT)
 
     wear = spec.get("wear") if isinstance(spec.get("wear"), Mapping) else {}
     for name, (filename, min_width, max_width) in _WEAR_FILES.items():
@@ -104,6 +119,12 @@ def fill_page_html(spec: Mapping[str, Any], template: str | Mapping[str, Any]) -
     return f"<html><body>{body}</body></html>"
 
 
+def _safe_color(raw: Any, default: str) -> str:
+    """``style.ink/accent`` 只接受 ``#hex``，其余回退默认色（C8）。"""
+    value = str(raw or "").strip()
+    return value if _SAFE_COLOR_RE.match(value) else default
+
+
 def _wear_html(name: str, filename: str, raw_strength: Any, min_width: int, max_width: int) -> str:
     try:
         strength = float(raw_strength)
@@ -122,9 +143,80 @@ def _wear_html(name: str, filename: str, raw_strength: Any, min_width: int, max_
 # ---------------------------------------------------------------- 渲染
 
 
-def spec_hash(spec: Mapping[str, Any]) -> str:
-    payload = json.dumps(dict(spec or {}), sort_keys=True, ensure_ascii=False, default=str)
+def spec_hash(
+    spec: Mapping[str, Any],
+    *,
+    template_key: Any = "",
+    font_key: str = "",
+) -> str:
+    """渲染缓存键：spec + 模板文件签名 + 字体签名（B4）。
+
+    模板或字体变化后签名不同，旧的 ``renders/<id>@<hash>`` 自然失效。
+    """
+    payload = json.dumps(
+        {"spec": dict(spec or {}), "template": template_key, "font": font_key},
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _font_signature(font_path: str | Path | None, data_dir: str | Path | None) -> str:
+    try:
+        _family, resolved = resolve_font(str(font_path or ""), data_dir=data_dir)
+        path = Path(resolved)
+        stat = path.stat()
+        return f"{path}:{stat.st_mtime_ns}:{stat.st_size}"
+    except Exception:  # noqa: BLE001 - 字体探测失败时退回入参，不阻断渲染
+        return str(font_path or "")
+
+
+def _target_lock(target: Path) -> threading.Lock:
+    key = str(target)
+    with _TARGET_LOCKS_GUARD:
+        lock = _TARGET_LOCKS.get(key)
+        if lock is None:
+            if len(_TARGET_LOCKS) >= _MAX_TARGET_LOCKS:
+                _TARGET_LOCKS.pop(next(iter(_TARGET_LOCKS)), None)
+            lock = threading.Lock()
+            _TARGET_LOCKS[key] = lock
+        return lock
+
+
+def _write_atomic(path: Path, data: bytes) -> None:
+    """先写同目录临时文件再 ``os.replace``，避免并发读到半截文件（B5）。"""
+    temp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        temp.write_bytes(data)
+        os.replace(temp, path)
+    finally:
+        if temp.exists():
+            try:
+                temp.unlink()
+            except OSError:
+                logger.debug("props temp cleanup failed path=%s", temp, exc_info=True)
+
+
+def _maybe_prune(room_dir: str | Path, settings: Mapping[str, Any] | None) -> int:
+    """按房间节流清理渲染缓存（默认每小时一次），不再只在缓存 miss 时跑（C6）。"""
+    if settings is None:
+        return 0
+    try:
+        days = int(settings.get("render_cache_days") or 0)
+    except (TypeError, ValueError):
+        return 0
+    if days <= 0:
+        return 0
+    key = str(Path(room_dir).resolve())
+    now = time.monotonic()
+    with _PRUNE_LOCK:
+        if now - _LAST_PRUNE.get(key, 0.0) < _PRUNE_INTERVAL_SECONDS:
+            return 0
+        if len(_LAST_PRUNE) >= _MAX_PRUNE_ROOMS:
+            _LAST_PRUNE.clear()
+        _LAST_PRUNE[key] = now
+    return store.prune_renders(room_dir, days)
 
 
 def render_prop(
@@ -165,9 +257,21 @@ def render_prop(
         _story_to_pdf_bytes(html, css, archive, page_rect, margins), spec
     )
     if suffix == "pdf":
-        output.write_bytes(payload)
+        _write_atomic(output, payload)
     else:
-        _pdf_to_png(payload, output)
+        # PyMuPDF 按扩展名推断图片格式，临时文件必须保留 .png 后缀。
+        temp = output.with_name(
+            f".{output.stem}.{os.getpid()}.{threading.get_ident()}.tmp{output.suffix}"
+        )
+        try:
+            _pdf_to_png(payload, temp)
+            os.replace(temp, output)
+        finally:
+            if temp.exists():
+                try:
+                    temp.unlink()
+                except OSError:
+                    logger.debug("props temp cleanup failed path=%s", temp, exc_info=True)
 
     return {
         "path": str(output),
@@ -187,31 +291,41 @@ def render_cached(
     font_path: str | Path | None = None,
     data_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    """命中 ``renders/<id>@<sha1(spec)>.<ext>`` 直接复用，否则渲染后落盘。"""
+    """命中 ``renders/<id>@<sha1(spec+模板+字体)>.<ext>`` 直接复用，否则渲染后落盘。"""
     prop_id = str(spec.get("id") or "")
-    digest = spec_hash(spec)
-    target = store.render_path(room_dir, prop_id, digest, fmt)
-    if target.is_file():
-        return {
-            "path": str(target),
-            "pages": _page_count(target) if target.suffix.lower() == ".pdf" else 1,
-            "bytes": target.stat().st_size,
-            "template_id": str(spec.get("template_id") or ""),
-            "format": str(fmt).lower(),
-            "cached": True,
-        }
-    target.parent.mkdir(parents=True, exist_ok=True)
-    result = render_prop(
+    template_id = str(spec.get("template_id") or "")
+    try:
+        template_key = registry.template_signature(template_id)
+    except Exception:  # noqa: BLE001 - 模板不存在时让 render_prop 抛可读错误
+        template_key = template_id
+    digest = spec_hash(
         spec,
-        target,
-        font_path=font_path,
-        room_dir=room_dir,
-        data_dir=data_dir,
-        fmt=fmt,
+        template_key=template_key,
+        font_key=_font_signature(font_path, data_dir),
     )
-    result["cached"] = False
-    if settings is not None:
-        store.prune_renders(room_dir, int(settings.get("render_cache_days") or 0))
+    target = store.render_path(room_dir, prop_id, digest, fmt)
+    with _target_lock(target):
+        if target.is_file():
+            result = {
+                "path": str(target),
+                "pages": _page_count(target) if target.suffix.lower() == ".pdf" else 1,
+                "bytes": target.stat().st_size,
+                "template_id": template_id,
+                "format": str(fmt).lower(),
+                "cached": True,
+            }
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            result = render_prop(
+                spec,
+                target,
+                font_path=font_path,
+                room_dir=room_dir,
+                data_dir=data_dir,
+                fmt=fmt,
+            )
+            result["cached"] = False
+    _maybe_prune(room_dir, settings)
     return result
 
 

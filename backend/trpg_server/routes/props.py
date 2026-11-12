@@ -24,7 +24,7 @@ from typing import Any, Mapping
 from flask import Blueprint, current_app, request, send_file, session
 
 from trpg_server import props as props_config
-from trpg_server.props import draft, image, policy, registry, store
+from trpg_server.props import draft, image, normalize, policy, registry, store
 from trpg_server.props.render import RenderError, render_cached
 from trpg_server.responses import error_response, success_response
 from trpg_server.room_log.fonts import FontMissing, resolve_font
@@ -46,10 +46,13 @@ bp = Blueprint("props", __name__)
 logger = logging.getLogger(__name__)
 
 _RENDER_SEMAPHORE = threading.Semaphore(2)
+_RENDER_MAX_WAITING = 8
+_RENDER_ACQUIRE_TIMEOUT = 15.0
+_RENDER_WAITING = 0
+_RENDER_WAITING_LOCK = threading.Lock()
 _FORMATS = {"pdf": "application/pdf", "png": "image/png"}
 _WRITE_ROLES = {ROOM_ROLE_OWNER, ROOM_ROLE_ADMIN}
 _WRITE_KEYS = {"title", "fields", "style", "wear", "visibility", "redaction"}
-_WEAR_NAMES = ("stain", "fold", "burn", "tear")
 
 
 def _settings() -> dict[str, Any]:
@@ -71,7 +74,7 @@ def _not_found():
 def _load_room(room_id: str):
     room_dir, info = _find_room(room_id)
     if not room_dir:
-        return None, None, error_response("Room not found", 404, "Room not found")
+        return None, None, error_response("Room not found", 404, "prop.room_not_found")
     return room_dir, info, None
 
 
@@ -86,11 +89,21 @@ def _write_forbidden():
     return error_response("Permission denied", 403, "prop.forbidden")
 
 
+def _public_unavailable() -> list[dict[str, Any]]:
+    """剥掉服务端绝对路径 ``dir``，只保留 id/source/reason（C7）。"""
+    return [
+        {key: value for key, value in item.items() if key != "dir"}
+        for item in registry.list_unavailable()
+        if isinstance(item, Mapping)
+    ]
+
+
 # ---------------------------------------------------------------- 参数规整
 
 
-class BodyError(ValueError):
-    """请求体字段非法。"""
+# 规整逻辑统一收敛在 ``props/normalize.py``（B3）；这里保留薄封装，
+# 让路由侧继续用「strict=True」把非法请求体映射成 prop.invalid_body。
+BodyError = normalize.NormalizeError
 
 
 def _payload() -> dict[str, Any]:
@@ -99,99 +112,27 @@ def _payload() -> dict[str, Any]:
 
 
 def _normalize_title(raw: Any, fallback: str) -> str:
-    title = str(raw or "").strip() or fallback
-    return title[:200]
+    return normalize.normalize_title(raw, fallback)
 
 
 def _normalize_style(raw: Any, previous: Mapping[str, Any] | None = None) -> dict[str, str]:
-    base = dict(previous or {})
-    if not isinstance(raw, Mapping):
-        return base
-    for key in ("paper", "ink", "accent", "font"):
-        if key in raw:
-            value = str(raw.get(key) or "").strip()
-            if value:
-                base[key] = value[:40]
-            else:
-                base.pop(key, None)
-    return base
+    return normalize.normalize_style(raw, previous)
 
 
 def _normalize_wear(raw: Any, previous: Mapping[str, Any] | None = None) -> dict[str, float]:
-    base = {name: float(previous.get(name) or 0.0) for name in _WEAR_NAMES} if previous else {}
-    if not isinstance(raw, Mapping):
-        return base
-    for name in _WEAR_NAMES:
-        if name not in raw:
-            continue
-        try:
-            value = float(raw.get(name))
-        except (TypeError, ValueError):
-            continue
-        base[name] = max(0.0, min(1.0, value))
-    return base
+    return normalize.normalize_wear(raw, previous)
 
 
 def _normalize_redaction(raw: Any) -> list[dict[str, Any]]:
-    if not isinstance(raw, (list, tuple)):
-        raise BodyError("redaction 必须是数组")
-    items: list[dict[str, Any]] = []
-    for entry in raw:
-        if not isinstance(entry, Mapping):
-            raise BodyError("redaction 元素必须是对象")
-        field = str(entry.get("field") or "").strip()
-        if not field:
-            raise BodyError("redaction 缺少 field")
-        try:
-            start = int(entry.get("start"))
-            end = int(entry.get("end"))
-        except (TypeError, ValueError) as exc:
-            raise BodyError("redaction 的 start/end 必须是整数") from exc
-        if end <= start:
-            continue
-        mode = str(entry.get("mode") or "burn").strip().lower()
-        if mode not in {"burn", "ink"}:
-            mode = "burn"
-        items.append({"field": field, "start": start, "end": end, "mode": mode})
-    return items
+    return normalize.normalize_redaction(raw, strict=True)
 
 
 def _normalize_visibility(raw: Any, previous: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    if raw is None:
-        return dict(previous or {"mode": "hidden", "revealed_to": []})
-    if not isinstance(raw, Mapping):
-        raise BodyError("visibility 必须是对象")
-    mode = str(raw.get("mode") or "hidden").strip().lower()
-    if mode not in policy.VISIBILITY_MODES:
-        raise BodyError("visibility.mode 非法")
-    recipients = raw.get("revealed_to")
-    ids: list[int] = []
-    if mode == "partial":
-        if not isinstance(recipients, (list, tuple)) or not recipients:
-            raise BodyError("partial 可见性需要 revealed_to")
-        for item in recipients:
-            try:
-                ids.append(int(item))
-            except (TypeError, ValueError) as exc:
-                raise BodyError("revealed_to 必须是用户 id 数组") from exc
-    return {"mode": mode, "revealed_to": ids}
+    return normalize.normalize_visibility(raw, previous)
 
 
 def _clamp_redaction(spec: dict[str, Any], items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """按当前字段长度裁剪区间，越界/空区间直接丢弃。"""
-    fields = spec.get("fields") if isinstance(spec.get("fields"), Mapping) else {}
-    kept: list[dict[str, Any]] = []
-    for item in items:
-        text = fields.get(item["field"])
-        if text is None:
-            continue
-        length = len(str(text))
-        start = max(0, min(int(item["start"]), length))
-        end = max(0, min(int(item["end"]), length))
-        if end <= start:
-            continue
-        kept.append({**item, "start": start, "end": end})
-    return kept
+    return normalize.clamp_redaction(spec, items)
 
 
 def _build_spec(room_id: str, body: Mapping[str, Any], settings: Mapping[str, Any]) -> dict[str, Any]:
@@ -264,7 +205,7 @@ def list_prop_templates(room_id):
         {
             "templates": registry.list_templates(),
             "groups": registry.list_template_groups(),
-            "unavailable": registry.list_unavailable(),
+            "unavailable": _public_unavailable(),
         },
         "Prop templates loaded",
     )
@@ -281,6 +222,11 @@ def rescan_prop_templates():
     if _disabled():
         return _disabled_response()
     result = registry.rescan()
+    result["unavailable"] = [
+        {key: value for key, value in item.items() if key != "dir"}
+        for item in result.get("unavailable") or []
+        if isinstance(item, Mapping)
+    ]
     return success_response(result, "Prop templates rescanned")
 
 
@@ -488,7 +434,16 @@ def delete_prop(room_id, prop_id):
         return _write_forbidden()
     if not store.is_valid_prop_id(prop_id):
         return _not_found()
-    deleted = store.delete_prop(room_dir, prop_id)
+    try:
+        deleted = store.delete_prop(room_dir, prop_id)
+    except (OSError, store.PropStoreError):
+        trace_id = uuid.uuid4().hex[:12]
+        logger.exception(
+            "props delete failed room=%s id=%s trace=%s", room_id, prop_id, trace_id
+        )
+        return error_response(
+            "Prop delete failed", 500, "prop.delete_failed", trace_id=trace_id
+        )
     return success_response({"deleted": bool(deleted)}, "Prop deleted")
 
 
@@ -538,22 +493,36 @@ def render_prop_file(room_id, prop_id):
     except FontMissing:
         return error_response("No usable CJK font", 503, "prop.font_missing")
 
+    global _RENDER_WAITING
+    with _RENDER_WAITING_LOCK:
+        if _RENDER_WAITING >= _RENDER_MAX_WAITING:
+            return error_response("Render queue is full", 429, "prop.render_busy")
+        _RENDER_WAITING += 1
     try:
-        with _RENDER_SEMAPHORE:
-            result = render_cached(
-                room_dir,
-                view,
-                fmt,
-                settings=settings,
-                font_path=font_path,
-                data_dir=current_app.config.get("DATA_DIR"),
-            )
-    except RenderError as exc:
+        acquired = _RENDER_SEMAPHORE.acquire(timeout=_RENDER_ACQUIRE_TIMEOUT)
+    finally:
+        with _RENDER_WAITING_LOCK:
+            _RENDER_WAITING -= 1
+    if not acquired:
+        return error_response("Render queue timeout", 503, "prop.render_timeout")
+
+    try:
+        result = render_cached(
+            room_dir,
+            view,
+            fmt,
+            settings=settings,
+            font_path=font_path,
+            data_dir=current_app.config.get("DATA_DIR"),
+        )
+    except RenderError:
         logger.exception("props render failed room=%s id=%s trace=%s", room_id, prop_id, trace_id)
-        return error_response(f"Prop render failed: {exc}", 500, "prop.render_failed", trace_id=trace_id)
+        return error_response("Prop render failed", 500, "prop.render_failed", trace_id=trace_id)
     except Exception:  # noqa: BLE001 - 不把内部异常文本回给客户端
         logger.exception("props render failed room=%s id=%s trace=%s", room_id, prop_id, trace_id)
         return error_response("Prop render failed", 500, "prop.render_failed", trace_id=trace_id)
+    finally:
+        _RENDER_SEMAPHORE.release()
 
     title = str(view.get("title") or prop_id)
     response = send_file(
@@ -620,6 +589,22 @@ def reveal_prop(room_id, prop_id):
     if updated is None:
         return _not_found()
 
+    # partial 投递只把 socket 推送给收件人与 KP/房管，避免非收件人看到卡片（C1）。
+    audience: list[int] | None = None
+    if visibility["mode"] == "partial":
+        audience = list(recipients)
+        for member in info.get("members") or []:
+            if member.get("is_active", True) is False:
+                continue
+            if str(member.get("room_role") or "") not in _WRITE_ROLES:
+                continue
+            try:
+                value = int(member.get("user_id"))
+            except (TypeError, ValueError):
+                continue
+            if value not in audience:
+                audience.append(value)
+
     content = str(body.get("message") or "").strip() or f"递来一件道具：{updated.get('title') or ''}"
     message = {
         "id": uuid.uuid4().hex,
@@ -643,7 +628,9 @@ def reveal_prop(room_id, prop_id):
     try:
         from trpg_server.immersive import broadcast
 
-        broadcast.emit("new_message", {**message, "room_id": str(room_id)})
+        broadcast.emit(
+            "new_message", {**message, "room_id": str(room_id)}, audience=audience
+        )
     except Exception:  # noqa: BLE001 - 广播失败不回滚已落库的消息
         logger.warning("props reveal broadcast failed room=%s id=%s", room_id, prop_id, exc_info=True)
 

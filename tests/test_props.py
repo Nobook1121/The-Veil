@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import pymupdf
@@ -1192,3 +1194,151 @@ def test_photo_generation_platform_failure_degrades(tmp_path):
     )
     assert result["ok"] is False and result["degraded"] is True
     assert "upstream down" in result["reason"]
+
+
+# ---------------------------------------------------------------- 安全与缺陷回归（第一批）
+
+
+def test_partial_prop_message_filtered_for_other_players(tmp_path):
+    room_id = _api_room(tmp_path)
+    owner = _api_app(tmp_path).test_client()
+    _login(owner)
+    created = _create(owner, room_id)
+    assert owner.post(
+        f"/api/rooms/{room_id}/props/{created['id']}/reveal",
+        json={"to": [2]},
+        headers=_headers(),
+    ).status_code == 200
+
+    player2 = _api_app(tmp_path).test_client()
+    _login(player2, user_id=2, username="player2")
+    player2_messages = player2.get(f"/api/rooms/{room_id}/messages").get_json()["data"]
+    assert any(item.get("type") == "prop" for item in player2_messages)
+
+    player3 = _api_app(tmp_path).test_client()
+    _login(player3, user_id=3, username="player3")
+    player3_messages = player3.get(f"/api/rooms/{room_id}/messages").get_json()["data"]
+    assert not any(item.get("type") == "prop" for item in player3_messages)
+
+    owner_messages = owner.get(f"/api/rooms/{room_id}/messages").get_json()["data"]
+    assert any(item.get("type") == "prop" for item in owner_messages)
+
+
+def test_user_template_symlinks_and_css_are_rejected(user_templates):
+    real = _write_user_template(user_templates, "linked-page")
+    outside = real.parent / "outside.html"
+    outside.write_text("<div><p>{{body}}</p></div>", encoding="utf-8")
+    try:
+        (real / "page.html").unlink()
+        os.symlink(outside, real / "page.html")
+    except (OSError, NotImplementedError):
+        pytest.skip("当前环境不允许创建符号链接")
+    _write_user_template(user_templates, "css-position", css=".x { position: absolute; }")
+    _write_user_template(user_templates, "css-transform", css=".x { transform: scale(2); }")
+    _write_user_template(user_templates, "css-huge", css=".x { width: 99999pt; }")
+    _write_user_template(user_templates, "good-after-bad")
+
+    ids = registry.available_ids()
+    assert "good-after-bad" in ids
+    assert not {"linked-page", "css-position", "css-transform", "css-huge"} & set(ids)
+    reasons = " ".join(item["reason"] for item in registry.list_unavailable())
+    assert "符号链接" in reasons
+    assert "position" in reasons
+    assert "transform" in reasons
+    assert "width" in reasons
+
+
+def test_templates_endpoint_strips_server_paths(tmp_path, user_templates):
+    _write_user_template(user_templates, "broken-css", css=".x { float: left; }")
+    room_id = _api_room(tmp_path)
+    client = _api_app(tmp_path).test_client()
+    _login(client, user_id=2, username="player2")
+    data = client.get(f"/api/rooms/{room_id}/props/templates").get_json()["data"]
+    assert data["unavailable"]
+    assert all("dir" not in item for item in data["unavailable"])
+
+
+def test_invalid_color_falls_back_and_title_placeholder(tmp_path):
+    spec = _letter_spec(
+        fields={"salutation": "致 何清越"},
+        style={"ink": 'red" onmouseover="x', "accent": "not-a-color"},
+        title="便签主标题",
+    )
+    html = fill_page_html(spec, "letter-1920")
+    assert spec["style"]["ink"] not in html
+    assert "#2b2b2b" in html
+    note_html = fill_page_html(
+        {"title": "便签主标题", "fields": {"name": "冯亦阳", "line": "明晚见"}}, "note"
+    )
+    assert "便签主标题" in note_html
+
+
+def test_render_cache_invalidates_when_template_changes(user_templates, tmp_path):
+    font = _font_path()
+    root = _write_user_template(user_templates, "sig-note")
+    spec = {
+        "schema_version": 1,
+        "id": store.new_prop_id(),
+        "room_id": "",
+        "template_id": "sig-note",
+        "title": "签名测试",
+        "fields": {"body": "第一次。"},
+        "style": {},
+        "wear": {},
+        "redaction": [],
+        "assets": {},
+    }
+    first = render_cached(tmp_path, spec, "pdf", settings={"render_cache_days": 0}, font_path=font)
+    second = render_cached(tmp_path, spec, "pdf", settings={"render_cache_days": 0}, font_path=font)
+    assert second["cached"] is True
+
+    time.sleep(0.01)
+    (root / "style.css").write_text("body { color: #222; } /* changed */", encoding="utf-8")
+    registry.rescan()
+    third = render_cached(tmp_path, spec, "pdf", settings={"render_cache_days": 0}, font_path=font)
+    assert third["cached"] is False
+    assert third["path"] != first["path"]
+
+
+def test_delete_failure_returns_mapped_error(tmp_path, monkeypatch):
+    room_id = _api_room(tmp_path)
+    client = _api_app(tmp_path).test_client()
+    _login(client)
+    created = _create(client, room_id)
+
+    def boom(*_args, **_kwargs):
+        raise OSError("boom secret path")
+
+    monkeypatch.setattr(store, "delete_prop", boom)
+    response = client.delete(
+        f"/api/rooms/{room_id}/props/{created['id']}", headers=_headers()
+    )
+    assert response.status_code == 500
+    payload = response.get_json()
+    assert payload["error"] == "prop.delete_failed"
+    assert "boom secret path" not in json.dumps(payload, ensure_ascii=False)
+    assert payload.get("trace_id")
+
+
+def test_tool_without_room_returns_error_not_raise():
+    context = AgentRequestContext(user_id=1)
+    result = execute_create_prop(_tool_create_args(), context)
+    assert result["ok"] is False and "房间" in result["error"]
+
+
+def test_prompt_excludes_partial_and_wraps_data():
+    revealed = _letter_spec(
+        id=store.new_prop_id(),
+        title="已揭示的信",
+        visibility={"mode": "revealed", "revealed_to": []},
+    )
+    partial = _letter_spec(
+        id=store.new_prop_id(),
+        title="只给一个人看的信",
+        visibility={"mode": "partial", "revealed_to": [2]},
+    )
+    directive = props_prompt.build_props_directive({}, registry.list_templates(), [revealed, partial])
+    assert "已揭示的信" in directive
+    assert "只给一个人看的信" not in directive
+    assert props_prompt.DATA_NOTICE in directive
+    assert props_prompt.DATA_CLOSE in directive
