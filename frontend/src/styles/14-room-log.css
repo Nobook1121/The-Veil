@@ -1,0 +1,227 @@
+/*
+ * 团录导出模态（设计稿 §6.4）。
+ * 所有界面表面颜色都走 --theme-* token；唯一的白色是右侧 PDF 首页预览纸张
+ * （设计稿明确要求「预览 iframe 白底」，它代表 A4 纸面而非模态底色）。
+ */
+
+.room-log-layout {
+    display: grid;
+    grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+    gap: var(--theme-space-lg);
+    align-items: start;
+}
+
+.room-log-options {
+    display: flex;
+    flex-direction: column;
+    gap: var(--theme-space-md);
+    min-width: 0;
+}
+
+.room-log-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--theme-space-xs);
+}
+
+.room-log-option-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--theme-space-sm);
+}
+
+.room-log-section-title {
+    margin: 0;
+    color: var(--theme-text-secondary);
+    font-size: var(--theme-font-size-sm);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.room-log-options .form-label {
+    margin: 0;
+    color: var(--theme-text-secondary);
+    font-size: var(--theme-font-size-sm);
+}
+
+.room-log-info-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--theme-border-subtle);
+    border-radius: var(--theme-radius-round);
+    background: transparent;
+    color: var(--theme-text-muted);
+    cursor: pointer;
+    transition:
+        color 0.2s ease,
+        border-color 0.2s ease,
+        background-color 0.2s ease;
+}
+
+.room-log-info-toggle:hover,
+.room-log-info-toggle:focus-visible,
+.room-log-info-toggle[aria-expanded="true"] {
+    color: var(--theme-accent-primary);
+    border-color: var(--theme-accent-primary);
+    background: var(--theme-accent-soft);
+}
+
+.room-log-info-toggle:focus-visible {
+    outline: 2px solid var(--theme-focus-ring);
+    outline-offset: 2px;
+}
+
+.room-log-info-note {
+    margin: 0;
+    padding: var(--theme-space-sm) var(--theme-space-md);
+    border-left: 3px solid var(--theme-accent-primary);
+    border-radius: var(--theme-radius-sm);
+    background: var(--theme-bg-panel-muted);
+    color: var(--theme-text-secondary);
+    font-size: var(--theme-font-size-sm);
+    line-height: var(--theme-line-height-base);
+}
+
+.room-log-info-note[hidden] {
+    display: none;
+}
+
+.room-log-range {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--theme-space-sm);
+}
+
+.room-log-range-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: var(--theme-text-muted);
+    font-size: var(--theme-font-size-xs);
+}
+
+.room-log-range-item input {
+    width: 100%;
+}
+
+.room-log-checkboxes {
+    display: flex;
+    flex-direction: column;
+    gap: var(--theme-space-sm);
+}
+
+.room-log-checkboxes .form-check {
+    margin: 0;
+}
+
+.room-log-checkboxes .form-check-label {
+    color: var(--theme-text-primary);
+    font-size: var(--theme-font-size-sm);
+}
+
+.room-log-stats {
+    display: flex;
+    flex-direction: column;
+    gap: var(--theme-space-xs);
+    padding: var(--theme-space-sm) var(--theme-space-md);
+    border: 1px dashed var(--theme-border-subtle);
+    border-radius: var(--theme-radius-md);
+    background: var(--theme-bg-panel-muted);
+}
+
+.room-log-stat {
+    color: var(--theme-text-secondary);
+    font-size: var(--theme-font-size-sm);
+    line-height: var(--theme-line-height-base);
+    overflow-wrap: anywhere;
+}
+
+.room-log-preview {
+    display: flex;
+    flex-direction: column;
+    gap: var(--theme-space-sm);
+    min-width: 0;
+}
+
+.room-log-preview-frame {
+    display: block;
+    width: 100%;
+    height: 62vh;
+    min-height: 320px;
+    border: 1px solid var(--theme-border-subtle);
+    border-radius: var(--theme-radius-md);
+    /* PDF 纸面预览：设计稿要求 iframe 白底，与模态主题底色分离 */
+    background: #ffffff;
+    box-shadow: var(--theme-shadow-md);
+}
+
+#roomLogExportModal .modal-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--theme-space-sm);
+}
+
+.room-log-status {
+    display: inline-flex;
+    flex: 1 1 220px;
+    align-items: center;
+    gap: var(--theme-space-sm);
+    min-height: 1.5em;
+    margin-right: auto;
+    color: var(--theme-text-muted);
+    font-size: var(--theme-font-size-sm);
+    line-height: var(--theme-line-height-tight);
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+.room-log-status.is-running {
+    color: var(--theme-text-muted);
+}
+
+.room-log-status.is-success {
+    color: var(--theme-success);
+}
+
+.room-log-status.is-error {
+    color: var(--theme-danger);
+}
+
+.room-log-status.is-running::before {
+    content: "";
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: var(--theme-radius-round);
+    animation: room-log-spin 0.8s linear infinite;
+}
+
+@keyframes room-log-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (max-width: 900px) {
+    .room-log-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .room-log-preview-frame {
+        height: 46vh;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .room-log-status.is-running::before {
+        animation: none;
+    }
+}

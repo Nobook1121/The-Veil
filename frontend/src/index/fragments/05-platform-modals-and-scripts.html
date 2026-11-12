@@ -61,6 +61,86 @@
         </div>
     </div>
 
+    <!-- 团录导出（P3）：选项 + 首页预览 + 后台任务轮询 -->
+    <div class="modal fade" id="roomLogExportModal" tabindex="-1" aria-labelledby="roomLogExportModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="roomLogExportModalLabel" data-i18n="roomLog.modal.title">导出团录</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="room-log-layout">
+                        <aside class="room-log-options">
+                            <div class="room-log-option-heading">
+                                <h6 class="room-log-section-title" data-i18n="roomLog.option.heading">导出选项</h6>
+                                <button type="button" class="room-log-info-toggle" id="roomLogInfoToggle" aria-expanded="false" aria-controls="roomLogInfoNote" title="导出说明" aria-label="导出说明" data-i18n-title="roomLog.info.toggle" data-i18n-aria-label="roomLog.info.toggle">
+                                    <i class="fa fa-info-circle" aria-hidden="true"></i>
+                                </button>
+                            </div>
+                            <p class="room-log-info-note" id="roomLogInfoNote" hidden data-i18n="roomLog.info.summary">导出会读取本房间的聊天记录，在服务器后台生成可搜索的 A4 PDF；关闭这个窗口不会中断任务。导出只读，不会修改原有聊天记录。</p>
+                            <div class="room-log-field">
+                                <label class="form-label" for="roomLogTemplate" data-i18n="roomLog.option.template">版式</label>
+                                <select class="form-select form-select-sm" id="roomLogTemplate">
+                                    <option value="archive" data-i18n="roomLog.template.archive">档案卷宗</option>
+                                    <option value="letter" data-i18n="roomLog.template.letter">手记信纸</option>
+                                    <option value="minimal" data-i18n="roomLog.template.minimal">极简排版</option>
+                                </select>
+                            </div>
+                            <div class="room-log-field">
+                                <span class="form-label" data-i18n="roomLog.option.range">日期范围</span>
+                                <div class="room-log-range">
+                                    <label class="room-log-range-item" for="roomLogDateFrom">
+                                        <span data-i18n="roomLog.date.from">开始日期</span>
+                                        <input type="date" class="form-control form-control-sm" id="roomLogDateFrom">
+                                    </label>
+                                    <label class="room-log-range-item" for="roomLogDateTo">
+                                        <span data-i18n="roomLog.date.to">结束日期</span>
+                                        <input type="date" class="form-control form-control-sm" id="roomLogDateTo">
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="room-log-field">
+                                <div class="room-log-checkboxes">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="roomLogIncludeKpOnly">
+                                        <label class="form-check-label" for="roomLogIncludeKpOnly" data-i18n="roomLog.option.include_kp_only">仅保留 KP 叙述</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="roomLogIncludeDice" checked>
+                                        <label class="form-check-label" for="roomLogIncludeDice" data-i18n="roomLog.option.include_dice">包含骰子记录</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="roomLogIncludeOoc" checked>
+                                        <label class="form-check-label" for="roomLogIncludeOoc" data-i18n="roomLog.option.include_ooc">包含场外发言</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="roomLogIncludeImages" checked>
+                                        <label class="form-check-label" for="roomLogIncludeImages" data-i18n="roomLog.option.include_images">包含图片</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="room-log-stats">
+                                <div class="room-log-section-title" data-i18n="roomLog.stats.heading">内容统计</div>
+                                <div class="room-log-stat" id="roomLogStats" aria-live="polite">—</div>
+                            </div>
+                        </aside>
+                        <section class="room-log-preview">
+                            <div class="room-log-section-title" data-i18n="roomLog.preview.heading">首页预览</div>
+                            <iframe class="room-log-preview-frame" id="roomLogPreviewFrame" sandbox="" title="团录首页预览" data-i18n-title="roomLog.preview.title"></iframe>
+                        </section>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <span class="room-log-status" id="roomLogStatus" role="status" aria-live="polite"></span>
+                    <button type="button" class="btn btn-outline-secondary" id="roomLogCancel" data-bs-dismiss="modal" data-i18n="common.cancel">取消</button>
+                    <button type="button" class="btn btn-primary" id="roomLogExport" data-i18n="roomLog.action.export">生成 PDF</button>
+                    <a class="btn btn-success" id="roomLogDownload" hidden data-i18n="roomLog.action.download">下载</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- API测试模态窗口 -->
     <div class="modal fade" id="apiTestModal" tabindex="-1" aria-labelledby="apiTestModalLabel" aria-hidden="true">
         <div class="modal-dialog" style="max-width: 600px;">
@@ -259,6 +339,8 @@
     <script src="js/room-console.js"></script>
     <script src="js/room-narrative.js"></script>
     <script src="js/rooms.js"></script>
+    <!-- 团录导出：依赖 i18n / api-client / rooms 提供的房间状态 -->
+    <script src="js/room-log.js"></script>
     <script src="js/scenario.js"></script>
     <!-- 角色卡渲染器注册表：规则集模块先登记，通用外壳再决定接管或明确阻断 -->
     <script src="js/character-sheet-registry.js"></script>
