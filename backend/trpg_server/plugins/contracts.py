@@ -62,6 +62,13 @@ CAPABILITY_LABELS: dict[str, str] = {
 }
 CAPABILITY_NAMES: tuple[str, ...] = tuple(CAPABILITY_LABELS)
 
+# 插件条目的实际来源（由宿主发现位置决定，前端不再根据 has_code 推断）：
+# - ``plugin_dir``：从 ``data/plugins/<id>/`` 扫描到的插件目录；
+# - ``template_pack``：预留给「模板包也进清单」的纯模板来源。
+PLUGIN_SOURCE_DIR = "plugin_dir"
+PLUGIN_SOURCE_TEMPLATE_PACK = "template_pack"
+PLUGIN_SOURCES: tuple[str, ...] = (PLUGIN_SOURCE_DIR, PLUGIN_SOURCE_TEMPLATE_PACK)
+
 # 生命周期状态。``available`` 表示「在磁盘上发现了，但不在启用列表里」。
 STATE_AVAILABLE = "available"
 STATE_LOADED = "loaded"
@@ -193,6 +200,8 @@ class PluginRecord:
     # 代码插件被禁用后，其已注册的 Flask 蓝图仍然存活到进程重启；把这件事
     # 记录在条目上，刷新设置页后仍能看到「需重启」。
     pending_restart: bool = False
+    # 发现位置：当前只会是 ``plugin_dir``；模板包进清单后另加值。
+    source: str = PLUGIN_SOURCE_DIR
 
     @property
     def loaded(self) -> bool:
@@ -206,6 +215,7 @@ class PluginRecord:
             "reason": self.reason,
             "reason_code": self.reason_code,
             "dir": str(self.plugin_dir),
+            "source": self.source,
             "capabilities": list(self.loaded_capabilities),
             "pending_restart": self.pending_restart,
             "manifest": self.manifest.to_dict() if self.manifest else None,
@@ -226,6 +236,9 @@ __all__ = [
     "PLUGIN_API_VERSION",
     "PLUGIN_ID_RE",
     "PLUGIN_MANIFEST_VERSION",
+    "PLUGIN_SOURCES",
+    "PLUGIN_SOURCE_DIR",
+    "PLUGIN_SOURCE_TEMPLATE_PACK",
     "PluginError",
     "PluginManifest",
     "PluginRecord",

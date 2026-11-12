@@ -69,6 +69,14 @@ def test_login_checkboxes_use_auth_specific_rendering_and_no_focus_glow():
     assert "transform: translate(-50%, -58%) rotate(45deg);" in auth_css
 
 
+def test_plugin_settings_source_uses_backend_field_not_has_code_guess():
+    source = (ROOT / "frontend/src/app/settings/plugins.ts").read_text(encoding="utf-8")
+
+    assert "record.source" in source
+    assert "has_code" not in source
+    assert '"settings.plugins.source.unknown"' in source
+
+
 def test_scenario_preview_long_text_wraps_in_preview_sections():
     scenario_css = (ROOT / "frontend/src/styles/02-scenario-character.css").read_text(encoding="utf-8")
     scenario_template = (ROOT / "frontend/src/templates/scenario.html").read_text(encoding="utf-8")

@@ -209,6 +209,17 @@ def test_enable_loads_plugin_and_template(tmp_path):
     assert output.stat().st_size > 0
 
 
+def test_summary_reports_source_from_discovery_location(tmp_path):
+    root = tmp_path / "plugins"
+    _write_plugin(root, "note-pack", with_template=True)
+    _enable(root, ["note-pack"])
+
+    plugin = _load(root).summary()["plugins"][0]
+    assert plugin["source"] == "plugin_dir"
+    # has_code 保留，但前端不再用它推断来源。
+    assert plugin["manifest"]["has_code"] is False
+
+
 def test_disable_and_uninstall_lifecycle(tmp_path):
     root = tmp_path / "plugins"
     _write_plugin(root, "note-pack", with_template=True)

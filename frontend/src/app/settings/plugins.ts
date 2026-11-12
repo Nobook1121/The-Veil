@@ -13,7 +13,6 @@ interface SettingsPluginManifest {
     version: string;
     description: string;
     author: string;
-    has_code: boolean;
 }
 
 interface SettingsPluginRecord {
@@ -23,6 +22,8 @@ interface SettingsPluginRecord {
     reason: string;
     reason_code: string;
     dir: string;
+    /** 发现位置，由后端给出：plugin_dir | template_pack（预留）。 */
+    source?: string;
     capabilities: string[];
     pending_restart?: boolean;
     manifest: SettingsPluginManifest | null;
@@ -102,12 +103,16 @@ interface TrpgPluginsApi {
         return key ? t(key, state) : t("settings.plugins.state.unknown", "未知状态");
     }
 
-    /** 来源按清单推导：带代码入口的是插件目录，纯数据插件即用户模板包。 */
+    /** 来源只读后端给出的发现位置，前端不做任何推断。 */
+    const SOURCE_LABELS: Record<string, [string, string]> = {
+        plugin_dir: ["settings.plugins.source.directory", "插件目录"],
+        template_pack: ["settings.plugins.source.pack", "模板包"],
+    };
+
     function sourceLabel(record: SettingsPluginRecord): string {
-        if (!record.manifest) return t("settings.plugins.source.unknown", "未知");
-        return record.manifest.has_code
-            ? t("settings.plugins.source.directory", "插件目录")
-            : t("settings.plugins.source.pack", "用户模板包");
+        const labels = record.source ? SOURCE_LABELS[record.source] : undefined;
+        if (!labels) return t("settings.plugins.source.unknown", "未知来源");
+        return t(labels[0], labels[1]);
     }
 
     function renderSummary(summary: SettingsPluginSummary | null): void {
