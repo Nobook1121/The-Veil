@@ -29,6 +29,7 @@ interface Window {
     const specCache = new Map<string, PropSpec>();
     let viewer: BootstrapModalInstance | null = null;
     let delegated = false;
+    let activePropId = "";
 
     function api(): TrpgPropApiRuntime | null {
         return global.TrpgPropApi || null;
@@ -156,6 +157,7 @@ interface Window {
         const element = document.getElementById("propViewerModal");
         if (!instance || !element) return;
         const runtime = api();
+        activePropId = options.propId;
         const title = element.querySelector<HTMLElement>("#propViewerTitle");
         if (title) title.textContent = options.title || t("prop.card.untitled", "一件道具");
         const meta = element.querySelector<HTMLElement>("#propViewerTemplate");
@@ -221,6 +223,25 @@ interface Window {
                 const image = event.target as HTMLImageElement;
                 image.classList.add("is-broken");
                 global.showNotification?.(t("prop.error.render_failed", "渲染失败，请稍后重试。"), "error");
+            });
+            element.querySelector<HTMLButtonElement>("#propViewerAskKp")?.addEventListener("click", () => {
+                const propId = activePropId;
+                if (!propId) return;
+                void (async () => {
+                    const question = await global.TrpgDialog?.prompt({
+                        title: t("prop.ask_kp.title", "问问 KP"),
+                        message: t("prop.ask_kp.prompt", "你想问这件道具的什么？"),
+                        defaultValue: "",
+                    });
+                    const text = String(question || "").trim();
+                    if (!text) return;
+                    if (!global.TrpgChat) {
+                        global.showNotification?.(t("prop.ask_kp.unavailable", "聊天尚未准备好，请稍后再试。"), "warning");
+                        return;
+                    }
+                    viewer?.hide();
+                    await global.TrpgChat.askAboutProp(propId, text);
+                })();
             });
         }
     }

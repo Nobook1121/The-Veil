@@ -1066,6 +1066,30 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
                 props_registry.list_templates(),
                 specs,
             )
+            # §6.6 玩家点道具「问问 KP」：只把该玩家能看到的内容作为请求级上下文，
+            # hidden 道具与脱敏段落不进入模型。
+            prop_id = str((message_data or {}).get("prop_id") or "").strip()
+            if prop_id and room_dir_for_props is not None and props_store.is_valid_prop_id(prop_id):
+                from trpg_server.props import policy as props_policy
+
+                question_spec = props_store.read_prop(room_dir_for_props, prop_id)
+                viewer_id = getattr(agent_context, "user_id", None)
+                viewer_info = (
+                    agent_context.room_info() if hasattr(agent_context, "room_info") else {}
+                )
+                is_kp_viewer = False
+                for member in (
+                    viewer_info.get("members") if isinstance(viewer_info, Mapping) else []
+                ) or []:
+                    if str(member.get("user_id")) == str(viewer_id):
+                        is_kp_viewer = str(member.get("room_role") or "") in {"owner", "admin"}
+                        break
+                view = props_policy.visible_spec(
+                    question_spec, viewer_id, is_kp=is_kp_viewer
+                )
+                question_directive = props_prompt.build_prop_question_directive(view)
+                if question_directive:
+                    props_directive = f"{props_directive}\n\n{question_directive}"
         prompt_layers = build_prompt_layers(
             global_rules=system_prompt,
             scenario=(room_snapshot or {}).get("scenario") if isinstance(room_snapshot, dict) else None,

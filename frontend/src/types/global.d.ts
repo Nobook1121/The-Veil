@@ -100,6 +100,9 @@ interface Window {
     TrpgPlugins?: {
         init: () => void;
     };
+    TrpgChat?: {
+        askAboutProp: (propId: string, question: string) => Promise<void>;
+    };
 }
 
 interface TrpgDialogOptions {

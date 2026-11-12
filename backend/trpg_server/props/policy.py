@@ -11,6 +11,8 @@ from typing import Any, Iterable, Mapping
 PLAYER_MASK = "█"
 AI_MASK = "████"
 VISIBILITY_MODES = ("hidden", "revealed", "partial")
+# 渲染层用不同标记字符区分两种遮盖效果（最终仍会被 PDF 覆盖图层盖住）。
+RENDER_MARKS = {"ink": "█", "burn": "▓"}
 
 
 def visibility_mode(spec: Mapping[str, Any] | None) -> str:
@@ -72,10 +74,27 @@ def _valid_spans(
         if end <= start:
             continue
         mode = str(item.get("mode") or "burn").strip().lower()
+        if mode not in RENDER_MARKS:
+            mode = "burn"
         grouped.setdefault(field, []).append((start, end, mode))
-    for spans in grouped.values():
-        spans.sort(key=lambda span: (span[0], span[1]), reverse=True)
+    for field, spans in grouped.items():
+        # 重叠与相邻区间先合并，避免多次替换造成位置漂移（§3.1）。
+        spans.sort(key=lambda span: (span[0], span[1]))
+        merged: list[tuple[int, int, str]] = []
+        for start, end, mode in spans:
+            if merged and start <= merged[-1][1]:
+                prev_start, prev_end, prev_mode = merged[-1]
+                merged[-1] = (prev_start, max(prev_end, end), _merge_mode(prev_mode, mode))
+            else:
+                merged.append((start, end, mode))
+        merged.sort(key=lambda span: (span[0], span[1]), reverse=True)
+        grouped[field] = merged
     return grouped
+
+
+def _merge_mode(left: str, right: str) -> str:
+    """区间合并时 burn 优先：燃烧痕迹比纯涂黑更醒目，也不会漏盖。"""
+    return "burn" if "burn" in (left, right) else "ink"
 
 
 def _mask_text(text: str, spans: Iterable[tuple[int, int, str]], mask: str) -> str:
@@ -110,6 +129,32 @@ def apply_redaction(
         raw = fields_copy.get(field)
         text = "" if raw is None else str(raw)
         fields_copy[field] = _mask_text(text, spans, effective_mask)
+    result["fields"] = fields_copy
+    return result
+
+
+def render_redaction(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """渲染专用：按 ``mode`` 把区间替换成不同标记，供 PDF 层画烧灼/涂黑（§3.1）。
+
+    与 :func:`apply_redaction` 的区别是保留 ``mode``：``ink`` 用 ``█``、
+    ``burn`` 用 ``▓``，渲染器据此在文字位置绘制不同遮盖图元。
+    """
+    result = copy.deepcopy(dict(spec or {}))
+    source_fields = result.get("fields")
+    if not isinstance(source_fields, Mapping):
+        return result
+    grouped = _valid_spans(result.get("redaction"), source_fields)
+    if not grouped:
+        return result
+    fields_copy = dict(source_fields)
+    for field, spans in grouped.items():
+        raw = fields_copy.get(field)
+        text = "" if raw is None else str(raw)
+        value = text
+        for start, end, mode in spans:
+            mark = RENDER_MARKS.get(mode, RENDER_MARKS["burn"])
+            value = value[:start] + mark * (end - start) + value[end:]
+        fields_copy[field] = value
     result["fields"] = fields_copy
     return result
 
@@ -191,6 +236,7 @@ def filter_messages(
 __all__ = [
     "AI_MASK",
     "PLAYER_MASK",
+    "RENDER_MARKS",
     "VISIBILITY_MODES",
     "apply_redaction",
     "can_view",
@@ -198,6 +244,7 @@ __all__ = [
     "has_redaction",
     "message_visible_to",
     "redacted_for_ai",
+    "render_redaction",
     "revealed_to",
     "visibility_mode",
     "visible_spec",

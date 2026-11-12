@@ -23,7 +23,7 @@ import pymupdf
 from trpg_server.room_log.fonts import FONT_FAMILY, FontMissing, build_archive, font_css, resolve_font
 from trpg_server.room_log.markdown import escape_html, to_html
 
-from . import registry, store
+from . import policy, registry, store
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +76,9 @@ def fill_page_html(spec: Mapping[str, Any], template: str | Mapping[str, Any]) -
     raw = page_path.read_text(encoding="utf-8")
 
     fields = spec.get("fields") if isinstance(spec.get("fields"), Mapping) else {}
+    if spec.get("redacted"):
+        # 玩家视图已按 █ 遮罩；渲染层再按 mode 换成 █/▓ 标记，供 PDF 覆盖图元识别。
+        fields = policy.render_redaction(spec).get("fields") or fields
     values: dict[str, str] = {}
     for key, value in fields.items():
         text = "" if value is None else str(value)
@@ -397,6 +400,7 @@ def _finalize_pdf(source: bytes, spec: Mapping[str, Any]) -> tuple[int, bytes]:
     try:
         doc = pymupdf.open(stream=source, filetype="pdf")
         _trim_trailing_decoration(doc)
+        _apply_redactions(doc)
         _apply_dressing(doc, spec)
         doc.set_metadata(
             {
@@ -434,6 +438,75 @@ def _trim_trailing_decoration(doc) -> None:
         if not previous.get_text().strip():
             break
         doc.delete_page(doc.page_count - 1)
+
+
+def _apply_redactions(doc) -> None:
+    """把 ``█`` / ``▓`` 标记画成真实遮盖：ink 涂黑、burn 烧灼焦边（§3.1）。
+
+    Story 只负责排版；拿到文字 span 的 bbox 后按字符比例切出遮盖区间，
+    再在 PDF 层画图元，因此两种模式在视觉上不同，而不是仅替换字符。
+    """
+    ink = policy.RENDER_MARKS["ink"]
+    burn = policy.RENDER_MARKS["burn"]
+    for page in doc:
+        for block in page.get_text("dict").get("blocks", []):
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    text = str(span.get("text") or "")
+                    if ink not in text and burn not in text:
+                        continue
+                    bbox = pymupdf.Rect(span.get("bbox") or (0, 0, 0, 0))
+                    if bbox.width <= 0 or bbox.height <= 0:
+                        continue
+                    total = len(text)
+                    char_width = bbox.width / total
+                    index = 0
+                    while index < total:
+                        mark = text[index]
+                        if mark not in (ink, burn):
+                            index += 1
+                            continue
+                        end = index + 1
+                        while end < total and text[end] == mark:
+                            end += 1
+                        rect = pymupdf.Rect(
+                            bbox.x0 + char_width * index,
+                            bbox.y0,
+                            bbox.x0 + char_width * end,
+                            bbox.y1,
+                        )
+                        if mark == ink:
+                            _draw_ink(page, rect)
+                        else:
+                            _draw_burn(page, rect)
+                        index = end
+
+
+def _draw_ink(page, rect: "pymupdf.Rect") -> None:
+    page.draw_rect(rect, color=None, fill=(0.02, 0.02, 0.02), overlay=True)
+    # 向外扩一点，盖住字形边缘的抗锯齿残影。
+    page.draw_rect(rect + (-0.6, -0.4, 0.6, 0.4), color=None, fill=(0.05, 0.05, 0.05), overlay=True)
+
+
+def _draw_burn(page, rect: "pymupdf.Rect") -> None:
+    # 焦黄晕圈 + 不规则深褐烧灼块，边缘做锯齿，和纯黑涂黑明显区分。
+    halo = rect + (-1.8, -1.4, 1.8, 1.4)
+    page.draw_rect(halo, color=None, fill=(0.62, 0.47, 0.29), overlay=True)
+    steps = max(6, int(rect.width / 3))
+    top: list[tuple[float, float]] = []
+    bottom: list[tuple[float, float]] = []
+    for step in range(steps + 1):
+        x = rect.x0 + rect.width * step / steps
+        top.append((x, rect.y0 + ((step * 37) % 7) / 10.0 - 0.3))
+        bottom.append((x, rect.y1 - ((step * 53) % 5) / 10.0 + 0.3))
+    points = top + list(reversed(bottom))
+    page.draw_polyline(
+        points + [points[0]],
+        color=(0.18, 0.10, 0.04),
+        fill=(0.10, 0.06, 0.03),
+        width=0.8,
+        overlay=True,
+    )
 
 
 def _apply_dressing(doc, spec: Mapping[str, Any]) -> None:

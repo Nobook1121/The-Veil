@@ -1326,6 +1326,67 @@ def test_tool_without_room_returns_error_not_raise():
     assert result["ok"] is False and "房间" in result["error"]
 
 
+def test_redaction_spans_merge_adjacent_and_overlapping():
+    spec = {
+        "fields": {"body": "0123456789"},
+        "redaction": [
+            {"field": "body", "start": 0, "end": 2, "mode": "ink"},
+            {"field": "body", "start": 2, "end": 4, "mode": "burn"},
+            {"field": "body", "start": 3, "end": 5, "mode": "burn"},
+        ],
+    }
+    masked = policy.apply_redaction(spec)
+    assert masked["fields"]["body"] == "█" * 5 + "56789"
+    rendered = policy.render_redaction(spec)["fields"]["body"]
+    assert rendered == "▓" * 5 + "56789"
+
+
+def test_render_ink_and_burn_draw_different_marks(tmp_path):
+    font = _font_path()
+    base = {
+        "fields": {"salutation": "致 何清越", "body": "钥匙藏在书房。", "signature": "冯亦阳"},
+        "redacted": True,
+    }
+    ink_spec = _letter_spec(
+        redaction=[{"field": "body", "start": 0, "end": 2, "mode": "ink"}], **base
+    )
+    burn_spec = _letter_spec(
+        redaction=[{"field": "body", "start": 0, "end": 2, "mode": "burn"}], **base
+    )
+    ink = render_prop(ink_spec, tmp_path / "ink.pdf", font_path=font)
+    burn = render_prop(burn_spec, tmp_path / "burn.pdf", font_path=font)
+    assert ink["pages"] >= 1 and burn["pages"] >= 1
+    assert Path(ink["path"]).read_bytes() != Path(burn["path"]).read_bytes()
+
+    doc = pymupdf.open(burn["path"])
+    try:
+        drawings = doc[0].get_drawings()
+        fills = [item.get("fill") for item in drawings if item.get("fill")]
+        assert drawings
+        # burn 的焦黄晕圈是偏暖的褐色，ink 只有近黑色。
+        assert any(color[0] > 0.3 and color[2] < 0.4 for color in fills)
+    finally:
+        doc.close()
+
+
+def test_question_directive_only_contains_visible_content():
+    spec = _letter_spec(
+        title="线索信",
+        fields={"salutation": "致 何清越", "body": "钥匙藏在书房。", "signature": "冯亦阳"},
+        redaction=[{"field": "body", "start": 0, "end": 2, "mode": "burn"}],
+        visibility={"mode": "revealed", "revealed_to": []},
+    )
+    view = policy.visible_spec(spec, 2, is_kp=False)
+    directive = props_prompt.build_prop_question_directive(view)
+    assert "钥匙" not in directive
+    assert "████" in directive
+    assert props_prompt.QUESTION_NOTICE in directive
+    assert props_prompt.build_prop_question_directive(None) == ""
+
+    hidden = _letter_spec(visibility={"mode": "hidden", "revealed_to": []})
+    assert policy.visible_spec(hidden, 2, is_kp=False) is None
+
+
 def test_prompt_excludes_partial_and_wraps_data():
     revealed = _letter_spec(
         id=store.new_prop_id(),

@@ -34,6 +34,8 @@ interface KnowledgeUsage {
 interface SendAIOptions {
     scenarioStart?: boolean;
     worldOverride?: boolean;
+    /** §6.6：把该道具作为本次请求的上下文（服务端按可见性再次校验）。 */
+    propId?: string;
 }
 
 interface CommandDefinition {
@@ -355,6 +357,39 @@ function isCombatPanelMessage(message: ChatMessage): boolean {
     return checkType.startsWith("combat");
 }
 
+/** §6.6「问问 KP」：把玩家的问题与道具 id 一起送进既有 KP 对话链路。 */
+async function askAboutProp(propId: string, question: string): Promise<void> {
+    const content = String(question || "").trim();
+    const id = String(propId || "").trim();
+    const chatInput = document.getElementById("chatInput") as HTMLInputElement | null;
+    const sendButton = document.getElementById("sendButton") as HTMLButtonElement | null;
+    if (!content || !id || !chatInput || !sendButton) return;
+    if (chatReadOnly) {
+        showNotification("隐身查看时不能发送消息", "error");
+        return;
+    }
+    if (!window.currentUser) {
+        showNotification("请先登录后再发送消息", "error");
+        return;
+    }
+    if (!getCurrentRoom()) {
+        showNotification("请先加入房间后再发送消息", "error");
+        return;
+    }
+    const role = aiRoles.find((entry) => entry.id === "kp") || { id: "kp", name: "KP" };
+    pendingMessages.push({
+        sender: getCurrentUsername(),
+        content,
+        role,
+        time: new Date().toLocaleTimeString(),
+    });
+    if (isAIThinking) {
+        showNotification("消息已加入队列，请等待 AI 回复完成后发送", "info");
+        return;
+    }
+    await sendToAI(chatInput, sendButton, { propId: id });
+}
+
 async function sendToAI(chatInput: HTMLInputElement, sendButton: HTMLButtonElement, options: SendAIOptions = {}): Promise<void> {
     if (pendingMessages.length === 0) return;
     const requestMessages = pendingMessages.slice();
@@ -386,6 +421,7 @@ async function sendToAI(chatInput: HTMLInputElement, sendButton: HTMLButtonEleme
                 world_override: options.worldOverride === true || requestMessages.some((message) => message.worldOverride === true),
                 // 个人沉浸偏好：后端在站点允许范围内再次 clamp，房间仍可收紧。
                 immersive_personal: window.TrpgImmersive?.getPersonalPreferences?.() || undefined,
+                prop_id: options.propId || undefined,
             },
         });
         if (!response.ok) {
@@ -2165,3 +2201,4 @@ window.restoreThinkingState = restoreThinkingState;
 window.startScenario = startScenario;
 window.resumePendingAIRequest = resumePendingAIRequest;
 window.sendWorldOverride = sendWorldOverrideMessage;
+window.TrpgChat = { askAboutProp };
