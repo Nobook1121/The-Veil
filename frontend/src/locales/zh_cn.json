@@ -1120,6 +1120,8 @@
     "settings.about.credits.desc": "感谢所有为帷幕贡献代码、文档与反馈的人。",
     "settings.about.credits.contributors": "贡献者",
     "settings.about.credits.special": "特别鸣谢",
+    "settings.about.credits.thanks_bilibili_name": "Bilibili 用户 399626",
+    "settings.about.credits.thanks_bilibili_role": "提供了「拾页Ⅱ」跑团道具模板库",
     "settings.about.credits.full_licenses": "完整第三方许可清单",
     "settings.about.credits.agpl_note": "部分依赖使用 AGPL 等许可证，完整清单见仓库 third_party 目录。",
     "settings.about.build.desc": "用于排查问题，向开发者反馈时请附上这些信息。",

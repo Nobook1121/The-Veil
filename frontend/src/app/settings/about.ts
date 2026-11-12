@@ -68,13 +68,66 @@
         const dependencies = byId("creditsDependencies");
         const summary = byId("aboutCreditsSummary");
 
-        const appendPeople = (host: HTMLElement | null, people: AboutCreditPerson[]): number => {
+        const appendPeople = (host: HTMLElement | null, people: AboutCreditPerson[], collapsible = false): number => {
             if (!host) return 0;
             host.replaceChildren();
             let count = 0;
             people.forEach((person) => {
-                const name = String(person.name || "").trim();
+                // 文案优先走 i18n key，缺少翻译时回落到 credits.json 里的字面文本。
+                const nameKey = String(person.name_key || "").trim();
+                const name = (nameKey ? t(nameKey, String(person.name || "")) : String(person.name || "")).trim();
                 if (!name) return;
+                const roleKey = String(person.role_key || "").trim();
+                const roleText = (roleKey
+                    ? t(roleKey, String(person.role || person.note || ""))
+                    : String(person.role || person.note || "")).trim();
+
+                if (collapsible) {
+                    // 特别鸣谢：名称可点击，说明收进 ⓘ，避免平铺长句。
+                    const row = document.createElement("div");
+                    row.className = "credits-person setting-hint-host";
+                    const main = document.createElement("div");
+                    main.className = "credits-person-main";
+                    const nameNode = person.url ? document.createElement("a") : document.createElement("strong");
+                    nameNode.className = "credit-name";
+                    nameNode.textContent = name;
+                    if (person.url) {
+                        (nameNode as HTMLAnchorElement).href = person.url;
+                        (nameNode as HTMLAnchorElement).target = "_blank";
+                        (nameNode as HTMLAnchorElement).rel = "noopener noreferrer";
+                    }
+                    main.appendChild(nameNode);
+                    row.appendChild(main);
+                    if (roleText) {
+                        const toggle = document.createElement("button");
+                        toggle.type = "button";
+                        toggle.className = "setting-hint-toggle";
+                        toggle.dataset.i18nDynamic = "true";
+                        toggle.innerHTML = '<i class="fa fa-info-circle" aria-hidden="true"></i>';
+                        toggle.title = t("settings.hint.show", "显示说明");
+                        toggle.setAttribute("aria-label", toggle.title);
+                        toggle.setAttribute("aria-expanded", "false");
+                        const note = document.createElement("p");
+                        note.className = "setting-hint credits-person-note";
+                        note.textContent = roleText;
+                        toggle.addEventListener("click", (event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const open = !row.classList.contains("setting-hint-open");
+                            row.classList.toggle("setting-hint-open", open);
+                            toggle.setAttribute("aria-expanded", String(open));
+                            const label = open ? t("settings.hint.hide", "收起说明") : t("settings.hint.show", "显示说明");
+                            toggle.title = label;
+                            toggle.setAttribute("aria-label", label);
+                        });
+                        main.appendChild(toggle);
+                        row.appendChild(note);
+                    }
+                    host.appendChild(row);
+                    count += 1;
+                    return;
+                }
+
                 const node = person.url ? document.createElement("a") : document.createElement("div");
                 node.className = "credits-person";
                 if (person.url) {
@@ -87,7 +140,7 @@
                 label.textContent = name;
                 const role = document.createElement("span");
                 role.className = "credit-role";
-                role.textContent = String(person.role || person.note || "");
+                role.textContent = roleText;
                 node.append(label, role);
                 host.appendChild(node);
                 count += 1;
@@ -96,7 +149,7 @@
         };
 
         const contributorCount = appendPeople(contributors, credits.contributors || []);
-        const specialCount = appendPeople(specialThanks, credits.special_thanks || []);
+        const specialCount = appendPeople(specialThanks, credits.special_thanks || [], true);
 
         if (dependencies) {
             dependencies.replaceChildren();

@@ -1120,6 +1120,8 @@
     "settings.about.credits.desc": "Thanks to everyone who contributed code, documentation and feedback.",
     "settings.about.credits.contributors": "Contributors",
     "settings.about.credits.special": "Special thanks",
+    "settings.about.credits.thanks_bilibili_name": "Bilibili user 399626",
+    "settings.about.credits.thanks_bilibili_role": "Provided the “Shiyue II” TRPG prop template library",
     "settings.about.credits.full_licenses": "Full third-party license list",
     "settings.about.credits.agpl_note": "Some dependencies use AGPL or similar licenses; see the third_party directory in the repository for the full list.",
     "settings.about.build.desc": "Useful for troubleshooting; include this information when reporting issues.",

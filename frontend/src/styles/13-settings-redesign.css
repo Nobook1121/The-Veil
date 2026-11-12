@@ -957,6 +957,32 @@ a.sponsor-item:hover {
     font-size: 11.5px;
 }
 
+/* 特别鸣谢：名称在左，说明收进 ⓘ，展开后占满整行。 */
+.credits-person.setting-hint-host {
+    flex-wrap: wrap;
+}
+
+.credits-person-main {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+}
+
+.credits-person-main .credit-name {
+    color: var(--theme-text-primary);
+    text-decoration: none;
+}
+
+.credits-person-main a.credit-name:hover {
+    color: var(--theme-accent-primary);
+}
+
+.credits-person .credits-person-note {
+    flex: 1 1 100%;
+    margin: 2px 0 0;
+}
+
 .about-legal-list {
     margin: 0 0 12px;
     padding: 0;

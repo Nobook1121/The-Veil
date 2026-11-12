@@ -37,7 +37,7 @@ _credits_cache: tuple[float, dict[str, Any]] | None = None
 # undefined；条目里额外的自定义字段原样保留，不因归一化丢失。
 _ENTRY_FIELDS: dict[str, tuple[str, ...]] = {
     "contributors": ("name", "role", "url", "note"),
-    "special_thanks": ("name", "note"),
+    "special_thanks": ("name", "role", "url", "note", "name_key", "role_key"),
     "dependencies": ("name", "version", "license", "url", "usage"),
     "sponsor_channels": ("id", "label", "url", "note"),
     "sponsors": ("name", "tier", "since", "url", "message"),

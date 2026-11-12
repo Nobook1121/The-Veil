@@ -6,7 +6,7 @@
 ## 1. 项目定位
 
 **帷幕 The Veil**：自托管的 AI 跑团（TRPG）平台。AI 担任 KP/守秘人，真人玩家在同一房间聊天中掷骰、交流、推进剧情。
-仓库名 `the-veil`，当前版本 `v1.0.4`（`backend/trpg_server/version.py` 是唯一真源，`package.json` 同源），Apache-2.0。
+仓库名 `the-veil`，当前版本 `v1.0.5`（`backend/trpg_server/version.py` 是唯一真源，`package.json` 同源），Apache-2.0。
 
 技术栈：
 

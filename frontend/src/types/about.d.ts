@@ -39,6 +39,9 @@ interface AboutCreditPerson {
     role?: string;
     url?: string;
     note?: string;
+    /** 可选 i18n key：存在时优先于 name / role 的字面文案。 */
+    name_key?: string;
+    role_key?: string;
 }
 
 interface AboutCreditDependency {

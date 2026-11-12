@@ -9,7 +9,16 @@
       "note": "服务端、规则引擎、前端与发布维护"
     }
   ],
-  "special_thanks": [],
+  "special_thanks": [
+    {
+      "name": "Bilibili 用户 399626",
+      "name_key": "settings.about.credits.thanks_bilibili_name",
+      "role": "提供了「拾页Ⅱ」跑团道具模板库",
+      "role_key": "settings.about.credits.thanks_bilibili_role",
+      "url": "https://space.bilibili.com/399626",
+      "note": "提供了「拾页Ⅱ」跑团道具模板库"
+    }
+  ],
   "dependencies": [
     {
       "name": "Flask",
