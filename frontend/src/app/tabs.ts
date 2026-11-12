@@ -863,6 +863,42 @@ function bindDiceRerollLimitState(): void {
     sync();
 }
 
+/** 启动时检查更新关闭后，「自动下载更新包」仅置灰，仍保留已保存值。 */
+function bindUpdateAutoDownloadState(): void {
+    const checkOnStartup = document.getElementById("updateCheckOnStartup") as HTMLInputElement | null;
+    const autoDownload = document.getElementById("updateAutoDownload") as HTMLInputElement | null;
+    if (!checkOnStartup || !autoDownload) return;
+    // 配置回填失败时也要与磁盘上的真实值保持一致。
+    checkOnStartup.checked = configManager.get<boolean>("general", "update", "check_update_on_startup", true) !== false;
+    const sync = (): void => {
+        const locked = autoDownload.dataset.deploymentLocked === "true";
+        const editable = !locked && checkOnStartup.checked;
+        autoDownload.disabled = !editable;
+        autoDownload.closest<HTMLElement>(".form-check")?.classList.toggle("setting-disabled", !editable);
+    };
+    checkOnStartup.addEventListener("change", sync);
+    sync();
+}
+
+/** 长期记忆关闭后，注入字符预算与条目上限仅置灰，仍保留已保存值。 */
+function bindMemorySettingsState(): void {
+    const toggle = document.getElementById("memoryEnabled") as HTMLInputElement | null;
+    const budget = document.getElementById("memoryInjectBudgetChars") as HTMLInputElement | null;
+    const maxItems = document.getElementById("memoryInjectMaxItems") as HTMLInputElement | null;
+    if (!toggle || !budget || !maxItems) return;
+    toggle.checked = configManager.get<boolean>("general", "ai.memory", "enabled", true) !== false;
+    const sync = (): void => {
+        [budget, maxItems].forEach((input) => {
+            const locked = input.dataset.deploymentLocked === "true";
+            const editable = !locked && toggle.checked;
+            input.disabled = !editable;
+            input.closest<HTMLElement>(".form-group")?.classList.toggle("setting-disabled", !editable);
+        });
+    };
+    toggle.addEventListener("change", sync);
+    sync();
+}
+
 /** 部署层（环境变量/命令行参数）锁定的设置项：禁用控件并提示「已被部署配置覆盖」。 */
 function applyGeneralDeploymentOverrides(): void {
     generalSettingControls.forEach((control) => {
@@ -897,6 +933,8 @@ function refreshGeneralSettingsBaseline(): void {
     applyGeneralDeploymentOverrides();
     bindDicePlayerRollTimeoutState();
     bindDiceRerollLimitState();
+    bindUpdateAutoDownloadState();
+    bindMemorySettingsState();
     // 音频块选择器由隐藏输入驱动；配置回填后需要同步重绘。
     (window as unknown as { refreshImmersiveAudioBlocksPicker?: () => void }).refreshImmersiveAudioBlocksPicker?.();
     generalSettingControls.forEach((control) => {

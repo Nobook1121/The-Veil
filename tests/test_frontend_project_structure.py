@@ -665,3 +665,173 @@ def test_external_idle_hands_engine_back_and_player_reads_engine_mode():
     # 播放器主轨按「实际引擎模式」判定，不再只看 currentPlan。
     assert 'const extUsable = Boolean(external?.active) && engine === "external";' in player
     assert 'const procUsable = Boolean(currentPlan) && engine === "procedural";' in player
+
+
+SETTINGS_TABS = (
+    "general",
+    "play",
+    "model",
+    "knowledge",
+    "system",
+    "plugins",
+    "access",
+    "immersive",
+    "about",
+)
+
+
+def test_settings_shell_exposes_nine_tabs_and_redesign_entrypoints():
+    fragment = (ROOT / "frontend/src/index/fragments/03-room-tools-auth-settings.html").read_text(encoding="utf-8")
+    scripts = (ROOT / "frontend/src/index/fragments/05-platform-modals-and-scripts.html").read_text(encoding="utf-8")
+    app_css = (ROOT / "frontend/src/react/app.css").read_text(encoding="utf-8")
+
+    assert 'class="settings-shell"' in fragment
+    assert 'class="settings-rail"' in fragment
+    for tab in SETTINGS_TABS:
+        assert f'data-settings="{tab}"' in fragment
+        assert f'id="{tab}-settings-content"' in fragment
+
+    # 关于页脚本与类型声明必须在产物侧可被加载。
+    assert '<script src="js/settings/about.js"></script>' in scripts
+    assert (ROOT / "frontend/src/app/settings/about.ts").is_file()
+    assert (ROOT / "frontend/src/types/about.d.ts").is_file()
+    assert '@import "../styles/13-settings-redesign.css";' in app_css
+
+
+def test_about_page_contract_covers_update_repo_sponsor_and_legal():
+    fragment = (ROOT / "frontend/src/index/fragments/03-room-tools-auth-settings.html").read_text(encoding="utf-8")
+    about = (ROOT / "frontend/src/app/settings/about.ts").read_text(encoding="utf-8")
+
+    for element_id in (
+        "aboutVersionValue",
+        "aboutChannelValue",
+        "aboutRuntimeValue",
+        "updateStateBadge",
+        "updateCheckButton",
+        "updateDownloadButton",
+        "updateNotesToggle",
+        "updateNotes",
+        "updateInstructions",
+        "updateProgress",
+        "updateProgressText",
+        "updateCheckOnStartup",
+        "updateAutoDownload",
+        "repoUrlValue",
+        "copyRepoUrlButton",
+        "repoStarCount",
+        "repoIssuesLink",
+        "repoDiscussionsLink",
+        "repoWikiLink",
+        "repoReleasesLink",
+        "aboutSponsorPanel",
+        "sponsorChannels",
+        "sponsorList",
+        "sponsorEmptyState",
+        "aboutCreditsPanel",
+        "creditsContributors",
+        "thirdPartyLink",
+        "licenseLink",
+        "privacyLink",
+        "thirdPartyPolicyLink",
+    ):
+        assert f'id="{element_id}"' in fragment, element_id
+
+    # 更新开关仅管理员可见：由 syncAdminOnly 在渲染后按角色同步。
+    assert 'data-admin-only="true"' in fragment
+    assert "function syncAdminOnly" in about
+    assert "function bindEvents" in about
+    assert "function renderUpdate" in about
+    assert "function renderInfo" in about
+    assert "function renderCredits" in about
+    assert "trpg:user-changed" in about
+
+    # 检查中状态 + 最多 40 次轮询，避免无限轮询。
+    assert "settings.about.update.state_checking" in about
+    assert "MAX_POLL_ATTEMPTS = 40" in about
+    assert "function setCheckingBusy" in about
+    assert "is-spinning" in about
+
+    # 赞助渠道与名单分别渲染，空数组走空态；兼容旧 sponsors 字段。
+    assert "sponsor_channels" in about
+    assert "sponsors" in about
+    assert "sponsorEmptyState" in about
+    assert "settings.about.repo.copy" in about
+
+
+def test_settings_advanced_blocks_are_folded_and_styles_use_theme_tokens():
+    fragment = (ROOT / "frontend/src/index/fragments/03-room-tools-auth-settings.html").read_text(encoding="utf-8")
+    css = (ROOT / "frontend/src/styles/13-settings-redesign.css").read_text(encoding="utf-8")
+
+    # 属性生成公式、AI 调试、AI 音乐导演、外链曲库都必须默认折叠。
+    assert fragment.count('<details class="settings-fold"') >= 4
+    assert "settings.play.attribute_formula" in fragment
+    assert "settings.model.ai_debug.fold" in fragment
+    assert "AI 音乐导演" in fragment
+    assert "外链曲库" in fragment
+    assert "settings.fold.advanced" in fragment
+
+    # rail 宽度按计划固定 236px，且折叠/搜索高亮样式已就位。
+    assert "grid-template-columns: 236px minmax(0, 1fr);" in css
+    assert ".settings-fold {" in css
+    assert ".settings-fold-summary" in css
+    assert ".settings-search-highlight {" in css
+
+    # 13 号样式内不再保留写死颜色，统一走主题 token。
+    for legacy_hex in ("#f4c542", "#d9a441", "#3fb950", "#f85149", "#d4a017"):
+        assert legacy_hex not in css
+    for token in ("--theme-warning", "--theme-success", "--theme-danger"):
+        assert f"var({token})" in css
+
+
+def test_settings_binding_helpers_initialize_from_real_config():
+    tabs = (ROOT / "frontend/src/app/tabs.ts").read_text(encoding="utf-8")
+
+    assert "function bindUpdateAutoDownloadState(): void {" in tabs
+    assert "function bindMemorySettingsState(): void {" in tabs
+    assert '"general", "update", "check_update_on_startup", true' in tabs
+    assert '"general", "ai.memory", "enabled", true' in tabs
+    # 两个状态函数必须挂在配置回填后的基线刷新里，否则初始值不会同步。
+    baseline = tabs.split("function refreshGeneralSettingsBaseline(): void {", 1)[1].split("\n}", 1)[0]
+    assert "bindUpdateAutoDownloadState();" in baseline
+    assert "bindMemorySettingsState();" in baseline
+    assert "setting-disabled" in tabs
+
+
+def test_settings_new_locale_keys_exist_in_both_catalogs():
+    catalogs = {}
+    for locale in ("zh_cn", "en_us"):
+        payload = json.loads((ROOT / f"frontend/src/locales/{locale}.json").read_text(encoding="utf-8"))
+        catalogs[locale] = payload["translations"]
+
+    keys = (
+        "settings.fold.advanced",
+        "settings.play.attribute_formula",
+        "settings.play.attribute_formula_hint",
+        "settings.model.ai_debug.title",
+        "settings.model.ai_debug.desc",
+        "settings.model.ai_debug.fold",
+        "settings.model.role_config.title",
+        "settings.model.role_config.desc",
+        "settings.knowledge.memory.title",
+        "settings.knowledge.memory.desc",
+        "settings.system.network.title",
+        "settings.system.invite.title",
+        "settings.system.status.title",
+        "settings.about.tagline",
+        "settings.about.repo.title",
+        "settings.about.repo.copy",
+        "settings.about.repo.copy_failed",
+        "settings.about.sponsor.empty",
+        "settings.about.legal.privacy_note",
+        "settings.about.legal.trademark",
+        "settings.about.update.state_checking",
+        "settings.about.update.poll_timeout",
+        "settings.about.update.step_stop",
+        "settings.about.update.step_replace",
+        "settings.about.update.step_restart",
+        "roomLog.error.export_timeout",
+        "roomLog.error.export_interrupted",
+    )
+    for key in keys:
+        assert key in catalogs["zh_cn"], key
+        assert key in catalogs["en_us"], key

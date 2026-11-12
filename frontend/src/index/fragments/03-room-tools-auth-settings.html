@@ -1273,11 +1273,18 @@
                                         <input type="number" class="form-control" id="diceRerollLimit" value="3" min="1" max="20">
                                         <small class="text-muted" data-i18n="settings.dice.reroll_limit_hint">仅在重投模式为「指定次数」时可编辑。</small>
                                     </div>
-                                    <div class="mt-3" data-admin-only="true" id="adminDiceTexturesSection">
-                                        <h5 data-i18n="settings.dice.textures_title">骰子贴图库</h5>
-                                        <p class="text-muted small" data-i18n="settings.dice.textures_hint">上传桌面贴图与骰面贴图，组合成皮肤供玩家在本机选择。</p>
-                                        <div id="adminDiceTextures"></div>
-                                    </div>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-dice-textures" data-admin-only="true">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title" data-i18n="settings.dice.textures_title">骰子外观库</h3>
+                                                        <p class="settings-section-desc" data-i18n="settings.dice.textures_hint">上传桌面贴图与骰面贴图，组合成皮肤供玩家在本机选择。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip settings-scope-chip--admin" data-i18n="settings.scope.site">站点配置</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                                    <div id="adminDiceTextures"></div>
                                                 </div>
                                             </section>
                                             <section class="settings-section" id="settings-section-character-rules">
@@ -1319,17 +1326,26 @@
                                         <small class="text-muted">管理员默认值仅作兜底：房间规则与用户个性化未填写时才生效。</small>
                                     </div>
 
-                                <div class="character-roll-settings-grid" aria-label="属性随机生成公式">
-                                    <label>力量 STR<input type="text" class="form-control" id="attributeRollSTR" placeholder="3d6x5"></label>
-                                    <label>敏捷 DEX<input type="text" class="form-control" id="attributeRollDEX" placeholder="3d6x5"></label>
-                                    <label>体型 SIZ<input type="text" class="form-control" id="attributeRollSIZ" placeholder="(2d6+6)x5"></label>
-                                    <label>外貌 APP<input type="text" class="form-control" id="attributeRollAPP" placeholder="3d6x5"></label>
-                                    <label>体质 CON<input type="text" class="form-control" id="attributeRollCON" placeholder="3d6x5"></label>
-                                    <label>智力 INT<input type="text" class="form-control" id="attributeRollINT" placeholder="(2d6+6)x5"></label>
-                                    <label>意志 POW<input type="text" class="form-control" id="attributeRollPOW" placeholder="3d6x5"></label>
-                                    <label>教育 EDU<input type="text" class="form-control" id="attributeRollEDU" placeholder="(2d6+6)x5"></label>
-                                    <label>幸运 LUC<input type="text" class="form-control" id="attributeRollLUC" placeholder="3d6x5"></label>
-                                </div>
+                                <details class="settings-fold" data-settings-assist="off">
+                                    <summary class="settings-fold-summary">
+                                        <span data-i18n="settings.play.attribute_formula">属性生成公式</span>
+                                        <span class="settings-fold-hint" data-i18n="settings.fold.advanced">高级</span>
+                                    </summary>
+                                    <div class="settings-fold-body">
+                                        <p class="settings-section-desc" data-i18n="settings.play.attribute_formula_hint">仅影响新建角色卡时的随机属性生成，已存在的角色卡不受影响。</p>
+                                        <div class="character-roll-settings-grid" aria-label="属性随机生成公式">
+                                            <label>力量 STR<input type="text" class="form-control" id="attributeRollSTR" placeholder="3d6x5"></label>
+                                            <label>敏捷 DEX<input type="text" class="form-control" id="attributeRollDEX" placeholder="3d6x5"></label>
+                                            <label>体型 SIZ<input type="text" class="form-control" id="attributeRollSIZ" placeholder="(2d6+6)x5"></label>
+                                            <label>外貌 APP<input type="text" class="form-control" id="attributeRollAPP" placeholder="3d6x5"></label>
+                                            <label>体质 CON<input type="text" class="form-control" id="attributeRollCON" placeholder="3d6x5"></label>
+                                            <label>智力 INT<input type="text" class="form-control" id="attributeRollINT" placeholder="(2d6+6)x5"></label>
+                                            <label>意志 POW<input type="text" class="form-control" id="attributeRollPOW" placeholder="3d6x5"></label>
+                                            <label>教育 EDU<input type="text" class="form-control" id="attributeRollEDU" placeholder="(2d6+6)x5"></label>
+                                            <label>幸运 LUC<input type="text" class="form-control" id="attributeRollLUC" placeholder="3d6x5"></label>
+                                        </div>
+                                    </div>
+                                </details>
                                                 </div>
                                                 <div class="settings-section-footer">
                                 <div class="mt-3 d-flex align-items-center gap-3">
@@ -1341,32 +1357,48 @@
                                     </div>
 
                                     <div id="model-settings-content" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-model">
-                            <section class="tool-panel mb-4" id="aiDebugSettings">
-                                <div class="tool-panel-header">
-                                    <h4>AI 调试模式</h4>
-                                    <span>仅保留工具调用相关提示词</span>
-                                </div>
-                                <div class="form-check mb-3">
-                                    <input type="checkbox" class="form-check-input" id="debugMode">
-                                    <label class="form-check-label" for="debugMode">启用 AI 调试模式</label>
-                                </div>
-                                <label class="form-label" for="debugKpPrompt">调试 KP 提示词</label>
-                                <textarea class="form-control" id="debugKpPrompt" rows="8" placeholder="输入仅用于测试 function calling 的 KP 提示词"></textarea>
-                                <button class="btn btn-primary mt-3" id="saveDebugKpPrompt" type="button">
-                                    <i class="fa fa-save" aria-hidden="true"></i> 保存调试提示词
-                                </button>
-                                <div class="settings-message" id="debugPromptMessage" aria-live="polite"></div>
-                            </section>
-                            <div class="role-config-settings">
-                                <div class="role-config-header">
-                                    <div>
-                                        <h4>角色配置</h4>
-                                        <p class="text-muted">为每个角色配置唤醒词、提示词和使用的大模型提供商。</p>
+                            <section class="settings-section" id="aiDebugSettings">
+                                <header class="settings-section-head">
+                                    <div class="settings-section-heading">
+                                        <h3 class="settings-section-title" data-i18n="settings.model.ai_debug.title">AI 调试</h3>
+                                        <p class="settings-section-desc" data-i18n="settings.model.ai_debug.desc">仅保留工具调用相关提示词，用于排查 function calling。</p>
                                     </div>
+                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点配置</span>
+                                </header>
+                                <div class="settings-section-body">
+                                    <details class="settings-fold" data-settings-assist="off">
+                                        <summary class="settings-fold-summary">
+                                            <span data-i18n="settings.model.ai_debug.fold">调试选项</span>
+                                            <span class="settings-fold-hint" data-i18n="settings.fold.advanced">高级</span>
+                                        </summary>
+                                        <div class="settings-fold-body">
+                                            <div class="form-check mb-3">
+                                                <input type="checkbox" class="form-check-input" id="debugMode">
+                                                <label class="form-check-label" for="debugMode">启用 AI 调试模式</label>
+                                            </div>
+                                            <label class="form-label" for="debugKpPrompt">调试 KP 提示词</label>
+                                            <textarea class="form-control" id="debugKpPrompt" rows="8" placeholder="输入仅用于测试 function calling 的 KP 提示词"></textarea>
+                                            <button class="btn btn-primary mt-3" id="saveDebugKpPrompt" type="button">
+                                                <i class="fa fa-save" aria-hidden="true"></i> 保存调试提示词
+                                            </button>
+                                            <div class="settings-message" id="debugPromptMessage" aria-live="polite"></div>
+                                        </div>
+                                    </details>
                                 </div>
-                                <div class="role-config-list" id="roleConfigList" aria-live="polite"></div>
-                                <div class="settings-message" id="roleConfigMessage" aria-live="polite"></div>
-                            </div>
+                            </section>
+                            <section class="settings-section" id="settings-section-role-config">
+                                <header class="settings-section-head">
+                                    <div class="settings-section-heading">
+                                        <h3 class="settings-section-title" data-i18n="settings.model.role_config.title">角色配置</h3>
+                                        <p class="settings-section-desc" data-i18n="settings.model.role_config.desc">为每个角色配置唤醒词、提示词和使用的大模型提供商。</p>
+                                    </div>
+                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点配置</span>
+                                </header>
+                                <div class="settings-section-body">
+                                    <div class="role-config-list" id="roleConfigList" aria-live="polite"></div>
+                                    <div class="settings-message" id="roleConfigMessage" aria-live="polite"></div>
+                                </div>
+                            </section>
                             <div class="platform-section-header">
                                 <div>
                                     <h4>大模型提供商</h4>
@@ -1717,6 +1749,17 @@
                                         <input type="number" class="form-control" id="lorebookTokenBudget" value="0" min="0" max="200000">
                                         <small class="text-muted">0 表示不限制（默认）。超大剧本可设上限，超出的低优先级章节会被整体丢弃（不截断正文）。</small>
                                     </div>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-long-term-memory">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title" data-i18n="settings.knowledge.memory.title">长期记忆</h3>
+                                                        <p class="settings-section-desc" data-i18n="settings.knowledge.memory.desc">从房间事件日志、关键节点与早期对话归档中按相关性注入少量回顾，避免长剧本后期遗忘玩家早期的行动与承诺。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.site">站点级</span>
+                                                </header>
+                                                <div class="settings-section-body">
                                     <div class="form-group mt-2">
                                         <div class="form-check">
                                             <input type="checkbox" class="form-check-input" id="memoryEnabled" checked>
@@ -1742,51 +1785,70 @@
                                             <section class="settings-section" id="settings-section-network">
                                                 <header class="settings-section-head">
                                                     <div class="settings-section-heading">
-                                                        <h3 class="settings-section-title">网络配置</h3>
-                                                        <p class="settings-section-desc">调整监听端口、局域网服务发现与邀请链接地址；测试连接不会修改已保存配置。</p>
+                                                        <h3 class="settings-section-title" data-i18n="settings.system.network.title">网络与端口</h3>
+                                                        <p class="settings-section-desc" data-i18n="settings.system.network.desc">调整监听端口与局域网服务发现；保存后重启服务才会生效。</p>
                                                     </div>
                                                     <span class="settings-scope-chip" data-i18n="settings.scope.deployment">部署级</span>
                                                 </header>
                                                 <div class="settings-section-body">
-                                    <div class="network-config">
-                                        <div class="form-group">
-                                            <label>端口号</label>
-                                            <input type="number" class="form-control" id="networkPort" min="1" max="65535" value="8086">
-                                        </div>
-                                        <div class="form-group mt-2">
-                                            <div class="form-check">
-                                                <input type="checkbox" class="form-check-input" id="enableDiscovery">
-                                                <label class="form-check-label" for="enableDiscovery">启用局域网服务发现</label>
-                                            </div>
-                                        </div>
-                                        <div class="form-group mt-3">
-                                            <label for="shareBaseUrlSelect">房间邀请地址（生成邀请链接/二维码时使用）</label>
-                                            <select class="form-control" id="shareBaseUrlSelect"></select>
-                                            <input type="text" class="form-control mt-2" id="shareBaseUrlInput" placeholder="留空则使用访问者当前地址，例如 http://192.168.1.10:8086" disabled>
-                                            <div class="form-text">本机有多个网络地址（多网卡/虚拟网卡）时，可在此选定用于生成邀请链接与二维码的对外地址。</div>
-                                        </div>
-                                        <div class="network-status mt-3 p-3 border rounded">
-                                            <h5>网络状态</h5>
-                                            <div class="status-item">
-                                                <span>服务器状态：</span>
-                                                <span id="serverStatus" class="status-value">未知</span>
-                                            </div>
-                                            <div class="status-item">
-                                                <span>局域网IP：</span>
-                                                <span id="lanIp" class="status-value">未知</span>
-                                            </div>
-                                            <div class="status-item">
-                                                <span>外部可访问性：</span>
-                                                <span id="externalAccess" class="status-value">未知</span>
-                                            </div>
-                                        </div>
-                                    </div>
+                                                    <div class="form-group">
+                                                        <label for="networkPort">端口号</label>
+                                                        <input type="number" class="form-control" id="networkPort" min="1" max="65535" value="8086">
+                                                    </div>
+                                                    <div class="form-group mt-2">
+                                                        <div class="form-check">
+                                                            <input type="checkbox" class="form-check-input" id="enableDiscovery">
+                                                            <label class="form-check-label" for="enableDiscovery">启用局域网服务发现</label>
+                                                        </div>
+                                                    </div>
                                                 </div>
                                                 <div class="settings-section-footer">
-                                        <div class="form-group mt-3">
-                                            <button class="btn btn-primary" id="saveNetworkConfig">保存网络配置</button>
-                                            <button class="btn btn-secondary ml-2" id="testNetworkConnection">测试网络连接</button>
-                                        </div>
+                                                    <button class="btn btn-primary" id="saveNetworkConfig">保存网络配置</button>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-invite-access">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title" data-i18n="settings.system.invite.title">邀请与外部访问</h3>
+                                                        <p class="settings-section-desc" data-i18n="settings.system.invite.desc">本机有多个网络地址（多网卡/虚拟网卡）时，可在此选定用于生成邀请链接与二维码的对外地址。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.deployment">部署级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                                    <div class="form-group">
+                                                        <label for="shareBaseUrlSelect">房间邀请地址（生成邀请链接/二维码时使用）</label>
+                                                        <select class="form-control" id="shareBaseUrlSelect"></select>
+                                                        <input type="text" class="form-control mt-2" id="shareBaseUrlInput" placeholder="留空则使用访问者当前地址，例如 http://192.168.1.10:8086" disabled>
+                                                    </div>
+                                                </div>
+                                            </section>
+                                            <section class="settings-section" id="settings-section-network-status">
+                                                <header class="settings-section-head">
+                                                    <div class="settings-section-heading">
+                                                        <h3 class="settings-section-title" data-i18n="settings.system.status.title">状态与自检</h3>
+                                                        <p class="settings-section-desc" data-i18n="settings.system.status.desc">查看服务、局域网与外部访问的当前状态；测试连接不会修改已保存配置。</p>
+                                                    </div>
+                                                    <span class="settings-scope-chip" data-i18n="settings.scope.deployment">部署级</span>
+                                                </header>
+                                                <div class="settings-section-body">
+                                                    <div class="network-status p-3 border rounded">
+                                                        <h5>网络状态</h5>
+                                                        <div class="status-item">
+                                                            <span>服务器状态：</span>
+                                                            <span id="serverStatus" class="status-value">未知</span>
+                                                        </div>
+                                                        <div class="status-item">
+                                                            <span>局域网IP：</span>
+                                                            <span id="lanIp" class="status-value">未知</span>
+                                                        </div>
+                                                        <div class="status-item">
+                                                            <span>外部可访问性：</span>
+                                                            <span id="externalAccess" class="status-value">未知</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="settings-section-footer">
+                                                    <button class="btn btn-secondary" id="testNetworkConnection">测试网络连接</button>
                                                 </div>
                                             </section>
                                     </div>
@@ -1998,7 +2060,12 @@
                                     </div>
                                 </div>
 
-                                <h5 class="mt-4">AI 音乐导演（LLM 按谱精修）</h5>
+                                <details class="settings-fold" data-settings-assist="off">
+                                    <summary class="settings-fold-summary">
+                                        <span>AI 音乐导演（LLM 按谱精修）</span>
+                                        <span class="settings-fold-hint" data-i18n="settings.fold.advanced">高级</span>
+                                    </summary>
+                                    <div class="settings-fold-body">
                                 <div class="form-group mt-2">
                                     <div class="form-check">
                                         <input class="form-check-input" type="checkbox" id="immersiveDirectorEnabled">
@@ -2048,8 +2115,15 @@
                                     <button type="button" class="btn btn-outline-danger btn-sm" id="immersiveDirectorClearCache">清理乐谱缓存</button>
                                 </div>
                                 <p class="text-muted small mt-2" id="immersiveDirectorStatus">导演用量与缓存尚未加载。</p>
+                                    </div>
+                                </details>
 
-                                <h5 class="mt-4">外链曲库（Jamendo / Openverse）</h5>
+                                <details class="settings-fold" data-settings-assist="off">
+                                    <summary class="settings-fold-summary">
+                                        <span>外链曲库（Jamendo / Openverse）</span>
+                                        <span class="settings-fold-hint" data-i18n="settings.fold.advanced">高级</span>
+                                    </summary>
+                                    <div class="settings-fold-body">
                                 <small class="form-text text-muted d-block mt-2">仅检索许可为 CC0 / CC BY / CC BY-SA 且署名信息完整的曲目；缺署名的结果不会播放。外部曲目叠在程序化底床之上，底床永不停。</small>
                                 <div class="form-row">
                                     <div class="form-group col-md-4 mt-2">
@@ -2104,6 +2178,8 @@
                                         <label class="form-check-label" for="immersiveExternalCacheAudio">缓存音频本体（默认只缓存元数据与 URL）</label>
                                     </div>
                                 </div>
+                                    </div>
+                                </details>
 
                                 <h5 class="mt-4">实时配图</h5>
                                 <div class="form-group mt-2">
@@ -2382,123 +2458,194 @@
 
                                     <div id="about-settings-content" class="settings-content" role="tabpanel" aria-labelledby="settings-tab-about">
                                         <div class="about-shell">
-                                            <section class="about-hero">
-                                                <img class="about-logo" id="aboutAppLogo" src="/assets/brand/icon-128.png" alt="帷幕">
-                                                <div class="about-hero-copy">
-                                                    <h2 class="about-name" id="aboutAppName">帷幕 The Veil</h2>
-                                                    <p class="about-subtitle" data-i18n="settings.about.subtitle">自托管 AI 跑团平台</p>
-                                                    <div class="about-meta">
-                                                        <span class="about-pill" id="aboutVersionValue">v-</span>
-                                                        <span class="about-pill" id="aboutBuildValue">dev · local</span>
-                                                        <span class="about-pill" id="aboutLicenseValue">Apache-2.0</span>
+                                            <section class="settings-section about-hero">
+                                                <div class="about-hero-main">
+                                                    <img class="about-logo" id="aboutAppLogo" src="/assets/brand/icon-128.png" alt="帷幕" width="72" height="72">
+                                                    <div class="about-hero-text">
+                                                        <h3 class="about-title"><span id="aboutAppName">帷幕 The Veil</span> <span class="about-version-chip" id="aboutVersionValue">v—</span> <span class="about-channel-chip" id="aboutChannelValue" hidden></span></h3>
+                                                        <p class="about-tagline" data-i18n="settings.about.tagline">自托管 AI 跑团平台，房间、剧本与日志都留在你自己的电脑上。</p>
+                                                        <p class="about-meta-line">
+                                                            <span data-i18n="settings.about.meta.developer">开发者</span> Nobook1121 ·
+                                                            <span data-i18n="settings.about.meta.license">许可证</span> <span id="aboutLicenseValue">Apache-2.0</span> ·
+                                                            <span id="aboutRuntimeValue">-</span>
+                                                        </p>
                                                     </div>
-                                                    <div class="about-links" id="repoLinkGroup" hidden>
-                                                        <a class="about-link" id="repoGithub" href="#" target="_blank" rel="noopener noreferrer">
-                                                            <i class="fa fa-github" aria-hidden="true"></i><span data-i18n="settings.about.links.github">GitHub 仓库</span>
-                                                        </a>
-                                                        <a class="about-link" id="repoIssues" href="#" target="_blank" rel="noopener noreferrer">
-                                                            <i class="fa fa-exclamation-circle" aria-hidden="true"></i><span data-i18n="settings.about.links.issues">问题反馈</span>
-                                                        </a>
-                                                        <a class="about-link" id="repoDiscussions" href="#" target="_blank" rel="noopener noreferrer">
-                                                            <i class="fa fa-comments" aria-hidden="true"></i><span data-i18n="settings.about.links.discussions">讨论区</span>
-                                                        </a>
-                                                        <a class="about-link" id="repoWikiLink" href="#" target="_blank" rel="noopener noreferrer">
-                                                            <i class="fa fa-book" aria-hidden="true"></i><span data-i18n="settings.about.links.wiki">使用文档</span>
-                                                        </a>
-                                                        <a class="about-link" id="repoReleases" href="#" target="_blank" rel="noopener noreferrer">
-                                                            <i class="fa fa-download" aria-hidden="true"></i><span data-i18n="settings.about.links.releases">发布记录</span>
-                                                        </a>
-                                                        <a class="about-link" id="repoStarLink" href="#" target="_blank" rel="noopener noreferrer" hidden>
-                                                            <i class="fa fa-star" aria-hidden="true"></i><span id="repoStarCount">0</span>
-                                                        </a>
-                                                    </div>
-                                                    <span class="settings-message" id="aboutInfoError" hidden></span>
-                                                    <button class="btn btn-sm btn-outline-secondary mt-2" id="aboutInfoRetry" type="button" hidden>
-                                                        <i class="fa fa-refresh" aria-hidden="true"></i> <span data-i18n="settings.about.retry">重试</span>
-                                                    </button>
                                                 </div>
-                                            </section>
-
-                                            <section class="about-card" id="appUpdatePanel">
-                                                <h5 data-i18n="settings.about.update.title">应用更新</h5>
-                                                <p class="settings-section-desc" data-i18n="settings.about.update.hint">从 GitHub Releases 检查新版本并下载发布包；下载后需手动替换程序目录并重启。</p>
-                                                <div class="update-status">
-                                                    <span class="update-state-pill" id="updateStateBadge" data-state="unknown" data-i18n="settings.about.update.state_idle">尚未检查</span>
-                                                    <p class="update-message" id="updateMessage" hidden></p>
-                                                </div>
-                                                <dl class="update-facts">
-                                                    <div><dt data-i18n="settings.about.update.current">当前版本</dt><dd id="updateCurrentVersion">v—</dd></div>
-                                                    <div><dt data-i18n="settings.about.update.latest">最新版本</dt><dd id="updateLatestVersion">—</dd></div>
-                                                    <div><dt data-i18n="settings.about.update.checked_at">上次检查</dt><dd id="updateCheckedAt">—</dd></div>
-                                                </dl>
-                                                <div class="update-progress" id="updateProgressWrap" hidden>
-                                                    <div class="update-progress-fill" id="updateProgressFill"></div>
-                                                </div>
-                                                <div class="update-actions">
-                                                    <button class="btn btn-primary" id="updateCheckButton" type="button">
-                                                        <i class="fa fa-refresh" aria-hidden="true"></i> <span data-i18n="settings.about.update.check">检查更新</span>
-                                                    </button>
-                                                    <button class="btn btn-outline-secondary" id="updateDownloadButton" type="button" hidden>
-                                                        <i class="fa fa-download" aria-hidden="true"></i> <span data-i18n="settings.about.update.download">下载更新包</span>
-                                                    </button>
-                                                    <a class="btn btn-outline-secondary" id="updateReleaseLink" href="#" target="_blank" rel="noopener noreferrer" hidden>
-                                                        <span data-i18n="settings.about.update.release_notes">查看发布说明</span>
+                                                <div class="about-hero-actions">
+                                                    <a class="btn btn-primary" id="starRepoButton" href="#" target="_blank" rel="noopener noreferrer">
+                                                        <i class="fa fa-github" aria-hidden="true"></i> <span data-i18n="settings.about.star.cta">在 GitHub 上 Star</span>
+                                                    </a>
+                                                    <a class="btn btn-outline-secondary" id="repoWikiButton" href="#" target="_blank" rel="noopener noreferrer">
+                                                        <i class="fa fa-book" aria-hidden="true"></i> <span data-i18n="settings.about.links.wiki">使用文档</span>
+                                                    </a>
+                                                    <a class="btn btn-outline-secondary" id="repoReleasesButton" href="#" target="_blank" rel="noopener noreferrer">
+                                                        <i class="fa fa-download" aria-hidden="true"></i> <span data-i18n="settings.about.links.releases">发布记录</span>
                                                     </a>
                                                 </div>
-                                                <div class="update-notes" id="updateNotes" hidden></div>
-                                                <p class="settings-section-desc" id="updateReadonlyNote" hidden data-i18n="settings.about.update.readonly">当前账号没有更新权限，只能查看版本与发布说明。</p>
-                                                <label class="form-check update-toggle" data-admin-only="true">
-                                                    <input class="form-check-input" type="checkbox" id="updateCheckOnStartup">
-                                                    <span class="form-check-label" data-i18n="settings.about.update.check_on_startup">启动时检查更新</span>
-                                                </label>
-                                                <label class="form-check update-toggle" data-admin-only="true">
-                                                    <input class="form-check-input" type="checkbox" id="updateAutoDownload">
-                                                    <span class="form-check-label" data-i18n="settings.about.update.auto_download">自动下载更新包（不会自动安装）</span>
-                                                </label>
-                                                <p class="settings-section-desc" data-admin-only="true" data-i18n="settings.about.update.scope_hint">更新源与检查行为属于站点配置，修改后点击底部「保存」生效。</p>
+                                                <span class="settings-message" id="aboutInfoError" hidden></span>
+                                                <button class="btn btn-sm btn-outline-secondary mt-2" id="aboutInfoRetry" type="button" hidden>
+                                                    <i class="fa fa-refresh" aria-hidden="true"></i> <span data-i18n="settings.about.retry">重试</span>
+                                                </button>
                                             </section>
 
-                                            <div class="about-grid">
-                                                <section class="about-card">
-                                                    <h5 data-i18n="settings.about.build.title">构建信息</h5>
+                                            <section class="settings-section" id="appUpdatePanel">
+                                                <div class="settings-section-head">
+                                                    <div>
+                                                        <h3 class="settings-section-title" data-i18n="settings.about.update.title">应用更新</h3>
+                                                        <p class="settings-section-desc" data-i18n="settings.about.update.hint">从 GitHub Releases 检查新版本并下载发布包；下载后需手动替换程序目录并重启。</p>
+                                                    </div>
+                                                    <div class="settings-section-actions">
+                                                        <span class="update-state-badge" id="updateStateBadge" data-state="unknown" data-i18n="settings.about.update.state_idle">尚未检查</span>
+                                                    </div>
+                                                </div>
+                                                <div class="settings-section-body">
+                                                    <dl class="update-facts">
+                                                        <div><dt data-i18n="settings.about.update.current">当前版本</dt><dd id="updateCurrentVersion">v—</dd></div>
+                                                        <div><dt data-i18n="settings.about.update.latest">最新版本</dt><dd id="updateLatestVersion">—</dd></div>
+                                                        <div><dt data-i18n="settings.about.update.checked_at">上次检查</dt><dd id="updateCheckedAt">—</dd></div>
+                                                    </dl>
+                                                    <div class="update-actions" data-admin-only="true">
+                                                        <label class="form-check">
+                                                            <input class="form-check-input" type="checkbox" id="updateCheckOnStartup">
+                                                            <span class="form-check-label" data-i18n="settings.about.update.check_on_startup">启动时检查更新</span>
+                                                        </label>
+                                                        <label class="form-check">
+                                                            <input class="form-check-input" type="checkbox" id="updateAutoDownload">
+                                                            <span class="form-check-label" data-i18n="settings.about.update.auto_download">自动下载更新包（不会自动安装）</span>
+                                                        </label>
+                                                        <div class="update-action-row">
+                                                            <button class="btn btn-primary" id="updateCheckButton" type="button">
+                                                                <i class="fa fa-refresh" aria-hidden="true"></i> <span data-i18n="settings.about.update.check">检查更新</span>
+                                                            </button>
+                                                            <button class="btn btn-outline-secondary" id="updateDownloadButton" type="button" hidden>
+                                                                <i class="fa fa-download" aria-hidden="true"></i> <span data-i18n="settings.about.update.download">下载更新包</span>
+                                                            </button>
+                                                            <button class="btn btn-link" id="updateNotesToggle" type="button" aria-expanded="false" hidden>
+                                                                <i class="fa fa-caret-down" aria-hidden="true"></i> <span data-i18n="settings.about.update.release_notes">更新说明</span>
+                                                            </button>
+                                                            <a class="btn btn-link" id="updateReleaseLink" href="#" target="_blank" rel="noopener noreferrer" hidden>
+                                                                <i class="fa fa-external-link" aria-hidden="true"></i> <span data-i18n="settings.about.update.release_notes">更新说明</span>
+                                                            </a>
+                                                        </div>
+                                                    </div>
+                                                    <div class="update-progress" id="updateProgress" hidden>
+                                                        <div class="update-progress-bar"><span class="update-progress-fill" id="updateProgressFill"></span></div>
+                                                        <span class="update-progress-text" id="updateProgressText"></span>
+                                                    </div>
+                                                    <pre class="update-notes" id="updateNotes" hidden></pre>
+                                                    <div class="update-instructions" id="updateInstructions" hidden>
+                                                        <p class="settings-note" data-i18n="settings.about.update.instructions_title">手动安装步骤</p>
+                                                        <ol>
+                                                            <li data-i18n="settings.about.update.step_stop">关闭正在运行的服务（Ctrl+C 或结束 start.cmd）。</li>
+                                                            <li data-i18n="settings.about.update.step_replace">解压更新包，覆盖安装目录中的程序文件（保留 data 目录）。</li>
+                                                            <li data-i18n="settings.about.update.step_restart">重新运行 start.cmd 启动帷幕。</li>
+                                                        </ol>
+                                                    </div>
+                                                    <div class="settings-message" id="updateMessage" hidden></div>
+                                                    <p class="settings-note" id="updateReadonlyNote" hidden data-i18n="settings.about.update.readonly">当前账号没有更新权限，只能查看版本与发布说明。</p>
+                                                </div>
+                                            </section>
+
+                                            <section class="settings-section" id="repoPanel">
+                                                <div class="settings-section-head">
+                                                    <div>
+                                                        <h3 class="settings-section-title" data-i18n="settings.about.repo.title">仓库与社区</h3>
+                                                        <p class="settings-section-desc" data-i18n="settings.about.repo.desc">发现问题或想参与开发？欢迎到仓库提交 issue、参与讨论。</p>
+                                                    </div>
+                                                </div>
+                                                <div class="settings-section-body">
+                                                    <div class="about-repo-row">
+                                                        <code class="about-repo-url" id="repoUrlValue">—</code>
+                                                        <button class="btn btn-sm btn-outline-secondary" id="copyRepoUrlButton" type="button" disabled>
+                                                            <i class="fa fa-copy" aria-hidden="true"></i> <span data-i18n="settings.about.repo.copy">复制地址</span>
+                                                        </button>
+                                                        <a class="btn btn-sm btn-primary" id="repoStarLink" href="#" target="_blank" rel="noopener noreferrer" hidden>
+                                                            <i class="fa fa-github" aria-hidden="true"></i> Star <span class="about-star-count" id="repoStarCount"></span>
+                                                        </a>
+                                                    </div>
+                                                    <ul class="about-link-list">
+                                                        <li><a id="repoIssuesLink" href="#" target="_blank" rel="noopener noreferrer"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> <span data-i18n="settings.about.links.issues">问题反馈</span></a></li>
+                                                        <li><a id="repoDiscussionsLink" href="#" target="_blank" rel="noopener noreferrer"><i class="fa fa-comments" aria-hidden="true"></i> <span data-i18n="settings.about.links.discussions">讨论区</span></a></li>
+                                                        <li><a id="repoWikiLink" href="#" target="_blank" rel="noopener noreferrer"><i class="fa fa-book" aria-hidden="true"></i> <span data-i18n="settings.about.links.wiki">使用文档</span></a></li>
+                                                        <li><a id="repoReleasesLink" href="#" target="_blank" rel="noopener noreferrer"><i class="fa fa-download" aria-hidden="true"></i> <span data-i18n="settings.about.links.releases">发布记录</span></a></li>
+                                                    </ul>
+                                                </div>
+                                            </section>
+
+                                            <section class="settings-section" id="aboutSponsorPanel">
+                                                <div class="settings-section-head">
+                                                    <div>
+                                                        <h3 class="settings-section-title" data-i18n="settings.about.sponsor.title">赞助与支持</h3>
+                                                        <p class="settings-section-desc" data-i18n="settings.about.sponsor.desc">赞助用于服务器和开发投入，不附带任何功能特权。</p>
+                                                    </div>
+                                                </div>
+                                                <div class="settings-section-body">
+                                                    <div class="sponsor-channels" id="sponsorChannels"></div>
+                                                    <h4 class="about-subtitle" data-i18n="settings.about.sponsor.list_title">赞助人</h4>
+                                                    <div class="sponsor-list" id="sponsorList"></div>
+                                                    <p class="settings-state" id="sponsorEmptyState" hidden data-i18n="settings.about.sponsor.empty">暂时还没有赞助记录，谢谢每一位支持者。</p>
+                                                </div>
+                                            </section>
+
+                                            <section class="settings-section" id="aboutCreditsPanel">
+                                                <div class="settings-section-head">
+                                                    <div>
+                                                        <h3 class="settings-section-title" data-i18n="settings.about.credits.title">致谢</h3>
+                                                        <p class="settings-section-desc" data-i18n="settings.about.credits.desc">感谢所有为帷幕贡献代码、文档与反馈的人。</p>
+                                                    </div>
+                                                </div>
+                                                <div class="settings-section-body">
+                                                    <h4 class="about-subtitle" data-i18n="settings.about.credits.contributors">贡献者</h4>
+                                                    <div class="credits-people" id="creditsContributors"></div>
+                                                    <p class="credits-empty" id="aboutCreditsSummary" hidden></p>
+                                                    <h4 class="about-subtitle" data-i18n="settings.about.credits.special">特别鸣谢</h4>
+                                                    <div class="credits-people" id="creditsSpecialThanks"></div>
+                                                    <h4 class="about-subtitle" data-i18n="settings.about.dependencies.title">依赖与许可</h4>
+                                                    <div class="credits-deps" id="creditsDependencies"></div>
+                                                    <p class="settings-note">
+                                                        <a id="thirdPartyLink" href="#" target="_blank" rel="noopener noreferrer" hidden data-i18n="settings.about.credits.full_licenses">完整第三方许可清单</a>
+                                                        <span data-i18n="settings.about.credits.agpl_note">部分依赖使用 AGPL 等许可证，完整清单见仓库 third_party 目录。</span>
+                                                    </p>
+                                                </div>
+                                            </section>
+
+                                            <section class="settings-section" id="aboutBuildPanel">
+                                                <div class="settings-section-head">
+                                                    <div>
+                                                        <h3 class="settings-section-title" data-i18n="settings.about.build.title">构建信息</h3>
+                                                        <p class="settings-section-desc" data-i18n="settings.about.build.desc">用于排查问题，向开发者反馈时请附上这些信息。</p>
+                                                    </div>
+                                                </div>
+                                                <div class="settings-section-body">
                                                     <dl class="about-kv">
                                                         <dt data-i18n="settings.about.build.version">版本</dt><dd id="aboutBuildVersion">-</dd>
                                                         <dt data-i18n="settings.about.build.mode">构建方式</dt><dd id="aboutBuildMode">-</dd>
                                                         <dt data-i18n="settings.about.build.sha">提交</dt><dd id="aboutBuildSha">-</dd>
                                                         <dt data-i18n="settings.about.build.time">构建时间</dt><dd id="aboutBuildTime">-</dd>
                                                         <dt data-i18n="settings.about.build.channel">通道</dt><dd id="aboutBuildChannel">-</dd>
-                                                    </dl>
-                                                </section>
-                                                <section class="about-card">
-                                                    <h5 data-i18n="settings.about.runtime.title">运行时与许可</h5>
-                                                    <dl class="about-kv">
                                                         <dt data-i18n="settings.about.runtime.python">Python</dt><dd id="aboutRuntimePython">-</dd>
                                                         <dt data-i18n="settings.about.runtime.platform">平台</dt><dd id="aboutRuntimePlatform">-</dd>
                                                         <dt data-i18n="settings.about.license">许可证</dt><dd id="aboutLicenseName">-</dd>
                                                         <dt data-i18n="settings.about.license_spdx">SPDX</dt><dd id="aboutLicenseSpdx">-</dd>
                                                     </dl>
-                                                    <div class="about-links">
-                                                        <a class="about-link" id="aboutLicenseLink" href="#" target="_blank" rel="noopener noreferrer">
-                                                            <i class="fa fa-file-text-o" aria-hidden="true"></i><span data-i18n="settings.about.license_view">查看许可证</span>
-                                                        </a>
-                                                        <a class="about-link" id="aboutThirdPartyLink" href="#" target="_blank" rel="noopener noreferrer" hidden>
-                                                            <i class="fa fa-file-text-o" aria-hidden="true"></i><span data-i18n="settings.about.third_party">第三方许可</span>
-                                                        </a>
-                                                    </div>
-                                                </section>
-                                            </div>
-
-                                            <section class="about-card">
-                                                <h5 data-i18n="settings.about.credits.title">致谢</h5>
-                                                <p class="credits-empty" id="aboutCreditsSummary" hidden></p>
-                                                <div class="credits-list" id="aboutContributors"></div>
-                                                <h5 class="mt-3" data-i18n="settings.about.dependencies.title">依赖与许可</h5>
-                                                <div class="credits-deps" id="aboutDependencies"></div>
+                                                </div>
                                             </section>
 
-                                            <section class="about-card" id="sponsorSection" hidden>
-                                                <h5 data-i18n="settings.about.sponsors.title">支持项目</h5>
-                                                <div class="sponsor-grid" id="sponsorList"></div>
+                                            <section class="settings-section" id="aboutLegalPanel">
+                                                <div class="settings-section-head">
+                                                    <div>
+                                                        <h3 class="settings-section-title" data-i18n="settings.about.legal.title">许可与声明</h3>
+                                                    </div>
+                                                </div>
+                                                <div class="settings-section-body">
+                                                    <ul class="about-legal-list">
+                                                        <li><a id="licenseLink" href="#" target="_blank" rel="noopener noreferrer" data-i18n="settings.about.legal.license">Apache License 2.0</a></li>
+                                                        <li><a id="privacyLink" href="#" target="_blank" rel="noopener noreferrer" data-i18n="settings.about.legal.privacy">数据与隐私说明</a></li>
+                                                        <li><a id="thirdPartyPolicyLink" href="#" target="_blank" rel="noopener noreferrer" data-i18n="settings.about.legal.third_party">第三方政策</a></li>
+                                                    </ul>
+                                                    <p class="settings-note" data-i18n="settings.about.legal.privacy_note">所有房间、剧本、角色卡与日志都保存在本机的 data 目录；只有管理员配置的 AI 服务会接收提示词。</p>
+                                                    <p class="settings-note" data-i18n="settings.about.legal.trademark">帷幕是独立开发的自托管跑团工具，与 Chaosium Inc. 无隶属关系；《克苏鲁的呼唤》相关商标与剧本版权归其各自权利人所有。</p>
+                                                </div>
                                             </section>
                                         </div>
                                     </div>

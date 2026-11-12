@@ -94,9 +94,7 @@ interface Window {
         init: () => void;
         refresh: () => Promise<void>;
     };
-    TrpgAbout?: {
-        init: () => void;
-    };
+    TrpgAbout?: TrpgAboutApi;
     TrpgPlugins?: {
         init: () => void;
     };

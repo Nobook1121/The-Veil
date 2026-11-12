@@ -3,7 +3,7 @@
 
 .settings-shell {
     display: grid;
-    grid-template-columns: 208px minmax(0, 1fr);
+    grid-template-columns: 236px minmax(0, 1fr);
     gap: 24px;
     align-items: start;
     /* 208 + 24 + 1040 内容宽 + 左右内边距与边框，对齐设计稿的内容最大宽。 */
@@ -74,8 +74,8 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: #f4c542;
-    box-shadow: 0 0 0 2px color-mix(in srgb, #f4c542 25%, transparent);
+    background: var(--theme-warning);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-warning) 25%, transparent);
 }
 
 /* ---------- 右侧工作区 ---------- */
@@ -280,8 +280,8 @@
 }
 
 .settings-section.setting-dirty {
-    border-color: color-mix(in srgb, #f4c542 55%, var(--border-subtle));
-    box-shadow: inset 3px 0 0 #f4c542;
+    border-color: color-mix(in srgb, var(--theme-warning) 55%, var(--border-subtle));
+    box-shadow: inset 3px 0 0 var(--theme-warning);
 }
 
 /* 现有直接子块（模型/知识库/沉浸页）自动卡片化 */
@@ -354,7 +354,7 @@
 /* ---------- 部署锁定 ---------- */
 .settings-section .setting-locked-note,
 .settings-section .form-text.setting-lock-hint {
-    color: #d9a441;
+    color: var(--theme-warning);
 }
 
 /* ---------- 关于页 ---------- */
@@ -365,8 +365,8 @@
 
 .about-hero {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
     gap: 18px;
     padding: 22px 24px;
     border: 1px solid var(--border-subtle);
@@ -510,18 +510,18 @@
 }
 
 .update-state-pill.ok {
-    border-color: color-mix(in srgb, #3fb950 45%, var(--border-subtle));
-    color: #3fb950;
+    border-color: color-mix(in srgb, var(--theme-success) 45%, var(--border-subtle));
+    color: var(--theme-success);
 }
 
 .update-state-pill.warn {
-    border-color: color-mix(in srgb, #f4c542 50%, var(--border-subtle));
-    color: #d9a441;
+    border-color: color-mix(in srgb, var(--theme-warning) 50%, var(--border-subtle));
+    color: var(--theme-warning);
 }
 
 .update-state-pill.error {
-    border-color: color-mix(in srgb, #f85149 50%, var(--border-subtle));
-    color: #f85149;
+    border-color: color-mix(in srgb, var(--theme-danger) 50%, var(--border-subtle));
+    color: var(--theme-danger);
 }
 
 .update-message {
@@ -689,7 +689,395 @@
     font-size: 11.5px;
 }
 
-/* 旧的分割线在卡片布局里不再需要 */
+/* ---------- 高级设置折叠 ---------- */
+.settings-fold {
+    margin-top: 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    background: var(--theme-bg-panel-muted);
+}
+
+.settings-fold-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    list-style: none;
+    cursor: pointer;
+    color: var(--theme-text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.settings-fold-summary::-webkit-details-marker {
+    display: none;
+}
+
+.settings-fold-summary::before {
+    content: "\f105";
+    font-family: "FontAwesome";
+    font-weight: normal;
+    color: var(--theme-text-muted);
+    transition: transform 0.16s ease;
+}
+
+.settings-fold[open] > .settings-fold-summary::before {
+    content: "\f107";
+}
+
+.settings-fold-summary > span:first-of-type {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.settings-fold-hint {
+    color: var(--theme-text-muted);
+    font-size: 11.5px;
+    font-weight: 400;
+}
+
+.settings-fold-body {
+    padding: 4px 14px 14px;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--color-panel);
+}
+
+.settings-fold-body > *:first-child {
+    margin-top: 12px;
+}
+
+.settings-search-highlight {
+    outline: 2px solid var(--theme-accent-primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* ---------- 关于页新结构 ---------- */
+.about-shell > .settings-section + .settings-section {
+    margin-top: 0;
+}
+
+.about-hero-main {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+
+.about-hero-text {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.about-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0;
+    color: var(--theme-text-primary);
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+}
+
+.about-version-chip,
+.about-channel-chip {
+    padding: 2px 9px;
+    border: 1px solid color-mix(in srgb, var(--theme-accent-primary) 35%, var(--border-subtle));
+    border-radius: 999px;
+    background: var(--theme-accent-soft);
+    color: var(--theme-accent-primary);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.about-tagline {
+    margin: 8px 0 0;
+    color: var(--theme-text-secondary);
+    font-size: 13.5px;
+}
+
+.about-meta-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0 0;
+    color: var(--theme-text-muted);
+    font-size: 12.5px;
+}
+
+.about-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.about-repo-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.about-repo-url {
+    flex: 1 1 260px;
+    min-width: 0;
+    padding: 6px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--theme-bg-panel-muted);
+    color: var(--theme-text-secondary);
+    font-size: 12.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.about-star-count {
+    margin-left: 4px;
+}
+
+.about-link-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.about-link-list a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 9px;
+    color: var(--theme-text-secondary);
+    font-size: 12.5px;
+    text-decoration: none;
+    transition: color 0.16s ease, border-color 0.16s ease;
+}
+
+.about-link-list a:hover {
+    border-color: var(--theme-accent-primary);
+    color: var(--theme-accent-primary);
+}
+
+.about-subtitle {
+    margin: 14px 0 8px;
+    color: var(--theme-text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.sponsor-channels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.sponsor-channel {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    text-align: left;
+}
+
+.sponsor-channel small {
+    color: var(--theme-text-muted);
+    font-size: 11.5px;
+}
+
+.sponsor-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.sponsor-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    color: var(--theme-text-secondary);
+    text-decoration: none;
+}
+
+a.sponsor-item:hover {
+    border-color: var(--theme-accent-primary);
+    color: var(--theme-accent-primary);
+}
+
+.sponsor-tier {
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--theme-accent-soft);
+    color: var(--theme-accent-primary);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.sponsor-name {
+    font-weight: 600;
+}
+
+.sponsor-since {
+    color: var(--theme-text-muted);
+    font-size: 11.5px;
+}
+
+.sponsor-message {
+    flex: 1 1 100%;
+    margin: 4px 0 0;
+    color: var(--theme-text-muted);
+    font-size: 12px;
+}
+
+.credits-people {
+    display: grid;
+    gap: 8px;
+}
+
+.credit-name {
+    color: var(--theme-text-primary);
+}
+
+.credit-role {
+    color: var(--theme-text-muted);
+    font-size: 11.5px;
+}
+
+.about-legal-list {
+    margin: 0 0 12px;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 6px;
+}
+
+.about-legal-list a {
+    color: var(--theme-text-secondary);
+    font-size: 12.5px;
+    text-decoration: none;
+}
+
+.about-legal-list a:hover {
+    color: var(--theme-accent-primary);
+    text-decoration: underline;
+}
+
+.settings-note {
+    margin: 10px 0 0;
+    color: var(--theme-text-muted);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.settings-state {
+    margin: 10px 0 0;
+    color: var(--theme-text-muted);
+    font-size: 12.5px;
+}
+
+/* 更新状态徽章 */
+.update-state-badge {
+    padding: 3px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    color: var(--theme-text-muted);
+    font-size: 11.5px;
+    white-space: nowrap;
+}
+
+.update-state-badge.ok {
+    border-color: color-mix(in srgb, var(--theme-success) 45%, var(--border-subtle));
+    background: color-mix(in srgb, var(--theme-success) 10%, transparent);
+    color: var(--theme-success);
+}
+
+.update-state-badge.warn {
+    border-color: color-mix(in srgb, var(--theme-warning) 50%, var(--border-subtle));
+    background: color-mix(in srgb, var(--theme-warning) 10%, transparent);
+    color: var(--theme-warning);
+}
+
+.update-state-badge.error {
+    border-color: color-mix(in srgb, var(--theme-danger) 50%, var(--border-subtle));
+    background: color-mix(in srgb, var(--theme-danger) 10%, transparent);
+    color: var(--theme-danger);
+}
+
+.update-state-badge.info {
+    border-color: color-mix(in srgb, var(--theme-accent-primary) 45%, var(--border-subtle));
+    background: color-mix(in srgb, var(--theme-accent-primary) 10%, transparent);
+    color: var(--theme-accent-primary);
+}
+
+.update-state-badge.muted {
+    opacity: 0.78;
+}
+
+.update-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.update-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.update-progress-bar {
+    flex: 1 1 auto;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--theme-bg-panel-muted);
+    overflow: hidden;
+}
+
+.update-progress-text {
+    color: var(--theme-text-muted);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.update-instructions {
+    margin-top: 12px;
+    color: var(--theme-text-secondary);
+    font-size: 12.5px;
+}
+
+.update-instructions ol {
+    margin: 6px 0 0;
+    padding-left: 20px;
+    line-height: 1.7;
+}
+
+.is-spinning i {
+    animation: settings-spin 0.9s linear infinite;
+}
+
+@keyframes settings-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+
 .settings-shell hr {
     border-color: var(--border-subtle);
 }
@@ -795,8 +1183,8 @@
 }
 
 .plugin-state-badge[data-state="pending_restart"] {
-    border-color: color-mix(in srgb, var(--color-warning, #d4a017) 45%, var(--border-subtle));
-    color: var(--color-warning, #d4a017);
+    border-color: color-mix(in srgb, var(--theme-warning) 45%, var(--border-subtle));
+    color: var(--theme-warning);
 }
 
 .plugin-switch {

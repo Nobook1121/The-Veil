@@ -23,10 +23,15 @@ const SettingsAssistant = (() => {
         "#knowledgeList",
         ".about-hero",
         ".about-links",
+        ".about-link-list",
         "#appUpdatePanel .update-actions",
         "#appUpdatePanel .update-progress",
         "#updateNotes",
+        "#updateInstructions",
         "#sponsorList",
+        "#sponsorChannels",
+        "#creditsDependencies",
+        ".credits-deps",
         "#aboutDependencies",
         "[data-settings-assist='off']",
     ].join(", ");
@@ -220,7 +225,7 @@ const SettingsAssistant = (() => {
     }
 
     function sectionTitle(host: HTMLElement): string {
-        const block = host.closest<HTMLElement>(".mb-4, .tool-panel, section");
+        const block = host.closest<HTMLElement>(".settings-section, .mb-4, .tool-panel, section");
         const heading = block?.querySelector<HTMLElement>("h1, h2, h3, h4, h5, h6");
         return headingText(heading);
     }
