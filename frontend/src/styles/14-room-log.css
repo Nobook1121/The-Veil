@@ -11,6 +11,11 @@
     align-items: start;
 }
 
+/* 非成员不显示入口：用 id 选择器压过 .btn 等作者样式，确保 [hidden] 生效。 */
+#roomLogExportBtn[hidden] {
+    display: none;
+}
+
 .room-log-options {
     display: flex;
     flex-direction: column;

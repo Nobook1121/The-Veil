@@ -139,12 +139,29 @@
     }
 
     /**
-     * 入口可见性：只要能看到房间就给出入口，是否可导出完全由 preview 的
-     * can_export / can_export_reason 决定（普通成员由 members_can_export 控制）。
-     * 上帝视角不是房间成员，仍然隐藏。
+     * 入口可见性：非成员（含上帝视角）在打开前就不给入口；房主/房管/站点管理员
+     * 始终可见。普通成员是否可导出仍由 preview 的 can_export / can_export_reason
+     * 决定（members_can_export 是服务端配置，前端拿不到就等 preview 再禁用）。
      */
+    function isElevatedUser(): boolean {
+        return ["ADMIN", "OWNER"].includes(global.currentUser?.role || "");
+    }
+
+    function isActiveRoomMember(room: Room): boolean {
+        const userId = String(global.currentUser?.user_id ?? "");
+        if (!userId) return false;
+        const members = Array.isArray(room.members) ? room.members : [];
+        return members.some((member) => String(member.user_id ?? "") === userId
+            && member.is_active !== false
+            && member.status !== "removed");
+    }
+
     function canOpenExport(room: Room | null | undefined): boolean {
-        return Boolean(room?.id) && room?.invisible_view !== true;
+        if (!room?.id || room.invisible_view === true) return false;
+        if (isElevatedUser()) return true;
+        const userId = String(global.currentUser?.user_id ?? "");
+        if (userId && String(room.creator_id ?? "") === userId) return true;
+        return isActiveRoomMember(room);
     }
 
     function syncEntryVisibility(): void {
@@ -305,6 +322,10 @@
                 return blockMessage("unavailable");
             case "log.invalid_response":
                 return t("roomLog.error.invalid_response", "导出服务返回了无法识别的内容。");
+            case "log.timeout":
+                return t("roomLog.error.export_timeout", "导出超时，已停止生成，请稍后重试。");
+            case "log.export_interrupted":
+                return t("roomLog.error.interrupted", "服务重启导致导出中断，请重新生成。");
             default:
                 return t("roomLog.error.generic", "导出失败，请稍后重试。");
         }
@@ -869,6 +890,9 @@
         observer.observe(detail, { attributes: true, attributeFilter: ["style"] });
         const title = byId<HTMLElement>("saveDetailTitle");
         if (title) observer.observe(title, { childList: true, characterData: true, subtree: true });
+        // 成员变化（被移出房间 / 新加入）后需要立即重算入口可见性。
+        const participants = byId<HTMLElement>("saveParticipants");
+        if (participants) observer.observe(participants, { childList: true, characterData: true, subtree: true });
     }
 
     function handleLocaleChange(): void {

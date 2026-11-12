@@ -19,7 +19,14 @@ from flask import Blueprint, current_app, request, send_file, session
 
 from trpg_server.responses import error_response, server_error, success_response
 from trpg_server.room_log.fonts import FontMissing, resolve_font
-from trpg_server.room_log.jobs import STATUS_DONE, get_store, room_log_settings
+from trpg_server.room_log.jobs import (
+    STATUS_DONE,
+    STATUS_FAILED,
+    STATUS_QUEUED,
+    STATUS_RUNNING,
+    get_store,
+    room_log_settings,
+)
 from trpg_server.room_log.model import build_document
 from trpg_server.room_log.render import TEMPLATES_DIR, load_template
 from trpg_server.routes.rooms import (
@@ -289,12 +296,14 @@ def get_room_log_export(room_id, export_id):
         return error
     if not _can_access(info):
         return _forbidden(room_id, "Not a room member")
-    job = get_store().get(room_id, export_id)
+    store = get_store()
+    job = store.get(room_id, export_id)
     if job is None:
         return error_response("Export not found", 404, "log.export_not_found")
     if not _can_use_job(info, job):
         return _forbidden(room_id)
-    return success_response(job, "Room log export status loaded successfully")
+    # 只返回前端需要的字段，避免暴露 options / creator_id 等内部信息。
+    return success_response(store.public(job), "Room log export status loaded successfully")
 
 
 @bp.route("/api/rooms/<room_id>/log/exports/<export_id>/file", methods=["GET"])
@@ -350,15 +359,26 @@ def delete_room_log_export(room_id, export_id):
     settings = _settings()
     if not _as_bool(settings.get("enabled"), True):
         return _forbidden(room_id, "Room log export is disabled")
+    # 与其它接口一致：先判成员，非成员对任意 export_id 都返回 403，
+    # 避免用「未知 id 成功 / 已存在 id 403」的差异探测任务是否存在。
+    if not _can_access(info):
+        return _forbidden(room_id, "Not a room member")
     can_export, _reason = _permission_state(info, settings)
     if not can_export:
         return _forbidden(room_id)
-    job = get_store().get(room_id, export_id)
-    if job is not None and not _can_use_job(info, job):
+    store = get_store()
+    job = store.get(room_id, export_id)
+    if job is None:
+        return error_response("Export not found", 404, "log.export_not_found")
+    if not _can_use_job(info, job):
         return _forbidden(room_id)
-    deleted = get_store().delete(room_id, export_id)
-    # 幂等：任务已过期或已被清理时同样返回成功，前端无需区分。
-    return success_response({"deleted": bool(deleted)}, "Room log export deleted")
+    if job.get("status") in {STATUS_QUEUED, STATUS_RUNNING}:
+        # 运行中的任务不删除，避免渲染线程与清理竞争后留下孤儿 PDF。
+        return error_response("Export is not ready", 409, "log.not_ready")
+    deleted = store.delete(room_id, export_id)
+    if not deleted:
+        return error_response("Export not found", 404, "log.export_not_found")
+    return success_response({"deleted": True}, "Room log export deleted")
 
 
 __all__ = ["bp"]
