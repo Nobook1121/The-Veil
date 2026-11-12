@@ -1369,7 +1369,9 @@ function addMessage(
     if (message?.avatar) messageDiv.setAttribute("data-avatar", message.avatar);
 
     const displayTime = message?.time || message?.timestamp || new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const renderedContent = isThinking ? renderThinkingContent(content) : renderMarkdown(content, isLatexEnabledFor(type));
+    // 老数据的 content 可能缺失或不是字符串，未知消息类型一律按纯文本兜底。
+    const safeContent = typeof content === "string" ? content : String(content ?? "");
+    const renderedContent = isThinking ? renderThinkingContent(safeContent) : renderMarkdown(safeContent, isLatexEnabledFor(type));
     const avatarSrc = getAvatarSrc(type, message, sender);
 
     messageDiv.innerHTML = window.TrpgTemplates.render("chat-message", {
@@ -1698,6 +1700,18 @@ function renderRoomMessage(message: ChatMessage | null, animate = false): void {
     }
     const aiRequestId = typeof message.metadata?.aiRequestId === "string" ? message.metadata.aiRequestId : null;
     if (aiRequestId) clearThinkingMessage(aiRequestId);
+    // 道具消息交给专用卡片渲染；非收件人由 prop-card 直接返回 null（不泄露存在性）。
+    if (message.type === "prop" && window.TrpgPropCard) {
+        const card = window.TrpgPropCard.render(message);
+        if (card) {
+            const chatHistory = document.getElementById("chatHistory");
+            if (chatHistory) {
+                chatHistory.appendChild(card);
+                chatHistory.scrollTop = chatHistory.scrollHeight;
+            }
+        }
+        return;
+    }
     const isOwnPlayerMessage = message.type === "player" && message.sender_id === getCurrentUserId();
     const type = message.type === "player" && !isOwnPlayerMessage ? "other" : message.type || "other";
     const metadata = message.metadata || {};

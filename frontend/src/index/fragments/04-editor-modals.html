@@ -1178,3 +1178,24 @@
             </div>
         </div>
     </div>
+
+    <!-- 道具工坊：查看器 -->
+    <div class="modal fade" id="propViewerModal" tabindex="-1" aria-labelledby="propViewerTitle" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content prop-viewer-content">
+                <div class="modal-header">
+                    <div class="prop-viewer-heading">
+                        <h5 class="modal-title" id="propViewerTitle"></h5>
+                        <span class="prop-viewer-template" id="propViewerTemplate"></span>
+                    </div>
+                    <a class="btn btn-outline-secondary btn-sm" id="propViewerPdf" href="#" target="_blank" rel="noopener" data-i18n="prop.action.open_pdf">打开 PDF</a>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="prop-viewer-stage" id="propViewerStage">
+                        <img id="propViewerImage" alt="">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
