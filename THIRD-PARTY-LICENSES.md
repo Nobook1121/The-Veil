@@ -210,13 +210,7 @@ Node 包可在 `node_modules/<包名>/LICENSE` 查看）。
 
 ## 前端 CDN 资源
 
-以下资源由浏览器从外部 CDN 加载，不随构建产物打包；离线部署时对应能力会降级。
-
-| 组件 | 版本 | 许可证 | 用途 | 来源 |
-| --- | --- | --- | --- | --- |
-| Socket.IO client | 4.7.5 | MIT | 实时通信（离线时退回长轮询/不可用） | `cdn.socket.io` |
-| marked | 15.0.12 | MIT | Markdown 渲染 | jsDelivr |
-| DOMPurify | 3.4.16 | Apache-2.0 OR MPL-2.0 | Markdown/HTML 净化 | jsDelivr |
+当前前端脚本与样式均不再从外部 CDN 加载。
 
 主题字体（Cinzel、EB Garamond、Noto Serif SC、Rajdhani、Share Tech Mono）经 `fonts.font.im`
 镜像按 unicode-range 子集加载，许可为 SIL OFL 1.1；字体不可达时回退到系统字体，不影响布局。
@@ -229,6 +223,9 @@ Node 包可在 `node_modules/<包名>/LICENSE` 查看）。
 | --- | --- | --- | --- |
 | Bootstrap（仅 CSS 与 bundle JS） | 5.3.0 | MIT | `data/assets/vendor/bootstrap/`（含 `LICENSE`、`bootstrap.min.css`、`bootstrap.bundle.min.js`） |
 | KaTeX | 0.16.11 | MIT | `data/assets/vendor/katex/`（含 `LICENSE`、`katex.min.css`、`katex.min.js`、`fonts/`） |
+| Socket.IO client | 4.7.5 | MIT | `data/assets/vendor/socket.io/`（含 `LICENSE`、`socket.io.min.js`） |
+| marked | 15.0.12 | MIT | `data/assets/vendor/marked/`（含 `LICENSE.md`、`marked.min.js`） |
+| DOMPurify | 3.4.16 | Apache-2.0 OR MPL-2.0 | `data/assets/vendor/dompurify/`（含 `LICENSE`、`purify.min.js`） |
 | Font Awesome | 4.7.0 | SIL OFL 1.1（字体）/ MIT（CSS） | `data/assets/vendor/font-awesome/` |
 
 ## 合规提示

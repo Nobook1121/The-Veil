@@ -1,0 +1,20 @@
+{
+  "note": "浏览器运行时随包依赖的完整性校验清单。版本与 SHA-256 取自对应 npm 发布包的官方 tarball；由 tests/test_frontend_project_structure.py 与 scripts/package-release.ps1 校验，防止发布包内被替换。",
+  "files": [
+    {
+      "path": "data/assets/vendor/socket.io/socket.io.min.js",
+      "version": "4.7.5",
+      "sha256": "73eba16bc895fdfa454e27ecb80def31ede8d861f99e175ff93b110eabec044f"
+    },
+    {
+      "path": "data/assets/vendor/marked/marked.min.js",
+      "version": "15.0.12",
+      "sha256": "3e7e7d7feb3e5d58cb6c804f68ab5c24cc7e5eb6270fd6e5cbb9124739217d0c"
+    },
+    {
+      "path": "data/assets/vendor/dompurify/purify.min.js",
+      "version": "3.4.16",
+      "sha256": "2c90a9b46d6463f26038a29b686e82bc91de01fdac9d5229e7cfe3b360134ea2"
+    }
+  ]
+}

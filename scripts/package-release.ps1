@@ -323,10 +323,25 @@ $required = @(
     'data/assets/vendor/font-awesome',
     'data/assets/vendor/bootstrap/bootstrap.min.css',
     'data/assets/vendor/bootstrap/bootstrap.bundle.min.js',
+    'data/assets/vendor/socket.io/socket.io.min.js',
+    'data/assets/vendor/marked/marked.min.js',
+    'data/assets/vendor/dompurify/purify.min.js',
     'data/scenarios/scenario-1793438085450/scenario.json'
 )
 foreach ($item in $required) {
     Assert-Present $item
+}
+
+# 随包前端库完整性：按 VENDOR-MANIFEST.json 校验 SHA-256，防止发布包内被替换成任意内容。
+$VendorManifestRelative = 'data/assets/vendor/VENDOR-MANIFEST.json'
+Assert-Present $VendorManifestRelative
+$VendorManifest = Get-Content (Join-Path $App $VendorManifestRelative) -Raw -Encoding UTF8 | ConvertFrom-Json
+foreach ($entry in $VendorManifest.files) {
+    Assert-Present $entry.path
+    $actualHash = (Get-FileHash -Path (Join-Path $App $entry.path) -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $entry.sha256.ToLowerInvariant()) {
+        throw "随包前端库校验失败: $($entry.path)（应为 $($entry.version) 官方产物）"
+    }
 }
 
 $forbidden = @(

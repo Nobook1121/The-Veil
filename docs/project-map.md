@@ -221,9 +221,9 @@ Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送�
 - `locales/`：i18n JSON
 
 第三方前端库的引入位置见 `index/fragments/01-head-and-sidebar.html`（样式）与
-`index/fragments/05-platform-modals-and-scripts.html`（脚本）：Bootstrap 5.3.0 由
-`data/assets/vendor/bootstrap/` 本地随包分发，Socket.IO 4.7.5、marked 15、DOMPurify 3.4.16
-仍走 CDN。二维码为仓库内裁剪版 `qrcode-generator`（MIT）。
+`index/fragments/05-platform-modals-and-scripts.html`（脚本）：Bootstrap 5.3.0、Socket.IO 4.7.5、
+KaTeX、marked 15、DOMPurify 3.4.16 均由 `data/assets/vendor/` 本地随包分发，不再依赖外部 CDN。
+二维码为仓库内裁剪版 `qrcode-generator`（MIT）。
 
 ## 6. 数据布局（`data/`）
 
@@ -264,7 +264,7 @@ Agent 工具（`agents/tools/`，注册名用 `命名空间.工具名`，发送�
 - dependencies：`react`、`react-dom`（19.x）、`three` 0.180、`cannon-es` 0.20
 - devDependencies：`typescript` 5.x、`esbuild` 0.28、`@types/react`、`@types/react-dom`、`@types/three` 0.180
 - `three` / `cannon-es` 仅用于 3D 骰子 bundle，均为 MIT
-- 运行时前端库：Bootstrap 5.3 本地随包（`data/assets/vendor/bootstrap/`），Socket.IO client、marked、DOMPurify 走 CDN
+- 运行时前端库：Bootstrap 5.3、Socket.IO client、KaTeX、marked、DOMPurify 本地随包（`data/assets/vendor/`），不依赖外部 CDN
 - 仓库内置：裁剪版 qrcode-generator
 
 许可证与合规：见 [THIRD-PARTY-LICENSES.md](../THIRD-PARTY-LICENSES.md)。**PyMuPDF 为 AGPL-3.0 / Artifex 商业双许可**，分发前必须确认。

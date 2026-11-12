@@ -294,6 +294,17 @@ def test_katex_assets_are_vendored_locally():
         assert (ROOT / "data/assets/vendor/katex" / relative).is_file()
 
 
+def test_markdown_assets_are_vendored_locally():
+    fragment = (ROOT / "frontend/src/index/fragments/05-platform-modals-and-scripts.html").read_text(encoding="utf-8")
+
+    assert 'src="/assets/vendor/marked/marked.min.js"' in fragment
+    assert 'src="/assets/vendor/dompurify/purify.min.js"' in fragment
+    assert "cdn.jsdelivr.net/npm/marked" not in fragment
+    assert "cdn.jsdelivr.net/npm/dompurify" not in fragment
+    assert (ROOT / "data/assets/vendor/marked/marked.min.js").is_file()
+    assert (ROOT / "data/assets/vendor/dompurify/purify.min.js").is_file()
+
+
 def test_long_single_dollar_block_is_flattened():
     poem = "意气骄满路，鞍马光照尘。" * 30
     wrapped = f"${poem}\\textcolor{{red}}{{别回头}}$"

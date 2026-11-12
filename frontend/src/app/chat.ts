@@ -1047,12 +1047,20 @@ const CHAT_SANITIZE_CONFIG: Record<string, unknown> = {
     ADD_ATTR: ["controls", "preload", "poster", "playsinline", "target", "rel", "loading", "download", ...LATEX_SANITIZE_ATTRS],
 };
 
+// 历史消息批量铺入时，逐条滚动/查重会把渲染退化成 O(n²) 并触发 n 次强制重排。
+// 批量期间只做 DOM 插入，收尾统一滚动一次。
+let chatBatchRendering = 0;
+let markdownFallbackWarned = false;
+
 function renderMarkdown(content: string, allowLatex = false): string {
     const parser = window.marked;
     const purifier = window.DOMPurify;
     if (!parser || !purifier) {
         // 渲染或净化组件不可用时降级为纯文本：宁可丢掉排版，也不放行未经净化的 HTML。
-        console.warn("Markdown 渲染或净化组件未就绪，消息以纯文本显示");
+        if (!markdownFallbackWarned) {
+            markdownFallbackWarned = true;
+            console.warn("Markdown 渲染或净化组件未就绪，消息以纯文本显示");
+        }
         return chatEscapeHtml(content);
     }
     try {
@@ -1433,7 +1441,7 @@ function addMessage(
         enhanceMessageMedia(renderedContentElement);
     }
     chatHistory.appendChild(messageDiv);
-    chatHistory.scrollTop = chatHistory.scrollHeight;
+    if (chatBatchRendering === 0) chatHistory.scrollTop = chatHistory.scrollHeight;
     return resolvedMessageId;
 }
 
@@ -1732,13 +1740,28 @@ function renderChatMessages(messages: ChatMessage[]): void {
     chatHistory.innerHTML = "";
     hideWelcomeText();
     clearActionSuggestions(false);
-    messages.forEach((message) => renderRoomMessage(message));
-    chatHistory.scrollTop = chatHistory.scrollHeight;
+    // 批量铺入时用 Set 去重（O(n)），替代逐条扫描 DOM 的 O(n²)；
+    // 收尾滚动放在 finally，异常中断时也能回到最新消息且不泄漏批量标记。
+    const renderedIds = new Set<string>();
+    chatBatchRendering += 1;
+    try {
+        messages.forEach((message) => {
+            if (message?.id) {
+                const key = String(message.id);
+                if (renderedIds.has(key)) return;
+                renderedIds.add(key);
+            }
+            renderRoomMessage(message);
+        });
+    } finally {
+        chatBatchRendering -= 1;
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+    }
 }
 
 function renderRoomMessage(message: ChatMessage | null, animate = false): void {
     if (!message) return;
-    if (message.id) {
+    if (message.id && chatBatchRendering === 0) {
         const duplicate = Array.from(document.querySelectorAll<HTMLElement>("#chatHistory .message[data-id]"))
             .some((element) => element.dataset.id === String(message.id));
         if (duplicate) return;
@@ -1752,7 +1775,7 @@ function renderRoomMessage(message: ChatMessage | null, animate = false): void {
             const chatHistory = document.getElementById("chatHistory");
             if (chatHistory) {
                 chatHistory.appendChild(card);
-                chatHistory.scrollTop = chatHistory.scrollHeight;
+                if (chatBatchRendering === 0) chatHistory.scrollTop = chatHistory.scrollHeight;
             }
         }
         return;

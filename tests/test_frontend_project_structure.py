@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -835,3 +836,38 @@ def test_settings_new_locale_keys_exist_in_both_catalogs():
     for key in keys:
         assert key in catalogs["zh_cn"], key
         assert key in catalogs["en_us"], key
+
+
+def test_runtime_frontend_libraries_are_vendored_without_cdn():
+    fragment = (ROOT / "frontend/src/index/fragments/05-platform-modals-and-scripts.html").read_text(encoding="utf-8")
+
+    for relative in (
+        "socket.io/socket.io.min.js",
+        "marked/marked.min.js",
+        "dompurify/purify.min.js",
+        "katex/katex.min.js",
+    ):
+        assert f'src="/assets/vendor/{relative}"' in fragment
+        assert (ROOT / "data/assets/vendor" / relative).is_file()
+    assert "cdn.socket.io" not in fragment
+    assert "cdn.jsdelivr.net" not in fragment
+    assert "https://" not in fragment
+
+
+def test_vendored_frontend_libraries_match_manifest():
+    manifest = json.loads((ROOT / "data/assets/vendor/VENDOR-MANIFEST.json").read_text(encoding="utf-8"))
+
+    assert manifest["files"]
+    for entry in manifest["files"]:
+        target = ROOT / entry["path"]
+        assert target.is_file(), entry["path"]
+        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        assert digest == entry["sha256"], f"{entry['path']} 与清单中的 {entry['version']} 官方产物不一致"
+
+
+def test_csp_no_longer_whitelists_external_script_cdns():
+    source = (ROOT / "backend/trpg_server/app_factory.py").read_text(encoding="utf-8")
+
+    assert "\"script-src 'self' 'unsafe-inline'\"" in source
+    assert "cdn.jsdelivr.net" not in source
+    assert "cdn.socket.io" not in source
