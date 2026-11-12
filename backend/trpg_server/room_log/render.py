@@ -98,7 +98,7 @@ def render_pdf(
         chapter_pages: list[int] = []
         total = max(1, len(document["chapters"]))
         for position, chapter in enumerate(document["chapters"], start=1):
-            html = _chapter_html(root, document, chapter, image_map, position)
+            html = _chapter_html(root, meta, document, chapter, image_map, position)
             path = temp_root / f"chapter-{position:03d}.pdf"
             theme = meta.get("options") or {}
             chapter_css = css + _chapter_extra_css(theme)
@@ -116,7 +116,7 @@ def render_pdf(
                 toc_path = temp_root / "toc.pdf"
                 _render_story(
                     _toc_html(document, start_pages),
-                    css + _toc_extra_css(meta.get("options") or {}),
+                    css,
                     archive,
                     toc_path,
                 )
@@ -137,6 +137,7 @@ def render_pdf(
         for path in chapter_files:
             _insert_pdf(final_doc, path)
 
+        _write_page_headers(final_doc, meta, document, resolved_font_path, skip_pages=cover_pages)
         _write_footer(final_doc, resolved_font_path, skip_pages=cover_pages)
         final_doc.set_metadata(
             {
@@ -262,34 +263,77 @@ def _cover_values(document: Mapping[str, Any]) -> dict[str, str]:
 
 def _chapter_html(
     root: Path,
+    meta: Mapping[str, Any],
     document: Mapping[str, Any],
     chapter: Mapping[str, Any],
     image_map: Mapping[tuple[int, int], str],
     position: int,
 ) -> str:
+    style = _entry_style(meta)
     body_parts: list[str] = []
     for entry_index, entry in enumerate(chapter.get("entries") or []):
-        body_parts.append(_entry_html(entry, image_map.get((position - 1, entry_index))))
+        body_parts.append(
+            _entry_html(entry, image_map.get((position - 1, entry_index)), meta, style)
+        )
     body = "\n".join(part for part in body_parts if part)
+    room = document.get("room") or {}
+    cover_values = _cover_values(document)
+    options = meta.get("options") or {}
+    letter_head = ""
+    if options.get("letter_head") and position == 1:
+        letter_head = (
+            '<table class="letter-head" width="100%"><tr>'
+            '<td class="letter-head-main">'
+            f'<p class="letter-room">{cover_values["room_name"]}</p>'
+            f'<p class="letter-scenario">{cover_values["scenario_title"]}</p></td>'
+            f'<td class="letter-head-date">{cover_values["date_range"]}</td>'
+            "</tr></table><hr class=\"letter-rule\"/>"
+        )
+    chapter_sep = ""
+    if options.get("chapter_separator") and position > 1:
+        chapter_sep = '<p class="chapter-sep">＊　＊　＊</p>'
     values = {
         "chapter_index": f"{position:02d}",
         "chapter_title": escape_html(str(chapter.get("title") or "")),
         "chapter_subtitle": escape_html(str(chapter.get("subtitle") or "")),
         "chapter_body": body,
-        "room_name": escape_html(str((document.get("room") or {}).get("name") or "")),
+        "room_name": escape_html(str(room.get("name") or "")),
+        "chapter_sep": chapter_sep,
+        "letter_head": letter_head,
     }
     template = (root / "chapter.html").read_text(encoding="utf-8")
     return _wrap_document(_fill(template, values))
 
 
-def _entry_html(entry: Mapping[str, Any], image_name: str | None) -> str:
+def _entry_style(meta: Mapping[str, Any]) -> str:
+    return str((meta.get("options") or {}).get("entry_style") or "archive")
+
+
+def _indent_paragraphs(html: str) -> str:
+    """letter 版式用全角空格做段首缩进（Story 对 text-indent 支持不稳定）。"""
+    return html.replace("<p>", "<p>　　")
+
+
+def _entry_html(
+    entry: Mapping[str, Any],
+    image_name: str | None,
+    meta: Mapping[str, Any],
+    style: str,
+) -> str:
     kind = str(entry.get("kind") or "system")
     html = str(entry.get("html") or "")
+    options = meta.get("options") or {}
+    if options.get("indent_paragraphs") and kind in {"narration", "dialogue", "speaker"}:
+        html = _indent_paragraphs(html)
     time_text = escape_html(str(entry.get("time") or ""))
     speaker = escape_html(str(entry.get("speaker") or ""))
     if kind == "narration":
+        if style == "minimal":
+            return f'<div class="plain">{html}</div>'
         return f'<div class="narr">{html}</div>'
     if kind == "dialogue":
+        if style == "minimal":
+            return f'<div class="plain">{html}</div>'
         return f'<div class="dial">{html}</div>'
     if kind == "speaker":
         character = escape_html(str(entry.get("character") or ""))
@@ -305,6 +349,9 @@ def _entry_html(entry: Mapping[str, Any], image_name: str | None) -> str:
         roll = entry.get("roll") or {}
         roll_text = _roll_text(roll)
         judgement = escape_html(str(roll.get("judgement") or ""))
+        if style == "minimal":
+            tail = f"　{judgement}" if judgement else ""
+            return f'<p class="inline-meta">{speaker} · {time_text}　{roll_text}{tail}</p>'
         judge_cell = f'<tr><td colspan="2" class="dice-judge">{judgement}</td></tr>' if judgement else ""
         return (
             '<table class="dice" width="100%"><tr>'
@@ -321,6 +368,8 @@ def _entry_html(entry: Mapping[str, Any], image_name: str | None) -> str:
             '<table class="figure" width="100%"><tr><td class="figure-cell">'
             f'<img src="{escape_html(image_name)}" width="420"/></td></tr>{caption_row}</table>'
         )
+    if style == "minimal":
+        return f'<div class="inline-meta">{html}</div>'
     return f'<p class="system">{html}</p>'
 
 
@@ -367,12 +416,7 @@ def _fill(template: str, values: Mapping[str, str]) -> str:
 
 def _chapter_extra_css(theme: Mapping[str, Any]) -> str:
     accent = str(theme.get("accent") or "#b9a06a")
-    return f"\n.chapter-rule {{ border-top-color: {accent}; }}" f"\nh1.chapter-title {{ color: #0d1f1a; }}" f"\ndiv.narr {{ border-left-color: {accent}; }}"
-
-
-def _toc_extra_css(theme: Mapping[str, Any]) -> str:
-    theme_color = str(theme.get("theme_color") or "#0d1f1a")
-    return f"\nh1.toc-title {{ color: {theme_color}; }}"
+    return f"\n.chapter-rule {{ border-top-color: {accent}; }}" f"\ndiv.narr {{ border-left-color: {accent}; }}"
 
 
 # ---------------------------------------------------------------- 图片与页码
@@ -416,6 +460,25 @@ def _chapter_start_pages(cover_pages: int, toc_pages: int, chapter_pages: list[i
         starts.append(page)
         page += count
     return starts
+
+
+def _write_page_headers(doc, meta: Mapping[str, Any], document: Mapping[str, Any], font_path: str, *, skip_pages: int) -> None:
+    """minimal 版式的页眉细线 +「房间名 · 团录」，Story 无 running header，合并后绘制。"""
+    options = meta.get("options") or {}
+    if not options.get("page_header"):
+        return
+    room_name = str((document.get("room") or {}).get("name") or "房间")
+    text = str(options.get("page_header_text") or f"{room_name} · 团录")
+    font = pymupdf.Font(fontfile=font_path)
+    for index in range(doc.page_count):
+        if index < skip_pages:
+            continue
+        page = doc[index]
+        left = 16 * MM
+        right = page.rect.width - 16 * MM
+        page.draw_line((left, 13 * MM), (right, 13 * MM), color=(0.82, 0.82, 0.82), width=0.5)
+        page.insert_font(fontname="pghead", fontfile=font_path)
+        page.insert_text((left, 10.5 * MM), text, fontname="pghead", fontsize=7.5, color=(0.45, 0.45, 0.45))
 
 
 def _write_footer(doc, font_path: str, *, skip_pages: int) -> None:

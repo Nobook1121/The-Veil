@@ -1,0 +1,17 @@
+{
+  "id": "letter",
+  "name": "手记信纸",
+  "description": "无独立封面、书信式连续排版，适合单人叙事与短团",
+  "toc": false,
+  "cover": false,
+  "page": { "size": "a4", "margin": [18, 16, 18, 16] },
+  "fonts": { "body": "VeilBody", "heading": "VeilBody" },
+  "options": {
+    "theme_color": "#f7f3e8",
+    "accent": "#8a6f4a",
+    "entry_style": "letter",
+    "indent_paragraphs": true,
+    "chapter_separator": true,
+    "letter_head": true
+  }
+}

@@ -1,0 +1,146 @@
+/* minimal 极简 —— 白底黑字，无装饰；页眉由 render.py 在合并后绘制。 */
+body {
+  font-family: VeilBody;
+  font-size: 10pt;
+  line-height: 1.6;
+  color: #111111;
+}
+
+p {
+  margin: 0 0 5pt 0;
+}
+
+h1, h2, h3 {
+  font-family: VeilBody;
+  color: #111111;
+}
+
+p.chapter-kicker {
+  font-size: 8pt;
+  color: #888888;
+  margin: 0 0 2pt 0;
+}
+
+h1.chapter-title {
+  font-size: 16pt;
+  margin: 0;
+}
+
+p.chapter-sub {
+  color: #666666;
+  font-size: 10pt;
+  margin: 2pt 0 0 0;
+}
+
+hr.chapter-rule {
+  border-top: 1px solid #dddddd;
+  margin: 8pt 0 12pt 0;
+}
+
+/* 正文：无竖线、无底色 */
+div.plain {
+  margin: 0 0 6pt 0;
+}
+
+div.plain p {
+  margin-bottom: 5pt;
+}
+
+div.narr, div.dial {
+  margin: 0 0 6pt 0;
+}
+
+table.speaker {
+  width: 100%;
+  margin-top: 3pt;
+}
+
+td.who {
+  text-align: left;
+  color: #111111;
+}
+
+td.when {
+  text-align: right;
+  color: #999999;
+  font-size: 8.5pt;
+}
+
+span.character {
+  color: #666666;
+  font-size: 9pt;
+}
+
+div.speech {
+  margin: 1pt 0 6pt 0;
+}
+
+div.speech p {
+  margin-bottom: 4pt;
+}
+
+/* 骰子与系统消息压成行内灰字 */
+p.inline-meta, div.inline-meta {
+  color: #888888;
+  font-size: 8.8pt;
+  margin: 1pt 0 4pt 0;
+}
+
+div.inline-meta p {
+  color: #888888;
+  font-size: 8.8pt;
+  margin: 0 0 2pt 0;
+}
+
+p.system {
+  color: #888888;
+  font-size: 8.8pt;
+  margin: 1pt 0 4pt 0;
+}
+
+table.figure {
+  width: 100%;
+  margin: 6pt 0;
+}
+
+td.figure-cell {
+  text-align: center;
+}
+
+td.figure-caption {
+  text-align: center;
+  color: #777777;
+  font-size: 8.5pt;
+  padding-top: 2pt;
+}
+
+/* 目录 */
+h1.toc-title {
+  font-size: 14pt;
+  color: #111111;
+  margin: 0 0 12pt 0;
+}
+
+table.toc {
+  width: 100%;
+}
+
+td.toc-no {
+  width: 8%;
+  text-align: left;
+  color: #999999;
+  font-size: 9pt;
+  padding: 3pt 0;
+}
+
+td.toc-name {
+  text-align: left;
+  padding: 3pt 0;
+}
+
+td.toc-page {
+  width: 8%;
+  text-align: right;
+  color: #111111;
+  padding: 3pt 0;
+}

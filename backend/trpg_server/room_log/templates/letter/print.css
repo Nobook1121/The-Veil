@@ -1,0 +1,165 @@
+/* letter 手记信纸 —— 连续书信排版，无独立封面、无目录。 */
+body {
+  font-family: VeilBody;
+  font-size: 10.5pt;
+  line-height: 2.0;
+  color: #2b2a26;
+}
+
+p {
+  margin: 0 0 8pt 0;
+}
+
+h1, h2, h3 {
+  font-family: VeilBody;
+  color: #2b2a26;
+}
+
+/* 第一页抬头 */
+table.letter-head {
+  width: 100%;
+  margin-bottom: 6pt;
+}
+
+td.letter-head-main {
+  text-align: left;
+}
+
+td.letter-head-date {
+  text-align: right;
+  color: #7a705f;
+  font-size: 9pt;
+}
+
+p.letter-room {
+  font-size: 18pt;
+  color: #2b2a26;
+  margin: 0;
+}
+
+p.letter-scenario {
+  font-size: 10.5pt;
+  color: #7a705f;
+  margin: 2pt 0 0 0;
+}
+
+hr.letter-rule {
+  border-top: 1px solid #c9bfa8;
+  margin: 8pt 0 18pt 0;
+}
+
+p.chapter-sep {
+  text-align: center;
+  color: #8a6f4a;
+  margin: 26pt 0 18pt 0;
+}
+
+p.chapter-index {
+  color: #8a6f4a;
+  font-size: 9pt;
+  margin: 0;
+}
+
+h1.chapter-title {
+  font-size: 22pt;
+  margin: 0;
+}
+
+p.chapter-sub {
+  color: #7a705f;
+  font-size: 10.5pt;
+  margin: 2pt 0 0 0;
+}
+
+hr.chapter-rule {
+  border-top: 1px solid #c9bfa8;
+  margin: 8pt 0 14pt 0;
+}
+
+div.narr {
+  margin: 0 0 10pt 0;
+}
+
+div.dial {
+  margin-left: 10pt;
+  color: #4a463c;
+  margin-bottom: 10pt;
+}
+
+table.speaker {
+  width: 100%;
+  margin-top: 6pt;
+}
+
+td.who {
+  text-align: left;
+  color: #2b2a26;
+}
+
+td.when {
+  text-align: right;
+  color: #8f8676;
+  font-size: 9pt;
+}
+
+span.character {
+  color: #7a705f;
+  font-size: 9.5pt;
+}
+
+/* 玩家发言像书信摘录 */
+div.speech {
+  border-left: 5px solid #d8d0c0;
+  margin: 2pt 0 12pt 12pt;
+  padding-left: 10pt;
+}
+
+div.speech p {
+  margin-bottom: 6pt;
+}
+
+table.dice {
+  width: 100%;
+  background-color: #f7f3e8;
+  border: 1px solid #e2dacb;
+  margin: 6pt 0 10pt 0;
+}
+
+td.dice-left {
+  text-align: left;
+  color: #7a705f;
+  font-size: 9pt;
+}
+
+td.dice-right {
+  text-align: right;
+}
+
+td.dice-judge {
+  text-align: right;
+  color: #8a6f4a;
+  font-size: 9pt;
+}
+
+p.system {
+  text-align: center;
+  color: #8f8676;
+  font-size: 9pt;
+  margin: 6pt 0;
+}
+
+table.figure {
+  width: 100%;
+  margin: 8pt 0;
+}
+
+td.figure-cell {
+  text-align: center;
+}
+
+td.figure-caption {
+  text-align: center;
+  color: #7a705f;
+  font-size: 9pt;
+  padding-top: 3pt;
+}

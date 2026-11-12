@@ -1,0 +1,15 @@
+{
+  "id": "minimal",
+  "name": "极简排版",
+  "description": "白底黑字、行内骰点，适合快速浏览与打印",
+  "toc": true,
+  "cover": false,
+  "page": { "size": "a4", "margin": [18, 16, 18, 16] },
+  "fonts": { "body": "VeilBody", "heading": "VeilBody" },
+  "options": {
+    "theme_color": "#ffffff",
+    "accent": "#111111",
+    "entry_style": "minimal",
+    "page_header": true
+  }
+}

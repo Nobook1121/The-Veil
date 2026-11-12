@@ -361,6 +361,31 @@ def test_render_pdf_rejects_empty_document(tmp_path):
         render_pdf(document, tmp_path / "empty.pdf", data_dir=tmp_path / "data")
 
 
+@pytest.mark.parametrize("template", ["archive", "letter", "minimal"])
+def test_all_templates_render_chinese(tmp_path, template):
+    room = _write_room(
+        tmp_path / "room",
+        [
+            _msg("第一天，夜色沉沉。", created_at="2026-10-01 20:00:00"),
+            _msg("1d100 = 42 成功", msg_type="dice", created_at="2026-10-01 20:01:00"),
+            _msg("我推开门。", msg_type="player", sender_id=1, created_at="2026-10-01 20:02:00"),
+        ],
+    )
+    document = build_document(room, {"template": template}, data_dir=tmp_path / "data")
+    output = tmp_path / f"{template}.pdf"
+    result = render_pdf(
+        document, output, template=template, room_dir=room, data_dir=tmp_path / "data"
+    )
+    assert result["pages"] >= 1
+    pdf = pymupdf.open(output)
+    try:
+        text = "".join(page.get_text() for page in pdf)
+        assert "夜色沉沉" in text
+        assert "\ufffd" not in text
+    finally:
+        pdf.close()
+
+
 # ---------------------------------------------------------------- P2 接口
 
 
@@ -450,7 +475,9 @@ def test_preview_returns_contract_fields(tmp_path):
     data = response.get_json()["data"]
     assert data["can_export"] is True
     assert data["can_export_reason"] is None
-    assert [item["id"] for item in data["templates"]] == ["archive"]
+    assert [item["id"] for item in data["templates"]] == ["archive", "letter", "minimal"]
+    names = {item["id"]: item["name"] for item in data["templates"]}
+    assert names["archive"] and names["letter"] and names["minimal"]
     assert data["templates"][0]["name"]
     assert data["templates"][0]["available"] is True
     assert data["stats"]["estimated_pages"] > 0
