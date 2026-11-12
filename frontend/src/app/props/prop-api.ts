@@ -13,10 +13,13 @@ interface PropTemplateField {
     required?: boolean;
 }
 
+/** 模板来源：内置 / 用户模板包 / 插件（`plugin:<插件 id>`）。 */
+type PropTemplateSource = "builtin" | "user" | `plugin:${string}`;
+
 interface PropTemplate {
     id: string;
     name?: string;
-    source?: "builtin" | "user";
+    source?: PropTemplateSource;
     order?: number;
     group?: string;
     group_name?: string;
@@ -38,7 +41,7 @@ interface PropTemplateGroup {
 interface PropTemplateUnavailable {
     id: string;
     dir?: string;
-    source?: "builtin" | "user";
+    source?: PropTemplateSource;
     reason: string;
 }
 

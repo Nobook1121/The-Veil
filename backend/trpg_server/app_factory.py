@@ -105,7 +105,14 @@ def create_app(config=None):
     socketio.init_app(app, cors_allowed_origins=allowed_origins or None)
     app.extensions["socketio"] = socketio
     register_session_guard(app)
+    # 插件体系：默认不启用任何第三方插件；加载失败只影响该插件本身。
+    # 必须在蓝图注册之前完成，插件声明的模板来源才能在首次扫描时生效。
+    from trpg_server.plugins.bootstrap import init_plugins, register_plugin_blueprints
+
+    init_plugins(app)
     register_blueprints(app)
+    # 插件蓝图最后注册：与核心冲突的路径仍由核心优先匹配。
+    register_plugin_blueprints(app)
     app.extensions["scenario_import_store"] = ImportJobStore(app.config["SCENARIO_IMPORTS_DIR"])
     app.extensions["scenario_import_store"].recover_interrupted()
     app.extensions["scenario_import_executor"] = ThreadPoolExecutor(max_workers=app.config["SCENARIO_IMPORT_WORKERS"])
@@ -368,6 +375,7 @@ def register_blueprints(app):
     from trpg_server.routes.room_console import bp as room_console_bp
     from trpg_server.routes.room_log import bp as room_log_bp
     from trpg_server.routes.props import bp as props_bp
+    from trpg_server.routes.plugins import bp as plugins_bp
     from trpg_server.routes.room_rules import bp as room_rules_bp
     from trpg_server.routes.dice_rolls import bp as dice_rolls_bp
     from trpg_server.routes.dice_textures import bp as dice_textures_bp
@@ -406,6 +414,7 @@ def register_blueprints(app):
     app.register_blueprint(room_console_bp)
     app.register_blueprint(room_log_bp)
     app.register_blueprint(props_bp)
+    app.register_blueprint(plugins_bp)
     app.register_blueprint(room_rules_bp)
     app.register_blueprint(dice_rolls_bp)
     app.register_blueprint(dice_textures_bp)

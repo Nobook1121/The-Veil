@@ -1,0 +1,24 @@
+.hello-note {
+  font-family: serif;
+  color: #2b2b2b;
+  padding: 18pt;
+}
+
+.hello-head {
+  font-size: 18pt;
+  font-weight: bold;
+  border-bottom: 1pt solid #3b5b8c;
+  margin-bottom: 10pt;
+}
+
+.hello-body {
+  font-size: 12pt;
+  line-height: 1.6;
+}
+
+.hello-mark {
+  margin-top: 14pt;
+  color: #3b5b8c;
+  font-size: 9pt;
+  letter-spacing: 2pt;
+}

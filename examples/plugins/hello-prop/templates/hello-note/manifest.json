@@ -1,0 +1,19 @@
+{
+  "id": "hello-note",
+  "name": "示例便条",
+  "order": 800,
+  "group": "plugin",
+  "group_name": "插件模板",
+  "description": "由 hello-prop 插件提供的便条模板，用于验证插件模板链路。",
+  "fields": [
+    { "key": "title", "label": "标题", "type": "text", "max": 60, "required": true },
+    { "key": "body", "label": "正文", "type": "textarea", "max": 600, "required": true }
+  ],
+  "styles": {
+    "paper": ["ivory", "white"],
+    "ink": ["#2b2b2b"],
+    "accent": ["#3b5b8c"]
+  },
+  "wear_supported": ["stain", "fold"],
+  "page": { "size": "a5", "margin": [14, 14, 14, 14] }
+}

@@ -40,6 +40,9 @@ except ValueError as exc:
 if _CLI_ARGS.config_dir is not None:
     config_paths.set_config_dir_override(_CLI_ARGS.config_dir)
 config_paths.set_cli_overrides(_CLI_ARGS.overrides)
+if _CLI_ARGS.no_plugins:
+    # 回滚开关：即使 enabled.json 里列了插件也不加载任何第三方代码。
+    os.environ["TRPG_PLUGINS_DISABLED"] = "1"
 
 # 首次启动：从 config/templates 生成 data/config 下的用户配置（幂等，不覆盖已有文件）。
 ensure_user_config()

@@ -106,6 +106,13 @@ def load_plugins(module_paths: Iterable[str]) -> list[Any]:
 def build_registry() -> RulesetRegistry:
     """按登记表构造进程级注册表；不抛异常，最坏情况返回空注册表。"""
     plugins = load_plugins(plugin_module_paths())
+    # 第三方插件通过 capabilities.rulesets 提供的规则集（未启用时为空）。
+    try:
+        from trpg_server.plugins.runtime import extra_ruleset_plugins
+
+        plugins.extend(extra_ruleset_plugins())
+    except Exception:  # noqa: BLE001 - 插件钩子故障不影响内置规则集
+        logger.debug("plugin_ruleset_hook_failed", exc_info=True)
     return RulesetRegistry(
         plugins,
         declared=DEFAULT_DECLARED_RULESETS,

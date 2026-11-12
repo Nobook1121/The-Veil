@@ -1,6 +1,12 @@
 # 道具工坊：用户模板扩展
 
-道具模板支持「内置 + 用户」两套来源。用户放好目录后，在道具编辑器里点模板旁的刷新按钮（站点管理员可见），或调用 `POST /api/props/templates/rescan`，无需重启服务。
+道具模板支持三种来源：内置、插件声明、用户模板包。放好目录后，在道具编辑器里点模板旁的刷新按钮（站点管理员可见），或调用 `POST /api/props/templates/rescan`，无需重启服务。
+
+- **内置**：`backend/trpg_server/props/templates/`，`source="builtin"`；
+- **插件**：`data/plugins/<插件 id>/plugin.json` 里声明 `capabilities.prop_templates.dirs`，`source="plugin:<插件 id>"`，见 [plugin-development.md](plugin-development.md)；
+- **用户模板包**：`data/props/templates/`，`source="user"`（本文档描述的就是这种轻量路径，不需要写 Python）。
+
+想把模板打包分发给其他站点时，推荐改成纯数据插件：加一个 `plugin.json` 即可，模板文件结构完全不变。
 
 ## 目录位置
 

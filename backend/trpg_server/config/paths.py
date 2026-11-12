@@ -79,10 +79,12 @@ class CliArgs:
     port: int | None = None
     config_dir: Path | None = None
     overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # 一键禁用全部第三方插件（插件体系的回滚开关）。
+    no_plugins: bool = False
 
 
 def parse_cli_args(argv: Sequence[str]) -> CliArgs:
-    """解析 ``[port] [--port N] [--config-dir PATH] [--set section.key=value ...]``。
+    """解析 ``[port] [--port N] [--config-dir PATH] [--set section.key=value ...] [--no-plugins]``。
 
     位置参数 ``port`` 保持兼容；``--port`` 为显式形式，两者同时出现时后者胜出。
     未知参数直接报错，避免拼错的 ``--set`` 被静默忽略。
@@ -90,12 +92,15 @@ def parse_cli_args(argv: Sequence[str]) -> CliArgs:
     port: int | None = None
     config_dir: Path | None = None
     overrides: dict[str, dict[str, Any]] = {}
+    no_plugins = False
 
     args = list(argv[1:])  # 跳过程序名
     index = 0
     while index < len(args):
         arg = args[index]
-        if arg == "--port":
+        if arg == "--no-plugins":
+            no_plugins = True
+        elif arg == "--port":
             index += 1
             if index >= len(args):
                 raise ValueError("--port requires a value")
@@ -127,4 +132,4 @@ def parse_cli_args(argv: Sequence[str]) -> CliArgs:
             raise ValueError(f"unexpected positional argument: {arg}")
         index += 1
 
-    return CliArgs(port=port, config_dir=config_dir, overrides=overrides)
+    return CliArgs(port=port, config_dir=config_dir, overrides=overrides, no_plugins=no_plugins)

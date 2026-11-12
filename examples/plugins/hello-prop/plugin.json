@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "hello-prop",
+  "name": "示例道具插件",
+  "version": "1.0.0",
+  "description": "最小可用示例：一张便条模板 + 一个只读 HTTP 接口。用于验证「装进去 → 列表可见 → 能渲染/能调用」。",
+  "author": "The Veil",
+  "api_version": 1,
+  "requires": {
+    "app": ">=1.0.0 <2.0.0"
+  },
+  "capabilities": {
+    "prop_templates": {
+      "dirs": ["templates"]
+    },
+    "http_blueprints": {
+      "module": "entry.py",
+      "blueprints": ["bp"]
+    }
+  },
+  "code": {
+    "entry": "entry.py"
+  }
+}

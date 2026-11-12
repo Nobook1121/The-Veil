@@ -1,3 +1,5 @@
+import logging
+
 from trpg_server.agents.tools.base import AgentTool, ToolRegistry
 from trpg_server.agents.tools.dice import ROLL_COC_CHECK_TOOL, ROLL_ROOM_CHECK_TOOL, ROLL_DICE_TOOL, ROLL_DICE_FUNCTION_TOOL, ROLL_MADNESS_ALIAS_TOOL, ROLL_MADNESS_TOOL, ROLL_SANITY_CHECK_TOOL, ROLL_SANITY_CHECK_ALIAS_TOOL
 from trpg_server.agents.tools.room import (
@@ -39,43 +41,49 @@ from trpg_server.agents.tools.props import PROPS_TOOL_NAMES, PROPS_TOOLS
 
 
 def default_tool_registry() -> ToolRegistry:
-    return ToolRegistry(
-        [
-            GET_ROOM_SNAPSHOT_TOOL,
-            GET_SCENARIO_CONTEXT_TOOL,
-            GET_SCENARIO_MODULE_TOOL,
-            ACTIVATE_SCENARIO_SCENE_TOOL,
-            GET_CHARACTER_CARDS_TOOL,
-            GET_MEMORY_TOOL,
-            REMEMBER_FACT_TOOL,
-            ROLL_COC_CHECK_TOOL,
-            ROLL_ROOM_CHECK_TOOL,
-            ROLL_SANITY_CHECK_TOOL,
-            ROLL_SANITY_CHECK_ALIAS_TOOL,
-            ROLL_MADNESS_TOOL,
-            ROLL_MADNESS_ALIAS_TOOL,
-            ROLL_DICE_TOOL,
-            ROLL_DICE_FUNCTION_TOOL,
-            REVEAL_SCENARIO_TRIGGER_TOOL,
-            SEARCH_RULESET_KNOWLEDGE_TOOL,
-            SUGGEST_ACTIONS_TOOL,
-            MUSIC_REQUEST_TOOL,
-            ADD_CHARACTER_ITEM_TOOL,
-            SET_CHARACTER_SKILL_TOOL,
-            SET_CHARACTER_ATTRIBUTE_TOOL,
-            *COMBAT_TOOLS,
-            *NARRATIVE_TOOLS,
-            *TRIGGER_RUNTIME_TOOLS,
-            *COC7_EXTRA_TOOLS,
-            *CHASE_TOOLS,
-            *MAGIC_TOOLS,
-            *MAGIC_CATALOG_TOOLS,
-            *SANITY_TOOLS,
-            *INTERLUDE_TOOLS,
-            *GAME_CLOCK_TOOLS,
-            *PROPS_TOOLS,
-        ]
-    )
+    tools = [
+        GET_ROOM_SNAPSHOT_TOOL,
+        GET_SCENARIO_CONTEXT_TOOL,
+        GET_SCENARIO_MODULE_TOOL,
+        ACTIVATE_SCENARIO_SCENE_TOOL,
+        GET_CHARACTER_CARDS_TOOL,
+        GET_MEMORY_TOOL,
+        REMEMBER_FACT_TOOL,
+        ROLL_COC_CHECK_TOOL,
+        ROLL_ROOM_CHECK_TOOL,
+        ROLL_SANITY_CHECK_TOOL,
+        ROLL_SANITY_CHECK_ALIAS_TOOL,
+        ROLL_MADNESS_TOOL,
+        ROLL_MADNESS_ALIAS_TOOL,
+        ROLL_DICE_TOOL,
+        ROLL_DICE_FUNCTION_TOOL,
+        REVEAL_SCENARIO_TRIGGER_TOOL,
+        SEARCH_RULESET_KNOWLEDGE_TOOL,
+        SUGGEST_ACTIONS_TOOL,
+        MUSIC_REQUEST_TOOL,
+        ADD_CHARACTER_ITEM_TOOL,
+        SET_CHARACTER_SKILL_TOOL,
+        SET_CHARACTER_ATTRIBUTE_TOOL,
+        *COMBAT_TOOLS,
+        *NARRATIVE_TOOLS,
+        *TRIGGER_RUNTIME_TOOLS,
+        *COC7_EXTRA_TOOLS,
+        *CHASE_TOOLS,
+        *MAGIC_TOOLS,
+        *MAGIC_CATALOG_TOOLS,
+        *SANITY_TOOLS,
+        *INTERLUDE_TOOLS,
+        *GAME_CLOCK_TOOLS,
+        *PROPS_TOOLS,
+    ]
+    # 第三方插件注册的 Agent 工具（插件未启用时为空列表）。
+    try:
+        from trpg_server.plugins.runtime import extra_agent_tools
+
+        tools.extend(extra_agent_tools())
+    except Exception:  # noqa: BLE001 - 插件钩子故障不影响核心工具
+        logging.getLogger(__name__).debug("plugin_agent_tool_hook_failed", exc_info=True)
+    return ToolRegistry(tools)
 
 
 __all__ = [

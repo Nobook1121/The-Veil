@@ -1,12 +1,14 @@
-"""模板注册表：合并内置模板与用户模板、校验字段、进程内缓存（§4.6）。
+"""模板注册表：合并多来源模板、校验字段、进程内缓存（§4.6）。
 
-来源有两套：
+来源分三类（结构相同）：
 
-- 内置：``backend/trpg_server/props/templates/<id>/``
-- 用户：``data/props/templates/<id>/``
+- 内置：``backend/trpg_server/props/templates/<id>/``，``source="builtin"``；
+- 插件：由插件清单 ``capabilities.prop_templates.dirs`` 声明，经
+  :func:`register_template_source` 注入，``source="plugin:<插件 id>"``；
+- 用户：``data/props/templates/<id>/``，``source="user"``（历史轻量模板包路径）。
 
-两者结构相同；用户模板额外经过 ``template_validation`` 的标签/资源安全校验。
-id 冲突时内置优先，用户模板被标记为不可用并 warning。任何一个用户模板坏掉
+非内置来源额外经过 ``template_validation`` 的标签/资源安全校验。
+id 冲突时内置优先，其余来源标记为不可用并 warning。任何一个模板坏掉
 只影响它自己，不会打挂整个模板列表。
 """
 from __future__ import annotations
@@ -34,6 +36,9 @@ _CACHE: dict[str, tuple[tuple, dict[str, Any]]] = {}
 _CACHE_LOCK = threading.RLock()
 _ROOTS: dict[str, Path] = {}
 _UNAVAILABLE: list[dict[str, Any]] = []
+# 插件声明的模板来源：``source 名``（``plugin:<id>``）→ 模板目录列表。
+# 由 trpg_server.plugins 在插件激活后注入；未激活的插件不会产生任何来源。
+_PLUGIN_SOURCES: dict[str, list[Path]] = {}
 
 
 class TemplateError(RuntimeError):
@@ -66,6 +71,36 @@ def _available_text() -> str:
 
 def available_ids() -> list[str]:
     return sorted(_manifests().keys())
+
+
+def register_template_source(name: str, paths: list[str | Path]) -> None:
+    """注册一组插件模板目录（来源名会写进 manifest 的 ``source``）。"""
+    key = str(name or "").strip()
+    if not key:
+        raise TemplateError("模板来源名不能为空")
+    normalized = [Path(path) for path in paths]
+    with _CACHE_LOCK:
+        _PLUGIN_SOURCES[key] = normalized
+        _CACHE.clear()
+
+
+def unregister_template_source(name: str) -> None:
+    with _CACHE_LOCK:
+        if _PLUGIN_SOURCES.pop(str(name or ""), None) is not None:
+            _CACHE.clear()
+
+
+def reset_template_sources() -> None:
+    """清空全部插件来源（测试与插件全量重载用）。"""
+    with _CACHE_LOCK:
+        if _PLUGIN_SOURCES:
+            _PLUGIN_SOURCES.clear()
+            _CACHE.clear()
+
+
+def registered_sources() -> dict[str, list[str]]:
+    with _CACHE_LOCK:
+        return {key: [str(path) for path in paths] for key, paths in _PLUGIN_SOURCES.items()}
 
 
 def list_templates() -> list[dict[str, Any]]:
@@ -180,14 +215,25 @@ def _manifests() -> dict[str, dict[str, Any]]:
         return _scan()
 
 
+def _template_sources() -> list[tuple[str, Path]]:
+    """按「内置 → 插件 → 用户」顺序返回来源；先出现者优先。"""
+    sources: list[tuple[str, Path]] = [("builtin", TEMPLATES_DIR)]
+    for name, paths in sorted(_PLUGIN_SOURCES.items()):
+        for path in paths:
+            sources.append((name, path))
+    sources.append(("user", USER_TEMPLATES_DIR))
+    return sources
+
+
 def _scan() -> dict[str, dict[str, Any]]:
     manifests: dict[str, dict[str, Any]] = {}
     roots: dict[str, Path] = {}
     unavailable: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
 
-    # 用模块级 TEMPLATES_DIR 而不是常量：测试与部分部署会临时改写内置目录。
-    for source, base in (("builtin", TEMPLATES_DIR), ("user", USER_TEMPLATES_DIR)):
+    # 用模块级 TEMPLATES_DIR / USER_TEMPLATES_DIR 而不是常量：测试与部分部署
+    # 会临时改写这两个目录；插件来源由 plugins 包在激活后注入。
+    for source, base in _template_sources():
         if not base.is_dir():
             continue
         for root in sorted(base.iterdir()):
@@ -195,7 +241,7 @@ def _scan() -> dict[str, dict[str, Any]]:
                 continue
             manifest_path = root / "manifest.json"
             if not manifest_path.is_file():
-                if source == "user":
+                if source != "builtin":
                     unavailable.append(_unavailable_entry(root, source, "缺少 manifest.json"))
                 continue
             signature = _signature(root)
@@ -208,7 +254,7 @@ def _scan() -> dict[str, dict[str, Any]]:
             else:
                 try:
                     manifest = _read_manifest(manifest_path)
-                    if source == "user":
+                    if source != "builtin":
                         from .template_validation import validate_user_template
 
                         validate_user_template(root, manifest)
@@ -237,11 +283,13 @@ def _scan() -> dict[str, dict[str, Any]]:
 
             template_id = str(manifest.get("id") or "")
             if template_id in manifests:
-                reason = (
-                    "与内置模板 id 冲突，用户模板已跳过"
-                    if source == "user"
-                    else "模板 id 与另一个内置模板重复"
-                )
+                existing_source = str(manifests[template_id].get("source") or "")
+                if existing_source == "builtin" and source == "user":
+                    reason = "与内置模板 id 冲突，用户模板已跳过"
+                elif existing_source == "builtin":
+                    reason = f"与内置模板 id 冲突，{source} 已跳过"
+                else:
+                    reason = f"与已加载模板 id 冲突（{existing_source}），{source} 已跳过"
                 unavailable.append(_unavailable_entry(root, source, reason))
                 logger.warning("props template conflict id=%s source=%s", template_id, source)
                 continue
@@ -341,7 +389,11 @@ __all__ = [
     "list_template_groups",
     "list_templates",
     "list_unavailable",
+    "register_template_source",
+    "registered_sources",
+    "reset_template_sources",
     "rescan",
     "template_dir",
+    "unregister_template_source",
     "validate_fields",
 ]
