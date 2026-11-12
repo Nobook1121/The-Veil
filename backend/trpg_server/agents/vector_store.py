@@ -270,7 +270,13 @@ class EmbeddedVectorStore(VectorStore):
         return self.delete(ids)
 
     def count(self, filter: Mapping[str, Any] | None = None) -> int:
-        return len(self._rows(filter))
+        # 无 filter 时直接交给 SQLite 数行，避免把整表向量与 payload 读出来再反序列化
+        # （启动期 create_app 会调一次，库越大越明显）。带 filter 仍需逐行匹配，保持原逻辑。
+        if filter:
+            return len(self._rows(filter))
+        with self._lock, self._session() as connection:
+            row = connection.execute("SELECT COUNT(*) FROM vectors").fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
 
     def health(self) -> dict[str, Any]:
         """轻量探活：短 busy timeout，避免知识库页刷新被库锁拖住几十秒。"""
