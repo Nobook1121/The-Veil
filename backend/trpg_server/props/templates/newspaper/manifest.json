@@ -1,0 +1,19 @@
+{
+  "id": "newspaper",
+  "name": "多栏报纸",
+  "category": "newspaper",
+  "description": "民国报刊版式，报头 + 头条 + 双栏正文 + 广告位",
+  "fields": [
+    {"key": "city", "label": "报名城市", "type": "text", "max": 12, "required": true},
+    {"key": "date", "label": "日期", "type": "text", "max": 40},
+    {"key": "issue", "label": "期号", "type": "text", "max": 20},
+    {"key": "headline", "label": "头条", "type": "text", "max": 80, "required": true},
+    {"key": "col1", "label": "左栏正文", "type": "textarea", "max": 2000, "required": true},
+    {"key": "col2", "label": "右栏正文", "type": "textarea", "max": 2000},
+    {"key": "ad", "label": "广告位", "type": "textarea", "max": 300}
+  ],
+  "styles": {"paper": ["aged", "ivory", "white"], "ink": ["#1a1a1a", "#2b2b2b"]},
+  "wear_supported": ["stain", "fold", "tear"],
+  "page": {"size": "a4", "margin": [12, 12, 12, 12]},
+  "ai_hints": {"era": "1920s", "tone": "journalistic", "length": "medium"}
+}

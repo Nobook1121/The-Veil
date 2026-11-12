@@ -1,0 +1,95 @@
+body {
+  margin: 0;
+  padding: 0;
+  color: #1a1a1a;
+  font-size: 9.5pt;
+  line-height: 1.65;
+}
+
+.paper {
+  padding: 8pt;
+  background-repeat: repeat;
+}
+
+.np {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.np td {
+  padding: 0;
+}
+
+.np-masthead {
+  text-align: center;
+  font-size: 25pt;
+  letter-spacing: 2pt;
+  padding: 4pt 0 6pt 0;
+  border-bottom: 3pt double #1a1a1a;
+}
+
+.np-date {
+  text-align: center;
+  font-size: 8pt;
+  color: #4a4a4a;
+  padding: 3pt 0 5pt 0;
+  border-bottom: 1pt solid #1a1a1a;
+}
+
+.np-headline {
+  text-align: center;
+  font-size: 15pt;
+  font-weight: bold;
+  padding: 9pt 0 7pt 0;
+}
+
+.np-col {
+  width: 50%;
+  vertical-align: top;
+  padding: 0 6pt 0 6pt;
+  font-size: 9pt;
+}
+
+.np-col p {
+  margin: 0 0 5pt 0;
+}
+
+.np-col h1,
+.np-col h2,
+.np-col h3 {
+  font-size: 10.5pt;
+  margin: 0 0 5pt 0;
+}
+
+.np-ad {
+  border-top: 1pt solid #1a1a1a;
+  margin-top: 8pt;
+  padding: 6pt 6pt 0 6pt;
+  text-align: center;
+  font-size: 8.5pt;
+}
+
+.np-ad p {
+  margin: 0 0 3pt 0;
+}
+
+.np-wear {
+  padding: 4pt 0 0 0;
+}
+
+.wear {
+  margin: 0;
+  padding: 0;
+}
+
+.wear-fold {
+  margin-top: 2pt;
+}
+
+.wear-stain {
+  margin-top: -10pt;
+}
+
+.wear-tear {
+  margin-top: -8pt;
+}

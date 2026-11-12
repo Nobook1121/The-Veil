@@ -1,0 +1,83 @@
+body {
+  margin: 0;
+  padding: 0;
+  color: #2b2b2b;
+  font-size: 11pt;
+  line-height: 1.75;
+}
+
+.paper {
+  padding: 16pt 18pt 20pt 18pt;
+  background-repeat: repeat;
+}
+
+.letter-head {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 4pt;
+}
+
+.letter-head td {
+  padding: 0;
+  font-size: 10.5pt;
+  vertical-align: bottom;
+}
+
+.salutation {
+  text-align: left;
+}
+
+.date {
+  text-align: right;
+  color: #5a5147;
+  font-size: 9.5pt;
+}
+
+.rule {
+  border: none;
+  border-top: 1pt solid #b9a98c;
+  margin: 4pt 0 12pt 0;
+}
+
+.letter-body {
+  font-size: 11pt;
+}
+
+.letter-body p {
+  margin: 0 0 8pt 0;
+}
+
+.signature {
+  text-align: right;
+  margin: 18pt 0 0 0;
+  font-size: 11pt;
+}
+
+.postscript {
+  margin: 10pt 0 0 0;
+  padding-top: 5pt;
+  border-top: 1pt dashed #c9bda6;
+  color: #5a5147;
+  font-size: 9.5pt;
+}
+
+.wear {
+  margin: 0;
+  padding: 0;
+}
+
+.wear-fold {
+  margin-top: 6pt;
+}
+
+.wear-stain {
+  margin-top: -14pt;
+}
+
+.wear-burn {
+  margin-top: -12pt;
+}
+
+.wear-tear {
+  margin-top: -10pt;
+}

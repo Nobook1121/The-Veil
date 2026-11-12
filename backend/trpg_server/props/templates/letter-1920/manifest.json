@@ -1,0 +1,17 @@
+{
+  "id": "letter-1920",
+  "name": "私人书信",
+  "category": "document",
+  "description": "1920 年代私人书信，横线信纸，可做旧",
+  "fields": [
+    {"key": "salutation", "label": "称呼", "type": "text", "max": 40, "required": false},
+    {"key": "body", "label": "正文", "type": "textarea", "max": 2000, "required": true},
+    {"key": "signature", "label": "落款", "type": "text", "max": 40},
+    {"key": "date", "label": "日期", "type": "text", "max": 40},
+    {"key": "postscript", "label": "附言", "type": "text", "max": 200}
+  ],
+  "styles": {"paper": ["ivory", "aged", "white"], "ink": ["#2b2b2b", "#1a1a1a", "#3b2a20"]},
+  "wear_supported": ["stain", "fold", "burn", "tear"],
+  "page": {"size": "a5", "margin": [14, 14, 14, 14]},
+  "ai_hints": {"era": "1920s", "tone": "formal", "length": "medium"}
+}
