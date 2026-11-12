@@ -4,7 +4,7 @@
 关于页、更新检查与打包脚本都从本模块读取。
 """
 
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 APP_NAME = "The Veil"
 APP_NAME_ZH = "帷幕"
 APP_DISPLAY_NAME = f"{APP_NAME_ZH} {APP_NAME}"
