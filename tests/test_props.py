@@ -19,8 +19,16 @@ from trpg_server.agents.tools.props import (
     execute_reveal_prop,
     execute_update_prop,
 )
-from trpg_server.props import policy, prompt as props_prompt, registry, store
-from trpg_server.props.render import RenderError, render_cached, render_prop
+from trpg_server.props import (
+    draft as props_draft,
+    image as props_image,
+    policy,
+    prepare as props_prepare,
+    prompt as props_prompt,
+    registry,
+    store,
+)
+from trpg_server.props.render import RenderError, fill_page_html, render_cached, render_prop
 from trpg_server.room_log.fonts import FontMissing, resolve_font
 
 
@@ -706,3 +714,212 @@ def test_prompt_directive_only_revealed_and_redacted(tmp_path):
 
 def test_prompt_directive_disabled_is_empty(tmp_path):
     assert props_prompt.build_props_directive({"enabled": False}, registry.list_templates(), []) == ""
+
+
+# ---------------------------------------------------------------- P5：AI 起草 / 备道具 / 生图
+
+
+def test_draft_fields_normalizes_and_keeps_prompt_small():
+    calls: list[str] = []
+
+    def fake(prompt: str) -> str:
+        calls.append(prompt)
+        return (
+            "```json\n"
+            '{"title":"烧焦的密信","fields":{"body":"钥匙藏在书房。","salutation":"致 何清越",'
+            '"signature":"冯亦阳"},"wear":{"stain":2,"tear":-1},'
+            '"style":{"paper":"aged","font":"serif"},"extra":"ignored"}\n```'
+        )
+
+    result = props_draft.draft_fields(
+        "letter-1920",
+        {"era": "1926", "place": "上海", "clues": "钥匙藏在书房", "tone": "克制"},
+        request=fake,
+    )
+    assert result["fields"]["body"] == "钥匙藏在书房。"
+    assert "extra" not in result["fields"]
+    assert result["wear"] == {"stain": 1.0, "tear": 0.0}
+    assert result["style"]["paper"] == "aged"
+    assert len(calls) == 1
+    # 只带模板 schema 与简短上下文，不包含整份剧本。
+    assert "letter-1920" in calls[0] and "钥匙藏在书房" in calls[0]
+    assert len(calls[0]) < 3000
+
+
+def test_draft_fields_retries_once_then_succeeds():
+    calls: list[str] = []
+
+    def fake(prompt: str) -> str:
+        calls.append(prompt)
+        if len(calls) == 1:
+            return "这不是 JSON"
+        return '{"fields":{"body":"第二次成功。"},"wear":{},"style":{}}'
+
+    result = props_draft.draft_fields("letter-1920", request=fake)
+    assert result["fields"]["body"] == "第二次成功。"
+    assert len(calls) == 2
+    assert "上一次输出不是合法 JSON" in calls[1]
+
+
+def test_draft_fields_fails_after_single_retry():
+    calls: list[str] = []
+
+    def fake(prompt: str) -> str:
+        calls.append(prompt)
+        return "仍然不是 JSON"
+
+    with pytest.raises(props_draft.DraftError):
+        props_draft.draft_fields("letter-1920", request=fake)
+    assert len(calls) == 2
+
+
+def test_prepare_scenario_props_writes_pack(tmp_path):
+    scenario = {
+        "id": 42,
+        "modules": [
+            {"id": "clue-1", "title": "烧焦的信", "module_type": "clue", "summary": "半封信", "content": "钥匙在书房"},
+            {"id": "scene-1", "title": "书房", "module_type": "scene", "content": "不应被映射"},
+        ],
+    }
+    calls: list[str] = []
+
+    def fake(prompt: str) -> str:
+        calls.append(prompt)
+        return json.dumps(
+            {
+                "props": [
+                    {
+                        "clue_id": "clue-1",
+                        "template_id": "letter-1920",
+                        "title": "烧焦的信",
+                        "fields": {"body": "钥匙在书房。"},
+                        "wear": {"burn": 0.8},
+                    },
+                    {"clue_id": "clue-1", "template_id": "nope", "fields": {}},
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    result = props_prepare.prepare_scenario_props(
+        scenario,
+        scenario_dir=tmp_path,
+        settings={"enabled": True, "auto_prepare_on_import": True},
+        request=fake,
+    )
+    assert result["ok"] is True
+    assert result["count"] == 1 and result["skipped"] == 1
+    assert "scene-1" not in calls[0]
+    pack = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
+    spec = pack["props"][0]
+    assert spec["source"]["kind"] == "imported"
+    assert spec["source"]["clue_id"] == "clue-1"
+    assert spec["visibility"] == {"mode": "hidden", "revealed_to": []}
+    assert spec["wear"]["burn"] == 0.8
+
+
+def test_prepare_scenario_props_disabled_and_failure(tmp_path):
+    scenario = {"id": 1, "modules": [{"id": "c1", "module_type": "clue", "content": "x"}]}
+    disabled = props_prepare.prepare_scenario_props(
+        scenario,
+        scenario_dir=tmp_path,
+        settings={"enabled": True, "auto_prepare_on_import": False},
+        request=lambda prompt: "{}",
+    )
+    assert disabled["count"] == 0
+    assert not (tmp_path / "prop-packs").exists()
+
+    failed = props_prepare.prepare_scenario_props(
+        scenario,
+        scenario_dir=tmp_path,
+        settings={"enabled": True, "auto_prepare_on_import": True},
+        request=lambda prompt: "不是 JSON",
+    )
+    assert failed["ok"] is False and failed["count"] == 0
+
+
+def _photo_spec(**overrides):
+    spec = {
+        "schema_version": 1,
+        "id": store.new_prop_id(),
+        "room_id": "r-props",
+        "template_id": "photo",
+        "title": "旧照片",
+        "fields": {"scene": "码头边的两个人", "caption": "民国十五年", "back_text": "勿念。", "date": "1926"},
+        "style": {},
+        "wear": {},
+        "redaction": [],
+        "visibility": {"mode": "hidden", "revealed_to": []},
+        "assets": {},
+    }
+    spec.update(overrides)
+    return spec
+
+
+def test_photo_template_blank_frame_and_asset():
+    spec = _photo_spec()
+    blank = fill_page_html(spec, "photo")
+    assert "photo-frame" in blank
+    assert "photo_img" not in blank and "<img" not in blank
+
+    spec["assets"] = {"photo": f"props/{spec['id']}/photo.png"}
+    with_photo = fill_page_html(spec, "photo")
+    assert 'src="photo.png"' in with_photo
+
+
+def test_photo_generation_budget_and_hash_reuse(tmp_path):
+    room_dir = tmp_path / "room"
+    room_dir.mkdir()
+    spec = _photo_spec()
+    store.write_prop(room_dir, spec)
+    calls: list[str] = []
+
+    def fake_generate(prompt: str, platform):
+        calls.append(prompt)
+        return b"\x89PNG\r\n\x1a\nfake", "png"
+
+    kwargs = {
+        "settings": {"image_daily_budget": 1},
+        "usage_file": tmp_path / "usage.json",
+        "platform": {"id": "fake"},
+        "generate": fake_generate,
+    }
+    first = props_image.ensure_photo(room_dir, spec, **kwargs)
+    assert first["ok"] is True and first["cached"] is False
+    stored = store.read_prop(room_dir, spec["id"])
+    assert stored["assets"]["photo"] == f"props/{spec['id']}/photo.png"
+    assert (room_dir / "props" / spec["id"] / "photo.png").is_file()
+
+    second = props_image.ensure_photo(room_dir, stored, **kwargs)
+    assert second["ok"] is True and second["cached"] is True
+    assert len(calls) == 1
+
+    # 换一个画面描述会重新消耗预算；预算只有 1 张，因此降级而不是继续生成。
+    changed = {**stored, "fields": {**stored["fields"], "scene": "雨夜的码头"}}
+    third = props_image.ensure_photo(room_dir, changed, **kwargs)
+    assert third["ok"] is False
+    assert third["reason"] == "daily_budget_exhausted"
+    assert len(calls) == 1
+    # 降级后不再引用旧图，渲染回落为空白照片框。
+    assert not (store.read_prop(room_dir, spec["id"])["assets"] or {}).get("photo")
+
+
+def test_photo_generation_platform_failure_degrades(tmp_path):
+    room_dir = tmp_path / "room"
+    room_dir.mkdir()
+    spec = _photo_spec()
+    store.write_prop(room_dir, spec)
+
+    def boom(prompt: str, platform):
+        raise RuntimeError("upstream down")
+
+    result = props_image.ensure_photo(
+        room_dir,
+        spec,
+        settings={"image_daily_budget": 5},
+        usage_file=tmp_path / "usage.json",
+        platform={"id": "fake"},
+        generate=boom,
+    )
+    assert result["ok"] is False and result["degraded"] is True
+    assert "upstream down" in result["reason"]

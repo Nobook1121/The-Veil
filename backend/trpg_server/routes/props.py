@@ -24,7 +24,7 @@ from typing import Any, Mapping
 from flask import Blueprint, current_app, request, send_file, session
 
 from trpg_server import props as props_config
-from trpg_server.props import policy, registry, store
+from trpg_server.props import draft, image, policy, registry, store
 from trpg_server.props.render import RenderError, render_cached
 from trpg_server.responses import error_response, success_response
 from trpg_server.room_log.fonts import FontMissing, resolve_font
@@ -263,6 +263,46 @@ def list_prop_templates(room_id):
     return success_response({"templates": registry.list_templates()}, "Prop templates loaded")
 
 
+@bp.route("/api/rooms/<room_id>/props/draft", methods=["POST"])
+def draft_prop(room_id):
+    """AI 起草：只做一次小请求，失败返回可读错误让编辑器提示手动填写。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    settings = _settings()
+    if not settings.get("enabled", True):
+        return _disabled_response()
+    if not settings.get("ai_draft_enabled", True):
+        return error_response("AI draft is disabled", 403, "prop.draft_disabled")
+    _room_dir, info, error = _load_room(room_id)
+    if error:
+        return error
+    if not _can_access(info):
+        return _write_forbidden()
+    if not _is_kp(info):
+        return _write_forbidden()
+
+    body = _payload()
+    try:
+        result = draft.draft_fields(
+            str(body.get("template_id") or ""),
+            {
+                "era": body.get("era"),
+                "place": body.get("place"),
+                "clues": body.get("clues"),
+                "tone": body.get("tone"),
+            },
+            config_dir=current_app.config.get("CONFIG_DIR"),
+            max_field_chars=int(settings.get("max_field_chars") or 0) or None,
+        )
+    except draft.DraftError as exc:
+        return error_response(str(exc), 502, "prop.draft_failed")
+    except Exception:  # noqa: BLE001 - 起草是辅助功能，失败不能影响编辑器
+        logger.exception("props draft failed room=%s", room_id)
+        return error_response("AI 起草失败，请手动填写。", 502, "prop.draft_failed")
+    return success_response(result, "Prop draft ready")
+
+
 @bp.route("/api/rooms/<room_id>/props", methods=["GET"])
 def list_props(room_id):
     login_error = _require_login()
@@ -454,7 +494,20 @@ def render_prop_file(room_id, prop_id):
     if fmt not in _FORMATS:
         return error_response("format 只支持 pdf / png", 400, "prop.invalid_format")
     spec = store.read_prop(room_dir, prop_id)
-    view = policy.visible_spec(spec, session.get("user_id"), is_kp=_is_kp(info))
+    is_kp = _is_kp(info)
+    # 照片模板：KP 首次预览时补生成图片；失败只降级为空白框，不阻断渲染。
+    if spec is not None and str(spec.get("template_id") or "") == "photo" and is_kp:
+        try:
+            image.ensure_photo(
+                room_dir,
+                spec,
+                config_dir=current_app.config.get("CONFIG_DIR"),
+                settings=settings,
+            )
+            spec = store.read_prop(room_dir, prop_id) or spec
+        except Exception:  # noqa: BLE001 - 生图失败不应让渲染 500
+            logger.warning("props photo ensure failed room=%s id=%s", room_id, prop_id, exc_info=True)
+    view = policy.visible_spec(spec, session.get("user_id"), is_kp=is_kp)
     if view is None:
         return _not_found()
 
@@ -617,6 +670,42 @@ def redact_prop(room_id, prop_id):
             return error_response("脱敏区间无效", 400, "prop.invalid_body")
         return _not_found()
     return success_response(updated, "Prop redaction added")
+
+
+@bp.route("/api/rooms/<room_id>/props/<prop_id>/photo", methods=["POST"])
+def generate_prop_photo(room_id, prop_id):
+    """显式生成/重绘照片；预算耗尽或失败返回 degraded，不视为 500。"""
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    settings = _settings()
+    if not settings.get("enabled", True):
+        return _disabled_response()
+    room_dir, info, error = _load_room(room_id)
+    if error:
+        return error
+    if not _can_access(info):
+        return _write_forbidden()
+    if not _is_kp(info):
+        return _write_forbidden()
+    if not store.is_valid_prop_id(prop_id):
+        return _not_found()
+    spec = store.read_prop(room_dir, prop_id)
+    if spec is None:
+        return _not_found()
+    if str(spec.get("template_id") or "") != "photo":
+        return error_response("Only photo props support images", 400, "prop.invalid_template")
+
+    body = _payload()
+    result = image.ensure_photo(
+        room_dir,
+        spec,
+        config_dir=current_app.config.get("CONFIG_DIR"),
+        settings=settings,
+        force=bool(body.get("force")),
+    )
+    message = "Photo ready" if result.get("ok") else "Photo degraded"
+    return success_response(result, message)
 
 
 __all__ = ["bp"]

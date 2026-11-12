@@ -540,6 +540,23 @@ def _generate_external(
     }
 
 
+def generate_external_asset(
+    prompt: str,
+    platform: dict[str, Any],
+    *,
+    category: str = "prop",
+    size_override: str = "",
+) -> tuple[bytes, str]:
+    """复用外部生图链路生成一张图，返回 ``(bytes, 后缀)``。
+
+    供道具工坊的照片模板使用：平台解析、重试、超时与落盘仍在
+    :func:`_generate_external` 内完成，调用方只负责把字节写进自己的资产目录。
+    """
+    payload = _generate_external(prompt, platform, category=category, size_override=size_override)
+    source = IMAGE_CACHE_DIR / str(payload.get("filename") or "")
+    return source.read_bytes(), source.suffix.lower().lstrip(".")
+
+
 def generate_now(
     *,
     room_dir: Path | None,

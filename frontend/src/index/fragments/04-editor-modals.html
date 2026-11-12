@@ -1155,6 +1155,30 @@
                                 <label class="form-label" for="propEditorPaper" data-i18n="prop.label.paper">纸张</label>
                                 <select class="form-select" id="propEditorPaper"></select>
                             </div>
+                            <details class="prop-draft">
+                                <summary data-i18n="prop.draft.title">让 AI 起草</summary>
+                                <div class="prop-draft-grid">
+                                    <div class="prop-editor-field">
+                                        <label class="form-label" for="propDraftEra" data-i18n="prop.draft.era">时代</label>
+                                        <input type="text" class="form-control" id="propDraftEra" maxlength="80" placeholder="1920 年代">
+                                    </div>
+                                    <div class="prop-editor-field">
+                                        <label class="form-label" for="propDraftPlace" data-i18n="prop.draft.place">地点</label>
+                                        <input type="text" class="form-control" id="propDraftPlace" maxlength="80" placeholder="上海">
+                                    </div>
+                                    <div class="prop-editor-field prop-draft-wide">
+                                        <label class="form-label" for="propDraftClues" data-i18n="prop.draft.clues">已知线索</label>
+                                        <textarea class="form-control" id="propDraftClues" rows="2" maxlength="800"></textarea>
+                                    </div>
+                                    <div class="prop-editor-field">
+                                        <label class="form-label" for="propDraftTone" data-i18n="prop.draft.tone">语气</label>
+                                        <input type="text" class="form-control" id="propDraftTone" maxlength="60" placeholder="克制、焦虑">
+                                    </div>
+                                    <div class="prop-editor-field prop-draft-action">
+                                        <button type="button" class="btn btn-outline-primary btn-sm" id="propDraftRun" data-i18n="prop.action.draft_ai">让 AI 起草</button>
+                                    </div>
+                                </div>
+                            </details>
                             <div class="prop-editor-fields" id="propEditorFields"></div>
                             <div class="prop-wear-block">
                                 <div class="prop-editor-section-title" data-i18n="prop.label.wear">做旧</div>

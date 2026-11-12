@@ -86,6 +86,17 @@ def fill_page_html(spec: Mapping[str, Any], template: str | Mapping[str, Any]) -
     for name, (filename, min_width, max_width) in _WEAR_FILES.items():
         values[f"wear_{name}"] = _wear_html(name, filename, wear.get(name), min_width, max_width)
 
+    # 照片类道具：资产目录已经挂进 Archive，模板只需引用文件名；没有图时
+    # 保持空串，模板的表格单元格就是「空白照片框」的降级形态。
+    assets = spec.get("assets") if isinstance(spec.get("assets"), Mapping) else {}
+    photo_name = Path(str(assets.get("photo") or "")).name
+    if photo_name and re.match(r"^[A-Za-z0-9_.-]+$", photo_name):
+        values["photo"] = escape_html(photo_name)
+        values["photo_img"] = f'<img src="{escape_html(photo_name)}" alt=""/>'
+    else:
+        values["photo"] = ""
+        values["photo_img"] = ""
+
     def replace(match: re.Match[str]) -> str:
         return values.get(match.group(1), "")
 

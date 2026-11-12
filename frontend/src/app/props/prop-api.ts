@@ -83,6 +83,21 @@ interface PropCreateBody {
     source?: PropSource;
 }
 
+interface PropDraftInput {
+    template_id: string;
+    era?: string;
+    place?: string;
+    clues?: string;
+    tone?: string;
+}
+
+interface PropDraftResult {
+    title?: string;
+    fields: Record<string, string>;
+    wear?: Record<string, number>;
+    style?: Record<string, string>;
+}
+
 interface PropRevealResult {
     prop: PropSpec;
     message?: ChatMessage;
@@ -103,6 +118,7 @@ interface TrpgPropApiRuntime {
     list(roomId: string): Promise<PropIndexEntry[]>;
     get(roomId: string, propId: string): Promise<PropSpec>;
     create(roomId: string, body: PropCreateBody): Promise<PropSpec>;
+    draft(roomId: string, body: PropDraftInput): Promise<PropDraftResult>;
     update(roomId: string, propId: string, patch: Partial<PropCreateBody>): Promise<PropSpec>;
     remove(roomId: string, propId: string): Promise<void>;
     reveal(
@@ -190,6 +206,11 @@ interface Window {
         return unwrap(payload, "create prop failed");
     }
 
+    async function draft(roomId: string, body: PropDraftInput): Promise<PropDraftResult> {
+        const payload = await api().post<ApiResponse<PropDraftResult>>(`${base(roomId)}/draft`, body);
+        return unwrap(payload, "draft prop failed");
+    }
+
     async function update(roomId: string, propId: string, patch: Partial<PropCreateBody>): Promise<PropSpec> {
         const payload = await api().request<ApiResponse<PropSpec>>(propPath(roomId, propId), {
             method: "PATCH",
@@ -266,6 +287,7 @@ interface Window {
         list,
         get,
         create,
+        draft,
         update,
         remove,
         reveal,

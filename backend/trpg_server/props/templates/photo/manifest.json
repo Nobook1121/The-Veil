@@ -1,0 +1,16 @@
+{
+  "id": "photo",
+  "name": "老照片",
+  "category": "photo",
+  "description": "年代照片：AI 生图或空白照片框，背面可题字",
+  "fields": [
+    {"key": "scene", "label": "画面描述", "type": "textarea", "max": 600, "required": false},
+    {"key": "caption", "label": "正面题字", "type": "text", "max": 120},
+    {"key": "back_text", "label": "背面题字", "type": "textarea", "max": 600},
+    {"key": "date", "label": "拍摄时间", "type": "text", "max": 60}
+  ],
+  "styles": {"paper": ["ivory", "aged", "white"], "ink": ["#2b2b2b", "#3a2b20", "#1a1a1a"]},
+  "wear_supported": ["stain", "fold", "burn", "tear"],
+  "page": {"size": "a4", "margin": [18, 18, 18, 18]},
+  "ai_hints": {"era": "1920s", "tone": "nostalgic", "length": "short", "image": "scene"}
+}

@@ -130,6 +130,30 @@ def publish_import_job(
             )
 
     store.update(job_id, status="published", progress=100, script_id=script_id)
+
+    # 可选后置：把 clue 模块 AI 映射为道具包。默认关闭；任何失败只 warning，
+    # 绝不影响剧本发布结果。
+    try:
+        from trpg_server.props import props_settings
+        from trpg_server.props.prepare import prepare_scenario_props
+
+        prop_settings = props_settings(config.get("CONFIG_DIR"))
+        if prop_settings.get("auto_prepare_on_import"):
+            prepared = prepare_scenario_props(
+                scenario,
+                scenario_dir=descriptor.parent,
+                config_dir=config.get("CONFIG_DIR"),
+                settings=prop_settings,
+            )
+            if prepared.get("count"):
+                current = store.get(job_id) or {}
+                meta = dict(current.get("stage_meta") or {})
+                meta["props_prepared"] = prepared["count"]
+                meta["message"] = f"{prepared['count']} 件道具已备好"
+                store.update(job_id, stage_meta=meta)
+    except Exception as exc:  # noqa: BLE001 - 后置步骤不得影响发布
+        logger.warning("scenario_import.props_prepare_failed job=%s error=%s", job_id, exc)
+
     log_user_action(
         logger,
         user_action_text(username, "发布了导入任务"),

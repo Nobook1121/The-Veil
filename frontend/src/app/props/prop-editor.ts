@@ -29,6 +29,7 @@ interface Window {
     let templates: PropTemplate[] = [];
     let currentSpec: PropSpec | null = null;
     let saving = false;
+    let drafting = false;
     let returnToLibrary = false;
 
     function api(): TrpgPropApiRuntime {
@@ -219,6 +220,49 @@ interface Window {
         }
     }
 
+    async function runDraft(): Promise<void> {
+        if (drafting || !currentSpec) return;
+        const manifest = currentTemplate();
+        if (!manifest) return;
+        const button = byId<HTMLButtonElement>("propDraftRun");
+        drafting = true;
+        if (button) button.disabled = true;
+        setStatus(t("prop.draft.running", "AI 正在起草…"));
+        try {
+            const result = await api().draft(roomId, {
+                template_id: manifest.id,
+                era: byId<HTMLInputElement>("propDraftEra")?.value || "",
+                place: byId<HTMLInputElement>("propDraftPlace")?.value || "",
+                clues: byId<HTMLTextAreaElement>("propDraftClues")?.value || "",
+                tone: byId<HTMLInputElement>("propDraftTone")?.value || "",
+            });
+            currentSpec = {
+                ...currentSpec,
+                fields: { ...(currentSpec.fields || {}), ...(result.fields || {}) },
+                wear: { ...(currentSpec.wear || {}), ...(result.wear || {}) },
+                style: { ...(currentSpec.style || {}), ...(result.style || {}) },
+            };
+            const titleInput = byId<HTMLInputElement>("propEditorTitle");
+            if (titleInput && !titleInput.value.trim() && result.title) titleInput.value = result.title;
+            renderFields(manifest, currentSpec.fields || {});
+            renderWear(currentSpec.wear || {});
+            const paperSelect = byId<HTMLSelectElement>("propEditorPaper");
+            const paper = result.style?.paper;
+            if (paperSelect && paper && Array.from(paperSelect.options).some((option) => option.value === paper)) {
+                paperSelect.value = paper;
+            }
+            setStatus(t("prop.draft.done", "AI 已起草，可继续修改后保存。"), "ok");
+        } catch (error) {
+            const runtime = api();
+            const message = runtime.errorText(error, t("prop.draft.failed", "AI 起草失败，请手动填写。"));
+            global.showNotification?.(message, "error");
+            setStatus(message, "error");
+        } finally {
+            drafting = false;
+            if (button) button.disabled = false;
+        }
+    }
+
     async function save(): Promise<void> {
         if (saving || !currentSpec) return;
         const manifest = currentTemplate();
@@ -279,6 +323,7 @@ interface Window {
         if (!modalElement) return;
         modal = new bootstrap.Modal(modalElement);
         byId<HTMLButtonElement>("propEditorSave")?.addEventListener("click", () => { void save(); });
+        byId<HTMLButtonElement>("propDraftRun")?.addEventListener("click", () => { void runDraft(); });
         byId<HTMLElement>("propEditorTemplate")?.addEventListener("change", () => {
             const values = fieldValues();
             const manifest = currentTemplate();
