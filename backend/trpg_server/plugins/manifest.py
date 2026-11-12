@@ -21,6 +21,7 @@ from .contracts import (
     PLUGIN_API_VERSION,
     PLUGIN_ID_RE,
     PLUGIN_MANIFEST_VERSION,
+    RESERVED_PLUGIN_IDS,
     VERSION_RE,
     ManifestError,
     PluginManifest,
@@ -159,6 +160,8 @@ def parse_manifest(
     plugin_id = _require_str(data, "id")
     if not PLUGIN_ID_RE.match(plugin_id):
         raise ManifestError("id 只能用小写字母、数字与 -，以字母开头，2–64 字符")
+    if plugin_id in RESERVED_PLUGIN_IDS:
+        raise ManifestError(f"id 与核心 Agent 工具命名空间冲突：{plugin_id}")
     directory = Path(plugin_dir)
     if expected_id is not None and plugin_id != expected_id:
         raise ManifestError(f"清单 id 与目录名不一致：{plugin_id} != {expected_id}")

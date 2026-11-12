@@ -40,8 +40,8 @@ from trpg_server.agents.tools.time import GAME_CLOCK_TOOL_NAMES, GAME_CLOCK_TOOL
 from trpg_server.agents.tools.props import PROPS_TOOL_NAMES, PROPS_TOOLS
 
 
-def default_tool_registry() -> ToolRegistry:
-    tools = [
+def _core_tools() -> list[AgentTool]:
+    return [
         GET_ROOM_SNAPSHOT_TOOL,
         GET_SCENARIO_CONTEXT_TOOL,
         GET_SCENARIO_MODULE_TOOL,
@@ -76,6 +76,15 @@ def default_tool_registry() -> ToolRegistry:
         *GAME_CLOCK_TOOLS,
         *PROPS_TOOLS,
     ]
+
+
+def core_agent_tool_names() -> set[str]:
+    """核心 Agent 工具名集合；插件激活时用来拒绝同名覆盖。"""
+    return {str(getattr(tool, "name", "") or "") for tool in _core_tools()}
+
+
+def default_tool_registry() -> ToolRegistry:
+    tools = _core_tools()
     # 第三方插件注册的 Agent 工具（插件未启用时为空列表）。
     try:
         from trpg_server.plugins.runtime import extra_agent_tools
@@ -109,5 +118,6 @@ __all__ = [
     "PROPS_TOOL_NAMES",
     "TRIGGER_RUNTIME_TOOL_NAMES",
     "TRIGGER_RUNTIME_TOOLS",
+    "core_agent_tool_names",
     "default_tool_registry",
 ]

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -225,6 +226,71 @@ def test_disable_and_uninstall_lifecycle(tmp_path):
     registry.uninstall("note-pack", confirm="note-pack")
     assert not (root / "note-pack").exists()
     assert registry.get("note-pack") is None
+
+
+def test_corrupt_enabled_state_degrades_to_empty(tmp_path):
+    """enabled.json 损坏时按空列表降级，不能把全部插件拖成不可用。"""
+    root = tmp_path / "plugins"
+    _write_plugin(root, "note-pack", with_template=True)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "enabled.json").write_text("{not valid json", encoding="utf-8")
+
+    registry = _load(root)  # 不抛异常
+    record = registry.get("note-pack")
+    assert record is not None
+    assert record.state != STATE_LOADED
+    assert registry.loaded_ids() == []
+    assert "plugin-note" not in props_registry.available_ids()
+
+
+def test_reserved_plugin_id_is_rejected(tmp_path):
+    """插件 id 不能与核心 Agent 工具命名空间同名，否则会顶掉核心工具。"""
+    payload = {
+        "schema_version": 1,
+        "id": "props",
+        "name": "伪造道具工具",
+        "version": "1.0.0",
+        "api_version": 1,
+        "description": "shadow core tools",
+        "author": "tester",
+    }
+    with pytest.raises(plugin_manifest.ManifestError):
+        plugin_manifest.parse_manifest(payload, tmp_path / "props")
+
+
+def test_disabled_code_plugin_prunes_module_and_keeps_restart_flag(tmp_path):
+    """禁用代码插件后模块要从 sys.modules 移除，并保留「需重启」标记。"""
+    root = tmp_path / "plugins"
+    _write_plugin(
+        root,
+        "toolbox",
+        entry=(
+            "from trpg_server.agents.tools.base import AgentTool\n"
+            "def handler(args, ctx):\n"
+            "    return {'ok': True}\n"
+            "def create_tools():\n"
+            "    return [AgentTool(name='toolbox.ping', description='demo', parameters={}, handler=handler)]\n"
+        ),
+        manifest={
+            "capabilities": {
+                "agent_tools": {"module": "entry.py", "tools": ["toolbox.ping"]}
+            }
+        },
+    )
+    _enable(root, ["toolbox"])
+    registry = _load(root)
+    module_name = "trpg_plugin_toolbox_entry"
+    assert module_name in sys.modules
+
+    result = registry.disable("toolbox")
+    assert result["restart_required"] is True
+    assert result["plugin"]["pending_restart"] is True
+    assert module_name not in sys.modules
+    assert registry.get("toolbox").pending_restart is True
+
+    # 重新加载（例如刷新设置页触发的 rescan）后标记仍在条目上。
+    registry.load()
+    assert registry.get("toolbox").pending_restart is True
 
 
 def test_disabled_all_skips_enabled_plugins(tmp_path):

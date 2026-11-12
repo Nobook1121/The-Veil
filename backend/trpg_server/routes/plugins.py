@@ -13,14 +13,17 @@
 
 from __future__ import annotations
 
+import logging
+
 from flask import Blueprint, request, session
 
 from trpg_server.plugins import bootstrap, plugin_registry
 from trpg_server.plugins.manifest import manifest_json_schema
 from trpg_server.plugins.registry import PluginNotFound, PluginStateError
-from trpg_server.responses import error_response, success_response
+from trpg_server.responses import error_response, server_error, success_response
 
 bp = Blueprint("plugins", __name__)
+logger = logging.getLogger(__name__)
 
 _ADMIN_ROLES = {"ADMIN", "OWNER"}
 
@@ -71,7 +74,11 @@ def rescan_plugins():
     registry, error = _registry()
     if error:
         return error
-    registry.load()
+    try:
+        registry.load()
+    except Exception:  # noqa: BLE001 - 扫描失败要回稳定 500，而不是 Flask 默认页
+        logger.exception("plugin_rescan_failed root=%s", getattr(registry, "root", ""))
+        return server_error("Plugin rescan failed")
     return success_response(registry.summary(), "Plugins rescanned")
 
 

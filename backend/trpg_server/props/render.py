@@ -151,18 +151,58 @@ def spec_hash(
     *,
     template_key: Any = "",
     font_key: str = "",
+    asset_key: str = "",
 ) -> str:
-    """渲染缓存键：spec + 模板文件签名 + 字体签名（B4）。
+    """渲染缓存键：spec + 模板文件签名 + 字体签名 + 图片/贴图签名（B4）。
 
-    模板或字体变化后签名不同，旧的 ``renders/<id>@<hash>`` 自然失效。
+    模板、字体、道具照片或纸纹贴图变化后签名不同，旧的
+    ``renders/<id>@<hash>`` 自然失效。
     """
     payload = json.dumps(
-        {"spec": dict(spec or {}), "template": template_key, "font": font_key},
+        {
+            "spec": dict(spec or {}),
+            "template": template_key,
+            "font": font_key,
+            "assets": asset_key,
+        },
         sort_keys=True,
         ensure_ascii=False,
         default=str,
     )
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _props_assets_signature() -> str:
+    """渲染器自带贴图（纸纹/做旧）的签名，重绘贴图后让缓存失效。"""
+    digest = hashlib.sha1()
+    try:
+        files = sorted(PROPS_ASSETS_DIR.glob("*.png"))
+    except OSError:
+        return ""
+    for path in files:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        digest.update(f"{path.name}:{stat.st_mtime_ns}:{stat.st_size};".encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _photo_signature(room_dir: str | Path | None, spec: Mapping[str, Any]) -> str:
+    """道具生成照片的文件签名；同 prompt 强制重绘时内容变了但 spec 不变。"""
+    if room_dir is None:
+        return ""
+    assets = spec.get("assets") if isinstance(spec.get("assets"), Mapping) else {}
+    name = Path(str(assets.get("photo") or "")).name
+    prop_id = str(spec.get("id") or "")
+    if not name or not store.is_valid_prop_id(prop_id):
+        return ""
+    try:
+        path = store.assets_dir(room_dir, prop_id) / name
+        stat = path.stat()
+    except (OSError, ValueError):
+        return name
+    return f"{name}:{stat.st_mtime_ns}:{stat.st_size}"
 
 
 def _font_signature(font_path: str | Path | None, data_dir: str | Path | None) -> str:
@@ -305,6 +345,7 @@ def render_cached(
         spec,
         template_key=template_key,
         font_key=_font_signature(font_path, data_dir),
+        asset_key=f"{_photo_signature(room_dir, spec)}|{_props_assets_signature()}",
     )
     target = store.render_path(room_dir, prop_id, digest, fmt)
     with _target_lock(target):
@@ -443,43 +484,90 @@ def _trim_trailing_decoration(doc) -> None:
 def _apply_redactions(doc) -> None:
     """把 ``█`` / ``▓`` 标记画成真实遮盖：ink 涂黑、burn 烧灼焦边（§3.1）。
 
-    Story 只负责排版；拿到文字 span 的 bbox 后按字符比例切出遮盖区间，
-    再在 PDF 层画图元，因此两种模式在视觉上不同，而不是仅替换字符。
+    优先用 ``rawdict`` 的逐字符 bbox 定位：同一 span 里 CJK 与拉丁数字混排时
+    字宽并不相等，按 span 宽度平均切分会把遮盖画偏，甚至盖住相邻正文。
     """
     ink = policy.RENDER_MARKS["ink"]
     burn = policy.RENDER_MARKS["burn"]
     for page in doc:
-        for block in page.get_text("dict").get("blocks", []):
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    text = str(span.get("text") or "")
-                    if ink not in text and burn not in text:
+        for mark, rect in _redaction_rects(page, ink, burn):
+            if mark == ink:
+                _draw_ink(page, rect)
+            else:
+                _draw_burn(page, rect)
+
+
+def _redaction_rects(page, ink: str, burn: str) -> list[tuple[str, "pymupdf.Rect"]]:
+    """返回 ``[(mark, rect)]``；连续同标记字符合并成一块。"""
+    rects: list[tuple[str, pymupdf.Rect]] = []
+    for block in page.get_text("rawdict").get("blocks", []):
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                chars = span.get("chars") or []
+                if not chars:
+                    # 没有逐字符信息（异常 PDF/旧版 PyMuPDF）时退回比例切分。
+                    rects.extend(_span_rects(span, ink, burn))
+                    continue
+                run: pymupdf.Rect | None = None
+                run_mark = ""
+                for char in chars:
+                    text = str(char.get("c") or "")
+                    mark = text if text in (ink, burn) else ""
+                    bbox = char.get("bbox")
+                    if not mark or not bbox:
+                        if run is not None:
+                            rects.append((run_mark, run))
+                            run = None
+                            run_mark = ""
                         continue
-                    bbox = pymupdf.Rect(span.get("bbox") or (0, 0, 0, 0))
-                    if bbox.width <= 0 or bbox.height <= 0:
+                    rect = pymupdf.Rect(bbox)
+                    if rect.is_empty:
                         continue
-                    total = len(text)
-                    char_width = bbox.width / total
-                    index = 0
-                    while index < total:
-                        mark = text[index]
-                        if mark not in (ink, burn):
-                            index += 1
-                            continue
-                        end = index + 1
-                        while end < total and text[end] == mark:
-                            end += 1
-                        rect = pymupdf.Rect(
-                            bbox.x0 + char_width * index,
-                            bbox.y0,
-                            bbox.x0 + char_width * end,
-                            bbox.y1,
-                        )
-                        if mark == ink:
-                            _draw_ink(page, rect)
-                        else:
-                            _draw_burn(page, rect)
-                        index = end
+                    if run is None or mark != run_mark:
+                        if run is not None:
+                            rects.append((run_mark, run))
+                        run = rect
+                        run_mark = mark
+                    else:
+                        run |= rect
+                if run is not None:
+                    rects.append((run_mark, run))
+    return rects
+
+
+def _span_rects(span: Mapping[str, Any], ink: str, burn: str) -> list[tuple[str, "pymupdf.Rect"]]:
+    """最后的兜底：按 span 的平均字宽切分（仅在缺少 chars 时使用）。"""
+    text = str(span.get("text") or "")
+    if ink not in text and burn not in text:
+        return []
+    bbox = pymupdf.Rect(span.get("bbox") or (0, 0, 0, 0))
+    if bbox.width <= 0 or bbox.height <= 0:
+        return []
+    total = len(text)
+    char_width = bbox.width / total
+    result: list[tuple[str, pymupdf.Rect]] = []
+    index = 0
+    while index < total:
+        mark = text[index]
+        if mark not in (ink, burn):
+            index += 1
+            continue
+        end = index + 1
+        while end < total and text[end] == mark:
+            end += 1
+        result.append(
+            (
+                mark,
+                pymupdf.Rect(
+                    bbox.x0 + char_width * index,
+                    bbox.y0,
+                    bbox.x0 + char_width * end,
+                    bbox.y1,
+                ),
+            )
+        )
+        index = end
+    return result
 
 
 def _draw_ink(page, rect: "pymupdf.Rect") -> None:

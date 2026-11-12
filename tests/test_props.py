@@ -1241,16 +1241,27 @@ def test_user_template_symlinks_and_css_are_rejected(user_templates):
         pytest.skip("当前环境不允许创建符号链接")
     _write_user_template(user_templates, "css-position", css=".x { position: absolute; }")
     _write_user_template(user_templates, "css-transform", css=".x { transform: scale(2); }")
+    _write_user_template(user_templates, "css-writing-mode", css=".x { writing-mode: vertical-rl; }")
+    _write_user_template(user_templates, "css-direction", css=".x { direction: rtl; }")
     _write_user_template(user_templates, "css-huge", css=".x { width: 99999pt; }")
     _write_user_template(user_templates, "good-after-bad")
 
     ids = registry.available_ids()
     assert "good-after-bad" in ids
-    assert not {"linked-page", "css-position", "css-transform", "css-huge"} & set(ids)
+    assert not {
+        "linked-page",
+        "css-position",
+        "css-transform",
+        "css-writing-mode",
+        "css-direction",
+        "css-huge",
+    } & set(ids)
     reasons = " ".join(item["reason"] for item in registry.list_unavailable())
     assert "符号链接" in reasons
     assert "position" in reasons
     assert "transform" in reasons
+    assert "writing-mode" in reasons
+    assert "direction" in reasons
     assert "width" in reasons
 
 
@@ -1371,6 +1382,55 @@ def test_render_ink_and_burn_draw_different_marks(tmp_path):
         assert drawings
         # burn 的焦黄晕圈是偏暖的褐色，ink 只有近黑色。
         assert any(color[0] > 0.3 and color[2] < 0.4 for color in fills)
+    finally:
+        doc.close()
+
+
+def test_render_cache_invalidates_after_photo_regenerated(tmp_path):
+    """同 prompt 强制重绘会换掉照片文件但 spec 不变，缓存键必须跟着变。"""
+    font = _font_path()
+    room_dir = tmp_path / "rooms" / "r-photo"
+    prop_id = store.new_prop_id()
+    spec = _letter_spec(id=prop_id, assets={"photo": "photo.png", "photo_hash": "same"})
+    asset_dir = store.assets_dir(room_dir, prop_id)
+    asset_dir.mkdir(parents=True)
+    photo = asset_dir / "photo.png"
+    photo.write_bytes(b"first-version")
+
+    first = render_cached(room_dir, spec, "pdf", settings=None, font_path=font)
+    second = render_cached(room_dir, spec, "pdf", settings=None, font_path=font)
+    assert first["cached"] is False
+    assert second["cached"] is True
+
+    photo.write_bytes(b"second-version")
+    stat = photo.stat()
+    os.utime(photo, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    third = render_cached(room_dir, spec, "pdf", settings=None, font_path=font)
+    assert third["cached"] is False
+
+
+def test_ink_cover_aligns_with_per_char_bbox_on_mixed_width_text(tmp_path):
+    """同一 span 内窄拉丁字符与宽标记混排时，遮盖必须按逐字符 bbox 落位。"""
+    font = _font_path()
+    doc = pymupdf.open()
+    try:
+        page = doc.new_page()
+        # 强制同一字体文件排版，确保 iiii 与 ████ 落在同一个 span 里。
+        page.insert_text((72, 120), "iiii████", fontsize=24, fontname="cjk", fontfile=font)
+        props_render._apply_redactions(doc)
+        marks = [
+            pymupdf.Rect(char["bbox"])
+            for block in page.get_text("rawdict")["blocks"]
+            for line in block.get("lines", [])
+            for span in line.get("spans", [])
+            for char in span.get("chars", [])
+            if char.get("c") == "█"
+        ]
+        assert marks
+        rects = [pymupdf.Rect(item["rect"]) for item in page.get_drawings() if item.get("fill")]
+        for mark in marks:
+            center = pymupdf.Point((mark.x0 + mark.x1) / 2, (mark.y0 + mark.y1) / 2)
+            assert any(rect.contains(center) for rect in rects), f"标记未被遮盖：{mark}"
     finally:
         doc.close()
 

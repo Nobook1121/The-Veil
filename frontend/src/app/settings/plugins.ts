@@ -24,6 +24,7 @@ interface SettingsPluginRecord {
     reason_code: string;
     dir: string;
     capabilities: string[];
+    pending_restart?: boolean;
     manifest: SettingsPluginManifest | null;
 }
 
@@ -147,15 +148,24 @@ interface TrpgPluginsApi {
                 + `<code class="plugin-card-error-code">${escapeHtml(record.reason_code || "unknown")}</code>`
                 + `<span>${escapeHtml(record.reason || t("settings.plugins.reason_unknown", "插件加载失败，详情见服务端日志。"))}</span></p>`
             : "";
+        // 代码插件禁用后蓝图仍存活到重启；后端把标记持久化在条目上，
+        // 刷新页面也要继续提示「需重启」，不能只靠一次性提示条。
+        const pendingRestart = Boolean(record.pending_restart) && record.state !== "loaded";
+        const displayState = pendingRestart ? "pending_restart" : record.state;
+        const restartNote = pendingRestart
+            ? `<p class="plugin-card-error"><span>${escapeHtml(
+                record.reason || t("settings.plugins.restart_required", "已禁用。该插件注册的 HTTP 路由仍在当前进程中，需重启服务才能完全回滚。")
+            )}</span></p>`
+            : "";
         return `
-            <article class="plugin-card" data-state="${escapeHtml(record.state)}" data-plugin-id="${escapeHtml(record.id)}">
+            <article class="plugin-card" data-state="${escapeHtml(displayState)}" data-plugin-id="${escapeHtml(record.id)}">
                 <div class="plugin-card-top">
                     <div class="plugin-card-heading">
                         <h4 class="plugin-card-name">${escapeHtml(name)}<code class="plugin-card-id">${escapeHtml(record.id)}</code></h4>
                         <p class="settings-section-desc">${escapeHtml(description)}</p>
                     </div>
                     <div class="plugin-card-actions">
-                        <span class="plugin-state-badge" data-state="${escapeHtml(record.state)}">${escapeHtml(stateLabel(record.state))}</span>
+                        <span class="plugin-state-badge" data-state="${escapeHtml(displayState)}">${escapeHtml(stateLabel(displayState))}</span>
                         <label class="plugin-switch">
                             <input type="checkbox" data-plugin-toggle="${escapeHtml(record.id)}"${checked ? " checked" : ""}${isBusy ? " disabled" : ""}>
                             <span>${escapeHtml(t("settings.plugins.enable_label", "启用"))}</span>
@@ -171,6 +181,7 @@ interface TrpgPluginsApi {
                     <div><dt>${escapeHtml(t("settings.plugins.source", "来源"))}</dt><dd>${escapeHtml(sourceLabel(record))}</dd></div>
                 </dl>
                 ${failure}
+                ${restartNote}
             </article>`;
     }
 

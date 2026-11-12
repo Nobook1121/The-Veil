@@ -28,6 +28,29 @@ PLUGIN_API_VERSION = 1
 PLUGIN_ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
 VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$")
 
+# 与核心 Agent 工具命名空间同名的插件 id 会被拒绝：工具名的第一段来自插件 id，
+# 允许同名就等于允许插件顶掉核心工具（如 props.create）。新增核心工具命名空间时
+# 需要同步这里；激活阶段还会再与真实注册表比对一次作为兜底。
+RESERVED_PLUGIN_IDS = frozenset(
+    {
+        "character",
+        "chase",
+        "check",
+        "coc7",
+        "combat",
+        "dice",
+        "knowledge",
+        "magic",
+        "music",
+        "narrative",
+        "props",
+        "room",
+        "san",
+        "sanity",
+        "trigger",
+    }
+)
+
 # 能力名 → 中文说明，供 /api/plugins 与文档共用。
 CAPABILITY_LABELS: dict[str, str] = {
     "prop_templates": "道具模板",
@@ -167,6 +190,9 @@ class PluginRecord:
     # 已成功激活的能力名（只有 loaded 才有意义）。
     loaded_capabilities: tuple[str, ...] = ()
     module: Any = None
+    # 代码插件被禁用后，其已注册的 Flask 蓝图仍然存活到进程重启；把这件事
+    # 记录在条目上，刷新设置页后仍能看到「需重启」。
+    pending_restart: bool = False
 
     @property
     def loaded(self) -> bool:
@@ -181,6 +207,7 @@ class PluginRecord:
             "reason_code": self.reason_code,
             "dir": str(self.plugin_dir),
             "capabilities": list(self.loaded_capabilities),
+            "pending_restart": self.pending_restart,
             "manifest": self.manifest.to_dict() if self.manifest else None,
         }
 
@@ -218,6 +245,7 @@ __all__ = [
     "REASON_RESOURCE_LIMIT",
     "REASON_RESTART",
     "REASON_UNSAFE_PATH",
+    "RESERVED_PLUGIN_IDS",
     "ResourceLimitError",
     "STATE_AVAILABLE",
     "STATE_DISABLED",

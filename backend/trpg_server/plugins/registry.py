@@ -51,6 +51,7 @@ from .contracts import (
     REASON_MANIFEST_INVALID,
     REASON_MISSING,
     REASON_NOT_ENABLED,
+    REASON_RESTART,
     REASON_UNSAFE_PATH,
     STATE_DISABLED,
     STATE_FAILED,
@@ -89,7 +90,13 @@ class PluginStateStore:
         self.path = Path(path)
 
     def load(self) -> dict[str, Any]:
-        data = read_json(self.path, default=None)
+        try:
+            data = read_json(self.path, default=None)
+        except (ValueError, OSError):
+            # 损坏的 enabled.json 不能阻断启动，也不能把全部插件拖下水：
+            # 记录告警后按空启用列表处理。
+            logger.warning("plugin_state_corrupt path=%s, fallback to empty", self.path, exc_info=True)
+            data = None
         if not isinstance(data, Mapping):
             return {"version": STATE_FILE_VERSION, "enabled": [], "updated_at": ""}
         enabled = data.get("enabled")
@@ -152,6 +159,8 @@ class PluginRegistry:
         self._app: Any = None
         self._lock = threading.RLock()
         self._loaded_at = ""
+        # 代码插件禁用后其蓝图仍存活到进程重启；记录在条目的 pending_restart 上。
+        self._pending_restart: set[str] = set()
 
     # -- 只读视图 ---------------------------------------------------------
     @property
@@ -189,6 +198,7 @@ class PluginRegistry:
             if app is not None:
                 self._app = app
             enabled_ids = [] if self._disabled_all else self._store.enabled_ids()
+            self._prune_modules(enabled_ids)
             self._records = {}
             self._order = []
             self._blueprints = []
@@ -203,6 +213,12 @@ class PluginRegistry:
                 self._activate(self._records[plugin_id])
             # 依赖了失败插件的插件一并标记失败（在 _resolve_order 之后才失败的情况）
             self._mark_failed_dependents()
+            for plugin_id in self._pending_restart:
+                record = self._records.get(plugin_id)
+                if record is not None and not record.loaded:
+                    record.pending_restart = True
+                    record.reason_code = REASON_RESTART
+                    record.reason = "已禁用，但已注册的 HTTP 路由仍在当前进程中，需重启服务才能完全回滚"
 
             if self._records:
                 props_registry.rescan()
@@ -259,6 +275,7 @@ class PluginRegistry:
         if key not in ids:
             ids.append(key)
             self._store.set_enabled(ids)
+        self._pending_restart.discard(key)
         self.load()
         if self._app is not None:
             # 运行期启用的插件可能带蓝图；核心蓝图已注册，插件只能补自己的命名空间。
@@ -277,8 +294,13 @@ class PluginRegistry:
         ids = [item for item in self._store.enabled_ids() if item != key]
         self._store.set_enabled(ids)
         has_code = bool(self._records[key].manifest and self._records[key].manifest.has_code)
+        if has_code:
+            # 代码插件的蓝图无法在运行期撤销，只能等重启；记在条目上供设置页展示。
+            self._pending_restart.add(key)
         self.load()
         record = self._records.get(key)
+        if record is not None and has_code:
+            record.pending_restart = True
         return {
             "plugin": record.to_dict() if record else None,
             "restart_required": has_code,
@@ -307,10 +329,23 @@ class PluginRegistry:
             removed = remove_tree(directory)
         ids = [item for item in self._store.enabled_ids() if item != key]
         self._store.set_enabled(ids)
+        self._pending_restart.discard(key)
         self.load()
         return {"id": key, "removed": removed, "enabled_ids": ids}
 
     # -- 内部阶段 ---------------------------------------------------------
+    def _prune_modules(self, enabled_ids: list[str]) -> None:
+        """丢弃不再启用的插件模块，避免目录已删但模块/线程还挂在进程里。
+
+        启用列表里的插件保留模块缓存（同签名可复用）；被禁用/卸载的插件
+        从 ``_modules`` 与 ``sys.modules`` 一起移除，下次启用会重新导入。
+        """
+        keep = {str(item) for item in enabled_ids}
+        for cache_key in [key for key in self._modules if key[0] not in keep]:
+            cached = self._modules.pop(cache_key, None)
+            if cached is not None:
+                sys.modules.pop(str(getattr(cached[1], "__name__", "")), None)
+
     def _discover(self, enabled_ids: list[str]) -> None:
         if not self.root.is_dir():
             return
@@ -548,12 +583,19 @@ class PluginRegistry:
         if not isinstance(tools, (list, tuple)):
             raise ManifestError("Agent 工具插件必须提供 create_tools() 或 TOOLS 列表")
         allowed = set(declared)
+        # 清单层已禁止与核心命名空间同名的插件 id；这里再与真实注册表比对，
+        # 防止核心新增工具而保留名单没同步时被插件顶掉。
+        from trpg_server.agents.tools import core_agent_tool_names
+
+        core_names = core_agent_tool_names()
         for tool in tools:
             name = str(getattr(tool, "name", "") or "")
             if name not in allowed:
                 raise ManifestError(f"未在清单中声明的 Agent 工具：{name or '<unnamed>'}")
             if not name.startswith(f"{record.id}."):
                 raise ManifestError(f"Agent 工具名必须以插件 id 为命名空间：{name}")
+            if name in core_names:
+                raise ManifestError(f"Agent 工具与核心工具重名，拒绝覆盖：{name}")
         runtime.register_agent_tools(record.id, list(tools))
 
     def _activate_ruleset(self, record: PluginRecord, module: ModuleType) -> None:

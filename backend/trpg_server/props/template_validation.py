@@ -48,6 +48,8 @@ _DISALLOWED_CSS_PROPS = frozenset(
         "border-image",
         "box-shadow",
         "transform",
+        "writing-mode",
+        "direction",
         "top",
         "right",
         "bottom",

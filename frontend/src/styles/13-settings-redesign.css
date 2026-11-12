@@ -794,6 +794,11 @@
     color: var(--color-danger);
 }
 
+.plugin-state-badge[data-state="pending_restart"] {
+    border-color: color-mix(in srgb, var(--color-warning, #d4a017) 45%, var(--border-subtle));
+    color: var(--color-warning, #d4a017);
+}
+
 .plugin-switch {
     display: inline-flex;
     align-items: center;
