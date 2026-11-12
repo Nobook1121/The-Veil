@@ -35,6 +35,7 @@ from trpg_server.agents.tools.character_stats import (
 )
 from trpg_server.agents.tools.interlude import INTERLUDE_TOOLS, INTERLUDE_TOOL_NAMES
 from trpg_server.agents.tools.time import GAME_CLOCK_TOOL_NAMES, GAME_CLOCK_TOOLS
+from trpg_server.agents.tools.props import PROPS_TOOL_NAMES, PROPS_TOOLS
 
 
 def default_tool_registry() -> ToolRegistry:
@@ -72,6 +73,7 @@ def default_tool_registry() -> ToolRegistry:
             *SANITY_TOOLS,
             *INTERLUDE_TOOLS,
             *GAME_CLOCK_TOOLS,
+            *PROPS_TOOLS,
         ]
     )
 
@@ -95,6 +97,8 @@ __all__ = [
     "GAME_CLOCK_TOOL_NAMES",
     "NARRATIVE_TOOLS",
     "NARRATIVE_TOOL_NAMES",
+    "PROPS_TOOLS",
+    "PROPS_TOOL_NAMES",
     "TRIGGER_RUNTIME_TOOL_NAMES",
     "TRIGGER_RUNTIME_TOOLS",
     "default_tool_registry",

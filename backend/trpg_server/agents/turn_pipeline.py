@@ -11,6 +11,7 @@ import secrets
 import time
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import requests
 from flask import Blueprint, current_app, request, session
@@ -809,6 +810,13 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
             if rollback_facts:
                 system_prompt += "\n\n" + rollback_facts
         excluded_tool_names: set[str] = set()
+        from trpg_server.props import props_settings as _props_settings
+
+        props_config_values = _props_settings(_get_config_dir())
+        if not props_config_values.get("enabled", True):
+            from trpg_server.agents.tools.props import PROPS_TOOL_NAMES as _PROPS_TOOL_NAMES
+
+            excluded_tool_names |= set(_PROPS_TOOL_NAMES)
         if freeform_room:
             excluded_tool_names |= set(FREEFORM_EXCLUDED_TOOLS)
         if direct_import:
@@ -1035,6 +1043,29 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
             projected_state["house_rules"] = {
                 "ai_next_step_hints": "用 room.suggest_actions 返回；不要在正文列出选项"
             }
+        # 道具工坊：只在启用且有房间时注入；内容只含已揭示道具（AI 侧 4 方块脱敏），
+        # 未揭示道具完全不进入上下文，避免模型把隐藏线索说漏。
+        props_directive = ""
+        if room_id and agent_profile.id == "kp" and props_config_values.get("enabled", True):
+            from trpg_server.props import prompt as props_prompt
+            from trpg_server.props import registry as props_registry
+            from trpg_server.props import store as props_store
+
+            specs: list[dict[str, Any]] = []
+            room_dir_for_props = getattr(agent_context, "room_dir", None)
+            if room_dir_for_props is not None:
+                for entry in props_store.list_index(room_dir_for_props):
+                    mode = str((entry.get("visibility") or {}).get("mode") or "hidden")
+                    if mode == "hidden":
+                        continue
+                    spec = props_store.read_prop(room_dir_for_props, str(entry.get("id") or ""))
+                    if spec is not None:
+                        specs.append(spec)
+            props_directive = props_prompt.build_props_directive(
+                props_config_values,
+                props_registry.list_templates(),
+                specs,
+            )
         prompt_layers = build_prompt_layers(
             global_rules=system_prompt,
             scenario=(room_snapshot or {}).get("scenario") if isinstance(room_snapshot, dict) else None,
@@ -1050,6 +1081,7 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
             narrative_summary=narrative_summary,
             opening_pack=opening_prompt,
             system_directive=system_directive,
+            props_directive=props_directive,
             memory_context=memory_context,
             cache_variant=latex_settings.cache_variant,
         )

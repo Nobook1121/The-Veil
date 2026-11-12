@@ -13,7 +13,13 @@ import pymupdf
 import pytest
 
 from trpg_server.app_factory import create_app
-from trpg_server.props import policy, registry, store
+from trpg_server.agents.context import AgentRequestContext
+from trpg_server.agents.tools.props import (
+    execute_create_prop,
+    execute_reveal_prop,
+    execute_update_prop,
+)
+from trpg_server.props import policy, prompt as props_prompt, registry, store
 from trpg_server.props.render import RenderError, render_cached, render_prop
 from trpg_server.room_log.fonts import FontMissing, resolve_font
 
@@ -521,3 +527,182 @@ def test_redact_and_patch(tmp_path):
     data = patch.get_json()["data"]
     assert data["title"] == "改名后的信"
     assert data["wear"]["stain"] == 0.9
+
+
+# ---------------------------------------------------------------- AI 工具（P4）
+
+
+def _tool_context(tmp_path, *, max_props: int = 200, max_field_chars: int = 4000):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "general.toml").write_text(
+        "[props]\nenabled = true\n"
+        f"max_props_per_room = {max_props}\nmax_field_chars = {max_field_chars}\n",
+        encoding="utf-8",
+    )
+    room_dir = tmp_path / "rooms" / "r-props"
+    room_dir.mkdir(parents=True)
+    info = {
+        "id": "r-props",
+        "name": "道具测试房",
+        "creator_id": 1,
+        "members": [
+            {"user_id": 1, "username": "owner", "is_active": True, "room_role": "owner"},
+            {"user_id": 2, "username": "player2", "is_active": True, "room_role": "member"},
+        ],
+    }
+    (room_dir / "info.json").write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+    (room_dir / "messages.json").write_text("[]", encoding="utf-8")
+    return AgentRequestContext(
+        room_id="r-props",
+        room_dir=room_dir,
+        config_dir=config_dir,
+        user_id=1,
+    )
+
+
+def _tool_create_args(**overrides):
+    args = {
+        "template_id": "letter-1920",
+        "title": "一封密信",
+        "fields": {
+            "salutation": "致 何清越",
+            "body": "钥匙藏在书房。",
+            "signature": "冯亦阳",
+        },
+    }
+    args.update(overrides)
+    return args
+
+
+def test_tool_create_defaults_hidden(tmp_path):
+    context = _tool_context(tmp_path)
+    result = execute_create_prop(_tool_create_args(), context)
+    assert result["ok"] is True
+    assert result["visibility"] == "hidden"
+    assert result["prop_id"].startswith("prop-")
+    assert "仅 KP 可见" in result["summary"]
+    assert "props.reveal" in result["summary"]
+    spec = store.read_prop(context.room_dir, result["prop_id"])
+    assert spec["visibility"] == {"mode": "hidden", "revealed_to": []}
+    assert spec["source"]["kind"] == "ai"
+
+
+def test_tool_create_unknown_template_lists_available(tmp_path):
+    context = _tool_context(tmp_path)
+    result = execute_create_prop(_tool_create_args(template_id="nope"), context)
+    assert result["ok"] is False
+    assert "letter-1920" in result["error"] and "newspaper" in result["error"]
+
+
+def test_tool_create_truncates_and_reports(tmp_path):
+    # max_field_chars 的配置下限是 100（config/schema.py），用 150 字触发截断。
+    context = _tool_context(tmp_path, max_field_chars=100)
+    result = execute_create_prop(_tool_create_args(fields={"body": "字" * 150}), context)
+    assert result["ok"] is True
+    assert result["truncated"]["body"]["limit"] == 100
+    assert "截断" in result["summary"] and "body(150→100)" in result["summary"]
+    spec = store.read_prop(context.room_dir, result["prop_id"])
+    assert len(spec["fields"]["body"]) == 100
+
+
+def test_tool_create_with_reveal_to_all(tmp_path):
+    context = _tool_context(tmp_path)
+    result = execute_create_prop(_tool_create_args(reveal_to="all"), context)
+    assert result["ok"] is True
+    assert result["visibility"] == "revealed"
+    assert "已投递给全体成员" in result["summary"]
+    messages = json.loads((context.room_dir / "messages.json").read_text(encoding="utf-8"))
+    assert messages[-1]["type"] == "prop"
+    assert messages[-1]["metadata"]["prop_id"] == result["prop_id"]
+
+
+def test_tool_single_create_per_turn(tmp_path):
+    context = _tool_context(tmp_path)
+    assert execute_create_prop(_tool_create_args(), context)["ok"] is True
+    second = execute_create_prop(_tool_create_args(title="第二封"), context)
+    assert second["ok"] is False
+    assert "本回合" in second["error"]
+
+
+def test_tool_room_limit_refuses(tmp_path):
+    context = _tool_context(tmp_path, max_props=1)
+    assert execute_create_prop(_tool_create_args(), context)["ok"] is True
+    # 单回合配额优先于房间上限，重置计数模拟下一回合，才能测到上限文案。
+    context.tool_state["props_created"] = 0
+    second = execute_create_prop(_tool_create_args(title="第二封"), context)
+    assert second["ok"] is False
+    assert "上限" in second["error"]
+
+
+def test_tool_missing_prop_text(tmp_path):
+    context = _tool_context(tmp_path)
+    missing = "prop-1787137557179-zzzzzz"
+    assert execute_reveal_prop({"prop_id": missing, "to": "all"}, context)["error"] == "该道具不存在或不可见。"
+    assert execute_update_prop({"prop_id": missing, "fields": {"body": "x"}}, context)["error"] == "该道具不存在或不可见。"
+    assert execute_reveal_prop({"prop_id": "../../etc", "to": "all"}, context)["error"] == "该道具不存在或不可见。"
+
+
+def test_tool_update_fields_wear_and_redaction(tmp_path):
+    context = _tool_context(tmp_path)
+    created = execute_create_prop(_tool_create_args(), context)
+    prop_id = created["prop_id"]
+    result = execute_update_prop(
+        {
+            "prop_id": prop_id,
+            "fields": {"signature": "冯亦阳 绝笔"},
+            "wear": {"stain": 2, "burn": 0.4},
+            "add_redaction": [{"field": "body", "start": 0, "end": 2, "mode": "burn"}],
+        },
+        context,
+    )
+    assert result["ok"] is True
+    assert result["redaction_count"] == 1
+    spec = store.read_prop(context.room_dir, prop_id)
+    assert spec["fields"]["signature"] == "冯亦阳 绝笔"
+    assert spec["wear"]["stain"] == 1.0 and spec["wear"]["burn"] == 0.4
+    assert spec["redaction"][0]["field"] == "body"
+
+
+def test_tool_reveal_partial_recipients(tmp_path):
+    context = _tool_context(tmp_path)
+    created = execute_create_prop(_tool_create_args(), context)
+    result = execute_reveal_prop(
+        {"prop_id": created["prop_id"], "to": [2, 99], "message": "他递来一封信。"},
+        context,
+    )
+    assert result["ok"] is True
+    spec = store.read_prop(context.room_dir, created["prop_id"])
+    assert spec["visibility"] == {"mode": "partial", "revealed_to": [2]}
+    messages = json.loads((context.room_dir / "messages.json").read_text(encoding="utf-8"))
+    assert messages[-1]["content"] == "他递来一封信。"
+    assert messages[-1]["metadata"]["revealed_to"] == [2]
+
+
+def test_prompt_directive_only_revealed_and_redacted(tmp_path):
+    context = _tool_context(tmp_path)
+    settings = {"enabled": True}
+    templates = registry.list_templates()
+    hidden = execute_create_prop(_tool_create_args(), context)
+    hidden_spec = store.read_prop(context.room_dir, hidden["prop_id"])
+
+    directive = props_prompt.build_props_directive(settings, templates, [hidden_spec])
+    assert "钥匙藏在书房" not in directive
+    assert hidden_spec["title"] not in directive
+    assert "letter-1920" in directive and "私人书信" in directive
+
+    execute_reveal_prop({"prop_id": hidden["prop_id"], "to": "all"}, context)
+    revealed_spec = store.read_prop(context.room_dir, hidden["prop_id"])
+    revealed_spec["redaction"] = [{"field": "body", "start": 0, "end": 2, "mode": "burn"}]
+    store.write_prop(context.room_dir, revealed_spec)
+
+    directive = props_prompt.build_props_directive(settings, templates, [revealed_spec])
+    expected = policy.apply_redaction(revealed_spec, mask=policy.AI_MASK)["fields"]["body"]
+    assert expected in directive
+    assert "钥匙" not in directive
+    assert "不得编造" in directive
+    assert "████" in directive
+
+
+def test_prompt_directive_disabled_is_empty(tmp_path):
+    assert props_prompt.build_props_directive({"enabled": False}, registry.list_templates(), []) == ""

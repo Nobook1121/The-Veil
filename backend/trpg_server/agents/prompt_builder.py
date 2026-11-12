@@ -93,6 +93,7 @@ def build_prompt_layers(
     narrative_summary: str | None = None,
     opening_pack: str | None = None,
     system_directive: str | None = None,
+    props_directive: str | None = None,
     memory_context: str | None = None,
     cache_variant: str = "",
 ) -> PromptLayers:
@@ -173,6 +174,11 @@ def build_prompt_layers(
     if room_snapshot_message:
         dynamic_messages.append({"role": "system", "content": str(room_snapshot_message)})
         dynamic_segments.append("room_state")
+    # 道具工坊：只在启用时由 turn_pipeline 生成；紧跟安全约束之前，
+    # 属于动态层，不破坏静态前缀缓存。
+    if props_directive:
+        dynamic_messages.append({"role": "system", "content": str(props_directive)})
+        dynamic_segments.append("props")
     # 安全/授权约束模块：同一槽位按模式热切换（普通防伪 / 直执行授权），
     # 位于易变内容之后，静态前缀与剧本卡不受影响；未启用时不产生任何注入。
     if system_directive:
