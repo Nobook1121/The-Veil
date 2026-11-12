@@ -8,6 +8,8 @@
 
 想把模板打包分发给其他站点时，推荐改成纯数据插件：加一个 `plugin.json` 即可，模板文件结构完全不变。
 
+> **重要：Story 不绘制 `background-image`。** 模板 `style.css` 或内联样式里的背景图不会出现在渲染结果中。纸纹/底纹请依赖渲染器的后置贴图，或在 `page.html` 里用 `assets/` 内的 `<img>` 叠加；不要把关键视觉寄托在 `background-image` 上。
+
 ## 目录位置
 
 ```
