@@ -206,6 +206,14 @@ class PluginRegistry:
 
             if self._records:
                 props_registry.rescan()
+            # 规则集注册表是懒构建的单例；插件启用/禁用后让它下次重建，
+            # 避免启用新规则集却仍读到旧缓存。
+            try:
+                from trpg_server.ruleset.registry import reset_builtin_registry
+
+                reset_builtin_registry()
+            except Exception:  # noqa: BLE001 - 重置失败不影响插件状态
+                logger.debug("ruleset_registry_reset_failed", exc_info=True)
             self._loaded_at = _now_text()
             logger.info(
                 "plugins_loaded total=%s loaded=%s disabled=%s failed=%s disabled_all=%s",
