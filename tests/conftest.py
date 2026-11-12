@@ -96,7 +96,9 @@ TEMP_ROOT = _select_temp_root()
 
 # 统一把 TEMP/TMP 与 pytest 的 basetemp 指到选定的临时根：既避免缓存落进
 # 仓库根，也避免系统临时目录不可写时 mkstemp / basetemp 直接失败。
-os.environ["TEMP"] = os.environ["TMP"] = str(TEMP_ROOT)
+# TMPDIR 也一并设置：标准库按 TMPDIR → TEMP → TMP 的顺序选候选目录，
+# 漏掉它会让子进程仍按旧值走。
+os.environ["TMPDIR"] = os.environ["TEMP"] = os.environ["TMP"] = str(TEMP_ROOT)
 tempfile.tempdir = str(TEMP_ROOT)
 
 # pytest 的默认 basetemp 取自 PYTEST_DEBUG_TEMPROOT / 系统临时目录，
@@ -110,3 +112,12 @@ if not _inductor_cache or _inside_repo(Path(_inductor_cache)):
 
 # 更新检查默认关闭，避免测试期间访问 GitHub 或写入 data/runtime/update。
 os.environ.setdefault("AI_TRPG_DISABLE_UPDATE_CHECK", "1")
+
+# 本地 embedding 模型指向一个不存在的路径：测试统一落到 HashedTokenEmbedding，
+# 不必为每次 create_app 加载真实 bge 模型（首次构建 13.1s → 0.6s）。
+# 该路径不创建，select_embedding_provider 判定本地后端不可用后会继续往下选。
+os.environ.setdefault("AI_TRPG_LOCAL_EMBEDDING_MODEL_PATH", str(TEMP_ROOT / "missing-embedding-model"))
+
+# 嵌入式向量库默认写仓库 data/runtime/vector-db/embedded，跑测试会真的往里写。
+# 没显式覆盖的用例统一落到测试临时目录，避免污染工作区、也避免库越来越大。
+os.environ.setdefault("AI_TRPG_EMBEDDED_VECTOR_DB_PATH", str(TEMP_ROOT / "vector-db" / "embedded"))

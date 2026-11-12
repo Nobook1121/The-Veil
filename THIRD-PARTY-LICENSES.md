@@ -129,6 +129,7 @@ Node 包可在 `node_modules/<包名>/LICENSE` 查看）。
 | Pygments | 2.21.0 | BSD-2-Clause |  |
 | pymupdf | 1.28.2 | AGPL-3.0 或 Artifex Commercial（双许可） | 是 |
 | pytest | 8.4.0 | MIT License | 是 |
+| pytest-timeout | 2.4.0 | MIT License | 是 |
 | python-engineio | 4.14.0 | MIT |  |
 | python-socketio | 5.11.2 | MIT License | 是 |
 | PyYAML | 6.0.3 | MIT License |  |
