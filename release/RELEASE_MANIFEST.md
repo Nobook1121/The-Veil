@@ -81,7 +81,7 @@ python3 -m venv .venv
 第一次启动通常需要几分钟，主要时间花在：
 
 - 下载并安装运行依赖；
-- **本地 Embedding 模型**：如果安装目录的 `data/runtime/models/embedding` 下放了向量模型（升级时保留 `data` 会带过来，或在首次向导里选择自动下载），脚本还要补齐 `sentence-transformers` 与 CPU 版 `torch`，并加载模型。这一项本身就有数百 MB，首次会明显变慢。
+- **本地 Embedding 模型**：如果安装目录的 `data/runtime/models/embedding` 下放了向量模型（升级时保留 `data` 会带过来，或在首次向导里选择自动下载），脚本还要补齐模型运行依赖并加载模型。这一项本身就有数百 MB，首次会明显变慢。
 
 没有本地模型时不会下载这部分依赖，平台会使用内置的轻量向量方案，启动会快很多；语义检索效果会弱一些，可在设置里再配置。
 
@@ -123,7 +123,7 @@ python3 -m venv .venv
 
 补充说明：
 
-- 首次启动会用 `config/templates/` 里的模板生成 `data/config/general.toml`；要改配置请改 `data/config/` 下的文件，不要改模板。
+- 首次启动会自动生成 `data/config/general.toml`；要改配置请改 `data/config/` 下的文件，不要改程序自带的配置模板。
 - 运行日志在 `data/runtime/logs/`。
 - 会话密钥通过环境变量 `AI_TRPG_SECRET_KEY` 提供，不要写进配置文件或分享出去。
 - 大多数设置也可以在网页「设置」里修改，保存后按提示生效。
@@ -184,7 +184,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\start-bootstrap.ps1
 
 **3. 第一次启动特别慢 / 像卡住了？**
 
-首次要下载依赖；如果带了本地 Embedding 模型，还要下载 CPU 版 `torch` 与 `sentence-transformers` 并加载模型，几百 MB 起步。窗口没有报错时请耐心等待。之后启动只需几秒。
+首次要下载依赖；如果带了本地 Embedding 模型，还要下载模型运行依赖并加载模型，几百 MB 起步。窗口没有报错时请耐心等待。之后启动只需几秒。
 
 **4. 升级后浏览器还是旧界面？**
 
@@ -226,7 +226,7 @@ icacls "D:\TheVeil" /setintegritylevel "(OI)(CI)Medium" /T
 
 ## 九、版本与更新记录
 
-- 本发布包版本为 **1.0.5**。版本号以程序内的 `APP_VERSION` 为唯一来源，`package.json` 与之保持一致。
+- 本发布包版本为 **1.0.5**。
 - 每个版本的改动记录在仓库的 `release/changelog/` 下；**最新一份 changelog 的版本号就是当前发布版本**，本版本对应 `release/changelog/v1.0.5.md`。
 - changelog 与开发文档不随发布包分发，可在 GitHub 仓库查看。
 - 网页「设置 → 关于」可以检查新版本并下载更新包；下载后仍需按上面的「升级」步骤手动替换程序目录，不会自动覆盖你的 `data`。
