@@ -46,6 +46,18 @@ _MAX_TARGET_LOCKS = 256
 _TARGET_LOCKS: dict[str, threading.Lock] = {}
 _TARGET_LOCKS_GUARD = threading.Lock()
 _PRUNE_INTERVAL_SECONDS = 3600.0
+
+# 渲染熔断：全部状态只在内存里，进程重启即清空。模板都是单页、正常耗时
+# 几十到几百毫秒，真正的风险是某个房间的渲染卡死后占满并发槽，让别的房间
+# 全部排队超时。因此按房间统计：慢渲染记日志，超硬阈值或连续失败就冷却。
+_SLOW_RENDER_MS = 5000
+_CIRCUIT_HARD_MS = 30000
+_CIRCUIT_FAILURE_LIMIT = 3
+_CIRCUIT_COOLDOWN_SECONDS = 30.0
+_CIRCUIT_WINDOW_SECONDS = 60.0
+_MAX_CIRCUIT_ROOMS = 512
+_CIRCUIT_LOCK = threading.Lock()
+_CIRCUIT_STATE: dict[str, dict[str, Any]] = {}
 _PRUNE_LOCK = threading.Lock()
 _LAST_PRUNE: dict[str, float] = {}
 _MAX_PRUNE_ROOMS = 512
@@ -215,6 +227,102 @@ def _font_signature(font_path: str | Path | None, data_dir: str | Path | None) -
         return str(font_path or "")
 
 
+def _circuit_key(room_dir: str | Path | None) -> str:
+    if room_dir is None:
+        return ""
+    try:
+        return str(Path(room_dir).resolve())
+    except OSError:
+        return str(room_dir)
+
+
+def _circuit_state(key: str, now: float) -> dict[str, Any]:
+    state = _CIRCUIT_STATE.get(key)
+    if state is None:
+        _prune_circuit_states(now)
+        state = {"failures": 0, "open_until": 0.0, "updated": now}
+        _CIRCUIT_STATE[key] = state
+    state["updated"] = now
+    return state
+
+
+def _prune_circuit_states(now: float) -> None:
+    if len(_CIRCUIT_STATE) < _MAX_CIRCUIT_ROOMS:
+        return
+    for key, state in list(_CIRCUIT_STATE.items()):
+        if state["open_until"] <= now and now - state["updated"] > _CIRCUIT_WINDOW_SECONDS:
+            _CIRCUIT_STATE.pop(key, None)
+
+
+def _open_circuit(state: dict[str, Any], now: float) -> None:
+    state["open_until"] = now + _CIRCUIT_COOLDOWN_SECONDS
+    state["failures"] = 0
+
+
+def render_circuit_open(room_dir: str | Path | None) -> bool:
+    """该房间是否处于熔断冷却期；冷却结束自动恢复。"""
+    key = _circuit_key(room_dir)
+    now = time.monotonic()
+    with _CIRCUIT_LOCK:
+        state = _CIRCUIT_STATE.get(key)
+        if state is None:
+            return False
+        if state["open_until"] > now:
+            return True
+        if state["open_until"]:
+            # 冷却结束：清零计数，重新允许尝试。
+            state.update(open_until=0.0, failures=0)
+        return False
+
+
+def _record_render_failure(room_dir: str | Path | None) -> None:
+    key = _circuit_key(room_dir)
+    now = time.monotonic()
+    with _CIRCUIT_LOCK:
+        state = _circuit_state(key, now)
+        state["failures"] += 1
+        if state["failures"] >= _CIRCUIT_FAILURE_LIMIT:
+            logger.warning(
+                "props render circuit open room=%s reason=consecutive_failures failures=%s",
+                key,
+                state["failures"],
+            )
+            _open_circuit(state, now)
+
+
+def _record_render_result(
+    room_dir: str | Path | None,
+    template_id: str,
+    pages: int,
+    elapsed_ms: int,
+) -> None:
+    key = _circuit_key(room_dir)
+    slow = elapsed_ms >= _SLOW_RENDER_MS
+    log = logger.warning if slow else logger.info
+    log(
+        "props render %s room=%s template=%s pages=%s ms=%s",
+        "slow" if slow else "done",
+        key,
+        template_id,
+        pages,
+        elapsed_ms,
+    )
+    now = time.monotonic()
+    with _CIRCUIT_LOCK:
+        state = _circuit_state(key, now)
+        if elapsed_ms >= _CIRCUIT_HARD_MS:
+            logger.warning(
+                "props render circuit open room=%s reason=hard_time template=%s pages=%s ms=%s",
+                key,
+                template_id,
+                pages,
+                elapsed_ms,
+            )
+            _open_circuit(state, now)
+        else:
+            state["failures"] = 0
+
+
 def _target_lock(target: Path) -> threading.Lock:
     key = str(target)
     with _TARGET_LOCKS_GUARD:
@@ -360,13 +468,24 @@ def render_cached(
             }
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
-            result = render_prop(
-                spec,
-                target,
-                font_path=font_path,
-                room_dir=room_dir,
-                data_dir=data_dir,
-                fmt=fmt,
+            started = time.monotonic()
+            try:
+                result = render_prop(
+                    spec,
+                    target,
+                    font_path=font_path,
+                    room_dir=room_dir,
+                    data_dir=data_dir,
+                    fmt=fmt,
+                )
+            except Exception:
+                _record_render_failure(room_dir)
+                raise
+            _record_render_result(
+                room_dir,
+                str(result.get("template_id") or template_id),
+                int(result.get("pages") or 0),
+                int((time.monotonic() - started) * 1000),
             )
             result["cached"] = False
     _maybe_prune(room_dir, settings)

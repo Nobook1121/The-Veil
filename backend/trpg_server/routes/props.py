@@ -25,7 +25,7 @@ from flask import Blueprint, current_app, request, send_file, session
 
 from trpg_server import props as props_config
 from trpg_server.props import draft, image, normalize, policy, registry, store
-from trpg_server.props.render import RenderError, render_cached
+from trpg_server.props.render import RenderError, render_cached, render_circuit_open
 from trpg_server.responses import error_response, success_response
 from trpg_server.room_log.fonts import FontMissing, resolve_font
 from trpg_server.routes.rooms import (
@@ -488,6 +488,18 @@ def render_prop_file(room_id, prop_id):
         return _not_found()
 
     trace_id = uuid.uuid4().hex[:12]
+    # 房间级熔断：该房间刚出现超长渲染或连续失败，冷却期内不再排队，
+    # 避免一个卡死的房间把两个并发槽占满后拖垮所有房间。
+    if render_circuit_open(room_dir):
+        logger.warning(
+            "props render circuit open room=%s id=%s trace=%s", room_id, prop_id, trace_id
+        )
+        return error_response(
+            "Prop render is cooling down",
+            503,
+            "prop.render_circuit_open",
+            trace_id=trace_id,
+        )
     try:
         _family, font_path = resolve_font()
     except FontMissing:

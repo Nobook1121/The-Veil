@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import tempfile
 import threading
@@ -1469,3 +1470,75 @@ def test_prompt_excludes_partial_and_wraps_data():
     assert "只给一个人看的信" not in directive
     assert props_prompt.DATA_NOTICE in directive
     assert props_prompt.DATA_CLOSE in directive
+
+
+# ---------------------------------------------------------------- 渲染熔断
+
+
+def test_render_returns_circuit_open_code(tmp_path, monkeypatch):
+    """熔断冷却期内渲染直接 503，不进排队。"""
+    room_id = _api_room(tmp_path)
+    owner = _api_app(tmp_path).test_client()
+    _login(owner)
+    created = _create(owner, room_id)
+    owner.post(
+        f"/api/rooms/{room_id}/props/{created['id']}/reveal",
+        json={"all": True},
+        headers=_headers(),
+    )
+    monkeypatch.setattr(
+        "trpg_server.routes.props.render_circuit_open", lambda *_args, **_kwargs: True
+    )
+    response = owner.get(f"/api/rooms/{room_id}/props/{created['id']}/render")
+    assert response.status_code == 503
+    assert response.get_json()["error"] == "prop.render_circuit_open"
+
+
+def test_render_elapsed_is_logged_and_slow_render_warns(tmp_path, caplog, monkeypatch):
+    monkeypatch.setattr(props_render, "_CIRCUIT_STATE", {})
+    room = tmp_path / "room-log"
+    with caplog.at_level(logging.INFO, logger="trpg_server.props.render"):
+        props_render._record_render_result(room, "letter-1920", 1, 120)
+    done = [record for record in caplog.records if record.levelno == logging.INFO]
+    assert any(
+        "props render done" in record.getMessage()
+        and "template=letter-1920" in record.getMessage()
+        and "pages=1" in record.getMessage()
+        and "ms=120" in record.getMessage()
+        for record in done
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="trpg_server.props.render"):
+        props_render._record_render_result(room, "letter-1920", 1, 6000)
+    assert any(
+        record.levelno == logging.WARNING and "ms=6000" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_consecutive_failures_open_circuit_and_cooldown_recovers(tmp_path, monkeypatch):
+    monkeypatch.setattr(props_render, "_CIRCUIT_STATE", {})
+    monkeypatch.setattr(props_render, "_CIRCUIT_COOLDOWN_SECONDS", 0.05)
+    room = tmp_path / "room-circuit"
+    assert props_render.render_circuit_open(room) is False
+
+    props_render._record_render_failure(room)
+    props_render._record_render_failure(room)
+    assert props_render.render_circuit_open(room) is False
+
+    props_render._record_render_failure(room)
+    assert props_render.render_circuit_open(room) is True
+
+    time.sleep(0.06)
+    assert props_render.render_circuit_open(room) is False
+    # 恢复后计数清零：单次失败不足以再次熔断。
+    props_render._record_render_failure(room)
+    assert props_render.render_circuit_open(room) is False
+
+
+def test_hard_render_time_opens_circuit(tmp_path, monkeypatch):
+    monkeypatch.setattr(props_render, "_CIRCUIT_STATE", {})
+    room = tmp_path / "room-hard"
+    props_render._record_render_result(room, "letter-1920", 1, 31000)
+    assert props_render.render_circuit_open(room) is True
