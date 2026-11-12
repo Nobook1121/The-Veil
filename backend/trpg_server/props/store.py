@@ -21,8 +21,9 @@ import re
 import string
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 from trpg_server.json_store import remove_tree, write_json_atomic
 from trpg_server.security import safe_join
@@ -35,11 +36,24 @@ RENDERS_DIRNAME = "renders"
 _ALPHABET = string.ascii_lowercase + string.digits
 _ID_RANDOM = random.SystemRandom()
 
-_LOCKS: dict[str, threading.RLock] = {}
+_LOCKS: dict[str, "_RoomLockEntry"] = {}
 _LOCKS_GUARD = threading.Lock()
-# 每房间一把锁且不回收会随房间数无上限增长；限制条目数，超限时淘汰最早
-# 创建的锁。淘汰只可能让长期无操作的房间短暂拿到两把锁，风险远小于泄漏。
+# 每房间一把锁且不回收会随房间数无上限增长；限制条目数。淘汰只挑「当前没有
+# 任何线程持有」的条目，并要求非阻塞 acquire 成功才移除，避免把正在使用的锁
+# 换掉后同房间出现两把锁。若一个可淘汰的都没有，就短暂让出 CPU 等持有者退出，
+# 而不是强行新增。
 _MAX_ROOM_LOCKS = 1024
+_LOCK_RETRY_SECONDS = 0.005
+
+
+class _RoomLockEntry:
+    """引用计数 + 重入锁；``users`` 只在 ``_LOCKS_GUARD`` 内修改。"""
+
+    __slots__ = ("lock", "users")
+
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
+        self.users = 0
 
 
 class PropStoreError(RuntimeError):
@@ -104,16 +118,47 @@ def new_prop_id(now: float | None = None) -> str:
     return f"prop-{stamp}-{suffix}"
 
 
-def _room_lock(room_dir: str | Path) -> threading.RLock:
+def _evict_idle_room_lock() -> bool:
+    """在 ``_LOCKS_GUARD`` 内调用：只移除没人持有的条目。
+
+    调用方持有 guard，因此不会有新线程在这期间拿到旧条目；``users == 0``
+    已经说明没有线程处在临界区，非阻塞 acquire 是最后一道确认。
+    """
+    for key, entry in list(_LOCKS.items()):
+        if entry.users > 0:
+            continue
+        if not entry.lock.acquire(blocking=False):
+            continue
+        entry.lock.release()
+        _LOCKS.pop(key, None)
+        return True
+    return False
+
+
+@contextmanager
+def _room_lock(room_dir: str | Path) -> Iterator[threading.RLock]:
+    """按房间返回重入锁；配额满时只淘汰空闲条目，没有空闲就等待。"""
     key = str(Path(room_dir).resolve())
-    with _LOCKS_GUARD:
-        lock = _LOCKS.get(key)
-        if lock is None:
-            if len(_LOCKS) >= _MAX_ROOM_LOCKS:
-                _LOCKS.pop(next(iter(_LOCKS)), None)
-            lock = threading.RLock()
-            _LOCKS[key] = lock
-        return lock
+    while True:
+        with _LOCKS_GUARD:
+            entry = _LOCKS.get(key)
+            if entry is None:
+                if len(_LOCKS) >= _MAX_ROOM_LOCKS and not _evict_idle_room_lock():
+                    entry = None
+                else:
+                    entry = _RoomLockEntry()
+                    _LOCKS[key] = entry
+            if entry is not None:
+                entry.users += 1
+                break
+        # 全部条目都在使用中：让出 CPU，等持有者退出后重试，不强行加锁。
+        time.sleep(_LOCK_RETRY_SECONDS)
+    try:
+        with entry.lock:
+            yield entry.lock
+    finally:
+        with _LOCKS_GUARD:
+            entry.users -= 1
 
 
 # ---------------------------------------------------------------- 读写
