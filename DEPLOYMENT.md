@@ -6,8 +6,8 @@
 
 - Python 3.11 或更高版本（推荐 3.12，64 位）
 - 无需 Node.js：发布包内置已构建的 `dist/public`
-- 磁盘空间：至少 1 GB 可用（依赖约 300 MB，另需数据与日志空间）
-- 操作系统：Windows 10/11、Linux、macOS
+- 磁盘空间：基础运行至少 1 GB 可用（依赖约 300 MB，另需数据与日志空间）；如需本地 Embedding 模型，再额外预留 1 GB 以上
+- 操作系统：Windows 10/11；macOS / Linux 可运行，但当前主要在 Windows 上验证
 
 ## 2. Windows 一键启动
 

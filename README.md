@@ -32,7 +32,7 @@
 1. **下载**：[点这里下载最新版本](https://github.com/Nobook1121/The-Veil/releases/latest)，解压到任意文件夹。
 2. **启动**：解压压缩包，运行 **`start.cmd`**。
    - 电脑里没装 Python？**脚本会自动帮你下载安装**，全程不用敲任何命令。
-   - 第一次启动会自动准备运行环境，请耐心等一两分钟。
+   - 第一次启动会自动准备运行环境，通常需要几分钟；如果带了本地 Embedding 模型，还需要额外下载并加载模型，时间会更久。之后启动通常只需几秒。
 3. **开跑！**：浏览器打开 <http://127.0.0.1:8086>，跟着向导走完，就可以开团。
 
 > 想让朋友也来玩？把启动窗口里列出的「局域网地址」发给他们就行。异地联机的办法见 [部署与访问](https://github.com/Nobook1121/The-Veil/wiki/%E9%83%A8%E7%BD%B2%E4%B8%8E%E8%AE%BF%E9%97%AE)。
@@ -91,7 +91,8 @@
 ## 系统要求
 
 - **Windows 10 / 11**：什么都不用装，双击 `start.cmd` 即可（缺 Python 时脚本会自动安装）。
-- **macOS / Linux**：装好 [Python 3.11+](https://www.python.org/downloads/) 后运行 `python server.py`。
+- **macOS / Linux**：装好 [Python 3.11+](https://www.python.org/downloads/) 后运行 `python server.py`（可运行，但当前主要在 Windows 上验证）。
+- **磁盘**：基础运行预留约 1 GB；如需本地 Embedding 模型，再额外预留 1 GB 以上。
 - 只想在**自己电脑上玩**时，不需要域名、不需要证书、不需要云服务器。
 
 发布包已内置构建好的前端页面，**不需要安装 Node.js**。只有从源码自行构建前端时才需要 Node.js 18+。
