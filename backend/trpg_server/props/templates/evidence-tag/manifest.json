@@ -1,0 +1,20 @@
+{
+  "id": "evidence-tag",
+  "name": "证物袋标签",
+  "order": 100,
+  "group": "archive",
+  "group_name": "档案凭证",
+  "category": "card",
+  "description": "证物袋标签：编号、发现地点、描述与经办人",
+  "fields": [
+    {"key": "case_no", "label": "证物编号", "type": "text", "max": 40, "required": true},
+    {"key": "location", "label": "发现地点", "type": "text", "max": 100},
+    {"key": "officer", "label": "经办人", "type": "text", "max": 40},
+    {"key": "date", "label": "日期", "type": "text", "max": 40},
+    {"key": "description", "label": "描述", "type": "textarea", "max": 700}
+  ],
+  "styles": {"paper": ["ivory", "white", "aged"], "ink": ["#1a1a1a", "#2b2b2b"]},
+  "wear_supported": ["stain", "tear", "fold"],
+  "page": {"size": "a5", "margin": [18, 18, 18, 18]},
+  "ai_hints": {"era": "1920s", "tone": "police", "length": "short"}
+}

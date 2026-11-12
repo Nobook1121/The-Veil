@@ -1,0 +1,19 @@
+{
+  "id": "telegram",
+  "name": "电报",
+  "order": 50,
+  "group": "press",
+  "group_name": "报刊公告",
+  "category": "document",
+  "description": "打字机电报：收报人、大写缩写正文与时间",
+  "fields": [
+    {"key": "recipient", "label": "收报人", "type": "text", "max": 60, "required": true},
+    {"key": "body", "label": "正文（大写缩写）", "type": "textarea", "max": 600, "required": true},
+    {"key": "time", "label": "时间", "type": "text", "max": 60},
+    {"key": "sender", "label": "发报人", "type": "text", "max": 60}
+  ],
+  "styles": {"paper": ["ivory", "white", "aged"], "ink": ["#1a1a1a", "#2b2b2b"]},
+  "wear_supported": ["fold", "stain", "tear"],
+  "page": {"size": "a5", "margin": [16, 16, 16, 16]},
+  "ai_hints": {"era": "1920s", "tone": "telegraphic", "length": "short"}
+}

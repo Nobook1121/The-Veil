@@ -1,0 +1,63 @@
+body {
+  margin: 0;
+  padding: 0;
+  color: #1a1a1a;
+  font-size: 10.5pt;
+  line-height: 1.7;
+}
+
+.tag {
+  border: 2pt solid #3a2b20;
+  padding: 12pt 14pt 16pt 14pt;
+  margin: 6pt;
+}
+
+.tag-head {
+  width: 100%;
+  border-collapse: collapse;
+  border-bottom: 2pt solid #3a2b20;
+}
+
+.tag-title {
+  font-size: 20pt;
+  font-weight: bold;
+  letter-spacing: 6pt;
+}
+
+.tag-stamp {
+  text-align: right;
+}
+
+.tag-meta {
+  margin-top: 10pt;
+  color: #3a2b20;
+  font-size: 11pt;
+}
+
+.tag-row {
+  border-bottom: 0.5pt solid #c9bfa9;
+  padding: 4pt 0;
+  line-height: 1.6;
+}
+
+.desc-title {
+  margin-top: 12pt;
+  font-size: 9pt;
+  letter-spacing: 3pt;
+  color: #6a5c48;
+}
+
+.desc {
+  border: 0.8pt solid #b9a98c;
+  padding: 8pt 10pt;
+  margin-top: 4pt;
+}
+
+.desc p {
+  margin: 0 0 4pt 0;
+}
+
+.tag .wear {
+  margin: 0;
+  padding: 0;
+}

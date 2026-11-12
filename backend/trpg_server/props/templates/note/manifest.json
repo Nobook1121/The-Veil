@@ -1,0 +1,18 @@
+{
+  "id": "note",
+  "name": "便签名片",
+  "order": 30,
+  "group": "correspondence",
+  "group_name": "书信日记",
+  "category": "card",
+  "description": "名片比例的小便签：姓名、头衔与手写一句话",
+  "fields": [
+    {"key": "name", "label": "名字", "type": "text", "max": 40, "required": true},
+    {"key": "title", "label": "头衔", "type": "text", "max": 60},
+    {"key": "line", "label": "手写一句话", "type": "textarea", "max": 200}
+  ],
+  "styles": {"paper": ["ivory", "white", "aged"], "ink": ["#2b2b2b", "#1a1a1a"]},
+  "wear_supported": ["stain", "fold"],
+  "page": {"size": "a6", "margin": [10, 12, 10, 12]},
+  "ai_hints": {"era": "1920s", "tone": "personal", "length": "short"}
+}

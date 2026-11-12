@@ -1,0 +1,57 @@
+body {
+  margin: 0;
+  padding: 0;
+  color: #2b2b2b;
+  font-size: 11pt;
+  line-height: 1.8;
+}
+
+.diary {
+  padding: 10pt 12pt;
+}
+
+.diary-head {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.diary-title {
+  font-size: 13pt;
+  letter-spacing: 4pt;
+  color: #5b4a36;
+}
+
+.diary-date {
+  text-align: right;
+  font-size: 9.5pt;
+  color: #6a5c48;
+}
+
+.diary-rule {
+  border: none;
+  border-top: 1pt solid #b9a98c;
+  margin: 6pt 0 10pt 0;
+}
+
+.diary-body p {
+  margin: 0 0 6pt 0;
+  padding-bottom: 5pt;
+  border-bottom: 0.6pt solid #d5cab4;
+  line-height: 23pt;
+}
+
+.diary-struck {
+  margin-top: 10pt;
+  color: #7a6d58;
+  text-decoration: line-through;
+  font-size: 10.5pt;
+}
+
+.diary-struck p {
+  margin: 0 0 4pt 0;
+}
+
+.diary .wear {
+  margin: 0;
+  padding: 0;
+}

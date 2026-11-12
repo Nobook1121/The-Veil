@@ -1,0 +1,67 @@
+body {
+  margin: 0;
+  padding: 0;
+  color: #1a1a1a;
+  font-size: 10.5pt;
+  line-height: 1.7;
+}
+
+.tg {
+  padding: 8pt 10pt;
+}
+
+.tg-head {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tg-brand {
+  font-size: 14pt;
+  letter-spacing: 2pt;
+  line-height: 1.4;
+}
+
+.tg-meta {
+  text-align: right;
+  font-size: 9.5pt;
+  line-height: 1.5;
+  color: #3a3a3a;
+}
+
+.tg-rule {
+  border: none;
+  border-top: 2pt solid #1a1a1a;
+  margin: 6pt 0 10pt 0;
+}
+
+.tg-label {
+  font-size: 8.5pt;
+  letter-spacing: 2pt;
+  color: #6a5c48;
+  margin-bottom: 6pt;
+}
+
+.tg-body {
+  letter-spacing: 1.2pt;
+  font-size: 10.5pt;
+  line-height: 1.7;
+  border: 0.8pt solid #b9a98c;
+  padding: 8pt 10pt;
+}
+
+.tg-body p {
+  margin: 0 0 6pt 0;
+  text-transform: uppercase;
+}
+
+.tg-sign {
+  text-align: right;
+  margin-top: 12pt;
+  font-size: 10pt;
+  letter-spacing: 1pt;
+}
+
+.tg .wear {
+  margin: 0;
+  padding: 0;
+}

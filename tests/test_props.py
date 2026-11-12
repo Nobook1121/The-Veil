@@ -904,6 +904,127 @@ def test_photo_generation_budget_and_hash_reuse(tmp_path):
     assert not (store.read_prop(room_dir, spec["id"])["assets"] or {}).get("photo")
 
 
+_TEMPLATE_SAMPLES = {
+    "salutation": "致 何清越",
+    "body": "见字如面。码头的事我已听说，明日午后在书房等你。",
+    "signature": "冯亦阳",
+    "date": "民国十五年三月",
+    "postscript": "阅后即焚。",
+    "city": "上海",
+    "issue": "第一百二十期",
+    "headline": "码头疑案再起波澜",
+    "col1": "本埠新闻：十六铺码头昨夜发生一起失踪案。",
+    "col2": "巡捕房已介入调查，尚未公布更多细节。",
+    "ad": "本埠绸缎庄新到货品。",
+    "struck": "今天本不该去码头。",
+    "agency": "淞沪警察厅",
+    "ref": "C-1926-041",
+    "summary": "关于码头失踪案的初步调查摘要。",
+    "stamp": "淞沪警察厅",
+    "route": "上海 — 南京",
+    "seat": "二等 12 号",
+    "time": "1926 年 4 月 3 日 19:40",
+    "serial": "A-004182",
+    "fare": "大洋 2 元",
+    "note": "单程",
+    "shop": "老凤祥银楼",
+    "items": "银镯一只 12 元\n长命锁一件 6 元",
+    "total": "大洋 18 元",
+    "case_no": "E-1926-019",
+    "location": "十六铺码头三号仓库",
+    "officer": "巡捕房 陈国梁",
+    "description": "带血迹的男式手套。",
+    "guest": "沈先生",
+    "occasion": "谨定于四月三日假座一品香饭店举行订婚仪式，恭请光临。",
+    "place": "一品香饭店二楼",
+    "recipient": "上海 法租界 霞飞路 何公馆",
+    "sender": "冯",
+    "party_a": "冯亦阳",
+    "party_b": "何清越",
+    "terms": "第一条 甲方须于四月三日前交付货品。\n第二条 乙方须一次付清款项。",
+    "signature_a": "冯亦阳",
+    "signature_b": "何清越",
+    "seal": "冯记",
+    "name": "冯亦阳",
+    "title": "沪上进出口行 经理",
+    "line": "明晚八点，老地方见。",
+    "scene": "码头边的两个人",
+    "caption": "民国十五年",
+    "back_text": "勿念。",
+}
+
+_EXPECTED_TEMPLATE_ORDER = [
+    "letter-1920",
+    "diary-page",
+    "note",
+    "newspaper",
+    "telegram",
+    "invitation",
+    "dossier",
+    "ticket-stub",
+    "receipt",
+    "evidence-tag",
+    "photo",
+    "contract",
+]
+
+
+def _sample_spec(template_id: str, wear: dict[str, float] | None = None) -> dict:
+    manifest = registry.get_template(template_id)
+    fields = {
+        field["key"]: _TEMPLATE_SAMPLES.get(field["key"], f"[{field['key']}]")
+        for field in manifest.get("fields") or []
+    }
+    return {
+        "schema_version": 1,
+        "id": store.new_prop_id(),
+        "room_id": "",
+        "template_id": template_id,
+        "title": manifest.get("name") or template_id,
+        "fields": fields,
+        "style": {},
+        "wear": wear or {},
+        "redaction": [],
+        "assets": {},
+    }
+
+
+def test_all_twelve_templates_render_without_tofu_or_runaway_pages(tmp_path):
+    manifests = registry.list_templates()
+    assert [manifest["id"] for manifest in manifests] == _EXPECTED_TEMPLATE_ORDER
+    for manifest in manifests:
+        template_id = manifest["id"]
+        result = render_prop(_sample_spec(template_id), tmp_path / f"{template_id}.pdf")
+        assert 1 <= result["pages"] <= 3, f"{template_id} 页数异常：{result['pages']}"
+        text = "".join(page.get_text() for page in pymupdf.open(result["path"]))
+        assert text.strip(), f"{template_id} 没有可提取文本"
+        assert "\ufffd" not in text, f"{template_id} 出现方块字"
+
+
+def test_template_groups_are_stable_and_cover_all_templates():
+    groups = registry.list_template_groups()
+    assert [group["name"] for group in groups] == ["书信日记", "报刊公告", "档案凭证", "影像契约"]
+    covered = [template_id for group in groups for template_id in group["template_ids"]]
+    assert covered == _EXPECTED_TEMPLATE_ORDER
+
+
+def test_wear_strength_changes_output(tmp_path):
+    checked = 0
+    for template_id in ("letter-1920", "diary-page", "receipt"):
+        manifest = registry.get_template(template_id)
+        wear_keys = manifest.get("wear_supported") or ["stain"]
+        weak = {key: 0.05 for key in wear_keys}
+        strong = {key: 0.95 for key in wear_keys}
+        assert fill_page_html(_sample_spec(template_id, weak), template_id) != fill_page_html(
+            _sample_spec(template_id, strong), template_id
+        )
+        weak_bytes = render_prop(_sample_spec(template_id, weak), tmp_path / f"{template_id}-weak.pdf")["bytes"]
+        strong_bytes = render_prop(_sample_spec(template_id, strong), tmp_path / f"{template_id}-strong.pdf")["bytes"]
+        assert weak_bytes != strong_bytes
+        checked += 1
+    assert checked == 3
+
+
 def test_photo_generation_platform_failure_degrades(tmp_path):
     room_dir = tmp_path / "room"
     room_dir.mkdir()

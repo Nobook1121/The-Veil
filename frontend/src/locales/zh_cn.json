@@ -1507,6 +1507,7 @@
     "prop.draft.running": "AI 正在起草…",
     "prop.draft.done": "AI 已起草，可继续修改后保存。",
     "prop.draft.failed": "AI 起草失败，请手动填写。",
+    "prop.group.other": "其他",
     "prop.filter.all": "全部",
     "prop.filter.hidden": "未揭示",
     "prop.filter.revealed": "已揭示",

@@ -1,0 +1,69 @@
+body {
+  margin: 0;
+  padding: 0;
+  color: #1a1a1a;
+  font-size: 10.5pt;
+  line-height: 1.7;
+}
+
+.receipt {
+  margin: 0 34pt;
+  padding: 8pt 4pt;
+}
+
+.shop {
+  text-align: center;
+  font-size: 14pt;
+  letter-spacing: 3pt;
+}
+
+.date {
+  text-align: center;
+  font-size: 9pt;
+  color: #5a5147;
+  margin-top: 3pt;
+}
+
+.dash {
+  border: none;
+  border-top: 1pt dashed #8a7a62;
+  margin: 8pt 0;
+}
+
+.items {
+  line-height: 1.9;
+  border-bottom: 0.5pt dotted #c9bfa9;
+  padding-bottom: 4pt;
+}
+
+.total-row {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.total-label {
+  text-align: right;
+  font-size: 10pt;
+  color: #5a4a38;
+  padding-right: 8pt;
+}
+
+.total {
+  text-align: right;
+  font-size: 11.5pt;
+  font-weight: bold;
+}
+
+.note {
+  margin-top: 14pt;
+  color: #5b4a36;
+  font-size: 10pt;
+  font-style: italic;
+  border-top: 0.6pt solid #d5cab4;
+  padding-top: 6pt;
+}
+
+.receipt .wear {
+  margin: 0;
+  padding: 0;
+}

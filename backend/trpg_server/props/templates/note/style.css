@@ -1,0 +1,48 @@
+body {
+  margin: 0;
+  padding: 0;
+  color: #2b2b2b;
+  font-size: 11pt;
+  line-height: 1.7;
+}
+
+.note {
+  border: 1.2pt solid #8a7a62;
+  padding: 18pt 16pt 20pt 16pt;
+  margin: 12pt 10pt;
+  text-align: center;
+}
+
+.note-name {
+  font-size: 18pt;
+  letter-spacing: 3pt;
+  margin-top: 8pt;
+}
+
+.note-title {
+  font-size: 9.5pt;
+  color: #6a5c48;
+  letter-spacing: 1pt;
+  margin-top: 4pt;
+}
+
+.note-rule {
+  border: none;
+  border-top: 1pt solid #b9a98c;
+  margin: 14pt 12pt;
+}
+
+.note-line {
+  text-align: left;
+  font-size: 10.5pt;
+  min-height: 60pt;
+}
+
+.note-line p {
+  margin: 0 0 5pt 0;
+}
+
+.note .wear {
+  margin: 0;
+  padding: 0;
+}

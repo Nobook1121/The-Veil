@@ -73,6 +73,9 @@ def fill_page_html(spec: Mapping[str, Any], template: str | Mapping[str, Any]) -
         text = "" if value is None else str(value)
         values[str(key)] = escape_html(text)
         values[f"{key}_html"] = to_html(text)
+        # 收据条目、契约条款这类「一行一条」的字段需要保留原始换行；
+        # to_html 会把单个换行并成同一段，这里额外提供 <br/> 版本。
+        values[f"{key}_lines"] = "<br/>".join(escape_html(line) for line in text.splitlines())
 
     style = spec.get("style") if isinstance(spec.get("style"), Mapping) else {}
     paper = str(style.get("paper") or "ivory").strip().lower()

@@ -1507,6 +1507,7 @@
     "prop.draft.running": "AI is drafting…",
     "prop.draft.done": "Draft ready. Edit it before saving.",
     "prop.draft.failed": "AI drafting failed. Please fill it in manually.",
+    "prop.group.other": "Other",
     "prop.filter.all": "All",
     "prop.filter.hidden": "Hidden",
     "prop.filter.revealed": "Revealed",

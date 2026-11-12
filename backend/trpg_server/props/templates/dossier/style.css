@@ -1,0 +1,94 @@
+body {
+  margin: 0;
+  padding: 0;
+  color: #1a1a1a;
+  font-size: 10.5pt;
+  line-height: 1.75;
+}
+
+.dossier {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.bind-cell {
+  width: 46pt;
+  vertical-align: top;
+  padding: 6pt 0 0 0;
+}
+
+.dossier-main {
+  vertical-align: top;
+  padding: 0 4pt 0 8pt;
+}
+
+.dossier-head {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.agency {
+  font-size: 12pt;
+  letter-spacing: 1pt;
+  color: #3a2b20;
+}
+
+.ref {
+  text-align: right;
+  font-size: 9.5pt;
+  color: #5a4a38;
+}
+
+.dossier-rule {
+  border: none;
+  border-top: 1.5pt solid #7a5c3e;
+  margin: 6pt 0 10pt 0;
+}
+
+.summary-title {
+  font-size: 9pt;
+  letter-spacing: 3pt;
+  color: #7a6a55;
+  margin-bottom: 4pt;
+}
+
+.dossier-summary {
+  border: 0.8pt solid #b9a98c;
+  padding: 8pt 10pt;
+  margin-bottom: 12pt;
+  background-color: #f4efe3;
+}
+
+.dossier-summary p {
+  margin: 0 0 4pt 0;
+}
+
+.dossier-body p {
+  margin: 0 0 7pt 0;
+}
+
+.stamp-row {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 18pt;
+}
+
+.stamp-empty {
+  width: 55%;
+}
+
+.stamp-cell {
+  text-align: center;
+  vertical-align: bottom;
+}
+
+.stamp-text {
+  font-size: 9pt;
+  color: #7a2b2b;
+  letter-spacing: 1pt;
+}
+
+.dossier .wear {
+  margin: 0;
+  padding: 0;
+}

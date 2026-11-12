@@ -1,0 +1,31 @@
+<table class="dossier" width="100%">
+  <tr>
+    <td class="bind-cell" width="46">
+      <img src="binding-holes.png" width="36" alt=""/>
+    </td>
+    <td class="dossier-main">
+      <table class="dossier-head" width="100%">
+        <tr>
+          <td class="agency">{{agency}}</td>
+          <td class="ref">编号：{{ref}}</td>
+        </tr>
+      </table>
+      <hr class="dossier-rule" style="border-top-color: {{accent}};"/>
+      <div class="summary-title">摘 要</div>
+      <div class="dossier-summary">{{summary_html}}</div>
+      <div class="dossier-body" style="color: {{ink}};">{{body_html}}</div>
+      <table class="stamp-row" width="100%">
+        <tr>
+          <td class="stamp-empty"></td>
+          <td class="stamp-cell">
+            <img src="stamp.png" width="104" alt=""/>
+            <div class="stamp-text">{{stamp}}</div>
+          </td>
+        </tr>
+      </table>
+      {{wear_fold}}
+      {{wear_stain}}
+      {{wear_burn}}
+    </td>
+  </tr>
+</table>

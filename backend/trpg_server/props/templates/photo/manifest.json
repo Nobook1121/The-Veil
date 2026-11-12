@@ -1,6 +1,9 @@
 {
   "id": "photo",
   "name": "老照片",
+  "order": 110,
+  "group": "image",
+  "group_name": "影像契约",
   "category": "photo",
   "description": "年代照片：AI 生图或空白照片框，背面可题字",
   "fields": [

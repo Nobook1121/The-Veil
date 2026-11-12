@@ -1,0 +1,24 @@
+<div class="contract">
+  <div class="c-title">契 约</div>
+  <table class="c-parties" width="100%">
+    <tr>
+      <td class="party">甲方：{{party_a}}</td>
+      <td class="party">乙方：{{party_b}}</td>
+    </tr>
+  </table>
+  <hr class="c-rule" style="border-top-color: {{accent}};"/>
+  <div class="c-terms" style="color: {{ink}};">{{terms_lines}}</div>
+  <div class="c-seal-title">签 署</div>
+  <table class="c-sign" width="100%">
+    <tr>
+      <td class="sign-line">甲方签名：{{signature_a}}</td>
+      <td class="sign-line">乙方签名：{{signature_b}}</td>
+    </tr>
+    <tr>
+      <td class="seal-cell"><img src="wax-seal.png" width="86" alt=""/></td>
+      <td class="seal-note">{{seal}}</td>
+    </tr>
+  </table>
+  {{wear_fold}}
+  {{wear_burn}}
+</div>

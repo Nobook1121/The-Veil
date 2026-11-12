@@ -1,0 +1,27 @@
+<div class="ticket">
+  <table class="ticket-head" width="100%">
+    <tr>
+      <td class="company">沪宁铁路 · 客运</td>
+      <td class="serial">NO. {{serial}}</td>
+    </tr>
+  </table>
+  <div class="ticket-route">{{route}}</div>
+  <table class="ticket-meta" width="100%">
+    <tr>
+      <td class="key" width="14%">座位</td>
+      <td class="value" width="26%">{{seat}}</td>
+      <td class="key" width="14%">时间</td>
+      <td class="value" width="46%">{{time}}</td>
+    </tr>
+    <tr>
+      <td class="key">票价</td>
+      <td class="value">{{fare}}</td>
+      <td class="key">附注</td>
+      <td class="value">{{note}}</td>
+    </tr>
+  </table>
+  <img class="perforation" src="perforation.png" width="420" alt=""/>
+  <div class="ticket-foot">凭票乘车 · 撕角无效</div>
+  {{wear_fold}}
+  {{wear_stain}}
+</div>

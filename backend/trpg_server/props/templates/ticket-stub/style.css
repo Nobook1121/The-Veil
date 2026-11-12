@@ -1,0 +1,71 @@
+body {
+  margin: 0;
+  padding: 0;
+  color: #1a1a1a;
+  font-size: 11pt;
+  line-height: 1.6;
+}
+
+.ticket {
+  border: 1.4pt dashed #6b5a44;
+  padding: 14pt 16pt 10pt 16pt;
+  margin: 6pt;
+}
+
+.ticket-head {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.company {
+  font-size: 10pt;
+  letter-spacing: 2pt;
+  color: #5a4a38;
+}
+
+.serial {
+  text-align: right;
+  font-size: 10pt;
+  letter-spacing: 1pt;
+}
+
+.ticket-route {
+  font-size: 20pt;
+  font-weight: bold;
+  letter-spacing: 2pt;
+  text-align: center;
+  padding: 16pt 0 14pt 0;
+  border-bottom: 1pt solid #8a7a62;
+}
+
+.ticket-meta {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10pt;
+}
+
+.ticket-meta .key {
+  color: #6a5c48;
+  font-size: 9.5pt;
+}
+
+.ticket-meta .value {
+  font-size: 10pt;
+}
+
+.perforation {
+  margin-top: 14pt;
+}
+
+.ticket-foot {
+  text-align: center;
+  font-size: 9pt;
+  color: #6a5c48;
+  letter-spacing: 2pt;
+  margin-top: 2pt;
+}
+
+.ticket .wear {
+  margin: 0;
+  padding: 0;
+}

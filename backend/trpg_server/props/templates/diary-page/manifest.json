@@ -1,0 +1,18 @@
+{
+  "id": "diary-page",
+  "name": "日记页",
+  "order": 20,
+  "group": "correspondence",
+  "group_name": "书信日记",
+  "category": "document",
+  "description": "横线日记页：日期、正文与被划掉的句子",
+  "fields": [
+    {"key": "date", "label": "日期", "type": "text", "max": 40},
+    {"key": "body", "label": "正文", "type": "textarea", "max": 1800, "required": true},
+    {"key": "struck", "label": "划掉的句子", "type": "textarea", "max": 300}
+  ],
+  "styles": {"paper": ["ivory", "aged", "white"], "ink": ["#2b2b2b", "#1a1a1a", "#3b2a20"]},
+  "wear_supported": ["stain", "fold", "tear"],
+  "page": {"size": "a5", "margin": [16, 16, 16, 16]},
+  "ai_hints": {"era": "1920s", "tone": "intimate", "length": "medium"}
+}

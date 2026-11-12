@@ -53,8 +53,41 @@ def available_ids() -> list[str]:
 
 
 def list_templates() -> list[dict[str, Any]]:
-    """返回全部模板清单（含字段 schema），按 id 排序。"""
-    return [copy.deepcopy(manifest) for _key, manifest in sorted(_manifests().items())]
+    """返回全部模板清单（含字段 schema），按 manifest.order 排序。
+
+    目录扫描顺序受文件系统影响，会随部署环境变化；``order`` 由模板自己声明，
+    缺失时回落到 id，保证 ``templates`` 接口的顺序在进程重启后仍然一致。
+    """
+    return [
+        copy.deepcopy(manifest)
+        for _key, manifest in sorted(
+            _manifests().items(),
+            key=lambda item: (_order_of(item[1]), item[0]),
+        )
+    ]
+
+
+def list_template_groups() -> list[dict[str, Any]]:
+    """按 manifest 声明顺序返回稳定分组（给前端模板选择器用）。"""
+    groups: list[dict[str, Any]] = []
+    index: dict[str, dict[str, Any]] = {}
+    for manifest in list_templates():
+        group_id = str(manifest.get("group") or "other")
+        group_name = str(manifest.get("group_name") or group_id)
+        group = index.get(group_id)
+        if group is None:
+            group = {"id": group_id, "name": group_name, "template_ids": []}
+            index[group_id] = group
+            groups.append(group)
+        group["template_ids"].append(str(manifest.get("id")))
+    return groups
+
+
+def _order_of(manifest: Mapping[str, Any]) -> int:
+    try:
+        return int(manifest.get("order"))
+    except (TypeError, ValueError):
+        return 9999
 
 
 def get_template(template_id: str) -> dict[str, Any]:
@@ -195,6 +228,7 @@ __all__ = [
     "UnknownTemplate",
     "available_ids",
     "get_template",
+    "list_template_groups",
     "list_templates",
     "template_dir",
     "validate_fields",

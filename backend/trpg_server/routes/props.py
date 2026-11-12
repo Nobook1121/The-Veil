@@ -260,7 +260,10 @@ def list_prop_templates(room_id):
         return error
     if not _can_access(info):
         return _write_forbidden()
-    return success_response({"templates": registry.list_templates()}, "Prop templates loaded")
+    return success_response(
+        {"templates": registry.list_templates(), "groups": registry.list_template_groups()},
+        "Prop templates loaded",
+    )
 
 
 @bp.route("/api/rooms/<room_id>/props/draft", methods=["POST"])

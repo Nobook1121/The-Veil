@@ -1,6 +1,9 @@
 {
   "id": "newspaper",
   "name": "多栏报纸",
+  "order": 40,
+  "group": "press",
+  "group_name": "报刊公告",
   "category": "newspaper",
   "description": "民国报刊版式，报头 + 头条 + 双栏正文 + 广告位",
   "fields": [

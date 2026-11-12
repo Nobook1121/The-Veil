@@ -1,6 +1,9 @@
 {
   "id": "letter-1920",
   "name": "私人书信",
+  "order": 10,
+  "group": "correspondence",
+  "group_name": "书信日记",
   "category": "document",
   "description": "1920 年代私人书信，横线信纸，可做旧",
   "fields": [

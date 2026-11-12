@@ -9,10 +9,12 @@
 
     python scripts/gen-prop-textures.py
 
-产物：paper-ivory / paper-aged / stain / fold / burn / tear-edge / stamp / wax-seal
+产物：paper-ivory / paper-aged / stain / fold / burn / tear-edge / stamp / wax-seal /
+binding-holes / perforation / gold-band
 """
 from __future__ import annotations
 
+import os
 import random
 from pathlib import Path
 
@@ -33,7 +35,12 @@ def _new_page(width_px: int, height_px: int):
 def _save(doc, name: str) -> None:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     path = OUTPUT / name
-    doc[0].get_pixmap(alpha=True, dpi=DPI).save(str(path))
+    # PyMuPDF 的 PNG 导出不会覆盖已存在文件：先写临时文件再原子替换。
+    temp = OUTPUT / f".{name}.tmp.png"
+    if temp.exists():
+        temp.unlink()
+    doc[0].get_pixmap(alpha=True, dpi=DPI).save(str(temp))
+    os.replace(temp, path)
     doc.close()
     print(f"{name}: {path.stat().st_size} bytes")
 
@@ -249,6 +256,72 @@ def wax_seal() -> None:
     _save(doc, "wax-seal.png")
 
 
+def binding_holes() -> None:
+    """卷宗左侧装订孔：纵向一排深色圆孔，透明底。"""
+    rng = random.Random(SEED + 9)
+    doc, page = _new_page(200, 1240)
+    width, height = page.rect.width, page.rect.height
+    for index in range(5):
+        center = (width * 0.45, height * (0.14 + index * 0.18))
+        for radius, opacity in ((17, 0.55), (12, 0.85)):
+            shape = page.new_shape()
+            shape.draw_circle(center, radius)
+            shape.finish(color=None, fill=(0.18, 0.14, 0.10), fill_opacity=opacity)
+            shape.commit()
+        for _ in range(10):
+            shape = page.new_shape()
+            shape.draw_circle(
+                (center[0] + rng.uniform(-20, 20), center[1] + rng.uniform(-20, 20)),
+                rng.uniform(0.6, 2.0),
+            )
+            shape.finish(color=None, fill=(0.12, 0.10, 0.08), fill_opacity=rng.uniform(0.05, 0.16))
+            shape.commit()
+    _save(doc, "binding-holes.png")
+
+
+def perforation() -> None:
+    """票据撕口：横向虚线 + 半圆缺口，透明底。"""
+    rng = random.Random(SEED + 10)
+    doc, page = _new_page(1240, 48)
+    width, height = page.rect.width, page.rect.height
+    y = height / 2
+    for x in range(0, int(width), 22):
+        shape = page.new_shape()
+        shape.draw_line((x, y), (min(width, x + 12), y))
+        shape.finish(color=(0.42, 0.35, 0.26), width=1.2, stroke_opacity=0.45)
+        shape.commit()
+    for x in range(10, int(width), 60):
+        shape = page.new_shape()
+        shape.draw_circle((x, y), rng.uniform(4.5, 6.5))
+        shape.finish(color=(0.80, 0.74, 0.62), width=1.0, fill=(0.97, 0.95, 0.90), fill_opacity=0.9)
+        shape.commit()
+    _save(doc, "perforation.png")
+
+
+def gold_band() -> None:
+    """请柬烫金花边：横向双线 + 菱形花纹，透明底。"""
+    rng = random.Random(SEED + 11)
+    doc, page = _new_page(1200, 96)
+    width, height = page.rect.width, page.rect.height
+    gold = (0.72, 0.58, 0.28)
+    for offset, line_width, opacity in ((14, 2.2, 0.85), (22, 0.9, 0.55)):
+        shape = page.new_shape()
+        shape.draw_line((0, offset), (width, offset))
+        shape.draw_line((0, height - offset), (width, height - offset))
+        shape.finish(color=gold, width=line_width, stroke_opacity=opacity)
+        shape.commit()
+    center_y = height / 2
+    for x in range(40, int(width), 80):
+        radius = rng.uniform(3.0, 5.0)
+        shape = page.new_shape()
+        shape.draw_polyline(
+            [(x, center_y - radius), (x + radius, center_y), (x, center_y + radius), (x - radius, center_y), (x, center_y - radius)]
+        )
+        shape.finish(color=gold, width=1.0, fill_opacity=0.0, stroke_opacity=0.7)
+        shape.commit()
+    _save(doc, "gold-band.png")
+
+
 def _cos(value: float) -> float:
     import math
 
@@ -270,6 +343,9 @@ def main() -> int:
     tear_edge()
     stamp()
     wax_seal()
+    binding_holes()
+    perforation()
+    gold_band()
     return 0
 
 

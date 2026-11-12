@@ -91,8 +91,23 @@ interface Window {
     function renderTemplateSelect(): void {
         const select = byId<HTMLSelectElement>("propEditorTemplate");
         if (!select) return;
-        select.innerHTML = templates
-            .map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.name || template.id)}</option>`)
+        const groups: Array<{ name: string; items: PropTemplate[] }> = [];
+        templates.forEach((template) => {
+            const name = template.group_name || t("prop.group.other", "其他");
+            let group = groups.find((item) => item.name === name);
+            if (!group) {
+                group = { name, items: [] };
+                groups.push(group);
+            }
+            group.items.push(template);
+        });
+        select.innerHTML = groups
+            .map((group) => {
+                const options = group.items
+                    .map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.name || template.id)}</option>`)
+                    .join("");
+                return `<optgroup label="${escapeHtml(group.name)}">${options}</optgroup>`;
+            })
             .join("");
         select.disabled = Boolean(propId);
         const selected = currentSpec?.template_id || templates[0]?.id || "";

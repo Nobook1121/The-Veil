@@ -1,0 +1,20 @@
+{
+  "id": "dossier",
+  "name": "档案卷宗",
+  "order": 70,
+  "group": "archive",
+  "group_name": "档案凭证",
+  "category": "document",
+  "description": "机构卷宗：编号、摘要、正文、装订孔与盖章位",
+  "fields": [
+    {"key": "agency", "label": "机构", "type": "text", "max": 80},
+    {"key": "ref", "label": "编号", "type": "text", "max": 40, "required": true},
+    {"key": "summary", "label": "摘要", "type": "textarea", "max": 500},
+    {"key": "body", "label": "正文", "type": "textarea", "max": 2200, "required": true},
+    {"key": "stamp", "label": "印章文字", "type": "text", "max": 40}
+  ],
+  "styles": {"paper": ["aged", "ivory", "white"], "ink": ["#1a1a1a", "#2b2b2b"]},
+  "wear_supported": ["stain", "fold", "burn"],
+  "page": {"size": "a4", "margin": [16, 16, 16, 16]},
+  "ai_hints": {"era": "1920s", "tone": "official", "length": "long"}
+}

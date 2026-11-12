@@ -19,7 +19,9 @@
 .prop-library-actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: var(--theme-space-xs);
+    min-width: 0;
 }
 
 .prop-filter-group .btn.is-active {

@@ -1,0 +1,20 @@
+{
+  "id": "receipt",
+  "name": "收据",
+  "order": 90,
+  "group": "archive",
+  "group_name": "档案凭证",
+  "category": "document",
+  "description": "店铺收据：店名、条目、合计与手写批注",
+  "fields": [
+    {"key": "shop", "label": "店名", "type": "text", "max": 60, "required": true},
+    {"key": "date", "label": "日期", "type": "text", "max": 40},
+    {"key": "items", "label": "条目列表", "type": "textarea", "max": 1000, "required": true},
+    {"key": "total", "label": "合计", "type": "text", "max": 40, "required": true},
+    {"key": "note", "label": "手写批注", "type": "text", "max": 200}
+  ],
+  "styles": {"paper": ["ivory", "white", "aged"], "ink": ["#1a1a1a", "#2b2b2b"]},
+  "wear_supported": ["fold", "stain", "tear"],
+  "page": {"size": "a5", "margin": [20, 24, 20, 24]},
+  "ai_hints": {"era": "1920s", "tone": "commercial", "length": "short"}
+}

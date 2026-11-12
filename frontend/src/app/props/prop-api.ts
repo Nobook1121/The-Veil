@@ -16,13 +16,22 @@ interface PropTemplateField {
 interface PropTemplate {
     id: string;
     name?: string;
+    order?: number;
+    group?: string;
+    group_name?: string;
     category?: string;
     description?: string;
     fields?: PropTemplateField[];
-    styles?: { paper?: string[]; ink?: string[] };
+    styles?: { paper?: string[]; ink?: string[]; accent?: string[] };
     wear_supported?: string[];
     page?: { size?: string; margin?: number[] };
     ai_hints?: Record<string, unknown>;
+}
+
+interface PropTemplateGroup {
+    id: string;
+    name: string;
+    template_ids: string[];
 }
 
 interface PropRedaction {
@@ -266,11 +275,18 @@ interface Window {
     function templateIcon(templateId: string, category?: string): string {
         const id = String(templateId || "").toLowerCase();
         if (id.includes("letter")) return "fa fa-envelope-o";
+        if (id.includes("diary")) return "fa fa-book";
         if (id.includes("newspaper") || category === "newspaper") return "fa fa-newspaper-o";
-        if (id.includes("photo")) return "fa fa-camera";
-        if (id.includes("invitation")) return "fa fa-paper-plane-o";
+        if (id.includes("dossier")) return "fa fa-folder-o";
         if (id.includes("ticket")) return "fa fa-ticket";
-        return "fa fa-file-text-o";
+        if (id.includes("receipt")) return "fa fa-money";
+        if (id.includes("evidence")) return "fa fa-tag";
+        if (id.includes("invitation")) return "fa fa-paper-plane-o";
+        if (id.includes("telegram")) return "fa fa-print";
+        if (id.includes("photo")) return "fa fa-camera";
+        if (id.includes("contract")) return "fa fa-file-text-o";
+        if (id.includes("note")) return "fa fa-sticky-note-o";
+        return "fa fa-file-o";
     }
 
     function errorText(error: unknown, fallback: string): string {
