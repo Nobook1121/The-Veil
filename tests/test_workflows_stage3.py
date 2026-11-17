@@ -12,6 +12,7 @@ from trpg_server.agents.tools import concentration as concentration_tools
 from trpg_server.agents.tools import effects as effects_tools
 from trpg_server.agents.tools import reactions as reaction_tools
 from trpg_server.agents.tools import spells as spell_tools
+from trpg_server.agents.tools import workflow as workflow_tools
 from trpg_server.plugins import runtime
 from trpg_server.plugins.registry import PluginRegistry
 from trpg_server.ruleset import builtin_registry, reset_builtin_registry
@@ -550,6 +551,147 @@ def test_reaction_timeout_uses_default_and_continues(tmp_path, plugins):
     combat = combat_tools._load_combat(context)
     assert combat["combatants"]["Goblin"]["hp"] < hp_before
     assert combat["combatants"]["Rival"]["spell_slots"]["3"]["used"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 豁免 ask：流程真的暂停，提交/超时后继续
+# ---------------------------------------------------------------------------
+def _set_save_policy(context: _Context, policy: str = "ask") -> None:
+    WorkflowEngine(context.room_dir).set_policy({"save": {"kp": policy}})
+
+
+def test_save_ask_pauses_and_player_decision_resolves(tmp_path, plugins):
+    context = _combat_context(tmp_path, [_wizard_card(known=["sacred-flame"])])
+    _set_save_policy(context)
+    hp_before = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
+    awaiting = spell_tools.cast_spell(
+        {
+            "caster": "Mira",
+            "spell": "sacred-flame",
+            "targets": ["Goblin"],
+            "slot_level": 0,
+            "request_id": "save-ask-1",
+        },
+        context,
+    )
+    assert awaiting.get("status") == "awaiting_save", awaiting
+    flow_id = awaiting["workflow"]["id"]
+    assert awaiting["awaiting"] == ["Goblin"]
+    flow = WorkflowEngine(tmp_path).get(flow_id)
+    assert flow["status"] == "waiting"
+    step = next(item for item in flow["steps"] if item["id"] == "save:Goblin")
+    assert step["policy"] == "ask"
+    assert step["status"] == "waiting"
+    assert step["default"] == {"decision": "fail", "reason": "save_timeout"}
+    # 停下时还没有产生任何伤害。
+    assert combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"] == hp_before
+
+    decided = workflow_tools.decide_workflow(
+        {
+            "flow_id": flow_id,
+            "step_id": "save:Goblin",
+            "decision": {"decision": "success", "total": 20},
+            "idempotency_key": "save-1",
+        },
+        context,
+    )
+    assert decided["duplicate"] is False
+    assert decided["workflow"]["status"] == "completed"
+    flow = WorkflowEngine(tmp_path).get(flow_id)
+    save_result = next(item["result"] for item in flow["steps"] if item["id"] == "save:Goblin")
+    assert save_result["decision"] == "success"
+    resolved = next(item["result"] for item in flow["steps"] if item["id"] == "resolve")
+    assert resolved["saves"][0]["success"] is True
+    assert resolved["saves"][0].get("decided") is True
+    assert resolved["damage"] == []  # 豁免成功，圣火无伤害
+    assert combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"] == hp_before
+
+    again = workflow_tools.decide_workflow(
+        {
+            "flow_id": flow_id,
+            "step_id": "save:Goblin",
+            "decision": {"decision": "success"},
+            "idempotency_key": "save-1",
+        },
+        context,
+    )
+    assert again["duplicate"] is True
+    events = workflow_tools.get_workflow({"flow_id": flow_id}, context)["events"]
+    assert any(event["type"] == "step.decided" for event in events)
+    assert any(event["type"] == "flow.completed" for event in events)
+
+
+def test_save_ask_timeout_uses_default_fail(tmp_path, plugins):
+    context = _combat_context(tmp_path, [_wizard_card(known=["sacred-flame"])])
+    _set_save_policy(context)
+    hp_before = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
+    awaiting = spell_tools.cast_spell(
+        {
+            "caster": "Mira",
+            "spell": "sacred-flame",
+            "targets": ["Goblin"],
+            "slot_level": 0,
+            "request_id": "save-timeout-1",
+        },
+        context,
+    )
+    engine = WorkflowEngine(tmp_path)
+    expired = engine.expire(awaiting["workflow"]["id"])
+    assert expired["expired"] is True
+    flow = engine.get(awaiting["workflow"]["id"], expire=False)
+    assert flow["status"] == "completed"
+    assert flow["timed_out"] is True
+    step = next(item for item in flow["steps"] if item["id"] == "save:Goblin")
+    assert step["result"]["decision"] == "fail"
+    assert step["result"]["timeout"] is True
+    # 默认失败：伤害照常结算。
+    assert combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"] < hp_before
+
+
+def test_reaction_then_ask_save_keeps_one_queue(tmp_path, plugins):
+    context = _combat_context(tmp_path, [_wizard_card(known=["sacred-flame"])])
+    _arm_counter_spell(context)
+    _set_save_policy(context)
+    awaiting = spell_tools.cast_spell(
+        {
+            "caster": "Mira",
+            "spell": "sacred-flame",
+            "targets": ["Goblin"],
+            "slot_level": 0,
+            "request_id": "save-after-counter",
+        },
+        context,
+    )
+    assert awaiting.get("status") == "awaiting_reaction", awaiting
+    flow_id = awaiting["workflow"]["id"]
+    declined = reaction_tools.resolve_reaction(
+        {
+            "flow_id": flow_id,
+            "candidate": "Rival",
+            "decision": {"decision": "none"},
+            "idempotency_key": "counter-decline-1",
+        },
+        context,
+    )
+    assert declined["continuation"]["status"] == "awaiting_save"
+    flow = WorkflowEngine(tmp_path).get(flow_id)
+    assert flow["status"] == "waiting"
+    save_step = next(item for item in flow["steps"] if item["id"] == "save:Goblin")
+    assert save_step["status"] == "waiting"
+
+    hp_before = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
+    workflow_tools.decide_workflow(
+        {
+            "flow_id": flow_id,
+            "step_id": "save:Goblin",
+            "decision": {"decision": "success"},
+            "idempotency_key": "save-after-counter-1",
+        },
+        context,
+    )
+    flow = WorkflowEngine(tmp_path).get(flow_id, expire=False)
+    assert flow["status"] == "completed"
+    assert combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"] == hp_before
 
 
 def test_coc7_has_no_reaction_or_area_tools(plugins):

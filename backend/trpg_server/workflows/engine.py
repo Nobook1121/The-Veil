@@ -12,6 +12,7 @@ from typing import Any, Callable, Mapping
 
 from trpg_server.workflows import store as flow_store
 from trpg_server.workflows.model import (
+    DEFAULT_TIMEOUT_SECONDS,
     FLOW_CANCELLED,
     FLOW_COMPLETED,
     FLOW_EXPIRED,
@@ -440,8 +441,6 @@ class WorkflowEngine:
             self._release_lock(flow, data)
             return
         metadata = dict(metadata)
-        metadata["continuation_done"] = True
-        flow["metadata"] = metadata
         flow["continuation_result"] = result
         self._append_event(
             flow,
@@ -449,6 +448,19 @@ class WorkflowEngine:
             actor="system",
             payload={"continuation": name},
         )
+        if any(
+            str(step.get("status")) == STEP_WAITING for step in flow.get("steps") or []
+        ):
+            # 续跑器可能把后续步骤（例如反制之后的豁免）挂起：保留续跑资格，
+            # 重新按 TTL 计时，等下一次决定到达再继续。
+            ttl = max(1, int(flow.get("ttl") or DEFAULT_TIMEOUT_SECONDS))
+            flow["status"] = FLOW_WAITING
+            flow["updated_at"] = stamp()
+            flow["expires_at"] = now() + ttl
+            self._schedule_expiry(str(flow.get("id")), ttl)
+            return
+        metadata["continuation_done"] = True
+        flow["metadata"] = metadata
         if all_steps_settled(flow):
             flow["status"] = FLOW_COMPLETED
             self._release_lock(flow, data)

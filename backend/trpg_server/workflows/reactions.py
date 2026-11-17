@@ -1,12 +1,14 @@
-"""反应待决中断队列。
+"""反应与豁免的待决中断队列。
 
 反应不是另一个平行系统，而是施法/攻击流程中的一个 ``reaction:<角色>`` 步骤：
 - 需要当事人决定时，流程停在 waiting，跨请求可查；
 - 提交决定或 TTL 到期后，流程通过续跑器继续结算；
 - 被反制的施法由续跑器扣除施法者法术位（不退还）但不产生任何效果。
 
-目前接入的是反制法术（counter-spell）与护盾术（shield）。护盾术复用同一
-队列，只在攻击流程的命中判定之后、伤害结算之前插入同名步骤。
+豁免复用同一套待决队列：策略为 ask/manual 时，每个需要豁免的目标对应一个
+``save:<角色>`` 步骤，流程停在 waiting；auto 的目标仍由规则集自动掷骰。
+
+目前接入的是反制法术（counter-spell）、护盾术（shield）与需要玩家决定的豁免。
 """
 
 from __future__ import annotations
@@ -16,14 +18,18 @@ from typing import Any, Iterable, Mapping
 from trpg_server.workflows.engine import WorkflowEngine
 from trpg_server.workflows.model import (
     DEFAULT_TIMEOUT_SECONDS,
+    EXECUTOR_AI,
     EXECUTOR_KP,
     EXECUTOR_PLAYER,
     FLOW_WAITING,
+    POLICY_ASK,
+    POLICY_MANUAL,
     make_step,
     resolve_policy,
 )
 
 REACTION_PREFIX = "reaction:"
+SAVE_PREFIX = "save:"
 
 
 def reaction_step_id(candidate: str) -> str:
@@ -33,6 +39,49 @@ def reaction_step_id(candidate: str) -> str:
 def candidate_of(step_id: str) -> str:
     text = str(step_id or "")
     return text[len(REACTION_PREFIX):] if text.startswith(REACTION_PREFIX) else ""
+
+
+def save_step_id(target: str) -> str:
+    return f"{SAVE_PREFIX}{str(target or '').strip()}"
+
+
+def save_target_of(step_id: str) -> str:
+    text = str(step_id or "")
+    return text[len(SAVE_PREFIX):] if text.startswith(SAVE_PREFIX) else ""
+
+
+def save_steps(
+    candidates: Iterable[Mapping[str, Any]],
+    *,
+    policy_overrides: Mapping[str, Any] | None = None,
+    label: str = "豁免",
+) -> list[dict[str, Any]]:
+    """生成豁免待决步骤；只有策略为 ask/manual 的目标会进入队列。
+
+    auto 的目标不生成步骤，交给规则集在结算时自动掷骰，行为与之前一致。
+    """
+    steps: list[dict[str, Any]] = []
+    for row in candidates:
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        if str(row.get("agent_id") or "").strip():
+            executor = EXECUTOR_AI
+        else:
+            executor = EXECUTOR_PLAYER if row.get("is_player") else EXECUTOR_KP
+        policy = resolve_policy("save", executor, policy_overrides)
+        if policy not in {POLICY_ASK, POLICY_MANUAL}:
+            continue
+        steps.append(
+            make_step(
+                save_step_id(name),
+                f"{name} {label}",
+                policy=policy,
+                executor=executor,
+                default={"decision": "fail", "reason": "save_timeout"},
+            )
+        )
+    return steps
 
 
 def _reaction_steps(
@@ -70,19 +119,22 @@ def open_cast_window(
     slot_level: int,
     targets: Iterable[str],
     reactors: Iterable[Mapping[str, Any]],
+    save_steps: Iterable[Mapping[str, Any]] = (),
     ttl: int = DEFAULT_TIMEOUT_SECONDS,
     request_key: str = "",
     policy_overrides: Mapping[str, Any] | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """为一个等待反制的施法打开流程；返回 ``{flow, error?}``。"""
+    """为一个等待反制或豁免的施法打开流程；返回 ``{flow, error?}``。"""
     engine = WorkflowEngine(room_dir, room_id=room_id)
     reactor_rows = [dict(item) for item in reactors if isinstance(item, Mapping)]
-    if not reactor_rows:
+    save_rows = [dict(item) for item in save_steps if isinstance(item, Mapping)]
+    if not reactor_rows and not save_rows:
         return {"error": "没有可反应的候选者", "code": "reaction.no_candidates"}
     steps: list[dict[str, Any]] = [
         make_step("validate", "校验射程与目标", policy="auto"),
         *_reaction_steps(reactor_rows, policy_overrides=policy_overrides, label="是否反制"),
+        *save_rows,
     ]
     for step_id, label in (
         ("resolve", "法术结算"),
@@ -104,6 +156,9 @@ def open_cast_window(
             "slot_level": int(slot_level),
             "targets": [str(name) for name in targets if str(name or "").strip()],
             "reactors": [str(item.get("name") or "") for item in reactor_rows],
+            "save_targets": [
+                save_target_of(str(step.get("id") or "")) for step in save_rows
+            ],
         },
         request_key=request_key,
         lock_character=True,
@@ -219,6 +274,7 @@ def counter_used(flow: Mapping[str, Any]) -> str:
 
 __all__ = [
     "REACTION_PREFIX",
+    "SAVE_PREFIX",
     "candidate_of",
     "counter_used",
     "decide",
@@ -226,4 +282,7 @@ __all__ = [
     "open_cast_window",
     "pending_for",
     "reaction_step_id",
+    "save_step_id",
+    "save_steps",
+    "save_target_of",
 ]

@@ -296,6 +296,15 @@ class Dnd5eSpells:
             return "self"
         return "none"
 
+    def save_ability(self, spell: Any) -> str:
+        """返回法术豁免属性（如 ``dex``）；不需要豁免返回空串。
+
+        核心据此决定是否把豁免拆成待决步骤，从而在策略为 ask 时暂停流程。
+        """
+        entry = spell if isinstance(spell, Mapping) else _pack_entry("spell", spell)
+        save = (entry or {}).get("save") if isinstance(entry, Mapping) else None
+        return _text(save.get("ability")) if isinstance(save, Mapping) else ""
+
     # -- 施法 -------------------------------------------------------------
     def cast(
         self,
@@ -311,6 +320,7 @@ class Dnd5eSpells:
         settings: Any = None,
         noncombat: bool = False,
         ritual: bool = False,
+        save_results: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         entry = _pack_entry("spell", spell)
         if entry is None:
@@ -402,41 +412,73 @@ class Dnd5eSpells:
             hit = True
             critical = False
             save_outcome = None
+            save_success: bool | None = None
             if save:
                 ability = _text(save.get("ability")) or "dex"
-                auto, disadvantage = save_modifiers(target, ability)
-                save_outcome = self.checks.roll_outcome(
-                    target_card if isinstance(target_card, Mapping) else card_of(target),
-                    CheckRequest(
-                        kind="save",
-                        name=f"{ability}豁免",
-                        target=dc,
-                        extra={
+                decided = (save_results or {}).get(target_name)
+                if isinstance(decided, bool):
+                    decided = {"success": decided}
+                if isinstance(decided, Mapping) and isinstance(decided.get("success"), bool):
+                    # 策略为 ask 时，豁免已由玩家/KP 在等待步骤里决定；这里只消费结果。
+                    save_success = bool(decided.get("success"))
+                    hit = not save_success
+                    results["saves"].append(
+                        {
+                            "target": target_name,
                             "ability": ability,
+                            "success": save_success,
+                            "auto_fail": False,
+                            "total": decided.get("total"),
+                            "dc": dc,
+                            "summary": _text(decided.get("summary"))
+                            or f"{label}豁免：{'成功' if save_success else '失败'}（已决）。",
+                            "dice": [
+                                int(item)
+                                for item in (decided.get("dice") or [])
+                                if isinstance(item, (int, float))
+                            ],
+                            "detail": dict(decided.get("detail") or {}),
+                            "presentation": dict(decided.get("presentation") or {}),
+                            "degree": _text(decided.get("degree"))
+                            or ("success" if save_success else "failure"),
+                            "decided": True,
+                        }
+                    )
+                else:
+                    auto, disadvantage = save_modifiers(target, ability)
+                    save_outcome = self.checks.roll_outcome(
+                        target_card if isinstance(target_card, Mapping) else card_of(target),
+                        CheckRequest(
+                            kind="save",
+                            name=f"{ability}豁免",
+                            target=dc,
+                            extra={
+                                "ability": ability,
+                                "auto_fail": auto,
+                                "disadvantage": disadvantage,
+                                "label": f"{label}豁免",
+                            },
+                        ),
+                        rng,
+                    )
+                    save_success = bool(save_outcome.success)
+                    hit = not save_success
+                    results["saves"].append(
+                        {
+                            "target": target_name,
+                            "ability": ability,
+                            "success": save_success,
                             "auto_fail": auto,
-                            "disadvantage": disadvantage,
-                            "label": f"{label}豁免",
-                        },
-                    ),
-                    rng,
-                )
-                hit = not bool(save_outcome.success)
-                results["saves"].append(
-                    {
-                        "target": target_name,
-                        "ability": ability,
-                        "success": bool(save_outcome.success),
-                        "auto_fail": auto,
-                        "total": save_outcome.total,
-                        "dc": save_outcome.target,
-                        "summary": save_outcome.presentation.get("summary", ""),
-                        # 供骰桌直接消费的 d20 明细；核心只负责转交元数据。
-                        "dice": list(save_outcome.dice),
-                        "detail": dict(save_outcome.detail),
-                        "presentation": dict(save_outcome.presentation),
-                        "degree": save_outcome.degree,
-                    }
-                )
+                            "total": save_outcome.total,
+                            "dc": save_outcome.target,
+                            "summary": save_outcome.presentation.get("summary", ""),
+                            # 供骰桌直接消费的 d20 明细；核心只负责转交元数据。
+                            "dice": list(save_outcome.dice),
+                            "detail": dict(save_outcome.detail),
+                            "presentation": dict(save_outcome.presentation),
+                            "degree": save_outcome.degree,
+                        }
+                    )
             elif attack is not None or (
                 entry.get("damage") and not save and not entry.get("projectiles")
             ):
@@ -471,7 +513,7 @@ class Dnd5eSpells:
                 terms, fixed = _parse_damage(dice)
                 amount, _detail = _roll_terms(terms, fixed, rng, critical=critical)
                 amount *= max(1, _as_int(upcast.get("projectiles"), 1))
-                if save and save_outcome is not None and save_outcome.success:
+                if save and save_success:
                     amount = amount // 2 if save.get("half_on_success") else 0
                 if amount <= 0:
                     continue

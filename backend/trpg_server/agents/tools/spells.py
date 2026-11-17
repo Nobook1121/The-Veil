@@ -236,6 +236,83 @@ def _counter_candidates(
     return rows
 
 
+_SAVE_SUCCESS_WORDS = frozenset(
+    {"success", "succeeded", "pass", "passed", "make", "made", "ok", "saved"}
+)
+_SAVE_FAILURE_WORDS = frozenset({"fail", "failed", "failure", "miss", "missed"})
+
+
+def _save_candidates(
+    spells: Any,
+    spell: str,
+    targets: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """法术需要豁免时返回每个目标的候选项；不需要豁免返回空列表。"""
+    ability_of = getattr(spells, "save_ability", None)
+    if not callable(ability_of) or not str(ability_of(spell) or "").strip():
+        return []
+    rows: list[dict[str, Any]] = []
+    for target in targets:
+        name = str(target.get("name") or "").strip()
+        if not name:
+            continue
+        rows.append(
+            {
+                "name": name,
+                "is_player": bool(target.get("is_player")),
+                "agent_id": str(target.get("agent_id") or ""),
+            }
+        )
+    return rows
+
+
+def _parse_save_decision(value: Any) -> dict[str, Any] | None:
+    """把玩家/KP 提交的豁免决定归一化成 ``{success, total, dice, ...}``。"""
+    if isinstance(value, bool):
+        return {"success": value}
+    if not isinstance(value, Mapping):
+        return None
+    success = value.get("success")
+    if not isinstance(success, bool):
+        raw = str(value.get("decision") or value.get("result") or "").strip().lower()
+        if raw in _SAVE_SUCCESS_WORDS:
+            success = True
+        elif raw in _SAVE_FAILURE_WORDS:
+            success = False
+        else:
+            return None
+    payload: dict[str, Any] = {"success": success}
+    for key in ("total", "summary", "degree"):
+        if value.get(key) not in (None, ""):
+            payload[key] = value.get(key)
+    dice = value.get("dice")
+    if isinstance(dice, list):
+        payload["dice"] = dice
+    for key in ("detail", "presentation"):
+        if isinstance(value.get(key), Mapping):
+            payload[key] = dict(value[key])
+    return payload
+
+
+def _save_results(flow: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """收集已决的 ``save:<目标>`` 步骤，交给规则集消费。"""
+    from trpg_server.workflows import reactions
+
+    results: dict[str, dict[str, Any]] = {}
+    for step in flow.get("steps") or []:
+        if not isinstance(step, Mapping):
+            continue
+        step_id = str(step.get("id") or "")
+        if not step_id.startswith(reactions.SAVE_PREFIX):
+            continue
+        if str(step.get("status")) != "completed":
+            continue
+        parsed = _parse_save_decision(step.get("result"))
+        if parsed is not None:
+            results[reactions.save_target_of(step_id)] = parsed
+    return results
+
+
 def _apply_combat_cast(
     context: Any,
     combat: dict[str, Any],
@@ -244,8 +321,13 @@ def _apply_combat_cast(
     targets: list[dict[str, Any]],
     target_cards: Mapping[str, Mapping[str, Any]],
     slot_level: int | None,
+    save_results: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """执行一次战斗内施法；流程 handler 与反应续跑器共用。"""
+    """执行一次战斗内施法；流程 handler 与反应续跑器共用。
+
+    ``save_results`` 是策略为 ask 时由玩家/KP 决定的豁免结果；缺省时规则集
+    仍按原逻辑自动掷骰（auto）。
+    """
     _ruleset, spells, error = _require_spells(combat, context)
     if error:
         return error
@@ -264,6 +346,7 @@ def _apply_combat_cast(
         rng=_roller,
         combat=combat,
         settings=_combat_settings(context),
+        save_results=save_results,
     )
     if result.get("error"):
         return result
@@ -330,6 +413,16 @@ def _finish_cast_steps(
 ) -> None:
     from trpg_server.workflows.model import stamp
 
+    if countered:
+        # 法术被反制后豁免不再发生，待决步骤按跳过收尾。
+        for step in flow.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            if not str(step.get("id") or "").startswith("save:"):
+                continue
+            if str(step.get("status")) in {"pending", "waiting", "running"}:
+                step["status"] = "skipped"
+                step["finished_at"] = stamp()
     for step in flow.get("steps") or []:
         if not isinstance(step, dict):
             continue
@@ -402,11 +495,47 @@ def _cast_after_reaction(room_dir: Any, flow: dict[str, Any], data: dict[str, An
         _finish_cast_steps(flow, result, countered=True)
         return result
 
+    # 反制窗口结束后才轮到豁免：把待决的 save:<目标> 步骤挂起，等当事人决定。
+    pending_saves = [
+        step
+        for step in flow.get("steps") or []
+        if isinstance(step, dict)
+        and str(step.get("id") or "").startswith(reactions.SAVE_PREFIX)
+        and str(step.get("status")) == "pending"
+    ]
+    if pending_saves:
+        from trpg_server.workflows.model import stamp
+
+        events = flow.setdefault("events", [])
+        for step in pending_saves:
+            step["status"] = "waiting"
+            step["started_at"] = step.get("started_at") or stamp()
+            events.append(
+                {
+                    "seq": len(events) + 1,
+                    "at": stamp(),
+                    "type": "step.waiting",
+                    "actor": caster_name,
+                    "payload": {"step": step.get("id"), "policy": step.get("policy")},
+                }
+            )
+        return {
+            "status": "awaiting_save",
+            "awaiting": [reactions.save_target_of(str(step.get("id"))) for step in pending_saves],
+        }
+
     target_cards = {
         str(target.get("name") or ""): _player_card(target, context) for target in targets
     }
     result = _apply_combat_cast(
-        context, combat, caster, spell, targets, target_cards, slot_level
+        context,
+        combat,
+        caster,
+        spell,
+        targets,
+        target_cards,
+        slot_level,
+        save_results=_save_results(flow),
     )
     if result.get("error"):
         raise RuntimeError(str(result.get("error")))
@@ -468,7 +597,7 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         awaiting = [
             str(step.get("id")).split(":", 1)[1]
             for step in flow_existing.get("steps") or []
-            if str(step.get("id") or "").startswith("reaction:")
+            if str(step.get("id") or "").startswith(("reaction:", "save:"))
             and str(step.get("status")) == "waiting"
         ]
         return {
@@ -521,11 +650,18 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             _as_int(arguments.get("slot_level"), 0) or None,
         )
 
-    # 有反制候选者时，把反应作为流程中的一个待决步骤，先不产生任何效果。
-    reactor_rows = _counter_candidates(combat, caster, spell)
-    if reactor_rows:
-        from trpg_server.workflows import reactions
+    # 有反制候选者或需要玩家决定的豁免时，把它作为流程中的待决步骤，
+    # 先不产生任何效果；两者共用同一套 waiting/TTL/幂等收尾。
+    from trpg_server.workflows import reactions
+    from trpg_server.workflows.engine import WorkflowEngine
 
+    reactor_rows = _counter_candidates(combat, caster, spell)
+    save_candidates = _save_candidates(spells, spell, targets)
+    save_rows = reactions.save_steps(
+        save_candidates,
+        policy_overrides=WorkflowEngine(context.room_dir).policy(),
+    )
+    if reactor_rows or save_rows:
         window = reactions.open_cast_window(
             context.room_dir,
             room_id=str(getattr(context, "room_id", "") or ""),
@@ -538,21 +674,38 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             slot_level=_as_int(arguments.get("slot_level"), 0) or 1,
             targets=[str(target.get("name") or "") for target in targets],
             reactors=reactor_rows,
+            save_steps=save_rows,
             ttl=60,
             request_key=request_key,
         )
         if window.get("error"):
             return {"error": window["error"], "code": window.get("code")}
         waiting = window.get("flow") or {}
+        awaiting_reactions = [
+            reactions.candidate_of(str(step.get("id")))
+            for step in waiting.get("steps") or []
+            if isinstance(step, dict)
+            and str(step.get("id") or "").startswith(reactions.REACTION_PREFIX)
+            and str(step.get("status")) == "waiting"
+        ]
+        awaiting_saves = [
+            reactions.save_target_of(str(step.get("id")))
+            for step in waiting.get("steps") or []
+            if isinstance(step, dict)
+            and str(step.get("id") or "").startswith(reactions.SAVE_PREFIX)
+            and str(step.get("status")) == "waiting"
+        ]
+        parts: list[str] = []
+        if awaiting_reactions:
+            parts.append("、".join(awaiting_reactions) + " 的反应")
+        if awaiting_saves:
+            parts.append("、".join(awaiting_saves) + " 的豁免")
         return {
             **_combat_summary_state(combat),
-            "status": "awaiting_reaction",
-            "summary": (
-                f"{caster_name} 施放 {spell}，等待 "
-                + "、".join(row["name"] for row in reactor_rows)
-                + " 的反应。"
-            ),
-            "awaiting": [row["name"] for row in reactor_rows],
+            "status": "awaiting_reaction" if awaiting_reactions else "awaiting_save",
+            "summary": f"{caster_name} 施放 {spell}，等待 " + " 与 ".join(parts) + "。",
+            "awaiting": [*awaiting_reactions, *awaiting_saves],
+            "awaiting_saves": awaiting_saves,
             "workflow": {
                 "id": waiting.get("id"),
                 "status": waiting.get("status"),
