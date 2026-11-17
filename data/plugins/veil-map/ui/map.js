@@ -94,6 +94,11 @@
         var unsubscribers = [];
         var socket = null;
         var socketHandler = null;
+        var fogState = { enabled: false };
+        var fogMask = null;
+        var fogMaskCanvas = document.createElement("canvas");
+        var fogSignature = "";
+        var fogHidden = false;
 
         host.classList.add("ws-plugin-map");
 
@@ -111,6 +116,12 @@
         hint.className = "vmap-hint";
         hint.hidden = true;
         host.appendChild(hint);
+
+        var fogToggle = document.createElement("button");
+        fogToggle.type = "button";
+        fogToggle.className = "vmap-fog-toggle";
+        fogToggle.hidden = true;
+        host.appendChild(fogToggle);
 
         var menu = document.createElement("div");
         menu.className = "vmap-menu";
@@ -132,6 +143,10 @@
             '<input type="number" min="' + MIN_BOUNDS + '" max="' + MAX_BOUNDS + '" step="1" data-vmap-bounds></label>',
             '<label class="vmap-field">背景图地址',
             '<input type="url" maxlength="2048" placeholder="https://… 或 /assets/…" data-vmap-bg></label>',
+            '<label class="vmap-check"><input type="checkbox" data-vmap-fog-enabled> 启用战争迷雾</label>',
+            '<label class="vmap-field">默认视野半径（格）',
+            '<input type="number" min="1" max="400" step="1" data-vmap-fog-vision></label>',
+            '<div class="vmap-note" data-vmap-fog-info hidden></div>',
             '<div class="vmap-actions">',
             '<button type="button" data-vmap-save-map>保存地图</button>',
             '<button type="button" class="secondary" data-vmap-close>关闭</button>',
@@ -179,6 +194,9 @@
         var panelSections = panel.querySelectorAll("[data-vmap-section]");
         var panelImport = panel.querySelector("[data-vmap-import]");
         var panelImportInfo = panel.querySelector("[data-vmap-import-info]");
+        var panelFogEnabled = panel.querySelector("[data-vmap-fog-enabled]");
+        var panelFogVision = panel.querySelector("[data-vmap-fog-vision]");
+        var panelFogInfo = panel.querySelector("[data-vmap-fog-info]");
         var panelCalibration = panel.querySelector("[data-vmap-calibration]");
         var panelCalibrationInfo = panel.querySelector("[data-vmap-calibration-info]");
         var panelCellsAcross = panel.querySelector("[data-vmap-cells-across]");
@@ -200,6 +218,106 @@
                 x: clamp(asInt(offset && offset.x, 0), -grid, grid),
                 y: clamp(asInt(offset && offset.y, 0), -grid, grid),
             };
+        }
+
+        // 迷雾掩码是 base64 位图，按 (row * bounds + col) 排列；服务端是唯一
+        // 计算方，这里只负责解码和绘制，不做任何视线裁剪。
+        function decodeMask(text, size) {
+            var mask = new Uint8Array(size);
+            var raw;
+            try {
+                raw = window.atob(String(text || ""));
+            } catch (error) {
+                return mask;
+            }
+            for (var index = 0; index < raw.length; index += 1) {
+                var byte = raw.charCodeAt(index);
+                if (!byte) continue;
+                for (var bit = 0; bit < 8; bit += 1) {
+                    var slot = index * 8 + bit;
+                    if (slot >= size) break;
+                    if (byte & (1 << bit)) mask[slot] = 1;
+                }
+            }
+            return mask;
+        }
+
+        function applyFog(fog) {
+            if (!fog || fog.enabled !== true) {
+                fogState = { enabled: false };
+                fogMask = null;
+                fogSignature = "";
+                updateFogToggle();
+                return;
+            }
+            var bounds = asInt(fog.bounds_cells, DEFAULT_BOUNDS);
+            var size = Math.max(1, bounds) * Math.max(1, bounds);
+            fogState = fog;
+            fogMask = {
+                bounds: bounds,
+                explored: decodeMask(fog.explored, size),
+                visible: decodeMask(fog.visible, size),
+            };
+            fogSignature = "";
+            updateFogToggle();
+        }
+
+        function updateFogToggle() {
+            var show = (canManage || serverCanManage) && fogState.enabled === true;
+            fogToggle.hidden = !show;
+            fogToggle.textContent = fogHidden ? "显示迷雾" : "隐藏迷雾";
+        }
+
+        function ensureFogMaskCanvas() {
+            if (!fogMask) return null;
+            var bounds = fogMask.bounds;
+            var signature = [bounds, fogState.explored || "", fogState.visible || ""].join("|");
+            if (signature === fogSignature) return fogMaskCanvas;
+            fogSignature = signature;
+            // 一格一像素：大场景也只有 bounds²，绘制时再放大，不在每帧重建。
+            fogMaskCanvas.width = bounds;
+            fogMaskCanvas.height = bounds;
+            var maskContext = fogMaskCanvas.getContext("2d");
+            if (!maskContext) return null;
+            var image = maskContext.createImageData(bounds, bounds);
+            var data = image.data;
+            var total = bounds * bounds;
+            for (var index = 0; index < total; index += 1) {
+                var alpha = 242;
+                if (fogMask.visible[index]) alpha = 0;
+                else if (fogMask.explored[index]) alpha = 148;
+                var offset = index * 4;
+                data[offset] = 6;
+                data[offset + 1] = 8;
+                data[offset + 2] = 12;
+                data[offset + 3] = alpha;
+            }
+            maskContext.putImageData(image, 0, 0);
+            return fogMaskCanvas;
+        }
+
+        function drawFog(camera) {
+            if (fogState.enabled !== true || fogHidden || !fogMask) return;
+            var maskCanvas = ensureFogMaskCanvas();
+            if (!maskCanvas) return;
+            var grid = asInt(fogState.grid_size, gridSize());
+            var half = asInt(fogState.half, Math.floor(fogMask.bounds / 2));
+            var offset = fogState.grid_offset || { x: 0, y: 0 };
+            var topLeft = ctx.worldToScreen(
+                (Number(offset.x) || 0) - half * grid,
+                (Number(offset.y) || 0) - half * grid
+            );
+            var cellPx = grid * camera.zoom;
+            context.save();
+            context.imageSmoothingEnabled = false;
+            context.drawImage(
+                maskCanvas,
+                topLeft.x,
+                topLeft.y,
+                fogMask.bounds * cellPx,
+                fogMask.bounds * cellPx
+            );
+            context.restore();
         }
 
         function newRequestId() {
@@ -393,6 +511,7 @@
             var list = activeTokens();
             context.clearRect(0, 0, size.width, size.height);
             drawSceneLayers(camera);
+            drawFog(camera);
             list.forEach(function (token) {
                 var rect = tokenRect(token);
                 var current = isCurrentActor(token);
@@ -526,6 +645,7 @@
                 combat = data.combat.active ? data.combat : { active: false };
             }
             if (typeof data.can_manage === "boolean") serverCanManage = data.can_manage;
+            if (data.fog && typeof data.fog === "object") applyFog(data.fog);
             if (!tokens().some(function (token) { return String(token.id) === selectedId; })) selectedId = "";
             ctx.setBaseStage({ background: mapState.background || "", gridSize: gridSize() });
             renderTurnBar();
@@ -617,6 +737,15 @@
                 renderCalibration();
                 var meta = mapState && mapState.background_meta;
                 renderImportInfo(meta && meta.import ? meta : null);
+                if (panelFogEnabled) panelFogEnabled.checked = fogState.enabled === true;
+                if (panelFogVision) {
+                    panelFogVision.value = String(asInt(fogState.vision_cells, 12));
+                }
+                if (panelFogInfo) {
+                    var explored = asInt(fogState.explored_count, 0);
+                    panelFogInfo.hidden = fogState.enabled !== true;
+                    panelFogInfo.textContent = "已探索 " + explored + " 格；玩家只收到自己视野内的棋子与墙体。";
+                }
             }
             if (mode === "token" && panelName) panelName.focus();
         }
@@ -628,6 +757,8 @@
                 grid_size: grid,
                 bounds_cells: bounds,
                 background: String(panelBackground.value || "").trim(),
+                fog_enabled: Boolean(panelFogEnabled && panelFogEnabled.checked),
+                fog_vision_cells: clamp(asInt(panelFogVision && panelFogVision.value, 12), 1, 400),
             })).then(function (response) {
                 if (destroyed) return;
                 if (!response || response.success !== true) {
@@ -924,7 +1055,12 @@
         function onSocketMapChanged(payload) {
             if (destroyed || !payload || !payload.map) return;
             if (String(payload.room_id || "") !== String(ctx.room.id)) return;
-            applyPayload({ map: payload.map, combat: combat, can_manage: serverCanManage });
+            applyPayload({
+                map: payload.map,
+                fog: payload.fog,
+                combat: combat,
+                can_manage: typeof payload.can_manage === "boolean" ? payload.can_manage : serverCanManage,
+            });
             var move = payload.move;
             if (move && move.source === "ai") {
                 var target = move.to || {};
@@ -975,6 +1111,11 @@
         canvas.addEventListener("contextmenu", onContextMenu);
         document.addEventListener("pointerdown", onDocumentPointerDown);
         document.addEventListener("keydown", onKeyDown);
+        fogToggle.addEventListener("click", function () {
+            fogHidden = !fogHidden;
+            updateFogToggle();
+            scheduleDraw();
+        });
 
         panel.addEventListener("click", function (event) {
             var target = event.target;
@@ -1074,6 +1215,7 @@
                 panel.remove();
                 turnbar.remove();
                 hint.remove();
+                fogToggle.remove();
                 canvas.remove();
                 host.classList.remove("ws-plugin-map");
             },
