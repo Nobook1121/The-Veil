@@ -185,19 +185,29 @@ def point_in_polygon(x: float, y: float, polygon: Sequence[Sequence[float]]) -> 
     return inside
 
 
-def _blocks_sight(wall: Mapping[str, Any]) -> bool:
+def _blocks_occluder(wall: Mapping[str, Any], mode: str = "sight") -> bool:
+    """墙体是否阻挡指定通道；门开着一律放行，窗户默认只挡移动。"""
     if str(wall.get("state") or "").strip().lower() == "open":
         return False
+    key = {"sight": "blocks_sight", "light": "blocks_light"}.get(
+        str(mode or "sight").lower(), "blocks_sight"
+    )
     is_window = str(wall.get("kind") or "wall").strip().lower() == "window"
     default = not is_window
-    return bool(wall.get("blocks_sight", default))
+    return bool(wall.get(key, default))
 
 
-def wall_segments(walls: Iterable[Mapping[str, Any]]) -> list[tuple[tuple[float, float], tuple[float, float]]]:
-    """挡视线墙体 → 世界像素线段列表。"""
+def _blocks_sight(wall: Mapping[str, Any]) -> bool:
+    return _blocks_occluder(wall, "sight")
+
+
+def wall_segments(
+    walls: Iterable[Mapping[str, Any]], mode: str = "sight"
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    """阻挡指定通道的墙体 → 世界像素线段列表（视线与光照共用）。"""
     segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
     for wall in walls or []:
-        if not isinstance(wall, Mapping) or not _blocks_sight(wall):
+        if not isinstance(wall, Mapping) or not _blocks_occluder(wall, mode):
             continue
         points: list[tuple[float, float]] = []
         for item in wall.get("points") or []:
@@ -242,13 +252,14 @@ def _buckets_for(
     grid_size: int,
     offset: Sequence[int],
     wall_version: str,
+    mode: str = "sight",
 ) -> tuple[dict[tuple[int, int], list[int]], list[tuple[tuple[float, float], tuple[float, float]]]]:
-    key = (wall_version, int(grid_size), int(offset[0]), int(offset[1]))
+    key = (wall_version, int(grid_size), int(offset[0]), int(offset[1]), str(mode or "sight"))
     cached = _BUCKETS.get(key)
     if cached is not None:
         _BUCKETS.move_to_end(key)
         return cached
-    segments = wall_segments(walls)
+    segments = wall_segments(walls, mode)
     value = _bucket_index(segments, grid_size, offset)
     return _remember(_BUCKETS, key, value, _BUCKET_LIMIT)
 
@@ -421,16 +432,19 @@ def visibility(
     light_version: str = "",
     room_key: str = "",
     facing: Any = None,
+    mode: str = "sight",
 ) -> dict[str, Any]:
     """计算观察者可见多边形与可见格集合（带缓存）。
 
     ``radius_cells`` 为 0 表示只受地图边界限制，否则只看见半径内的格子。
-    ``light_version`` 本轮不参与几何，但进入缓存键，给后续动态光照留位置。
+    ``mode="light"`` 时按 ``blocks_light`` 过滤墙体，供光源投影复用；视线与
+    光照分开计算，调用方再取交集。
     """
     ox, oy = float(origin[0]), float(origin[1])
     grid = max(1, int(grid_size))
     bounds = max(1, int(bounds_cells))
     radius = max(0, int(radius_cells))
+    mode = str(mode or "sight").lower()
     origin_cell = (
         int(math.floor((ox - int(offset[0])) / grid)),
         int(math.floor((oy - int(offset[1])) / grid)),
@@ -448,6 +462,7 @@ def visibility(
         wall_version,
         str(light_version or ""),
         str(facing or ""),
+        mode,
     )
     cached = _CACHE.get(key)
     if cached is not None:
@@ -457,7 +472,7 @@ def visibility(
         return result
 
     box = bounds_rect(bounds, grid, offset)
-    buckets, segments = _buckets_for(walls, grid, offset, wall_version)
+    buckets, segments = _buckets_for(walls, grid, offset, wall_version, mode)
     candidates = _candidate_segments(buckets, segments, (ox, oy), origin_cell, radius, grid)
     max_distance = radius * grid if radius > 0 else 0.0
     polygon = _sweep((ox, oy), candidates, box, max_distance)
@@ -472,3 +487,54 @@ def visibility(
     }
     _remember(_CACHE, key, result, _CACHE_LIMIT)
     return result
+
+
+def lighting(
+    origin: Sequence[float],
+    *,
+    walls: Iterable[Mapping[str, Any]],
+    grid_size: int,
+    offset: Sequence[int] = (0, 0),
+    bounds_cells: int,
+    bright_cells: int,
+    dim_cells: int,
+    wall_version: str = "",
+    light_version: str = "",
+    room_key: str = "",
+) -> dict[str, Any]:
+    """单个光源的明区 / 暗区格集合。
+
+    ``dim_cells`` 是外圈半径，``bright_cells`` 是内圈明亮半径；墙体按
+    ``blocks_light`` 遮挡。明暗两组分开返回，前端据此叠两层遮罩。
+    """
+    bright_radius = max(0, int(bright_cells))
+    dim_radius = max(bright_radius, int(dim_cells))
+    if dim_radius <= 0:
+        return {"bright": set(), "dim": set(), "polygon": [], "cached": False}
+    result = visibility(
+        origin,
+        walls=walls,
+        grid_size=grid_size,
+        offset=offset,
+        bounds_cells=bounds_cells,
+        radius_cells=dim_radius,
+        wall_version=wall_version,
+        light_version=light_version,
+        room_key=room_key,
+        mode="light",
+    )
+    ox, oy = result["origin_cell"]
+    bright: set[tuple[int, int]] = set()
+    dim: set[tuple[int, int]] = set()
+    for cell in result["cells"]:
+        if max(abs(cell[0] - ox), abs(cell[1] - oy)) <= bright_radius:
+            bright.add(cell)
+        else:
+            dim.add(cell)
+    return {
+        "bright": bright,
+        "dim": dim,
+        "polygon": result["polygon"],
+        "origin_cell": result["origin_cell"],
+        "cached": result.get("cached", False),
+    }

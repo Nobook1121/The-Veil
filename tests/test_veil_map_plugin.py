@@ -943,6 +943,7 @@ def test_import_uvtt_brings_walls_doors_lights_and_ambient(client):
     assert (light["x"], light["y"]) == (0, 0)
     assert (light["range_cells"], light["range_ft"]) == (6, 30)
     assert light["color"] == "#ffaa00"
+    assert light["enabled"] is True
     assert state["ambient_light"]["enabled"] is True
     assert state["ambient_light"]["color"] == "#1a334d"
     assert state["ambient_light"]["intensity"] == 0.5
@@ -1411,3 +1412,212 @@ def test_coc7_room_has_no_fog_entry(tmp_path):
     body = client.get("/api/plugins/veil-map/rooms/room1/map").get_json()
     assert body["error"] == "map.ruleset_disabled"
     assert "fog" not in body
+
+    lights = client.put(
+        "/api/plugins/veil-map/rooms/room1/lights",
+        json={"lights": [], "request_id": "coc7-lights", "revision": 1},
+    ).get_json()
+    assert lights["error"] == "map.ruleset_disabled"
+
+
+# ---------------------------------------------------------------------------
+# 动态光源投影
+# ---------------------------------------------------------------------------
+
+
+def test_lighting_splits_bright_dim_and_wall_shadow():
+    module = veil_map.visibility
+    module.reset_cache()
+    walls = [
+        {
+            "id": "wall-light",
+            "kind": "wall",
+            "blocks_sight": True,
+            "blocks_light": True,
+            "points": [{"x": 320, "y": -1600}, {"x": 320, "y": 1600}],
+        }
+    ]
+    version = module.state_version(walls)
+    first = module.lighting(
+        (96, 32),
+        walls=walls,
+        grid_size=64,
+        offset=(0, 0),
+        bounds_cells=50,
+        bright_cells=4,
+        dim_cells=8,
+        wall_version=version,
+        light_version="lights-v1",
+        room_key="room-light",
+    )
+    assert (1, 0) in first["bright"]
+    assert (4, 0) in first["bright"]
+    assert (5, 0) not in first["bright"] and (5, 0) not in first["dim"]
+    assert (-4, 0) in first["dim"]
+    assert (-6, 0) in first["dim"]
+    assert (-9, 0) not in first["dim"]
+    assert first["cached"] is False
+
+    again = module.lighting(
+        (96, 32),
+        walls=walls,
+        grid_size=64,
+        offset=(0, 0),
+        bounds_cells=50,
+        bright_cells=4,
+        dim_cells=8,
+        wall_version=version,
+        light_version="lights-v1",
+        room_key="room-light",
+    )
+    assert again["cached"] is True
+
+    # 光源版本变化（开关、移动、半径调整）必须让投影缓存失效。
+    changed = module.lighting(
+        (96, 32),
+        walls=walls,
+        grid_size=64,
+        offset=(0, 0),
+        bounds_cells=50,
+        bright_cells=4,
+        dim_cells=8,
+        wall_version=version,
+        light_version="lights-v2",
+        room_key="room-light",
+    )
+    assert changed["cached"] is False
+
+
+def test_active_light_sources_include_token_carry_and_priority_cap():
+    lights = [
+        {
+            "id": f"light-{index}",
+            "x": 0,
+            "y": 0,
+            "bright_cells": 0,
+            "range_cells": index,
+            "enabled": True,
+        }
+        for index in range(1, 31)
+    ]
+    state = {
+        "grid_size": 64,
+        "grid_offset": {"x": 0, "y": 0},
+        "tokens": [],
+        "lights": lights,
+    }
+    sources = veil_map._active_light_sources(state)
+    assert len(sources) == veil_map.MAX_ACTIVE_LIGHTS
+    assert sources[0]["dim_cells"] == 30
+    assert sources[-1]["dim_cells"] == 7
+
+    carried = {
+        "grid_size": 64,
+        "grid_offset": {"x": 0, "y": 0},
+        "lights": [],
+        "tokens": [
+            {
+                "id": "token-light",
+                "kind": "pc",
+                "cell_x": 0,
+                "cell_y": 0,
+                "w": 2,
+                "h": 2,
+                "light": {"bright_cells": 4, "dim_cells": 8, "enabled": True},
+            }
+        ],
+    }
+    carried_sources = veil_map._active_light_sources(carried)
+    assert len(carried_sources) == 1
+    assert carried_sources[0]["token_id"] == "token-light"
+    assert carried_sources[0]["follows_token"] is True
+    assert (carried_sources[0]["x"], carried_sources[0]["y"]) == (64, 64)
+
+
+def test_scene_light_toggle_changes_player_lighting(client):
+    manager, _app = client
+    _login(manager, "u1")
+    _map(manager)
+    light = {
+        "id": "torch-1",
+        "x": 96,
+        "y": 32,
+        "bright_cells": 3,
+        "range_cells": 6,
+        "color": "#ffcc66",
+    }
+    saved = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/lights", {"lights": [light]})
+    assert saved.status_code == 200
+
+    visitor = _app.test_client()
+    _login(visitor, "u2")
+    player = _map(visitor)
+    assert player["fog"]["lighting"] == "sources"
+    assert player["fog"]["light_sources"] == 1
+    bright = veil_map.visibility.decode_mask(player["fog"]["bright"], 50)
+    dim = veil_map.visibility.decode_mask(player["fog"]["dim"], 50)
+    assert (1, 0) in bright
+    assert (5, 0) in dim
+    assert (8, 0) not in bright and (8, 0) not in dim
+
+    off = _write(
+        manager,
+        "put",
+        "/api/plugins/veil-map/rooms/room1/lights",
+        {"lights": [dict(light, enabled=False)]},
+    )
+    assert off.status_code == 200
+    dark = _map(visitor)
+    assert dark["fog"]["lighting"] == "none"
+    assert veil_map.visibility.decode_mask(dark["fog"]["bright"], 50) == veil_map.visibility.decode_mask(
+        dark["fog"]["visible"], 50
+    )
+
+
+def test_token_light_permissions_and_removal(client):
+    manager, app = client
+    _login(manager, "u1")
+    state = _map(manager)
+    tokens = {token["name"]: token["id"] for token in state["map"]["tokens"]}
+    bob_id = tokens["Bob"]
+    alice_id = tokens["Alice"]
+
+    visitor = app.test_client()
+    _login(visitor, "u2")
+    added = _write(
+        visitor,
+        "put",
+        f"/api/plugins/veil-map/rooms/room1/tokens/{bob_id}/light",
+        {"light": {"bright_cells": 4, "dim_cells": 8, "color": "#ffaa00"}},
+    )
+    assert added.status_code == 200
+    body = added.get_json()["data"]
+    assert body["token"]["light"]["enabled"] is True
+    assert body["fog"]["lighting"] == "sources"
+
+    denied = _write(
+        visitor,
+        "put",
+        f"/api/plugins/veil-map/rooms/room1/tokens/{alice_id}/light",
+        {"light": {"bright_cells": 4, "dim_cells": 8}},
+    )
+    assert denied.status_code == 403
+    assert denied.get_json()["code"] == "map.not_owner"
+
+    removed = _write(
+        visitor,
+        "put",
+        f"/api/plugins/veil-map/rooms/room1/tokens/{bob_id}/light",
+        {"remove": True},
+    )
+    assert removed.status_code == 200
+    assert removed.get_json()["data"]["token"]["light"] is None
+
+    manager_added = _write(
+        manager,
+        "put",
+        f"/api/plugins/veil-map/rooms/room1/tokens/{alice_id}/light",
+        {"light": {"bright_cells": 2, "dim_cells": 4}},
+    )
+    assert manager_added.status_code == 200
+    assert manager_added.get_json()["data"]["token"]["light"]["enabled"] is True

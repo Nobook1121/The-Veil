@@ -120,18 +120,29 @@ def _default_calibration() -> dict[str, int]:
 
 
 def _default_ambient() -> dict[str, Any]:
-    return {"enabled": False, "color": "#ffffff", "intensity": 1.0, "darkness": 0.0, "baked": False}
+    return {
+        "enabled": False,
+        "color": "#ffffff",
+        "intensity": 1.0,
+        "darkness": 0.0,
+        "baked": False,
+        # 昼夜与天气本轮不做，只留字段给后续场景环境使用。
+        "time_of_day": "",
+        "weather": "",
+    }
 
 
 DEFAULT_VISION_CELLS = 12
 MAX_VISION_CELLS = MAX_BOUNDS * 2
+MAX_ACTIVE_LIGHTS = 24
 
 
 def _default_fog() -> dict[str, Any]:
     """静态迷雾：探索记录（格位掩码）+ 观察者当前可见。
 
-    动态光源投影与昼夜还没做，``mode`` 先把接口占住。迷雾默认开启，房主可
-    在面板里关掉；关掉后服务端退回整图推送（没有任何需要隐藏的信息）。
+    动态光源投影做的是静态投影（光源位置、明暗半径、墙体遮挡），昼夜循环
+    和天气没有实现。迷雾默认开启，房主可在面板里关掉；关掉后服务端退回
+    整图推送（没有任何需要隐藏的信息）。
     """
     return {
         "enabled": True,
@@ -201,6 +212,36 @@ def _carry_fraction(cell: int, fraction: float) -> tuple[int, float]:
     return int(cell) + int(carry), fraction - carry
 
 
+def _normalize_token_light(raw: Any) -> dict[str, Any] | None:
+    """棋子自带光源（火把、法术光）；与场景光源走同一套明暗半径描述。"""
+    if not isinstance(raw, dict) or raw.get("remove") is True:
+        return None
+    bright = _clamp(_as_int(raw.get("bright_cells"), 4), 0, MAX_VISION_CELLS)
+    raw_dim = raw.get("dim_cells", raw.get("range_cells"))
+    dim = _clamp(_as_int(raw_dim, max(bright, 8)), 0, MAX_VISION_CELLS)
+    dim = max(dim, bright)
+    if dim <= 0:
+        return None
+    color = str(raw.get("color") or "#ffaa00").strip().lower()
+    if not _HEX_COLOR.match(color):
+        color = "#ffaa00"
+    try:
+        intensity = float(raw.get("intensity", 1.0))
+    except (TypeError, ValueError):
+        intensity = 1.0
+    if not math.isfinite(intensity):
+        intensity = 1.0
+    return {
+        "bright_cells": bright,
+        "dim_cells": dim,
+        "range_ft": spatial.cells_to_feet(dim, FEET_PER_CELL),
+        "color": color,
+        "intensity": max(0.0, min(10.0, intensity)),
+        "enabled": bool(raw.get("enabled", True)),
+        "shadows": bool(raw.get("shadows", True)),
+    }
+
+
 def _normalize_token(raw: Any, grid: int, offset_x: int, offset_y: int) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -257,6 +298,7 @@ def _normalize_token(raw: Any, grid: int, offset_x: int, offset_y: int) -> dict[
         "combatant": str(raw.get("combatant") or ""),
         # 0 表示跟随场景迷雾的默认视野；>0 时为该棋子的视野半径（格）。
         "vision_cells": _clamp(_as_int(raw.get("vision_cells"), 0), 0, MAX_VISION_CELLS),
+        "light": _normalize_token_light(raw.get("light")),
     }
 
 
@@ -412,6 +454,8 @@ def _normalize_light(raw: Any, index: int) -> dict[str, Any] | None:
         "intensity": max(0.0, min(10.0, intensity)),
         "shadows": bool(raw.get("shadows", True)),
         "angle": _clamp(_as_int(raw.get("angle"), 360), 0, 360),
+        # 场景光源可被 KP 开关；UVTT 导入的光源默认点亮、可直接使用。
+        "enabled": bool(raw.get("enabled", True)),
     }
 
 
@@ -453,6 +497,9 @@ def _normalize_ambient(raw: Any) -> dict[str, Any]:
     ambient["darkness"] = max(0.0, min(1.0, darkness))
     ambient["enabled"] = bool(raw.get("enabled"))
     ambient["baked"] = bool(raw.get("baked"))
+    # 预留字段：本轮不参与光照计算，只在场景里原样保存。
+    ambient["time_of_day"] = str(raw.get("time_of_day") or "")[:32]
+    ambient["weather"] = str(raw.get("weather") or "")[:32]
     return ambient
 
 
@@ -1009,6 +1056,112 @@ def _scene_room_key(room_dir) -> str:
         return str(room_dir or "")
 
 
+def _active_light_sources(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """场景光源 + 棋子自带光源，统一成同一种描述。
+
+    场景光源是固定位置；棋子光源跟随棋子 footprint 中心。超过上限时按覆盖
+    半径与亮度排序，只保留首要的若干个，避免一次请求做太多投影。
+    """
+    grid, offset_x, offset_y = _grid_of(state)
+    sources: list[dict[str, Any]] = []
+    for light in state.get("lights") or []:
+        if not light.get("enabled", True):
+            continue
+        bright = _clamp(_as_int(light.get("bright_cells"), 0), 0, MAX_VISION_CELLS)
+        dim = _clamp(
+            _as_int(light.get("range_cells"), bright), bright, MAX_VISION_CELLS
+        )
+        if dim <= 0:
+            continue
+        sources.append(
+            {
+                "id": str(light.get("id") or ""),
+                "x": _as_int(light.get("x"), 0),
+                "y": _as_int(light.get("y"), 0),
+                "bright_cells": bright,
+                "dim_cells": dim,
+                "color": str(light.get("color") or "#ffaa00"),
+                "intensity": max(0.0, min(10.0, _fraction(light.get("intensity")))),
+                "token_id": "",
+                "follows_token": False,
+            }
+        )
+    for token in state.get("tokens") or []:
+        light = token.get("light")
+        if not isinstance(light, dict) or not light.get("enabled"):
+            continue
+        bright = _clamp(_as_int(light.get("bright_cells"), 0), 0, MAX_VISION_CELLS)
+        dim = _clamp(
+            _as_int(light.get("dim_cells"), bright), bright, MAX_VISION_CELLS
+        )
+        if dim <= 0:
+            continue
+        cell_x, cell_y = _cell_of(token, grid, offset_x, offset_y)
+        width, height = _footprint(token)
+        x, y = visibility.footprint_center(
+            cell_x, cell_y, width, height, grid, (offset_x, offset_y)
+        )
+        sources.append(
+            {
+                "id": f"{token.get('id')}:light",
+                "x": int(round(x)),
+                "y": int(round(y)),
+                "bright_cells": bright,
+                "dim_cells": dim,
+                "color": str(light.get("color") or "#ffaa00"),
+                "intensity": max(
+                    0.0, min(10.0, _fraction(light.get("intensity")))
+                ),
+                "token_id": str(token.get("id") or ""),
+                "follows_token": True,
+            }
+        )
+    sources.sort(
+        key=lambda item: (
+            item["dim_cells"] * 2 + item["bright_cells"],
+            item["intensity"],
+        ),
+        reverse=True,
+    )
+    return sources[:MAX_ACTIVE_LIGHTS]
+
+
+def _scene_lighting(
+    state: dict[str, Any], room_dir
+) -> tuple[set[tuple[int, int]], set[tuple[int, int]], list[dict[str, Any]]]:
+    """场景光照：多个光源分别投影后取并集，明区与暗区分开返回。"""
+    sources = _active_light_sources(state)
+    if not sources:
+        return set(), set(), []
+    grid, offset_x, offset_y = _grid_of(state)
+    bounds = _clamp(
+        _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS
+    )
+    wall_version = visibility.state_version(state.get("walls") or [])
+    # 光源与棋子位置都进入 light_version：任一光源变化会让投影缓存整体失效。
+    light_version = visibility.state_version(sources)
+    room_key = _scene_room_key(room_dir)
+    bright: set[tuple[int, int]] = set()
+    dim: set[tuple[int, int]] = set()
+    for source in sources:
+        result = visibility.lighting(
+            (source["x"], source["y"]),
+            walls=state.get("walls") or [],
+            grid_size=grid,
+            offset=(offset_x, offset_y),
+            bounds_cells=bounds,
+            bright_cells=source["bright_cells"],
+            dim_cells=source["dim_cells"],
+            wall_version=wall_version,
+            light_version=light_version,
+            room_key=room_key,
+        )
+        bright |= result["bright"]
+        dim |= result["dim"]
+    dim -= bright
+    return bright, dim, sources
+
+
 def _pc_tokens(state: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         token
@@ -1186,6 +1339,22 @@ def _observer_scope(
         state, room_dir, _vision_tokens(state, user_id, manager)
     )
     explored = visibility.decode_mask(fog.get("explored"), bounds) | party_cells
+    ambient = state.get("ambient_light") or {}
+    bright_all, dim_all, light_sources = _scene_lighting(state, room_dir)
+    if ambient.get("enabled"):
+        # 环境光（UVTT 的全局照明）下，视野内都算明亮。
+        bright = set(visible)
+        dim: set[tuple[int, int]] = set()
+        lighting_mode = "ambient"
+    elif not light_sources:
+        # 没有任何光源时退化为纯视线可见，避免整张图漆黑一片。
+        bright = set(visible)
+        dim = set()
+        lighting_mode = "none"
+    else:
+        bright = visible & bright_all
+        dim = (visible & dim_all) - bright
+        lighting_mode = "sources"
     if manager:
         view = state
     else:
@@ -1200,6 +1369,10 @@ def _observer_scope(
         "grid_size": grid,
         "grid_offset": {"x": offset_x, "y": offset_y},
         "vision_cells": _as_int(fog.get("vision_cells"), DEFAULT_VISION_CELLS),
+        "lighting": lighting_mode,
+        "light_sources": len(light_sources),
+        "bright": visibility.encode_mask(bright, bounds),
+        "dim": visibility.encode_mask(dim, bounds),
         "explored": visibility.encode_mask(explored, bounds),
         "visible": visibility.encode_mask(visible, bounds),
         "explored_count": len(explored),
@@ -1965,6 +2138,145 @@ def update_walls(room_id: str):
         revision=state["revision"],
         code="map.walls_updated",
         data={"map": state, "fog": fog_payload, "can_manage": True},
+    )
+
+
+@bp.route("/rooms/<room_id>/lights", methods=["PUT"])
+def update_lights(room_id: str):
+    """KP 保存场景光源（含开关）。棋子自带光源走 token 级接口。"""
+    room_dir, info, denied = _map_room_or_error(room_id)
+    if denied:
+        return denied
+    payload = _write_payload()
+    _role, manager = _room_context(info)
+    with _MAP_LOCK:
+        state = _load_map(room_dir)
+        if not manager:
+            return _rejected_request(
+                "只有房主或房管可以编辑场景光源。",
+                "map.manager_only",
+                revision=state["revision"],
+            )
+        request_id, expected, error = _read_envelope(payload, state)
+        if error is not None:
+            return error
+        record = _duplicate_record(state, request_id)
+        if record is not None:
+            return _duplicate_receipt(state, manager, record)
+        if expected != state["revision"]:
+            return _conflict_request(state, manager, request_id)
+        raw_lights = payload.get("lights")
+        if not isinstance(raw_lights, list):
+            return _invalid_request(
+                "lights 必须是光源数组。",
+                "map.invalid_lights",
+                request_id=request_id,
+                revision=state["revision"],
+            )
+        if len(raw_lights) > MAX_LIGHTS:
+            return _invalid_request(
+                f"光源数量不能超过 {MAX_LIGHTS} 个。",
+                "map.too_many_lights",
+                request_id=request_id,
+                revision=state["revision"],
+            )
+        state["lights"] = _normalize_lights(raw_lights)
+        state = _save_map(
+            room_dir,
+            state,
+            {"request_id": request_id, "action": "map.lights"},
+        )
+        _view, fog_payload, _visible = _observer_scope(
+            state, room_dir, str(session.get("user_id") or ""), True
+        )
+    _broadcast(room_id, state)
+    return _receipt(
+        "success",
+        "光源已保存。",
+        request_id=request_id,
+        revision=state["revision"],
+        code="map.lights_updated",
+        data={"map": state, "fog": fog_payload, "can_manage": True},
+    )
+
+
+@bp.route("/rooms/<room_id>/tokens/<token_id>/light", methods=["PUT"])
+def update_token_light(room_id: str, token_id: str):
+    """给棋子加 / 去掉自带光源；房主可操作任意棋子，玩家只能动自己的。"""
+    room_dir, info, denied = _map_room_or_error(room_id)
+    if denied:
+        return denied
+    payload = _write_payload()
+    _role, manager = _room_context(info)
+    viewer_id = str(session.get("user_id") or "")
+    with _MAP_LOCK:
+        state = _load_map(room_dir)
+        token = next(
+            (item for item in state["tokens"] if str(item.get("id")) == str(token_id)),
+            None,
+        )
+        if token is None:
+            return _invalid_request(
+                "棋子不存在。",
+                "map.token_not_found",
+                revision=state["revision"],
+                http_status=404,
+            )
+        if not manager and str(token.get("owner_user_id") or "") != viewer_id:
+            return _rejected_request(
+                "你只能操作自己绑定的棋子上的光源。",
+                "map.not_owner",
+                revision=state["revision"],
+            )
+        request_id, expected, error = _read_envelope(payload, state)
+        if error is not None:
+            return error
+        view, fog_view, _visible = _observer_scope(
+            state, room_dir, viewer_id, manager
+        )
+        record = _duplicate_record(state, request_id)
+        if record is not None:
+            return _duplicate_receipt(
+                state, manager, record, map_view=view, fog_view=fog_view
+            )
+        if expected != state["revision"]:
+            return _conflict_request(
+                state, manager, request_id, map_view=view, fog_view=fog_view
+            )
+        raw_light = payload.get("light")
+        if payload.get("remove") is True or raw_light is None:
+            token["light"] = None
+        else:
+            light = _normalize_token_light(raw_light)
+            if light is None:
+                return _invalid_request(
+                    "光源参数不合法：需要明亮半径或昏暗半径。",
+                    "map.invalid_light",
+                    request_id=request_id,
+                    revision=state["revision"],
+                )
+            token["light"] = light
+        state = _save_map(
+            room_dir,
+            state,
+            {"request_id": request_id, "action": "token.light", "token_id": token_id},
+        )
+        view, fog_view, _visible = _observer_scope(
+            state, room_dir, viewer_id, manager
+        )
+    _broadcast(room_id, state)
+    return _receipt(
+        "success",
+        "棋子光源已更新。",
+        request_id=request_id,
+        revision=state["revision"],
+        code="map.token_light_updated",
+        data={
+            "map": view,
+            "fog": fog_view,
+            "token": token,
+            "can_manage": manager,
+        },
     )
 
 
