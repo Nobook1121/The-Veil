@@ -377,8 +377,8 @@ def _agent_app() -> Flask:
 
 
 def _read_map_tokens(room_dir: Path) -> list[dict]:
-    path = room_dir / "plugins" / "veil-map" / "map.json"
-    return json.loads(path.read_text(encoding="utf-8"))["tokens"]
+    state, _source = veil_map.scene_store.load(room_dir)
+    return state.get("tokens") or []
 
 
 @pytest.fixture()
@@ -1042,3 +1042,98 @@ def test_failed_uvtt_import_leaves_no_partial_scene(client):
     assert after["map"]["walls"] == before_walls
     after_assets = len(list(asset_dir.iterdir())) if asset_dir.exists() else 0
     assert after_assets == before_assets
+
+
+def _scene_dir(room_dir: Path) -> Path:
+    return room_dir / "plugins" / "veil-map" / "scenes" / "default"
+
+
+def _generation_dir(room_dir: Path) -> Path:
+    active = json.loads((_scene_dir(room_dir) / "active.json").read_text(encoding="utf-8"))
+    return _scene_dir(room_dir) / active["generation"]
+
+
+def test_scene_shards_share_same_revision(client):
+    manager, app = client
+    _login(manager, "u1")
+    room_dir = Path(app.config["ROOMS_DIR"]) / "room1"
+
+    updated = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map", {"grid_size": 48})
+    assert updated.status_code == 200
+    revision = updated.get_json()["revision"]
+    generation = _generation_dir(room_dir)
+    scene = json.loads((generation / "scene.json").read_text(encoding="utf-8"))
+    assert scene["revision"] == revision
+    assert scene["grid_size"] == 48
+    for filename in ("tokens.json", "walls.json", "lights.json", "journal.json"):
+        payload = json.loads((generation / filename).read_text(encoding="utf-8"))
+        assert payload["revision"] == revision
+    assert (room_dir / "plugins" / "veil-map" / "scenes" / "active.json").exists()
+    assert not (room_dir / "plugins" / "veil-map" / "map.json").exists()
+
+
+def test_legacy_map_json_is_read_then_migrated_on_first_write(client):
+    _manager, app = client
+    room_dir = Path(app.config["ROOMS_DIR"]) / "room1"
+    info = json.loads((room_dir / "info.json").read_text(encoding="utf-8"))
+    info["members"] = [member for member in info["members"] if member["user_id"] == "u1"]
+    (room_dir / "info.json").write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+    legacy = {
+        "version": 1,
+        "revision": 7,
+        "scene_id": "default",
+        "grid_size": 48,
+        "bounds_cells": 50,
+        "tokens": [
+            {
+                "id": "member-u1",
+                "name": "Alice",
+                "x": 96,
+                "y": 96,
+                "w": 1,
+                "h": 1,
+                "kind": "pc",
+                "owner_user_id": "u1",
+                "combatant": "Alice",
+            }
+        ],
+        "walls": [{"id": "wall-a", "kind": "wall", "points": [{"x": 0, "y": 0}, {"x": 64, "y": 0}]}],
+    }
+    map_dir = room_dir / "plugins" / "veil-map"
+    map_dir.mkdir(parents=True)
+    (map_dir / "map.json").write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+
+    manager = app.test_client()
+    _login(manager, "u1")
+    opened = _map(manager)
+    assert opened["map"]["revision"] == 7
+    assert opened["map"]["grid_size"] == 48
+    assert opened["map"]["walls"][0]["id"] == "wall-a"
+    assert not _scene_dir(room_dir).exists()
+
+    updated = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map", {"grid_size": 32})
+    assert updated.status_code == 200
+    assert updated.get_json()["revision"] == 8
+    assert _scene_dir(room_dir).exists()
+    assert (map_dir / "map.json").exists()
+
+    reopened = _map(manager)
+    assert reopened["map"]["grid_size"] == 32
+    assert reopened["map"]["revision"] == 8
+
+
+def test_scene_loader_falls_back_to_previous_complete_generation(client):
+    manager, app = client
+    _login(manager, "u1")
+    room_dir = Path(app.config["ROOMS_DIR"]) / "room1"
+
+    first = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map", {"grid_size": 48})
+    assert first.status_code == 200
+    second = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map", {"grid_size": 56})
+    assert second.status_code == 200
+    latest = _generation_dir(room_dir)
+    (latest / "tokens.json").unlink()
+
+    state = veil_map._load_map(room_dir)
+    assert state["revision"] == first.get_json()["revision"]
+    assert state["grid_size"] == 48

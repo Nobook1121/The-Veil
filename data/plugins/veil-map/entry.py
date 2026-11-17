@@ -28,7 +28,7 @@ from flask import Blueprint, current_app, jsonify, request, send_from_directory,
 from trpg_server.agents.room_state import load_room_state
 from trpg_server.agents.tools.base import AgentTool
 from trpg_server.combat.scheduler import spend_budget
-from trpg_server.json_store import read_json, write_json_atomic
+from trpg_server.json_store import read_json
 from trpg_server.responses import error_response, success_response
 from trpg_server.room_access import can_access, find_room, is_elevated
 from trpg_server.room_rules import resolve_rule_id
@@ -85,6 +85,7 @@ def _load_local_module(name: str):
 spatial = _load_local_module("spatial")
 media = _load_local_module("media")
 importer = _load_local_module("importer")
+scene_store = _load_local_module("scene_store")
 
 
 def _now() -> str:
@@ -100,10 +101,6 @@ def _as_int(value: Any, fallback: int) -> int:
 
 def _clamp(value: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
-
-
-def _map_path(room_dir):
-    return room_dir / "plugins" / "veil-map" / "map.json"
 
 
 def _default_calibration() -> dict[str, int]:
@@ -406,7 +403,8 @@ def _normalize_map(raw: Any) -> dict[str, Any]:
 
 
 def _load_map(room_dir) -> dict[str, Any]:
-    return _normalize_map(read_json(_map_path(room_dir), default={}))
+    state, _source = scene_store.load(room_dir)
+    return _normalize_map(state)
 
 
 def _save_map(
@@ -414,7 +412,11 @@ def _save_map(
     state: dict[str, Any],
     request_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """写入地图并推进 revision；成功的写请求会留下幂等记录。"""
+    """写入场景并推进 revision；成功的写请求会留下幂等记录。
+
+    新布局把 scene / tokens / walls / lights / journal 拆成独立分片，revision
+    写在每个分片里并由 scene_store 统一提交，旧 ``map.json`` 只在没有分片时读取。
+    """
     state["revision"] = max(0, _as_int(state.get("revision"), 0)) + 1
     normalized = _normalize_map(state)
     normalized["updated_at"] = _now()
@@ -429,9 +431,7 @@ def _save_map(
         }
         records.append(record)
         normalized["recent_requests"] = records[-RECENT_REQUEST_LIMIT:]
-    path = _map_path(room_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_json_atomic(path, normalized)
+    scene_store.save(room_dir, normalized)
     return normalized
 
 
