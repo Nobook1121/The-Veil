@@ -1475,8 +1475,27 @@ async function switchRoomScenario(
     }
 }
 
+interface HouseRuleDefinitionSpec {
+    type: string;
+    default?: unknown;
+    values?: string[];
+    min?: number;
+    max?: number;
+    scope?: string;
+    group?: string;
+    group_label?: string;
+    group_label_i18n?: Record<string, string>;
+    label?: string;
+    label_i18n?: Record<string, string>;
+    description?: string;
+    description_i18n?: Record<string, string>;
+    option_labels?: Record<string, Record<string, string>>;
+}
+
 interface RoomHouseRulesPayload {
     house_rules: RoomHouseRules;
+    definitions?: Record<string, HouseRuleDefinitionSpec>;
+    ruleset_id?: string;
     global_hints_enabled: boolean;
     visibility?: "public" | "private";
     dice_thresholds?: { critical: number; fumble: number };
@@ -1656,6 +1675,168 @@ const COMBAT_SELECT_FIELDS: Array<[string, keyof RoomHouseRules]> = [
     ["houseRuleCombatShieldAction", "combat_shield_action"],
 ];
 
+let activeRulesetHouseRules: Record<string, HouseRuleDefinitionSpec> = {};
+
+function houseRuleLocale(): string {
+    return document.documentElement.lang || "zh-CN";
+}
+
+function houseRuleText(value: string | undefined, translations?: Record<string, string>): string {
+    if (translations && typeof translations === "object") {
+        const locale = houseRuleLocale();
+        return translations[locale] || translations["zh-CN"] || translations["en-US"] || "";
+    }
+    return value || "";
+}
+
+/** 只渲染插件声明为 scope=ruleset 的房规；核心不认识任何具体字段名。 */
+function renderRulesetHouseRules(payload: RoomHouseRulesPayload): void {
+    const container = document.getElementById("roomRulesetHouseRules");
+    if (!container) return;
+    const entries = Object.entries(payload.definitions || {}).filter(
+        ([, spec]) => spec && spec.scope === "ruleset",
+    );
+    activeRulesetHouseRules = Object.fromEntries(entries);
+    container.replaceChildren();
+    if (!entries.length) {
+        container.hidden = true;
+        return;
+    }
+    container.hidden = false;
+    const title = document.createElement("h6");
+    title.textContent = houseRuleLocale().startsWith("en") ? "Ruleset House Rules" : "规则集房规";
+    container.appendChild(title);
+    const groups = new Map<string, { label: string; items: Array<[string, HouseRuleDefinitionSpec]> }>();
+    entries.forEach(([key, spec]) => {
+        const keyName = spec.group || "general";
+        if (!groups.has(keyName)) {
+            groups.set(keyName, {
+                label: houseRuleText(spec.group_label, spec.group_label_i18n) || keyName,
+                items: [],
+            });
+        }
+        groups.get(keyName)!.items.push([key, spec]);
+    });
+    const values = (payload.house_rules || {}) as Record<string, unknown>;
+    groups.forEach((group) => {
+        const heading = document.createElement("div");
+        heading.className = "text-muted small text-uppercase mt-3 mb-2";
+        heading.textContent = group.label;
+        container.appendChild(heading);
+        group.items.forEach(([key, spec]) => {
+            const value = values[key];
+            const labelText = houseRuleText(spec.label, spec.label_i18n) || key;
+            const descriptionText = houseRuleText(spec.description, spec.description_i18n);
+            if (spec.type === "boolean") {
+                const wrapper = document.createElement("div");
+                wrapper.className = "form-check";
+                const input = document.createElement("input");
+                input.className = "form-check-input";
+                input.type = "checkbox";
+                input.dataset.houseRuleKey = key;
+                input.checked = value === undefined || value === null ? Boolean(spec.default) : Boolean(value);
+                const label = document.createElement("label");
+                label.className = "form-check-label";
+                label.textContent = labelText;
+                wrapper.append(input, label);
+                container.appendChild(wrapper);
+            } else {
+                const wrapper = document.createElement("div");
+                wrapper.className = "mb-3";
+                const label = document.createElement("label");
+                label.className = "form-label";
+                label.textContent = labelText;
+                wrapper.appendChild(label);
+                if (spec.type === "nullable_boolean") {
+                    const select = document.createElement("select");
+                    select.className = "form-select form-select-sm";
+                    select.dataset.houseRuleKey = key;
+                    const nullableOptions: Array<[string, string]> = [
+                        ["", "跟随默认"],
+                        ["on", "开启"],
+                        ["off", "关闭"],
+                    ];
+                    nullableOptions.forEach(([optionValue, optionLabel]) => {
+                        const option = document.createElement("option");
+                        option.value = optionValue;
+                        option.textContent = optionLabel;
+                        select.appendChild(option);
+                    });
+                    select.value = value === null ? "" : value === undefined ? "" : value ? "on" : "off";
+                    wrapper.appendChild(select);
+                } else if (spec.type === "nullable_integer") {
+                    const input = document.createElement("input");
+                    input.className = "form-control form-control-sm";
+                    input.type = "number";
+                    input.dataset.houseRuleKey = key;
+                    if (typeof spec.min === "number") input.min = String(spec.min);
+                    if (typeof spec.max === "number") input.max = String(spec.max);
+                    input.value = value === null || value === undefined ? "" : String(value);
+                    wrapper.appendChild(input);
+                } else {
+                    const select = document.createElement("select");
+                    select.className = "form-select form-select-sm";
+                    select.dataset.houseRuleKey = key;
+                    (spec.values || []).forEach((optionValue) => {
+                        const option = document.createElement("option");
+                        option.value = optionValue;
+                        option.textContent =
+                            houseRuleText(undefined, spec.option_labels?.[optionValue]) || optionValue;
+                        select.appendChild(option);
+                    });
+                    const current = typeof value === "string" ? value : String(spec.default ?? "");
+                    if (current && Array.from(select.options).some((option) => option.value === current)) {
+                        select.value = current;
+                    }
+                    wrapper.appendChild(select);
+                }
+                if (descriptionText) {
+                    const description = document.createElement("p");
+                    description.className = "form-text small mb-0";
+                    description.textContent = descriptionText;
+                    wrapper.appendChild(description);
+                }
+                container.appendChild(wrapper);
+            }
+            if (spec.type === "boolean" && descriptionText) {
+                const description = document.createElement("p");
+                description.className = "form-text small mt-1 ps-4";
+                description.textContent = descriptionText;
+                container.appendChild(description);
+            }
+        });
+    });
+}
+
+function readRulesetHouseRuleValues(): Record<string, unknown> {
+    const values: Record<string, unknown> = {};
+    const container = document.getElementById("roomRulesetHouseRules");
+    if (!container) return values;
+    container.querySelectorAll<HTMLElement>("[data-house-rule-key]").forEach((element) => {
+        const key = element.dataset.houseRuleKey;
+        const spec = key ? activeRulesetHouseRules[key] : undefined;
+        if (!key || !spec) return;
+        if (element instanceof HTMLInputElement) {
+            if (spec.type === "boolean") {
+                values[key] = element.checked;
+            } else if (spec.type === "nullable_integer") {
+                const raw = element.value.trim();
+                values[key] = raw === "" ? null : Number(raw);
+            } else {
+                values[key] = element.value;
+            }
+        } else if (element instanceof HTMLSelectElement) {
+            const raw = element.value;
+            if (spec.type === "nullable_boolean") {
+                values[key] = raw === "" ? null : raw === "on";
+            } else {
+                values[key] = raw === "" ? null : raw;
+            }
+        }
+    });
+    return values;
+}
+
 async function openHouseRulesModal(): Promise<void> {
     if (!currentRoom?.id) return;
     const modalElement = document.getElementById("roomHouseRulesModal");
@@ -1798,6 +1979,7 @@ async function openHouseRulesModal(): Promise<void> {
             if (effective) parts.push(`当前生效：${levelLabel[effective.level]} / 玩家投掷${effective.player_roll ? "开启" : "关闭"} / 重投${rerollText(effective.reroll_mode, effective.reroll_limit)}（等待超时 ${effective.timeout} 秒）`);
             animationHint.textContent = parts.join("；");
         }
+        renderRulesetHouseRules(response.data);
         new bootstrap.Modal(modalElement).show();
     } catch (error) {
         showNotification(`加载房规失败：${roomErrorMessage(error)}`, "error");
@@ -1861,6 +2043,7 @@ async function saveHouseRules(): Promise<void> {
                 combat_dex_extra_action_threshold: readCombatDexExtraAction(),
                 // 即时症状收尾安全阀：留空沿用默认 60 分钟，0 表示关闭兜底。
                 coc7_sanity_bout_safety_minutes: readHouseRuleBoutSafety(),
+                ...readRulesetHouseRuleValues(),
             },
             visibility: visibilitySelect?.value || "private",
         });

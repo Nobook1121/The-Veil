@@ -9,6 +9,7 @@ from __future__ import annotations
 from dnd5e_plugin.checks import Dnd5eChecks
 from dnd5e_plugin.combat import Dnd5eCombatRules
 from dnd5e_plugin.effects import Dnd5eEffects
+from dnd5e_plugin.house_rules import house_rules as dnd5e_house_rules
 from dnd5e_plugin.schema import Dnd5eCharacterSchema
 from dnd5e_plugin.spells import Dnd5eSpells
 from dnd5e_plugin.tools import Dnd5eTools
@@ -90,6 +91,10 @@ class Dnd5ePlugin:
             panels={"chat": "sidebar", "character": "drawer", "combat": "topbar"},
             priority=100,
         )
+
+    def house_rules(self) -> dict[str, dict]:
+        """返回 5e 房规 schema；核心只按 type/values/default 做通用校验。"""
+        return dnd5e_house_rules()
 
 
 PLUGIN = Dnd5ePlugin()
