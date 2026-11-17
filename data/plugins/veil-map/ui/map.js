@@ -24,6 +24,15 @@
         return Number.isFinite(number) ? number : fallback;
     }
 
+    function hexToRgba(value, alpha) {
+        var text = String(value || "").replace("#", "");
+        if (!/^[0-9a-fA-F]{6}$/.test(text)) text = "ffaa00";
+        var red = parseInt(text.slice(0, 2), 16);
+        var green = parseInt(text.slice(2, 4), 16);
+        var blue = parseInt(text.slice(4, 6), 16);
+        return "rgba(" + red + ", " + green + ", " + blue + ", " + clamp(alpha, 0, 1) + ")";
+    }
+
     function apiRequest(method, path, body) {
         var api = window.TrpgApi;
         if (api) {
@@ -129,9 +138,11 @@
             "</div>",
             '<div class="vmap-divider"></div>',
             '<div class="vmap-section-label">导入地图</div>',
-            '<label class="vmap-field">图片文件（PNG / JPG / WEBP / BMP，最大 40MB）',
-            '<input type="file" accept=".png,.jpg,.jpeg,.webp,.bmp,image/png,image/jpeg,image/webp,image/bmp" data-vmap-import></label>',
+            '<label class="vmap-field">地图文件（PNG / JPG / WEBP / BMP、UVTT / dd2vtt、Foundry 场景 JSON，最大 64MB）',
+            '<input type="file" accept=".png,.jpg,.jpeg,.webp,.bmp,.uvtt,.dd2vtt,.json,image/png,image/jpeg,image/webp,image/bmp,application/json" data-vmap-import></label>',
+            '<div class="vmap-note" data-vmap-import-help>UVTT / Foundry 会一并带出墙体、门与光源；Foundry 仅支持内嵌背景图的场景。</div>',
             '<div class="vmap-actions"><button type="button" data-vmap-import-map>导入地图</button></div>',
+            '<div class="vmap-note" data-vmap-import-info hidden></div>',
             '<div class="vmap-calibration" data-vmap-calibration hidden>',
             '<div class="vmap-note" data-vmap-calibration-info></div>',
             '<label class="vmap-field">横向格数',
@@ -167,6 +178,7 @@
         var panelTitle = panel.querySelector("[data-vmap-panel-title]");
         var panelSections = panel.querySelectorAll("[data-vmap-section]");
         var panelImport = panel.querySelector("[data-vmap-import]");
+        var panelImportInfo = panel.querySelector("[data-vmap-import-info]");
         var panelCalibration = panel.querySelector("[data-vmap-calibration]");
         var panelCalibrationInfo = panel.querySelector("[data-vmap-calibration-info]");
         var panelCellsAcross = panel.querySelector("[data-vmap-cells-across]");
@@ -293,12 +305,64 @@
             });
         }
 
+        function drawSceneLayers(camera) {
+            if (!mapState) return;
+            var grid = gridSize();
+            var lights = Array.isArray(mapState.lights) ? mapState.lights : [];
+            context.save();
+            lights.forEach(function (light) {
+                var point = ctx.worldToScreen(Number(light.x) || 0, Number(light.y) || 0);
+                var radius = Math.max(1, Number(light.range_cells) || 0) * grid * camera.zoom;
+                if (radius <= 2) return;
+                var color = String(light.color || "#ffaa00");
+                var intensity = clamp(Number(light.intensity) || 0, 0, 1.5);
+                var gradient = context.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius);
+                gradient.addColorStop(0, hexToRgba(color, 0.24 * intensity));
+                gradient.addColorStop(0.55, hexToRgba(color, 0.10 * intensity));
+                gradient.addColorStop(1, hexToRgba(color, 0));
+                context.fillStyle = gradient;
+                context.beginPath();
+                context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+                context.fill();
+            });
+            context.restore();
+
+            var walls = Array.isArray(mapState.walls) ? mapState.walls : [];
+            context.save();
+            walls.forEach(function (wall) {
+                var points = Array.isArray(wall.points) ? wall.points : [];
+                if (points.length < 2) return;
+                context.beginPath();
+                points.forEach(function (item, index) {
+                    var point = ctx.worldToScreen(Number(item.x) || 0, Number(item.y) || 0);
+                    if (index === 0) context.moveTo(point.x, point.y);
+                    else context.lineTo(point.x, point.y);
+                });
+                var kind = String(wall.kind || "wall");
+                var openDoor = kind === "door" && String(wall.state || "closed") === "open";
+                if (kind === "door") {
+                    context.strokeStyle = openDoor ? "rgba(147, 196, 125, 0.9)" : "rgba(224, 102, 102, 0.92)";
+                } else if (kind === "window") {
+                    context.strokeStyle = "rgba(111, 168, 220, 0.92)";
+                } else if (kind === "terrain") {
+                    context.strokeStyle = "rgba(246, 178, 107, 0.68)";
+                } else {
+                    context.strokeStyle = "rgba(200, 163, 90, 0.78)";
+                }
+                context.lineWidth = Math.max(1.5, (kind === "door" ? 3 : 2) * camera.zoom);
+                context.setLineDash(openDoor ? [6 * camera.zoom, 4 * camera.zoom] : []);
+                context.stroke();
+            });
+            context.restore();
+        }
+
         function draw() {
             if (!context || destroyed) return;
             var size = resizeCanvas();
             var camera = ctx.getCamera();
             var list = activeTokens();
             context.clearRect(0, 0, size.width, size.height);
+            drawSceneLayers(camera);
             list.forEach(function (token) {
                 var rect = tokenRect(token);
                 var current = isCurrentActor(token);
@@ -513,7 +577,11 @@
                 panelBounds.value = String(clamp(asInt(mapState.bounds_cells, DEFAULT_BOUNDS), MIN_BOUNDS, MAX_BOUNDS));
                 panelBackground.value = String(mapState.background || "");
             }
-            if (mode === "scene") renderCalibration();
+            if (mode === "scene") {
+                renderCalibration();
+                var meta = mapState && mapState.background_meta;
+                renderImportInfo(meta && meta.import ? meta : null);
+            }
             if (mode === "token" && panelName) panelName.focus();
         }
 
@@ -564,10 +632,30 @@
                 "（" + meta.width + "×" + meta.height + "px，每格 " + derived + "px）";
         }
 
+        function renderImportInfo(details) {
+            if (!panelImportInfo) return;
+            var info = details && details.import ? details.import : details;
+            if (!info || !info.format) {
+                panelImportInfo.hidden = true;
+                panelImportInfo.textContent = "";
+                return;
+            }
+            var parts = [String(info.label || info.format)];
+            if (typeof info.walls === "number") parts.push("墙体 " + info.walls + " 段");
+            if (typeof info.doors === "number") parts.push("门/窗 " + info.doors + " 个");
+            if (typeof info.lights === "number") parts.push("光源 " + info.lights + " 个");
+            if (info.needs_review) parts.push("需要复核网格");
+            var warnings = Array.isArray(info.warnings) ? info.warnings : [];
+            var text = parts.join(" · ");
+            if (warnings.length) text += "。" + warnings.join(" ");
+            panelImportInfo.textContent = text;
+            panelImportInfo.hidden = false;
+        }
+
         function importMap() {
             var file = panelImport && panelImport.files ? panelImport.files[0] : null;
             if (!file) {
-                notify("请先选择要导入的地图图片。", "error");
+                notify("请先选择要导入的地图文件。", "error");
                 return;
             }
             var envelope = writeBody({});
@@ -586,15 +674,17 @@
                     return;
                 }
                 applyPayload(response.data);
-                if (response.data && response.data.calibration_hint) {
-                    panelCellsAcross.value = String(response.data.calibration_hint.cells_across);
-                    panelOffsetX.value = "0";
-                    panelOffsetY.value = "0";
+                var hint = response.data && response.data.calibration_hint;
+                if (hint) {
+                    panelCellsAcross.value = String(hint.cells_across);
+                    panelOffsetX.value = String(hint.offset_x || 0);
+                    panelOffsetY.value = String(hint.offset_y || 0);
                 }
                 if (panelImport) panelImport.value = "";
                 if (panelBackground) panelBackground.value = String(response.data.map.background || "");
+                renderImportInfo(response.data);
                 renderCalibration();
-                notify("地图已导入，请调整网格标定。", "success");
+                notify(response.message || "地图已导入，请调整网格标定。", hint && hint.needs_review ? "info" : "success");
             }).catch(function (error) {
                 console.error("veil-map import failed", error);
                 notify("地图导入失败，请稍后重试。", "error");

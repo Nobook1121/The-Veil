@@ -1,6 +1,8 @@
 """导入地图图片的校验工具。
 
 只读取文件头判断格式与尺寸，不把整张图解码进内存，也不依赖 Pillow。
+格式一律按文件内容（magic bytes）判断，扩展名只用于错误提示；这样把 PNG
+改名成 ``.jpg``、或把 UVTT 文件存成 ``.json`` 都能正确识别。
 所有错误都带可读中文消息与稳定 code，由插件转换为写操作回执。
 """
 
@@ -100,31 +102,32 @@ _READERS = {
     "bmp": _bmp_size,
 }
 
+# magic bytes → 规范扩展名；jpeg 统一归一化为 jpg，便于落盘。
+_SIGNATURES = (
+    ("png", lambda raw: raw[:8] == b"\x89PNG\r\n\x1a\n"),
+    ("jpg", lambda raw: raw[:2] == b"\xff\xd8"),
+    ("webp", lambda raw: raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"),
+    ("bmp", lambda raw: raw[:2] == b"BM"),
+)
 
-def inspect_image(raw: bytes, filename: Any) -> dict[str, Any]:
-    """校验上传图片，返回 ``{suffix, width, height, size}``；失败抛 ImageError。"""
-    suffix = image_suffix(filename)
-    if suffix not in SUPPORTED_IMAGE_SUFFIXES:
-        raise ImageError(
-            "map.image_unsupported",
-            "只支持 PNG / JPG / WEBP / BMP 格式的地图图片。",
-        )
+
+def sniff_image(raw: bytes) -> dict[str, Any] | None:
+    """按文件头识别图片；返回 ``{suffix, width, height}``，无法识别时返回 None。"""
     if not raw:
-        raise ImageError("map.image_empty", "上传的图片是空文件，请重新选择。")
-    if len(raw) > MAX_IMAGE_BYTES:
-        limit = MAX_IMAGE_BYTES // (1024 * 1024)
-        raise ImageError(
-            "map.image_too_large",
-            f"地图图片不能超过 {limit} MB，请压缩或裁切后再导入。",
-        )
-    reader = _READERS.get(suffix)
-    size = reader(raw) if reader else None
-    if not size:
-        raise ImageError(
-            "map.image_invalid",
-            "图片内容无法识别，请确认文件没有损坏、且扩展名与实际格式一致。",
-        )
-    width, height = size
+        return None
+    for suffix, matches in _SIGNATURES:
+        if not matches(raw):
+            continue
+        size = _READERS[suffix](raw)
+        if not size:
+            return None
+        width, height = size
+        return {"suffix": suffix, "width": width, "height": height}
+    return None
+
+
+def validate_dimensions(width: int, height: int) -> None:
+    """校验图片尺寸与像素上限；失败抛 ImageError。"""
     if width < MIN_IMAGE_DIMENSION or height < MIN_IMAGE_DIMENSION:
         raise ImageError(
             "map.image_tiny",
@@ -140,4 +143,39 @@ def inspect_image(raw: bytes, filename: Any) -> dict[str, Any]:
             "map.image_pixels",
             f"图片像素总量过大（{width}×{height}），请先缩小到 1.2 亿像素以内。",
         )
-    return {"suffix": suffix, "width": width, "height": height, "size": len(raw)}
+
+
+def inspect_image(raw: bytes, filename: Any = "") -> dict[str, Any]:
+    """校验上传图片，返回 ``{suffix, width, height, size}``；失败抛 ImageError。
+
+    格式按 magic bytes 判断；``filename`` 只用于在“既不是图片也不是 JSON”时
+    区分“扩展名不受支持”和“文件内容损坏”。
+    """
+    if not raw:
+        raise ImageError("map.image_empty", "上传的图片是空文件，请重新选择。")
+    if len(raw) > MAX_IMAGE_BYTES:
+        limit = MAX_IMAGE_BYTES // (1024 * 1024)
+        raise ImageError(
+            "map.image_too_large",
+            f"地图图片不能超过 {limit} MB，请压缩或裁切后再导入。",
+        )
+    sniffed = sniff_image(raw)
+    if sniffed is None:
+        suffix = image_suffix(filename)
+        if suffix and suffix not in SUPPORTED_IMAGE_SUFFIXES:
+            raise ImageError(
+                "map.image_unsupported",
+                "只支持 PNG / JPG / WEBP / BMP 格式的地图图片。",
+            )
+        raise ImageError(
+            "map.image_invalid",
+            "图片内容无法识别，请确认文件没有损坏、且扩展名与实际格式一致。",
+        )
+    width, height = int(sniffed["width"]), int(sniffed["height"])
+    validate_dimensions(width, height)
+    return {
+        "suffix": str(sniffed["suffix"]),
+        "width": width,
+        "height": height,
+        "size": len(raw),
+    }

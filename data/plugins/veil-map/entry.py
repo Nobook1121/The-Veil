@@ -53,6 +53,7 @@ TOKEN_COLORS = ("#c8a35a", "#6fa8dc", "#93c47d", "#e06666", "#8e7cc3", "#76a5af"
 MAX_WALLS = 200
 MAX_WALL_POINTS = 64
 WALL_KINDS = {"wall", "door", "window", "terrain"}
+MAX_LIGHTS = 100
 RECENT_REQUEST_LIMIT = 64
 _MAP_LOCK = threading.RLock()
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -83,6 +84,7 @@ def _load_local_module(name: str):
 
 spatial = _load_local_module("spatial")
 media = _load_local_module("media")
+importer = _load_local_module("importer")
 
 
 def _now() -> str:
@@ -108,6 +110,10 @@ def _default_calibration() -> dict[str, int]:
     return {"cells_across": 0, "cells_down": 0, "offset_x": 0, "offset_y": 0}
 
 
+def _default_ambient() -> dict[str, Any]:
+    return {"enabled": False, "color": "#ffffff", "intensity": 1.0, "darkness": 0.0, "baked": False}
+
+
 def _default_map() -> dict[str, Any]:
     return {
         "version": MAP_VERSION,
@@ -121,6 +127,8 @@ def _default_map() -> dict[str, Any]:
         "bounds_cells": BOUNDS_DEFAULT,
         "tokens": [],
         "walls": [],
+        "lights": [],
+        "ambient_light": _default_ambient(),
         "recent_requests": [],
         "updated_at": "",
     }
@@ -153,8 +161,9 @@ def _normalize_background_meta(raw: Any) -> dict[str, Any]:
     url = str(raw.get("url") or "").strip()
     if not url.startswith("/"):
         return {}
-    return {
+    meta = {
         "kind": str(raw.get("kind") or "uploaded")[:24],
+        "format": str(raw.get("format") or raw.get("kind") or "uploaded")[:24],
         "name": str(raw.get("name") or "地图图片")[:120],
         "url": url[:2048],
         "width": max(0, _as_int(raw.get("width"), 0)),
@@ -162,6 +171,22 @@ def _normalize_background_meta(raw: Any) -> dict[str, Any]:
         "bytes": max(0, _as_int(raw.get("bytes"), 0)),
         "uploaded_at": str(raw.get("uploaded_at") or "")[:32],
     }
+    details = raw.get("import")
+    if isinstance(details, dict):
+        warnings = [
+            str(item).strip()[:200]
+            for item in (details.get("warnings") or [])
+            if str(item).strip()
+        ][:8]
+        meta["import"] = {
+            "format": str(details.get("format") or meta["format"])[:24],
+            "walls": max(0, _as_int(details.get("walls"), 0)),
+            "doors": max(0, _as_int(details.get("doors"), 0)),
+            "lights": max(0, _as_int(details.get("lights"), 0)),
+            "needs_review": bool(details.get("needs_review")),
+            "warnings": warnings,
+        }
+    return meta
 
 
 def _normalize_calibration(raw: Any) -> dict[str, int]:
@@ -250,6 +275,82 @@ def _normalize_walls(raw: Any) -> list[dict[str, Any]]:
     return walls
 
 
+def _normalize_light(raw: Any, index: int) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    x, y = _coordinate(raw.get("x")), _coordinate(raw.get("y"))
+    if x is None or y is None:
+        return None
+    range_cells = _as_int(raw.get("range_cells"), 0)
+    if range_cells <= 0:
+        range_cells = spatial.feet_to_cells(raw.get("range_ft"), FEET_PER_CELL)
+    range_cells = _clamp(range_cells, 1, MAX_BOUNDS * 2)
+    bright_cells = _clamp(_as_int(raw.get("bright_cells"), 0), 0, range_cells)
+    color = str(raw.get("color") or "#ffaa00").strip().lower()
+    if not _HEX_COLOR.match(color):
+        color = "#ffaa00"
+    try:
+        intensity = float(raw.get("intensity", 1.0))
+    except (TypeError, ValueError):
+        intensity = 1.0
+    if not math.isfinite(intensity):
+        intensity = 1.0
+    light_id = str(raw.get("id") or "").strip()[:64] or f"light-{index + 1}"
+    return {
+        "id": light_id,
+        "x": x,
+        "y": y,
+        "range_cells": range_cells,
+        "range_ft": spatial.cells_to_feet(range_cells, FEET_PER_CELL),
+        "bright_cells": bright_cells,
+        "color": color,
+        "intensity": max(0.0, min(10.0, intensity)),
+        "shadows": bool(raw.get("shadows", True)),
+        "angle": _clamp(_as_int(raw.get("angle"), 360), 0, 360),
+    }
+
+
+def _normalize_lights(raw: Any) -> list[dict[str, Any]]:
+    lights: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw if isinstance(raw, list) else []):
+        light = _normalize_light(item, index)
+        if light is None:
+            continue
+        if light["id"] in seen:
+            light["id"] = f"{light['id']}-{index + 1}"
+        seen.add(light["id"])
+        lights.append(light)
+        if len(lights) >= MAX_LIGHTS:
+            break
+    return lights
+
+
+def _normalize_ambient(raw: Any) -> dict[str, Any]:
+    ambient = _default_ambient()
+    if not isinstance(raw, dict):
+        return ambient
+    color = str(raw.get("color") or "#ffffff").strip().lower()
+    ambient["color"] = color if _HEX_COLOR.match(color) else "#ffffff"
+    try:
+        intensity = float(raw.get("intensity", 1.0))
+    except (TypeError, ValueError):
+        intensity = 1.0
+    if not math.isfinite(intensity):
+        intensity = 1.0
+    ambient["intensity"] = max(0.0, min(10.0, intensity))
+    try:
+        darkness = float(raw.get("darkness", 0.0))
+    except (TypeError, ValueError):
+        darkness = 0.0
+    if not math.isfinite(darkness):
+        darkness = 0.0
+    ambient["darkness"] = max(0.0, min(1.0, darkness))
+    ambient["enabled"] = bool(raw.get("enabled"))
+    ambient["baked"] = bool(raw.get("baked"))
+    return ambient
+
+
 def _normalize_recent_requests(raw: Any) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for item in raw if isinstance(raw, list) else []:
@@ -297,6 +398,8 @@ def _normalize_map(raw: Any) -> dict[str, Any]:
             tokens.append(token)
     state["tokens"] = tokens[-MAX_TOKENS:]
     state["walls"] = _normalize_walls(state.get("walls"))
+    state["lights"] = _normalize_lights(state.get("lights"))
+    state["ambient_light"] = _normalize_ambient(state.get("ambient_light"))
     state["recent_requests"] = _normalize_recent_requests(state.get("recent_requests"))
     state["updated_at"] = str(state.get("updated_at") or "")
     return state
@@ -1271,7 +1374,11 @@ def update_walls(room_id: str):
 
 @bp.route("/rooms/<room_id>/map/import", methods=["POST"])
 def import_map(room_id: str):
-    """上传图片作为地图背景，落盘到房间自己的插件资源目录。"""
+    """导入外部地图：裸图片、Universal VTT 或 Foundry 场景 JSON。
+
+    整个文件先解析成内存里的导入包，所有校验通过后才写图片与地图状态；任何
+    一步失败都不会留下半个场景。结构化格式会替换墙体、门与光源，棋子坐标不动。
+    """
     room_dir, info, denied = _map_room_or_error(room_id)
     if denied:
         return denied
@@ -1281,12 +1388,23 @@ def import_map(room_id: str):
 
     uploaded = request.files.get("file")
     if uploaded is None or not uploaded.filename:
-        return _invalid_request("请选择要导入的地图图片。", "map.image_missing")
-    raw = uploaded.read(media.MAX_IMAGE_BYTES + 1)
+        return _invalid_request("请选择要导入的地图文件。", "map.import_missing")
+    raw = uploaded.read(importer.MAX_IMPORT_BYTES + 1)
     try:
-        meta = media.inspect_image(raw, uploaded.filename)
+        bundle = importer.read_import(raw, uploaded.filename, media)
+    except importer.ImportError as exc:
+        return _invalid_request(exc.message, exc.code, http_status=exc.status)
     except media.ImageError as exc:
         return _invalid_request(exc.message, exc.code, http_status=413 if "too_large" in exc.code else 400)
+
+    image = bundle["image"]
+    structured = bundle["format"] != importer.FORMAT_IMAGE
+    warnings = list(bundle.get("warnings") or [])
+    needs_review = bool(bundle.get("needs_review"))
+    walls = bundle.get("walls")
+    lights = bundle.get("lights")
+    ambient = bundle.get("ambient_light")
+    doors = sum(1 for wall in walls or [] if str(wall.get("kind")) in {"door", "window"})
 
     form = dict(request.form)
     with _MAP_LOCK:
@@ -1300,55 +1418,118 @@ def import_map(room_id: str):
         if expected != state["revision"]:
             return _conflict_request(state, manager, request_id)
 
-        stored_name = f"{uuid4().hex}.{meta['suffix']}"
-        asset_path = _map_assets_dir(room_dir) / stored_name
-        asset_path.parent.mkdir(parents=True, exist_ok=True)
-        asset_path.write_bytes(raw)
+        if structured:
+            grid = int(bundle["grid"]["size"])
+            origin_x = float(bundle["grid"].get("origin_x") or 0.0)
+            origin_y = float(bundle["grid"].get("origin_y") or 0.0)
+            grid_offset = {
+                "x": _wrap_grid_offset(origin_x - image["width"] / 2.0, grid),
+                "y": _wrap_grid_offset(origin_y - image["height"] / 2.0, grid),
+            }
+            offset_x = int(round(origin_x)) % grid
+            offset_y = int(round(origin_y)) % grid
+        else:
+            # 裸图片不改变当前网格；格线先回到图片中心对齐，等用户确认标定。
+            grid = int(state["grid_size"])
+            grid_offset = {"x": 0, "y": 0}
+            offset_x = 0
+            offset_y = 0
+        cells_across = max(1, int(round(image["width"] / max(1, grid))))
+        cells_down = max(1, int(round(image["height"] / max(1, grid))))
 
-        grid = int(state["grid_size"])
-        display_name = Path(str(uploaded.filename)).name[:120] or "地图图片"
-        state["background"] = (
-            f"/api/plugins/veil-map/rooms/{room_id}/assets/maps/{stored_name}"
-        )
-        state["background_meta"] = {
-            "kind": "uploaded",
-            "name": display_name,
-            "url": state["background"],
-            "width": meta["width"],
-            "height": meta["height"],
-            "bytes": meta["size"],
-            "uploaded_at": _now(),
-        }
-        cells_across = max(1, int(round(meta["width"] / max(1, grid))))
-        cells_down = max(1, int(round(meta["height"] / max(1, grid))))
-        state["calibration"] = {
-            "cells_across": cells_across,
-            "cells_down": cells_down,
-            "offset_x": 0,
-            "offset_y": 0,
-        }
-        # 导入不自动改网格尺寸；格线先回到图片中心对齐，等用户确认标定。
-        # 棋子世界坐标保持不变，切换地图不丢棋子。
-        state["grid_offset"] = {"x": 0, "y": 0}
-        state = _save_map(
-            room_dir,
-            state,
-            {"request_id": request_id, "action": "map.import"},
-        )
+        stored_name = f"{uuid4().hex}.{image['suffix']}"
+        asset_path = _map_assets_dir(room_dir) / stored_name
+        display_name = Path(str(uploaded.filename)).name[:120] or f"地图 {importer.FORMAT_LABELS[bundle['format']]}"
+        try:
+            asset_path.parent.mkdir(parents=True, exist_ok=True)
+            asset_path.write_bytes(image["bytes"])
+
+            state["background"] = (
+                f"/api/plugins/veil-map/rooms/{room_id}/assets/maps/{stored_name}"
+            )
+            state["background_meta"] = {
+                "kind": bundle["format"],
+                "format": bundle["format"],
+                "name": display_name,
+                "url": state["background"],
+                "width": image["width"],
+                "height": image["height"],
+                "bytes": image["size"],
+                "uploaded_at": _now(),
+                "import": {
+                    "format": bundle["format"],
+                    "walls": len(walls or []),
+                    "doors": doors,
+                    "lights": len(lights or []),
+                    "needs_review": needs_review,
+                    "warnings": warnings,
+                },
+            }
+            state["grid_size"] = grid
+            state["grid_offset"] = grid_offset
+            state["calibration"] = {
+                "cells_across": cells_across,
+                "cells_down": cells_down,
+                "offset_x": offset_x,
+                "offset_y": offset_y,
+            }
+            if walls is not None:
+                state["walls"] = _normalize_walls(walls)
+            if lights is not None:
+                state["lights"] = _normalize_lights(lights)
+            if ambient is not None:
+                state["ambient_light"] = _normalize_ambient(ambient)
+            state = _save_map(
+                room_dir,
+                state,
+                {"request_id": request_id, "action": "map.import"},
+            )
+        except Exception:  # noqa: BLE001 - 导入失败必须回滚已落盘的图片
+            asset_path.unlink(missing_ok=True)
+            logger.exception("veil_map_import_failed room=%s", room_id)
+            return _receipt(
+                "invalid",
+                "地图导入失败，原场景未被修改，请稍后重试。",
+                request_id=request_id,
+                revision=state["revision"],
+                code="map.import_failed",
+                http_status=500,
+            )
     _broadcast(room_id, state)
+    summary = {
+        "format": bundle["format"],
+        "label": bundle["label"],
+        "walls": len(walls or []),
+        "doors": doors,
+        "lights": len(lights or []),
+        "warnings": warnings,
+        "needs_review": needs_review,
+    }
+    if structured:
+        message = (
+            f"已导入{bundle['label']}：墙体 {summary['walls']} 段、门/窗 {doors} 个、"
+            f"光源 {summary['lights']} 个。"
+        )
+        if needs_review or warnings:
+            message += " 有需要复核的网格提示，请检查标定。"
+        else:
+            message += " 请确认网格标定。"
+    else:
+        message = "地图已导入，请确认网格标定。"
     return _receipt(
         "success",
-        "地图已导入，请确认网格标定。",
+        message,
         request_id=request_id,
         revision=state["revision"],
         code="map.imported",
         data={
             "map": state,
             "can_manage": True,
+            "import": summary,
             "background": {
                 "url": state["background"],
-                "width": meta["width"],
-                "height": meta["height"],
+                "width": image["width"],
+                "height": image["height"],
                 "name": state["background_meta"]["name"],
                 "grid_size": grid,
                 "cells_across": cells_across,
@@ -1357,8 +1538,10 @@ def import_map(room_id: str):
             "calibration_hint": {
                 "cells_across": cells_across,
                 "cells_down": cells_down,
-                "offset_x": 0,
-                "offset_y": 0,
+                "offset_x": offset_x,
+                "offset_y": offset_y,
+                "needs_review": needs_review,
+                "warnings": warnings,
             },
         },
     )

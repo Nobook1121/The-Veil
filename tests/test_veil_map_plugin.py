@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import io
 import json
@@ -855,3 +856,189 @@ def test_calibration_rejects_invalid_or_missing_background(client):
     })
     assert too_few.status_code == 400
     assert too_few.get_json()["code"] == "map.grid_too_small"
+
+
+def _uvtt_payload(
+    *,
+    width: int = 640,
+    height: int = 320,
+    grid: int = 64,
+    map_size: tuple[int, int] | None = None,
+    walls: list[dict] | None = None,
+    doors: list[dict] | None = None,
+    lights: list[dict] | None = None,
+    environment: dict | None = None,
+) -> dict:
+    declared = map_size or (width, height)
+    return {
+        "format": 0.3,
+        "resolution": {
+            "map_origin": {"x": 0, "y": 0},
+            "map_size": {"x": declared[0], "y": declared[1]},
+            "pixels_per_grid": grid,
+        },
+        "image": base64.b64encode(_png(width, height)).decode("ascii"),
+        "walls": walls or [],
+        "doors": doors or [],
+        "lights": lights or [],
+        "environment": environment or {},
+    }
+
+
+def test_import_uvtt_brings_walls_doors_lights_and_ambient(client):
+    manager, _app = client
+    _login(manager, "u1")
+    payload = _uvtt_payload(
+        walls=[
+            {"points": [{"x": 0, "y": 0}, {"x": 10, "y": 0}], "wall_type": "wall"},
+            {"points": [{"x": 0, "y": 1}, {"x": 0, "y": 4}], "wall_type": "invisible"},
+        ],
+        doors=[
+            {"points": [{"x": 2, "y": 2}, {"x": 3, "y": 2}], "door_type": "door", "open": True},
+            {"points": [{"x": 4, "y": 2}, {"x": 5, "y": 2}], "door_type": "window", "open": False},
+        ],
+        lights=[
+            {
+                "position": {"x": 5, "y": 2.5},
+                "range": 6,
+                "color": "ffaa00",
+                "intensity": 0.8,
+                "shadows": True,
+            }
+        ],
+        environment={"baked_lighting": False, "ambient_light": {"color": [0.1, 0.2, 0.3, 0.5]}},
+    )
+
+    response = _import_map(manager, json.dumps(payload).encode(), "dungeon.json", "uvtt-1")
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["status"] == "success"
+    data = body["data"]
+    assert data["import"]["format"] == "uvtt"
+    assert data["import"]["walls"] == 4
+    assert data["import"]["doors"] == 2
+    assert data["import"]["lights"] == 1
+    assert data["import"]["needs_review"] is False
+
+    state = data["map"]
+    assert state["grid_size"] == 64
+    assert [wall["kind"] for wall in state["walls"]] == ["wall", "wall", "door", "window"]
+    assert state["walls"][2]["state"] == "open"
+    assert state["walls"][0]["points"] == [{"x": -320, "y": -160}, {"x": 320, "y": -160}]
+    light = state["lights"][0]
+    assert (light["x"], light["y"]) == (0, 0)
+    assert (light["range_cells"], light["range_ft"]) == (6, 30)
+    assert light["color"] == "#ffaa00"
+    assert state["ambient_light"]["enabled"] is True
+    assert state["ambient_light"]["color"] == "#1a334d"
+    assert state["ambient_light"]["intensity"] == 0.5
+    assert state["background_meta"]["format"] == "uvtt"
+
+
+def test_import_uvtt_grid_mismatch_asks_for_review(client):
+    manager, _app = client
+    _login(manager, "u1")
+    payload = _uvtt_payload(width=650, height=320, grid=64, map_size=(640, 300))
+
+    response = _import_map(manager, json.dumps(payload).encode(), "odd.uvtt", "uvtt-review")
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["import"]["needs_review"] is True
+    assert data["calibration_hint"]["needs_review"] is True
+    warnings = " ".join(data["import"]["warnings"])
+    assert "宽度" in warnings and "整数倍" in warnings
+    assert data["map"]["grid_size"] == 64
+    assert data["map"]["background_meta"]["import"]["needs_review"] is True
+
+
+def test_import_foundry_scene_with_embedded_image(client):
+    manager, _app = client
+    _login(manager, "u1")
+    scene = {
+        "name": "Crypt",
+        "width": 640,
+        "height": 320,
+        "background": {"src": "data:image/png;base64," + base64.b64encode(_png(640, 320)).decode()},
+        "grid": {"size": 64, "distance": 5, "units": "ft", "offsetX": 0, "offsetY": 0},
+        "walls": [
+            {"c": [0, 0, 640, 0], "sight": 1, "move": 1, "light": 1, "door": 0},
+            {"c": [64, 64, 128, 64], "sight": 1, "move": 1, "light": 1, "door": 1, "ds": 2},
+        ],
+        "lights": [
+            {
+                "x": 320,
+                "y": 160,
+                "config": {"dim": 30, "bright": 10, "color": "#ffaa00", "alpha": 0.8, "shadows": True},
+            }
+        ],
+        "environment": {"darkness": 0.4, "globalLight": {"enabled": True, "color": "#ffffff", "alpha": 0.3}},
+    }
+
+    response = _import_map(manager, json.dumps(scene).encode(), "scene.json", "foundry-1")
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["import"]["format"] == "foundry"
+    assert data["import"]["walls"] == 2
+    assert data["import"]["doors"] == 1
+    assert data["import"]["lights"] == 1
+    state = data["map"]
+    assert state["walls"][1]["kind"] == "door"
+    assert state["walls"][1]["state"] == "open"
+    assert state["lights"][0]["range_cells"] == 6
+    assert state["lights"][0]["bright_cells"] == 2
+    assert state["ambient_light"]["enabled"] is True
+    assert state["ambient_light"]["darkness"] == 0.4
+
+
+def test_import_foundry_external_image_is_rejected_with_scope(client):
+    manager, _app = client
+    _login(manager, "u1")
+    scene = {
+        "width": 640,
+        "height": 320,
+        "background": {"src": "maps/crypt.png"},
+        "grid": {"size": 64, "distance": 5, "units": "ft"},
+        "walls": [],
+    }
+    response = _import_map(manager, json.dumps(scene).encode(), "scene.json", "foundry-external")
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["code"] == "map.import_image_missing"
+    assert "Universal VTT" in body["message"]
+
+
+def test_import_detects_content_not_extension_and_rejects_unknown_json(client):
+    manager, app = client
+    _login(manager, "u1")
+
+    renamed = _import_map(manager, _png(640, 320), "map.txt", "content-1")
+    assert renamed.status_code == 200
+    assert renamed.get_json()["data"]["import"]["format"] == "image"
+
+    unknown = _import_map(manager, json.dumps({"hello": "world"}).encode(), "map.json", "content-2")
+    assert unknown.status_code == 400
+    assert unknown.get_json()["code"] == "map.import_unknown_json"
+
+    asset_dir = Path(app.config["ROOMS_DIR"]) / "room1" / "plugins" / "veil-map" / "assets" / "maps"
+    assert len(list(asset_dir.iterdir())) == 1
+
+
+def test_failed_uvtt_import_leaves_no_partial_scene(client):
+    manager, app = client
+    _login(manager, "u1")
+    before = _map(manager)
+    asset_dir = Path(app.config["ROOMS_DIR"]) / "room1" / "plugins" / "veil-map" / "assets" / "maps"
+    before_assets = len(list(asset_dir.iterdir())) if asset_dir.exists() else 0
+    before_walls = before["map"]["walls"]
+
+    broken = _uvtt_payload()
+    broken["image"] = "not-base64!!"
+    response = _import_map(manager, json.dumps(broken).encode(), "broken.uvtt", "broken-1")
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "map.import_image_invalid"
+
+    after = _map(manager)
+    assert after["map"]["revision"] == before["map"]["revision"]
+    assert after["map"]["walls"] == before_walls
+    after_assets = len(list(asset_dir.iterdir())) if asset_dir.exists() else 0
+    assert after_assets == before_assets
