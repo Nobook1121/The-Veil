@@ -643,6 +643,23 @@ def _plan_percentile(*, check_name: str | None, difficulty: str | None, target: 
     }
 
 
+def _plan_d20(*, check_name: str | None, dc: int | None, advantage: bool, disadvantage: bool) -> dict[str, Any]:
+    """d20 规则集的物理骰计划；优势/劣势需要两枚 d20。"""
+    count = 2 if (advantage or disadvantage) else 1
+    return {
+        "mode": "standard",
+        "expression": "1d20",
+        "count": count,
+        "sides": 20,
+        "groups": [{"role": "normal", "type": "d20", "count": count, "labels": []}],
+        "selected": None,
+        "bonus_dice": 0,
+        "penalty_dice": 0,
+        "candidates": [],
+        "check": {"name": check_name, "difficulty": "dc", "target": dc},
+    }
+
+
 def _room_check_plan(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip()
     check_name = _resolve_check_name(arguments)
@@ -651,6 +668,15 @@ def _room_check_plan(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     penalty = _dice_count(arguments, "penalty_dice", "penalty")
     target: int | None = None
     display_name = check_name
+    ruleset_id: str | None = None
+    try:
+        room_info = context.room_info() if hasattr(context, "room_info") else {}
+        if isinstance(room_info, dict):
+            from trpg_server import room_rules
+
+            ruleset_id = room_rules.resolve_rule_id(room_info)
+    except Exception:  # noqa: BLE001 - 计划阶段不阻断投掷
+        ruleset_id = None
     try:
         member = _find_member(player_name, context)
         card = member.get("character_card") if member else None
@@ -661,6 +687,19 @@ def _room_check_plan(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                 target = _adjust_threshold(_threshold(base, difficulty), arguments.get("adjustment", arguments.get("correction")))
     except (TypeError, ValueError):
         target = None
+    try:
+        from trpg_server.ruleset import get_plugin
+
+        dice_spec = getattr(get_plugin(ruleset_id), "dice", None)
+    except Exception:  # noqa: BLE001 - 规则集不可用时按百分制计划
+        dice_spec = None
+    if isinstance(dice_spec, dict) and str(dice_spec.get("type") or "").lower() == "d20":
+        return _plan_d20(
+            check_name=display_name,
+            dc=_as_int(arguments.get("dc"), 10),
+            advantage=bool(arguments.get("advantage")),
+            disadvantage=bool(arguments.get("disadvantage")),
+        )
     return _plan_percentile(check_name=display_name, difficulty=difficulty, target=target, bonus=bonus, penalty=penalty)
 
 
@@ -938,14 +977,25 @@ def roll_room_check(
         return {"error": "player_name is required"}
     if not check_name:
         return {"error": "name is required"}
-    difficulty = _normalize_difficulty(arguments.get("difficulty"))
-    if not difficulty:
-        return {"error": "difficulty must be regular, hard, extreme, 普通, 困难, or 极难"}
     member = _find_member(player_name, context)
     if not member:
         return {"error": f"player {player_name} was not found in current room"}
     room_info = context.room_info() if hasattr(context, "room_info") else {}
-    ruleset_id = str((room_info or {}).get("ruleset_id") or "").strip() or None
+    ruleset_id: str | None = None
+    if isinstance(room_info, dict):
+        from trpg_server import room_rules
+
+        ruleset_id = room_rules.resolve_rule_id(room_info)
+    difficulty = _normalize_difficulty(arguments.get("difficulty"))
+    if not difficulty:
+        from trpg_server import check_service
+        from trpg_server.ruleset import get_plugin
+
+        mode = check_service._room_check_mode(getattr(get_plugin(ruleset_id), "checks", None))
+        if mode == "percentile":
+            return {"error": "difficulty must be regular, hard, extreme, 普通, 困难, or 极难"}
+        # d20 规则集使用 dc，不要求 COC7 的 difficulty 枚举。
+        difficulty = "regular"
     exposure = str(arguments.get("exposure") or arguments.get("fear_source") or "").strip()
     fear = {"penalty": 0, "matched": "", "kind": ""}
     if exposure:
@@ -955,7 +1005,7 @@ def roll_room_check(
         if sanity is not None and isinstance(state, dict) and hasattr(sanity, "fear_penalty"):
             fear = sanity.fear_penalty(card, state, exposure, room_info=room_info)
     try:
-        result = check_service.run_room_check(
+        result = check_service.run_room_check_entry(
             member,
             context=context,
             player_name=player_name,
@@ -966,6 +1016,10 @@ def roll_room_check(
             penalty=_dice_count(arguments, "penalty_dice", "penalty") + int(fear.get("penalty") or 0),
             critical_threshold=arguments.get("critical_threshold"),
             fumble_threshold=arguments.get("fumble_threshold"),
+            dc=arguments.get("dc"),
+            modifier=_as_int(arguments.get("modifier"), 0),
+            advantage=bool(arguments.get("advantage")),
+            disadvantage=bool(arguments.get("disadvantage")),
             ruleset_id=ruleset_id,
             rng=rng,
             faces=faces,
@@ -979,7 +1033,7 @@ def roll_room_check(
     return result
 
 
-def execute_roll_room_check(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+def _execute_room_check(arguments: dict[str, Any], context: Any, *, tool_name: str) -> dict[str, Any]:
     player_name = str(arguments.get("player_name") or arguments.get("playerName") or "").strip()
     member = _find_member(player_name, context)
     roller_id = member.get("user_id") if isinstance(member, dict) else None
@@ -994,7 +1048,7 @@ def execute_roll_room_check(arguments: dict[str, Any], context: Any) -> dict[str
             lambda: roll_room_check(arguments, context),
             roller_user_id=roller_id,
             roller_name=player_name,
-            tool_name="check.roll_room_check",
+            tool_name=tool_name,
             face_resolver=(lambda faces: roll_room_check(arguments, context, faces=faces)) if physics else None,
             auto_roll=physics and not click,
         )
@@ -1004,8 +1058,16 @@ def execute_roll_room_check(arguments: dict[str, Any], context: Any) -> dict[str
         result = _finalize_dice_metadata(result, context)
     result = _attach_trigger_reveal(result, arguments, context)
     _record_growth_mark(result, context, member)
-    _log_roll_result(result, context, tool_name="check.roll_room_check", actor=player_name)
+    _log_roll_result(result, context, tool_name=tool_name, actor=player_name)
     return result
+
+
+def execute_roll_room_check(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    return _execute_room_check(arguments, context, tool_name="check.roll_room_check")
+
+
+def execute_roll_dnd5e_check(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    return _execute_room_check(arguments, context, tool_name="dnd5e.roll_check")
 
 
 def _record_growth_mark(result: dict[str, Any], context: Any, member: dict[str, Any] | None) -> None:
@@ -1399,7 +1461,8 @@ def execute_roll_dice(arguments: dict[str, Any], context: Any) -> dict[str, Any]
     return result
 
 ROLL_COC_CHECK_TOOL = AgentTool(name="dice.roll_coc_check", description="Roll a real backend COC7 percentile check. The result reports whether it is a critical success or fumble. Uses the room's configured critical/fumble thresholds unless overridden by arguments.", parameters={"type": "object", "properties": {"character_name": {"type": "string"}, "skill": {"type": "string"}, "target": {"type": "integer", "minimum": 1, "maximum": 100}, "difficulty": {"type": "string"}, "adjustment": {"type": "string"}, "correction": {"type": "string"}, "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "critical_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "fumble_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "reason": {"type": "string"}, "trigger_id": {"type": ["integer", "string"], "description": "Optional. When this check gates a scenario trigger, pass the trigger id so the trigger content is revealed in the same round if the check succeeds. Do not pass it when the trigger condition is not tied to this check."}}, "required": ["skill", "target"]}, handler=execute_roll_coc_check)
-ROLL_ROOM_CHECK_TOOL = AgentTool(name="check.roll_room_check", description="Resolve a current-room player's character card and roll a COC7 check. player_name accepts the login name OR the character card name. For the check itself, pass skill (preferred) or name with the skill/attribute, e.g. 力量/敏捷/侦察/聆听/心理学/理智; never put a player or character name into the check name. The result reports whether it is a critical success or fumble. Uses the room's configured critical/fumble thresholds unless overridden by arguments.", parameters={"type": "object", "properties": {"player_name": {"type": "string", "description": "Room member's login username or character card name (not the skill name)."}, "skill": {"type": "string", "description": "Skill or attribute to test, e.g. 力量/敏捷/侦察/聆听/心理学. Prefer this field."}, "name": {"type": "string", "description": "Legacy alias of skill. Must be a skill or attribute name, never a player/character name."}, "difficulty": {"type": "string"}, "adjustment": {"type": "string"}, "correction": {"type": "string"}, "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "critical_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "fumble_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "exposure": {"type": "string", "description": "Optional. Exact name (or id/English name) of one of the character's recorded phobias/manias that the keeper judges is directly exposed right now, e.g. 蜘蛛恐惧. Use san.traits to look up the exact name first. Only an exact match grants the one penalty die; do not pass a loose keyword."}, "trigger_id": {"type": ["integer", "string"], "description": "Optional. When this check gates a scenario trigger, pass the trigger id so the trigger content is revealed in the same round if the check succeeds. Do not pass it when the trigger condition is not tied to this check."}}, "required": ["player_name"]}, handler=execute_roll_room_check)
+ROLL_ROOM_CHECK_TOOL = AgentTool(name="check.roll_room_check", description="Resolve a current-room player's character card and roll the check declared by the room ruleset (percentile for CoC7, d20 for 5e). player_name accepts the login name OR the character card name. For percentile rulesets pass skill (preferred) or name with the skill/attribute; for d20 rulesets pass name (e.g. 力量检定/敏捷豁免) plus dc. Never put a player or character name into the check name.", parameters={"type": "object", "properties": {"player_name": {"type": "string", "description": "Room member's login username or character card name (not the skill name)."}, "skill": {"type": "string", "description": "Percentile rulesets: skill or attribute to test, e.g. 力量/敏捷/侦察/聆听/心理学. Prefer this field."}, "name": {"type": "string", "description": "Check name. Must be a skill/attribute/saving-throw name, never a player/character name."}, "difficulty": {"type": "string", "description": "Percentile rulesets only: regular/hard/extreme/普通/困难/极难."}, "dc": {"type": "integer", "description": "d20 rulesets only: difficulty class (DC) of the check."}, "modifier": {"type": "integer", "description": "d20 rulesets only: temporary situational modifier added to the d20 total."}, "advantage": {"type": "boolean", "description": "d20 rulesets only: roll two d20 and keep the higher."}, "disadvantage": {"type": "boolean", "description": "d20 rulesets only: roll two d20 and keep the lower."}, "adjustment": {"type": "string"}, "correction": {"type": "string"}, "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 10}, "critical_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "fumble_threshold": {"type": "integer", "minimum": 0, "maximum": 100}, "exposure": {"type": "string", "description": "Optional. Exact name (or id/English name) of one of the character's recorded phobias/manias that the keeper judges is directly exposed right now, e.g. 蜘蛛恐惧. Use san.traits to look up the exact name first. Only an exact match grants the one penalty die; do not pass a loose keyword."}, "trigger_id": {"type": ["integer", "string"], "description": "Optional. When this check gates a scenario trigger, pass the trigger id so the trigger content is revealed in the same round if the check succeeds. Do not pass it when the trigger condition is not tied to this check."}}, "required": ["player_name"]}, handler=execute_roll_room_check)
+DND5E_ROLL_CHECK_TOOL = AgentTool(name="dnd5e.roll_check", description="Roll a D&D 5e ability check, saving throw, or skill check for a current-room player. Resolves the character card's ability modifier, saving-throw proficiency, and skill proficiency, then rolls d20 + modifiers against dc. Use advantage/disadvantage when the situation grants them. Never use percentile/COC7 difficulty for this tool.", parameters={"type": "object", "properties": {"player_name": {"type": "string", "description": "Room member's login username or character card name."}, "name": {"type": "string", "description": "Check name, e.g. 力量检定 / 敏捷豁免 / 察觉检定."}, "skill": {"type": "string", "description": "Alias of name."}, "dc": {"type": "integer", "description": "Difficulty class (DC).", "default": 10}, "modifier": {"type": "integer", "description": "Temporary situational modifier added to the d20 total."}, "advantage": {"type": "boolean"}, "disadvantage": {"type": "boolean"}, "trigger_id": {"type": ["integer", "string"], "description": "Optional. Reveal the gated scenario trigger in the same round when this check succeeds."}}, "required": ["player_name", "name"]}, handler=execute_roll_dnd5e_check)
 ROLL_SANITY_CHECK_TOOL = AgentTool(name="san.roll_sanity_check", description="Roll a player's SAN check and apply success/failure sanity change directly to the room character state. If the room enables sanity habituation, pass source (the creature/phenomenon) so cumulative loss from that source is tracked and capped. Set illusion=true only when the loss comes from a hallucination, so a successful reality check's resistance can cancel it. Never add penalty dice for a phobia here; use check.roll_room_check with exposure for that.", parameters={"type": "object", "properties": {"player_name": {"type": "string"}, "san_change": {"type": "string", "description": "Success/failure change, e.g. 1d4/1d6 or +1d4/-1d6"}, "source": {"type": "string", "description": "Optional. The mythos source of this SAN check (e.g. 深潜者). Used for habituation tracking when enabled."}, "illusion": {"type": "boolean", "description": "Optional. True when the Sanity loss is caused by a hallucination/illusion, which can be cancelled by a successful reality check's resistance."}}, "required": ["player_name", "san_change"]}, handler=execute_roll_sanity_check)
 ROLL_SANITY_CHECK_ALIAS_TOOL = AgentTool(name="sanity.roll_sanity_check", description=ROLL_SANITY_CHECK_TOOL.description, parameters=ROLL_SANITY_CHECK_TOOL.parameters, handler=execute_roll_sanity_check)
 ROLL_MADNESS_TOOL = AgentTool(name="san.roll_madness", description="CoC7 madness resolution. Call this immediately whenever a player loses 5 or more SAN from one sanity roll: it makes the INT check, decides temporary/indefinite/permanent insanity, rolls 1D10 on the Bouts of Madness table, and writes the result (including any new phobia/mania) into the player's character card. Pass loss (defaults to the last SAN loss recorded by san.roll_sanity_check) and an optional cause.", parameters={"type": "object", "properties": {"player_name": {"type": "string", "description": "Room member's login username or character card name."}, "loss": {"type": "integer", "minimum": 0, "description": "SAN points lost in this single incident. Omit to use the last SAN check's loss."}, "cause": {"type": "string", "description": "What caused the madness, used for the card's madness record."}, "force": {"type": "boolean", "description": "Set true to force a madness roll even if loss is below 5 (e.g. keeper decision)."}, "bout_mode": {"type": "string", "enum": ["immediate", "summary"], "description": "Optional. immediate = 1D10 combat rounds (others present); summary = 1D10 hours (alone / montage). Defaults to immediate."}}, "required": ["player_name"]}, handler=execute_roll_madness)

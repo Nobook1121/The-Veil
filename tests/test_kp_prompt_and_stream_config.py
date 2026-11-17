@@ -6,16 +6,25 @@ def test_kp_prompt_is_valid_chinese_and_requires_tools_for_dice():
 
     assert "浣犳槸" not in prompt
     assert "你是KP" in prompt
-    assert "COC7" in prompt
+    # 基础提示词保持规则集中立；COC7 口径由插件片段注入。
+    assert "COC7" not in prompt
     assert "不得编造骰点" in prompt
     assert "room.get_room_snapshot" in prompt
-    assert "dice.roll_coc_check" in prompt
-    assert "不无故让调查员死亡" in prompt
+    assert "不无故让玩家角色死亡" in prompt
     assert "失败归因" in prompt
     assert "不要在回复结尾主动提供选项" in prompt
     assert "所有参与玩家的角色卡已经创建完毕" in prompt
-    assert "玩家的名字就是其用户名" in prompt
+    assert "玩家的名字通常就是其用户名" in prompt
     assert "当前房间绑定的剧本" in prompt
+
+
+def test_coc7_kp_prompt_still_carries_coc7_rules():
+    from trpg_server.ruleset.prompts import assemble_role_prompt
+
+    prompt = assemble_role_prompt("", "coc7")
+    assert "COC7" in prompt
+    assert "dice.roll_coc_check" in prompt
+    assert "check.roll_room_check" in prompt
 
 
 def test_kp_prompt_contains_defensive_user_input_rules():

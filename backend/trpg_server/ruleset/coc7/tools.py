@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from trpg_server.ruleset.coc7.prompts import COC7_KP_PROMPT
+
 # 只有 CoC7 才需要的工具；其余（room / dice.roll / knowledge / trigger / narrative）是核心通用工具。
 COC7_TOOL_NAMES = (
     "dice.roll_coc_check",
@@ -51,5 +53,8 @@ class Coc7Tools:
         return CHECK_TOOL_KEYS.get(str(kind or "").strip().lower(), f"coc7.{kind}")
 
     def prompt_fragments(self) -> list[str]:
-        # 现有 KP 提示词已包含 CoC7 判定口径，本期不额外注入，避免重复占 token。
+        # 通用 KP 提示词已不包含规则集口径；这里由 role_prompt 统一注入。
         return []
+
+    def role_prompt(self, role_id: str) -> str:
+        return COC7_KP_PROMPT if str(role_id or "").strip().lower() == "kp" else ""

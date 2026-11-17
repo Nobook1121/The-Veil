@@ -108,7 +108,7 @@ class CheckOutcomeProvider(Protocol):
 
 
 class ToolProvider(Protocol):
-    """插件声明的 AI 工具名与提示词片段。
+    """插件声明的 AI 工具名、提示词片段与角色提示词。
 
     工具必须以插件 ``id`` 作为命名空间首段（如 ``coc7.roll_sanity_check``）；
     实现本身仍注册在核心工具表里，由核心守卫后下发。
@@ -117,6 +117,10 @@ class ToolProvider(Protocol):
     def tool_names(self) -> tuple[str, ...]: ...
 
     def prompt_fragments(self) -> list[str]: ...
+
+    def role_prompt(self, role_id: str) -> str:
+        """返回该角色在本规则集下的主持口径；缺省实现可返回空字符串。"""
+        ...
 
 
 @runtime_checkable

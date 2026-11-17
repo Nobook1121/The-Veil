@@ -748,11 +748,16 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
         # 当前轮玩家输入与历史共用同一套清洗：发给模型的是扁平化文本，
         # 持久化与聊天框展示仍保留原始 LaTeX。
         user_content = clean_message_for_model(_format_user_content(content, speaker), latex_settings)
-        system_prompt = (
-            _load_debug_kp_prompt()
-            if runtime_config.debug_mode
-            else agent_profile.prompt or _load_kp_prompt()
-        )
+        if runtime_config.debug_mode:
+            system_prompt = _load_debug_kp_prompt()
+        else:
+            from trpg_server.ruleset.prompts import assemble_role_prompt
+
+            system_prompt = assemble_role_prompt(
+                agent_profile.prompt or _load_kp_prompt(),
+                room_ruleset_id,
+                role="kp",
+            )
         # 常驻行为约束：写入系统提示的静态层（global_rules），随每次请求重新注入，
         # 因此即便历史被压缩或截断，该设置也不会在多轮对话中丢失。
         # 仅当「全局提示开关开启且房间房规显式启用行动建议」时才允许给出提示；
@@ -834,7 +839,7 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
                 "本轮已注入房间快照、动态状态和剧本知识库检索结果，不要重复调用 room.get_room_snapshot；"
                 "检索结果足够回答时不要再调用 room.get_scenario_context 或 room.get_scenario_module。"
                 "明确检定时直接调用对应检定工具；得到结果后直接生成最终叙事，除非已知触发条件要求继续调用触发器。"
-                "检定只能使用 COC7 标准属性（力量/敏捷/意志/教育等）或角色卡上已有的技能名，禁止编造技能目录中不存在的技能。"
+                "检定只能使用当前规则集角色卡上已有的属性、豁免或技能名；具体口径见系统提示末尾的规则集主持段落，禁止编造目录中不存在的检定名。"
                 "禁止使用相同参数重复调用同一工具；互不依赖的工具应在同一轮并行调用。"
                 "只有明确到达结局或满足剧本结束条件时，才在 state_updates 中设置 completed 或 ending_reached 为 true。"
             )

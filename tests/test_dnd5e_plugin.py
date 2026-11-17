@@ -153,7 +153,7 @@ def test_dnd5e_declares_prompt_fragments_for_noncombat_casting(plugins):
     assert fragments
     assert any("scene.advance" in item for item in fragments)
     assert any("spell.concentration" in item for item in fragments)
-    assert plugin.tools.tool_names() == ()
+    assert plugin.tools.tool_names() == ("dnd5e.roll_check",)
 
 
 def test_coc7_prompt_fragments_stay_empty(plugins):
@@ -317,3 +317,63 @@ def test_unknown_check_name_is_rejected(plugins):
     plugin = builtin_registry().resolve("dnd5e")
     with pytest.raises(check_service.CheckServiceError):
         _run(plugin, _card(plugin), "不存在的能力")
+
+
+def test_dnd5e_real_room_check_and_save_reach_log(plugins, tmp_path):
+    """真实房间入口：5e 属性检定与豁免走 d20，并写入房间日志。"""
+    from trpg_server import room_rules
+    from trpg_server.room_log import read_room_log
+
+    plugin = builtin_registry().resolve("dnd5e")
+    card = _card(plugin)
+    member = {"user_id": "u-1", "username": "alice", "character_card": card}
+    info = {"id": "room-5e", "ruleset_id": "dnd5e", "members": [member]}
+
+    attack_roll = room_rules.roll_check(
+        tmp_path,
+        info,
+        member,
+        name="力量检定",
+        dc=15,
+        rng=lambda sides: 12,
+    )
+    assert attack_roll["ruleset_id"] == "dnd5e"
+    assert attack_roll["dice"] == [12]
+    assert attack_roll["target"] == 15
+    assert attack_roll["roll"] == attack_roll["total"]
+    assert attack_roll["success"] is (attack_roll["total"] >= 15)
+    assert "d20" in attack_roll["summary"]
+
+    save_roll = room_rules.roll_check(
+        tmp_path,
+        info,
+        member,
+        name="敏捷豁免",
+        dc=12,
+        rng=lambda sides: 8,
+    )
+    assert save_roll["ruleset_id"] == "dnd5e"
+    assert save_roll["dice"] == [8]
+    assert save_roll["target"] == 12
+
+    entries = read_room_log(tmp_path)["entries"]
+    messages = [str(entry.get("message") or "") for entry in entries]
+    assert any("力量检定" in message and "DC 15" in message for message in messages)
+    assert any("敏捷豁免" in message and "DC 12" in message for message in messages)
+
+
+def test_role_prompt_is_assembled_per_ruleset(plugins):
+    from trpg_server.ruleset.prompts import assemble_role_prompt
+
+    base = "基础 KP 提示词"
+    dnd_prompt = assemble_role_prompt(base, "dnd5e")
+    assert dnd_prompt.startswith(base)
+    assert "D&D 5e" in dnd_prompt
+    assert "d20" in dnd_prompt and "DC" in dnd_prompt
+    assert "dnd5e.roll_check" in dnd_prompt
+    assert "《克苏鲁的呼唤》第七版规则" not in dnd_prompt
+
+    coc_prompt = assemble_role_prompt(base, "coc7")
+    assert coc_prompt.startswith(base)
+    assert "克苏鲁的呼唤第七版" in coc_prompt
+    assert "check.roll_room_check" in coc_prompt

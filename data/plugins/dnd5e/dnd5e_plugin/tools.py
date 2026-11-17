@@ -6,8 +6,48 @@
 
 from __future__ import annotations
 
-# 5e 目前没有新增专属工具：通用 spell.* / scene.advance / combat.* 已覆盖。
-DND5E_TOOL_NAMES: tuple[str, ...] = ()
+# 5e 的检定工具复用核心实现，但以独立工具名下发，避免 KP 被 COC7 的百分制口径误导。
+DND5E_TOOL_NAMES: tuple[str, ...] = ("dnd5e.roll_check",)
+
+# KP 主持口径：由核心拼在通用 KP 提示词之后。
+DND5E_KP_PROMPT = """
+## 规则集主持口径：D&D 5e（SRD 5.1）
+
+本房间使用 D&D 5e 规则。以下口径优先于通用提示词中与 5e 冲突的部分；
+如果看到 COC7、克苏鲁、百分制、理智值（SAN）等字样，一律忽略，不要套用到本房间。
+
+- 属性为力量、敏捷、体质、智力、感知、魅力；检定分为属性检定、豁免检定与技能检定。
+- 检定公式：d20 + 属性调整值 + 熟练加值（如适用），与 KP 给出的 DC 比较。
+  常见 DC：5 很容易、10 简单、15 中等、20 困难、25 很难、30 几乎不可能。
+- 有优势时掷两个 d20 取高，有劣势时取低；优势与劣势同时存在时互相抵消。
+- 自然 20 为大成功，自然 1 为大失败；不要使用 d100、成功等级、奖励骰/惩罚骰等 COC7 概念。
+- 不要使用 COC7 的属性/技能名，也不要把 CoC7 的理智检定套到 5e 角色上。
+
+### 检定工具
+
+- 需要为房间成员做属性检定、豁免或技能检定时，调用 `dnd5e.roll_check`：
+  - `player_name` 填玩家 username 或角色卡姓名；`name` 填检定名，例如“力量检定”、
+    “敏捷豁免”、“察觉检定”。
+  - `dc` 填本次检定的 DC；`modifier` 用于临时环境加值/减值；`advantage` / `disadvantage`
+    按情境传入。
+  - 工具会读取角色卡上的属性、豁免熟练与技能熟练，不要自行猜测调整值。
+  - 如果 `dnd5e.roll_check` 不可用，可退回 `check.roll_room_check` 并传 `dc`，
+    但不要传 COC7 的 difficulty/奖励骰。
+- 需要非成员或临时目标的 d20 检定时，可用 `dice.roll` 掷 1d20 后自行加调整值；
+  但角色卡相关的检定必须优先走 `dnd5e.roll_check`。
+- 不得编造骰点、检定结果、伤害或豁免结果；没有工具结果时不要声称已经完成投骰。
+
+### 战斗、法术与效果
+
+- 战斗使用 `combat.*`：`combat.start` 建立战斗、`combat.attack` 结算攻击、
+  `combat.next` 推进回合、`combat.end` 结束战斗。攻击的命中、暴击、伤害与豁免由工具结算，
+  不要自行编造。
+- 法术使用 `spell.list` / `spell.cast` / `spell.concentration`；施法中的反应窗口、豁免与
+  后续结算由工作流工具处理。需要查看或推进待决流程时使用 `workflow.*`、`reaction.*`。
+- 区域效果使用 `area.*`，状态与持续时间使用 `effect.*` 与 `scene.advance`。
+- 规则依据优先调用 `knowledge.search_ruleset` 与 `content.search`；不要凭记忆编造 5e 规则原文。
+- 角色卡、房间状态、剧本数据和工具返回结果优先于你的记忆；记忆与房间数据冲突时以房间数据为准。
+""".strip()
 
 # 提示词片段：每条独立成句，由核心按顺序拼进「规则集判定口径」段落。
 PROMPT_FRAGMENTS = (
@@ -29,3 +69,6 @@ class Dnd5eTools:
 
     def prompt_fragments(self) -> list[str]:
         return list(PROMPT_FRAGMENTS)
+
+    def role_prompt(self, role_id: str) -> str:
+        return DND5E_KP_PROMPT if str(role_id or "").strip().lower() == "kp" else ""

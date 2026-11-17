@@ -865,6 +865,10 @@ def roll_check(
     adjustment: Any = None,
     bonus: int = 0,
     penalty: int = 0,
+    dc: Any = None,
+    modifier: int = 0,
+    advantage: bool = False,
+    disadvantage: bool = False,
     reason: str = "",
     actor: Any = None,
     actor_id: Any = None,
@@ -874,7 +878,8 @@ def roll_check(
 ) -> dict[str, Any]:
     """房间成员检定（不等待玩家物理投掷，命令触发即结算）。
 
-    REST 与房间控制台共用 ``check_service`` 入口，具体判定由房间规则集插件完成。
+    REST 与房间控制台共用 ``check_service`` 入口，具体判定由房间规则集插件完成；
+    百分制规则集使用 difficulty，d20 规则集使用 dc/modifier/advantage/disadvantage。
     """
     from trpg_server import check_service
     from trpg_server.agents.tools import dice
@@ -889,7 +894,7 @@ def roll_check(
         username=actor,
     )
     try:
-        result = check_service.run_room_check(
+        result = check_service.run_room_check_entry(
             member,
             context=context,
             player_name=member_ref(member),
@@ -898,6 +903,10 @@ def roll_check(
             adjustment=adjustment,
             bonus=bonus,
             penalty=penalty,
+            dc=dc,
+            modifier=modifier,
+            advantage=advantage,
+            disadvantage=disadvantage,
             ruleset_id=resolve_rule_id(info),
             rng=rng,
         )

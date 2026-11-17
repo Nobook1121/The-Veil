@@ -495,7 +495,7 @@ def _load_kp_prompt():
     if content_lines:
         return "\n".join(content_lines)
 
-    return "你是KP（守秘人），负责主持以克苏鲁的呼唤第七版规则为基础的桌上角色扮演游戏。"
+    return "你是KP（守秘人），负责主持本房间的桌上角色扮演游戏。"
 
 
 def _load_debug_kp_prompt():

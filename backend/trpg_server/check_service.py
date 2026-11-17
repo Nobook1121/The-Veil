@@ -292,6 +292,7 @@ def run_room_check_outcome(
     disadvantage: bool = False,
     ruleset_id: str | None = None,
     rng: Callable[[int], int] | None = None,
+    faces: list[int] | tuple[int, ...] | None = None,
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """用通用 ``CheckOutcome`` 结算一次规则集检定。
@@ -313,6 +314,19 @@ def run_room_check_outcome(
     except (TypeError, ValueError) as exc:
         raise CheckServiceError("dc must be an integer") from exc
 
+    roller = rng
+    if faces is not None:
+        face_iter = iter(faces)
+
+        def roller(sides: int) -> int:
+            try:
+                face = int(next(face_iter))
+            except StopIteration as exc:
+                raise ValueError("not enough dice faces for this check") from exc
+            if not 1 <= face <= int(sides):
+                raise ValueError("dice face out of range")
+            return face
+
     payload = dict(extra or {})
     payload.setdefault("advantage", bool(advantage))
     payload.setdefault("disadvantage", bool(disadvantage))
@@ -328,19 +342,145 @@ def run_room_check_outcome(
             plugin,
             card,
             request,
-            rng or (lambda sides: dice.random.randint(1, sides)),
+            roller or (lambda sides: dice.random.randint(1, sides)),
         )
     except (TypeError, ValueError) as exc:
         raise CheckServiceError(str(exc)) from exc
 
     result = outcome.to_dict()
+    presentation = result.get("presentation") if isinstance(result.get("presentation"), Mapping) else {}
+    detail = result.get("detail") if isinstance(result.get("detail"), Mapping) else {}
+    label = str(presentation.get("label") or check_name)
+    summary = str(presentation.get("summary") or "").strip()
+    dice_faces = [int(item) for item in (result.get("dice") or [])]
+    total = result.get("total")
+    target_value = result.get("target")
+    degree = str(result.get("degree") or "")
+    natural = detail.get("natural")
+    success = bool(result.get("success"))
+    if not summary:
+        summary = f"{label}：d20 {dice_faces} = {total}，DC {target_value}，{degree or '结果未知'}。"
     result.update(
         {
             "player_name": resolved_name,
             "character_name": card.get("name"),
+            "name": label,
+            "expression": "1d20",
+            "roll": int(total) if total is not None else (dice_faces[0] if dice_faces else 0),
+            "rolls": dice_faces,
+            "total": total,
+            "base_target": target_value,
+            "difficulty": "dc",
+            "difficulty_label": f"DC {target_value}" if target_value is not None else "",
+            "bonus_dice": 0,
+            "penalty_dice": 0,
+            "natural": natural,
+            "advantage": bool(detail.get("advantage")),
+            "disadvantage": bool(detail.get("disadvantage")),
+            "success": success,
+            "success_level": degree if success else "failure",
+            "raw_success_level": degree,
+            "critical": natural == 20 or degree == "critical_success",
+            "fumble": natural == 1 or degree in {"critical_failure", "auto_failure"},
+            "critical_threshold": 20,
+            "fumble_threshold": 1,
+            "summary": summary,
         }
     )
+    result["visible_message"] = dice._result_message(
+        summary,
+        "check.roll_room_check",
+        check_type="room",
+        player_name=resolved_name,
+        name=label,
+        extra_metadata={
+            "dice_roll": dice._dice_roll_metadata(
+                result,
+                mode="d20",
+                check_name=label,
+                target=int(target_value) if target_value is not None else None,
+                roller=resolved_name,
+            )
+        },
+    )
     return result
+
+
+def _room_check_mode(checks: Any) -> str:
+    """规则集声明的检定入口：百分制 ``roll`` 优先，其次通用 ``roll_outcome``。"""
+    if callable(getattr(checks, "roll", None)):
+        return "percentile"
+    if callable(getattr(checks, "roll_outcome", None)):
+        return "outcome"
+    return ""
+
+
+def run_room_check_entry(
+    member: Mapping[str, Any],
+    *,
+    context: Any = None,
+    player_name: str | None = None,
+    name: str,
+    difficulty: str = "regular",
+    adjustment: Any = None,
+    bonus: int = 0,
+    penalty: int = 0,
+    critical_threshold: Any = None,
+    fumble_threshold: Any = None,
+    ruleset_id: str | None = None,
+    rng: Callable[[int], int] | None = None,
+    faces: list[int] | tuple[int, ...] | None = None,
+    dc: Any = None,
+    modifier: int = 0,
+    advantage: bool = False,
+    disadvantage: bool = False,
+    kind: str = "check",
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """按规则集声明的入口结算房间检定，返回统一的房间检定结果。
+
+    - 声明了百分制 ``checks.roll`` 的规则集（CoC7）走 :func:`run_room_check`，
+      行为与旧路径逐字一致。
+    - 声明了通用 ``checks.roll_outcome`` 的规则集（dnd5e）走
+      :func:`run_room_check_outcome`，结果补齐日志/骰桌/战斗共用的字段。
+    """
+    plugin = get_plugin(ruleset_id)
+    checks = getattr(plugin, "checks", None)
+    mode = _room_check_mode(checks)
+    if mode == "percentile":
+        return run_room_check(
+            member,
+            context=context,
+            player_name=player_name,
+            name=name,
+            difficulty=difficulty,
+            adjustment=adjustment,
+            bonus=bonus,
+            penalty=penalty,
+            critical_threshold=critical_threshold,
+            fumble_threshold=fumble_threshold,
+            ruleset_id=ruleset_id,
+            rng=rng,
+            faces=faces,
+        )
+    if mode == "outcome":
+        if dc in (None, ""):
+            dc = 10
+        return run_room_check_outcome(
+            member,
+            player_name=player_name,
+            name=name,
+            kind=kind,
+            dc=int(dc),
+            modifier=modifier,
+            advantage=advantage,
+            disadvantage=disadvantage,
+            ruleset_id=ruleset_id,
+            rng=rng,
+            faces=faces,
+            extra=extra,
+        )
+    raise CheckServiceError(f"规则集 {plugin.id} 不支持检定")
 
 
 def run_room_social_check(
