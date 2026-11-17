@@ -21,7 +21,10 @@ class AgentRequestContext:
     def room_info(self) -> dict[str, Any]:
         if not self.room_dir:
             return {}
-        return read_json(self.room_dir / "info.json", default={})
+        from trpg_server.house_rules_store import attach_view
+
+        info = read_json(self.room_dir / "info.json", default={})
+        return attach_view(info) if isinstance(info, dict) else {}
 
     def room_messages(self) -> list[dict[str, Any]]:
         if not self.room_dir:

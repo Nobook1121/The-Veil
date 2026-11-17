@@ -50,9 +50,9 @@ def _normalize(value: Any, allowed: tuple[str, ...]) -> str | None:
 
 def resolve_narrative_settings(room_info: Mapping[str, Any] | None) -> NarrativeSettings:
     """从房间 ``info.json`` 的房规读取档位；非法值按「跟随默认」处理。"""
-    info = room_info if isinstance(room_info, Mapping) else {}
-    rules = info.get("house_rules")
-    rules = rules if isinstance(rules, Mapping) else {}
+    from trpg_server.house_rules_store import flat_rules
+
+    rules = flat_rules(room_info)
     enabled_value = rules.get("narrative_enabled")
     enabled = True if enabled_value is None else bool(enabled_value)
     profile = _normalize(rules.get("narrative_profile"), PROFILES) or PROFILE_GRAPH

@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 STATUS_AVAILABLE = "available"
 STATUS_DEVELOPMENT = "development"
 STATUS_INCOMPATIBLE = "incompatible"
+STATUS_UNKNOWN = "unknown"
+STATUS_UNAVAILABLE = "unavailable"
 
 
 class RulesetSelectionError(ValueError):
@@ -33,6 +35,36 @@ class RulesetSelectionError(ValueError):
 
 
 @dataclass(frozen=True)
+class RulesetResolution:
+    """显式解析结果；未知/开发中/不兼容都带结构化原因，不回退其它规则集。"""
+
+    ruleset_id: str
+    status: str
+    plugin: Any | None = None
+    display_name: str = ""
+    reason: str = ""
+    reason_code: str = ""
+
+    @property
+    def available(self) -> bool:
+        return self.status == STATUS_AVAILABLE and self.plugin is not None
+
+    def require(self) -> Any:
+        if self.available:
+            return self.plugin
+        raise RulesetSelectionError(self.ruleset_id, self.reason, self.reason_code)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ruleset_id": self.ruleset_id,
+            "status": self.status,
+            "display_name": self.display_name,
+            "reason": self.reason,
+            "reason_code": self.reason_code,
+        }
+
+
+@dataclass(frozen=True)
 class DeclaredRuleset:
     """尚未实现、但需要在界面上占位展示的规则集（如「开发中」）。"""
 
@@ -41,6 +73,18 @@ class DeclaredRuleset:
     state: str = STATUS_DEVELOPMENT
     message: str = "该规则集仍在开发中，暂不可选"
     reason_code: str = "ruleset_in_development"
+
+
+def _combat_descriptor(plugin: Any) -> dict[str, Any]:
+    """规则集战斗能力与回合模型；面板/工具据此显隐，核心不解释具体规则。"""
+    from trpg_server.ruleset.session import combat_available, turn_model_of
+
+    combat = getattr(plugin, "combat", None)
+    return {
+        "available": combat_available(plugin),
+        "attack_mode": str(getattr(combat, "attack_mode", "") or "") if combat is not None else "",
+        "turn": turn_model_of(plugin).to_dict(),
+    }
 
 
 class RulesetRegistry:
@@ -94,22 +138,70 @@ class RulesetRegistry:
         key = str(ruleset_id or "").strip().lower()
         return self._plugins.get(key)
 
-    def resolve(self, ruleset_id: str | None = None) -> RulesetPlugin:
-        """解析规则集；未知或不兼容时回退默认，保证旧房间/旧卡仍可打开。"""
-        plugin = self.get(ruleset_id)
+    def resolve_explicit(self, ruleset_id: str | None = None) -> RulesetResolution:
+        """显式解析：未知规则集返回 ``unknown``，绝不回退到其它规则集。
+
+        空 / ``None`` 表示「使用默认规则集」，仍按默认插件解析；这是旧卡与旧
+        房间没有 ``ruleset_id`` 时的兼容入口，不代表未知 id 也能静默兜底。
+        """
+        key = str(ruleset_id or "").strip().lower()
+        if not key:
+            default_id = self.default_id()
+            if default_id is None:
+                return RulesetResolution(
+                    ruleset_id="",
+                    status=STATUS_UNAVAILABLE,
+                    reason="服务端没有可用的规则集",
+                    reason_code="ruleset_unavailable",
+                )
+            plugin = self._plugins[default_id]
+            return RulesetResolution(
+                ruleset_id=default_id,
+                status=STATUS_AVAILABLE,
+                plugin=plugin,
+                display_name=str(getattr(plugin, "display_name", "") or default_id),
+            )
+        plugin = self._plugins.get(key)
         if plugin is not None:
-            return plugin
-        default_id = self.default_id()
-        if ruleset_id:
-            logger.info("Unknown ruleset %r, falling back to %s", ruleset_id, default_id or "<none>")
-        fallback = self.get(default_id) if default_id else None
-        if fallback is None:
-            raise RuntimeError("No ruleset plugin registered")
-        return fallback
+            return RulesetResolution(
+                ruleset_id=key,
+                status=STATUS_AVAILABLE,
+                plugin=plugin,
+                display_name=str(getattr(plugin, "display_name", "") or key),
+            )
+        declared = self._declared.get(key)
+        if declared is not None:
+            return RulesetResolution(
+                ruleset_id=key,
+                status=declared.state,
+                display_name=declared.display_name,
+                reason=declared.message,
+                reason_code=declared.reason_code,
+            )
+        if key in self._incompatible:
+            return RulesetResolution(
+                ruleset_id=key,
+                status=STATUS_INCOMPATIBLE,
+                display_name=key,
+                reason=f"规则集 {key} 与当前服务端不兼容（{self._incompatible[key]}）",
+                reason_code="ruleset_incompatible",
+            )
+        return RulesetResolution(
+            ruleset_id=key,
+            status=STATUS_UNKNOWN,
+            display_name=key,
+            reason=f"未知的规则集：{key}",
+            reason_code="ruleset_unknown",
+        )
+
+    def resolve(self, ruleset_id: str | None = None) -> RulesetPlugin:
+        """解析规则集；未知/开发中/不兼容时显式失败，不回退默认插件。"""
+        return self.resolve_explicit(ruleset_id).require()
 
     def describe(self) -> list[dict[str, Any]]:
         """展示用清单：前端据此渲染可选/灰色卡片，无需硬编码规则集 id。"""
-        from trpg_server.ruleset.descriptors import descriptor_of
+        from trpg_server.ruleset.descriptors import descriptor_of, dice_of
+        from trpg_server.ruleset.ui import workspace_of
 
         items: list[dict[str, Any]] = []
         for ruleset_id, plugin in self._plugins.items():
@@ -124,6 +216,10 @@ class RulesetRegistry:
                     "supported_locales": list(plugin.supported_locales),
                     "capabilities": sorted(plugin.capabilities),
                     "schema": descriptor_of(plugin),
+                    "combat": _combat_descriptor(plugin),
+                    "dice": dice_of(plugin),
+                    # 主视图归属由插件声明；核心只转述，不预设 canvas / conversation。
+                    "workspace": workspace_of(plugin).to_dict(),
                     "state": STATUS_AVAILABLE,
                     "selectable": True,
                     "enabled": True,
@@ -175,22 +271,7 @@ class RulesetRegistry:
 
     def assert_selectable(self, ruleset_id: str | None) -> RulesetPlugin:
         """选择入口的硬校验：不可选/未实现/不兼容都抛错，并给出可读原因。"""
-        key = str(ruleset_id or "").strip().lower() or (self.default_id() or "")
-        if not key:
-            raise RulesetSelectionError("", "服务端没有可用的规则集", "ruleset_unavailable")
-        plugin = self._plugins.get(key)
-        if plugin is not None:
-            return plugin
-        declared = self._declared.get(key)
-        if declared is not None:
-            raise RulesetSelectionError(key, declared.message, declared.reason_code)
-        if key in self._incompatible:
-            raise RulesetSelectionError(
-                key,
-                f"规则集 {key} 与当前服务端不兼容（{self._incompatible[key]}）",
-                "ruleset_incompatible",
-            )
-        raise RulesetSelectionError(key, f"未知的规则集：{key}", "ruleset_unknown")
+        return self.resolve_explicit(ruleset_id).require()
 
     # -- 场景 / 房间解析 ---------------------------------------------------
     def resolve_for_scenario(self, scenario: Mapping[str, Any] | None) -> RulesetPlugin:

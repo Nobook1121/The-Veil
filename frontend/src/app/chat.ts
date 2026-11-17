@@ -1848,6 +1848,8 @@ function initWebSocket(): void {
     if (socket?.connected) return;
     try {
         socket = io();
+        // 通用事件通道：插件（如地图）需要监听房间广播，核心只暴露连接本身。
+        window.TrpgSocket = socket;
         socket.on("connect", () => {
             const room = getCurrentRoom();
             if (room && !room.invisible_view) socket?.emit("join_room", { room_id: room.id });
@@ -1957,6 +1959,7 @@ function disconnectSocket(): void {
         socket.disconnect();
         socket = null;
     }
+    window.TrpgSocket = null;
 }
 
 function joinSocketRoom(roomId: string): void {

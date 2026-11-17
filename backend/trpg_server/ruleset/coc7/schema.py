@@ -67,6 +67,11 @@ RESOURCE_KEYS = ("sanity", "hp", "mp")
 DERIVED_KEYS = ("db", "build", "mov")
 STATUS_BODY_KEYS = ("majorWound", "unconscious", "dead")
 STATUS_MENTAL_KEYS = ("indefiniteInsanity", "permanentInsanity", "temporaryInsanity")
+# 通用状态分组：核心不再区分 body/mental，只按插件声明的分组展示。
+STATUS_GROUPS = (
+    {"key": "body", "title_i18n": "sheet.coc7.status.body", "keys": list(STATUS_BODY_KEYS)},
+    {"key": "mental", "title_i18n": "sheet.coc7.status.mental", "keys": list(STATUS_MENTAL_KEYS)},
+)
 # 派生值写回卡的键；核心按此列表同步，不再写死 CoC 派生字段。
 CARD_DERIVED_KEYS = ("maxHp", "maxSan", "initialSan", "maxMp", "mov", "build", "damageBonus", "armor")
 # 运行时资源槽位：快照键 / 卡面镜像键 / 上限来源，由本插件声明。
@@ -118,6 +123,10 @@ class Coc7CharacterSchema:
     status_body_keys = STATUS_BODY_KEYS
     status_mental_keys = STATUS_MENTAL_KEYS
     extension_schema_versions = EXTENSION_SCHEMA_VERSIONS
+
+    def status_groups(self) -> list[dict[str, Any]]:
+        """状态分组（通用形状）；body/mental 只是本规则集自己的分组名。"""
+        return [dict(group) for group in STATUS_GROUPS]
 
     def extension_namespaces(self) -> tuple[str, ...]:
         """声明过的扩展命名空间（顺序稳定，便于测试与文档）。"""

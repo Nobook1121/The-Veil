@@ -227,6 +227,224 @@
             },
             "additionalProperties": false
           }
+        },
+        "ui": {
+          "type": "object",
+          "required": [
+            "api_version"
+          ],
+          "properties": {
+            "api_version": {
+              "const": 1
+            },
+            "workspace": {
+              "type": "object",
+              "properties": {
+                "layout_id": {
+                  "type": "string"
+                },
+                "rulesets": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "primary": {
+                  "enum": [
+                    "canvas",
+                    "conversation",
+                    "custom"
+                  ]
+                },
+                "primary_min_width": {
+                  "type": "integer"
+                },
+                "sidebar": {
+                  "type": "object",
+                  "properties": {
+                    "position": {
+                      "enum": [
+                        "left",
+                        "none",
+                        "right"
+                      ]
+                    },
+                    "width": {
+                      "type": "integer"
+                    },
+                    "min_width": {
+                      "type": "integer"
+                    },
+                    "max_width": {
+                      "type": "integer"
+                    },
+                    "collapsible": {
+                      "type": "boolean"
+                    },
+                    "collapsed_width": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                "topbar": {
+                  "type": "object",
+                  "properties": {
+                    "height": {
+                      "type": "integer"
+                    },
+                    "slots": {
+                      "type": "array",
+                      "items": {
+                        "enum": [
+                          "layout",
+                          "players",
+                          "scene",
+                          "settings",
+                          "status",
+                          "turn"
+                        ]
+                      }
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                "left_rail": {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer"
+                    },
+                    "visible": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                "panels": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "enum": [
+                      "drawer",
+                      "inline",
+                      "none",
+                      "overlay",
+                      "primary",
+                      "sidebar",
+                      "topbar"
+                    ]
+                  }
+                },
+                "priority": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": true
+            },
+            "slots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "slot"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "slot": {
+                    "enum": [
+                      "character.sheet.side",
+                      "room.chat.aboveHistory",
+                      "room.rail.right",
+                      "room.stage.primary",
+                      "room.tab",
+                      "settings.section"
+                    ]
+                  },
+                  "title_i18n": {
+                    "type": "string"
+                  },
+                  "rulesets": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "requires": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "priority": {
+                    "type": "integer"
+                  },
+                  "layout": {
+                    "type": "object"
+                  },
+                  "permissions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "mount": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": true
+              }
+            },
+            "sandbox": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "const": false
+                },
+                "mode": {
+                  "enum": [
+                    "iframe",
+                    "none",
+                    "shadow"
+                  ]
+                },
+                "position": {
+                  "enum": [
+                    "character.sheet.side",
+                    "room.chat.aboveHistory",
+                    "room.rail.right",
+                    "room.stage.primary",
+                    "room.tab",
+                    "settings.section"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "content_packs": {
+          "type": "object",
+          "properties": {
+            "dirs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9._\\-/]+$",
+                "description": "插件内的相对路径；不允许绝对路径、盘符或 .."
+              }
+            },
+            "contract_version": {
+              "const": 1
+            }
+          },
+          "additionalProperties": false
         }
       }
     }

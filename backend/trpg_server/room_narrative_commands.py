@@ -63,8 +63,10 @@ def _int_option(options: Mapping[str, str], name: str, default: int) -> int:
 
 
 def _info(room_dir: Path) -> dict[str, Any]:
+    from trpg_server.house_rules_store import attach_view
+
     payload = read_json(room_dir / "info.json", default={})
-    return payload if isinstance(payload, dict) else {}
+    return attach_view(payload) if isinstance(payload, dict) else {}
 
 
 def _runtime(room_id: Any, room_dir: Path, rooms_dir: Any, scenarios_dir: Any) -> tuple[NarrativeRuntime | None, str]:

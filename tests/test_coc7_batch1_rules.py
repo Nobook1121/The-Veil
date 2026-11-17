@@ -295,7 +295,7 @@ def test_aging_crosses_milestones_cumulatively_and_skips_edu_after_60():
 
 
 def test_house_rule_definitions_expose_off_by_default():
-    from trpg_server.routes.rooms import HOUSE_RULE_DEFINITIONS
+    from trpg_server.ruleset.coc7.house_rules import COC7_HOUSE_RULE_DEFINITIONS
 
     keys = (
         "coc7_social_difficulty",
@@ -306,5 +306,5 @@ def test_house_rule_definitions_expose_off_by_default():
         "coc7_age_adjustments",
     )
     for key in keys:
-        assert HOUSE_RULE_DEFINITIONS[key]["default"] is False
-        assert HOUSE_RULE_DEFINITIONS[key]["type"] == "boolean"
+        assert COC7_HOUSE_RULE_DEFINITIONS[key]["default"] is False
+        assert COC7_HOUSE_RULE_DEFINITIONS[key]["type"] == "boolean"

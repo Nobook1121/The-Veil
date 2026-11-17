@@ -23,7 +23,7 @@ RULESET_API_VERSION = 1
 class CheckRequest:
     """一次判定的输入，字段刻意保持规则中立。"""
 
-    kind: str = "skill"  # skill / attribute / resource / opposed / custom
+    kind: str = "skill"  # skill / attribute / resource / opposed / attack / save / custom
     name: str = ""
     target: int | None = None
     difficulty: str = "regular"
@@ -35,7 +35,12 @@ class CheckRequest:
 
 @dataclass(frozen=True)
 class CheckResolution:
-    """一次判定的可序列化结果；``state_patch`` 由核心负责写回角色卡。"""
+    """一次判定的可序列化结果；``state_patch`` 由核心负责写回角色卡。
+
+    这是历史 CoC 形状（百分制 + 成功等级），继续保留以兼容现有调用方。
+    新代码使用 :class:`trpg_server.ruleset.check_outcome.CheckOutcome`；
+    ``CheckResolution`` 只承担「掷骰事实 + 展示信封」，不再扩展规则语义。
+    """
 
     roll: int
     target: int
@@ -87,6 +92,19 @@ class CheckProvider(Protocol):
     def roll(self, card: Mapping[str, Any], request: CheckRequest, rng: Any) -> CheckResolution: ...
 
     def success_level(self, roll: int, target: int) -> str: ...
+
+
+@runtime_checkable
+class CheckOutcomeProvider(Protocol):
+    """可选能力：返回通用 ``CheckOutcome`` 与声明目标值范围。
+
+    未实现时核心把 ``CheckProvider.roll()`` 的结果包成 ``CheckOutcome``，
+    因此旧插件不需要一次性迁移。
+    """
+
+    def roll_outcome(self, card: Mapping[str, Any], request: CheckRequest, rng: Any) -> Any: ...
+
+    def target_bounds(self) -> tuple[int | None, int | None]: ...
 
 
 class ToolProvider(Protocol):

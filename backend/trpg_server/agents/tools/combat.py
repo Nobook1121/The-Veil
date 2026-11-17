@@ -217,11 +217,22 @@ def _scheduler(
 ) -> TurnScheduler:
     settings = settings or _combat_settings(context)
     thresholds = _context_thresholds(context) if context is not None else (1, 96)
+    turn_model = None
+    try:
+        from trpg_server.ruleset.registry import get_plugin
+        from trpg_server.ruleset.session import turn_model_of
+
+        ruleset_id = str(combat.get("ruleset") or settings.ruleset_id or "")
+        turn_model = turn_model_of(get_plugin(ruleset_id))
+    except Exception:  # noqa: BLE001 - 规则集壳缺失时退回旧调度行为
+        turn_model = None
     return TurnScheduler(
         _combat_ruleset(combat, settings),
         settings,
         roll_d100=lambda: _percentile_roll(_roller)[0],
+        roll_die=_roller,
         thresholds=thresholds,
+        turn_model=turn_model,
     )
 
 
@@ -252,8 +263,16 @@ def _combat_summary_state(combat: dict[str, Any]) -> dict[str, Any]:
                 "initiative": combatant.get("initiative"),
                 "hp": combatant.get("hp"),
                 "max_hp": combatant.get("max_hp"),
+                "temp_hp": combatant.get("temp_hp"),
+                "ac": combatant.get("armorClass") or combatant.get("ac"),
                 "status": combatant.get("status"),
                 "armor": combatant.get("armor"),
+                "budget": dict(combatant.get("budget") or {}),
+                "death_saves": combatant.get("death_saves") or None,
+                "conditions": list(combatant.get("conditions") or []),
+                "effects": list(combatant.get("effects") or []),
+                "concentration": combatant.get("concentration") or None,
+                "spell_slots": dict(combatant.get("spell_slots") or {}),
                 "major_wound": bool(combatant.get("major_wound")),
                 "used_dodge": bool(combatant.get("used_dodge")),
                 "used_counter": bool(combatant.get("used_counter")),
@@ -448,6 +467,7 @@ def _combatant_from_spec(spec: dict[str, Any]) -> dict[str, Any]:
         "user_id": None,
         "is_player": False,
         "side": _as_text(spec.get("side"), "enemy") or "enemy",
+        "monster_id": _as_text(spec.get("monster_id") or spec.get("ref_id")),
         "dex": dex,
         "initiative": dex,
         "str": strength,
@@ -463,6 +483,7 @@ def _combatant_from_spec(spec: dict[str, Any]) -> dict[str, Any]:
         "hp": hp,
         "max_hp": max_hp,
         "armor": max(0, _as_int(spec.get("armor"), 0)),
+        "ac": _as_int(spec.get("ac"), 0) or None,
         "status": status,
         "major_wound": status in {"dying", "dead"} or bool(spec.get("major_wound")),
         "dying": status == "dying",
@@ -493,7 +514,22 @@ def _unique_name(combatants: dict[str, Any], name: str) -> str:
     return f"{name}（{index}）"
 
 
-NPC_ONLY_FIELDS = {"skills", "weapons", "hp", "max_hp", "maxHp", "current_hp", "armor", "str", "siz", "con", "build", "side"}
+NPC_ONLY_FIELDS = {
+    "skills",
+    "weapons",
+    "hp",
+    "max_hp",
+    "maxHp",
+    "current_hp",
+    "armor",
+    "str",
+    "siz",
+    "con",
+    "build",
+    "side",
+    "monster_id",
+    "ac",
+}
 
 
 def _is_npc_entry(entry: dict[str, Any]) -> bool:
@@ -803,6 +839,18 @@ def _persist_player_state(context: Any, combatant: dict[str, Any]) -> None:
             status["unconscious"] = bool(combatant.get("unconscious"))
             status["dead"] = bool(combatant.get("dead"))
             card["status"] = status
+            # 插件可把战斗者字段映射回自己的卡面（如 5e 的 sheet.hp）；
+            # CoC7 未声明该钩子，保持原有字段写入路径不变。
+            try:
+                persist = getattr(
+                    get_ruleset(str(combatant.get("ruleset") or "")),
+                    "persist_combatant",
+                    None,
+                )
+                if callable(persist):
+                    persist(combatant, card)
+            except Exception:  # noqa: BLE001 - 回写失败不应中断战斗
+                logger.debug("persist_combatant hook failed", exc_info=True)
         # HP / MP 变化并入统一待写回队列，归档时写回持久卡并清标记。
         pending = []
         for kind, value in (("hp", state["current_hp"]), ("mp", state["current_mp"])):
@@ -834,6 +882,8 @@ def _apply_damage(
     ignore_armor: bool = False,
     settings: CombatSettings | None = None,
     persist: bool = True,
+    combat: dict[str, Any] | None = None,
+    rng: Any = None,
 ) -> dict[str, Any]:
     """结算一次伤害；具体阈值由规则书插件决定。
 
@@ -864,6 +914,35 @@ def _apply_damage(
         "note": outcome.note,
         "con_check": outcome.extra.get("con_check"),
     }
+    # 插件可选的“受伤后”钩子（如专注检定）；核心只搬运返回的提示。
+    notes: list[str] = []
+    hook = getattr(ruleset, "on_damage_taken", None)
+    if callable(hook) and outcome.effective > 0:
+        try:
+            hook_result = hook(
+                combatant,
+                outcome,
+                rng=rng or _roller,
+                settings=settings,
+                combat=combat,
+            )
+        except TypeError:
+            try:
+                hook_result = hook(combatant, outcome, rng=rng or _roller, settings=settings)
+            except Exception:  # noqa: BLE001 - 受伤钩子不能击穿伤害结算
+                hook_result = None
+        except Exception:  # noqa: BLE001
+            hook_result = None
+        if isinstance(hook_result, str):
+            notes.append(hook_result)
+        elif isinstance(hook_result, (list, tuple)):
+            notes.extend(str(item) for item in hook_result if str(item or "").strip())
+        elif isinstance(hook_result, dict):
+            notes.extend(
+                str(item) for item in hook_result.get("notes") or [] if str(item or "").strip()
+            )
+    if notes:
+        result["notes"] = notes
     # 瞄准跟踪：受伤即失去瞄准，不需要判断房规是否开启（未开启时字段本就不存在）。
     if outcome.effective > 0 and combatant.get("aiming"):
         combatant["aiming"] = False
@@ -892,12 +971,41 @@ def _format_damage_result(target: str, result: dict[str, Any]) -> str:
         text += "，昏迷"
     if result.get("note"):
         text += f"；{result['note']}"
+    for note in result.get("notes") or []:
+        text += f"；{note}"
     return text
 
 
 # ---------------------------------------------------------------------------
 # 工具实现
 # ---------------------------------------------------------------------------
+def _prepare_combatant(
+    combatant: dict[str, Any],
+    context: Any,
+    settings: CombatSettings,
+    ruleset: Any,
+) -> None:
+    """让规则集把角色卡/数据包映射成自己的战斗者字段。
+
+    插件未声明 ``prepare_combatant`` 时保留历史 CoC 技能解析；核心不解释
+    插件写入的任何字段。
+    """
+    prepare = getattr(ruleset, "prepare_combatant", None)
+    if callable(prepare):
+        prepare(
+            combatant,
+            card=_player_card(combatant, context),
+            settings=settings,
+        )
+        return
+    combatant["fighting"] = _resolve_skill_value(
+        combatant,
+        _player_card(combatant, context),
+        names=MELEE_SKILL_NAMES,
+        default=25,
+    )[0]
+
+
 def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     if not getattr(context, "room_dir", None):
         return {"error": "combat tools require a room context"}
@@ -972,12 +1080,10 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     ruleset = get_ruleset(settings.ruleset_id)
     for combatant in combatants.values():
         combatant["ruleset"] = ruleset.ruleset_id
-        combatant["fighting"] = _resolve_skill_value(
-            combatant,
-            _player_card(combatant, context),
-            names=MELEE_SKILL_NAMES,
-            default=25,
-        )[0]
+        try:
+            _prepare_combatant(combatant, context, settings, ruleset)
+        except ValueError as exc:
+            return {"error": str(exc)}
         combatant["initiative"] = ruleset.roll_initiative(combatant, _roller, settings)
 
     if arguments.get("initiative_check"):
@@ -1023,7 +1129,11 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             _append_log(combat, f"已清理上一场战斗遗留的 {dropped} 条回合制毒剂。", context)
     except Exception:  # noqa: BLE001 - 清理失败不能阻止开战
         logger.exception("清理上一场战斗遗留的回合制毒剂失败")
-    _scheduler(combat, context).begin_round(combat)
+    _scheduler_instance = _scheduler(combat, context)
+    for text in _scheduler_instance.begin_round(combat):
+        _append_log(combat, text, context)
+    for text in _scheduler_instance.start_turn(combat):
+        _append_log(combat, text, context)
     _append_log(combat, "战斗开始：" + " → ".join(order), context)
     _save_combat(context, combat)
     state = _combat_summary_state(combat)
@@ -1077,12 +1187,10 @@ def join_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     key = _unique_name(combatants, combatant["name"])
     combatant["name"] = key
     combatant["ruleset"] = ruleset.ruleset_id
-    combatant["fighting"] = _resolve_skill_value(
-        combatant,
-        _player_card(combatant, context),
-        names=MELEE_SKILL_NAMES,
-        default=25,
-    )[0]
+    try:
+        _prepare_combatant(combatant, context, settings, ruleset)
+    except ValueError as exc:
+        return {"error": str(exc)}
     combatant["initiative"] = ruleset.roll_initiative(combatant, _roller, settings)
     if arguments.get("initiative_check"):
         critical, fumble = _context_thresholds(context)
@@ -1106,6 +1214,7 @@ def join_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     combatant["used_counter"] = False
     combatant["disengaged"] = False
     combatant["damage_taken_this_round"] = 0
+    _scheduler(combat, context).initialize_combatant(combatant)
     combatants[key] = combatant
 
     order = combat.setdefault("order", [])
@@ -1449,6 +1558,73 @@ def _opposed_rolls(
     }
 
 
+def _attack_d20(
+    combat: dict[str, Any],
+    attacker: dict[str, Any],
+    target: dict[str, Any],
+    arguments: dict[str, Any],
+    context: Any,
+    settings: CombatSettings,
+    ruleset: Any,
+) -> dict[str, Any]:
+    """把整次 d20 攻击交给规则集；核心只做预算、日志与保存。"""
+    resolver = getattr(ruleset, "resolve_attack_action", None)
+    if not callable(resolver):
+        return {"error": "该规则集声明了 d20 攻击，但没有实现 resolve_attack_action"}
+    scheduler = _scheduler(combat, context, settings)
+    slot = _as_text(arguments.get("slot") or arguments.get("action_slot") or "action").lower()
+    budget = scheduler.budget_of(attacker)
+    if budget and int(budget.get(slot) or 0) <= 0:
+        return {"error": f"{attacker.get('name')} 的 {slot} 行动额度已用完"}
+
+    outcome = resolver(
+        attacker,
+        target,
+        arguments,
+        attacker_card=_player_card(attacker, context),
+        rng=_roller,
+        settings=settings,
+        combat=combat,
+    )
+    if not isinstance(outcome, dict):
+        return {"error": "规则集返回了无法识别的攻击结果"}
+    if outcome.get("error"):
+        return outcome
+    if budget:
+        scheduler.spend_budget(attacker, slot, 1)
+
+    summary = str(outcome.get("summary") or "")
+    if summary:
+        _append_log(combat, summary, context, mirror=False)
+    _save_combat(context, combat)
+
+    result = dict(outcome)
+    if summary:
+        result["visible_message"] = _result_message(
+            summary,
+            "combat.attack",
+            check_type="combat_attack",
+            attacker=attacker.get("name"),
+            target=target.get("name"),
+            extra_metadata={
+                "dice_roll": _dice_roll_metadata(
+                    result,
+                    mode="d20",
+                    check_name=str(result.get("weapon") or "攻击"),
+                    target=result.get("target_ac"),
+                    roller=str(attacker.get("name") or ""),
+                )
+            },
+        )
+        _log_roll_result(
+            result,
+            context,
+            tool_name="combat.attack",
+            actor=str(attacker.get("name") or ""),
+        )
+    return result
+
+
 def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     combat = _load_combat(context)
     if not combat:
@@ -1464,6 +1640,9 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     settings = _combat_settings(context)
     if settings.major_wound_penalty == "cannot_act" and attacker.get("major_wound"):
         return {"error": f"{attacker.get('name')} 身负重伤，按房规无法行动"}
+    ruleset = _combat_ruleset(combat, settings)
+    if str(getattr(ruleset, "attack_mode", "opposed")).strip().lower() == "d20":
+        return _attack_d20(combat, attacker, target, arguments, context, settings, ruleset)
     room_options = _coc7_room_options(context)
     detail_rules = _combat_detail_rules(settings)
     knockout_rule = bool(room_options and room_options.combat_knockout and detail_rules)
@@ -2220,6 +2399,8 @@ def damage_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         if "armor" in arguments
         else target.get("armor") or 0,
         ignore_armor=bool(arguments.get("ignore_armor")),
+        combat=combat,
+        rng=_roller,
     )
     applied["damage_detail"] = detail
     summary = _format_damage_result(str(target.get("name")), applied)
@@ -2885,6 +3066,30 @@ class _TimeAdvanceContext:
         return load_room_info(self.room_dir)
 
 
+def spend_combat_action(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """通用行动槽扣减：插件声明了 TurnModel 预算后，动作/附赠/反应/移动都走这里。"""
+    combat = _load_combat(context)
+    if not combat:
+        return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
+    actor = _resolve_combatant(combat, arguments.get("actor"))
+    if actor is None:
+        current = (combat.get("order") or [None])[int(combat.get("turn") or 0)]
+        actor = _resolve_combatant(combat, current)
+    if actor is None:
+        return {"error": "当前没有可扣减行动额度的战斗者"}
+    slot = _as_text(arguments.get("slot") or arguments.get("action_slot") or "action").lower()
+    amount = max(1, _as_int(arguments.get("amount"), 1))
+    scheduler = _scheduler(combat, context)
+    if not scheduler.budget_of(actor):
+        return {"error": f"规则集没有为 {actor.get('name')} 声明行动预算"}
+    if not scheduler.spend_budget(actor, slot, amount):
+        return {"error": f"{actor.get('name')} 的 {slot} 额度不足（需要 {amount}）"}
+    _append_log(combat, f"{actor.get('name')} 消耗 {amount} 点 {slot}。", context)
+    _save_combat(context, combat)
+    state = _combat_summary_state(combat)
+    return {**state, "summary": f"{actor.get('name')} 剩余 {slot}：{scheduler.budget_of(actor).get(slot, 0)}。"}
+
+
 def end_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     combat = _load_combat(context)
     if not combat:
@@ -2921,6 +3126,20 @@ def end_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             _persist_player_state(context, combatant)
         except Exception:  # noqa: BLE001 - 单个角色回写失败不能阻止结束战斗
             logger.exception("战斗结束回写角色状态失败：%s", combatant.get("name"))
+    # 规则集声明了效果能力时，战斗结束清掉可移除效果（条件/临时增益），
+    # 休息型与不可逆效果保留。CoC7 没有 effects 能力，保持原样。
+    try:
+        ruleset = _combat_ruleset(combat, _combat_settings(context))
+        if getattr(ruleset, "effects", None) is not None:
+            from trpg_server.ruleset.effects import clear_effects
+
+            for combatant in (combat.get("combatants") or {}).values():
+                if not isinstance(combatant, dict):
+                    continue
+                for text in clear_effects(combatant, plugin=ruleset):
+                    _append_log(combat, text, context, mirror=False)
+    except Exception:  # noqa: BLE001 - 清理失败不能阻止结束战斗
+        logger.exception("战斗结束清理效果失败")
     combat["active"] = False
     combat["ended_at"] = _timestamp()
     _append_log(combat, "战斗结束", context)
@@ -2955,6 +3174,7 @@ COMBAT_START_TOOL = AgentTool(
                                 "name": {"type": "string"},
                                 "player_name": {"type": "string"},
                                 "module_id": {"type": "string"},
+                                "monster_id": {"type": "string", "description": "内容数据包中的怪物 id（如 SRD 数据包）"},
                                 "is_npc": {"type": "boolean"},
                                 "side": {"type": "string"},
                                 "dex": {"type": "integer"},
@@ -2964,6 +3184,7 @@ COMBAT_START_TOOL = AgentTool(
                                 "build": {"type": "integer"},
                                 "hp": {"type": "integer"},
                                 "max_hp": {"type": "integer"},
+                                "ac": {"type": "integer", "description": "护甲等级（d20 规则集）"},
                                 "armor": {"type": "integer"},
                                 "skills": {"type": "object"},
                                 "weapons": {"type": "array"},
@@ -2996,15 +3217,16 @@ COMBAT_NEXT_TOOL = AgentTool(
 COMBAT_ATTACK_TOOL = AgentTool(
     name="combat.attack",
     description=(
-        "近战攻击或战技：攻击者与目标做格斗对抗检定，目标可选择反击(counter)或闪避(dodge)。"
-        "自动处理成功等级比较、极限成功满伤害/贯穿、伤害加值、护甲、重伤/昏迷/濒死。"
+        "攻击：d20 规则集按攻击加值对 AC 结算命中、暴击、伤害与抗性；"
+        "百分制规则集按格斗对抗处理（目标可反击/闪避）。"
+        "自动处理成功等级、伤害骰、护甲/抗性与重伤/昏迷/濒死。"
     ),
     parameters={
         "type": "object",
         "properties": {
             "attacker": {"type": "string"},
             "target": {"type": "string"},
-            "weapon": {"type": "string", "description": "角色卡上的武器名；省略则徒手"},
+            "weapon": {"type": "string", "description": "武器名或数据包 id；省略则使用第一件武器"},
             "skill": {"type": "string", "description": "覆盖使用的技能名（默认按武器技能）"},
             "defense": {"type": "string", "enum": ["dodge", "counter", "none"]},
             "maneuver": {
@@ -3014,6 +3236,24 @@ COMBAT_ATTACK_TOOL = AgentTool(
             "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 2},
             "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 2},
             "ignore_armor": {"type": "boolean"},
+            "slot": {
+                "type": "string",
+                "description": "d20 规则集的行动槽：action（默认）、bonus_action、reaction",
+            },
+            "advantage": {"type": "boolean", "description": "d20 规则集：优势"},
+            "disadvantage": {"type": "boolean", "description": "d20 规则集：劣势"},
+            "cover": {
+                "type": "string",
+                "enum": ["none", "half", "three_quarters", "full"],
+                "description": "d20 规则集：目标掩体",
+            },
+            "two_handed": {"type": "boolean", "description": "d20 规则集：双手握持，使用 versatile 伤害"},
+            "attack_roll": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "description": "d20 规则集：玩家前端已掷出的 d20 结果（覆盖服务端随机）",
+            },
         },
         "required": ["attacker", "target"],
     },
@@ -3319,6 +3559,24 @@ COMBAT_CAST_TOOL = AgentTool(
     handler=cast_spell,
 )
 
+COMBAT_SPEND_TOOL = AgentTool(
+    name="combat.spend",
+    description=(
+        "扣减通用行动槽。规则集声明 TurnModel 后可用：slot=action/bonus_action/reaction/movement，"
+        "amount 为点数（移动按英尺）。用于附赠动作、反应与移动的额度消耗。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "actor": {"type": "string", "description": "省略则使用当前行动者"},
+            "slot": {"type": "string", "description": "行动槽 key，如 action、bonus_action、reaction、movement"},
+            "amount": {"type": "integer", "minimum": 1, "description": "消耗点数，默认 1；移动按英尺"},
+        },
+        "required": ["slot"],
+    },
+    handler=spend_combat_action,
+)
+
 COMBAT_END_TOOL = AgentTool(
     name="combat.end",
     description="结束当前战斗轮并保存战斗记录。",
@@ -3345,6 +3603,7 @@ COMBAT_TOOLS = [
     COMBAT_KNOCKOUT_TOOL,
     COMBAT_HIT_LOCATION_TOOL,
     COMBAT_TREAT_TOOL,
+    COMBAT_SPEND_TOOL,
     COMBAT_END_TOOL,
 ]
 COMBAT_TOOL_NAMES = [tool.name for tool in COMBAT_TOOLS]

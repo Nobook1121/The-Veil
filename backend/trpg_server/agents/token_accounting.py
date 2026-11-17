@@ -17,6 +17,7 @@ MESSAGE_OVERHEAD_TOKENS = 4
 # 分段键 → 中文标签，供控制台与前端展示；顺序即展示顺序。
 SEGMENT_LABELS: dict[str, str] = {
     "rules": "系统规则",
+    "ruleset": "规则集判定口径",
     "scenario_static": "剧本静态核心",
     "scene_static": "场景静态卡",
     "knowledge": "知识库检索",

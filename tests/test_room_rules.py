@@ -179,7 +179,7 @@ def test_rule_limits_cannot_loosen_site_policy(tmp_path):
     result = _run(room_dir, "rule limits cooldown 5")
 
     assert result.ok is True
-    assert _read(room_dir)["house_rules"]["world_override_cooldown_seconds"] == 20
+    assert _read(room_dir)["house_rules"]["core"]["world_override_cooldown_seconds"] == 20
     assert "按站点值生效" in result.message
 
 

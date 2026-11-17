@@ -94,6 +94,10 @@ def _sanitize_character_card(character_card):
         "background": character_card.get("background", {}) if isinstance(character_card.get("background", {}), dict) else {},
         "status": status,
     }
+    # 规则自有卡面快照：插件按 schema 解释，核心只负责原样携带。
+    sheet = character_card.get("sheet")
+    if isinstance(sheet, dict) and sheet:
+        sanitized["sheet"] = dict(sheet)
     # 规则扩展命名空间（如 extensions.mental）：旧卡没有时保持缺省，不写空键。
     extensions = character_card.get("extensions")
     if isinstance(extensions, dict) and extensions:
@@ -187,7 +191,40 @@ def _bind_character(member, character_card):
         return False
     member["character_card"] = sanitized
     member["character_state"] = _initial_character_state(sanitized)
+    member.pop("character_card_paused", None)
+    member.pop("character_card_pause_reason", None)
     return True
+
+def pause_incompatible_bindings(info, ruleset_id):
+    """规则集切换后暂停不兼容的角色卡绑定，切回时自动恢复。
+
+    不删除任何卡或绑定：只在成员上记录暂停状态与原因，供前端提示与后续恢复。
+    旧卡没有 ``rulesetId`` 时不误伤，只有明确不匹配才暂停。
+    """
+    target = str(ruleset_id or "").strip().lower()
+    paused = []
+    members = info.get("members") if isinstance(info, dict) else None
+    for member in members or []:
+        if not isinstance(member, dict):
+            continue
+        card = member.get("character_card")
+        if not isinstance(card, dict) or not card.get("id"):
+            continue
+        card_ruleset = str(card.get("rulesetId") or card.get("ruleset_id") or "").strip().lower()
+        if target and card_ruleset and card_ruleset != target:
+            member["character_card_paused"] = True
+            member["character_card_pause_reason"] = "ruleset_mismatch"
+            paused.append(
+                {
+                    "user_id": str(member.get("user_id") or ""),
+                    "character_id": str(card.get("id")),
+                    "ruleset_id": card_ruleset,
+                }
+            )
+        else:
+            member.pop("character_card_paused", None)
+            member.pop("character_card_pause_reason", None)
+    return paused
 
 def _recalculate_character_state(state):
     damage = sum(_bounded_int(record.get("value", record.get("damage")), 0, 999, 0) for record in state.get("injury_records", []))

@@ -2,6 +2,7 @@
 from flask import request
 from flask import session
 from trpg_server.agents.config import load_ai_runtime_config
+from trpg_server.house_rules_store import active_ruleset_id
 from trpg_server.immersive.config import AUDIO_BLOCKS
 from trpg_server.immersive.config import MUSIC_BLOCKS
 from trpg_server.json_store import read_json
@@ -19,7 +20,7 @@ from trpg_server.room_ops.access import (
     world_override_allowed,
 )
 from trpg_server.room_ops.blueprint import bp
-from trpg_server.room_ops.constants import HOUSE_RULE_DEFINITIONS, ROOM_VISIBILITIES
+from trpg_server.room_ops.constants import ROOM_VISIBILITIES
 from trpg_server.room_ops.house_rules import (
     _admin_dice_thresholds,
     _normalize_bgm_url,
@@ -30,6 +31,7 @@ from trpg_server.room_ops.house_rules import (
     _room_dice_animation,
     _room_dice_thresholds,
     _room_house_rules,
+    house_rule_definitions,
 )
 from trpg_server.room_ops.log import logger
 from trpg_server.room_ops.storage import (
@@ -101,7 +103,9 @@ def get_room_house_rules(room_id):
     return success_response(
         {
             "house_rules": _room_house_rules(info),
-            "definitions": HOUSE_RULE_DEFINITIONS,
+            "definitions": house_rule_definitions(info),
+            "ruleset_id": active_ruleset_id(info),
+            "schema_version": 2,
             "global_hints_enabled": _global_hints_enabled(),
             "visibility": _room_visibility(info),
             "dice_thresholds": _room_dice_thresholds(info),
@@ -133,9 +137,10 @@ def update_room_house_rules(room_id):
     if not isinstance(updates, dict):
         return error_response("Invalid house rules payload", 400, "house_rules must be an object")
 
+    definitions = house_rule_definitions(info)
     current = _room_house_rules(info)
     for key, value in updates.items():
-        spec = HOUSE_RULE_DEFINITIONS.get(key)
+        spec = definitions.get(key)
         if not spec:
             return error_response(f"Unknown house rule: {key}", 400, "Unknown house rule")
         if spec["type"] == "boolean":
@@ -245,7 +250,7 @@ def update_room_house_rules(room_id):
             current[key] = value
 
     enabled_by_request = {
-        key for key, spec in HOUSE_RULE_DEFINITIONS.items()
+        key for key, spec in definitions.items()
         if spec.get("ai_prompt") and current.get(key) and updates.get(key)
     }
     if enabled_by_request and not _global_hints_enabled():
@@ -276,7 +281,9 @@ def update_room_house_rules(room_id):
     return success_response(
         {
             "house_rules": _room_house_rules(info),
-            "definitions": HOUSE_RULE_DEFINITIONS,
+            "definitions": definitions,
+            "schema_version": 2,
+            "ruleset_id": active_ruleset_id(info),
             "global_hints_enabled": _global_hints_enabled(),
             "visibility": _room_visibility(info),
             "dice_thresholds": _room_dice_thresholds(info),

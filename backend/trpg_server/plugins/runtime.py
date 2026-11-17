@@ -16,6 +16,7 @@ from typing import Any
 _LOCK = threading.RLock()
 _EXTRA_TOOLS: dict[str, tuple[Any, ...]] = {}
 _EXTRA_RULESETS: dict[str, Any] = {}
+_CONTENT_PACKS: dict[str, Any] = {}
 
 
 def register_agent_tools(plugin_id: str, tools: list[Any]) -> None:
@@ -38,11 +39,37 @@ def extra_ruleset_plugins() -> list[Any]:
         return list(_EXTRA_RULESETS.values())
 
 
+def register_content_packs(plugin_id: str, library: Any) -> None:
+    with _LOCK:
+        _CONTENT_PACKS[str(plugin_id)] = library
+
+
+def content_packs_for(ruleset_id: str = "") -> Any:
+    """按规则集聚合所有已装载的数据包；无数据包时返回空库。"""
+    from .content_packs import ContentPackLibrary
+
+    with _LOCK:
+        libraries = list(_CONTENT_PACKS.values())
+    packs = [
+        pack
+        for library in libraries
+        for pack in getattr(library, "packs", ())
+        if not ruleset_id or pack.ruleset_id == str(ruleset_id).strip().lower()
+    ]
+    return ContentPackLibrary(tuple(packs))
+
+
+def content_pack_ids() -> list[str]:
+    with _LOCK:
+        return sorted(_CONTENT_PACKS)
+
+
 def clear_plugin_runtime() -> None:
     """卸载/重载时清空扩展项（已注册的 Flask 蓝图无法撤销，需重启）。"""
     with _LOCK:
         _EXTRA_TOOLS.clear()
         _EXTRA_RULESETS.clear()
+        _CONTENT_PACKS.clear()
 
 
 def unregister_plugin(plugin_id: str) -> None:
@@ -50,6 +77,7 @@ def unregister_plugin(plugin_id: str) -> None:
     with _LOCK:
         _EXTRA_TOOLS.pop(str(plugin_id), None)
         _EXTRA_RULESETS.pop(str(plugin_id), None)
+        _CONTENT_PACKS.pop(str(plugin_id), None)
 
 
 def runtime_snapshot() -> dict[str, Any]:
@@ -57,14 +85,18 @@ def runtime_snapshot() -> dict[str, Any]:
         return {
             "agent_tools": {key: len(value) for key, value in _EXTRA_TOOLS.items()},
             "rulesets": sorted(_EXTRA_RULESETS),
+            "content_packs": sorted(_CONTENT_PACKS),
         }
 
 
 __all__ = [
     "clear_plugin_runtime",
+    "content_pack_ids",
+    "content_packs_for",
     "extra_agent_tools",
     "extra_ruleset_plugins",
     "register_agent_tools",
+    "register_content_packs",
     "register_ruleset_plugin",
     "runtime_snapshot",
     "unregister_plugin",

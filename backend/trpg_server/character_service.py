@@ -340,7 +340,11 @@ def apply_save(actor: Any, character_id: str, payload: dict[str, Any]) -> dict[s
 
     ruleset = get_plugin(character.get("rulesetId"))
     character["rulesetId"] = ruleset.id
-    stored = pack_card(ruleset, _runtime_to_test_character(character))
+    card_input = _runtime_to_test_character(character)
+    # 规则无关的卡面快照：前端按 descriptor 直接提交 sheet，原样交给插件打包。
+    if isinstance(character.get("sheet"), dict):
+        card_input["sheet"] = dict(character["sheet"])
+    stored = pack_card(ruleset, card_input)
     write_json_atomic(character_json_path(character["id"]), stored)
     # 前端按 schema 渲染：保存响应也带回 sheet，避免再依赖固定顶层字段。
     character["sheet"] = dict(stored.get("sheet") or {})

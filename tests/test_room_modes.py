@@ -1,7 +1,23 @@
 """房间模式（scripted / freeform / manual）的创建、读取与归档契约。"""
 import json
 
+import pytest
+
 from trpg_server.app_factory import create_app
+from trpg_server.ruleset import bootstrap, reset_builtin_registry
+from trpg_server.ruleset.registry import DeclaredRuleset
+
+
+@pytest.fixture
+def placeholder_ruleset():
+    original = bootstrap.DEFAULT_DECLARED_RULESETS
+    bootstrap.DEFAULT_DECLARED_RULESETS = (DeclaredRuleset(id="coming-soon", display_name="Coming Soon"),)
+    reset_builtin_registry()
+    try:
+        yield "coming-soon"
+    finally:
+        bootstrap.DEFAULT_DECLARED_RULESETS = original
+        reset_builtin_registry()
 
 
 class FakeManager:
@@ -175,10 +191,13 @@ def test_create_room_persists_scenario_ruleset(tmp_path):
     assert stored["ruleset_id"] == "coc7"
 
 
-def test_create_room_rejects_development_ruleset(tmp_path):
+def test_create_room_rejects_development_ruleset(tmp_path, placeholder_ruleset):
     client = _app(tmp_path).test_client()
     _login(client)
-    response = _post_room(client, {"name": "占位规则房", "room_mode": "freeform", "ruleset_id": "dnd5e"})
+    response = _post_room(
+        client,
+        {"name": "占位规则房", "room_mode": "freeform", "ruleset_id": placeholder_ruleset},
+    )
     assert response.status_code == 400, response.get_json()
     payload = response.get_json()
     assert payload["error"] == "ruleset_in_development"

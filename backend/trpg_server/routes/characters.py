@@ -755,6 +755,10 @@ def _sanitize_room_character_card(character):
         "background": character.get("background", {}) if isinstance(character.get("background", {}), dict) else {},
         "status": character.get("status") if isinstance(character.get("status"), dict) else {},
     }
+    # 规则自有卡面快照：插件按 schema 解释，核心只负责原样携带。
+    sheet = character.get("sheet")
+    if isinstance(sheet, dict) and sheet:
+        sanitized["sheet"] = dict(sheet)
     try:
         return derive_card(get_plugin(sanitized["rulesetId"]), sanitized)
     except Exception:  # noqa: BLE001 - 插件异常时按未派生结果写入

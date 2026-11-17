@@ -95,6 +95,7 @@ def build_prompt_layers(
     system_directive: str | None = None,
     props_directive: str | None = None,
     memory_context: str | None = None,
+    ruleset_fragments: list[str] | None = None,
     cache_variant: str = "",
 ) -> PromptLayers:
     scenario_static = _scenario_static_content(scenario)
@@ -112,6 +113,20 @@ def build_prompt_layers(
 
     dynamic_messages: list[dict[str, str]] = []
     dynamic_segments: list[str] = []
+    # 规则集插件提供的判定口径：核心只拼接，不解释具体规则；无片段时不产生注入。
+    fragments = [
+        _bounded(str(item).strip(), 1200)
+        for item in (ruleset_fragments or [])
+        if str(item or "").strip()
+    ]
+    if fragments:
+        dynamic_messages.append(
+            {
+                "role": "system",
+                "content": "规则集判定口径（本房间生效）：\n- " + "\n- ".join(fragments[:6]),
+            }
+        )
+        dynamic_segments.append("ruleset")
     if ruleset_results:
         references = []
         for item in ruleset_results[:5]:

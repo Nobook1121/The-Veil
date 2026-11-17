@@ -9,6 +9,7 @@ import pytest
 
 from trpg_server.ruleset import (
     RULESET_API_VERSION,
+    STATUS_UNKNOWN,
     RulesetRegistry,
     RulesetSelectionError,
     builtin_registry,
@@ -34,8 +35,12 @@ class _FakePlugin:
         self.tools = None
 
 
-def test_builtin_registry_only_exposes_coc7():
-    registry = builtin_registry()
+def test_builtin_registry_without_plugins_only_exposes_coc7(monkeypatch):
+    from trpg_server.plugins import runtime
+    from trpg_server.ruleset import bootstrap
+
+    monkeypatch.setattr(runtime, "extra_ruleset_plugins", lambda: [])
+    registry = bootstrap.build_registry()
     assert registry.ids() == ["coc7"]
     plugin = registry.resolve(None)
     assert plugin.id == default_ruleset_id()
@@ -43,9 +48,16 @@ def test_builtin_registry_only_exposes_coc7():
     assert "character_schema" in plugin.capabilities
 
 
-def test_unknown_ruleset_falls_back_and_room_scenario_resolution():
+def test_unknown_ruleset_is_rejected_explicitly_and_room_scenario_resolution():
+    """D8：未知规则集显式失败，不再静默回退 coc7。"""
     registry = builtin_registry()
-    assert registry.resolve("does-not-exist").id == "coc7"
+    resolution = registry.resolve_explicit("does-not-exist")
+    assert resolution.status == STATUS_UNKNOWN
+    assert resolution.reason_code == "ruleset_unknown"
+    with pytest.raises(RulesetSelectionError) as exc_info:
+        registry.resolve("does-not-exist")
+    assert exc_info.value.reason_code == "ruleset_unknown"
+    assert registry.resolve(None).id == "coc7"
     assert registry.resolve_for_scenario({"ruleset_id": "coc7"}).id == "coc7"
     assert registry.resolve_for_room({"scenario": {"ruleset_id": "coc7"}}).id == "coc7"
     assert registry.resolve_for_room({"ruleset_id": "coc7"}).id == "coc7"
@@ -67,15 +79,17 @@ def test_registry_runs_without_any_builtin_plugin():
     registry = RulesetRegistry([plugin])
     assert registry.default_id() == "placeholder"
     assert registry.resolve(None) is plugin
-    assert registry.resolve("unknown") is plugin
+    with pytest.raises(RulesetSelectionError):
+        registry.resolve("unknown")
     assert registry.assert_selectable(None) is plugin
 
 
 def test_empty_registry_reports_unavailable_instead_of_crashing_import():
     registry = RulesetRegistry([])
     assert registry.default_id() is None
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RulesetSelectionError) as exc_info:
         registry.resolve(None)
+    assert exc_info.value.reason_code == "ruleset_unavailable"
     with pytest.raises(RulesetSelectionError):
         registry.assert_selectable(None)
 
@@ -88,8 +102,10 @@ def test_explicit_default_plugin_wins():
 
 
 def test_plugin_modules_are_registry_driven_not_hardcoded(monkeypatch):
+    from trpg_server.plugins import runtime
     from trpg_server.ruleset import bootstrap
 
+    monkeypatch.setattr(runtime, "extra_ruleset_plugins", lambda: [])
     monkeypatch.setenv("TRPG_RULESET_PLUGINS", "")
     empty = bootstrap.build_registry()
     assert empty.ids() == []
@@ -184,8 +200,9 @@ def test_kp_tools_are_assembled_from_ruleset_plugin():
     assert ruleset_tool_names("coc7") == list(plugin.tools.tool_names())
     assert build_kp_tool_names("coc7") == DEFAULT_KP_TOOLS
     assert "check.roll_room_check" in DEFAULT_KP_TOOLS
-    # 未知规则集回退默认规则集，工具清单保持一致。
-    assert build_kp_tool_names("does-not-exist") == DEFAULT_KP_TOOLS
+    # D8：未知规则集不再回退默认插件的工具清单，而是显式失败。
+    with pytest.raises(RulesetSelectionError):
+        build_kp_tool_names("does-not-exist")
 
 
 def test_descriptor_transcribes_coc7_schema():
@@ -346,10 +363,16 @@ def test_combat_registry_forwards_to_ruleset_plugin():
 
     plugin = builtin_registry().resolve("coc7")
     assert combat_registry.get_ruleset("coc7") is plugin.combat
-    # dnd5e 仍是开发中占位：注册表不注册插件，但战斗兼容实现保留，避免既有测试/流程回退。
-    assert builtin_registry().get("dnd5e") is None
-    assert combat_registry.get_ruleset("dnd5e").ruleset_id == "dnd5e"
-    assert {item["id"] for item in combat_registry.list_rulesets()} >= {"coc7", "dnd5e"}
+    # E4：dnd5e 插件已提供战斗能力，核心按插件转发而不是回退 coc7。
+    dnd = builtin_registry().get("dnd5e")
+    if dnd is not None:
+        assert getattr(dnd, "combat", None) is not None
+        assert combat_registry.get_ruleset("dnd5e") is dnd.combat
+        assert {item["id"] for item in combat_registry.list_rulesets()} == {"coc7", "dnd5e"}
+    else:
+        with pytest.raises(combat_registry.CombatRulesetUnavailable):
+            combat_registry.get_ruleset("dnd5e")
+        assert {item["id"] for item in combat_registry.list_rulesets()} == {"coc7"}
 
 
 def test_check_service_dispatches_to_ruleset_plugin(monkeypatch):

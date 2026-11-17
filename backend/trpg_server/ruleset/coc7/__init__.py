@@ -11,6 +11,9 @@ from typing import Any
 
 from trpg_server.dice_policy import PercentileRollPolicy
 from trpg_server.ruleset.contracts import RULESET_API_VERSION
+from trpg_server.ruleset.coc7.house_rules import coc7_house_rule_definitions
+from trpg_server.ruleset.session import ActionBudgetSlot, TurnModel
+from trpg_server.ruleset.ui import LeftRailSpec, SidebarSpec, TopbarSpec, WorkspaceSpec
 from trpg_server.ruleset.coc7.catalogs import Coc7Catalogs
 from trpg_server.ruleset.coc7.checks import Coc7Checks
 from trpg_server.ruleset.coc7 import growth as coc7_growth
@@ -57,6 +60,15 @@ class Coc7Plugin:
         self.training = coc7_training
         # 本规则集使用的骰子策略：核心只调抽象接口，不认识十位/个位。
         self.roll_policy = PercentileRollPolicy()
+        # 骰型声明：前端骰桌据此保持百分骰，不因规则集切换显示 d20。
+        self.dice = {
+            "type": "d100",
+            "sides": 100,
+            "expression": "1d100",
+            "modes": ["normal", "bonus", "penalty"],
+            "critical": [1],
+            "fumble": [96, 97, 98, 99, 100],
+        }
         # 理智 / 疯狂：上限、1/5 阈值、INT 检定与疯狂表现表都在插件内。
         self.sanity = SANITY
         # 战斗细节（批次 4）：瞄准、掩体闪避、误伤、击晕、部位命中的纯规则。
@@ -64,6 +76,35 @@ class Coc7Plugin:
         self.combat = _load_combat_ruleset()
         if self.combat is None:
             self.capabilities = self.capabilities - {"combat"}
+        # 房规 schema 由规则集自己声明；核心只做命名空间、校验与读写。
+        self.house_rules_definitions = coc7_house_rule_definitions
+        # 通用会话壳：只声明 CoC7 的回合事实，回合逻辑仍在现有战斗模块里。
+        self.turn = TurnModel(
+            mode="round",
+            initiative="dexterity",
+            initiative_formula="DEX（已准备武器 +50）",
+            economy="slots",
+            budget=(ActionBudgetSlot(key="action", per_round=1, refresh="round"),),
+            advance="manual",
+        )
+        # 通用 UI 壳：coc7 继续聊天主列 + 260px 成员栏，不启用 dnd5e 的布局数值。
+        self.workspace = WorkspaceSpec(
+            layout_id="coc7-conversation",
+            rulesets=("coc7",),
+            primary="conversation",
+            primary_min_width=480,
+            sidebar=SidebarSpec(
+                position="right",
+                width=260,
+                min_width=240,
+                max_width=420,
+                collapsible=False,
+                collapsed_width=48,
+            ),
+            topbar=TopbarSpec(height=0, slots=()),
+            left_rail=LeftRailSpec(width=0, visible=False),
+            panels={"chat": "primary", "character": "sidebar", "combat": "inline"},
+        )
 
 
 # 插件登记入口：装配点按模块路径导入本包后取这个实例。

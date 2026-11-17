@@ -57,7 +57,9 @@ def _iter_room_dirs():
     return [path for path in rooms_dir.iterdir() if path.is_dir()]
 
 def _read_room(room_dir):
-    return read_json(room_dir / "info.json", default={})
+    from trpg_server.house_rules_store import attach_view
+
+    return attach_view(read_json(room_dir / "info.json", default={}))
 
 def _write_room(room_dir, info):
     # 统一走 room_rules.save_room_info：房间锁 + 锁内合并 game_clock，

@@ -43,7 +43,10 @@ def find_room(room_id):
     info_file = room_dir / "info.json"
     if not info_file.exists():
         return None, None
-    return room_dir, read_json(info_file, default={})
+    from trpg_server.house_rules_store import attach_view
+
+    info = read_json(info_file, default={})
+    return room_dir, attach_view(info)
 
 
 def is_active_member(member):

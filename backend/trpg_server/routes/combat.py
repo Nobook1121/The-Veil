@@ -63,7 +63,10 @@ class CombatRoomContext:
         self.user_id = str(session.get("user_id") or "")
 
     def room_info(self) -> dict[str, Any]:
-        return read_json(Path(self.room_dir) / "info.json", default={})
+        from trpg_server.house_rules_store import attach_view
+
+        info = read_json(Path(self.room_dir) / "info.json", default={})
+        return attach_view(info) if isinstance(info, dict) else {}
 
 
 def _context(room_dir: Path, room_id: str) -> CombatRoomContext:

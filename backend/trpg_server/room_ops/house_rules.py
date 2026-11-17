@@ -5,25 +5,34 @@ from trpg_server.agents.dice_settings import resolve_dice_settings
 from trpg_server.immersive.config import AUDIO_BLOCKS
 from trpg_server.immersive.config import MUSIC_BLOCKS
 from trpg_server.immersive.config import MUSIC_BLOCK_PRIORITY
+from trpg_server.house_rules_store import active_ruleset_id, definitions_for, flatten, is_namespaced
 from trpg_server.room_ops.constants import (
-    HOUSE_RULE_DEFINITIONS,
     _BGM_AUDIO_SUFFIXES,
     _BGM_LOCAL_PREFIXES,
 )
 from trpg_server.room_ops.storage import _get_config_dir
 
+
+def house_rule_definitions(info):
+    """当前房间的房规 schema：核心设置 + 活动规则集插件声明。"""
+    return definitions_for(active_ruleset_id(info))
+
+
 def _room_house_rules(info):
-    """Normalize stored house rules against ``HOUSE_RULE_DEFINITIONS``.
+    """Normalize stored house rules against the active ruleset's schema.
 
     Missing keys fall back to defaults and wrong types are coerced, so a room
     written by an older version always yields a complete, well-typed dict.
     """
     stored = info.get("house_rules") if isinstance(info, dict) else None
     stored = stored if isinstance(stored, dict) else {}
+    ruleset_id = active_ruleset_id(info)
+    if is_namespaced(stored):
+        stored = flatten(stored, ruleset_id)
     # 旧版房间只存了单曲 bgm_url：升级后迁移为列表，避免背景音乐丢失。
     legacy_bgm_url = _normalize_bgm_url(stored.get("bgm_url", ""))
     normalized = {}
-    for key, spec in HOUSE_RULE_DEFINITIONS.items():
+    for key, spec in definitions_for(ruleset_id).items():
         value = stored.get(key, spec["default"])
         if spec["type"] == "boolean":
             value = bool(value)

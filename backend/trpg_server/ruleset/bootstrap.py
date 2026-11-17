@@ -10,8 +10,8 @@
 
 - ``TRPG_RULESET_PLUGINS``：启用的插件模块，默认 ``trpg_server.ruleset.coc7``。
 - ``TRPG_RULESET_DEFAULT``：显式默认插件 id；留空时取第一个成功加载的插件。
-- ``TRPG_RULESET_COMBAT_FALLBACKS``：``id=模块路径`` 形式的战斗实现兼容表，
-  仅用于「已声明但尚未插件化」的占位规则集。
+- ``TRPG_RULESET_COMBAT_FALLBACKS``：``id=模块路径`` 形式的战斗实现兼容表；
+  核心默认不再登记任何具体规则集的兼容实现，只在运维显式配置时懒加载。
 """
 
 from __future__ import annotations
@@ -27,14 +27,12 @@ logger = logging.getLogger(__name__)
 
 # 默认内置插件清单。新增插件时只需改这一处（或环境变量），核心无需改动。
 DEFAULT_PLUGIN_MODULES: tuple[str, ...] = ("trpg_server.ruleset.coc7",)
-# 仅作「开发中」占位：不可选、不注册为插件、不提供任何规则能力。
-DEFAULT_DECLARED_RULESETS: tuple[DeclaredRuleset, ...] = (
-    DeclaredRuleset(id="dnd5e", display_name="DnD 5e"),
-)
-# 战斗实现的兼容加载表：仅覆盖尚未通过插件 ``combat`` 能力提供实现的占位规则集。
-DEFAULT_COMBAT_MODULES: tuple[tuple[str, str], ...] = (
-    ("dnd5e", "trpg_server.combat.rulesets.dnd5e"),
-)
+# 占位规则集：仅用于界面「开发中」灰卡，不注册为插件。具体规则集由插件提供，
+# 核心不再写死任何规则集 id。
+DEFAULT_DECLARED_RULESETS: tuple[DeclaredRuleset, ...] = ()
+# 战斗实现的兼容加载表：默认为空。核心不再为任何具体规则集预置战斗实现；
+# 规则集应通过插件 ``combat`` 能力提供，运维可用环境变量做临时兼容。
+DEFAULT_COMBAT_MODULES: tuple[tuple[str, str], ...] = ()
 
 ENV_PLUGIN_MODULES = "TRPG_RULESET_PLUGINS"
 ENV_DEFAULT_RULESET = "TRPG_RULESET_DEFAULT"
@@ -60,7 +58,7 @@ def default_ruleset_hint() -> str:
 
 
 def combat_module_map() -> dict[str, str]:
-    """占位规则集 → 战斗实现模块路径。"""
+    """占位规则集 → 战斗实现模块路径；默认空表，仅环境变量可配置。"""
     raw = os.environ.get(ENV_COMBAT_MODULES)
     if raw is None:
         return dict(DEFAULT_COMBAT_MODULES)

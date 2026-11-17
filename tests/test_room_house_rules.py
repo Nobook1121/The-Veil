@@ -52,6 +52,18 @@ def _read_room_info(tmp_path, room_id="r-1"):
     return json.loads((tmp_path / "rooms" / room_id / "info.json").read_text(encoding="utf-8"))
 
 
+def _stored_rules(tmp_path, room_id="r-1"):
+    return _read_room_info(tmp_path, room_id).get("house_rules") or {}
+
+
+def _stored_core(tmp_path, room_id="r-1"):
+    return _stored_rules(tmp_path, room_id).get("core") or {}
+
+
+def _stored_ruleset(tmp_path, ruleset_id="coc7", room_id="r-1"):
+    return (_stored_rules(tmp_path, room_id).get("by_ruleset") or {}).get(ruleset_id) or {}
+
+
 def _disable_global_hints(tmp_path):
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -99,7 +111,7 @@ def test_put_house_rules_enables_and_reads_back(tmp_path):
 
     assert response.status_code == 200
     assert response.get_json()["data"]["house_rules"]["action_suggestions_enabled"] is True
-    assert _read_room_info(tmp_path)["house_rules"]["action_suggestions_enabled"] is True
+    assert _stored_core(tmp_path)["action_suggestions_enabled"] is True
 
 
 def test_put_rejects_enabling_when_global_hints_disabled(tmp_path):
@@ -116,8 +128,7 @@ def test_put_rejects_enabling_when_global_hints_disabled(tmp_path):
     )
 
     assert response.status_code == 400
-    stored = _read_room_info(tmp_path)
-    assert stored.get("house_rules", {}).get("action_suggestions_enabled") is not True
+    assert _stored_core(tmp_path).get("action_suggestions_enabled") is not True
 
 
 def test_put_rejects_unknown_house_rule_key(tmp_path):
@@ -183,7 +194,7 @@ def test_put_house_rules_dice_thresholds_override_defaults(tmp_path):
 
     assert response.status_code == 200
     assert response.get_json()["data"]["dice_thresholds"] == {"critical": 2, "fumble": 99}
-    stored = _read_room_info(tmp_path)["house_rules"]
+    stored = _stored_core(tmp_path)
     assert stored["dice_critical_threshold"] == 2
     assert stored["dice_fumble_threshold"] == 99
 
@@ -208,7 +219,7 @@ def test_put_house_rules_blank_dice_threshold_restores_default(tmp_path):
 
     assert response.status_code == 200
     assert response.get_json()["data"]["dice_thresholds"]["critical"] == 4
-    assert _read_room_info(tmp_path)["house_rules"]["dice_critical_threshold"] is None
+    assert _stored_core(tmp_path)["dice_critical_threshold"] is None
 
 
 def test_put_rejects_non_integer_dice_threshold(tmp_path):
@@ -258,7 +269,7 @@ def test_put_house_rules_bgm_urls_reads_back_and_rejects_invalid(tmp_path):
     rules = response.get_json()["data"]["house_rules"]
     assert rules["bgm_urls"] == ["https://example.com/bgm.mp3", "/assets/bgm/builtin/01-静谧之海.wav"]
     assert rules["bgm_mode"] == "shuffle"
-    assert _read_room_info(tmp_path)["house_rules"]["bgm_urls"][0] == "https://example.com/bgm.mp3"
+    assert _stored_core(tmp_path)["bgm_urls"][0] == "https://example.com/bgm.mp3"
 
     invalid = client.put(
         "/api/rooms/r-1/house-rules",
@@ -266,7 +277,7 @@ def test_put_house_rules_bgm_urls_reads_back_and_rejects_invalid(tmp_path):
         headers={"X-CSRF-Token": "csrf"},
     )
     assert invalid.status_code == 400
-    assert _read_room_info(tmp_path)["house_rules"]["bgm_urls"][0] == "https://example.com/bgm.mp3"
+    assert _stored_core(tmp_path)["bgm_urls"][0] == "https://example.com/bgm.mp3"
 
     invalid_mode = client.put(
         "/api/rooms/r-1/house-rules",
@@ -289,7 +300,7 @@ def test_put_house_rules_accepts_local_music_library_path(tmp_path):
     )
 
     assert response.status_code == 200
-    assert _read_room_info(tmp_path)["house_rules"]["bgm_urls"] == ["/assets/bgm/library/abc__night.wav"]
+    assert _stored_core(tmp_path)["bgm_urls"] == ["/assets/bgm/library/abc__night.wav"]
 
     invalid = client.put(
         "/api/rooms/r-1/house-rules",
@@ -297,7 +308,7 @@ def test_put_house_rules_accepts_local_music_library_path(tmp_path):
         headers={"X-CSRF-Token": "csrf"},
     )
     assert invalid.status_code == 400
-    assert _read_room_info(tmp_path)["house_rules"]["bgm_urls"] == ["/assets/bgm/library/abc__night.wav"]
+    assert _stored_core(tmp_path)["bgm_urls"] == ["/assets/bgm/library/abc__night.wav"]
 
 
 def test_room_house_rules_migrates_legacy_bgm_url(tmp_path):
@@ -337,7 +348,7 @@ def test_put_house_rules_skill_bases_reads_back_and_drops_invalid_entries(tmp_pa
 
     assert response.status_code == 200
     assert response.get_json()["data"]["house_rules"]["skill_bases"] == {"spotHidden": 40, "fighting.sword": 20}
-    assert _read_room_info(tmp_path)["house_rules"]["skill_bases"] == {"spotHidden": 40, "fighting.sword": 20}
+    assert _stored_ruleset(tmp_path)["skill_bases"] == {"spotHidden": 40, "fighting.sword": 20}
 
 
 def test_put_house_rules_skill_bases_clamps_out_of_range(tmp_path):
@@ -369,7 +380,7 @@ def test_put_rejects_non_object_skill_bases(tmp_path):
     )
 
     assert response.status_code == 400
-    assert "skill_bases" not in _read_room_info(tmp_path).get("house_rules", {})
+    assert "skill_bases" not in _stored_ruleset(tmp_path)
 
 
 def test_archive_removes_house_rules(tmp_path):

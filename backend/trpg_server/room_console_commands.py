@@ -420,8 +420,10 @@ def _members_command(room_id: Any, rooms_dir: Path) -> RoomCommandResult:
 
 
 def _load_room_info(room_dir: Path) -> dict[str, Any]:
+    from trpg_server.house_rules_store import attach_view
+
     info = read_json(room_dir / "info.json", default={})
-    return info if isinstance(info, dict) else {}
+    return attach_view(info) if isinstance(info, dict) else {}
 
 
 def _find_room_member(info: dict[str, Any], target: str) -> dict[str, Any] | None:

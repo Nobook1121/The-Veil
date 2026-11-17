@@ -507,6 +507,10 @@ class PluginRegistry:
                 self._activate_templates(record)
                 loaded_capabilities.append("prop_templates")
 
+            if "content_packs" in manifest.capabilities:
+                self._activate_content_packs(record)
+                loaded_capabilities.append("content_packs")
+
             module: ModuleType | None = None
             if manifest.has_code and manifest.code_entry:
                 module = self._import_module(record, manifest.code_entry)
@@ -571,6 +575,15 @@ class PluginRegistry:
                 raise ManifestError(f"模板目录不存在：{relative}")
             dirs.append(path)
         props_registry.register_template_source(f"plugin:{record.id}", dirs)
+
+    def _activate_content_packs(self, record: PluginRecord) -> None:
+        """装载只读内容数据包；启动阶段只校验 pack.json 与文件清单。"""
+        from .content_packs import ContentPackLibrary
+
+        manifest = record.manifest
+        assert manifest is not None
+        library = ContentPackLibrary.from_manifest(manifest)
+        runtime.register_content_packs(record.id, library)
 
     def _activate_tools(self, record: PluginRecord, module: ModuleType) -> None:
         declared = record.manifest.capabilities["agent_tools"]["tools"] if record.manifest else []

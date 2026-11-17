@@ -4,6 +4,7 @@ from flask import request
 from flask import session
 from trpg_server.agents.room_state import save_room_state
 from trpg_server.agents.versioning import migrate_room_binding
+from trpg_server.house_rules_store import active_ruleset_id, switch_namespaces
 from trpg_server.json_store import read_json
 from trpg_server.json_store import remove_tree
 from trpg_server.json_store import write_json_atomic
@@ -31,7 +32,12 @@ from trpg_server.room_ops.access import (
     _require_login,
 )
 from trpg_server.room_ops.blueprint import bp
-from trpg_server.room_ops.cards import _bind_character, _card_in_use_response, _find_card_conflict
+from trpg_server.room_ops.cards import (
+    _bind_character,
+    _card_in_use_response,
+    _find_card_conflict,
+    pause_incompatible_bindings,
+)
 from trpg_server.room_ops.constants import (
     ROOM_MEMBER_ACTIVE,
     ROOM_ROLE_OWNER,
@@ -426,6 +432,35 @@ def get_room_usage(room_id):
         return _denied(room_id)
     return success_response(load_room_usage(room_dir, str(room_id)), "Room usage loaded successfully")
 
+class RulesetSwitchBlocked(Exception):
+    """规则集切换被房间状态拒绝（例如战斗进行中）。"""
+
+
+def _has_active_combat(room_dir) -> bool:
+    state = read_json(room_dir / "state.json", default={})
+    combat = state.get("combat") if isinstance(state, dict) else None
+    return isinstance(combat, dict) and bool(combat.get("active"))
+
+
+def _apply_ruleset_switch(info, target_ruleset_id, room_dir=None):
+    """规则集切换事务：快照旧命名空间、初始化新默认、暂停不兼容绑定。
+
+    返回 ``(old_ruleset_id, new_ruleset_id, paused_bindings)``；调用方负责落盘与广播。
+    规则集未变化时原样返回，不触碰房规与绑定。
+    切换目标与当前规则集不同且房间有进行中的战斗时，抛 ``RulesetSwitchBlocked``，
+    避免静默丢弃战斗状态。
+    """
+    current_ruleset_id = active_ruleset_id(info)
+    target = str(target_ruleset_id or "").strip().lower()
+    if room_dir is not None and target and target != current_ruleset_id and _has_active_combat(room_dir):
+        raise RulesetSwitchBlocked("战斗进行中，不能切换规则集；请先结束战斗再切换。")
+    old_ruleset_id, new_ruleset_id = switch_namespaces(info, target_ruleset_id)
+    if old_ruleset_id == new_ruleset_id:
+        return old_ruleset_id, new_ruleset_id, []
+    paused = pause_incompatible_bindings(info, new_ruleset_id)
+    return old_ruleset_id, new_ruleset_id, paused
+
+
 @bp.route("/api/rooms/<room_id>/scenario-migration", methods=["POST"])
 def migrate_room_scenario(room_id):
     login_error = _require_login()
@@ -459,10 +494,27 @@ def migrate_room_scenario(room_id):
         updated = migrate_room_binding(info, target, payload.get("mapping") or {}, old_entities, new_entities)
     except ValueError as exc:
         return error_response(str(exc), 400, "Scenario migration rejected")
-    updated["ruleset_id"] = builtin_registry().resolve(
+    target_ruleset_id = builtin_registry().resolve(
         str(target.get("ruleset_id") or updated.get("ruleset_id") or "")
     ).id
+    try:
+        old_ruleset_id, new_ruleset_id, paused = _apply_ruleset_switch(updated, target_ruleset_id, room_dir)
+    except RulesetSwitchBlocked as exc:
+        return error_response(str(exc), 409, "Combat in progress")
+    updated["ruleset_id"] = new_ruleset_id
     _write_room(room_dir, updated)
+    if old_ruleset_id != new_ruleset_id:
+        log_room_event(
+            room_dir,
+            user_action_text(session.get("username"), "切换了房间规则集"),
+            actor=session.get("username"),
+            room_id=room_id,
+            logger_=logger,
+            用户ID=session.get("user_id"),
+            原规则集=old_ruleset_id,
+            新规则集=new_ruleset_id,
+            暂停绑定=len(paused),
+        )
     return success_response(_room_summary(updated), "Room migrated to scenario version")
 
 def _first_scene(target: dict) -> dict | None:
@@ -512,7 +564,12 @@ def switch_room_scenario(room_id):
     updated["scenario_id"] = target_id
     updated["scenario_version"] = str(target.get("scenario_version") or target.get("version") or "1")
     updated["scenario_title"] = str(target.get("title") or payload.get("scenario_title") or "").strip() or f"剧本 {target_id}"
-    updated["ruleset_id"] = builtin_registry().resolve(str(target.get("ruleset_id") or "")).id
+    target_ruleset_id = builtin_registry().resolve(str(target.get("ruleset_id") or "")).id
+    try:
+        old_ruleset_id, new_ruleset_id, paused = _apply_ruleset_switch(updated, target_ruleset_id, room_dir)
+    except RulesetSwitchBlocked as exc:
+        return error_response(str(exc), 409, "Combat in progress")
+    updated["ruleset_id"] = new_ruleset_id
     # 场景指针：继承进度时，只要旧场景在新剧本中仍存在就保留，避免打断当前场景；
     # 否则回退到新剧本的第一个场景。
     target_scene_ids = {
@@ -567,6 +624,11 @@ def switch_room_scenario(room_id):
         房间码=updated.get("room_code"),
         原剧本=previous_title,
         新剧本=updated["scenario_title"],
+        **(
+            {"原规则集": old_ruleset_id, "新规则集": new_ruleset_id, "暂停绑定": len(paused)}
+            if old_ruleset_id != new_ruleset_id
+            else {}
+        ),
     )
     return success_response(_room_summary(updated), "Room scenario switched")
 

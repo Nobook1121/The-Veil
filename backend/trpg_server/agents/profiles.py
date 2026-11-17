@@ -64,11 +64,53 @@ def ruleset_tool_names(ruleset_id: str | None = None) -> list[str]:
     return [str(name) for name in provider.tool_names() if str(name).strip()]
 
 
+def combat_budget_tool_names(ruleset_id: str | None = None) -> list[str]:
+    """多槽行动经济（动作/附赠/反应/移动）才下发通用扣减工具。"""
+    from trpg_server.ruleset.session import turn_model_of
+
+    try:
+        model = turn_model_of(builtin_registry().resolve(ruleset_id))
+    except Exception:  # noqa: BLE001 - 规则集不可用时按无战斗处理
+        return []
+    return ["combat.spend"] if len(model.budget) > 1 else []
+
+
+def spell_tool_names(ruleset_id: str | None = None) -> list[str]:
+    """声明了 ``spells`` 能力的规则集才下发施法工具。"""
+    try:
+        plugin = builtin_registry().resolve(ruleset_id)
+    except Exception:  # noqa: BLE001 - 规则集不可用时按无施法处理
+        return []
+    if getattr(plugin, "spells", None) is None:
+        return []
+    return ["spell.list", "spell.cast", "spell.concentration"]
+
+
+def effect_tool_names(ruleset_id: str | None = None) -> list[str]:
+    """声明了 ``effects`` 能力的规则集才下发状态与效果工具。"""
+    try:
+        plugin = builtin_registry().resolve(ruleset_id)
+    except Exception:  # noqa: BLE001 - 规则集不可用时按无状态能力处理
+        return []
+    if getattr(plugin, "effects", None) is None:
+        return []
+    return ["effect.list", "effect.apply", "effect.remove", "scene.advance"]
+
+
 def build_kp_tool_names(ruleset_id: str | None = None) -> list[str]:
     """按规则集组装 KP 工具：核心工具 + 插件声明的规则专属工具。"""
     names = list(CORE_KP_TOOL_NAMES)
     index = names.index("room.remember_fact") + 1
-    extra = [name for name in ruleset_tool_names(ruleset_id) if name not in names]
+    extra = [
+        name
+        for name in (
+            *ruleset_tool_names(ruleset_id),
+            *combat_budget_tool_names(ruleset_id),
+            *spell_tool_names(ruleset_id),
+            *effect_tool_names(ruleset_id),
+        )
+        if name not in names
+    ]
     names[index:index] = extra
     return names
 

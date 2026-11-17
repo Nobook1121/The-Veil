@@ -8,7 +8,24 @@ import pytest
 
 from trpg_server import scenario_service
 from trpg_server.app_factory import create_app
-from trpg_server.ruleset import RulesetSelectionError, builtin_registry
+from trpg_server.ruleset import RulesetSelectionError, builtin_registry, reset_builtin_registry
+from trpg_server.ruleset.registry import DeclaredRuleset, RulesetRegistry
+
+PLACEHOLDER = DeclaredRuleset(id="coming-soon", display_name="Coming Soon")
+
+
+@pytest.fixture
+def placeholder():
+    from trpg_server.ruleset import bootstrap
+
+    original = bootstrap.DEFAULT_DECLARED_RULESETS
+    bootstrap.DEFAULT_DECLARED_RULESETS = (PLACEHOLDER,)
+    reset_builtin_registry()
+    try:
+        yield PLACEHOLDER
+    finally:
+        bootstrap.DEFAULT_DECLARED_RULESETS = original
+        reset_builtin_registry()
 
 
 class _ScenarioActor:
@@ -46,23 +63,25 @@ def _make_app(tmp_path: Path) -> object:
 
 
 def test_registry_describes_development_placeholder_without_hardcoding():
-    items = {item["id"]: item for item in builtin_registry().describe()}
+    registry = RulesetRegistry([builtin_registry().resolve("coc7")], declared=[PLACEHOLDER])
+    items = {item["id"]: item for item in registry.describe()}
     assert items["coc7"]["state"] == "available"
     assert items["coc7"]["selectable"] is True
-    placeholder = items["dnd5e"]
+    placeholder = items["coming-soon"]
     assert placeholder["state"] == "development"
     assert placeholder["selectable"] is False
     assert placeholder["reason_code"] == "ruleset_in_development"
 
 
 def test_selecting_development_ruleset_is_rejected_with_reason():
+    registry = RulesetRegistry([builtin_registry().resolve("coc7")], declared=[PLACEHOLDER])
     with pytest.raises(RulesetSelectionError) as exc_info:
-        builtin_registry().assert_selectable("dnd5e")
+        registry.assert_selectable("coming-soon")
     assert exc_info.value.reason_code == "ruleset_in_development"
     assert "开发中" in exc_info.value.message
 
 
-def test_rulesets_endpoint_requires_login_and_exposes_development_state(tmp_path: Path):
+def test_rulesets_endpoint_requires_login_and_exposes_development_state(tmp_path: Path, placeholder):
     """前端只依赖这个接口渲染灰卡，因此接口层也要固定住契约。"""
     app = _make_app(tmp_path)
     client = app.test_client()
@@ -78,12 +97,12 @@ def test_rulesets_endpoint_requires_login_and_exposes_development_state(tmp_path
     assert response.status_code == 200
     items = {item["id"]: item for item in response.get_json()["data"]}
     assert items["coc7"]["selectable"] is True
-    assert items["dnd5e"]["state"] == "development"
-    assert items["dnd5e"]["selectable"] is False
-    assert items["dnd5e"]["reason"]
+    assert items[placeholder.id]["state"] == "development"
+    assert items[placeholder.id]["selectable"] is False
+    assert items[placeholder.id]["reason"]
 
 
-def test_create_scenario_defaults_to_coc7_and_rejects_development_ruleset(tmp_path: Path):
+def test_create_scenario_defaults_to_coc7_and_rejects_development_ruleset(tmp_path: Path, placeholder):
     app = _make_app(tmp_path)
     with app.app_context():
         created = scenario_service.apply_create(
@@ -99,7 +118,7 @@ def test_create_scenario_defaults_to_coc7_and_rejects_development_ruleset(tmp_pa
                     "title": "开发中规则剧本",
                     "author": "作者",
                     "scenario_version": "1.0.0",
-                    "ruleset_id": "dnd5e",
+                    "ruleset_id": placeholder.id,
                 },
             )
         assert exc_info.value.status == 400

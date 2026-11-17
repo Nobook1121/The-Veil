@@ -144,7 +144,9 @@ def _bout_messages(result: Any) -> list[str]:
     return []
 
 
-def _settle_after_time_change(room_dir: Path, room_id: Any, config_dir: Any) -> str:
+def _settle_after_time_change(
+    room_dir: Path, room_id: Any, config_dir: Any, elapsed_seconds: int = 0
+) -> str:
     """时间向前推进后在同一处结算到期效果；失败不阻断时间推进。"""
     messages: list[str] = []
     try:
@@ -156,6 +158,19 @@ def _settle_after_time_change(room_dir: Path, room_id: Any, config_dir: Any) -> 
         messages.extend(result.get("messages") or [])
     except Exception:  # noqa: BLE001 - 结算失败不能回滚已经推进的时间
         pass
+    if elapsed_seconds > 0:
+        try:
+            from trpg_server import room_spells
+            from trpg_server import room_rules
+
+            info = room_rules.load_room_info(room_dir)
+            ruleset, _settings = room_spells.ruleset_for(info)
+            if room_spells.effects_available(ruleset):
+                minutes = max(1, (int(elapsed_seconds) + 59) // 60)
+                result = room_spells.advance_minutes(room_dir, info, minutes=minutes)
+                messages.extend(result.get("notes") or [])
+        except Exception:  # noqa: BLE001 - 效果结算失败不能回滚时间
+            pass
     messages.extend(_expire_bouts(room_dir, room_id, config_dir))
     if not messages:
         return ""
@@ -227,7 +242,11 @@ def handle_room_time_command(
         except room_clock.ClockError as exc:
             return False, exc.message
         return True, f"游戏时间推进完成：{room_clock.format_display(clock['current'])}" + _settle_after_time_change(
-            room_dir, room_id, config_dir
+            room_dir,
+            room_id,
+            config_dir,
+            elapsed_seconds=days * room_clock.SECONDS_PER_DAY
+            + hours * room_clock.SECONDS_PER_HOUR,
         )
 
     # time set
@@ -244,12 +263,17 @@ def handle_room_time_command(
         assume_yes = True
     if not assume_yes:
         return True, preview + "\n（预演模式：确认无误后加 yes 执行）"
+    before_seconds = room_clock.current_seconds(info)
     try:
         clock = room_clock.set_clock(room_dir, target, actor=actor)
     except room_clock.ClockError as exc:
         return False, exc.message
+    elapsed = 0
+    after_moment = room_clock.parse_moment(clock["current"])
+    if before_seconds is not None and after_moment is not None:
+        elapsed = max(0, int(after_moment.timestamp()) - int(before_seconds))
     return True, f"游戏时间设置完成：{room_clock.format_display(clock['current'])}" + _settle_after_time_change(
-        room_dir, room_id, config_dir
+        room_dir, room_id, config_dir, elapsed_seconds=elapsed
     )
 
 

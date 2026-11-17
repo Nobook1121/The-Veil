@@ -318,6 +318,32 @@ def _parse_capabilities(raw: Mapping[str, Any], plugin_id: str) -> dict[str, Any
             normalized_assets.append({"path": path, "type": kind})
         result["frontend_assets"] = normalized_assets
 
+    if "ui" in raw:
+        from trpg_server.ruleset.ui import UiDeclarationError, parse_ui
+
+        try:
+            declaration = parse_ui(raw["ui"])
+        except UiDeclarationError as exc:
+            raise ManifestError(f"capabilities.ui 不合法：{exc}") from exc
+        result["ui"] = declaration.to_dict() if declaration is not None else {}
+
+    if "content_packs" in raw:
+        section = _require_mapping(raw["content_packs"], "capabilities.content_packs")
+        dirs = section.get("dirs", ["packs"])
+        if not isinstance(dirs, list) or not dirs:
+            raise ManifestError("capabilities.content_packs.dirs 必须是非空数组")
+        contract_version = section.get("contract_version", 1)
+        if not isinstance(contract_version, int) or isinstance(contract_version, bool):
+            raise ManifestError("capabilities.content_packs.contract_version 必须是整数")
+        if contract_version != 1:
+            raise ManifestError(
+                f"capabilities.content_packs.contract_version 不受支持：{contract_version}"
+            )
+        result["content_packs"] = {
+            "dirs": [_normalize_rel_path(item, "content_packs.dirs") for item in dirs],
+            "contract_version": contract_version,
+        }
+
     return result
 
 
@@ -326,6 +352,15 @@ def _parse_capabilities(raw: Mapping[str, Any], plugin_id: str) -> dict[str, Any
 
 def manifest_json_schema() -> dict[str, Any]:
     """清单的 JSON Schema（draft-07）视图，与上面的校验实现保持同步。"""
+    from trpg_server.ruleset.ui import (
+        PANEL_DESTINATIONS,
+        SANDBOX_MODES,
+        SIDEBAR_POSITIONS,
+        TOPBAR_SLOTS,
+        UI_SLOTS,
+        WORKSPACE_PRIMARIES,
+    )
+
     relative_path = {
         "type": "string",
         "minLength": 1,
@@ -453,6 +488,100 @@ def manifest_json_schema() -> dict[str, Any]:
                             },
                             "additionalProperties": False,
                         },
+                    },
+                    "ui": {
+                        "type": "object",
+                        "required": ["api_version"],
+                        "properties": {
+                            "api_version": {"const": 1},
+                            "workspace": {
+                                "type": "object",
+                                "properties": {
+                                    "layout_id": {"type": "string"},
+                                    "rulesets": {"type": "array", "items": {"type": "string"}},
+                                    "primary": {"enum": sorted(WORKSPACE_PRIMARIES)},
+                                    "primary_min_width": {"type": "integer"},
+                                    "sidebar": {
+                                        "type": "object",
+                                        "properties": {
+                                            "position": {"enum": sorted(SIDEBAR_POSITIONS)},
+                                            "width": {"type": "integer"},
+                                            "min_width": {"type": "integer"},
+                                            "max_width": {"type": "integer"},
+                                            "collapsible": {"type": "boolean"},
+                                            "collapsed_width": {"type": "integer"},
+                                        },
+                                        "additionalProperties": True,
+                                    },
+                                    "topbar": {
+                                        "type": "object",
+                                        "properties": {
+                                            "height": {"type": "integer"},
+                                            "slots": {
+                                                "type": "array",
+                                                "items": {"enum": sorted(TOPBAR_SLOTS)},
+                                            },
+                                        },
+                                        "additionalProperties": True,
+                                    },
+                                    "left_rail": {
+                                        "type": "object",
+                                        "properties": {
+                                            "width": {"type": "integer"},
+                                            "visible": {"type": "boolean"},
+                                        },
+                                        "additionalProperties": True,
+                                    },
+                                    "panels": {
+                                        "type": "object",
+                                        "additionalProperties": {"enum": sorted(PANEL_DESTINATIONS)},
+                                    },
+                                    "priority": {"type": "integer"},
+                                },
+                                "additionalProperties": True,
+                            },
+                            "slots": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["id", "slot"],
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "slot": {"enum": sorted(UI_SLOTS)},
+                                        "title_i18n": {"type": "string"},
+                                        "rulesets": {"type": "array", "items": {"type": "string"}},
+                                        "requires": {"type": "array", "items": {"type": "string"}},
+                                        "priority": {"type": "integer"},
+                                        "layout": {"type": "object"},
+                                        "permissions": {"type": "array", "items": {"type": "string"}},
+                                        "mount": {"type": "string"},
+                                    },
+                                    "additionalProperties": True,
+                                },
+                            },
+                            "sandbox": {
+                                "type": "object",
+                                "properties": {
+                                    "enabled": {"const": False},
+                                    "mode": {"enum": sorted(SANDBOX_MODES)},
+                                    "position": {"enum": sorted(UI_SLOTS)},
+                                },
+                                "additionalProperties": True,
+                            },
+                        },
+                        "additionalProperties": False,
+                    },
+                    "content_packs": {
+                        "type": "object",
+                        "properties": {
+                            "dirs": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": relative_path,
+                            },
+                            "contract_version": {"const": 1},
+                        },
+                        "additionalProperties": False,
                     },
                 },
             },

@@ -126,6 +126,7 @@ class Coc7RuleOptions:
 
 def resolve_options(room_info: Mapping[str, Any] | None = None) -> Coc7RuleOptions:
     """从房间信息读取开关；缺省或旧房间一律按全部关闭处理。"""
-    info = room_info if isinstance(room_info, Mapping) else {}
-    rules = info.get("house_rules")
+    from trpg_server.house_rules_store import flat_rules
+
+    rules = flat_rules(room_info)
     return Coc7RuleOptions.from_house_rules(rules if isinstance(rules, Mapping) else None)

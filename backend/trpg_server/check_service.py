@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from trpg_server.ruleset import CheckRequest, get_plugin
+from trpg_server.ruleset.capabilities import check_outcome_of, target_bounds_of
 
 
 class CheckServiceError(ValueError):
@@ -149,9 +150,18 @@ def run_room_check(
                 )
             )
         raise CheckServiceError(f"{check_name} was not found on player {resolved_name}'s character card")
-    if base_target > 100:
-        raise CheckServiceError(f"{check_name} value must be between 0 and 100")
-
+    # 目标值范围由插件声明（CoC7 为 0–100）；核心不再写死百分制上限。
+    lower_bound, upper_bound = target_bounds_of(plugin)
+    if lower_bound is not None and base_target < lower_bound:
+        raise CheckServiceError(
+            f"{check_name} value must be between {lower_bound} and {upper_bound}"
+            if upper_bound is not None
+            else f"{check_name} value must be at least {lower_bound}"
+        )
+    if upper_bound is not None and base_target > upper_bound:
+        raise CheckServiceError(
+            f"{check_name} value must be between {lower_bound if lower_bound is not None else 0} and {upper_bound}"
+        )
     bonus_dice = max(0, min(10, int(bonus or 0)))
     penalty_dice = max(0, min(10, int(penalty or 0)))
     # 奖励与惩罚同时存在时互相抵消，只有净额生效（上限 2 颗）。
@@ -268,6 +278,69 @@ def _rewrite_visible(result: Mapping[str, Any], summary: str) -> None:
     message = result.get("visible_message")
     if isinstance(message, dict):
         message["content"] = summary
+
+
+def run_room_check_outcome(
+    member: Mapping[str, Any],
+    *,
+    player_name: str | None = None,
+    name: str,
+    kind: str = "check",
+    dc: int = 10,
+    modifier: int = 0,
+    advantage: bool = False,
+    disadvantage: bool = False,
+    ruleset_id: str | None = None,
+    rng: Callable[[int], int] | None = None,
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """用通用 ``CheckOutcome`` 结算一次规则集检定。
+
+    核心只负责成员定位、DC 透传与结果展示；成功等级、自然 1/20 的含义、
+    加值构成全部由插件决定。CoC7 仍走 :func:`run_room_check` 的百分制路径。
+    """
+    dice = _dice_module()
+    card, resolved_name = _resolve_member(member, player_name)
+    check_name = str(name or "").strip()
+    if not check_name:
+        raise CheckServiceError("name is required")
+
+    plugin = get_plugin(ruleset_id)
+    if getattr(plugin, "checks", None) is None:
+        raise CheckServiceError(f"规则集 {plugin.id} 不支持检定")
+    try:
+        target = int(dc)
+    except (TypeError, ValueError) as exc:
+        raise CheckServiceError("dc must be an integer") from exc
+
+    payload = dict(extra or {})
+    payload.setdefault("advantage", bool(advantage))
+    payload.setdefault("disadvantage", bool(disadvantage))
+    request = CheckRequest(
+        kind=kind,
+        name=check_name,
+        target=target,
+        modifier=int(modifier or 0),
+        extra=payload,
+    )
+    try:
+        outcome = check_outcome_of(
+            plugin,
+            card,
+            request,
+            rng or (lambda sides: dice.random.randint(1, sides)),
+        )
+    except (TypeError, ValueError) as exc:
+        raise CheckServiceError(str(exc)) from exc
+
+    result = outcome.to_dict()
+    result.update(
+        {
+            "player_name": resolved_name,
+            "character_name": card.get("name"),
+        }
+    )
+    return result
 
 
 def run_room_social_check(

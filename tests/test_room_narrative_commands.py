@@ -202,12 +202,12 @@ def test_guard_and_profile_require_confirmation(tmp_path):
     result = _run(rooms_dir, room_dir, "narrative guard shadow --yes", app=app)
     assert result.ok
     info = json.loads((room_dir / "info.json").read_text(encoding="utf-8"))
-    assert info["house_rules"]["narrative_guard"] == "shadow"
+    assert info["house_rules"]["core"]["narrative_guard"] == "shadow"
 
     result = _run(rooms_dir, room_dir, "narrative profile degraded --yes", app=app)
     assert result.ok
     info = json.loads((room_dir / "info.json").read_text(encoding="utf-8"))
-    assert info["house_rules"]["narrative_profile"] == "degraded"
+    assert info["house_rules"]["core"]["narrative_profile"] == "degraded"
 
     result = _run(rooms_dir, room_dir, "narrative guard nope", app=app)
     assert not result.ok
@@ -223,7 +223,7 @@ def test_narrative_accepts_pure_word_options(tmp_path):
     result = _run(rooms_dir, room_dir, "narrative guard shadow yes", app=app)
     assert result.ok, result.message
     info = json.loads((room_dir / "info.json").read_text(encoding="utf-8"))
-    assert info["house_rules"]["narrative_guard"] == "shadow"
+    assert info["house_rules"]["core"]["narrative_guard"] == "shadow"
 
     result = _run(rooms_dir, room_dir, "narrative state json", app=app)
     assert result.ok, result.message

@@ -59,6 +59,8 @@ CAPABILITY_LABELS: dict[str, str] = {
     "http_blueprints": "HTTP 蓝图",
     "settings_sections": "设置页配置段",
     "frontend_assets": "前端资源",
+    "ui": "插件 UI 声明",
+    "content_packs": "内容数据包",
 }
 CAPABILITY_NAMES: tuple[str, ...] = tuple(CAPABILITY_LABELS)
 

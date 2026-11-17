@@ -82,8 +82,10 @@ class RoomRuleContext:
 
 
 def load_room_info(room_dir: Any) -> dict[str, Any]:
+    from trpg_server.house_rules_store import attach_view
+
     info = read_json(Path(room_dir) / "info.json", default={})
-    return info if isinstance(info, dict) else {}
+    return attach_view(info) if isinstance(info, dict) else {}
 
 
 def save_room_info(room_dir: Any, info: dict[str, Any]) -> None:
@@ -97,7 +99,18 @@ def save_room_info(room_dir: Any, info: dict[str, Any]) -> None:
     with room_clock.room_lock(room_dir):
         room_clock.preserve_stored_clock(room_dir, info)
         info["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        write_json_atomic(Path(room_dir) / "info.json", info)
+        from trpg_server.house_rules_store import namespaced_for_storage
+
+        payload = dict(info)
+        stored_rules = namespaced_for_storage(info)
+        if stored_rules is None:
+            payload.pop("house_rules", None)
+        else:
+            payload["house_rules"] = stored_rules
+        # 内存兼容视图与原始命名空间只用于本次请求，不落盘。
+        payload.pop("_house_rules_ns", None)
+        payload.pop("_house_rules_legacy", None)
+        write_json_atomic(Path(room_dir) / "info.json", payload)
 
 
 def resolve_rule_id(info: dict[str, Any] | None, *, scenarios_dir: Any = None) -> str:

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from trpg_server.ruleset.resources import normalize_slots
+
 # 默认派生键：插件未声明时按历史 CoC 口径处理，保证旧卡行为不变。
 DEFAULT_DERIVED_CARD_KEYS: tuple[str, ...] = (
     "maxHp",
@@ -130,12 +132,13 @@ def derived_card_keys(plugin: Any) -> tuple[str, ...]:
 
 
 def resource_slots(plugin: Any) -> tuple[dict[str, Any], ...]:
+    """插件声明的资源槽位；统一带 v2 字段，旧字段原样保留。"""
     declared = getattr(schema_of(plugin), "resource_slots", None)
     if callable(declared):
-        slots = tuple(dict(slot) for slot in declared())
+        slots = normalize_slots(declared())
         if slots:
             return slots
-    return DEFAULT_RESOURCE_SLOTS
+    return normalize_slots(DEFAULT_RESOURCE_SLOTS)
 
 
 def resource_slot(plugin: Any, kind: str) -> dict[str, Any] | None:
@@ -238,7 +241,7 @@ def resource_state_defaults(plugin: Any, card: Mapping[str, Any] | None) -> dict
     result: dict[str, Any] = {}
     for slot in resource_slots(plugin):
         cap_min = _as_int(slot.get("cap_min"), 0)
-        cap = _bounded(data.get(str(slot["cap_derived"])), cap_min, 999, cap_min)
+        cap = _bounded(data.get(str(slot.get("cap_derived") or "")), cap_min, 999, cap_min)
         initial_key = str(slot.get("initial_state") or "")
         initial_value = None
         current_fallback = cap
@@ -264,7 +267,7 @@ def clamp_resource_state(plugin: Any, card: Mapping[str, Any] | None, state: dic
         cap_key = str(slot["cap_state"])
         cap_min = _as_int(slot.get("cap_min"), 0)
         existing_cap = _bounded(snapshot.get(cap_key), cap_min, 999, cap_min)
-        cap = _bounded(data.get(str(slot["cap_derived"])), cap_min, 999, existing_cap)
+        cap = _bounded(data.get(str(slot.get("cap_derived") or "")), cap_min, 999, existing_cap)
         snapshot[cap_key] = cap
         snapshot[str(slot["state"])] = _bounded(snapshot.get(str(slot["state"])), 0, cap, cap)
         initial_key = str(slot.get("initial_state") or "")
@@ -272,3 +275,89 @@ def clamp_resource_state(plugin: Any, card: Mapping[str, Any] | None, state: dic
             fallback = _bounded(data.get(str(slot.get("initial_mirror") or "")), 0, cap, cap)
             snapshot[initial_key] = _bounded(snapshot.get(initial_key), 0, cap, fallback)
     return snapshot
+
+
+# ---------------------------------------------------------------- E0 通用壳访问
+
+
+def check_outcome_of(plugin: Any, card: Mapping[str, Any], request: Any, rng: Any = None):
+    """调用插件结算一次判定并返回通用 ``CheckOutcome``。
+
+    优先使用插件的 ``checks.roll_outcome``；未声明时把历史 ``roll`` 结果包成
+    信封，保证 CoC7 与旧插件不需要改签名就能接入。
+    """
+    from trpg_server.ruleset.check_outcome import coerce_outcome
+
+    checks = checks_of(plugin)
+    if checks is None:
+        raise ValueError(f"规则集 {getattr(plugin, 'id', '')} 不支持检定")
+    ruleset_id = str(getattr(plugin, "id", "") or "")
+    kind = str(getattr(request, "kind", "") or "check")
+    resolver = getattr(checks, "roll_outcome", None)
+    if callable(resolver):
+        return coerce_outcome(resolver(card, request, rng), ruleset_id=ruleset_id, kind=kind)
+    roller = getattr(checks, "roll", None)
+    if not callable(roller):
+        raise ValueError(f"规则集 {ruleset_id} 不支持检定")
+    return coerce_outcome(roller(card, request, rng), ruleset_id=ruleset_id, kind=kind)
+
+
+def target_bounds_of(plugin: Any) -> tuple[int | None, int | None]:
+    """插件声明的目标值范围；未声明表示核心不做范围校验。
+
+    CoC7 声明 ``(0, 100)``，因此核心不再写死 ``base_target <= 100``；
+    d20 类规则可以不声明，或声明自己的范围。
+    """
+    checks = checks_of(plugin)
+    resolver = getattr(checks, "target_bounds", None)
+    if not callable(resolver):
+        return None, None
+    try:
+        lower, upper = resolver()
+    except (TypeError, ValueError):
+        return None, None
+    return _optional_int(lower), _optional_int(upper)
+
+
+def turn_model_of(plugin: Any):
+    """插件的回合模型；未声明时按是否具备战斗能力给中性默认。"""
+    from trpg_server.ruleset.session import turn_model_of as _turn_model_of
+
+    return _turn_model_of(plugin)
+
+
+def workspace_of(plugin: Any):
+    """插件的 workspace 声明；缺失时回退 conversation 布局。"""
+    from trpg_server.ruleset.ui import workspace_of as _workspace_of
+
+    return _workspace_of(plugin)
+
+
+def card_descriptor_of(plugin: Any) -> dict[str, Any]:
+    """插件角色卡描述 v2（sections / fields / labels）。"""
+    from trpg_server.ruleset.content import character_card_descriptor
+
+    return character_card_descriptor(plugin).to_dict()
+
+
+def house_rules_definitions_of(plugin: Any) -> dict[str, dict[str, Any]]:
+    """插件的房规 schema；未声明时返回空字典（核心只保留自己的 core 字段）。"""
+    declared = getattr(plugin, "house_rules_definitions", None)
+    if not callable(declared):
+        declared = getattr(plugin, "house_rules", None)
+    if not callable(declared):
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for key, spec in (declared() or {}).items():
+        if isinstance(spec, Mapping):
+            result[str(key)] = dict(spec)
+    return result
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

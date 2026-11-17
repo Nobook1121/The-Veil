@@ -20,6 +20,8 @@ from trpg_server.agents.tools.narrative_triggers import (
 from trpg_server.agents.tools.knowledge import SEARCH_RULESET_KNOWLEDGE_TOOL
 from trpg_server.agents.tools.suggest import SUGGEST_ACTIONS_TOOL
 from trpg_server.agents.tools.combat import COMBAT_TOOLS, COMBAT_TOOL_NAMES
+from trpg_server.agents.tools.effects import EFFECT_TOOLS, EFFECT_TOOL_NAMES
+from trpg_server.agents.tools.spells import SPELL_TOOLS, SPELL_TOOL_NAMES
 from trpg_server.agents.tools.music import MUSIC_REQUEST_TOOL
 from trpg_server.agents.tools.character_items import ADD_CHARACTER_ITEM_TOOL
 from trpg_server.agents.tools.coc7 import COC7_EXTRA_TOOL_NAMES, COC7_EXTRA_TOOLS
@@ -65,6 +67,8 @@ def _core_tools() -> list[AgentTool]:
         SET_CHARACTER_SKILL_TOOL,
         SET_CHARACTER_ATTRIBUTE_TOOL,
         *COMBAT_TOOLS,
+        *SPELL_TOOLS,
+        *EFFECT_TOOLS,
         *NARRATIVE_TOOLS,
         *TRIGGER_RUNTIME_TOOLS,
         *COC7_EXTRA_TOOLS,
@@ -108,6 +112,10 @@ __all__ = [
     "SANITY_TOOLS",
     "COMBAT_TOOLS",
     "COMBAT_TOOL_NAMES",
+    "EFFECT_TOOLS",
+    "EFFECT_TOOL_NAMES",
+    "SPELL_TOOLS",
+    "SPELL_TOOL_NAMES",
     "INTERLUDE_TOOLS",
     "INTERLUDE_TOOL_NAMES",
     "GAME_CLOCK_TOOLS",

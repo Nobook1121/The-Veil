@@ -26,6 +26,7 @@ from trpg_server.agents.config import load_ai_runtime_config
 from trpg_server.agents.context import build_agent_context
 from trpg_server.agents.profiles import resolve_agent_profile, with_graph_tools
 from trpg_server.agents.runtime import run_agent_completion
+from trpg_server.agents.hint_guard import strip_action_hints
 from trpg_server.agents.structured_output import apply_state_updates, parse_kp_response, validate_state_updates, validate_structured_response
 from trpg_server.agents.telemetry import build_provider_cache_key, calculate_cache_hit_rate, record_ai_usage
 from trpg_server.agents.prompt_builder import build_prompt_layers
@@ -882,6 +883,24 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
             from trpg_server.agents.tools.time import GAME_CLOCK_TOOL_NAMES
 
             excluded_tool_names |= set(GAME_CLOCK_TOOL_NAMES)
+        try:
+            from trpg_server.ruleset import builtin_registry as _builtin_registry
+            from trpg_server.ruleset.session import combat_available as _combat_available
+
+            _ruleset_plugin = _builtin_registry().resolve(room_ruleset_id)
+            if not _combat_available(_ruleset_plugin):
+                # 规则集没有战斗能力时，战斗工具整组不出现。
+                excluded_tool_names |= set(COMBAT_TOOL_NAMES)
+            if getattr(_ruleset_plugin, "spells", None) is None:
+                from trpg_server.agents.tools.spells import SPELL_TOOL_NAMES
+
+                excluded_tool_names |= set(SPELL_TOOL_NAMES)
+            if getattr(_ruleset_plugin, "effects", None) is None:
+                from trpg_server.agents.tools.effects import EFFECT_TOOL_NAMES
+
+                excluded_tool_names |= set(EFFECT_TOOL_NAMES)
+        except Exception:  # noqa: BLE001 - 规则集未注册时保持原有工具集
+            pass
         if room_ruleset_id == "coc7":
             # 批次 1 房规：开关关闭时对应工具不存在，与旧行为完全一致。
             from trpg_server.ruleset.coc7.options import resolve_options as resolve_coc7_options
@@ -1082,6 +1101,18 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
             except Exception:
                 logger.exception("Failed to build long-term memory context")
         projected_state = project_room_state(agent_context.room_state(), room_snapshot) if room_id else {}
+        # 插件声明的规则口径：核心只拼接片段，不解释具体规则；无片段时不注入。
+        ruleset_fragments: list[str] = []
+        try:
+            from trpg_server.ruleset import builtin_registry as _prompt_registry
+
+            _prompt_tools = getattr(_prompt_registry().resolve(room_ruleset_id), "tools", None)
+            if _prompt_tools is not None:
+                ruleset_fragments = [
+                    str(item) for item in _prompt_tools.prompt_fragments() if str(item or "").strip()
+                ]
+        except Exception:  # noqa: BLE001 - 规则集片段失败不应阻断主流程
+            ruleset_fragments = []
         if interlude_active and isinstance(projected_state, dict):
             # 复盘材料只取已落盘摘要 / 关键帧 / 日志，避免把全量聊天重新塞回上下文。
             projected_state["interlude"] = room_interlude.review_context(
@@ -1158,6 +1189,7 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
             system_directive=system_directive,
             props_directive=props_directive,
             memory_context=memory_context,
+            ruleset_fragments=ruleset_fragments,
             cache_variant=latex_settings.cache_variant,
         )
         _emit_thinking_stage(room_id, ai_request_id, "vector_search_done", "向量库检索完成")
@@ -1464,10 +1496,16 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
         staged_suggestions = agent_context.tool_state.get("suggested_actions")
         if isinstance(staged_suggestions, list):
             suggestions = [str(item) for item in staged_suggestions if str(item).strip()]
+        if not effective_suggestions:
+            # 房规未开启行动建议时，任何来源的选项都不该下发（工具层已拦一次，这里再兜一次）。
+            suggestions = []
 
         structured = parse_kp_response(result.content)
         if structured:
             structured = validate_structured_response(structured, (room_snapshot or {}).get("scenario") if isinstance(room_snapshot, dict) else {})
+            if structured and not effective_suggestions and structured.options:
+                # 模型可能绕过工具，直接把选项写进 JSON 的 options 字段。
+                structured = replace(structured, options=[])
         validated_updates = {}
         delivered_structured_triggers = []
         ending_reached = False
@@ -1599,6 +1637,22 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
                 ai_response = str(voice_turn["content"])
         except Exception:  # noqa: BLE001 - 配音解析绝不能阻塞主流程
             logger.exception("voice prepare failed room=%s", room_id)
+        if ai_response and not effective_suggestions:
+            # 提示词只能降低概率：模型仍可能在正文里写「你们要做什么？」+ 选项列表，
+            # 这里做确定性兜底，房规关闭提示时把这段删掉。
+            hint_report = strip_action_hints(ai_response)
+            if hint_report.changed:
+                ai_response = hint_report.text
+                log_room_event(
+                    message=f"提示门控：移除未开启的 {hint_report.prompts} 处行动引导与 {hint_report.options} 个选项",
+                    actor="narrative",
+                    room_id=room_id,
+                    rooms_dir=current_app.config.get("ROOMS_DIR"),
+                    logger_=logger,
+                    source="narrative",
+                    hint_prompts=hint_report.prompts,
+                    hint_options=hint_report.options,
+                )
         if not ai_response:
             return error_response(
                 "AI platform did not return a response",

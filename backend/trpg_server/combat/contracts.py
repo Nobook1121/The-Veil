@@ -79,6 +79,16 @@ class CombatRuleset(Protocol):
 
     只把“核心必须知道”的东西放进协议；规则书专有的动作解析、法术效果、
     武器表仍然留在插件自己的模块里，由工具层调用。
+
+    可选扩展（插件不实现即保持旧行为）：
+
+    - ``attack_mode``：``"opposed"``（缺省，旧百分制对抗）或 ``"d20"``。
+      核心只按这个声明决定是否把整次攻击交给 ``resolve_attack_action``。
+    - ``prepare_combatant``：开战/加入时由插件把角色卡或数据包条目映射成
+      自己的战斗者字段；核心不解释映射结果。
+    - ``resolve_attack_action``：``attack_mode="d20"`` 时整次攻击（命中、伤害、
+      暴击、抗性）都由插件结算，核心只负责日志、保存与行动预算。
+    - ``start_turn`` / ``end_turn``：回合开始/结束的规则钩子（如死亡豁免）。
     """
 
     ruleset_id: str

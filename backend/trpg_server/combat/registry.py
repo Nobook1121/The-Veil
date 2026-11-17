@@ -3,8 +3,8 @@
 插件通过 ``combat`` 能力提供实现；本模块只做「按规则集 id 取实现」与兼容兜底，
 不静态 import 任何具体规则包，因此删除某个战斗实现不会让核心导入失败。
 
-尚未通过插件能力提供实现的占位规则集，其兼容实现登记在
-:mod:`trpg_server.ruleset.bootstrap` 的 ``combat_module_map()`` 里，按需懒加载。
+兼容兜底只认运维通过 ``TRPG_RULESET_COMBAT_FALLBACKS`` 显式配置的模块，
+核心默认不为任何具体规则集预置战斗实现。
 """
 
 from __future__ import annotations
@@ -58,17 +58,22 @@ def _plugin_combat(ruleset_id: str) -> Any | None:
 
 
 def get_ruleset(ruleset_id: str | None = None):
-    """按规则集 id 取战斗实现；未找到时回退默认插件的战斗能力。"""
+    """按规则集 id 取战斗实现。
+
+    显式 id 只解析该规则集自己的实现，不静默回退默认插件；只有未指定规则集时
+    才使用默认插件。这与规则集注册表的显式解析口径一致（D8）。
+    """
     registry = builtin_registry()
     key = str(ruleset_id or "").strip().lower()
-    if not key:
-        key = registry.default_id() or ""
-    combat = _plugin_combat(key)
-    if combat is not None:
-        return combat
-    fallback = _fallback_ruleset(key)
-    if fallback is not None:
-        return fallback
+    if key:
+        combat = _plugin_combat(key)
+        if combat is not None:
+            return combat
+        fallback = _fallback_ruleset(key)
+        if fallback is not None:
+            return fallback
+        raise CombatRulesetUnavailable(f"规则集 {key} 没有可用的战斗实现")
+
     default_id = registry.default_id()
     if default_id:
         combat = _plugin_combat(default_id)

@@ -341,10 +341,9 @@ def _true(value: Any) -> bool:
 
 def is_enabled(info: Mapping[str, Any] | None) -> bool:
     """房间是否启用游戏时钟（房规 ``coc7_game_clock``，默认关闭）。"""
-    data = info if isinstance(info, Mapping) else {}
-    rules = data.get("house_rules")
-    if not isinstance(rules, Mapping):
-        return False
+    from trpg_server.house_rules_store import flat_rules
+
+    rules = flat_rules(info)
     return _true(rules.get(ENABLED_RULE_KEY, False))
 
 

@@ -76,7 +76,12 @@ class CombatSettings:
     dying_check: bool = True
 
     @classmethod
-    def from_house_rules(cls, rules: Mapping[str, Any] | None) -> "CombatSettings":
+    def from_house_rules(
+        cls,
+        rules: Mapping[str, Any] | None,
+        *,
+        room_ruleset_id: str | None = None,
+    ) -> "CombatSettings":
         rules = rules or {}
 
         def _choice(key: str, default: str, allowed: tuple[str, ...]) -> str:
@@ -98,6 +103,11 @@ class CombatSettings:
             threshold = None
 
         default_ruleset = _default_ruleset_id()
+        # 房间规则集具备战斗能力时优先跟随房间，避免 5e 房间按站点默认的 CoC
+        # 战斗语义结算；旧房间/未绑定规则集仍回退站点默认。
+        room_default = str(room_ruleset_id or "").strip().lower()
+        if room_default and room_default in (combat_ruleset_ids() or ()):
+            default_ruleset = room_default
         allowed_rulesets = combat_ruleset_ids() or ((default_ruleset,) if default_ruleset else ())
 
         return cls(
@@ -117,8 +127,12 @@ class CombatSettings:
 
 def resolve_settings(room_info: Mapping[str, Any] | None) -> CombatSettings:
     """从房间信息里解析战斗配置；缺失时返回默认值。"""
+    from trpg_server.house_rules_store import active_ruleset_id, flat_rules
 
     if not isinstance(room_info, Mapping):
         return CombatSettings()
-    rules = room_info.get("house_rules")
-    return CombatSettings.from_house_rules(rules if isinstance(rules, Mapping) else None)
+    rules = flat_rules(room_info)
+    return CombatSettings.from_house_rules(
+        rules if isinstance(rules, Mapping) else None,
+        room_ruleset_id=active_ruleset_id(room_info),
+    )

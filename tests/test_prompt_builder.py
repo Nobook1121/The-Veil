@@ -6,6 +6,42 @@ from trpg_server.agents.prompt_builder import (
 )
 
 
+def test_prompt_layers_inject_ruleset_fragments_into_dynamic_layer():
+    result = build_prompt_layers(
+        global_rules="GLOBAL",
+        scenario={"id": "scenario-1", "version": "3", "core": "CORE"},
+        scene={"id": "scene-2", "version": "5", "content": "SCENE"},
+        room_state={"room_id": "room-a"},
+        history=[],
+        user_input="look",
+        rules_version="7",
+        ruleset_fragments=["施法后调用 scene.advance 推进时间。", "  "],
+    )
+
+    contents = [message["content"] for message in result.messages]
+    fragment_index = next(index for index, text in enumerate(contents) if "规则集判定口径" in text)
+    assert "scene.advance" in contents[fragment_index]
+    assert result.segments[fragment_index] == "ruleset"
+    # 规则片段属于动态层，不污染可缓存的静态前缀。
+    assert "ruleset" not in result.segments[0:3]
+    assert "scene.advance" not in result.static_prefix
+
+
+def test_prompt_layers_skip_empty_ruleset_fragments():
+    result = build_prompt_layers(
+        global_rules="GLOBAL",
+        scenario={"id": "scenario-1", "version": "3", "core": "CORE"},
+        scene={"id": "scene-2", "version": "5", "content": "SCENE"},
+        room_state={"room_id": "room-a"},
+        history=[],
+        user_input="look",
+        rules_version="7",
+        ruleset_fragments=["", "   "],
+    )
+    assert "ruleset" not in result.segments
+    assert [message["role"] for message in result.messages] == ["system", "system", "system", "system", "user"]
+
+
 def test_prompt_layers_keep_static_prefix_before_dynamic_room_data():
     result = build_prompt_layers(
         global_rules="GLOBAL",

@@ -1754,7 +1754,9 @@ def _dice_settings_command(args: list[str], rooms_dir: Any) -> ConsoleCommandRes
         info = read_json(info_path, default=None)
         if not isinstance(info, dict):
             return ConsoleCommandResult(False, f"未找到房间 {room_id}")
-        settings = resolve_dice_settings(None, info.get("house_rules"))
+        from trpg_server.house_rules_store import flat_rules
+
+        settings = resolve_dice_settings(None, flat_rules(info))
         source = "房间规则" if settings["level_source"] == "room" else "管理员默认"
         player_source = "房间规则" if settings["player_roll_source"] == "room" else "管理员默认"
         reroll_source = "房间规则" if settings["reroll_source"] == "room" else "管理员默认"

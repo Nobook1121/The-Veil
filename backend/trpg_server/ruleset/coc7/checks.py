@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from trpg_server.ruleset.check_outcome import CheckOutcome, coerce_outcome
 from trpg_server.ruleset.contracts import CheckRequest, CheckResolution
 
 # 属性英文键 / 中文别名 → 规范属性键（判定名解析口径）。
@@ -371,6 +372,14 @@ class Coc7Checks:
     def resolve_target(self, card: Mapping[str, Any], request: CheckRequest) -> int:
         value = self.lookup_target(card, request.name)
         return int(value) if value is not None else 1
+
+    def target_bounds(self) -> tuple[int | None, int | None]:
+        """CoC7 的百分制范围由插件声明，核心不再写死 ``<= 100``。"""
+        return 0, 100
+
+    def roll_outcome(self, card: Mapping[str, Any], request: CheckRequest, rng: Any) -> CheckOutcome:
+        """通用判定信封；内部仍走 ``roll()``，行为与旧结果完全一致。"""
+        return coerce_outcome(self.roll(card, request, rng), ruleset_id=self.ruleset_id, kind=request.kind)
 
     def roll(self, card: Mapping[str, Any], request: CheckRequest, rng: Any) -> CheckResolution:
         dice = _dice_module()
