@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
+import struct
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlencode
@@ -698,3 +700,158 @@ def test_spatial_window_blocks_movement_not_sight():
     ]
     assert spatial.segment_blockers(walls, (0, -64), (0, 64), mode="sight") == []
     assert spatial.segment_blockers(walls, (0, -64), (0, 64), mode="movement") == ["window-1"]
+
+
+def _png(width: int, height: int) -> bytes:
+    """构造只含合法 PNG 文件头的字节串；尺寸解析只需要 IHDR。"""
+    signature = b"\x89PNG\r\n\x1a\n"
+    ihdr = (
+        struct.pack(">I", 13)
+        + b"IHDR"
+        + struct.pack(">II", width, height)
+        + b"\x08\x06\x00\x00\x00"
+    )
+    return signature + ihdr + b"\x00\x00\x00\x00"
+
+
+def _import_map(client, content: bytes, filename: str, request_id: str):
+    data = _map(client)
+    return client.post(
+        "/api/plugins/veil-map/rooms/room1/map/import",
+        data={
+            "request_id": request_id,
+            "revision": str(data["map"]["revision"]),
+            "file": (io.BytesIO(content), filename),
+        },
+        content_type="multipart/form-data",
+    )
+
+
+def test_import_map_stores_asset_under_room_and_is_idempotent(client):
+    manager, _app = client
+    _login(manager, "u1")
+    before = _map(manager)
+    token_positions = {
+        token["id"]: (token["x"], token["y"]) for token in before["map"]["tokens"]
+    }
+
+    imported = _import_map(manager, _png(640, 320), "dungeon.png", "import-1")
+    assert imported.status_code == 200
+    body = imported.get_json()
+    assert body["status"] == "success"
+    data = body["data"]
+    assert data["background"]["width"] == 640
+    assert data["background"]["height"] == 320
+    assert data["map"]["background"].startswith(
+        "/api/plugins/veil-map/rooms/room1/assets/maps/"
+    )
+    assert data["map"]["background_meta"]["name"] == "dungeon.png"
+
+    asset_dir = Path(_app.config["ROOMS_DIR"]) / "room1" / "plugins" / "veil-map" / "assets" / "maps"
+    files = list(asset_dir.iterdir())
+    assert len(files) == 1
+
+    # 重复提交同一个 request_id：返回 duplicate，不会多存一份。
+    replay = _import_map(manager, _png(640, 320), "dungeon.png", "import-1")
+    assert replay.status_code == 200
+    assert replay.get_json()["duplicate"] is True
+    assert len(list(asset_dir.iterdir())) == 1
+
+    served = manager.get(data["map"]["background"])
+    assert served.status_code == 200
+    assert served.data == _png(640, 320)
+
+    # 地图元数据不写进 info.json，棋子坐标保持不变。
+    info_text = (Path(_app.config["ROOMS_DIR"]) / "room1" / "info.json").read_text(encoding="utf-8")
+    assert "base64" not in info_text
+    after = _map(manager)["map"]
+    assert {
+        token["id"]: (token["x"], token["y"]) for token in after["tokens"]
+    } == token_positions
+
+
+def test_import_map_readable_errors(client, monkeypatch):
+    manager, _app = client
+    _login(manager, "u1")
+
+    unsupported = _import_map(manager, b"whatever", "map.txt", "bad-1")
+    assert unsupported.status_code == 400
+    assert unsupported.get_json()["code"] == "map.image_unsupported"
+
+    broken = _import_map(manager, b"not a png", "map.png", "bad-2")
+    assert broken.status_code == 400
+    assert broken.get_json()["code"] == "map.image_invalid"
+
+    tiny = _import_map(manager, _png(32, 32), "tiny.png", "bad-3")
+    assert tiny.status_code == 400
+    assert tiny.get_json()["code"] == "map.image_tiny"
+
+    monkeypatch.setattr(veil_map.media, "MAX_IMAGE_BYTES", 100)
+    huge = _import_map(manager, _png(640, 320) + b"x" * 200, "huge.png", "bad-4")
+    assert huge.status_code == 413
+    assert huge.get_json()["code"] == "map.image_too_large"
+
+
+def test_import_requires_manager(client, tmp_path):
+    _manager, app = client
+    player = app.test_client()
+    _login(player, "u2")
+    response = _import_map(player, _png(640, 320), "dungeon.png", "player-1")
+    assert response.status_code == 403
+    assert response.get_json()["status"] == "rejected"
+    asset_dir = Path(app.config["ROOMS_DIR"]) / "room1" / "plugins" / "veil-map" / "assets" / "maps"
+    assert not asset_dir.exists() or not list(asset_dir.iterdir())
+
+
+def test_calibration_saves_and_keeps_token_coordinates(client):
+    manager, _app = client
+    _login(manager, "u1")
+    before = _map(manager)
+    token_positions = {
+        token["id"]: (token["x"], token["y"]) for token in before["map"]["tokens"]
+    }
+    imported = _import_map(manager, _png(2048, 1536), "big.png", "cal-import")
+    assert imported.status_code == 200
+
+    calibrated = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map/calibration", {
+        "cells_across": 32,
+        "offset_x": 12,
+        "offset_y": 4,
+    })
+    assert calibrated.status_code == 200
+    body = calibrated.get_json()
+    assert body["status"] == "success"
+    state = body["data"]["map"]
+    assert state["grid_size"] == 64
+    assert state["calibration"]["cells_across"] == 32
+    assert state["calibration"]["offset_x"] == 12
+    assert state["grid_offset"]["x"] == 12
+    assert {
+        token["id"]: (token["x"], token["y"]) for token in state["tokens"]
+    } == token_positions
+
+    # 重新调整：改为 64 格 → 每格 32px，旧标定可覆盖。
+    recalibrated = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map/calibration", {
+        "cells_across": 64,
+        "offset_x": 0,
+        "offset_y": 0,
+    })
+    assert recalibrated.status_code == 200
+    assert recalibrated.get_json()["data"]["map"]["grid_size"] == 32
+
+
+def test_calibration_rejects_invalid_or_missing_background(client):
+    manager, _app = client
+    _login(manager, "u1")
+    missing = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map/calibration", {
+        "cells_across": 20,
+    })
+    assert missing.status_code == 400
+    assert missing.get_json()["code"] == "map.no_background_image"
+
+    assert _import_map(manager, _png(640, 320), "small.png", "cal-bad-import").status_code == 200
+    too_few = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map/calibration", {
+        "cells_across": 200,
+    })
+    assert too_few.status_code == 400
+    assert too_few.get_json()["code"] == "map.grid_too_small"

@@ -23,7 +23,7 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
-from flask import Blueprint, current_app, jsonify, request, session
+from flask import Blueprint, current_app, jsonify, request, send_from_directory, session
 
 from trpg_server.agents.room_state import load_room_state
 from trpg_server.agents.tools.base import AgentTool
@@ -82,6 +82,7 @@ def _load_local_module(name: str):
 
 
 spatial = _load_local_module("spatial")
+media = _load_local_module("media")
 
 
 def _now() -> str:
@@ -103,14 +104,20 @@ def _map_path(room_dir):
     return room_dir / "plugins" / "veil-map" / "map.json"
 
 
+def _default_calibration() -> dict[str, int]:
+    return {"cells_across": 0, "cells_down": 0, "offset_x": 0, "offset_y": 0}
+
+
 def _default_map() -> dict[str, Any]:
     return {
         "version": MAP_VERSION,
         "revision": 0,
         "scene_id": "default",
         "background": "",
+        "background_meta": {},
         "grid_size": DEFAULT_GRID,
         "grid_offset": {"x": 0, "y": 0},
+        "calibration": _default_calibration(),
         "bounds_cells": BOUNDS_DEFAULT,
         "tokens": [],
         "walls": [],
@@ -138,6 +145,33 @@ def _normalize_token(raw: Any) -> dict[str, Any] | None:
         "kind": str(raw.get("kind") or "npc"),
         "combatant": str(raw.get("combatant") or ""),
     }
+
+
+def _normalize_background_meta(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict) or not raw:
+        return {}
+    url = str(raw.get("url") or "").strip()
+    if not url.startswith("/"):
+        return {}
+    return {
+        "kind": str(raw.get("kind") or "uploaded")[:24],
+        "name": str(raw.get("name") or "地图图片")[:120],
+        "url": url[:2048],
+        "width": max(0, _as_int(raw.get("width"), 0)),
+        "height": max(0, _as_int(raw.get("height"), 0)),
+        "bytes": max(0, _as_int(raw.get("bytes"), 0)),
+        "uploaded_at": str(raw.get("uploaded_at") or "")[:32],
+    }
+
+
+def _normalize_calibration(raw: Any) -> dict[str, int]:
+    calibration = _default_calibration()
+    if isinstance(raw, dict):
+        calibration["cells_across"] = max(0, _as_int(raw.get("cells_across"), 0))
+        calibration["cells_down"] = max(0, _as_int(raw.get("cells_down"), 0))
+        calibration["offset_x"] = max(0, _as_int(raw.get("offset_x"), 0))
+        calibration["offset_y"] = max(0, _as_int(raw.get("offset_y"), 0))
+    return calibration
 
 
 def _coordinate(value: Any) -> int | None:
@@ -244,6 +278,7 @@ def _normalize_map(raw: Any) -> dict[str, Any]:
     state["revision"] = max(0, _as_int(state.get("revision"), 0))
     state["scene_id"] = str(state.get("scene_id") or "default")[:64]
     state["background"] = str(state.get("background") or "")[:2048]
+    state["background_meta"] = _normalize_background_meta(state.get("background_meta"))
     state["grid_size"] = _clamp(_as_int(state.get("grid_size"), DEFAULT_GRID), MIN_GRID, MAX_GRID)
     offset = state.get("grid_offset") if isinstance(state.get("grid_offset"), dict) else {}
     grid = int(state["grid_size"])
@@ -251,6 +286,7 @@ def _normalize_map(raw: Any) -> dict[str, Any]:
         "x": _clamp(_as_int(offset.get("x"), 0), -grid, grid),
         "y": _clamp(_as_int(offset.get("y"), 0), -grid, grid),
     }
+    state["calibration"] = _normalize_calibration(state.get("calibration"))
     state["bounds_cells"] = _clamp(
         _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS
     )
@@ -315,7 +351,7 @@ def _member_name(member: dict[str, Any]) -> str:
 
 def _reconcile_tokens(state: dict[str, Any], info: dict[str, Any]) -> bool:
     """按活跃成员补齐 PC 棋子；已有棋子保留坐标与尺寸。"""
-    grid = int(state.get("grid_size") or DEFAULT_GRID)
+    grid, offset_x, offset_y = _grid_of(state)
     tokens = state.setdefault("tokens", [])
     by_id = {str(token.get("id")): token for token in tokens}
     by_owner = {
@@ -341,8 +377,8 @@ def _reconcile_tokens(state: dict[str, Any], info: dict[str, Any]) -> bool:
         token = {
             "id": f"member-{user_id}",
             "name": name,
-            "x": (index % 6) * grid,
-            "y": (index // 6) * grid,
+            "x": offset_x + (index % 6) * grid,
+            "y": offset_y + (index // 6) * grid,
             "w": 1,
             "h": 1,
             "color": TOKEN_COLORS[index % len(TOKEN_COLORS)],
@@ -910,6 +946,10 @@ def update_map(room_id: str):
                     request_id=request_id,
                     revision=state["revision"],
                 )
+            if background != state.get("background"):
+                state["background_meta"] = {}
+                state["calibration"] = _default_calibration()
+                state["grid_offset"] = {"x": 0, "y": 0}
             state["background"] = background
         state = _save_map(
             room_dir,
@@ -1138,6 +1178,17 @@ def move_token(room_id: str, token_id: str):
     )
 
 
+def _map_assets_dir(room_dir) -> Path:
+    return Path(room_dir) / "plugins" / "veil-map" / "assets" / "maps"
+
+
+def _wrap_grid_offset(value: float, grid: int) -> int:
+    """把世界像素偏移折回 ``[-grid/2, grid/2)``，避免存大数。"""
+    grid = max(1, int(grid))
+    wrapped = (int(round(value)) + grid // 2) % grid
+    return wrapped - grid // 2
+
+
 def _point_from_payload(raw: Any, state: dict[str, Any]) -> tuple[int, int, int, int] | None:
     """解析 ``{cell_x, cell_y}`` 或 ``{x, y}``，返回 ``(world_x, world_y, cell_x, cell_y)``。"""
     if not isinstance(raw, dict):
@@ -1216,6 +1267,213 @@ def update_walls(room_id: str):
         code="map.walls_updated",
         data={"map": state, "can_manage": True},
     )
+
+
+@bp.route("/rooms/<room_id>/map/import", methods=["POST"])
+def import_map(room_id: str):
+    """上传图片作为地图背景，落盘到房间自己的插件资源目录。"""
+    room_dir, info, denied = _map_room_or_error(room_id)
+    if denied:
+        return denied
+    _role, manager = _room_context(info)
+    if not manager:
+        return _rejected_request("只有房主或房管可以导入地图。", "map.manager_only")
+
+    uploaded = request.files.get("file")
+    if uploaded is None or not uploaded.filename:
+        return _invalid_request("请选择要导入的地图图片。", "map.image_missing")
+    raw = uploaded.read(media.MAX_IMAGE_BYTES + 1)
+    try:
+        meta = media.inspect_image(raw, uploaded.filename)
+    except media.ImageError as exc:
+        return _invalid_request(exc.message, exc.code, http_status=413 if "too_large" in exc.code else 400)
+
+    form = dict(request.form)
+    with _MAP_LOCK:
+        state = _load_map(room_dir)
+        request_id, expected, error = _read_envelope(form, state)
+        if error is not None:
+            return error
+        record = _duplicate_record(state, request_id)
+        if record is not None:
+            return _duplicate_receipt(state, manager, record)
+        if expected != state["revision"]:
+            return _conflict_request(state, manager, request_id)
+
+        stored_name = f"{uuid4().hex}.{meta['suffix']}"
+        asset_path = _map_assets_dir(room_dir) / stored_name
+        asset_path.parent.mkdir(parents=True, exist_ok=True)
+        asset_path.write_bytes(raw)
+
+        grid = int(state["grid_size"])
+        display_name = Path(str(uploaded.filename)).name[:120] or "地图图片"
+        state["background"] = (
+            f"/api/plugins/veil-map/rooms/{room_id}/assets/maps/{stored_name}"
+        )
+        state["background_meta"] = {
+            "kind": "uploaded",
+            "name": display_name,
+            "url": state["background"],
+            "width": meta["width"],
+            "height": meta["height"],
+            "bytes": meta["size"],
+            "uploaded_at": _now(),
+        }
+        cells_across = max(1, int(round(meta["width"] / max(1, grid))))
+        cells_down = max(1, int(round(meta["height"] / max(1, grid))))
+        state["calibration"] = {
+            "cells_across": cells_across,
+            "cells_down": cells_down,
+            "offset_x": 0,
+            "offset_y": 0,
+        }
+        # 导入不自动改网格尺寸；格线先回到图片中心对齐，等用户确认标定。
+        # 棋子世界坐标保持不变，切换地图不丢棋子。
+        state["grid_offset"] = {"x": 0, "y": 0}
+        state = _save_map(
+            room_dir,
+            state,
+            {"request_id": request_id, "action": "map.import"},
+        )
+    _broadcast(room_id, state)
+    return _receipt(
+        "success",
+        "地图已导入，请确认网格标定。",
+        request_id=request_id,
+        revision=state["revision"],
+        code="map.imported",
+        data={
+            "map": state,
+            "can_manage": True,
+            "background": {
+                "url": state["background"],
+                "width": meta["width"],
+                "height": meta["height"],
+                "name": state["background_meta"]["name"],
+                "grid_size": grid,
+                "cells_across": cells_across,
+                "cells_down": cells_down,
+            },
+            "calibration_hint": {
+                "cells_across": cells_across,
+                "cells_down": cells_down,
+                "offset_x": 0,
+                "offset_y": 0,
+            },
+        },
+    )
+
+
+@bp.route("/rooms/<room_id>/map/calibration", methods=["PUT"])
+def calibrate_map(room_id: str):
+    """保存图片像素 → 格数 → 格线偏移的标定结果。"""
+    room_dir, info, denied = _map_room_or_error(room_id)
+    if denied:
+        return denied
+    payload = _write_payload()
+    _role, manager = _room_context(info)
+    with _MAP_LOCK:
+        state = _load_map(room_dir)
+        if not manager:
+            return _rejected_request(
+                "只有房主或房管可以标定地图网格。",
+                "map.manager_only",
+                revision=state["revision"],
+            )
+        request_id, expected, error = _read_envelope(payload, state)
+        if error is not None:
+            return error
+        record = _duplicate_record(state, request_id)
+        if record is not None:
+            return _duplicate_receipt(state, manager, record)
+        if expected != state["revision"]:
+            return _conflict_request(state, manager, request_id)
+
+        background = state.get("background_meta") or {}
+        width = _as_int(background.get("width"), 0)
+        height = _as_int(background.get("height"), 0)
+        if width <= 0 or height <= 0:
+            return _invalid_request(
+                "当前地图不是导入的图片，无法按像素标定；请先导入地图图片。",
+                "map.no_background_image",
+                request_id=request_id,
+                revision=state["revision"],
+            )
+        cells_across = _as_int(payload.get("cells_across"), 0)
+        if cells_across < 1 or cells_across > 400:
+            return _invalid_request(
+                "横向格数必须在 1–400 之间。",
+                "map.invalid_cells_across",
+                request_id=request_id,
+                revision=state["revision"],
+            )
+        grid = int(round(width / cells_across))
+        if grid < MIN_GRID:
+            return _invalid_request(
+                f"按 {cells_across} 格切分后每格只有 {grid}px，低于最小值 {MIN_GRID}px；请减少格数。",
+                "map.grid_too_small",
+                request_id=request_id,
+                revision=state["revision"],
+            )
+        if grid > MAX_GRID:
+            return _invalid_request(
+                f"按 {cells_across} 格切分后每格 {grid}px，超过最大值 {MAX_GRID}px；请增加格数。",
+                "map.grid_too_large",
+                request_id=request_id,
+                revision=state["revision"],
+            )
+        cells_down = _as_int(payload.get("cells_down"), max(1, int(round(height / grid))))
+        if cells_down < 1 or cells_down > 400:
+            return _invalid_request(
+                "纵向格数必须在 1–400 之间。",
+                "map.invalid_cells_down",
+                request_id=request_id,
+                revision=state["revision"],
+            )
+        offset_x = _as_int(payload.get("offset_x"), 0)
+        offset_y = _as_int(payload.get("offset_y"), 0)
+        if not 0 <= offset_x < grid or not 0 <= offset_y < grid:
+            return _invalid_request(
+                f"格线偏移必须在 0–{grid - 1}px 之间。",
+                "map.invalid_grid_offset",
+                request_id=request_id,
+                revision=state["revision"],
+            )
+        state["grid_size"] = grid
+        state["grid_offset"] = {
+            "x": _wrap_grid_offset(offset_x - width / 2.0, grid),
+            "y": _wrap_grid_offset(offset_y - height / 2.0, grid),
+        }
+        state["calibration"] = {
+            "cells_across": cells_across,
+            "cells_down": cells_down,
+            "offset_x": offset_x,
+            "offset_y": offset_y,
+        }
+        state = _save_map(
+            room_dir,
+            state,
+            {"request_id": request_id, "action": "map.calibration"},
+        )
+    _broadcast(room_id, state)
+    return _receipt(
+        "success",
+        f"网格标定已保存：{cells_across} × {cells_down} 格，每格 {grid}px。",
+        request_id=request_id,
+        revision=state["revision"],
+        code="map.calibrated",
+        data={"map": state, "can_manage": True},
+    )
+
+
+@bp.route("/rooms/<room_id>/assets/maps/<path:filename>")
+def serve_map_asset(room_id: str, filename: str):
+    room_dir, _info, denied = _map_room_or_error(room_id)
+    if denied:
+        return denied
+    response = send_from_directory(_map_assets_dir(room_dir), filename)
+    response.headers["Cache-Control"] = "private, max-age=31536000, immutable"
+    return response
 
 
 @bp.route("/rooms/<room_id>/spatial/range", methods=["POST"])

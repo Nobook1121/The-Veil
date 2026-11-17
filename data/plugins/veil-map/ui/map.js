@@ -34,6 +34,8 @@
         }
         var isForm = typeof FormData !== "undefined" && body instanceof FormData;
         var options = { method: method, headers: { Accept: "application/json" } };
+        var csrf = window.currentUser && window.currentUser.csrf_token;
+        if (csrf && method !== "GET") options.headers["X-CSRF-Token"] = csrf;
         if (isForm) {
             options.body = body;
         } else if (body !== undefined) {
@@ -125,6 +127,21 @@
             '<button type="button" data-vmap-save-map>保存地图</button>',
             '<button type="button" class="secondary" data-vmap-close>关闭</button>',
             "</div>",
+            '<div class="vmap-divider"></div>',
+            '<div class="vmap-section-label">导入地图</div>',
+            '<label class="vmap-field">图片文件（PNG / JPG / WEBP / BMP，最大 40MB）',
+            '<input type="file" accept=".png,.jpg,.jpeg,.webp,.bmp,image/png,image/jpeg,image/webp,image/bmp" data-vmap-import></label>',
+            '<div class="vmap-actions"><button type="button" data-vmap-import-map>导入地图</button></div>',
+            '<div class="vmap-calibration" data-vmap-calibration hidden>',
+            '<div class="vmap-note" data-vmap-calibration-info></div>',
+            '<label class="vmap-field">横向格数',
+            '<input type="number" min="1" max="400" step="1" data-vmap-cells-across></label>',
+            '<div class="vmap-row">',
+            '<label class="vmap-field">格线横向偏移（px）<input type="number" min="0" step="1" data-vmap-offset-x></label>',
+            '<label class="vmap-field">格线纵向偏移（px）<input type="number" min="0" step="1" data-vmap-offset-y></label>',
+            "</div>",
+            '<div class="vmap-actions"><button type="button" data-vmap-save-calibration>保存标定</button></div>',
+            "</div>",
             "</div>",
             '<div data-vmap-section="token">',
             '<div class="vmap-divider"></div>',
@@ -149,6 +166,12 @@
         var panelHeight = panel.querySelector("[data-vmap-token-h]");
         var panelTitle = panel.querySelector("[data-vmap-panel-title]");
         var panelSections = panel.querySelectorAll("[data-vmap-section]");
+        var panelImport = panel.querySelector("[data-vmap-import]");
+        var panelCalibration = panel.querySelector("[data-vmap-calibration]");
+        var panelCalibrationInfo = panel.querySelector("[data-vmap-calibration-info]");
+        var panelCellsAcross = panel.querySelector("[data-vmap-cells-across]");
+        var panelOffsetX = panel.querySelector("[data-vmap-offset-x]");
+        var panelOffsetY = panel.querySelector("[data-vmap-offset-y]");
 
         function notify(message, type) {
             ctx.notify(String(message || ""), type || "info");
@@ -490,6 +513,7 @@
                 panelBounds.value = String(clamp(asInt(mapState.bounds_cells, DEFAULT_BOUNDS), MIN_BOUNDS, MAX_BOUNDS));
                 panelBackground.value = String(mapState.background || "");
             }
+            if (mode === "scene") renderCalibration();
             if (mode === "token" && panelName) panelName.focus();
         }
 
@@ -512,6 +536,96 @@
             }).catch(function (error) {
                 console.error("veil-map map settings failed", error);
                 notify("地图设置保存失败，请稍后重试。", "error");
+            });
+        }
+
+        function calibrationGrid(cellsAcross) {
+            var meta = mapState && mapState.background_meta;
+            if (!meta || !meta.width) return gridSize();
+            return clamp(Math.round(meta.width / Math.max(1, cellsAcross)), MIN_GRID, MAX_GRID);
+        }
+
+        function renderCalibration() {
+            var meta = mapState && mapState.background_meta;
+            var calibration = mapState && mapState.calibration;
+            var hasImage = Boolean(meta && meta.width > 0 && meta.height > 0);
+            panelCalibration.hidden = !hasImage;
+            if (!hasImage) return;
+            var across = calibration && calibration.cells_across
+                ? calibration.cells_across
+                : Math.max(1, Math.round(meta.width / gridSize()));
+            panelCellsAcross.value = String(across);
+            panelOffsetX.value = String(calibration && calibration.offset_x ? calibration.offset_x : 0);
+            panelOffsetY.value = String(calibration && calibration.offset_y ? calibration.offset_y : 0);
+            var derived = calibrationGrid(across);
+            panelOffsetX.max = String(derived - 1);
+            panelOffsetY.max = String(derived - 1);
+            panelCalibrationInfo.textContent = "已导入：" + String(meta.name || "地图图片") +
+                "（" + meta.width + "×" + meta.height + "px，每格 " + derived + "px）";
+        }
+
+        function importMap() {
+            var file = panelImport && panelImport.files ? panelImport.files[0] : null;
+            if (!file) {
+                notify("请先选择要导入的地图图片。", "error");
+                return;
+            }
+            var envelope = writeBody({});
+            var form = new FormData();
+            form.append("file", file);
+            form.append("request_id", envelope.request_id);
+            form.append("revision", String(envelope.revision));
+            apiRequest(
+                "POST",
+                "/rooms/" + encodeURIComponent(ctx.room.id) + "/map/import",
+                form
+            ).then(function (response) {
+                if (destroyed) return;
+                if (!response || response.success !== true) {
+                    applyWriteFailure(response, "地图导入失败。");
+                    return;
+                }
+                applyPayload(response.data);
+                if (response.data && response.data.calibration_hint) {
+                    panelCellsAcross.value = String(response.data.calibration_hint.cells_across);
+                    panelOffsetX.value = "0";
+                    panelOffsetY.value = "0";
+                }
+                if (panelImport) panelImport.value = "";
+                if (panelBackground) panelBackground.value = String(response.data.map.background || "");
+                renderCalibration();
+                notify("地图已导入，请调整网格标定。", "success");
+            }).catch(function (error) {
+                console.error("veil-map import failed", error);
+                notify("地图导入失败，请稍后重试。", "error");
+            });
+        }
+
+        function saveCalibration() {
+            var across = clamp(asInt(panelCellsAcross.value, 0), 1, 400);
+            var grid = calibrationGrid(across);
+            var offsetX = clamp(asInt(panelOffsetX.value, 0), 0, Math.max(0, grid - 1));
+            var offsetY = clamp(asInt(panelOffsetY.value, 0), 0, Math.max(0, grid - 1));
+            apiRequest(
+                "PUT",
+                "/rooms/" + encodeURIComponent(ctx.room.id) + "/map/calibration",
+                writeBody({
+                    cells_across: across,
+                    offset_x: offsetX,
+                    offset_y: offsetY,
+                })
+            ).then(function (response) {
+                if (destroyed) return;
+                if (!response || response.success !== true) {
+                    applyWriteFailure(response, "网格标定保存失败。");
+                    return;
+                }
+                applyPayload(response.data);
+                renderCalibration();
+                notify(response.message || "网格标定已保存。", "success");
+            }).catch(function (error) {
+                console.error("veil-map calibration failed", error);
+                notify("网格标定保存失败，请稍后重试。", "error");
             });
         }
 
@@ -744,6 +858,14 @@
             }
             if (target.closest("[data-vmap-add-token]")) {
                 addToken();
+                return;
+            }
+            if (target.closest("[data-vmap-import-map]")) {
+                importMap();
+                return;
+            }
+            if (target.closest("[data-vmap-save-calibration]")) {
+                saveCalibration();
             }
         });
 

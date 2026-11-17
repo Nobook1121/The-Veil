@@ -218,3 +218,24 @@
     letter-spacing: 0.06em;
     text-transform: uppercase;
 }
+
+.vmap-calibration[hidden] {
+    display: none;
+}
+
+.vmap-note {
+    margin: 8px 0;
+    padding: 6px 8px;
+    border-radius: 7px;
+    background: rgba(200, 163, 90, 0.1);
+    color: rgba(245, 230, 200, 0.82);
+    font-size: 0.7rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.vmap-field input[type="file"] {
+    padding: 4px;
+    color: rgba(236, 231, 219, 0.72);
+    font-size: 0.7rem;
+}
