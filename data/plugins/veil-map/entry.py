@@ -1392,7 +1392,14 @@ def _filter_map_for_observer(
     visible: set[tuple[int, int]],
     known: set[tuple[int, int]],
 ) -> dict[str, Any]:
-    """玩家只拿到自己该看到的棋子 / 墙体 / 光源子集。"""
+    """玩家只拿到自己该看到的棋子 / 墙体 / 光源子集。
+
+    已知风险（1.0.7 安全审查 M-2 的处置口径）：``background`` /
+    ``background_meta`` 不在这里裁剪，底图 URL 对房间成员保持可用，视为该房间
+    的公开素材。迷雾只承诺隐藏棋子、墙体、光源与未探索区域，不承诺隐藏底图
+    画面本身；若需要连底图一起保密，应改为按已探索区域生成裁剪图或遮罩合成图，
+    而不是继续依赖视图字段裁剪。
+    """
     grid, offset_x, offset_y = _grid_of(state)
     view = dict(state)
     tokens: list[dict[str, Any]] = []
@@ -2848,6 +2855,12 @@ def calibrate_map(room_id: str):
 
 @bp.route("/rooms/<room_id>/assets/maps/<path:filename>")
 def serve_map_asset(room_id: str, filename: str):
+    """房间成员可读取底图资源。
+
+    已知风险（安全审查 M-2）：迷雾开启时底图仍按「该房间公开素材」处理，接口
+    不做按视野裁剪；迷雾只隐藏棋子/墙体/光源。若后续要求底图保密，需要在此
+    按观察者探索区域返回裁剪图或遮罩合成图。
+    """
     room_dir, _info, denied = _map_room_or_error(room_id)
     if denied:
         return denied

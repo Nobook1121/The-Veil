@@ -287,6 +287,14 @@ def takeover_ai_player(room_id, user_id):
         requester = _find_member(fresh, user_id=requester_id, active_only=True)
         if not requester:
             return _denied(room_id)
+        # 接管会把 AI 玩家标记为 removed 并转走角色卡，属于不可逆操作：
+        # 只有房管/房主，或该 AI 玩家的原创建者可以执行；普通成员不能动
+        # KP 配置的 AI 阵容。
+        allowed = _can_manage_members(fresh) or str(
+            target.get("created_by") or ""
+        ) == str(requester_id or "")
+        if not allowed:
+            return _denied(room_id)
         target_card = target.get("character_card") if isinstance(target.get("character_card"), dict) else {}
         current_card = requester.get("character_card") if isinstance(requester.get("character_card"), dict) else {}
         if current_card and str(current_card.get("id")) != str(target_card.get("id")) and not replace:

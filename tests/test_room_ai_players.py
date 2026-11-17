@@ -123,18 +123,29 @@ def test_create_ai_player_and_takeover_transfers_character(tmp_path):
     assert ai_member["control_mode"] == "ai"
     assert ai_member["character_card"]["id"] == "card-ai"
 
-    takeover = _client(app, 2).post(
+    # 普通成员不能接管 KP/房管创建的 AI 玩家。
+    denied = _client(app, 2).post(
         f"/api/rooms/r-ai/ai-players/{ai_member['user_id']}/takeover",
         json={},
+        headers=_headers(),
+    )
+    assert denied.status_code == 403
+    info = _read_info(rooms_dir)
+    assert next(row for row in info["members"] if row.get("is_ai_player"))["is_active"] is True
+
+    # 房主 / 原创建者可以接管；已有角色卡时需 replace 确认。
+    takeover = _client(app, 1).post(
+        f"/api/rooms/r-ai/ai-players/{ai_member['user_id']}/takeover",
+        json={"replace": True},
         headers=_headers(),
     )
 
     assert takeover.status_code == 200
     info = _read_info(rooms_dir)
-    assert next(row for row in info["members"] if row["user_id"] == 2)["character_card"]["id"] == "card-ai"
+    assert next(row for row in info["members"] if row["user_id"] == 1)["character_card"]["id"] == "card-ai"
     taken = next(row for row in info["members"] if row["user_id"] == ai_member["user_id"])
     assert taken["is_active"] is False
-    assert taken.get("taken_over_by") == 2
+    assert taken.get("taken_over_by") == 1
     assert "character_card" not in taken
 
 
@@ -277,7 +288,9 @@ def test_takeover_conflict_requires_confirmation_flag(tmp_path):
     )
     ai_member = next(row for row in created.get_json()["data"]["members"] if row.get("is_ai_player"))
 
-    conflict = _client(app, 2).post(
+    # 由 AI 的创建者/房主发起接管，验证已有角色卡时的二次确认（普通成员权限
+    # 在 test_create_ai_player_and_takeover_transfers_character 中覆盖）。
+    conflict = _client(app, 1).post(
         f"/api/rooms/r-ai/ai-players/{ai_member['user_id']}/takeover",
         json={},
         headers=_headers(),
@@ -285,14 +298,14 @@ def test_takeover_conflict_requires_confirmation_flag(tmp_path):
     assert conflict.status_code == 409
     assert conflict.get_json()["error"] == "character_already_bound"
 
-    replaced = _client(app, 2).post(
+    replaced = _client(app, 1).post(
         f"/api/rooms/r-ai/ai-players/{ai_member['user_id']}/takeover",
         json={"replace": True},
         headers=_headers(),
     )
     assert replaced.status_code == 200
     info = _read_info(rooms_dir)
-    assert next(row for row in info["members"] if row["user_id"] == 2)["character_card"]["id"] == "card-ai"
+    assert next(row for row in info["members"] if row["user_id"] == 1)["character_card"]["id"] == "card-ai"
 
 
 def test_room_summary_reports_ai_counts(tmp_path):
