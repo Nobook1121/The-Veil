@@ -1,0 +1,8 @@
+[
+  { "id": "str", "name": "Strength", "abbr": "STR", "locales": { "zh-CN": { "name": "力量" } }, "source": "SRD 5.1" },
+  { "id": "dex", "name": "Dexterity", "abbr": "DEX", "locales": { "zh-CN": { "name": "敏捷" } }, "source": "SRD 5.1" },
+  { "id": "con", "name": "Constitution", "abbr": "CON", "locales": { "zh-CN": { "name": "体质" } }, "source": "SRD 5.1" },
+  { "id": "int", "name": "Intelligence", "abbr": "INT", "locales": { "zh-CN": { "name": "智力" } }, "source": "SRD 5.1" },
+  { "id": "wis", "name": "Wisdom", "abbr": "WIS", "locales": { "zh-CN": { "name": "感知" } }, "source": "SRD 5.1" },
+  { "id": "cha", "name": "Charisma", "abbr": "CHA", "locales": { "zh-CN": { "name": "魅力" } }, "source": "SRD 5.1" }
+]

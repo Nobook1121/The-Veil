@@ -1,0 +1,27 @@
+{
+  "pack_id": "dnd5e-srd-5-1",
+  "pack_version": "1.0.0",
+  "contract_version": 1,
+  "ruleset_id": "dnd5e",
+  "content_version": "1.0.0",
+  "source": {
+    "system": "Dungeons & Dragons 5th Edition",
+    "document": "System Reference Document 5.1 (SRD 5.1)",
+    "edition": "2014",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "source_url": "https://dnd.wizards.com/resources/systems-reference-document",
+    "attribution": "This work includes material taken from the System Reference Document 5.1 (\"SRD 5.1\") by Wizards of the Coast LLC and available at https://dnd.wizards.com/resources/systems-reference-document. The SRD 5.1 is licensed under the Creative Commons Attribution 4.0 International License available at https://creativecommons.org/licenses/by/4.0/.",
+    "modifications": "Structured subset of SRD 5.1 for programmatic use; field names and grouping are modifications. No PHB-only content."
+  },
+  "files": [
+    { "path": "abilities.json", "type": "ability" },
+    { "path": "skills.json", "type": "skill" },
+    { "path": "progression.json", "type": "progression" },
+    { "path": "equipment.json", "type": "equipment" },
+    { "path": "conditions.json", "type": "condition" },
+    { "path": "spells.json", "type": "spell" },
+    { "path": "monsters.json", "type": "monster" },
+    { "path": "classes.json", "type": "class" }
+  ]
+}

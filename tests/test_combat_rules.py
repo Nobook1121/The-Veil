@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import random
-
 import pytest
 
 from trpg_server.agents.tools import combat
-from trpg_server.combat.registry import get_ruleset, list_rulesets
 from trpg_server.combat.rulesets.coc7 import Coc7Ruleset
 from trpg_server.combat.scheduler import TurnScheduler
 from trpg_server.combat.settings import CombatSettings
@@ -262,48 +259,6 @@ def test_monster_actions_per_round_from_stat_block(tmp_path):
     state = combat.combat_state({}, context)
     ghoul = next(item for item in state["order"] if item["name"] == "Ghoul")
     assert ghoul["actions_per_round"] == 3
-
-
-def test_dnd5e_plugin_proves_core_abstraction():
-    ruleset = get_ruleset("dnd5e")
-    assert {item["id"] for item in list_rulesets()} == {"coc7", "dnd5e"}
-
-    rng = random.Random(7)
-    fighter = {"dex": 16, "hp": 20, "max_hp": 20, "speed": 30}
-    initiative = ruleset.roll_initiative(fighter, rng, CombatSettings())
-    assert 4 <= initiative <= 23
-    assert ruleset.action_budget(fighter, CombatSettings()) == {
-        "action": 1,
-        "bonus_action": 1,
-        "reaction": 1,
-        "movement": 30,
-    }
-    assert ruleset.resolve_attack(15, 14) == "hit"
-    assert ruleset.resolve_attack(10, 14) == "miss"
-
-
-def test_dnd5e_death_saves_are_plugin_owned():
-    ruleset = get_ruleset("dnd5e")
-    target = {"hp": 20, "max_hp": 20, "status": "active"}
-    outcome = ruleset.resolve_damage(
-        target,
-        25,
-        armor=0,
-        ignore_armor=False,
-        roll_d100=None,
-        thresholds=(1, 96),
-        settings=CombatSettings(),
-    )
-    assert outcome.dying is True
-    assert target["death_saves"] == {"successes": 0, "failures": 0}
-
-    # 三次失败后死亡（5e 用 d20，10 以下失败）。
-    for _ in range(3):
-        result = ruleset.on_round_end(
-            target, roll_d100=lambda: 5, thresholds=(1, 96), settings=CombatSettings()
-        )
-    assert result.dead is True
-    assert target["status"] == "dead"
 
 
 def test_delay_moves_actor_to_end_of_round(tmp_path):

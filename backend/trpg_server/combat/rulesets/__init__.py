@@ -8,11 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["Coc7Ruleset", "Dnd5eRuleset"]
+__all__ = ["Coc7Ruleset"]
 
 _MODULE_ATTRS = {
     "Coc7Ruleset": ".coc7",
-    "Dnd5eRuleset": ".dnd5e",
 }
 
 

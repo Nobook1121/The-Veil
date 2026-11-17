@@ -1,0 +1,20 @@
+[
+  { "id": "acrobatics", "name": "Acrobatics", "ability": "dex", "locales": { "zh-CN": { "name": "体操" } }, "source": "SRD 5.1" },
+  { "id": "animal-handling", "name": "Animal Handling", "ability": "wis", "locales": { "zh-CN": { "name": "驯兽" } }, "source": "SRD 5.1" },
+  { "id": "arcana", "name": "Arcana", "ability": "int", "locales": { "zh-CN": { "name": "奥秘" } }, "source": "SRD 5.1" },
+  { "id": "athletics", "name": "Athletics", "ability": "str", "locales": { "zh-CN": { "name": "运动" } }, "source": "SRD 5.1" },
+  { "id": "deception", "name": "Deception", "ability": "cha", "locales": { "zh-CN": { "name": "欺瞒" } }, "source": "SRD 5.1" },
+  { "id": "history", "name": "History", "ability": "int", "locales": { "zh-CN": { "name": "历史" } }, "source": "SRD 5.1" },
+  { "id": "insight", "name": "Insight", "ability": "wis", "locales": { "zh-CN": { "name": "洞悉" } }, "source": "SRD 5.1" },
+  { "id": "intimidation", "name": "Intimidation", "ability": "cha", "locales": { "zh-CN": { "name": "威吓" } }, "source": "SRD 5.1" },
+  { "id": "investigation", "name": "Investigation", "ability": "int", "locales": { "zh-CN": { "name": "调查" } }, "source": "SRD 5.1" },
+  { "id": "medicine", "name": "Medicine", "ability": "wis", "locales": { "zh-CN": { "name": "医药" } }, "source": "SRD 5.1" },
+  { "id": "nature", "name": "Nature", "ability": "int", "locales": { "zh-CN": { "name": "自然" } }, "source": "SRD 5.1" },
+  { "id": "perception", "name": "Perception", "ability": "wis", "locales": { "zh-CN": { "name": "察觉" } }, "source": "SRD 5.1" },
+  { "id": "performance", "name": "Performance", "ability": "cha", "locales": { "zh-CN": { "name": "表演" } }, "source": "SRD 5.1" },
+  { "id": "persuasion", "name": "Persuasion", "ability": "cha", "locales": { "zh-CN": { "name": "游说" } }, "source": "SRD 5.1" },
+  { "id": "religion", "name": "Religion", "ability": "int", "locales": { "zh-CN": { "name": "宗教" } }, "source": "SRD 5.1" },
+  { "id": "sleight-of-hand", "name": "Sleight of Hand", "ability": "dex", "locales": { "zh-CN": { "name": "巧手" } }, "source": "SRD 5.1" },
+  { "id": "stealth", "name": "Stealth", "ability": "dex", "locales": { "zh-CN": { "name": "隐匿" } }, "source": "SRD 5.1" },
+  { "id": "survival", "name": "Survival", "ability": "wis", "locales": { "zh-CN": { "name": "求生" } }, "source": "SRD 5.1" }
+]

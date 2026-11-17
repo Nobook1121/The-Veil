@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "dnd5e-srd",
+  "name": "D&D 5e SRD 5.1 Content Pack",
+  "version": "1.0.0",
+  "description": "Structured D&D 5e content from the System Reference Document 5.1 (2014), licensed under CC BY 4.0. Data only; no rules engine code.",
+  "author": "The Veil",
+  "api_version": 1,
+  "capabilities": {
+    "content_packs": {
+      "dirs": ["packs"],
+      "contract_version": 1
+    }
+  }
+}
