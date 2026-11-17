@@ -22,7 +22,7 @@ from trpg_server.agents.config import load_ai_runtime_config
 from trpg_server.agents.context import build_agent_context
 from trpg_server.agents.dice_settings import resolve_dice_settings
 from trpg_server.agents.http_retry import post_with_retry
-from trpg_server.agents.profiles import AgentProfile
+from trpg_server.agents.profiles import AgentProfile, plugin_tool_names
 from trpg_server.agents.ruleset_knowledge import RulesetKnowledgeStore, search_ruleset
 from trpg_server.agents.runtime import run_agent_completion
 from trpg_server.agents.tools import default_tool_registry
@@ -138,6 +138,15 @@ def _room_context(room_dir, info: dict[str, Any], member: dict[str, Any]) -> str
     return "\n".join(lines)
 
 
+def _player_tool_names(ruleset_id: str) -> list[str]:
+    """玩家工具 + 插件按规则集下发的工具（如 dnd5e 地图移动）。"""
+    names = list(PLAYER_TOOL_NAMES)
+    for name in plugin_tool_names(ruleset_id):
+        if name not in names:
+            names.append(name)
+    return names
+
+
 def _build_profile(ruleset_id: str, room_info: dict[str, Any]) -> AgentProfile:
     prompt = PLAYER_AGENT_PROMPT
     if not ai_kp_enabled(room_info):
@@ -149,7 +158,7 @@ def _build_profile(ruleset_id: str, room_info: dict[str, Any]) -> AgentProfile:
         prompt=prompt,
         provider=None,
         wake_words=[],
-        tool_names=list(PLAYER_TOOL_NAMES),
+        tool_names=_player_tool_names(ruleset_id),
         context_providers=[],
     )
 

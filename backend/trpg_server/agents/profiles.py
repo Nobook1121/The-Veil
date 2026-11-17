@@ -97,6 +97,34 @@ def effect_tool_names(ruleset_id: str | None = None) -> list[str]:
     return ["effect.list", "effect.apply", "effect.remove", "scene.advance"]
 
 
+def plugin_tool_names(ruleset_id: str | None = None) -> list[str]:
+    """插件注册的 Agent 工具；按工具声明的 ``rulesets`` 过滤。
+
+    空元组表示工具对所有规则集通用；非空时只下发给包含当前规则集的房间。
+    惰性 import runtime，避免核心 profiles 与插件运行时互相导入。
+    """
+    try:
+        from trpg_server.plugins.runtime import extra_agent_tools
+
+        tools = extra_agent_tools()
+    except Exception:  # noqa: BLE001 - 插件钩子故障不影响核心工具
+        return []
+    current = str(ruleset_id or "").strip().lower()
+    names: list[str] = []
+    for tool in tools:
+        scope = tuple(
+            str(item).strip().lower()
+            for item in (getattr(tool, "rulesets", ()) or ())
+            if str(item).strip()
+        )
+        if scope and current not in scope:
+            continue
+        name = str(getattr(tool, "name", "") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
 def build_kp_tool_names(ruleset_id: str | None = None) -> list[str]:
     """按规则集组装 KP 工具：核心工具 + 插件声明的规则专属工具。"""
     names = list(CORE_KP_TOOL_NAMES)
@@ -108,6 +136,7 @@ def build_kp_tool_names(ruleset_id: str | None = None) -> list[str]:
             *combat_budget_tool_names(ruleset_id),
             *spell_tool_names(ruleset_id),
             *effect_tool_names(ruleset_id),
+            *plugin_tool_names(ruleset_id),
         )
         if name not in names
     ]

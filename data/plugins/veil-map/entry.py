@@ -22,10 +22,12 @@ from uuid import uuid4
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.agents.room_state import load_room_state
+from trpg_server.agents.tools.base import AgentTool
 from trpg_server.combat.scheduler import spend_budget
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.responses import error_response, success_response
 from trpg_server.room_access import can_access, find_room, is_elevated
+from trpg_server.room_rules import resolve_rule_id
 
 bp = Blueprint("veil_map", __name__, url_prefix="/api/plugins/veil-map")
 logger = logging.getLogger(__name__)
@@ -36,7 +38,12 @@ MIN_GRID = 16
 MAX_GRID = 256
 MAX_TOKENS = 200
 MAX_NAME = 40
+MAX_REASON = 120
 FEET_PER_CELL = 5
+BOUNDS_DEFAULT = 50
+MIN_BOUNDS = 5
+MAX_BOUNDS = 200
+DM_AGENT_IDS = {"kp"}
 TOKEN_COLORS = ("#c8a35a", "#6fa8dc", "#93c47d", "#e06666", "#8e7cc3", "#76a5af", "#f6b26b", "#a64d79")
 _MAP_LOCK = threading.RLock()
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -68,6 +75,7 @@ def _default_map() -> dict[str, Any]:
         "scene_id": "default",
         "background": "",
         "grid_size": DEFAULT_GRID,
+        "bounds_cells": BOUNDS_DEFAULT,
         "tokens": [],
         "updated_at": "",
     }
@@ -102,6 +110,9 @@ def _normalize_map(raw: Any) -> dict[str, Any]:
     state["scene_id"] = str(state.get("scene_id") or "default")[:64]
     state["background"] = str(state.get("background") or "")[:2048]
     state["grid_size"] = _clamp(_as_int(state.get("grid_size"), DEFAULT_GRID), MIN_GRID, MAX_GRID)
+    state["bounds_cells"] = _clamp(
+        _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS
+    )
     tokens: list[dict[str, Any]] = []
     for item in state.get("tokens") or []:
         token = _normalize_token(item)
@@ -211,12 +222,15 @@ def _room_or_error(room_id: str):
     return room_dir, info, None
 
 
-def _broadcast(room_id: str, state: dict[str, Any]) -> None:
+def _broadcast(room_id: str, state: dict[str, Any], move: dict[str, Any] | None = None) -> None:
     socketio = current_app.extensions.get("socketio")
     if socketio is None:
         return
+    payload: dict[str, Any] = {"room_id": str(room_id), "map": state}
+    if isinstance(move, dict) and move:
+        payload["move"] = move
     try:
-        socketio.emit("room_map_changed", {"room_id": str(room_id), "map": state}, room=str(room_id))
+        socketio.emit("room_map_changed", payload, room=str(room_id))
     except Exception:  # noqa: BLE001 - 广播失败不能影响写入结果
         logger.warning("veil_map_broadcast_failed room=%s", room_id, exc_info=True)
 
@@ -274,6 +288,141 @@ def _snap(value: Any, grid: int) -> int | None:
     cell = int(round(number / grid))
     cell = _clamp(cell, -1000, 1000)
     return cell * grid
+
+
+def _cell_of(token: dict[str, Any], grid: int) -> tuple[int, int]:
+    return (
+        int(round(_as_int(token.get("x"), 0) / grid)),
+        int(round(_as_int(token.get("y"), 0) / grid)),
+    )
+
+
+def _footprint(token: dict[str, Any]) -> tuple[int, int]:
+    return (
+        _clamp(_as_int(token.get("w"), 1), 1, 4),
+        _clamp(_as_int(token.get("h"), 1), 1, 4),
+    )
+
+
+def _within_bounds(state: dict[str, Any], token: dict[str, Any], cell_x: int, cell_y: int) -> bool:
+    """地图边界以世界原点为中心；``bounds_cells`` 是整张地图的格数。"""
+    bounds = _clamp(_as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS)
+    half = bounds // 2
+    width, height = _footprint(token)
+    return (
+        -half <= cell_x
+        and cell_x + width <= bounds - half
+        and -half <= cell_y
+        and cell_y + height <= bounds - half
+    )
+
+
+def _occupancy_conflict(
+    state: dict[str, Any], token: dict[str, Any], cell_x: int, cell_y: int
+) -> str:
+    """返回目标 footprint 上已占用的棋子名称；无冲突时返回空串。"""
+    grid = int(state.get("grid_size") or DEFAULT_GRID)
+    width, height = _footprint(token)
+    for other in state.get("tokens") or []:
+        if other is token or str(other.get("id")) == str(token.get("id")):
+            continue
+        other_x, other_y = _cell_of(other, grid)
+        other_w, other_h = _footprint(other)
+        if (
+            cell_x < other_x + other_w
+            and other_x < cell_x + width
+            and cell_y < other_y + other_h
+            and other_y < cell_y + height
+        ):
+            return str(other.get("name") or "其他棋子")
+    return ""
+
+
+def _find_token(state: dict[str, Any], reference: Any) -> dict[str, Any] | None:
+    needle = str(reference or "").strip().casefold()
+    if not needle:
+        return None
+    tokens = state.get("tokens") or []
+    for token in tokens:
+        if str(token.get("id") or "").casefold() == needle:
+            return token
+    for token in tokens:
+        names = {
+            str(token.get("name") or "").strip().casefold(),
+            str(token.get("combatant") or "").strip().casefold(),
+        }
+        if needle in names:
+            return token
+    return None
+
+
+def _member_role(info: dict[str, Any], user_id: Any) -> str:
+    target = str(user_id or "")
+    if target and target == str(info.get("creator_id") or ""):
+        return "owner"
+    for member in _active_members(info):
+        if str(member.get("user_id") or "") == target:
+            return str(member.get("room_role") or "").strip().lower()
+    return ""
+
+
+def _member_name_by_id(info: dict[str, Any], user_id: Any) -> str:
+    for member in _active_members(info):
+        if str(member.get("user_id") or "") != str(user_id or ""):
+            continue
+        card = member.get("character_card") if isinstance(member.get("character_card"), dict) else {}
+        return str(card.get("name") or member.get("username") or "").strip()[:MAX_NAME]
+    return ""
+
+
+def _agent_actor_label(info: dict[str, Any], agent_id: Any, user_id: Any) -> str:
+    if str(agent_id or "").strip().lower() in DM_AGENT_IDS:
+        return "KP"
+    name = _member_name_by_id(info, user_id)
+    return f"AI 玩家（{name}）" if name else "AI 玩家"
+
+
+def _agent_can_move(
+    info: dict[str, Any], token: dict[str, Any], user_id: Any, agent_id: Any
+) -> tuple[bool, str]:
+    """KP 视为 DM 可移动任意棋子；其余按房间角色或棋子归属判定。"""
+    if str(agent_id or "").strip().lower() in DM_AGENT_IDS:
+        return True, ""
+    if _member_role(info, user_id) in _OWNER_ROLES:
+        return True, ""
+    owner = str(token.get("owner_user_id") or "")
+    if owner and owner == str(user_id or ""):
+        return True, ""
+    controller = _member_name_by_id(info, owner) or "其他成员"
+    return (
+        False,
+        f"你只能移动自己绑定的棋子（「{token.get('name') or '该棋子'}」由 {controller} 控制）。",
+    )
+
+
+def _agent_ruleset_id(info: dict[str, Any], scenarios_dir: Any = None) -> str:
+    try:
+        return str(resolve_rule_id(info, scenarios_dir=scenarios_dir) or "").strip().lower()
+    except Exception:  # noqa: BLE001 - 规则集解析失败时退回房间显式值
+        return str((info or {}).get("ruleset_id") or "").strip().lower()
+
+
+def _response_message(response: Any) -> str:
+    if response is None:
+        return ""
+    # error_response 返回 (Response, status) 元组，取第一段解析 JSON。
+    if isinstance(response, tuple) and response:
+        response = response[0]
+    try:
+        data = response.get_json(silent=True)
+    except (AttributeError, TypeError):
+        data = None
+    if isinstance(data, dict):
+        return str(data.get("message") or data.get("error") or "").strip()
+    try:
+        return str(response.get_data(as_text=True) or "").strip()
+    except Exception:  # noqa: BLE001 - 非 Flask 响应对象按空消息处理
+        return ""
 
 
 def _safe_background(value: Any) -> str | None:
@@ -397,6 +546,15 @@ def update_map(room_id: str):
                     "map.invalid_grid",
                 )
             state["grid_size"] = grid
+        if "bounds_cells" in payload:
+            bounds = _as_int(payload.get("bounds_cells"), state["bounds_cells"])
+            if bounds < MIN_BOUNDS or bounds > MAX_BOUNDS:
+                return error_response(
+                    f"地图边界必须在 {MIN_BOUNDS}–{MAX_BOUNDS} 格之间。",
+                    400,
+                    "map.invalid_bounds",
+                )
+            state["bounds_cells"] = bounds
         if "background" in payload:
             background = _safe_background(payload.get("background"))
             if background is None:
@@ -514,4 +672,159 @@ def move_token(room_id: str, token_id: str):
     )
 
 
-__all__ = ["bp"]
+def _move_token_agent(
+    room_dir,
+    info: dict[str, Any],
+    *,
+    room_id: str,
+    user_id: str,
+    agent_id: str,
+    token_ref: str,
+    cell_x: int,
+    cell_y: int,
+    reason: str = "",
+    scenarios_dir: Any = None,
+) -> dict[str, Any]:
+    """KP/AI 移动棋子：权限、边界、占位与战斗预算都走同一套插件规则。"""
+    if not str(room_id or "").strip() or room_dir is None:
+        return {"ok": False, "error": "缺少房间上下文，无法移动棋子。"}
+    if _agent_ruleset_id(info, scenarios_dir) != "dnd5e":
+        return {"ok": False, "error": "当前房间的规则集不支持地图棋子移动。"}
+    with _MAP_LOCK:
+        state = _load_map(room_dir)
+        _reconcile_tokens(state, info)
+        token = _find_token(state, token_ref)
+        if token is None:
+            return {"ok": False, "error": f"没有找到棋子「{token_ref}」。"}
+        allowed, denied = _agent_can_move(info, token, user_id, agent_id)
+        if not allowed:
+            return {"ok": False, "error": denied}
+
+        grid = int(state.get("grid_size") or DEFAULT_GRID)
+        target_x = _snap(cell_x * grid, grid)
+        target_y = _snap(cell_y * grid, grid)
+        if target_x is None or target_y is None:
+            return {"ok": False, "error": "目标格坐标不合法。"}
+        to_cell_x = int(round(target_x / grid))
+        to_cell_y = int(round(target_y / grid))
+        from_cell_x, from_cell_y = _cell_of(token, grid)
+
+        if not _within_bounds(state, token, to_cell_x, to_cell_y):
+            bounds = _clamp(
+                _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS
+            )
+            return {"ok": False, "error": f"目标位置超出地图边界（当前地图 {bounds} 格）。"}
+        occupied = _occupancy_conflict(state, token, to_cell_x, to_cell_y)
+        if occupied:
+            return {"ok": False, "error": f"目标格已被「{occupied}」占用，无法移动。"}
+
+        combat = load_room_state(room_dir).get("combat")
+        combat_active = isinstance(combat, dict) and bool(combat.get("active"))
+        if combat_active:
+            combat_name, combatant = _combatant_for_token(combat, token)
+            if not combat_name or combatant is None:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"战斗进行中，「{token.get('name') or '该棋子'}」没有加入先攻顺序，"
+                        "无法移动。"
+                    ),
+                }
+
+        # 战斗内复用现有行动经济：当前行动者、movement 预算、扣减与回滚。
+        ok, error = _apply_combat_cost(room_id, room_dir, state, token, target_x, target_y)
+        if not ok:
+            message = _response_message(error)
+            return {"ok": False, "error": message or "移动被战斗规则拒绝。"}
+
+        distance = max(abs(to_cell_x - from_cell_x), abs(to_cell_y - from_cell_y))
+        cost_ft = distance * FEET_PER_CELL if combat_active else 0
+        token["x"] = target_x
+        token["y"] = target_y
+        state = _save_map(room_dir, state)
+
+    move: dict[str, Any] = {
+        "source": "ai",
+        "actor": _agent_actor_label(info, agent_id, user_id),
+        "token_id": str(token.get("id") or ""),
+        "token_name": str(token.get("name") or ""),
+        "from": {"cell_x": from_cell_x, "cell_y": from_cell_y},
+        "to": {"cell_x": to_cell_x, "cell_y": to_cell_y},
+        "cost_ft": cost_ft,
+        "combat_active": combat_active,
+    }
+    if reason:
+        move["reason"] = reason
+    _broadcast(room_id, state, move)
+    return {
+        "ok": True,
+        "message": f"{move['actor']} 将「{move['token_name']}」移动到 ({to_cell_x}, {to_cell_y})。",
+        "token": token,
+        "from": move["from"],
+        "to": move["to"],
+        "cost_ft": cost_ft,
+        "combat_active": combat_active,
+    }
+
+
+def _move_token_tool(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    try:
+        room_dir = getattr(context, "room_dir", None)
+        room_id = str(getattr(context, "room_id", "") or "")
+        info_fn = getattr(context, "room_info", None)
+        info = info_fn() if callable(info_fn) else {}
+        if not isinstance(info, dict) or not info:
+            info = read_json(room_dir / "info.json", default={}) if room_dir else {}
+        token_ref = str(arguments.get("token") or "").strip()
+        if not token_ref:
+            return {"ok": False, "error": "请提供要移动的棋子 id 或名称。"}
+        try:
+            cell_x = int(arguments.get("cell_x"))
+            cell_y = int(arguments.get("cell_y"))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "目标格坐标必须是整数（cell_x / cell_y）。"}
+        return _move_token_agent(
+            room_dir,
+            info,
+            room_id=room_id,
+            user_id=str(getattr(context, "user_id", "") or ""),
+            agent_id=str(getattr(context, "agent_id", "") or ""),
+            token_ref=token_ref,
+            cell_x=cell_x,
+            cell_y=cell_y,
+            reason=str(arguments.get("reason") or "").strip()[:MAX_REASON],
+            scenarios_dir=getattr(context, "scenarios_dir", None),
+        )
+    except Exception:  # noqa: BLE001 - 工具异常只影响本次调用
+        logger.warning("veil_map_agent_move_failed", exc_info=True)
+        return {"ok": False, "error": "地图移动失败，请稍后重试。"}
+
+
+MOVE_TOKEN_TOOL = AgentTool(
+    name="veil-map.move_token",
+    description=(
+        "移动地图上的一枚棋子。战斗中必须由当前行动者发起，并按移动距离消耗 movement "
+        "预算；探索阶段不消耗行动经济，但仍受地图边界与占位限制。KP 可以移动任意棋子，"
+        "AI 玩家只能移动自己绑定的棋子。cell_x / cell_y 是格子坐标（可为负），服务端会"
+        "按网格吸附；reason 用一句短语说明移动意图。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "token": {"type": "string", "description": "棋子 id 或名称"},
+            "cell_x": {"type": "integer", "description": "目标格列坐标（可为负）"},
+            "cell_y": {"type": "integer", "description": "目标格行坐标（可为负）"},
+            "reason": {"type": "string", "description": "给玩家的简短移动说明（可选）"},
+        },
+        "required": ["token", "cell_x", "cell_y"],
+    },
+    handler=_move_token_tool,
+    rulesets=("dnd5e",),
+)
+
+
+def create_tools() -> list[AgentTool]:
+    return [MOVE_TOKEN_TOOL]
+
+
+__all__ = ["bp", "create_tools", "MOVE_TOKEN_TOOL"]

@@ -10,6 +10,9 @@
     var FEET_PER_CELL = 5;
     var MIN_GRID = 16;
     var MAX_GRID = 256;
+    var MIN_BOUNDS = 5;
+    var MAX_BOUNDS = 200;
+    var DEFAULT_BOUNDS = 50;
     var POLL_INTERVAL = 12000;
 
     function clamp(value, minimum, maximum) {
@@ -111,6 +114,8 @@
             '<div class="vmap-section-label">地图</div>',
             '<label class="vmap-field">网格尺寸（px）',
             '<input type="number" min="' + MIN_GRID + '" max="' + MAX_GRID + '" step="8" data-vmap-grid></label>',
+            '<label class="vmap-field">地图边界（格）',
+            '<input type="number" min="' + MIN_BOUNDS + '" max="' + MAX_BOUNDS + '" step="1" data-vmap-bounds></label>',
             '<label class="vmap-field">背景图地址',
             '<input type="url" maxlength="2048" placeholder="https://… 或 /assets/…" data-vmap-bg></label>',
             '<div class="vmap-actions">',
@@ -134,6 +139,7 @@
 
         var context = canvas.getContext("2d");
         var panelGrid = panel.querySelector("[data-vmap-grid]");
+        var panelBounds = panel.querySelector("[data-vmap-bounds]");
         var panelBackground = panel.querySelector("[data-vmap-bg]");
         var panelName = panel.querySelector("[data-vmap-token-name]");
         var panelWidth = panel.querySelector("[data-vmap-token-w]");
@@ -438,6 +444,7 @@
             });
             if (mapState) {
                 panelGrid.value = String(gridSize());
+                panelBounds.value = String(clamp(asInt(mapState.bounds_cells, DEFAULT_BOUNDS), MIN_BOUNDS, MAX_BOUNDS));
                 panelBackground.value = String(mapState.background || "");
             }
             if (mode === "token" && panelName) panelName.focus();
@@ -445,8 +452,10 @@
 
         function saveMapSettings() {
             var grid = clamp(asInt(panelGrid.value, gridSize()), MIN_GRID, MAX_GRID);
+            var bounds = clamp(asInt(panelBounds.value, DEFAULT_BOUNDS), MIN_BOUNDS, MAX_BOUNDS);
             apiRequest("PUT", "/rooms/" + encodeURIComponent(ctx.room.id) + "/map", {
                 grid_size: grid,
+                bounds_cells: bounds,
                 background: String(panelBackground.value || "").trim(),
             }).then(function (response) {
                 if (destroyed) return;
@@ -626,6 +635,14 @@
             if (destroyed || !payload || !payload.map) return;
             if (String(payload.room_id || "") !== String(ctx.room.id)) return;
             applyPayload({ map: payload.map, combat: combat, can_manage: serverCanManage });
+            var move = payload.move;
+            if (move && move.source === "ai") {
+                var target = move.to || {};
+                var text = String(move.actor || "KP") + " 将「" + String(move.token_name || "棋子") +
+                    "」移动到 (" + asInt(target.cell_x, 0) + ", " + asInt(target.cell_y, 0) + ")";
+                if (move.reason) text += "：" + String(move.reason);
+                notify(text, "info");
+            }
         }
 
         function attachSocket() {

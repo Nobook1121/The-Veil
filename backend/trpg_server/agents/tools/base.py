@@ -28,6 +28,8 @@ class AgentTool:
     description: str
     parameters: dict[str, Any]
     handler: Callable[[dict[str, Any], Any], dict[str, Any]]
+    # 插件工具可按规则集限定下发范围；空元组表示所有规则集通用。
+    rulesets: tuple[str, ...] = ()
 
     def schema(self) -> dict[str, Any]:
         return {

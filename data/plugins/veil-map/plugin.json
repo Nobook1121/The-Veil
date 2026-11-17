@@ -19,6 +19,10 @@
       "module": "entry.py",
       "blueprints": ["bp"]
     },
+    "agent_tools": {
+      "module": "entry.py",
+      "tools": ["veil-map.move_token"]
+    },
     "ui": {
       "api_version": 1,
       "slots": [

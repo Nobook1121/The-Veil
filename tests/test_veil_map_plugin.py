@@ -5,9 +5,13 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from flask import Flask
+
+from trpg_server.agents import player_agent, profiles
+from trpg_server.plugins import runtime as plugin_runtime
 
 ENTRY = Path(__file__).resolve().parent.parent / "data" / "plugins" / "veil-map" / "entry.py"
 
@@ -246,3 +250,192 @@ def test_player_cannot_edit_map_or_add_tokens(client):
     assert manager.delete(
         "/api/plugins/veil-map/rooms/room1/tokens/member-u1"
     ).status_code == 403
+
+
+def _agent_context(room_dir: Path, *, user_id: str, agent_id: str) -> SimpleNamespace:
+    info = json.loads((room_dir / "info.json").read_text(encoding="utf-8"))
+    return SimpleNamespace(
+        room_id="room1",
+        room_dir=room_dir,
+        scenarios_dir=None,
+        user_id=user_id,
+        agent_id=agent_id,
+        room_info=lambda: info,
+    )
+
+
+def _agent_app() -> Flask:
+    app = Flask(__name__)
+    app.extensions["socketio"] = _FakeSocket()
+    return app
+
+
+def _read_map_tokens(room_dir: Path) -> list[dict]:
+    path = room_dir / "plugins" / "veil-map" / "map.json"
+    return json.loads(path.read_text(encoding="utf-8"))["tokens"]
+
+
+@pytest.fixture()
+def registered_plugin_tools():
+    plugin_runtime.register_agent_tools("veil-map", veil_map.create_tools())
+    yield
+    plugin_runtime.unregister_plugin("veil-map")
+
+
+def test_agent_tool_is_scoped_to_dnd5e(registered_plugin_tools, monkeypatch):
+    tools = veil_map.create_tools()
+    assert [tool.name for tool in tools] == ["veil-map.move_token"]
+    assert tools[0].rulesets == ("dnd5e",)
+
+    assert "veil-map.move_token" in profiles.plugin_tool_names("dnd5e")
+    assert "veil-map.move_token" not in profiles.plugin_tool_names("coc7")
+
+    # 裸测试环境没有加载 dnd5e 规则集插件，先把其它扩展工具清空，
+    # 只验证 KP 工具链会并入插件工具。
+    for name in (
+        "ruleset_tool_names",
+        "combat_budget_tool_names",
+        "spell_tool_names",
+        "effect_tool_names",
+    ):
+        monkeypatch.setattr(profiles, name, lambda *_args, **_kwargs: [])
+    assert "veil-map.move_token" in profiles.build_kp_tool_names("dnd5e")
+    assert "veil-map.move_token" not in profiles.build_kp_tool_names("coc7")
+
+    assert "veil-map.move_token" in player_agent._build_profile("dnd5e", {}).tool_names
+    assert "veil-map.move_token" not in player_agent._build_profile("coc7", {}).tool_names
+
+
+def test_agent_kp_moves_player_token_in_exploration(tmp_path):
+    rooms = _write_room(tmp_path)
+    room_dir = rooms / "room1"
+    app = _agent_app()
+    tool = veil_map.create_tools()[0]
+    context = _agent_context(room_dir, user_id="u1", agent_id="kp")
+
+    with app.app_context():
+        result = tool.handler(
+            {"token": "Bob", "cell_x": 2, "cell_y": 3, "reason": "退到石柱后"},
+            context,
+        )
+
+    assert result["ok"] is True
+    assert result["to"] == {"cell_x": 2, "cell_y": 3}
+    assert result["cost_ft"] == 0
+    bob = next(token for token in _read_map_tokens(room_dir) if token["name"] == "Bob")
+    assert (bob["x"], bob["y"]) == (128, 192)
+
+    events = [item for item in app.extensions["socketio"].events if item["event"] == "room_map_changed"]
+    move = events[-1]["payload"]["move"]
+    assert move["source"] == "ai"
+    assert move["actor"] == "KP"
+    assert move["token_name"] == "Bob"
+    assert move["reason"] == "退到石柱后"
+    assert move["combat_active"] is False
+
+
+def test_agent_player_can_only_move_own_token(tmp_path):
+    rooms = _write_room(tmp_path)
+    room_dir = rooms / "room1"
+    app = _agent_app()
+    tool = veil_map.create_tools()[0]
+    context = _agent_context(room_dir, user_id="u2", agent_id="player")
+
+    with app.app_context():
+        denied = tool.handler({"token": "Carol", "cell_x": 1, "cell_y": 1}, context)
+        allowed = tool.handler({"token": "Bob", "cell_x": 1, "cell_y": 1}, context)
+
+    assert denied["ok"] is False
+    assert "只能移动自己绑定的棋子" in denied["error"]
+    assert allowed["ok"] is True
+
+
+def test_agent_move_uses_combat_turn_and_budget(tmp_path):
+    rooms = _write_room(tmp_path, combat=_combat(["Alice", "Bob"]))
+    room_dir = rooms / "room1"
+    app = _agent_app()
+    tool = veil_map.create_tools()[0]
+    context = _agent_context(room_dir, user_id="u1", agent_id="kp")
+
+    with app.app_context():
+        not_current = tool.handler({"token": "Bob", "cell_x": 1, "cell_y": 1}, context)
+        moved = tool.handler({"token": "Alice", "cell_x": 3, "cell_y": 0}, context)
+        exhausted = tool.handler({"token": "Alice", "cell_x": 7, "cell_y": 0}, context)
+
+    assert not_current["ok"] is False
+    assert "轮到" in not_current["error"]
+    assert moved["ok"] is True
+    assert moved["cost_ft"] == 15
+    assert exhausted["ok"] is False
+    assert "剩余 15 英尺" in exhausted["error"]
+
+    state = json.loads((room_dir / "state.json").read_text(encoding="utf-8"))
+    assert state["combat"]["combatants"]["Alice"]["budget"]["movement"] == 15
+    alice = next(token for token in _read_map_tokens(room_dir) if token["name"] == "Alice")
+    assert (alice["x"], alice["y"]) == (192, 0)
+
+
+def test_agent_move_rejects_bounds_and_occupied_cell(tmp_path):
+    rooms = _write_room(tmp_path)
+    room_dir = rooms / "room1"
+    app = _agent_app()
+    tool = veil_map.create_tools()[0]
+    context = _agent_context(room_dir, user_id="u1", agent_id="kp")
+
+    with app.app_context():
+        outside = tool.handler({"token": "Bob", "cell_x": 100, "cell_y": 0}, context)
+        occupied = tool.handler({"token": "Bob", "cell_x": 2, "cell_y": 0}, context)
+
+    assert outside["ok"] is False
+    assert "超出地图边界" in outside["error"]
+    assert occupied["ok"] is False
+    assert "Carol" in occupied["error"]
+
+
+def test_agent_move_rejects_non_combatant_during_combat(tmp_path):
+    rooms = _write_room(tmp_path, combat=_combat(["Alice", "Bob"]))
+    room_dir = rooms / "room1"
+    map_dir = room_dir / "plugins" / "veil-map"
+    map_dir.mkdir(parents=True)
+    (map_dir / "map.json").write_text(
+        json.dumps(
+            {
+                "grid_size": 64,
+                "bounds_cells": 50,
+                "tokens": [
+                    {"id": "npc-ogre", "name": "Ogre", "x": 320, "y": 320, "w": 1, "h": 1, "kind": "npc"}
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    app = _agent_app()
+    tool = veil_map.create_tools()[0]
+    context = _agent_context(room_dir, user_id="u1", agent_id="kp")
+
+    with app.app_context():
+        result = tool.handler({"token": "Ogre", "cell_x": 6, "cell_y": 6}, context)
+
+    assert result["ok"] is False
+    assert "没有加入先攻顺序" in result["error"]
+    ogre = next(token for token in _read_map_tokens(room_dir) if token["name"] == "Ogre")
+    assert (ogre["x"], ogre["y"]) == (320, 320)
+
+
+def test_agent_move_rejects_coc7_room(tmp_path):
+    rooms = _write_room(tmp_path)
+    room_dir = rooms / "room1"
+    info_path = room_dir / "info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    info["ruleset_id"] = "coc7"
+    info_path.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+    app = _agent_app()
+    tool = veil_map.create_tools()[0]
+    context = _agent_context(room_dir, user_id="u1", agent_id="kp")
+
+    with app.app_context():
+        result = tool.handler({"token": "Bob", "cell_x": 1, "cell_y": 1}, context)
+
+    assert result["ok"] is False
+    assert "规则集不支持" in result["error"]
