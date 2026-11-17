@@ -398,7 +398,8 @@ def _normalize_wall(raw: Any, index: int) -> dict[str, Any] | None:
         "kind": kind,
         "points": points,
         "blocks_sight": bool(raw.get("blocks_sight", kind != "window")),
-        "blocks_movement": bool(raw.get("blocks_movement", kind != "window")),
+        # 窗户挡人不挡视线：门/窗/墙默认都阻挡移动，门可通过 state 放行。
+        "blocks_movement": bool(raw.get("blocks_movement", True)),
         "blocks_light": bool(raw.get("blocks_light", kind != "window")),
         "opacity": max(0.0, min(1.0, opacity)),
         "height": max(0.0, min(100.0, height)),
@@ -1506,6 +1507,94 @@ def _occupancy_conflict(
     return ""
 
 
+_MOVE_INSET_PX = 1.0
+
+
+def _footprint_points(
+    state: dict[str, Any], cell_x: int, cell_y: int, width: int, height: int
+) -> list[tuple[float, float]]:
+    """棋子 footprint 四角（世界像素）；向内收 1px，避免贴墙格把边线当成穿越。"""
+    grid, offset_x, offset_y = _grid_of(state)
+    left = offset_x + int(cell_x) * grid + _MOVE_INSET_PX
+    top = offset_y + int(cell_y) * grid + _MOVE_INSET_PX
+    right = offset_x + (int(cell_x) + width) * grid - _MOVE_INSET_PX
+    bottom = offset_y + (int(cell_y) + height) * grid - _MOVE_INSET_PX
+    right = max(left, right)
+    bottom = max(top, bottom)
+    return [(left, top), (right, top), (right, bottom), (left, bottom)]
+
+
+def _movement_wall_blockers(
+    state: dict[str, Any],
+    token: dict[str, Any],
+    from_cell: tuple[int, int],
+    to_cell: tuple[int, int],
+) -> list[str]:
+    """返回移动路径穿过的墙体 id；门 open 时放行，窗户按 blocks_movement 判定。"""
+    walls = state.get("walls")
+    if not isinstance(walls, list) or not walls:
+        return []
+    if (int(from_cell[0]), int(from_cell[1])) == (int(to_cell[0]), int(to_cell[1])):
+        return []
+    width, height = _footprint(token)
+    starts = _footprint_points(state, from_cell[0], from_cell[1], width, height)
+    ends = _footprint_points(state, to_cell[0], to_cell[1], width, height)
+    paths = list(zip(starts, ends))
+    if width > 1 or height > 1:
+        # 多格棋子再检查四条边的中点，覆盖四角轨迹之间的中段。
+        for index in range(4):
+            start_a, start_b = starts[index], starts[(index + 1) % 4]
+            end_a, end_b = ends[index], ends[(index + 1) % 4]
+            paths.append(
+                (
+                    ((start_a[0] + start_b[0]) / 2.0, (start_a[1] + start_b[1]) / 2.0),
+                    ((end_a[0] + end_b[0]) / 2.0, (end_a[1] + end_b[1]) / 2.0),
+                )
+            )
+    blockers: list[str] = []
+    for start, end in paths:
+        if abs(end[0] - start[0]) < 1e-6 and abs(end[1] - start[1]) < 1e-6:
+            continue
+        for wall_id in spatial.segment_blockers(walls, start, end, mode="movement"):
+            if wall_id not in blockers:
+                blockers.append(wall_id)
+    return blockers
+
+
+def _movement_block_message(state: dict[str, Any], blockers: list[str]) -> str:
+    blocked_ids = {str(item) for item in blockers}
+    kinds = {
+        str(wall.get("kind") or "wall").strip().lower()
+        for wall in state.get("walls") or []
+        if isinstance(wall, dict) and str(wall.get("id") or "") in blocked_ids
+    }
+    if "door" in kinds and "window" not in kinds:
+        return "移动路径被未打开的门挡住，请先开门或绕行。"
+    if "window" in kinds and "door" not in kinds:
+        return "移动路径被窗户挡住，无法穿过。"
+    return "移动路径被墙体挡住，请绕行。"
+
+
+def _move_target_rejection(
+    state: dict[str, Any], token: dict[str, Any], cell_x: int, cell_y: int
+) -> tuple[str, str] | None:
+    """移动入口共用的目标格校验：边界、占位与墙体穿越；被挡住时不改坐标与预算。"""
+    if not _within_bounds(state, token, cell_x, cell_y):
+        bounds = _clamp(
+            _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS
+        )
+        return "map.out_of_bounds", f"目标位置超出地图边界（当前地图 {bounds} 格）。"
+    occupied = _occupancy_conflict(state, token, cell_x, cell_y)
+    if occupied:
+        return "map.cell_occupied", f"目标格已被「{occupied}」占用。"
+    grid, offset_x, offset_y = _grid_of(state)
+    from_cell = _cell_of(token, grid, offset_x, offset_y)
+    blockers = _movement_wall_blockers(state, token, from_cell, (cell_x, cell_y))
+    if blockers:
+        return "map.wall_blocked", _movement_block_message(state, blockers)
+    return None
+
+
 def _find_token(state: dict[str, Any], reference: Any) -> dict[str, Any] | None:
     needle = str(reference or "").strip().casefold()
     if not needle:
@@ -1996,19 +2085,12 @@ def move_token(room_id: str, token_id: str):
                 revision=state["revision"],
             )
         cell_x, cell_y, fraction_x, fraction_y = target
-        if not _within_bounds(state, token, cell_x, cell_y):
+        rejection = _move_target_rejection(state, token, cell_x, cell_y)
+        if rejection is not None:
+            code, message = rejection
             return _rejected_request(
-                "目标位置超出地图边界。",
-                "map.out_of_bounds",
-                request_id=request_id,
-                revision=state["revision"],
-                data={"map": view, "fog": fog_view, "can_manage": manager},
-            )
-        occupied = _occupancy_conflict(state, token, cell_x, cell_y)
-        if occupied:
-            return _rejected_request(
-                f"目标格已被「{occupied}」占用。",
-                "map.cell_occupied",
+                message,
+                code,
                 request_id=request_id,
                 revision=state["revision"],
                 data={"map": view, "fog": fog_view, "can_manage": manager},
@@ -2714,14 +2796,10 @@ def _move_token_agent(
             return {"ok": False, "error": "目标格坐标不合法。"}
         from_cell_x, from_cell_y = _cell_of(token, grid, offset_x, offset_y)
 
-        if not _within_bounds(state, token, to_cell_x, to_cell_y):
-            bounds = _clamp(
-                _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS
-            )
-            return {"ok": False, "error": f"目标位置超出地图边界（当前地图 {bounds} 格）。"}
-        occupied = _occupancy_conflict(state, token, to_cell_x, to_cell_y)
-        if occupied:
-            return {"ok": False, "error": f"目标格已被「{occupied}」占用，无法移动。"}
+        rejection = _move_target_rejection(state, token, to_cell_x, to_cell_y)
+        if rejection is not None:
+            code, message = rejection
+            return {"ok": False, "error": message, "code": code}
 
         combat = load_room_state(room_dir).get("combat")
         combat_active = isinstance(combat, dict) and bool(combat.get("active"))

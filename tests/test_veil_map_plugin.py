@@ -714,6 +714,105 @@ def test_spatial_window_blocks_movement_not_sight():
     assert spatial.segment_blockers(walls, (0, -64), (0, 64), mode="movement") == ["window-1"]
 
 
+def test_move_blocked_by_closed_wall_keeps_position_and_budget(tmp_path):
+    rooms = _write_room(tmp_path, combat=_combat(["Alice", "Bob"]))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.config.update(ROOMS_DIR=str(rooms), CONFIG_DIR=str(tmp_path / "config"))
+    app.extensions["socketio"] = _FakeSocket()
+    app.register_blueprint(veil_map.bp)
+    manager = app.test_client()
+    _login(manager, "u1")
+    _map(manager)
+
+    wall = {
+        "id": "wall-block",
+        "kind": "wall",
+        "points": [{"x": 64, "y": -128}, {"x": 64, "y": 128}],
+    }
+    saved = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/walls", {"walls": [wall]})
+    assert saved.status_code == 200
+
+    blocked = _write(
+        manager, "post", "/api/plugins/veil-map/rooms/room1/tokens/member-u1/move",
+        {"cell_x": 4, "cell_y": 0},
+    )
+    body = blocked.get_json()
+    assert blocked.status_code == 403
+    assert body["status"] == "rejected"
+    assert body["code"] == "map.wall_blocked"
+    assert "墙体" in body["message"]
+
+    data = _map(manager)
+    alice = _token(data, "member-u1")
+    assert (alice["cell_x"], alice["cell_y"]) == (0, 0)
+    alice_combat = next(item for item in data["combat"]["order"] if item["name"] == "Alice")
+    assert alice_combat["budget"]["movement"] == 30
+
+    door = dict(wall, kind="door", state="open")
+    assert _write(
+        manager, "put", "/api/plugins/veil-map/rooms/room1/walls", {"walls": [door]}
+    ).status_code == 200
+    moved = _write(
+        manager, "post", "/api/plugins/veil-map/rooms/room1/tokens/member-u1/move",
+        {"cell_x": 4, "cell_y": 0},
+    )
+    assert moved.status_code == 200
+    assert (_token(moved.get_json()["data"], "member-u1")["cell_x"]) == 4
+
+
+def test_agent_move_wall_check_uses_corners_doors_and_windows(tmp_path):
+    rooms = _write_room(tmp_path)
+    room_dir = rooms / "room1"
+    map_dir = room_dir / "plugins" / "veil-map"
+    map_dir.mkdir(parents=True)
+    map_path = map_dir / "map.json"
+    base_state = {
+        "grid_size": 64,
+        "bounds_cells": 50,
+        "tokens": [
+            {"id": "npc-ogre", "name": "Ogre", "cell_x": 6, "cell_y": 3, "w": 2, "h": 2, "kind": "npc"}
+        ],
+    }
+    # 墙体只覆盖棋子顶部一行：锚点与中心路径都不会穿过，只有 footprint 角会。
+    wall = {
+        "id": "door-1",
+        "kind": "door",
+        "state": "closed",
+        "points": [{"x": 512, "y": 192}, {"x": 512, "y": 240}],
+    }
+    map_path.write_text(
+        json.dumps({**base_state, "walls": [wall]}, ensure_ascii=False), encoding="utf-8"
+    )
+    app = _agent_app()
+    tool = veil_map.create_tools()[0]
+    context = _agent_context(room_dir, user_id="u1", agent_id="kp")
+
+    with app.app_context():
+        blocked_door = tool.handler({"token": "Ogre", "cell_x": 7, "cell_y": 3}, context)
+
+        map_path.write_text(
+            json.dumps({**base_state, "walls": [dict(wall, kind="window")]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        blocked_window = tool.handler({"token": "Ogre", "cell_x": 7, "cell_y": 3}, context)
+
+        map_path.write_text(
+            json.dumps({**base_state, "walls": [dict(wall, state="open")]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        allowed = tool.handler({"token": "Ogre", "cell_x": 7, "cell_y": 3}, context)
+
+    assert blocked_door["ok"] is False
+    assert blocked_door["code"] == "map.wall_blocked"
+    assert "门" in blocked_door["error"]
+    assert blocked_window["ok"] is False
+    assert "窗户" in blocked_window["error"]
+    assert allowed["ok"] is True
+    ogre = next(token for token in _read_map_tokens(room_dir) if token["name"] == "Ogre")
+    assert (ogre["cell_x"], ogre["cell_y"]) == (7, 3)
+
+
 def _png(width: int, height: int) -> bytes:
     """构造只含合法 PNG 文件头的字节串；尺寸解析只需要 IHDR。"""
     signature = b"\x89PNG\r\n\x1a\n"
