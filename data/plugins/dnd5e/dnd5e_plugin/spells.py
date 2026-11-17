@@ -7,10 +7,10 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
+from dnd5e_plugin import spell_schema
 from dnd5e_plugin.combat import (
     _as_int,
     _display_name,
@@ -330,6 +330,18 @@ class Dnd5eSpells:
         use_level = level if level == 0 else max(level, _as_int(slot_level, level))
         if level > 0 and use_level > 9:
             return {"error": "法术位环阶不能超过 9"}
+        caster_level = max(1, _as_int(caster.get("level"), 1))
+        target_list = [target for target in (targets or []) if isinstance(target, dict)]
+        # 目标与射程校验必须在扣法术位、打断旧专注之前完成。
+        target_errors = spell_schema.validate_targets(
+            entry,
+            caster,
+            target_list,
+            slot_level=use_level,
+            caster_level=caster_level,
+        )
+        if target_errors:
+            return {"error": "；".join(target_errors)}
         slot_state: dict[str, int] | None = None
         if level > 0 and not ritual:
             slots = caster.get("spell_slots") if isinstance(caster.get("spell_slots"), Mapping) else {}
@@ -347,8 +359,9 @@ class Dnd5eSpells:
             profile = spellcasting_profile(sheet_of(card) if isinstance(card, Mapping) else {}) or {}
         dc = _as_int(profile.get("spellSaveDC"), 8 + proficiency_bonus(caster.get("level", 1)))
         attack_bonus = _as_int(profile.get("spellAttackBonus"), proficiency_bonus(caster.get("level", 1)))
-        caster_level = max(1, _as_int(caster.get("level"), 1))
-        target_list = [target for target in (targets or []) if isinstance(target, dict)]
+        upcast = spell_schema.apply_upcast(
+            entry, slot_level=use_level, caster_level=caster_level
+        )
         notes: list[str] = []
         if entry.get("concentration") and isinstance(caster.get("concentration"), Mapping):
             notes.extend(self.end_concentration(caster, combat=combat, reason="施放新的专注法术"))
@@ -362,6 +375,8 @@ class Dnd5eSpells:
                 "concentration": bool(entry.get("concentration")),
                 "ritual": bool(entry.get("ritual")),
             },
+            "descriptor": spell_schema.describe(entry),
+            "upcast": upcast,
             "slot": self.required_slot(entry),
             "slot_state": slot_state,
             "ritual": bool(ritual),
@@ -374,7 +389,7 @@ class Dnd5eSpells:
             "concentration": None,
             "notes": notes,
         }
-        if not target_list and _text(entry.get("range")) not in {"Self", "self"}:
+        if not target_list and spell_schema.range_spec(entry)["type"] != "self":
             results["summary"] = f"{caster.get('name')} 施放{label}，但没有指定目标。"
             return results
 
@@ -450,11 +465,12 @@ class Dnd5eSpells:
                 results["attack"] = natural_attack.to_dict()
             if not hit and not (save and save.get("half_on_success")):
                 continue
-            for dice, damage_type in self._damage_rows(entry, spell_id, level, use_level, caster_level):
+            for row in upcast["damage"]:
+                dice = _text(row.get("dice"))
+                damage_type = _text(row.get("type")) or "force"
                 terms, fixed = _parse_damage(dice)
                 amount, _detail = _roll_terms(terms, fixed, rng, critical=critical)
-                projectiles = self._projectile_count(entry, level, use_level)
-                amount *= projectiles
+                amount *= max(1, _as_int(upcast.get("projectiles"), 1))
                 if save and save_outcome is not None and save_outcome.success:
                     amount = amount // 2 if save.get("half_on_success") else 0
                 if amount <= 0:
@@ -475,8 +491,8 @@ class Dnd5eSpells:
                 applied["target"] = target_name
                 applied["dice"] = dice
                 results["damage"].append(applied)
-            healing = entry.get("healing") if isinstance(entry.get("healing"), Mapping) else None
-            if healing:
+            healing = upcast.get("healing")
+            if isinstance(healing, Mapping) and healing:
                 terms, fixed = _parse_damage(healing.get("dice"))
                 healed, _detail = _roll_terms(terms, fixed, rng)
                 if healing.get("add_spellcasting_modifier"):
@@ -496,7 +512,7 @@ class Dnd5eSpells:
                 if effect:
                     effect["id"] = f"spell:{spell_id}:{uuid4().hex[:8]}"
                     stored = add_effect(target, effect)
-                    results["effects"].append({"target": target_name, **stored})
+                    results["effects"].append({**stored, "target": target_name})
                     if entry.get("concentration"):
                         concentration_refs.append({"target": target_name, "id": stored.get("id")})
             spell_effects = entry.get("effects")
@@ -514,7 +530,7 @@ class Dnd5eSpells:
                         "detail": {"label": label, "effects": dict(spell_effects)},
                     }
                     stored = add_effect(target, effect)
-                    results["effects"].append({"target": target_name, **stored})
+                    results["effects"].append({**stored, "target": target_name})
                     if entry.get("concentration"):
                         concentration_refs.append({"target": target_name, "id": stored.get("id")})
             if save and not hit and save_outcome is not None and save_outcome.success:
@@ -595,49 +611,6 @@ class Dnd5eSpells:
         return [f"{combatant.get('name')} 专注被打断（{summary}）", *notes]
 
     # -- 内部工具 ---------------------------------------------------------
-    def _damage_rows(
-        self,
-        entry: Mapping[str, Any],
-        spell_id: str,
-        level: int,
-        slot_level: int,
-        caster_level: int,
-    ) -> list[tuple[str, str]]:
-        rows = entry.get("damage") if isinstance(entry.get("damage"), list) else []
-        scaling = entry.get("scaling") if isinstance(entry.get("scaling"), Mapping) else {}
-        result: list[tuple[str, str]] = []
-        for row in rows:
-            if not isinstance(row, Mapping):
-                continue
-            dice = _text(row.get("dice"))
-            if scaling.get("type") == "cantrip_level":
-                for step in scaling.get("thresholds") or []:
-                    if not isinstance(step, Mapping):
-                        continue
-                    if caster_level >= _as_int(step.get("level"), 99):
-                        dice = _text(step.get("dice")) or dice
-            if scaling.get("type") == "slot_level" and scaling.get("per_level"):
-                extra_levels = max(0, slot_level - level)
-                if extra_levels:
-                    base_terms, base_fixed = _parse_damage(dice)
-                    add_terms, add_fixed = _parse_damage(scaling.get("per_level"))
-                    total_terms = [(count, sides) for count, sides in base_terms]
-                    total_terms.extend((count * extra_levels, sides) for count, sides in add_terms)
-                    dice = _format_terms(total_terms, base_fixed + add_fixed * extra_levels)
-            result.append((dice, _text(row.get("type")) or "force"))
-        return result
-
-    def _projectile_count(self, entry: Mapping[str, Any], level: int, slot_level: int) -> int:
-        projectiles = entry.get("projectiles") if isinstance(entry.get("projectiles"), Mapping) else None
-        if not projectiles:
-            return 1
-        count = max(1, _as_int(projectiles.get("count"), 1))
-        scaling = entry.get("scaling") if isinstance(entry.get("scaling"), Mapping) else {}
-        per_level = _as_int(scaling.get("projectiles_per_level"), 0)
-        if per_level:
-            count += per_level * max(0, slot_level - level)
-        return count
-
     def _condition_effect(
         self,
         entry: Mapping[str, Any],
@@ -705,50 +678,14 @@ class Dnd5eSpells:
         return "；".join(parts) + "。"
 
 
-def _format_terms(terms: list[tuple[int, int]], fixed: int) -> str:
-    grouped: dict[int, int] = {}
-    for count, sides in terms:
-        if count <= 0:
-            continue
-        grouped[sides] = grouped.get(sides, 0) + count
-    parts = [f"{count}d{sides}" for sides, count in sorted(grouped.items())]
-    if fixed:
-        parts.append(f"{fixed:+d}")
-    return "+".join(parts) if parts else "0"
-
-
 def _duration_of(entry: Mapping[str, Any], *, noncombat: bool = False) -> dict[str, Any]:
-    text = _text(entry.get("duration")).casefold()
-    if noncombat:
-        minutes = _duration_minutes(text)
-        if minutes is not None:
-            return {"unit": "minute", "remaining": max(1, minutes), "timing": "time_advance"}
-        return {"unit": "permanent"}
-    if "round" in text:
-        return {"unit": "round", "remaining": 1, "timing": "round_end"}
-    if "minute" in text:
-        return {"unit": "round", "remaining": 10, "timing": "round_end"}
-    if "hour" in text:
-        return {"unit": "scene", "remaining": 1, "timing": "scene_end"}
-    if "instantaneous" in text:
-        return {"unit": "permanent"}
-    return {"unit": "permanent"}
-
-
-def _duration_minutes(text: str) -> int | None:
-    """把法术持续时间换算成非战斗的分钟数；无法解析时返回 ``None``。"""
-    match = re.search(r"(\d+)\s*(round|minute|hour)", text)
-    if not match:
-        return None
-    value = max(1, int(match.group(1)))
-    unit = match.group(2)
-    if unit == "hour":
-        return value * 60
-    return value
+    return spell_schema.effect_duration(
+        spell_schema.duration_spec(entry), noncombat=noncombat
+    )
 
 
 def _is_instantaneous(entry: Mapping[str, Any]) -> bool:
-    return _text(entry.get("duration")).casefold().startswith("instantaneous")
+    return spell_schema.duration_spec(entry)["unit"] == "instant"
 
 
 __all__ = [

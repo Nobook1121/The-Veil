@@ -363,6 +363,11 @@ class Dnd5eCombatRules:
         combatant["armorClass"] = armor_class_from_equipment(sheet)
         combatant["speed_ft"] = max(0, _as_int(sheet.get("speed"), 30))
         combatant["attacks"] = _player_attacks(sheet)
+        # 玩家默认 humanoid；角色卡显式声明时以卡为准。
+        combatant.setdefault(
+            "creature_type",
+            _text(sheet.get("creature_type")).casefold() or "humanoid",
+        )
         combatant["damage_resistances"] = list(sheet.get("damage_resistances") or [])
         combatant["damage_vulnerabilities"] = list(sheet.get("damage_vulnerabilities") or [])
         combatant["damage_immunities"] = list(sheet.get("damage_immunities") or [])
@@ -393,6 +398,10 @@ class Dnd5eCombatRules:
         combatant["speed_ft"] = max(0, _as_int(speed.get("walk"), 30))
         combatant["attacks"] = _monster_attacks(monster)
         combatant["monster_name"] = _display_name(monster)
+        # 目标限制（如只有 humanoid 生效）需要生物类型；SRD 的 type 是权威来源。
+        creature_type = _text(monster.get("type")).casefold()
+        if creature_type:
+            combatant["creature_type"] = creature_type
         combatant["damage_resistances"] = list(monster.get("damage_resistances") or [])
         combatant["damage_vulnerabilities"] = list(monster.get("damage_vulnerabilities") or [])
         combatant["damage_immunities"] = list(monster.get("damage_immunities") or [])
