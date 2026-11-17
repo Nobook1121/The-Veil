@@ -28,16 +28,19 @@ def search_ruleset_knowledge(arguments: dict[str, Any], context: Any) -> dict[st
     for item in raw_results if isinstance(raw_results, list) else []:
         if not isinstance(item, dict) or not str(item.get("text") or "").strip():
             continue
-        references.append(
-            {
-                "ruleset_id": item.get("ruleset_id"),
-                "knowledge_version": item.get("knowledge_version"),
-                "chunk_id": item.get("chunk_id"),
-                "topic": item.get("topic"),
-                "citation": item.get("citation"),
-                "text": str(item.get("text"))[:MAX_REFERENCE_TEXT_LENGTH],
-            }
-        )
+        reference = {
+            "ruleset_id": item.get("ruleset_id"),
+            "knowledge_version": item.get("knowledge_version"),
+            "chunk_id": item.get("chunk_id"),
+            "topic": item.get("topic"),
+            "citation": item.get("citation"),
+            "text": str(item.get("text"))[:MAX_REFERENCE_TEXT_LENGTH],
+        }
+        # 来源与许可随结果给出；没有声明的旧检索结果保持原结构不变。
+        for key in ("title", "source", "license", "license_url"):
+            if item.get(key):
+                reference[key] = item.get(key)
+        references.append(reference)
         if len(references) >= top_k:
             break
 

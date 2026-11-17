@@ -122,4 +122,15 @@ def search_ruleset(room_id: str, query: str, *, store: RulesetKnowledgeStore, ru
     if store.rooms_dir:
         info = read_json(store.rooms_dir / str(room_id) / "info.json", default={})
         version = (info.get("rulesets") or {}).get(ruleset_id)
-    return store.search(ruleset_id, query, version=version, top_k=top_k)
+    stored = store.search(ruleset_id, query, version=version, top_k=top_k)
+    # 规则集自带检索源（如 5e 的 SRD 内容包）时合并；没有 builtin_search 的
+    # 适配器（CoC7）保持原有返回，一条不变。
+    try:
+        adapter = store.registry.get(ruleset_id)
+    except ValueError:
+        return stored
+    builtin = getattr(adapter, "builtin_search", None)
+    if not callable(builtin):
+        return stored
+    merged = list(builtin(query, limit=top_k)) + list(stored)
+    return merged[: max(1, min(int(top_k), 20))]

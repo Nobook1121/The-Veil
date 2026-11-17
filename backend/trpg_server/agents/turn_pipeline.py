@@ -1177,6 +1177,25 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
                 question_directive = props_prompt.build_prop_question_directive(view)
                 if question_directive:
                     props_directive = f"{props_directive}\n\n{question_directive}"
+        # 规则集自带检索源（如 5e 的 SRD 内容包）时，先把与本轮输入相关的规则
+        # 条目放进提示词；没有 builtin_search 的规则集保持原行为（不预取）。
+        ruleset_results: list[dict[str, Any]] = []
+        if room_id and room_ruleset_id:
+            try:
+                adapter = ruleset_store.registry.get(room_ruleset_id)
+            except ValueError:
+                adapter = None
+            if adapter is not None and callable(getattr(adapter, "builtin_search", None)):
+                try:
+                    ruleset_results = search_ruleset(
+                        room_id,
+                        str(user_content or "")[:500],
+                        store=ruleset_store,
+                        ruleset_id=room_ruleset_id,
+                        top_k=3,
+                    )
+                except Exception:  # noqa: BLE001 - 规则检索失败不阻断回合
+                    logger.warning("Ruleset retrieval failed for room %s", room_id, exc_info=True)
         prompt_layers = build_prompt_layers(
             global_rules=system_prompt,
             scenario=(room_snapshot or {}).get("scenario") if isinstance(room_snapshot, dict) else None,
@@ -1186,7 +1205,7 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
             user_input=user_content,
             rules_version=rules_version,
             retrieval_results=scenario_results,
-            ruleset_results=[],
+            ruleset_results=ruleset_results,
             retrieval_full=direct_import,
             room_snapshot_message=room_snapshot_message,
             narrative_summary=narrative_summary,
