@@ -716,7 +716,11 @@
             if (typeof data.can_manage === "boolean") serverCanManage = data.can_manage;
             if (data.fog && typeof data.fog === "object") applyFog(data.fog);
             if (!tokens().some(function (token) { return String(token.id) === selectedId; })) selectedId = "";
-            ctx.setBaseStage({ background: mapState.background || "", gridSize: gridSize() });
+            ctx.setBaseStage({
+                background: mapState.background || "",
+                gridSize: gridSize(),
+                gridOffset: gridOffset(),
+            });
             renderTurnBar();
             scheduleDraw();
         }

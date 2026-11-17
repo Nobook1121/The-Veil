@@ -51,6 +51,8 @@ interface RoomStageMarker {
 interface RoomStageState {
     background?: string;
     grid_size?: number;
+    // 格线原点（世界像素，相对背景图中心）；旧数据缺省时按 (0, 0) 处理。
+    grid_offset?: { x?: number; y?: number };
     markers?: RoomStageMarker[];
 }
 
@@ -99,6 +101,7 @@ interface StagePluginViewport {
     height: number;
     zoom: number;
     gridSize: number;
+    gridOffset: { x: number; y: number };
     camera: StagePluginCamera;
 }
 
@@ -126,7 +129,11 @@ interface StagePluginContext {
     screenToWorld(x: number, y: number): StagePluginPoint;
     getViewport(): StagePluginViewport;
     getGridSize(): number;
-    setBaseStage(view: { background?: string; gridSize?: number }): void;
+    setBaseStage(view: {
+        background?: string;
+        gridSize?: number;
+        gridOffset?: { x?: number; y?: number };
+    }): void;
     notify(message: string, type?: string): void;
 }
 

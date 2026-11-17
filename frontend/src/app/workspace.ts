@@ -21,6 +21,8 @@
     interface StageView {
         background: string;
         gridSize: number;
+        // 格线原点（世界像素）；旧状态没有该字段时按 (0, 0) 渲染。
+        gridOffset: { x: number; y: number };
         markers: RoomStageMarker[];
     }
 
@@ -604,6 +606,13 @@
         }
     }
 
+    function normalizeGridOffset(raw: unknown): { x: number; y: number } {
+        const value = raw && typeof raw === "object" ? (raw as { x?: unknown; y?: unknown }) : {};
+        const x = Number(value.x);
+        const y = Number(value.y);
+        return { x: Number.isFinite(x) ? x : 0, y: Number.isFinite(y) ? y : 0 };
+    }
+
     function illustrationBackground(): string {
         const image = byId<HTMLImageElement>("immersiveStageImage");
         if (image && !image.hidden && image.getAttribute("src")) return image.getAttribute("src") || "";
@@ -642,6 +651,7 @@
         const view: StageView = {
             background: String(declared?.background || stored?.background || illustrationBackground() || ""),
             gridSize: Math.max(16, Math.min(256, Number(declared?.grid_size || stored?.grid_size || 64))),
+            gridOffset: normalizeGridOffset(declared?.grid_offset || stored?.grid_offset),
             markers,
         };
         stageViews.set(key, view);
@@ -681,13 +691,21 @@
         image.src = url;
     }
 
-    function drawGrid(context: CanvasRenderingContext2D, width: number, height: number, cam: Camera, gridSize: number): void {
+    function drawGrid(
+        context: CanvasRenderingContext2D,
+        width: number,
+        height: number,
+        cam: Camera,
+        gridSize: number,
+        gridOffset: { x: number; y: number }
+    ): void {
         const left = (-width / 2 - cam.x) / cam.zoom;
         const right = (width / 2 - cam.x) / cam.zoom;
         const top = (-height / 2 - cam.y) / cam.zoom;
         const bottom = (height / 2 - cam.y) / cam.zoom;
-        const startX = Math.floor(left / gridSize) * gridSize;
-        const startY = Math.floor(top / gridSize) * gridSize;
+        // 格线以标定原点为基准，而不是固定从世界 (0, 0) 起算。
+        const startX = gridOffset.x + Math.floor((left - gridOffset.x) / gridSize) * gridSize;
+        const startY = gridOffset.y + Math.floor((top - gridOffset.y) / gridSize) * gridSize;
         const columns = Math.min(400, Math.ceil((right - left) / gridSize) + 2);
         const rowsCount = Math.min(400, Math.ceil((bottom - top) / gridSize) + 2);
         context.lineWidth = 1 / cam.zoom;
@@ -757,7 +775,7 @@
             stageContext.drawImage(backgroundImage, -backgroundImage.naturalWidth / 2, -backgroundImage.naturalHeight / 2);
             stageContext.globalAlpha = 1;
         }
-        if (showGrid) drawGrid(stageContext, width, height, cam, view.gridSize);
+        if (showGrid) drawGrid(stageContext, width, height, cam, view.gridSize, view.gridOffset);
         // 插件挂载后棋子由插件绘制；核心只保留背景与网格，避免占位标记与 token 重影。
         if (!stagePlugin) drawMarkers(stageContext, view.markers, cam.zoom);
         stageContext.restore();
@@ -783,6 +801,7 @@
             height,
             ...camera(),
             gridSize: stageView().gridSize,
+            gridOffset: { ...stageView().gridOffset },
         });
     }
 
@@ -912,7 +931,11 @@
         return task;
     }
 
-    function setBaseStage(view: { background?: string; gridSize?: number }): void {
+    function setBaseStage(view: {
+        background?: string;
+        gridSize?: number;
+        gridOffset?: { x?: number; y?: number };
+    }): void {
         const current = stageView();
         let changed = false;
         if (typeof view.background === "string" && view.background !== current.background) {
@@ -926,16 +949,28 @@
                 changed = true;
             }
         }
+        if (view.gridOffset !== undefined) {
+            const offset = normalizeGridOffset(view.gridOffset);
+            if (offset.x !== current.gridOffset.x || offset.y !== current.gridOffset.y) {
+                current.gridOffset = offset;
+                changed = true;
+            }
+        }
         if (!changed) return;
         writeStore(stageStorageKey(), JSON.stringify({
             background: current.background,
             grid_size: current.gridSize,
+            grid_offset: current.gridOffset,
             markers: current.markers,
         }));
         // 背景地址可能相同（同一 URL 换了内容），清空缓存强制重新加载。
         backgroundUrl = "";
         drawStage();
-        emitPluginEvent("stage", { gridSize: current.gridSize, background: current.background });
+        emitPluginEvent("stage", {
+            gridSize: current.gridSize,
+            background: current.background,
+            gridOffset: { ...current.gridOffset },
+        });
     }
 
     function stageSize(): { width: number; height: number } {
@@ -1013,11 +1048,13 @@
             getViewport: (): StagePluginViewport => {
                 const cam = camera();
                 const size = stageSize();
+                const view = stageView();
                 return {
                     width: size.width,
                     height: size.height,
                     zoom: cam.zoom,
-                    gridSize: stageView().gridSize,
+                    gridSize: view.gridSize,
+                    gridOffset: { ...view.gridOffset },
                     camera: { ...cam },
                 };
             },
