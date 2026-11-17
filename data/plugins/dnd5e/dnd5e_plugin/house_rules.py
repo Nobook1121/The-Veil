@@ -43,18 +43,6 @@ def house_rules() -> dict[str, dict[str, Any]]:
                 none=("关闭暴击", "No critical hits"),
             ),
         },
-        "dnd5e_death_saves_public": {
-            "type": "boolean",
-            "default": True,
-            "scope": _SCOPE,
-            "group": "combat",
-            "group_label_i18n": combat,
-            "label_i18n": _text("死亡豁免公开掷", "Public Death Saves"),
-            "description_i18n": _text(
-                "开启后死亡豁免结果在骰桌公开；关闭时只向该玩家与主持人显示。",
-                "When enabled, death save results are public on the dice table; when disabled, only the player and GM see them.",
-            ),
-        },
         "dnd5e_initiative_mode": {
             "type": "enum",
             "default": "roll",
@@ -138,24 +126,6 @@ def house_rules() -> dict[str, dict[str, Any]]:
                 none=("忽略掩体", "Ignore cover"),
             ),
         },
-        "dnd5e_diagonal_movement": {
-            "type": "enum",
-            "default": "standard",
-            "values": ["standard", "always_5", "always_10"],
-            "scope": _SCOPE,
-            "group": "combat",
-            "group_label_i18n": combat,
-            "label_i18n": _text("对角线移动", "Diagonal Movement"),
-            "description_i18n": _text(
-                "标准规则下每格对角线交替计 5/10 英尺；也可固定按 5 英尺或 10 英尺计算。",
-                "Standard rules alternate diagonal costs of 5/10 feet; alternatively always count 5 or 10 feet.",
-            ),
-            "option_labels": _option_labels(
-                standard=("标准：5/10 交替", "Standard: 5/10 alternating"),
-                always_5=("每格 5 英尺", "Always 5 feet"),
-                always_10=("每格 10 英尺", "Always 10 feet"),
-            ),
-        },
         "dnd5e_variant_encumbrance": {
             "type": "boolean",
             "default": False,
@@ -178,18 +148,6 @@ def house_rules() -> dict[str, dict[str, Any]]:
             "description_i18n": _text(
                 "开启后用法术点替代法术位，按 SRD 变体规则换算。",
                 "When enabled, use spell points instead of spell slots using the SRD variant conversion.",
-            ),
-        },
-        "dnd5e_feat_at_level_1": {
-            "type": "boolean",
-            "default": False,
-            "scope": _SCOPE,
-            "group": "optional",
-            "group_label_i18n": optional,
-            "label_i18n": _text("1 级获得专长", "Feat at 1st Level"),
-            "description_i18n": _text(
-                "开启后角色在 1 级额外获得一个专长，替代常规属性提升节奏。",
-                "When enabled, characters gain one feat at 1st level instead of the usual ability score increase cadence.",
             ),
         },
     }

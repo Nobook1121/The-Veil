@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from trpg_server.combat.settings import resolve_settings
 from trpg_server.plugins import runtime
 from trpg_server.plugins.registry import PluginRegistry
 from trpg_server.ruleset import builtin_registry, reset_builtin_registry
@@ -221,6 +222,54 @@ def test_missing_slot_returns_error(plugins):
         caster, None, spell="fireball", targets=[_goblin()], slot_level=3, rng=lambda sides: 1
     )
     assert "没有 3 环法术位" in result["error"]
+
+
+def test_spell_points_replace_slots_when_enabled(plugins):
+    settings = resolve_settings(
+        {"ruleset_id": "dnd5e", "house_rules": {"dnd5e_spell_points": True}}
+    )
+    caster = _caster(level=3, known=["magic-missile"])
+    spells = _plugin().spells
+    first = spells.cast(
+        caster,
+        None,
+        spell="magic-missile",
+        targets=[_goblin()],
+        slot_level=1,
+        rng=lambda sides: 1,
+        settings=settings,
+    )
+    assert "error" not in first
+    assert first["slot_state"]["spell_points"] == {
+        "max": 14,
+        "used": 2,
+        "remaining": 12,
+        "cost": 2,
+    }
+    # 法术位本身不被消耗。
+    assert caster["spell_slots"]["1"]["used"] == 0
+    for _ in range(6):
+        cast = spells.cast(
+            caster,
+            None,
+            spell="magic-missile",
+            targets=[_goblin()],
+            slot_level=1,
+            rng=lambda sides: 1,
+            settings=settings,
+        )
+        assert "error" not in cast
+    assert caster["spell_points"] == {"max": 14, "used": 14}
+    blocked = spells.cast(
+        caster,
+        None,
+        spell="magic-missile",
+        targets=[_goblin()],
+        slot_level=1,
+        rng=lambda sides: 1,
+        settings=settings,
+    )
+    assert "法术点不足" in blocked["error"]
 
 
 # ---------------------------------------------------------------------------

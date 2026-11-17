@@ -74,6 +74,8 @@ class CombatSettings:
     shield_action: str = "disabled"
     dex_extra_action_threshold: int | None = None
     dying_check: bool = True
+    # 房间房规原文透传：核心不解释任何键，规则插件自行读取自己的字段。
+    house_rules: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_house_rules(
@@ -131,6 +133,7 @@ class CombatSettings:
             shield_action=_choice("combat_shield_action", "disabled", SHIELD_ACTIONS),
             dex_extra_action_threshold=threshold,
             dying_check=_flag("combat_dying_check", True),
+            house_rules=dict(rules),
         )
 
 

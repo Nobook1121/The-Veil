@@ -19,6 +19,7 @@ from dnd5e_plugin.combat import (
     _parse_damage,
     _roll_terms,
     _text,
+    house_rule,
 )
 from dnd5e_plugin.effects import (
     Dnd5eEffects,
@@ -39,6 +40,31 @@ CASTING_SLOT_BY_TIME = {
     "action": "action",
     "1 action": "action",
 }
+
+# SRD 变体「法术点」：按环阶消耗点数，1~9 环依次如下。
+SPELL_POINT_COST = {1: 2, 2: 3, 3: 5, 4: 6, 5: 7, 6: 9, 7: 10, 8: 11, 9: 13}
+
+
+def spell_points_from_slots(slots: Mapping[str, Any]) -> dict[str, int]:
+    """把法术位表换算成法术点总量；``used`` 按已消耗法术位折算。"""
+    maximum = 0
+    used = 0
+    for key, row in slots.items():
+        if not isinstance(row, Mapping):
+            continue
+        cost = SPELL_POINT_COST.get(_as_int(key, 0), 0)
+        maximum += max(0, _as_int(row.get("max"), 0)) * cost
+        used += max(0, _as_int(row.get("used"), 0)) * cost
+    return {"max": maximum, "used": min(maximum, used)}
+
+
+def _spell_points_state(caster: Mapping[str, Any]) -> dict[str, int]:
+    stored = caster.get("spell_points")
+    if isinstance(stored, Mapping) and stored.get("max") is not None:
+        maximum = max(0, _as_int(stored.get("max"), 0))
+        return {"max": maximum, "used": max(0, min(maximum, _as_int(stored.get("used"), 0)))}
+    slots = caster.get("spell_slots")
+    return spell_points_from_slots(slots if isinstance(slots, Mapping) else {})
 
 
 def _spell_label(entry: Mapping[str, Any]) -> str:
@@ -169,6 +195,12 @@ def prepare_spellcasting(combatant: dict[str, Any], sheet: Mapping[str, Any]) ->
         raw.get("known") or raw.get("spells_known") or sheet.get("spellsKnown")
     )
     combatant["spells_prepared"] = _name_list(raw.get("prepared") or raw.get("spells_prepared"))
+    stored_points = raw.get("spell_points")
+    if isinstance(stored_points, Mapping) and stored_points.get("max") is not None:
+        combatant["spell_points"] = {
+            "max": max(0, _as_int(stored_points.get("max"), 0)),
+            "used": max(0, _as_int(stored_points.get("used"), 0)),
+        }
 
 
 def persist_spellcasting(card: dict[str, Any], combatant: Mapping[str, Any]) -> None:
@@ -181,6 +213,16 @@ def persist_spellcasting(card: dict[str, Any], combatant: Mapping[str, Any]) -> 
     profile = sheet.get("spellcasting")
     profile = dict(profile) if isinstance(profile, Mapping) else {}
     profile["slots"] = {str(key): dict(value) for key, value in slots.items() if isinstance(value, Mapping)}
+    points = combatant.get("spell_points")
+    if isinstance(points, Mapping):
+        profile["spell_points"] = {
+            "max": max(0, _as_int(points.get("max"), 0)),
+            "used": max(0, _as_int(points.get("used"), 0)),
+        }
+        # 法术点制下的已消耗量已经折算进 points，法术位的 used 保持 0，
+        # 避免下次开战重复扣点。
+        for row in profile["slots"].values():
+            row["used"] = 0
     sheet["spellcasting"] = profile
     card["sheet"] = sheet
 
@@ -371,11 +413,35 @@ class Dnd5eSpells:
             row = slots.get(str(use_level)) if isinstance(slots.get(str(use_level)), Mapping) else None
             if row is None:
                 return {"error": f"{caster.get('name')} 没有 {use_level} 环法术位"}
-            remaining = _as_int(row.get("max"), 0) - _as_int(row.get("used"), 0)
-            if remaining <= 0:
-                return {"error": f"{caster.get('name')} 的 {use_level} 环法术位已用完"}
-            row["used"] = _as_int(row.get("used"), 0) + 1
-            slot_state = {"level": use_level, "remaining": remaining - 1}
+            if bool(house_rule(settings, "dnd5e_spell_points", False)):
+                # 法术点制：按环阶扣点，不占用法术位；上限由法术位表换算而来。
+                points = _spell_points_state(caster)
+                cost = SPELL_POINT_COST.get(use_level, 0)
+                remaining_points = points["max"] - points["used"]
+                if cost <= 0 or remaining_points < cost:
+                    return {
+                        "error": (
+                            f"{caster.get('name')} 的法术点不足"
+                            f"（剩余 {remaining_points}，需要 {cost}）"
+                        )
+                    }
+                points["used"] += cost
+                caster["spell_points"] = dict(points)
+                slot_state = {
+                    "level": use_level,
+                    "spell_points": {
+                        "max": points["max"],
+                        "used": points["used"],
+                        "remaining": points["max"] - points["used"],
+                        "cost": cost,
+                    },
+                }
+            else:
+                remaining = _as_int(row.get("max"), 0) - _as_int(row.get("used"), 0)
+                if remaining <= 0:
+                    return {"error": f"{caster.get('name')} 的 {use_level} 环法术位已用完"}
+                row["used"] = _as_int(row.get("used"), 0) + 1
+                slot_state = {"level": use_level, "remaining": remaining - 1}
 
         profile = caster.get("spellcasting") if isinstance(caster.get("spellcasting"), Mapping) else None
         if profile is None:

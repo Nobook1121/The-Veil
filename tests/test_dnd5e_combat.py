@@ -383,3 +383,179 @@ def test_switch_is_blocked_while_combat_active(tmp_path, plugins):
     (tmp_path / "state.json").write_text(json.dumps({"combat": None}), encoding="utf-8")
     old, new, _paused = _apply_ruleset_switch(info, "coc7", tmp_path)
     assert (old, new) == ("dnd5e", "coc7")
+
+
+# ---------------------------------------------------------------------------
+# 房规字段的消费点：改配置必须改变结算
+# ---------------------------------------------------------------------------
+def _settings(**rules):
+    return resolve_settings({"ruleset_id": "dnd5e", "house_rules": dict(rules)})
+
+
+def _target(ac: int = 10) -> dict:
+    return {"name": "木桩", "hp": 100, "max_hp": 100, "armorClass": ac}
+
+
+def _attack(player, target, settings, **action):
+    payload = {"weapon": "长剑", "attack_roll": 20, **action}
+    return _rules().resolve_attack_action(
+        player, target, payload, rng=lambda sides: 1, settings=settings
+    )
+
+
+def test_critical_rule_changes_damage(plugins):
+    player = _prepared_player(plugins)
+    standard = _attack(player, _target(), _settings(dnd5e_critical_rule="standard"))
+    assert standard["critical"] is True
+    assert standard["damage"]["damage"] == 5  # 2d8(各 1) + 3
+
+    maximized = _attack(player, _target(), _settings(dnd5e_critical_rule="max_dice"))
+    assert maximized["critical"] is True
+    assert maximized["damage"]["damage"] == 11  # 1d8 取 8 + 3
+
+    none = _attack(player, _target(), _settings(dnd5e_critical_rule="none"))
+    assert none["critical"] is False
+    assert none["damage"]["damage"] == 4  # 1d8(1) + 3
+
+    # 确认骰失败：按普通命中结算；确认成功：保留暴击。
+    failed = _rules().resolve_attack_action(
+        player,
+        _target(),
+        {"weapon": "长剑", "attack_roll": 20},
+        rng=lambda sides: 1,
+        settings=_settings(dnd5e_critical_rule="confirm"),
+    )
+    assert failed["critical"] is False and failed["damage"]["damage"] == 4
+    confirmed = _rules().resolve_attack_action(
+        player,
+        _target(),
+        {"weapon": "长剑", "attack_roll": 20},
+        rng=lambda sides: 20 if sides == 20 else 1,
+        settings=_settings(dnd5e_critical_rule="confirm"),
+    )
+    assert confirmed["critical"] is True and confirmed["damage"]["damage"] == 5
+
+
+def test_initiative_mode_changes_roll(plugins):
+    combatant = {"name": "Aria", "dex": 16}
+
+    def sequence(*values):
+        iterator = iter(values)
+        return lambda sides: next(iterator)
+
+    assert _rules().roll_initiative(combatant, sequence(3), _settings()) == 6
+    assert (
+        _rules().roll_initiative(combatant, sequence(), _settings(dnd5e_initiative_mode="fixed"))
+        == 13
+    )
+    assert (
+        _rules().roll_initiative(
+            combatant, sequence(3, 18), _settings(dnd5e_initiative_mode="advantage")
+        )
+        == 21
+    )
+
+
+def test_surprise_rule_controls_first_turn(plugins):
+    def budget():
+        return {"action": 1, "bonus_action": 1, "reaction": 1, "movement": 30}
+
+    combat = {"round": 1, "surprised": ["Aria"]}
+    standard = {"name": "Aria", "budget": budget()}
+    _rules().start_turn(standard, combat=combat, settings=_settings())
+    assert standard["budget"]["action"] == 0
+
+    ignored = {"name": "Aria", "budget": budget()}
+    _rules().start_turn(ignored, combat=combat, settings=_settings(dnd5e_surprise_rule="none"))
+    assert ignored["budget"]["action"] == 1
+
+    # 先攻劣势：掷两次取低；预算不再清零。
+    initiative = {"name": "Aria", "dex": 16, "budget": budget()}
+    initiative["surprised"] = True
+    values = iter([18, 4])
+    roll = _rules().roll_initiative(
+        initiative,
+        lambda sides: next(values),
+        _settings(dnd5e_surprise_rule="initiative_disadvantage"),
+    )
+    assert roll == 7  # 取低 4 + DEX 调整值 3
+    _rules().start_turn(
+        initiative, combat=combat, settings=_settings(dnd5e_surprise_rule="initiative_disadvantage")
+    )
+    assert initiative["budget"]["action"] == 1
+
+
+def test_flanking_rule_grants_advantage(plugins):
+    player = _prepared_player(plugins)
+    # AC 20：单骰 12 + 5 = 17 未命中；夹击取第二次 15 → 20 命中。
+    target = {"name": "木桩", "hp": 100, "max_hp": 100, "armorClass": 20}
+    off = _rules().resolve_attack_action(
+        player,
+        target,
+        {"weapon": "长剑", "attack_roll": 12, "flanking": True},
+        rng=lambda sides: 15,
+        settings=_settings(dnd5e_flanking=False),
+    )
+    assert off["advantage"] is False and off["success"] is False
+    on = _rules().resolve_attack_action(
+        player,
+        {"name": "木桩", "hp": 100, "max_hp": 100, "armorClass": 20},
+        {"weapon": "长剑", "attack_roll": 12, "flanking": True},
+        rng=lambda sides: 15,
+        settings=_settings(dnd5e_flanking=True),
+    )
+    assert on["advantage"] is True and on["success"] is True
+
+
+def test_cover_rule_toggles_ac_bonus(plugins):
+    player = _prepared_player(plugins)
+    # 10 + 5 = 15；半掩体 +2 后未命中，关闭掩体则命中。
+    standard = _rules().resolve_attack_action(
+        player,
+        _target(15),
+        {"weapon": "长剑", "attack_roll": 10, "cover": "half"},
+        rng=lambda sides: 1,
+        settings=_settings(),
+    )
+    assert standard["target_ac"] == 17 and standard["success"] is False
+    ignored = _rules().resolve_attack_action(
+        player,
+        _target(15),
+        {"weapon": "长剑", "attack_roll": 10, "cover": "half"},
+        rng=lambda sides: 1,
+        settings=_settings(dnd5e_cover_rule="none"),
+    )
+    assert ignored["target_ac"] == 15 and ignored["success"] is True
+
+
+def test_variant_encumbrance_reduces_speed(plugins):
+    card = builtin_registry().resolve("dnd5e").schema.pack(
+        {
+            "id": "heavy-1",
+            "name": "Aria",
+            "level": 1,
+            "class": "Fighter",
+            "abilities": {"str": 10, "dex": 10, "con": 10, "int": 10, "wis": 10, "cha": 10},
+            "hp": {"current": 10, "max": 10},
+            "equipment": ["chain-mail"],
+        }
+    )
+    rules = _rules()
+    off = {"name": "Aria", "is_player": True, "side": "player"}
+    rules.prepare_combatant(off, card=card, settings=_settings())
+    assert rules.action_budget(off, _settings())["movement"] == 30
+
+    on = {"name": "Aria", "is_player": True, "side": "player"}
+    settings = _settings(dnd5e_variant_encumbrance=True)
+    rules.prepare_combatant(on, card=card, settings=settings)
+    assert on["encumbrance"] == "light"
+    assert rules.action_budget(on, settings)["movement"] == 20
+
+
+def test_rest_variant_changes_rest_length(plugins):
+    from dnd5e_plugin.rest import rest_profile
+
+    assert rest_profile(_settings())["short_rest_minutes"] == 60
+    assert rest_profile(_settings(dnd5e_rest_variant="gritty"))["long_rest_minutes"] == 10080
+    assert rest_profile(_settings(dnd5e_rest_variant="heroic"))["short_rest_minutes"] == 5
+

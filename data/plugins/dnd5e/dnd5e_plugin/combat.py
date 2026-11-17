@@ -52,6 +52,27 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def house_rule(settings: Any, key: str, default: Any) -> Any:
+    """读取房间房规里的 5e 字段。
+
+    核心只把房规原文挂在 ``settings.house_rules``，不解释任何键；字段名、
+    取值与默认值都属于插件。
+    """
+    raw = getattr(settings, "house_rules", None)
+    if isinstance(raw, Mapping) and key in raw:
+        value = raw.get(key)
+        if value not in (None, ""):
+            return value
+    return default
+
+
+def _rule_flag(settings: Any, key: str, default: bool = False) -> bool:
+    value = house_rule(settings, key, default)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def _roll_die(rng: Any, sides: int) -> int:
     """兼容 ``Callable[[sides], int]`` 与 ``random`` 模块两种随机源。"""
     sides = max(1, int(sides))
@@ -134,13 +155,28 @@ def _parse_damage(expression: Any) -> tuple[list[tuple[int, int]], int]:
 
 
 def _roll_terms(
-    terms: list[tuple[int, int]], fixed: int, rng: Any, *, critical: bool = False
+    terms: list[tuple[int, int]],
+    fixed: int,
+    rng: Any,
+    *,
+    critical: bool = False,
+    critical_mode: str = "double_dice",
 ) -> tuple[int, list[dict[str, Any]]]:
+    """掷伤害骰。
+
+    ``critical_mode`` 决定暴击时的骰子处理：``double_dice``（默认，骰数翻倍）
+    或 ``max_dice``（骰数不变、每颗取最大值）。非暴击时两者一致。
+    """
     total = max(0, int(fixed))
     detail: list[dict[str, Any]] = []
     for count, sides in terms:
-        actual = max(0, int(count)) * (2 if critical else 1)
-        rolls = [_roll_die(rng, sides) for _ in range(actual)]
+        base = max(0, int(count))
+        if critical and critical_mode == "max_dice":
+            actual = base
+            rolls = [max(1, int(sides)) for _ in range(actual)]
+        else:
+            actual = base * (2 if critical else 1)
+            rolls = [_roll_die(rng, sides) for _ in range(actual)]
         subtotal = sum(rolls)
         total += subtotal
         detail.append({"count": actual, "sides": sides, "rolls": rolls, "total": subtotal})
@@ -175,6 +211,34 @@ def _equipment_rows(sheet: Mapping[str, Any], category: str | None = None) -> li
             continue
         rows.append(row)
     return rows
+
+
+def _carried_weight_lb(sheet: Mapping[str, Any]) -> float:
+    """按装备条目累计负重；数据包未声明重量的条目按 0 计。"""
+    total = 0.0
+    for identifier, _equipped in _equipment_items(sheet):
+        row = _pack_entry("equipment", identifier)
+        if row is None:
+            continue
+        try:
+            total += max(0.0, float(row.get("weight_lb") or 0))
+        except (TypeError, ValueError):
+            continue
+    return round(total, 2)
+
+
+def encumbrance_level(strength: int, weight_lb: float) -> str:
+    """变体负重分级：``heavy``（重载）、``light``（负重）、空串（正常）。
+
+    阈值来自 SRD：超过力量 ×5 为负重，超过力量 ×10 为重载。
+    """
+    score = max(1, int(strength))
+    weight = max(0.0, float(weight_lb))
+    if weight > score * 10:
+        return "heavy"
+    if weight > score * 5:
+        return "light"
+    return ""
 
 
 def armor_class_from_equipment(sheet: Mapping[str, Any]) -> int:
@@ -288,7 +352,17 @@ class Dnd5eCombatRules:
 
     # -- 先攻与行动经济 ---------------------------------------------------
     def roll_initiative(self, combatant: Mapping[str, Any], rng: Any, settings: Any) -> int:
-        return _roll_die(rng, 20) + self._dex_mod(combatant)
+        mode = _text(house_rule(settings, "dnd5e_initiative_mode", "roll")).lower()
+        dex = self._dex_mod(combatant)
+        if mode == "fixed":
+            return 10 + dex
+        if mode == "advantage":
+            return max(_roll_die(rng, 20), _roll_die(rng, 20)) + dex
+        if combatant.get("surprised") and _text(
+            house_rule(settings, "dnd5e_surprise_rule", "standard")
+        ).lower() == "initiative_disadvantage":
+            return min(_roll_die(rng, 20), _roll_die(rng, 20)) + dex
+        return _roll_die(rng, 20) + dex
 
     def initiative_tiebreak(self, combatant: Mapping[str, Any]) -> int:
         return self._dex_mod(combatant)
@@ -301,6 +375,12 @@ class Dnd5eCombatRules:
 
     def action_budget(self, combatant: Mapping[str, Any], settings: Any) -> dict[str, int]:
         speed = effective_speed(combatant, _as_int(combatant.get("speed_ft"), 30))
+        # 变体负重的分级在开战准备时按房间开关写入，这里只消费结果。
+        encumbrance = _text(combatant.get("encumbrance")).lower()
+        if encumbrance == "heavy":
+            speed = max(0, speed - 20)
+        elif encumbrance == "light":
+            speed = max(0, speed - 10)
         return {
             "action": 1,
             "bonus_action": 1,
@@ -325,7 +405,7 @@ class Dnd5eCombatRules:
         settings: Any = None,
     ) -> None:
         if combatant.get("is_player"):
-            self._prepare_player(combatant, card)
+            self._prepare_player(combatant, card, settings)
             return
         monster_id = _text(combatant.get("monster_id"))
         if monster_id:
@@ -340,7 +420,12 @@ class Dnd5eCombatRules:
         combatant.setdefault("speed_ft", 30)
         combatant.setdefault("temp_hp", 0)
 
-    def _prepare_player(self, combatant: dict[str, Any], card: Any) -> None:
+    def _prepare_player(
+        self,
+        combatant: dict[str, Any],
+        card: Any,
+        settings: Any = None,
+    ) -> None:
         sheet = sheet_of(card) if isinstance(card, Mapping) else {}
         abilities = self._normalize_abilities(sheet.get("abilities") or sheet.get("attributes"))
         combatant["abilities"] = abilities
@@ -363,6 +448,13 @@ class Dnd5eCombatRules:
         combatant["armorClass"] = armor_class_from_equipment(sheet)
         combatant["speed_ft"] = max(0, _as_int(sheet.get("speed"), 30))
         combatant["attacks"] = _player_attacks(sheet)
+        combatant["carried_weight_lb"] = _carried_weight_lb(sheet)
+        # 变体负重是房间开关；关闭时不写任何标记，行动经济按原速度结算。
+        level = ""
+        if _rule_flag(settings, "dnd5e_variant_encumbrance"):
+            level = encumbrance_level(abilities.get("str", 10), combatant["carried_weight_lb"])
+        if level:
+            combatant["encumbrance"] = level
         # 玩家默认 humanoid；角色卡显式声明时以卡为准。
         combatant.setdefault(
             "creature_type",
@@ -450,6 +542,16 @@ class Dnd5eCombatRules:
         disadvantage = (
             bool(action.get("disadvantage") or action.get("dis")) or condition_mods["disadvantage"]
         )
+        # 夹击：房间开启且本次近战攻击被标记为夹击时给优势。
+        if (
+            _rule_flag(settings, "dnd5e_flanking")
+            and (action.get("flanking") or action.get("flank"))
+            and _text(attack.get("kind")).casefold() != "ranged"
+        ):
+            advantage = True
+        # 变体负重达到重载时，攻击检定带劣势（分级在开战准备时算好）。
+        if _text(attacker.get("encumbrance")).lower() == "heavy":
+            disadvantage = True
         if advantage and disadvantage:
             advantage = disadvantage = False
         if not isinstance(preset_rolls, list) or not preset_rolls:
@@ -460,11 +562,13 @@ class Dnd5eCombatRules:
 
         target_ac = _as_int(target.get("armorClass") or target.get("ac"), 10)
         cover = _text(action.get("cover")).lower()
-        if cover in {"half", "半", "half_cover"}:
+        # 掩体规则关闭时忽略所有掩体加值与全掩体禁攻。
+        cover_enabled = _text(house_rule(settings, "dnd5e_cover_rule", "standard")).lower() != "none"
+        if cover_enabled and cover in {"half", "半", "half_cover"}:
             target_ac += 2
-        elif cover in {"three_quarters", "3/4", "四分之三"}:
+        elif cover_enabled and cover in {"three_quarters", "3/4", "四分之三"}:
             target_ac += 5
-        elif cover in {"full", "全", "full_cover"}:
+        elif cover_enabled and cover in {"full", "全", "full_cover"}:
             return self._attack_result(
                 attacker,
                 target,
@@ -488,13 +592,30 @@ class Dnd5eCombatRules:
         hit = critical or (natural != 1 and total >= target_ac)
         if hit and condition_mods["auto_crit"]:
             critical = True
+        critical_mode = "double_dice"
+        critical_rule = _text(house_rule(settings, "dnd5e_critical_rule", "standard")).lower()
+        if critical_rule == "none":
+            critical = False
+        elif critical and critical_rule == "confirm":
+            # 二次确认：再掷一次攻击，命中 AC 才保留暴击，否则按普通命中。
+            confirm = _roll_die(rng, 20)
+            if confirm + attack_bonus < target_ac:
+                critical = False
+        elif critical and critical_rule == "max_dice":
+            critical_mode = "max_dice"
 
         damage_result = None
         if hit and not dry_run:
             terms, fixed = _parse_damage(attack.get("damage_dice"))
             if action.get("two_handed") and attack.get("versatile_dice"):
                 terms, fixed = _parse_damage(attack.get("versatile_dice"))
-            rolled, detail = _roll_terms(terms, fixed, rng, critical=critical)
+            rolled, detail = _roll_terms(
+                terms,
+                fixed,
+                rng,
+                critical=critical,
+                critical_mode=critical_mode,
+            )
             amount = max(0, rolled + _as_int(attack.get("damage_bonus"), 0))
             damage_result = self._apply_damage(
                 target,
@@ -888,7 +1009,8 @@ class Dnd5eCombatRules:
             surprised = {_text(item).casefold() for item in combat.get("surprised") or []}
             names = {_text(combatant.get("name")).casefold()}
             names.update(_text(item).casefold() for item in combatant.get("aliases") or [])
-            if names & surprised:
+            rule = _text(house_rule(settings, "dnd5e_surprise_rule", "standard")).lower()
+            if names & surprised and rule == "standard":
                 if isinstance(budget, dict):
                     for key in ("action", "bonus_action", "movement"):
                         if key in budget:

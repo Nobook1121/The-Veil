@@ -1107,13 +1107,22 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
 
     settings = _combat_settings(context)
     ruleset = get_ruleset(settings.ruleset_id)
+    surprised_names = [str(name).strip() for name in arguments.get("surprised") or [] if str(name).strip()]
+    surprised_set = set(surprised_names)
     for combatant in combatants.values():
         combatant["ruleset"] = ruleset.ruleset_id
         try:
             _prepare_combatant(combatant, context, settings, ruleset)
         except ValueError as exc:
             return {"error": str(exc)}
-        combatant["initiative"] = ruleset.roll_initiative(combatant, _roller, settings)
+        # 先攻掷骰期间把「被突袭」作为中性标记交给规则集，掷完立刻移除，
+        # 不写入战斗状态；规则集按自己的房规决定它是否影响先攻。
+        if str(combatant.get("name") or "") in surprised_set:
+            combatant["surprised"] = True
+        try:
+            combatant["initiative"] = ruleset.roll_initiative(combatant, _roller, settings)
+        finally:
+            combatant.pop("surprised", None)
 
     if arguments.get("initiative_check"):
         # 可选先攻检定（p105）：大成功首次攻击 1 奖励骰，大失败失去首次攻击。
