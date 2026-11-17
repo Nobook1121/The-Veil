@@ -251,8 +251,30 @@ def test_wait_for_player_roll_times_out_and_rolls_automatically(monkeypatch):
 
     rolled = _wait_for_event(events, "player_dice_rolled")
     assert rolled["auto"] is True
+    # 自动投掷即终局：服务端已经确认，客户端不应再停在「等待投掷者确认结果」。
+    assert rolled["confirmed"] is True
+    assert rolled["state"] == "timeout"
     assert result["visible_message"]["metadata"]["dice_roll"]["auto"] is True
     assert player_roll.list_pending("room-3") == []
+
+
+def test_timeout_resolver_failure_still_releases_waiter(monkeypatch):
+    events = []
+    monkeypatch.setattr(player_roll, "_BROADCASTER", lambda event, payload: events.append((event, payload)))
+    monkeypatch.setattr(player_roll, "wait_timeout_seconds", lambda context: 0.15)
+
+    def boom():
+        raise RuntimeError("结算失败")
+
+    result = player_roll.wait_for_player_roll(
+        FakeContext("room-6"), _plan(), boom, roller_user_id="u2", roller_name="player", tool_name="dice.roll"
+    )
+
+    cancelled = _wait_for_event(events, "player_dice_cancelled")
+    assert cancelled["reason"] == "resolve_failed"
+    # 即使自动结算抛错，也必须唤醒等待线程并清掉请求，避免永久阻塞/残留 pending。
+    assert result["error"] == "dice_request_closed"
+    assert player_roll.list_pending("room-6") == []
 
 
 def test_second_request_in_same_room_is_rejected(monkeypatch):
@@ -427,6 +449,66 @@ def test_standard_metadata_splits_percentile_into_two_d10_groups():
     assert meta["selected"] is None
 
 
+def test_d20_metadata_marks_selected_advantage_die_and_naturals():
+    advantage = _dice_roll_metadata(
+        {
+            "expression": "1d20",
+            "rolls": [3, 17],
+            "roll": 17,
+            "natural": 17,
+            "total": 22,
+            "advantage": True,
+            "success": True,
+            "success_level": "hit",
+        },
+        mode="d20",
+        check_name="攻击",
+        target=15,
+    )
+    assert advantage["mode"] == "d20"
+    assert advantage["sides"] == 20
+    assert advantage["count"] == 2
+    assert advantage["selected"] == {"group": 0, "index": 1}
+    assert advantage["natural"] == 17
+    assert advantage["advantage"] is True
+    assert advantage["groups"][0]["highlights"] == [None, None]
+
+    critical = _dice_roll_metadata(
+        {
+            "expression": "1d20",
+            "rolls": [20, 4],
+            "roll": 20,
+            "natural": 20,
+            "total": 25,
+            "advantage": True,
+            "success": True,
+            "success_level": "critical",
+        },
+        mode="d20",
+    )
+    assert critical["groups"][0]["highlights"] == ["critical", None]
+    assert critical["selected"] == {"group": 0, "index": 0}
+
+
+def test_d20_metadata_marks_natural_one_as_fumble():
+    meta = _dice_roll_metadata(
+        {
+            "expression": "1d20",
+            "rolls": [1, 15],
+            "roll": 1,
+            "natural": 1,
+            "total": 6,
+            "disadvantage": True,
+            "success": False,
+            "success_level": "miss",
+        },
+        mode="d20",
+    )
+    assert meta["disadvantage"] is True
+    assert meta["groups"][0]["highlights"] == ["fumble", None]
+    assert meta["selected"] == {"group": 0, "index": 0}
+
+
 def test_plan_groups_expands_d100_and_keeps_other_dice_types():
     groups = _plan_groups([(1, 100), (2, 6)])
 
@@ -476,13 +558,13 @@ def test_room_console_reports_and_updates_dice_settings(tmp_path):
     assert run("dice player on --yes").ok is True
 
     info = __import__("json").loads((room_dir / "info.json").read_text(encoding="utf-8"))
-    assert info["house_rules"]["dice_animation_level"] == "simple"
-    assert info["house_rules"]["player_dice_roll"] is True
+    assert info["house_rules"]["core"]["dice_animation_level"] == "simple"
+    assert info["house_rules"]["core"]["player_dice_roll"] is True
 
     inherit = run("dice level inherit --yes")
     assert inherit.ok is True
     info = __import__("json").loads((room_dir / "info.json").read_text(encoding="utf-8"))
-    assert info["house_rules"]["dice_animation_level"] is None
+    assert info["house_rules"]["core"]["dice_animation_level"] is None
 
     assert "没有等待玩家投掷" in run("dice pending").message
 
@@ -532,8 +614,8 @@ def test_room_console_reroll_commands(tmp_path):
     assert run("dice reroll unlimited --yes").ok is True
     assert run("dice reroll-limit 5 --yes").ok is True
     info = json.loads((room_dir / "info.json").read_text(encoding="utf-8"))
-    assert info["house_rules"]["dice_reroll_mode"] == "unlimited"
-    assert info["house_rules"]["dice_reroll_limit"] == 5
+    assert info["house_rules"]["core"]["dice_reroll_mode"] == "unlimited"
+    assert info["house_rules"]["core"]["dice_reroll_limit"] == 5
 
     assert run("dice reroll-limit 0 --yes").ok is False
     assert run("dice reroll sometimes --yes").ok is False
@@ -541,8 +623,8 @@ def test_room_console_reroll_commands(tmp_path):
     assert run("dice reroll inherit --yes").ok is True
     assert run("dice reroll-limit inherit --yes").ok is True
     info = json.loads((room_dir / "info.json").read_text(encoding="utf-8"))
-    assert info["house_rules"]["dice_reroll_mode"] is None
-    assert info["house_rules"]["dice_reroll_limit"] is None
+    assert info["house_rules"]["core"]["dice_reroll_mode"] is None
+    assert info["house_rules"]["core"]["dice_reroll_limit"] is None
 
 
 def test_house_rule_definitions_include_reroll_settings():

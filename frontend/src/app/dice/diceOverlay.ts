@@ -164,6 +164,14 @@ function diceRollerName(roller: DiceResultSnapshot["roller"]): string {
     return name === undefined || name === null ? "" : String(name);
 }
 
+function diceEscape(value: unknown): string {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
 function diceResultHtml(snapshot: DiceResultSnapshot): string {
     const value = snapshot.mode === "percentile" ? snapshot.roll : snapshot.total;
     const parts: string[] = [`<span class="dice-total">${String(value ?? "")}</span>`];
@@ -178,14 +186,34 @@ function diceResultHtml(snapshot: DiceResultSnapshot): string {
     }
     const rollerName = diceRollerName(snapshot.roller);
     if (rollerName) {
-        parts.push(`<span class="dice-roller">${rollerName}</span>`);
+        parts.push(`<span class="dice-roller">${diceEscape(rollerName)}</span>`);
     }
     if (snapshot.auto) {
         parts.push(`<span class="dice-auto">等待超时，系统自动投掷</span>`);
     }
-    const labels = (snapshot.labels || []).filter(Boolean).map(String);
-    if (labels.length > 1 && snapshot.mode !== "percentile") {
-        parts.push(`<span class="dice-faces">${labels.join(" / ")}</span>`);
+    const groups = Array.isArray(snapshot.groups) ? snapshot.groups : [];
+    const faces = snapshot.mode === "percentile"
+        ? []
+        : groups.flatMap((group) => (group.faces || []).map((_face, index) => ({
+            label: group.labels?.[index] ?? group.faces?.[index] ?? "",
+            highlight: group.highlights?.[index] || "",
+        })));
+    if (faces.length) {
+        parts.push(
+            `<span class="dice-faces">${faces.map((face) => (
+                `<span class="dice-face${face.highlight ? ` ${face.highlight}` : ""}">${diceEscape(face.label)}</span>`
+            )).join(" / ")}</span>`
+        );
+    } else {
+        const labels = (snapshot.labels || []).filter(Boolean).map(String);
+        if (labels.length > 1 && snapshot.mode !== "percentile") {
+            parts.push(`<span class="dice-faces">${labels.map(diceEscape).join(" / ")}</span>`);
+        }
+    }
+    const natural = snapshot.natural ?? null;
+    if (snapshot.mode !== "percentile" && (natural === 20 || natural === 1)) {
+        const kind = natural === 20 ? "critical" : "fumble";
+        parts.push(`<span class="dice-natural ${kind}">自然 ${natural}</span>`);
     }
     return parts.join("");
 }

@@ -78,6 +78,13 @@ interface Room {
     scenario_version?: string;
     // 房间级唯一规则集；旧房间由后端按剧本推断，推断不到回退 coc7。
     ruleset_id?: string;
+    // 可选的房间主布局标记；缺省时由房间规则集的 workspace 声明决定。
+    ui_layout?: "canvas" | "conversation" | string;
+    ui_layout_locked?: boolean;
+    // 可选剧本标记：只作为房间创建默认值，房间一旦有标记不再覆盖。
+    scenario?: { ruleset_id?: string; ui_layout?: string } | null;
+    // 地图舞台基础状态（网格/背景/标记点位置）；地图插件接入前由前端本地状态兜底。
+    stage?: RoomStageState | null;
     // 房间模式：预设名 + 两个正交能力位。旧房间由后端补默认值（scripted / true / required）。
     room_mode?: "scripted" | "freeform" | "manual";
     ai_kp_enabled?: boolean;

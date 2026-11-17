@@ -20,6 +20,8 @@ interface CombatParticipantState {
     ready_weapon?: boolean;
     disengaged?: boolean;
     dying?: boolean;
+    /** E4 行动经济：动作/附赠/反应/移动等槽位的剩余额度。 */
+    budget?: Record<string, number>;
 }
 
 interface CombatWeaponOption {

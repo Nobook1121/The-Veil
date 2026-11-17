@@ -52,6 +52,12 @@ export function HomeChat() {
     useEffect(() => {
         const handleShortcut = (event: KeyboardEvent): void => {
             if (!event.altKey || event.key.toLowerCase() !== "b") return;
+            // canvas workspace 下 Alt+B 控制右侧工具侧栏，不再复用旧成员栏状态。
+            if (window.TrpgWorkspace?.isCanvas?.()) {
+                event.preventDefault();
+                window.TrpgWorkspace.toggleSidebar();
+                return;
+            }
             event.preventDefault();
             setSidebarCollapsed((value) => !value);
         };
@@ -131,7 +137,137 @@ export function HomeChat() {
 
     return (
         <>
-            <div className="home-chat-body">
+            <div className="home-chat-body" id="homeChatBody" data-room-layout="conversation" data-room-panel="chat">
+                {/*
+                    canvas workspace 的空壳：始终渲染、默认隐藏，由 workspace 模块按规则集声明切换。
+                    coc7 下这些节点不占空间、不创建 canvas，聊天/成员 DOM 保持原样。
+                */}
+                <header className="ws-chrome ws-topbar" id="wsTopbar" aria-label="房间桌面条">
+                    <div className="ws-topbar-scene">
+                        <button type="button" className="ws-topbar-icon" id="wsSceneButton" title="场景" aria-label="场景">
+                            <i className="fa fa-map-o" aria-hidden="true" />
+                        </button>
+                        <strong className="ws-topbar-title" id="wsSceneName">未加入房间</strong>
+                    </div>
+                    <div className="ws-topbar-players" id="wsTopbarPlayers" aria-label="玩家头像" />
+                    <div className="ws-topbar-actions">
+                        <span className="ws-turn-capsule" id="wsTurnCapsule" hidden />
+                        <span className="ws-online-count" id="wsOnlineCount">在线玩家 0/0</span>
+                        <button type="button" className="ws-topbar-btn" id="wsLayoutControl" title="切换布局">
+                            <i className="fa fa-columns" aria-hidden="true" />
+                            <span>布局</span>
+                        </button>
+                        <button type="button" className="ws-topbar-icon" id="wsSettingsButton" title="界面与布局" aria-label="界面与布局">
+                            <i className="fa fa-cog" aria-hidden="true" />
+                        </button>
+                        <button type="button" className="ws-topbar-icon" id="wsFullscreenButton" title="全屏" aria-label="全屏">
+                            <i className="fa fa-expand" aria-hidden="true" />
+                        </button>
+                    </div>
+                </header>
+
+                <nav className="ws-chrome ws-left-rail" id="wsLeftRail" aria-label="场景工具">
+                    <button type="button" className="ws-rail-btn is-active" data-ws-tool="select" title="选择" aria-label="选择">
+                        <i className="fa fa-mouse-pointer" aria-hidden="true" />
+                    </button>
+                    <button type="button" className="ws-rail-btn" data-ws-tool="measure" title="测量" aria-label="测量">
+                        <i className="fa fa-arrows-h" aria-hidden="true" />
+                    </button>
+                    <button type="button" className="ws-rail-btn" data-ws-tool="fog" title="迷雾（DM）" aria-label="迷雾" data-ws-dm-only="true">
+                        <i className="fa fa-eye-slash" aria-hidden="true" />
+                    </button>
+                    <button type="button" className="ws-rail-btn" data-ws-tool="light" title="光照（DM）" aria-label="光照" data-ws-dm-only="true">
+                        <i className="fa fa-lightbulb-o" aria-hidden="true" />
+                    </button>
+                    <button type="button" className="ws-rail-btn" data-ws-tool="wall" title="墙（DM）" aria-label="墙" data-ws-dm-only="true">
+                        <i className="fa fa-th-large" aria-hidden="true" />
+                    </button>
+                    <button type="button" className="ws-rail-btn" data-ws-tool="token" title="添加标记（DM）" aria-label="添加标记" data-ws-dm-only="true">
+                        <i className="fa fa-plus-square-o" aria-hidden="true" />
+                    </button>
+                    <span className="ws-rail-sep" aria-hidden="true" />
+                    <button type="button" className="ws-rail-btn is-active" data-ws-tool="grid" title="网格" aria-label="网格">
+                        <i className="fa fa-th" aria-hidden="true" />
+                    </button>
+                </nav>
+
+                <section className="ws-chrome ws-stage" id="wsStageHost" aria-label="地图舞台">
+                    <div className="ws-stage-empty" id="wsStageEmpty" hidden>
+                        <i className="fa fa-map" aria-hidden="true" />
+                        <span>等待场景载入</span>
+                    </div>
+                    <div className="ws-stage-controls" aria-label="地图缩放">
+                        <button type="button" id="wsZoomOut" title="缩小">−</button>
+                        <span id="wsZoomLabel">100%</span>
+                        <button type="button" id="wsZoomIn" title="放大">＋</button>
+                        <button type="button" id="wsZoomFit" title="适应窗口">适应</button>
+                        <button type="button" id="wsStageFullscreen" title="全屏">全屏</button>
+                    </div>
+                </section>
+
+                <div className="ws-chrome ws-sidebar-tabs" id="wsSidebarTabs" role="tablist" aria-label="工具侧栏">
+                    <button type="button" role="tab" className="ws-sidebar-tab is-active" data-ws-panel="chat" aria-selected="true">
+                        <i className="fa fa-comment" aria-hidden="true" />
+                        <span>聊天</span>
+                    </button>
+                    <button type="button" role="tab" className="ws-sidebar-tab" data-ws-panel="character" aria-selected="false">
+                        <i className="fa fa-users" aria-hidden="true" />
+                        <span>角色</span>
+                    </button>
+                    <button type="button" role="tab" className="ws-sidebar-tab" data-ws-panel="settings" aria-selected="false">
+                        <i className="fa fa-sliders" aria-hidden="true" />
+                        <span>设置</span>
+                    </button>
+                    <button type="button" className="ws-sidebar-toggle" id="wsSidebarToggle" title="折叠 / 展开侧栏">
+                        <i className="fa fa-chevron-right" aria-hidden="true" />
+                    </button>
+                    <button type="button" className="ws-sidebar-toggle" id="wsChatOverlayButton" title="展开聊天浮层（Ctrl+Shift+C）">
+                        <i className="fa fa-expand" aria-hidden="true" />
+                    </button>
+                </div>
+
+                <div className="ws-chrome ws-sidebar-settings" id="wsSidebarSettings">
+                    <h3>界面与布局</h3>
+                    <div className="ws-setting-block">
+                        <span className="ws-setting-label">主视图</span>
+                        <div className="ws-layout-choices" id="wsLayoutSettings" role="group" aria-label="主视图布局">
+                            <button type="button" data-ws-layout="canvas">画布</button>
+                            <button type="button" data-ws-layout="conversation">聊天</button>
+                        </div>
+                        <p className="ws-setting-hint">切换布局不会重载页面，聊天位置与地图镜头会保留。</p>
+                    </div>
+                    <label className="ws-setting-block" htmlFor="wsSidebarWidth">
+                        <span className="ws-setting-label">侧栏宽度</span>
+                        <input type="range" id="wsSidebarWidth" min="360" max="420" step="4" value="380" />
+                        <span className="ws-setting-value" id="wsSidebarWidthValue">380px</span>
+                    </label>
+                    <div className="ws-setting-block">
+                        <span className="ws-setting-label">覆盖范围</span>
+                        <div className="ws-layout-scopes" id="wsLayoutScopes" role="group" aria-label="布局覆盖范围">
+                            <button type="button" data-ws-scope="session" className="is-active">仅本次会话</button>
+                            <button type="button" data-ws-scope="room">当前房间</button>
+                            <button type="button" data-ws-scope="default">我的默认</button>
+                        </div>
+                        <p className="ws-setting-hint" id="wsLayoutScopeHint">仅本次会话：刷新或重进房间后失效。</p>
+                    </div>
+                </div>
+
+                <div className="ws-chrome ws-sidebar-resizer" id="wsSidebarResizer" title="拖动调整侧栏宽度" aria-hidden="true" />
+                <button type="button" className="ws-chrome ws-layout-float" id="wsLayoutFloat" title="切换回画布布局">
+                    <i className="fa fa-columns" aria-hidden="true" />
+                    <span>画布</span>
+                </button>
+                <div className="ws-chrome ws-chat-backdrop" id="wsChatBackdrop" aria-hidden="true" />
+                <div
+                    className="ws-chrome ws-chat-drawer-handle"
+                    id="wsChatDrawerHandle"
+                    role="button"
+                    tabIndex={0}
+                    aria-label="展开或收起聊天抽屉"
+                >
+                    <span aria-hidden="true" />
+                </div>
+
                 <div className="home-chat-main">
                     <header className="page-command-header chat-command-header" data-page-header="chat">
                         <div>

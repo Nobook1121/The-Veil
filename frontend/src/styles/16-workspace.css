@@ -1,0 +1,1079 @@
+/* ==========================================================================
+   E7 第二批：规则集 workspace 布局（canvas 主视图）
+   所有尺寸来自规则集声明的 --ws-* 变量；未声明 canvas 的规则集（coc7）
+   不显示任何 workspace chrome，聊天主列 + 260px 成员栏保持原样。
+   ========================================================================== */
+
+.home-chat-body:not([data-room-layout="canvas"]) .ws-chrome:not(.ws-layout-float) {
+    display: none !important;
+}
+
+.ws-layout-float[hidden] {
+    display: none !important;
+}
+
+.home-chat-body[data-room-layout="canvas"] {
+    display: grid;
+    grid-template-columns: var(--ws-rail-width, 0) minmax(var(--ws-primary-min, 480px), 1fr) var(--ws-sidebar-active, 260px);
+    grid-template-rows: var(--ws-topbar-height, 0) minmax(0, 1fr);
+    grid-template-areas:
+        "topbar topbar topbar"
+        "rail stage sidebar";
+    width: 100%;
+    height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--color-bg, #0d1114);
+    position: relative;
+}
+
+.home-chat-body[data-room-layout="canvas"][data-ws-size="medium"],
+.home-chat-body[data-room-layout="canvas"][data-ws-size="compact"] {
+    grid-template-rows: var(--ws-topbar-compact, 44px) minmax(0, 1fr);
+}
+
+/* 中等屏停靠侧栏时让地图优先吃满剩余宽度，最小 720px 只在宽屏保证。 */
+.home-chat-body[data-room-layout="canvas"][data-ws-size="medium"][data-ws-dock="true"] {
+    grid-template-columns: var(--ws-rail-width, 0) minmax(0, 1fr) var(--ws-sidebar-active, 260px);
+}
+
+/* 中等/紧凑/窄屏：地图不再为侧栏预留列宽，侧栏改为覆盖层。 */
+.home-chat-body[data-room-layout="canvas"][data-ws-dock="false"] {
+    grid-template-columns: var(--ws-rail-width, 0) minmax(0, 1fr) 0;
+}
+
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: var(--ws-topbar-compact, 44px) minmax(0, 1fr) var(--ws-rail-width, 0);
+    grid-template-areas:
+        "topbar"
+        "stage"
+        "rail";
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    z-index: 1100;
+}
+
+/* 窄屏 canvas 全屏时锁住页面滚动，避免外层导航把地图顶出视口。 */
+body:has(.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"]) {
+    overflow: hidden;
+}
+
+/* 页面进入动画的 transform 会成为 fixed 的包含块；窄屏全屏地图需要回到视口坐标系。 */
+#home:has(.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"]) {
+    transform: none !important;
+    animation: none !important;
+}
+
+/* --------------------------------------------------------------------------
+   顶部桌面条
+   -------------------------------------------------------------------------- */
+.ws-topbar {
+    grid-area: topbar;
+    display: grid;
+    grid-template-columns: minmax(150px, 260px) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    height: var(--ws-topbar-height, 48px);
+    padding: 0 10px;
+    border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    background: color-mix(in srgb, var(--color-panel, #14181c) 92%, transparent);
+    backdrop-filter: blur(10px);
+    position: relative;
+    z-index: 6;
+    min-width: 0;
+}
+
+.home-chat-body[data-ws-size="medium"] .ws-topbar,
+.home-chat-body[data-ws-size="compact"] .ws-topbar {
+    height: var(--ws-topbar-compact, 44px);
+}
+
+.home-chat-body[data-ws-size="narrow"] .ws-topbar {
+    grid-template-columns: minmax(70px, 1fr) auto auto;
+    gap: 6px;
+    padding: 0 8px;
+    height: var(--ws-topbar-compact, 44px);
+}
+
+.ws-topbar-scene {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.ws-topbar-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-text, #ece7db);
+    font-size: 0.92rem;
+    font-weight: 700;
+}
+
+.ws-topbar-icon,
+.ws-topbar-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 30px;
+    min-width: 30px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--color-muted, rgba(236, 231, 219, 0.68));
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.ws-topbar-icon:hover,
+.ws-topbar-btn:hover {
+    background: color-mix(in srgb, var(--color-text, #fff) 8%, transparent);
+    color: var(--color-text, #fff);
+    border-color: var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.ws-topbar-players {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    padding: 2px 0;
+}
+
+.ws-topbar-players::-webkit-scrollbar {
+    display: none;
+}
+
+.ws-topbar-empty {
+    color: var(--color-muted, rgba(236, 231, 219, 0.55));
+    font-size: 0.76rem;
+}
+
+.ws-avatar {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--color-text, #fff) 20%, transparent);
+    background: var(--color-panel, #1b2025);
+    color: var(--color-text, #ece7db);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.ws-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.ws-avatar.is-online::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #43c463;
+    border: 1px solid var(--color-panel, #14181c);
+}
+
+.ws-avatar-more {
+    background: color-mix(in srgb, var(--color-text, #fff) 10%, transparent);
+    font-size: 0.7rem;
+}
+
+.ws-topbar-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    min-width: 0;
+}
+
+.ws-turn-capsule {
+    display: inline-flex;
+    align-items: center;
+    max-width: 240px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--color-warning, #e0b54a) 45%, transparent);
+    background: color-mix(in srgb, var(--color-warning, #e0b54a) 14%, transparent);
+    color: var(--color-warning, #e0b54a);
+    font-size: 0.75rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ws-online-count {
+    color: var(--color-muted, rgba(236, 231, 219, 0.68));
+    font-size: 0.76rem;
+    white-space: nowrap;
+}
+
+.home-chat-body[data-ws-size="narrow"] .ws-online-count,
+.home-chat-body[data-ws-size="compact"] .ws-online-count,
+.home-chat-body[data-ws-size="narrow"] .ws-topbar-btn span,
+.home-chat-body[data-ws-size="compact"] .ws-topbar-btn span {
+    display: none;
+}
+
+/* --------------------------------------------------------------------------
+   左侧场景工具条（窄屏改底部横条）
+   -------------------------------------------------------------------------- */
+.ws-left-rail {
+    grid-area: rail;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    width: var(--ws-rail-width, 48px);
+    padding: 8px 4px;
+    border-right: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    background: color-mix(in srgb, var(--color-panel, #14181c) 88%, #000 12%);
+    overflow-y: auto;
+    scrollbar-width: none;
+    z-index: 5;
+}
+
+.ws-left-rail::-webkit-scrollbar {
+    display: none;
+}
+
+.home-chat-body[data-ws-size="narrow"] .ws-left-rail {
+    flex-direction: row;
+    justify-content: center;
+    width: 100%;
+    padding: 4px 8px;
+    border-right: 0;
+    border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.ws-rail-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--color-muted, rgba(236, 231, 219, 0.62));
+    cursor: pointer;
+    transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.ws-rail-btn:hover {
+    background: color-mix(in srgb, var(--color-text, #fff) 8%, transparent);
+    color: var(--color-text, #fff);
+}
+
+.ws-rail-btn.is-active {
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 22%, transparent);
+    border-color: color-mix(in srgb, var(--color-primary, #c8a35a) 48%, transparent);
+    color: var(--color-primary, #c8a35a);
+}
+
+.ws-rail-sep {
+    width: 24px;
+    height: 1px;
+    margin: 3px 0;
+    background: var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.home-chat-body[data-ws-size="narrow"] .ws-rail-sep {
+    width: 1px;
+    height: 24px;
+    margin: 0 3px;
+}
+
+/* --------------------------------------------------------------------------
+   地图舞台
+   -------------------------------------------------------------------------- */
+.ws-stage {
+    grid-area: stage;
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--color-primary, #c8a35a) 8%, transparent), transparent 60%),
+        linear-gradient(145deg, #0b0f12, #12171b 55%, #0a0d10);
+}
+
+.ws-stage-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: grab;
+    touch-action: none;
+}
+
+.ws-stage-canvas.is-dragging {
+    cursor: grabbing;
+}
+
+/* 插件舞台覆盖层：核心只负责给它定位，具体内容与交互由插件绘制。 */
+.ws-plugin-stage {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+}
+
+.ws-stage-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--color-muted, rgba(236, 231, 219, 0.55));
+    font-size: 0.86rem;
+    pointer-events: none;
+}
+
+.ws-stage-empty i {
+    font-size: 1.6rem;
+    opacity: 0.7;
+}
+
+.ws-stage-controls {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+    border-radius: 10px;
+    background: color-mix(in srgb, #0d1114 82%, transparent);
+    backdrop-filter: blur(8px);
+    z-index: 3;
+}
+
+.ws-stage-controls button {
+    height: 26px;
+    min-width: 26px;
+    padding: 0 7px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--color-muted, rgba(236, 231, 219, 0.72));
+    font-size: 0.74rem;
+    cursor: pointer;
+}
+
+.ws-stage-controls button:hover {
+    background: color-mix(in srgb, var(--color-text, #fff) 10%, transparent);
+    color: var(--color-text, #fff);
+}
+
+.ws-stage-controls span {
+    min-width: 44px;
+    text-align: center;
+    color: var(--color-muted, rgba(236, 231, 219, 0.62));
+    font-size: 0.72rem;
+}
+
+.home-chat-body[data-ws-size="compact"] .ws-stage-controls {
+    right: 80px;
+}
+
+.home-chat-body[data-ws-size="narrow"] .ws-stage-controls {
+    right: 8px;
+    bottom: calc(var(--ws-rail-width, 48px) + 64px);
+}
+
+/* --------------------------------------------------------------------------
+   右侧工具侧栏：聊天 / 角色 / 设置
+   -------------------------------------------------------------------------- */
+.ws-sidebar-tabs {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    position: absolute;
+    top: var(--ws-topbar-height, 48px);
+    right: 0;
+    width: var(--ws-sidebar-active, 380px);
+    height: 36px;
+    padding: 0 6px;
+    border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    background: var(--theme-bg-elevated, var(--color-panel, #14181c));
+    z-index: 8;
+}
+
+.home-chat-body[data-ws-size="medium"] .ws-sidebar-tabs,
+.home-chat-body[data-ws-size="compact"] .ws-sidebar-tabs {
+    top: var(--ws-topbar-compact, 44px);
+}
+
+.home-chat-body[data-ws-size="narrow"] .ws-sidebar-tabs {
+    top: calc(var(--ws-topbar-compact, 44px) + 8px);
+}
+
+.ws-sidebar-tab,
+.ws-sidebar-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 28px;
+    min-width: 28px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--color-muted, rgba(236, 231, 219, 0.66));
+    font-size: 0.76rem;
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+.ws-sidebar-tab:hover,
+.ws-sidebar-toggle:hover {
+    background: color-mix(in srgb, var(--color-text, #fff) 8%, transparent);
+    color: var(--color-text, #fff);
+}
+
+.ws-sidebar-tab.is-active {
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 18%, transparent);
+    border-color: color-mix(in srgb, var(--color-primary, #c8a35a) 38%, transparent);
+    color: var(--color-primary, #c8a35a);
+}
+
+.ws-sidebar-toggle {
+    margin-left: auto;
+}
+
+/* 折叠为 48px 图标栏：纵向排列，隐藏文字。 */
+.home-chat-body[data-ws-size="wide"][data-ws-sidebar="collapsed"] .ws-sidebar-tabs,
+.home-chat-body[data-ws-size="medium"][data-ws-sidebar="collapsed"] .ws-sidebar-tabs {
+    flex-direction: column;
+    width: var(--ws-sidebar-collapsed, 48px);
+    height: auto;
+    min-height: 180px;
+    padding: 6px 4px;
+    border-bottom: 0;
+    border-left: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.home-chat-body[data-ws-sidebar="collapsed"] .ws-sidebar-tab span {
+    display: none;
+}
+
+.home-chat-body[data-ws-sidebar="collapsed"] .ws-sidebar-toggle {
+    margin-left: 0;
+}
+
+/* 紧凑/窄屏：侧栏 tab 变成右侧浮动图标栏，不占地图宽度。 */
+.home-chat-body[data-ws-size="compact"] .ws-sidebar-tabs,
+.home-chat-body[data-ws-size="narrow"] .ws-sidebar-tabs {
+    position: fixed;
+    top: calc(var(--ws-topbar-compact, 44px) + 10px);
+    right: 8px;
+    width: 42px;
+    height: auto;
+    flex-direction: column;
+    padding: 5px 4px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+    border-radius: 12px;
+    background: color-mix(in srgb, #101418 86%, transparent);
+    backdrop-filter: blur(10px);
+}
+
+.home-chat-body[data-ws-size="compact"] .ws-sidebar-tab span,
+.home-chat-body[data-ws-size="narrow"] .ws-sidebar-tab span {
+    display: none;
+}
+
+.home-chat-body[data-ws-size="compact"] .ws-sidebar-toggle,
+.home-chat-body[data-ws-size="narrow"] .ws-sidebar-toggle {
+    margin-left: 0;
+}
+
+/* 聊天主列进入侧栏（停靠态）。 */
+.home-chat-body[data-room-layout="canvas"] .home-chat-main {
+    grid-area: sidebar;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    border-left: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    background: var(--theme-bg-elevated, var(--color-panel, #14181c));
+    padding-top: 36px;
+    overflow: hidden;
+}
+
+.home-chat-body[data-room-layout="canvas"]:not([data-room-panel="chat"]) .home-chat-main {
+    display: none;
+}
+
+/* 覆盖层模式：聊天不占列宽，展开时覆盖地图右缘，地图不缩放。 */
+.home-chat-body[data-room-layout="canvas"][data-ws-chat="overlay"] .home-chat-main {
+    display: none;
+}
+
+.home-chat-body[data-room-layout="canvas"]:not([data-ws-size="narrow"])[data-ws-overlay="true"][data-room-panel="chat"] .home-chat-main {
+    display: flex;
+    position: fixed;
+    top: var(--ws-topbar-height, 48px);
+    right: 0;
+    bottom: 0;
+    width: min(560px, 92vw);
+    padding-top: 36px;
+    border-left: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
+    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.45);
+    z-index: 30;
+}
+
+@media (min-width: 1440px) {
+    .home-chat-body[data-room-layout="canvas"]:not([data-ws-size="narrow"])[data-ws-overlay="true"][data-room-panel="chat"] .home-chat-main {
+        width: min(640px, 92vw);
+    }
+}
+
+/* 角色面板复用成员栏；canvas 下填满侧栏，不再使用 260px 固定宽度。 */
+.home-chat-body[data-room-layout="canvas"] .home-room-members {
+    --home-sidebar-width: var(--ws-sidebar-active, 380px);
+    grid-area: sidebar;
+    width: 100%;
+    flex: 1 1 auto;
+    border-left: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    background: var(--theme-bg-elevated, var(--color-panel, #14181c));
+    padding-top: 36px;
+}
+
+.home-chat-body[data-room-layout="canvas"] .home-room-members-content {
+    width: 100%;
+}
+
+.home-chat-body[data-room-layout="canvas"] .home-room-members-rail,
+.home-chat-body[data-room-layout="canvas"] .home-room-members-collapse {
+    display: none;
+}
+
+.home-chat-body[data-room-layout="canvas"] .home-room-members.is-collapsed {
+    flex-basis: auto;
+}
+
+.home-chat-body[data-room-layout="canvas"] .home-room-members.is-collapsed .home-room-members-content {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: none;
+}
+
+.home-chat-body[data-room-layout="canvas"]:not([data-room-panel="character"]) .home-room-members {
+    display: none;
+}
+
+/* 紧凑/窄屏的角色面板改为覆盖层。 */
+.home-chat-body[data-room-layout="canvas"][data-ws-size="compact"][data-room-panel="character"] .home-room-members,
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"][data-room-panel="character"] .home-room-members {
+    display: flex;
+    position: fixed;
+    top: var(--ws-topbar-compact, 44px);
+    right: 0;
+    bottom: 0;
+    width: min(560px, 92vw);
+    z-index: 30;
+    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.45);
+}
+
+/* 设置面板。 */
+.ws-sidebar-settings {
+    display: none;
+    position: absolute;
+    top: calc(var(--ws-topbar-height, 48px) + 36px);
+    right: 0;
+    bottom: 0;
+    width: var(--ws-sidebar-active, 380px);
+    padding: 16px;
+    overflow-y: auto;
+    background: var(--theme-bg-elevated, var(--color-panel, #14181c));
+    border-left: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    z-index: 7;
+}
+
+.home-chat-body[data-room-layout="canvas"][data-room-panel="settings"] .ws-sidebar-settings {
+    display: block;
+}
+
+.home-chat-body[data-room-layout="canvas"][data-ws-size="compact"] .ws-sidebar-settings,
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"] .ws-sidebar-settings {
+    display: none;
+    position: fixed;
+    top: var(--ws-topbar-compact, 44px);
+    right: 0;
+    bottom: 0;
+    width: min(420px, 92vw);
+    z-index: 30;
+    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.45);
+}
+
+.home-chat-body[data-room-layout="canvas"][data-ws-size="compact"][data-room-panel="settings"] .ws-sidebar-settings,
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"][data-room-panel="settings"] .ws-sidebar-settings {
+    display: block;
+}
+
+.ws-sidebar-settings h3 {
+    margin: 0 0 14px;
+    font-size: 0.95rem;
+    color: var(--color-text, #ece7db);
+}
+
+.ws-setting-block {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin-bottom: 18px;
+}
+
+.ws-setting-label {
+    color: var(--color-muted, rgba(236, 231, 219, 0.62));
+    font-size: 0.76rem;
+    letter-spacing: 0.04em;
+}
+
+.ws-setting-hint {
+    margin: 0;
+    color: var(--color-muted, rgba(236, 231, 219, 0.55));
+    font-size: 0.72rem;
+    line-height: 1.55;
+}
+
+.ws-setting-value {
+    color: var(--color-text, #ece7db);
+    font-size: 0.74rem;
+}
+
+.ws-layout-choices,
+.ws-layout-scopes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.ws-layout-choices button,
+.ws-layout-scopes button {
+    padding: 5px 10px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+    border-radius: 7px;
+    background: transparent;
+    color: var(--color-muted, rgba(236, 231, 219, 0.68));
+    font-size: 0.76rem;
+    cursor: pointer;
+}
+
+.ws-layout-choices button:hover,
+.ws-layout-scopes button:hover {
+    color: var(--color-text, #fff);
+    border-color: color-mix(in srgb, var(--color-text, #fff) 26%, transparent);
+}
+
+.ws-layout-choices button.is-active,
+.ws-layout-scopes button.is-active {
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 20%, transparent);
+    border-color: color-mix(in srgb, var(--color-primary, #c8a35a) 45%, transparent);
+    color: var(--color-primary, #c8a35a);
+}
+
+.ws-layout-choices button:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+}
+
+.ws-sidebar-settings input[type="range"] {
+    width: 100%;
+    accent-color: var(--color-primary, #c8a35a);
+}
+
+/* 侧栏宽度拖拽把手。 */
+.ws-sidebar-resizer {
+    position: absolute;
+    top: var(--ws-topbar-height, 48px);
+    bottom: 0;
+    right: calc(var(--ws-sidebar-active, 380px) - 3px);
+    width: 6px;
+    cursor: col-resize;
+    z-index: 9;
+}
+
+.ws-sidebar-resizer[hidden] {
+    display: none !important;
+}
+
+.ws-sidebar-resizer:hover {
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 40%, transparent);
+}
+
+/* --------------------------------------------------------------------------
+   浮层背景、底部抽屉、布局浮钮与布局菜单
+   -------------------------------------------------------------------------- */
+.ws-chat-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.42);
+    z-index: 25;
+}
+
+.home-chat-body[data-room-layout="canvas"][data-ws-overlay="true"] .ws-chat-backdrop {
+    display: block;
+}
+
+.home-chat-body[data-room-layout="canvas"][data-ws-chat="drawer"]:not([data-ws-drawer="collapsed"]) .ws-chat-backdrop {
+    display: block;
+}
+
+.ws-chat-drawer-handle {
+    display: none;
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 64px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.16));
+    border-radius: 999px 999px 0 0;
+    background: color-mix(in srgb, #101418 92%, transparent);
+    z-index: 32;
+    cursor: pointer;
+}
+
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"] .ws-chat-drawer-handle {
+    display: flex;
+}
+
+.home-chat-body[data-ws-drawer="collapsed"] .ws-chat-drawer-handle {
+    bottom: calc(var(--ws-rail-width, 48px) + 56px);
+}
+
+.home-chat-body[data-ws-drawer="half"] .ws-chat-drawer-handle {
+    bottom: calc(var(--ws-rail-width, 48px) + 45vh);
+}
+
+.home-chat-body[data-ws-drawer="full"] .ws-chat-drawer-handle {
+    bottom: calc(var(--ws-rail-width, 48px) + 85vh);
+}
+
+.ws-chat-drawer-handle span {
+    width: 26px;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--color-muted, rgba(236, 231, 219, 0.62));
+}
+
+/* 窄屏聊天底部抽屉：三档高度。 */
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"] .home-chat-main {
+    display: none;
+}
+
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"][data-room-panel="chat"] .home-chat-main {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: var(--ws-rail-width, 48px);
+    width: 100%;
+    height: 56px;
+    padding-top: 0;
+    border-left: 0;
+    border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.5);
+    z-index: 31;
+    overflow: hidden;
+}
+
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"][data-room-panel="chat"][data-ws-drawer="half"] .home-chat-main {
+    height: 45vh;
+}
+
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"][data-room-panel="chat"][data-ws-drawer="full"] .home-chat-main {
+    height: 85vh;
+}
+
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"][data-ws-drawer="collapsed"] .home-chat-main .chat-command-header,
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"][data-ws-drawer="collapsed"] .home-chat-main .chat-history,
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"][data-ws-drawer="collapsed"] .home-chat-main .chat-suggestions,
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"][data-ws-drawer="collapsed"] .home-chat-main .immersive-chat-stage-host,
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"][data-ws-drawer="collapsed"] .home-chat-main .combat-panel {
+    display: none;
+}
+
+.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"][data-ws-drawer="collapsed"] .home-chat-main .chat-input {
+    margin-top: auto;
+    padding: 6px 8px !important;
+}
+
+/* 布局浮钮：只在 conversation 且房间规则集声明 canvas 时出现。 */
+.ws-layout-float {
+    position: fixed;
+    right: 88px;
+    bottom: 16px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 42%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-panel, #14181c) 92%, transparent);
+    color: var(--color-primary, #c8a35a);
+    font-size: 0.78rem;
+    cursor: pointer;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(8px);
+    z-index: 20;
+}
+
+.ws-layout-float:hover {
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 18%, var(--color-panel, #14181c));
+}
+
+/* 布局菜单挂在 body，避免 topbar 隐藏时无法使用。 */
+.ws-layout-popover {
+    position: fixed;
+    width: 260px;
+    padding: 12px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
+    border-radius: 12px;
+    background: var(--color-panel, #14181c);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+    z-index: 80;
+}
+
+.ws-layout-popover[hidden] {
+    display: none !important;
+}
+
+.ws-popover-title {
+    display: block;
+    margin-bottom: 9px;
+    color: var(--color-text, #ece7db);
+    font-size: 0.82rem;
+}
+
+.ws-layout-popover .ws-layout-choices,
+.ws-layout-popover .ws-layout-scopes {
+    margin-bottom: 9px;
+}
+
+.ws-popover-hint {
+    margin: 0;
+    color: var(--color-muted, rgba(236, 231, 219, 0.55));
+    font-size: 0.7rem;
+    line-height: 1.5;
+}
+
+/* --------------------------------------------------------------------------
+   canvas 侧栏内的聊天可读性
+   -------------------------------------------------------------------------- */
+.home-chat-body[data-room-layout="canvas"] .chat-command-header {
+    display: none;
+}
+
+.home-chat-body[data-room-layout="canvas"] .chat-history {
+    padding: 12px;
+    font-size: 15px;
+}
+
+.home-chat-body[data-room-layout="canvas"] .message {
+    max-width: 100%;
+    margin-bottom: 12px;
+}
+
+.home-chat-body[data-room-layout="canvas"] .message.player-message {
+    max-width: 92%;
+}
+
+.home-chat-body[data-room-layout="canvas"] .message-avatar {
+    display: none;
+}
+
+.home-chat-body[data-room-layout="canvas"] .message-content-container {
+    max-width: 100%;
+    width: 100%;
+}
+
+.home-chat-body[data-room-layout="canvas"] .message-header {
+    margin-bottom: 3px;
+    font-size: 0.72em;
+}
+
+.home-chat-body[data-room-layout="canvas"] .message-content {
+    padding: 8px 11px;
+    border-radius: 12px;
+    font-size: 15px;
+    line-height: 1.75;
+}
+
+.home-chat-body[data-room-layout="canvas"] .message-content .markdown-body,
+.home-chat-body[data-room-layout="canvas"] .message-content .markdown-body p,
+.home-chat-body[data-room-layout="canvas"] .message-content .markdown-body li {
+    line-height: 1.75;
+}
+
+.home-chat-body[data-room-layout="canvas"] .message-content .markdown-body p {
+    margin-top: 0.35em;
+    margin-bottom: 0.35em;
+}
+
+.home-chat-body[data-room-layout="canvas"] .message-meta {
+    margin-top: 3px;
+    font-size: 0.68em;
+}
+
+.home-chat-body[data-room-layout="canvas"] .chat-input {
+    padding: 8px 10px !important;
+}
+
+.home-chat-body[data-room-layout="canvas"] .chat-input .immersive-audio-toggle {
+    display: none;
+}
+
+.home-chat-body[data-room-layout="canvas"] .chat-input .btn {
+    padding: 6px 8px;
+}
+
+.home-chat-body[data-room-layout="canvas"] .chat-input .form-control {
+    font-size: 0.88rem;
+}
+
+/* KP 思考气泡与长文折叠。 */
+.home-chat-body[data-room-layout="canvas"] .message.thinking .message-content-container {
+    border-left: 2px solid color-mix(in srgb, var(--color-primary, #c8a35a) 42%, transparent);
+    padding-left: 9px;
+}
+
+.ws-long-message,
+.ws-thinking-content {
+    max-height: calc(1.75em * 10);
+    overflow: hidden;
+    position: relative;
+    -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 78%, transparent 100%);
+}
+
+.ws-thinking-content {
+    max-height: calc(1.75em * 3);
+}
+
+.ws-long-message.is-expanded,
+.ws-thinking-content.is-expanded {
+    max-height: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+}
+
+.ws-thinking-content.is-expanded {
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.ws-message-toggle {
+    align-self: flex-start;
+    margin-top: 4px;
+    padding: 2px 8px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
+    border-radius: 999px;
+    background: transparent;
+    color: var(--color-muted, rgba(236, 231, 219, 0.62));
+    font-size: 0.7rem;
+    cursor: pointer;
+}
+
+.ws-message-toggle:hover {
+    color: var(--color-text, #fff);
+    border-color: color-mix(in srgb, var(--color-text, #fff) 26%, transparent);
+}
+
+/* 骰子/检定卡：标题行 + 结果块的两行结构。 */
+.home-chat-body[data-room-layout="canvas"] .dice-message .message-content-container {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.home-chat-body[data-room-layout="canvas"] .dice-message .message-header {
+    order: 0;
+}
+
+.home-chat-body[data-room-layout="canvas"] .dice-message .message-content {
+    order: 1;
+    padding: 7px 10px;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 26%, transparent);
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 8%, transparent);
+    border-radius: 10px;
+}
+
+.home-chat-body[data-room-layout="canvas"] .dice-message .message-meta {
+    order: 2;
+}
+
+.home-chat-body[data-room-layout="canvas"] .dice-message .message-content .markdown-body {
+    font-size: 0.96rem;
+    line-height: 1.55;
+}
+
+/* 长表格/图片在窄栏内横向滚动，不撑破侧栏。 */
+.home-chat-body[data-room-layout="canvas"] .message-content .markdown-body table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.home-chat-body[data-room-layout="canvas"] .message-content .markdown-body img.chat-media-thumb {
+    max-width: 100%;
+    max-height: 180px;
+}
+
+/* 右侧栏本身的滚动条收窄。 */
+.home-chat-body[data-room-layout="canvas"] .chat-history,
+.home-chat-body[data-room-layout="canvas"] .home-room-member-list,
+.home-chat-body[data-room-layout="canvas"] .ws-sidebar-settings {
+    scrollbar-width: thin;
+    overscroll-behavior: contain;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ws-topbar-icon,
+    .ws-topbar-btn,
+    .ws-rail-btn,
+    .ws-sidebar-tab,
+    .ws-sidebar-toggle,
+    .ws-stage-controls button,
+    .ws-layout-float,
+    .ws-layout-choices button,
+    .ws-layout-scopes button {
+        transition: none;
+    }
+}

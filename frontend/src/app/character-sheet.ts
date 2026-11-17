@@ -36,7 +36,10 @@ interface Window {
     let cachedRulesetOptions: RulesetHeaderOption[] | null = null;
     let rulesetHeaderRequest: Promise<void> | null = null;
     let rulesetHeaderEventsBound = false;
+    let roomEventsBound = false;
     let activeSheetRulesetId = "";
+    let activeModule: CharacterSheetModule | null = null;
+    let activeModuleId = "";
 
     function escapeHtml(value: unknown): string {
         return String(value ?? "")
@@ -158,24 +161,84 @@ interface Window {
         if (typeof notifier === "function") notifier(reason, "error");
     }
 
-    function init(): void {
-        const registry = global.TrpgCharacterSheetRegistry;
-        const module = registry?.defaultModule();
-        if (!module) {
-            // 其他脚本（登录、房间）会调用这两个全局钩子，缺省为 no-op 避免连锁报错。
-            global.clearCharacterManagement = () => {};
-            global.reloadCharacterManagement = async () => {};
-            block("没有可用的角色卡渲染器：规则集模块未加载，无法打开或编辑角色卡。");
+    /**
+     * 切换规则集模块前重建工作区：克隆节点可以一次性丢掉旧模块绑在按钮上的
+     * 直接监听，避免 CoC 与 5e 的创建/编辑入口互相触发。克隆保留内部标记结构，
+     * 但清掉 ``dataset.initialized``，让新模块按自己的流程重新初始化。
+     */
+    function resetWorkspaceBindings(): void {
+        const workspace = document.getElementById("characterWorkspace");
+        if (!workspace) return;
+        const replacement = workspace.cloneNode(false) as HTMLElement;
+        replacement.innerHTML = workspace.innerHTML;
+        delete replacement.dataset.initialized;
+        workspace.replaceWith(replacement);
+    }
+
+    function activateModule(module: CharacterSheetModule): void {
+        const moduleId = String(module.id || "").trim().toLowerCase();
+        if (activeModuleId === moduleId && activeModule) {
+            void module.reloadCharacterManagement?.();
             return;
         }
+        activeModule?.clearCharacterManagement?.();
+        resetWorkspaceBindings();
+        activeModule = module;
+        activeModuleId = moduleId;
         global.clearCharacterManagement = () => module.clearCharacterManagement?.();
         global.reloadCharacterManagement = async () => {
             await module.reloadCharacterManagement?.();
         };
-        activeSheetRulesetId = String(module.id || "").trim().toLowerCase();
-        bindRulesetHeaderEvents();
-        void loadRulesetHeader();
+        activeSheetRulesetId = moduleId;
+        try {
+            global.localStorage?.setItem("trpg:active-character-ruleset", moduleId);
+        } catch {
+            // 隐私模式下不可写；不影响本次切换。
+        }
+        applyRulesetHeader(pickRuleset(cachedRulesetOptions));
         module.initCharacterSheet();
+    }
+
+    function storedRulesetId(): string {
+        try {
+            return String(global.localStorage?.getItem("trpg:active-character-ruleset") || "").trim().toLowerCase();
+        } catch {
+            return "";
+        }
+    }
+
+    function resolveModule(): CharacterSheetModule | undefined {
+        const registry = global.TrpgCharacterSheetRegistry;
+        // 房间内跟随房间规则集；不在房间时沿用上次使用的模块，最后回退默认（CoC）。
+        const roomRulesetId = String(global.currentRoom?.ruleset_id || "").trim().toLowerCase();
+        const rulesetId = roomRulesetId || storedRulesetId();
+        return (rulesetId ? registry?.forRuleset(rulesetId) : undefined) || registry?.defaultModule();
+    }
+
+    function syncModule(): void {
+        const module = resolveModule();
+        if (!module) {
+            const roomRulesetId = String(global.currentRoom?.ruleset_id || "").trim().toLowerCase();
+            global.clearCharacterManagement = () => {};
+            global.reloadCharacterManagement = async () => {};
+            block(
+                roomRulesetId
+                    ? `没有可用的角色卡渲染器：当前房间规则集 ${roomRulesetId} 尚未加载对应模块。`
+                    : "没有可用的角色卡渲染器：规则集模块未加载，无法打开或编辑角色卡。"
+            );
+            return;
+        }
+        activateModule(module);
+    }
+
+    function init(): void {
+        bindRulesetHeaderEvents();
+        if (!roomEventsBound) {
+            roomEventsBound = true;
+            global.addEventListener("trpg:room-changed", () => syncModule());
+        }
+        void loadRulesetHeader();
+        syncModule();
     }
 
     global.TrpgCharacterSheetHost = { init };

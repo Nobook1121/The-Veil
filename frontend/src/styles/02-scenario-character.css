@@ -4093,3 +4093,69 @@ body.is-guest .guest-login-hint {
 .attribute-chip.is-room-temp strong {
     color: color-mix(in srgb, var(--theme-warning) 55%, var(--theme-text-primary));
 }
+
+/* ---------------------------------------------------------------- D&D 5e 卡面编辑器 */
+.dnd5e-field-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px 14px;
+}
+
+.dnd5e-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+}
+
+.dnd5e-field > span {
+    opacity: 0.8;
+}
+
+.dnd5e-field input,
+.dnd5e-field textarea {
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.16));
+    background: rgba(0, 0, 0, 0.22);
+    color: inherit;
+    font: inherit;
+}
+
+.dnd5e-field-wide {
+    grid-column: 1 / -1;
+}
+
+.dnd5e-slot-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 12px;
+}
+
+.dnd5e-slot-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.dnd5e-slot-row label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+}
+
+.dnd5e-slot-row input {
+    width: 58px;
+    padding: 3px 6px;
+    border-radius: 5px;
+    border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.16));
+    background: rgba(0, 0, 0, 0.22);
+    color: inherit;
+}

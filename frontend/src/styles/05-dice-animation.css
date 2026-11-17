@@ -83,6 +83,55 @@
     opacity: 0.8;
 }
 
+/* d20 骰面：自然 20 / 自然 1 的高亮由规则集元数据驱动，此处只负责视觉。 */
+.dice-faces {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    opacity: 0.9;
+}
+
+.dice-face {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.dice-face.critical {
+    color: var(--dice-warning-color, var(--theme-warning, #ffd166));
+    background: rgba(255, 209, 102, 0.18);
+    font-weight: 700;
+}
+
+.dice-face.fumble {
+    color: var(--dice-danger-color, var(--theme-danger, #ff8a7a));
+    background: rgba(255, 138, 122, 0.18);
+    font-weight: 700;
+}
+
+.dice-natural {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 1px 8px;
+    border-radius: 999px;
+}
+
+.dice-natural.critical {
+    color: var(--dice-warning-color, var(--theme-warning, #ffd166));
+    background: rgba(255, 209, 102, 0.16);
+}
+
+.dice-natural.fumble {
+    color: var(--dice-danger-color, var(--theme-danger, #ff8a7a));
+    background: rgba(255, 138, 122, 0.16);
+}
+
 .dice-auto { color: var(--dice-warning-color, var(--theme-warning, #ffcf70)); }
 
 .dice-table-status {

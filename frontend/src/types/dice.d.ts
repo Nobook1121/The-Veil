@@ -7,6 +7,8 @@ interface DiceGroupSpecLike {
     count: number;
     faces?: number[];
     labels?: string[];
+    /** 与 faces 对齐的骰面标记：自然 1/20 由规则集声明，前端只负责高亮。 */
+    highlights?: Array<"critical" | "fumble" | null>;
 }
 
 interface DiceRerollState {
@@ -30,6 +32,9 @@ interface DiceRollMeta {
     roll?: number | null;
     rolls: number[];
     candidates: number[];
+    natural?: number | null;
+    advantage?: boolean;
+    disadvantage?: boolean;
     bonus_dice: number;
     penalty_dice: number;
     total: number;
@@ -83,6 +88,9 @@ interface DiceResultSnapshot {
     count?: number;
     sides?: number;
     candidates?: number[];
+    natural?: number | null;
+    advantage?: boolean;
+    disadvantage?: boolean;
     auto?: boolean;
     reroll?: DiceRerollState | null;
 }
@@ -110,6 +118,8 @@ interface DiceRolledPayload extends DiceResultSnapshot {
     room_id?: string;
     request_id?: string;
     auto?: boolean;
+    /** 服务端已终局确认（超时自动投掷等），客户端无需再等投掷者点「确定」。 */
+    confirmed?: boolean;
     player_roll?: boolean;
     reason?: string;
     operator?: string;

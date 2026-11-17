@@ -414,11 +414,17 @@ def _dice_roll_metadata(
         groups, selected = _percentile_groups(value, candidates)
         success = bool(result.get("success"))
         success_level = result.get("success_level")
+        natural = None
+        advantage = False
+        disadvantage = False
     else:
         expression = str(result.get("expression") or "")
         terms = result.get("terms") if isinstance(result.get("terms"), list) else []
         match = re.fullmatch(r"(\d+)d(\d+)", expression)
         count = int(sum(int(term.get("count") or 0) for term in terms)) if terms else (int(match.group(1)) if match else len(result.get("rolls") or []))
+        # 优势/劣势会掷两枚 d20，但表达式仍是 1d20；展示数量以实际骰面为准。
+        if not terms:
+            count = max(count, len(result.get("rolls") or []))
         sides = int(match.group(2)) if match else 0
         rolls = [int(item) for item in (result.get("rolls") or [])]
         faces = rolls
@@ -442,7 +448,35 @@ def _dice_roll_metadata(
         selected = None
         success = result.get("success")
         success_level = result.get("success_level")
-    return {
+        natural = result.get("natural")
+        try:
+            natural = int(natural) if natural is not None else None
+        except (TypeError, ValueError):
+            natural = None
+        advantage = bool(result.get("advantage"))
+        disadvantage = bool(result.get("disadvantage"))
+        # d20：自然 1/20 由插件语义声明为 fumble/critical，核心只做展示标记；
+        # 优势/劣势的两枚骰子中，被采用的那一枚用 selected 高亮。
+        if mode == "d20":
+            for group in groups:
+                group_faces = [int(item) for item in (group.get("faces") or [])]
+                if str(group.get("type") or "") != "d20" and int(group.get("sides") or 0) != 20:
+                    continue
+                group["highlights"] = [
+                    "critical" if face == 20 else "fumble" if face == 1 else None
+                    for face in group_faces
+                ]
+            if natural is None and rolls:
+                natural = rolls[0]
+            if (
+                selected is None
+                and len(rolls) > 1
+                and len(groups) == 1
+                and natural is not None
+                and natural in rolls
+            ):
+                selected = {"group": 0, "index": rolls.index(natural)}
+    metadata = {
         "mode": mode,
         "expression": expression,
         "count": count,
@@ -472,6 +506,12 @@ def _dice_roll_metadata(
         "reroll": {"enabled": False, "mode": "off", "limit": 0, "used": 0, "remaining": 0},
         "confirmed": True,
     }
+    # 只给 d20 元数据加自然值/优势字段，百分骰路径保持原有键集不变。
+    if mode == "d20":
+        metadata["natural"] = natural
+        metadata["advantage"] = advantage
+        metadata["disadvantage"] = disadvantage
+    return metadata
 
 
 def _effective_dice_settings(context: Any) -> dict[str, Any]:

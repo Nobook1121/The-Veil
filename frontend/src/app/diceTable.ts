@@ -2,6 +2,20 @@
  * 虚拟投掷桌：居中浮层播放当前档位动画，驱动玩家投掷、重投与确认流程。
  * 只影响本机渲染；服务端结果是权威值。
  */
+interface RulesetDiceDeclaration {
+    type?: string;
+    sides?: number;
+    expression?: string;
+    modes?: string[];
+    critical?: number[];
+    fumble?: number[];
+}
+
+interface RulesetDiceOption {
+    id: string;
+    dice?: RulesetDiceDeclaration | null;
+}
+
 const DiceTable = (() => {
     interface ActiveRoll {
         requestId: string;
@@ -32,6 +46,11 @@ const DiceTable = (() => {
     let inputBound = false;
     let rolling = false;
     let lastRoomId = "";
+    /** 规则集声明的默认骰型；空表达式时按房间规则集决定 d20 / d100。 */
+    let rulesetDice:
+        | { rulesetId: string; expression: string; sides: number; critical: number[]; fumble: number[] }
+        | null = null;
+    let rulesetDiceRequest: Promise<void> | null = null;
 
     /** 同时存活的 3D 实例上限：超出后把最早的骰桌改为平铺 2D 结果，及时释放 WebGL context。 */
     const MAX_LIVE_3D = 4;
@@ -76,6 +95,46 @@ const DiceTable = (() => {
             || document.body;
     }
 
+    function roomRulesetId(): string {
+        return String(window.currentRoom?.ruleset_id || "").trim().toLowerCase();
+    }
+
+    /**
+     * 读取当前房间规则集声明的骰型。核心不判断 d20 / d100：
+     * 插件在 /api/rulesets 的 ``dice`` 字段里声明 expression、critical 与 fumble，
+     * 这里只把它缓存下来作为骰桌默认值。
+     */
+    async function loadRulesetDice(): Promise<void> {
+        const rulesetId = roomRulesetId();
+        if (!rulesetId) return;
+        if (rulesetDice?.rulesetId === rulesetId) return;
+        if (rulesetDiceRequest) return rulesetDiceRequest;
+        rulesetDiceRequest = (async () => {
+            try {
+                const response = await TrpgApi.get<ApiResponse<RulesetDiceOption[]>>("/api/rulesets");
+                const rows = response?.success && Array.isArray(response.data) ? response.data : [];
+                const row = rows.find((item) => String(item?.id || "").trim().toLowerCase() === rulesetId);
+                const dice = row?.dice || {};
+                const faces = (values: unknown): number[] => Array.isArray(values)
+                    ? values.map(Number).filter((value) => Number.isFinite(value) && value > 0)
+                    : [];
+                rulesetDice = {
+                    rulesetId,
+                    expression: String(dice.expression || "").trim() || "1d100",
+                    sides: Number(dice.sides) || 100,
+                    critical: faces(dice.critical),
+                    fumble: faces(dice.fumble),
+                };
+            } catch {
+                // 旧服务端或未登录：保留百分骰兜底，不阻塞骰桌。
+                rulesetDice = { rulesetId, expression: "1d100", sides: 100, critical: [], fumble: [] };
+            } finally {
+                rulesetDiceRequest = null;
+            }
+        })();
+        return rulesetDiceRequest;
+    }
+
     function planFromMeta(meta: DiceRollMeta): DicePlan {
         return {
             mode: meta.mode || "standard",
@@ -116,6 +175,9 @@ const DiceTable = (() => {
             count: meta.count ?? 0,
             sides: meta.sides ?? 0,
             candidates: meta.candidates || [],
+            natural: meta.natural ?? null,
+            advantage: Boolean(meta.advantage),
+            disadvantage: Boolean(meta.disadvantage),
             reroll: meta.reroll ?? null,
         };
     }
@@ -715,7 +777,14 @@ const DiceTable = (() => {
         if (!expiresAt) return;
         const delay = Math.min(Math.max(expiresAt - Date.now() + 5000, 1000), 10 * 60 * 1000);
         window.setTimeout(() => {
-            if (active !== target || target.snapshot !== null) return;
+            if (active !== target) return;
+            if (target.snapshot !== null) {
+                // 服务端已出结果，但终局事件丢失（投掷者离线/断线）：按终局收桌，
+                // 避免骰桌永远停在「等待投掷者确认结果」并堵住后续投掷。
+                target.overlay.setStatus("等待确认超时，已自动结算", "auto");
+                finishActive(true, target.snapshot);
+                return;
+            }
             target.overlay.setStatus("投掷请求已结束", "cancelled");
             finishActive(false);
         }, delay);
@@ -777,7 +846,14 @@ const DiceTable = (() => {
             await playSnapshot(target, snapshot, true);
         }
         if (payload.auto) target.overlay.setStatus("等待超时，系统已自动投掷", "auto");
-        if (payload.state === "awaiting_confirm" || (target.reroll && target.reroll.enabled && payload.state !== "forced")) {
+        // 超时自动投掷 / 强制投掷是服务端终局结算（confirmed），不能再进入
+        // 「等待投掷者确认」：投掷者已离线时没有人会点确认，骰桌会永久停住，
+        // 而且 active 不清空会让后续所有投掷排队。
+        const serverSettled = payload.auto === true
+            || payload.confirmed === true
+            || target.state === "timeout"
+            || target.state === "forced";
+        if (!serverSettled && (payload.state === "awaiting_confirm" || (target.reroll && target.reroll.enabled && payload.state !== "forced"))) {
             showRerollControls(target);
             return;
         }
@@ -1259,6 +1335,10 @@ const DiceTable = (() => {
             showNotification("纯文本档位下不显示骰桌；已忽略 table 参数。", "info");
             return false;
         }
+        if (!String(expression || "").trim()) {
+            await loadRulesetDice();
+            expression = rulesetDice?.expression || "1d100";
+        }
         let plan: DicePlan;
         try {
             plan = new DiceTool().localPlan(expression);
@@ -1357,6 +1437,8 @@ const DiceTable = (() => {
         const id = roomId();
         if (id === lastRoomId) return;
         lastRoomId = id;
+        rulesetDice = null;
+        rulesetDiceRequest = null;
         if (active) {
             active.renderer?.dispose();
             active.overlay.close();

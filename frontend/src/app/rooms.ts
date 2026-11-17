@@ -36,6 +36,8 @@ let roomEntrySelectionRoomId: string | null = null;
 let roomEntryAllowCardless = false;
 // 目标房间的房规技能基础值上限（进入房间选择角色卡时用于校验）。
 let roomEntrySkillBases: Record<string, number> = {};
+// 目标房间的规则集：加入 5e 房间时角色卡列表必须来自 5e 模块。
+let roomEntryRulesetId = "";
 const roomActionLocks = new Set<string>();
 // 创建房间弹窗的剧本选择器状态（点击后展开下拉搜索，避免结果撑高弹窗）。
 let roomScenarioPickerScenarios: Scenario[] = [];
@@ -252,21 +254,25 @@ async function enforceSkillBaseLimits(
     return sheet.clampCardSkillBases?.(card, overrides) || characterCard;
 }
 
-function getCharacterCards(): COC7CharacterCard[] {
-    const sheet = defaultRoomCharacterSheet();
-    if (!sheet) {
+function getCharacterCards(rulesetIdOverride?: string | null): COC7CharacterCard[] {
+    const override = String(rulesetIdOverride || "").trim().toLowerCase();
+    const resolved = override
+        ? window.TrpgCharacterSheetRegistry?.forRuleset?.(override) || defaultRoomCharacterSheet()
+        : defaultRoomCharacterSheet();
+    if (!resolved) {
         blockMissingCharacterSheet(null);
         throw new Error("没有已注册的角色卡模块，无法列出角色卡。");
     }
-    if (typeof sheet.listCharacterCards !== "function") {
+    const lister = (resolved as unknown as { listCharacterCards?: () => unknown }).listCharacterCards;
+    if (typeof lister !== "function") {
         showNotification("当前规则集未实现角色卡列表，无法展示角色卡。", "error");
         throw new Error("当前规则集未实现角色卡列表。");
     }
-    return sheet.listCharacterCards();
+    return lister.call(resolved) as COC7CharacterCard[];
 }
 
-function getRoomEntryCards(): COC7CharacterCard[] {
-    const cards = getCharacterCards();
+function getRoomEntryCards(rulesetId?: string | null): COC7CharacterCard[] {
+    const cards = getCharacterCards(rulesetId);
     if (isElevatedUser()) return cards;
     const user = window.currentUser;
     if (!user) return [];
@@ -288,7 +294,7 @@ function populateCharacterSelect(selectId: string): void {
     const select = document.getElementById(selectId) as HTMLSelectElement | null;
     if (!select) return;
     const currentValue = select.value;
-    const cards = getCharacterCards();
+    const cards = getCharacterCards(roomEntryRulesetId);
     select.innerHTML = window.TrpgTemplates.render("select-placeholder-option", { label: "请选择角色卡" });
     cards.forEach((card) => {
         const option = document.createElement("option");
@@ -340,15 +346,20 @@ async function promptRoomEntryCharacterSelection(
     action: RoomEntrySelection["action"],
     roomId: string | null = null,
     skillBases: Record<string, number> = {},
-    options: { allowCardless?: boolean } = {}
+    options: { allowCardless?: boolean; rulesetId?: string } = {}
 ): Promise<RoomEntrySelection | null> {
     roomEntrySelectionAction = action;
     roomEntrySelectionRoomId = roomId;
     roomEntrySkillBases = skillBases;
     roomEntryAllowCardless = options.allowCardless === true;
+    roomEntryRulesetId = String(options.rulesetId || "").trim().toLowerCase();
     // Character management loads cards asynchronously during application
     // startup. Refreshing the room list can happen before that request ends.
-    await window.reloadCharacterManagement?.();
+    // 目标房间声明了规则集时，先让对应模块加载自己的卡，再打开选择器。
+    const entryModule = roomEntryRulesetId
+        ? window.TrpgCharacterSheetRegistry?.forRuleset?.(roomEntryRulesetId)
+        : undefined;
+    await (entryModule?.reloadCharacterManagement?.() || window.reloadCharacterManagement?.());
     populateRoomEntryCharacterSelect();
     roomEntrySelectionSettled = false;
     const baseMessage = action === "create" ? "创建房间前请选择要使用的角色卡。" : "进入房间前请选择要使用的角色卡。";
@@ -403,19 +414,30 @@ function getSelectedCharacterCardSnapshot(selectId: string): Partial<COC7Charact
         blockMissingCharacterSheet(null);
         throw new Error("没有已注册的角色卡模块，无法读取角色卡。");
     }
+    // 目标房间声明了规则集时只问对应模块；否则遍历时按快照的 rulesetId 归位，
+    // 避免 CoC 模块把 5e 卡先转成 CoC 骨架。
+    const preferred = roomEntryRulesetId ? registry.forRuleset(roomEntryRulesetId) : undefined;
+    const modules: Array<{ id: string; sheet: RoomCharacterSheet }> = preferred
+        ? [{ id: roomEntryRulesetId, sheet: preferred as unknown as RoomCharacterSheet }]
+        : registry.ids()
+            .map((id) => ({ id: String(id).toLowerCase(), sheet: registry.get(id) as unknown as RoomCharacterSheet }))
+            .filter((item) => Boolean(item.sheet));
+    let fallback: Partial<COC7CharacterCard> | null = null;
     let supported = false;
-    for (const id of registry.ids()) {
-        const sheet = registry.get(id) as unknown as RoomCharacterSheet | undefined;
+    for (const { id, sheet } of modules) {
         if (!sheet?.getCharacterCardSnapshot) continue;
         supported = true;
         const snapshot = sheet.getCharacterCardSnapshot(cardId);
-        if (snapshot) return snapshot;
+        if (!snapshot) continue;
+        const snapshotRuleset = String((snapshot as { rulesetId?: string }).rulesetId || id).toLowerCase();
+        if (snapshotRuleset === id) return snapshot;
+        if (!fallback) fallback = snapshot;
     }
     if (!supported) {
         blockMissingCharacterSheet(null);
         throw new Error("已注册的角色卡模块无法读取角色卡快照。");
     }
-    return null;
+    return fallback;
 }
 
 function syncRoomCharacterSelection(roomId: string, characterCard: Partial<COC7CharacterCard> | null): void {
@@ -863,7 +885,10 @@ async function openRoomDetail(roomId: string): Promise<void> {
             return;
         }
 
-        const roomEntrySelection = await promptRoomEntryCharacterSelection("join", roomId, roomSkillBaseOverrides(data.data), { allowCardless: cardlessAllowed });
+        const roomEntrySelection = await promptRoomEntryCharacterSelection("join", roomId, roomSkillBaseOverrides(data.data), {
+            allowCardless: cardlessAllowed,
+            rulesetId: String(data.data.ruleset_id || ""),
+        });
         if (!roomEntrySelection || roomEntrySelection.createCharacter || roomEntrySelection.action === "create") return;
 
         if (roomEntrySelection.action === "invisible") {
@@ -939,6 +964,8 @@ async function enterRoom(room: Room): Promise<void> {
 
     currentRoom = room;
     window.currentRoom = currentRoom;
+    // 角色卡面按房间规则集切换模块；进入房间后立即同步一次。
+    window.dispatchEvent(new CustomEvent("trpg:room-changed", { detail: { room } }));
     // 只有进入房间后才会启用该房间的背景音乐（离开房间时清空）。
     window.TrpgBgm?.setRoom(room);
     // 实时配乐/配图同样按房间作用域恢复：读取上次段落与最近场景图。
@@ -960,6 +987,8 @@ async function enterRoom(room: Room): Promise<void> {
     window.renderChatMessages?.(messages);
     setText("homeRoomTitle", room.name);
     setText("homeRoomOnlineCount", formatRoomOnlineCount(room));
+    // workspace 顶栏/场景名与在线人数由统一事件同步，避免重复查询 DOM。
+    window.dispatchEvent(new CustomEvent("trpg:room-meta", { detail: { room } }));
     const selfMember = activeRoomMembers(room).find((member) => String(member.user_id) === String(window.currentUser?.user_id));
     if (selfMember?.character_card) {
         syncRoomCharacterSelection(room.id, selfMember.character_card);
@@ -1942,6 +1971,7 @@ function renderRoomMemberList(room: Room | null): void {
     const members = visibleRoom ? activeRoomMembers(visibleRoom) : [];
     if (!visibleRoom || members.length === 0) {
         container.innerHTML = emptyHtml;
+        window.dispatchEvent(new CustomEvent("trpg:room-members-rendered", { detail: { room } }));
         return;
     }
     // 无卡玩家单独归入「观战」，与有卡调查员分组显示，避免混在在线/离线列表里。
@@ -2392,6 +2422,7 @@ function clearCurrentRoom(): void {
     if (currentRoom?.id) window.leaveSocketRoom?.(currentRoom.id);
     currentRoom = null;
     window.currentRoom = null;
+    window.dispatchEvent(new CustomEvent("trpg:room-changed", { detail: { room: null } }));
     window.TrpgBgm?.setRoom(null);
     window.TrpgImmersive?.setRoom(null);
     window.TrpgDiceTable?.onRoomChanged();

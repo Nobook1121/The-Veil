@@ -277,6 +277,8 @@
 
     function render(payload: CombatStatePayload): void {
         state = payload;
+        // 桌面条回合胶囊按同一份战斗状态更新；核心不解析规则语义。
+        window.dispatchEvent(new CustomEvent("trpg:combat-changed", { detail: { state: payload } }));
         const panel = byId("combatPanel");
         if (!panel) return;
         if (!payload.active) {

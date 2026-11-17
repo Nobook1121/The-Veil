@@ -260,7 +260,8 @@ function initChat(): void {
         // /dice ... table：前端本地投掷并在屏幕中央召唤骰桌，不经过 AI。
         const diceTableCommand = message.trim().match(/^\/dice(?:\s+([\s\S]*?))?\s+(?:--table|-t|table)\s*$/i);
         if (diceTableCommand) {
-            const expression = (diceTableCommand[1] || "").trim() || "1d100";
+            // 省略表达式时由骰桌按房间规则集声明的骰型决定（5e 为 d20，CoC 为 d100）。
+            const expression = (diceTableCommand[1] || "").trim();
             activeChatInput.value = "";
             await sendVisibleMessage("player", message);
             await window.TrpgDiceTable?.handleDiceTableCommand(expression);
