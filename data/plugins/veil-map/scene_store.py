@@ -11,6 +11,7 @@
         tokens.json      # 棋子
         walls.json       # 墙体、门、窗
         lights.json      # 光源与环境光
+        fog.json         # 迷雾探索记录（格位掩码）
         journal.json     # 幂等请求记录
 
 每次写入生成一个完整的新代目录，最后才原子替换 ``active.json``。因此
@@ -51,8 +52,12 @@ SHARDS = (
     ("tokens", "tokens.json"),
     ("walls", "walls.json"),
     ("lights", "lights.json"),
+    ("fog", "fog.json"),
     ("recent_requests", "journal.json"),
 )
+
+# 后来加入的分片：旧代目录里没有这个文件也视为完整（读成空值）。
+OPTIONAL_SHARDS = {"fog"}
 
 
 def scenes_root(room_dir) -> Path:
@@ -112,6 +117,9 @@ def _load_generation(path: Path, scene_id: str) -> dict[str, Any] | None:
     for key, filename in SHARDS:
         payload = read_json(path / filename, default=None)
         if not isinstance(payload, dict):
+            if key in OPTIONAL_SHARDS:
+                state[key] = {}
+                continue
             return None
         try:
             shard_revision = int(payload.get("revision") or 0)
@@ -201,7 +209,8 @@ def save(room_dir, state: dict[str, Any]) -> None:
     write_json_atomic(generation_dir / "scene.json", meta)
 
     for key, filename in SHARDS:
-        payload: dict[str, Any] = {"revision": revision, key: state.get(key) or []}
+        default: Any = {} if key == "fog" else []
+        payload: dict[str, Any] = {"revision": revision, key: state.get(key) or default}
         if key == "lights":
             payload["ambient_light"] = state.get("ambient_light") or {}
         write_json_atomic(generation_dir / filename, payload)

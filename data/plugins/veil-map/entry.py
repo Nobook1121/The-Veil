@@ -36,7 +36,7 @@ from trpg_server.room_rules import resolve_rule_id
 bp = Blueprint("veil_map", __name__, url_prefix="/api/plugins/veil-map")
 logger = logging.getLogger(__name__)
 
-MAP_VERSION = 2
+MAP_VERSION = 3
 DEFAULT_GRID = 64
 MIN_GRID = 16
 MAX_GRID = 256
@@ -86,6 +86,7 @@ spatial = _load_local_module("spatial")
 media = _load_local_module("media")
 importer = _load_local_module("importer")
 scene_store = _load_local_module("scene_store")
+visibility = _load_local_module("visibility")
 
 
 def _now() -> str:
@@ -103,12 +104,66 @@ def _clamp(value: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
 
+def _as_bool(value: Any, fallback: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value if value is not None else "").strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return fallback
+
+
 def _default_calibration() -> dict[str, int]:
     return {"cells_across": 0, "cells_down": 0, "offset_x": 0, "offset_y": 0}
 
 
 def _default_ambient() -> dict[str, Any]:
     return {"enabled": False, "color": "#ffffff", "intensity": 1.0, "darkness": 0.0, "baked": False}
+
+
+DEFAULT_VISION_CELLS = 12
+MAX_VISION_CELLS = MAX_BOUNDS * 2
+
+
+def _default_fog() -> dict[str, Any]:
+    """静态迷雾：探索记录（格位掩码）+ 观察者当前可见。
+
+    动态光源投影与昼夜还没做，``mode`` 先把接口占住。迷雾默认开启，房主可
+    在面板里关掉；关掉后服务端退回整图推送（没有任何需要隐藏的信息）。
+    """
+    return {
+        "enabled": True,
+        "mode": "static",
+        "vision_cells": DEFAULT_VISION_CELLS,
+        "explored": "",
+        "explored_count": 0,
+        "bounds_cells": BOUNDS_DEFAULT,
+        "grid_size": DEFAULT_GRID,
+    }
+
+
+def _normalize_fog(raw: Any, bounds_cells: int, grid_size: int) -> dict[str, Any]:
+    """迷雾掩码只在同一网格/边界下有效；标定变了就清空探索记录。"""
+    fog = _default_fog()
+    fog["bounds_cells"] = int(bounds_cells)
+    fog["grid_size"] = int(grid_size)
+    if not isinstance(raw, dict):
+        return fog
+    fog["enabled"] = bool(raw.get("enabled", fog["enabled"]))
+    fog["vision_cells"] = _clamp(
+        _as_int(raw.get("vision_cells"), fog["vision_cells"]), 1, MAX_VISION_CELLS
+    )
+    text = str(raw.get("explored") or "")
+    same_space = (
+        _as_int(raw.get("bounds_cells"), 0) == int(bounds_cells)
+        and _as_int(raw.get("grid_size"), 0) == int(grid_size)
+    )
+    if same_space and text:
+        fog["explored"] = text
+        fog["explored_count"] = max(0, _as_int(raw.get("explored_count"), 0))
+    return fog
 
 
 def _default_map() -> dict[str, Any]:
@@ -126,6 +181,7 @@ def _default_map() -> dict[str, Any]:
         "walls": [],
         "lights": [],
         "ambient_light": _default_ambient(),
+        "fog": _default_fog(),
         "recent_requests": [],
         "updated_at": "",
     }
@@ -199,6 +255,8 @@ def _normalize_token(raw: Any, grid: int, offset_x: int, offset_y: int) -> dict[
         "owner_user_id": str(raw.get("owner_user_id") or ""),
         "kind": str(raw.get("kind") or "npc"),
         "combatant": str(raw.get("combatant") or ""),
+        # 0 表示跟随场景迷雾的默认视野；>0 时为该棋子的视野半径（格）。
+        "vision_cells": _clamp(_as_int(raw.get("vision_cells"), 0), 0, MAX_VISION_CELLS),
     }
 
 
@@ -447,6 +505,7 @@ def _normalize_map(raw: Any) -> dict[str, Any]:
     state["walls"] = _normalize_walls(state.get("walls"))
     state["lights"] = _normalize_lights(state.get("lights"))
     state["ambient_light"] = _normalize_ambient(state.get("ambient_light"))
+    state["fog"] = _normalize_fog(state.get("fog"), state["bounds_cells"], state["grid_size"])
     state["recent_requests"] = _normalize_recent_requests(state.get("recent_requests"))
     state["updated_at"] = str(state.get("updated_at") or "")
     return state
@@ -492,6 +551,8 @@ def _save_map(
         }
         records.append(record)
         normalized["recent_requests"] = records[-RECENT_REQUEST_LIMIT:]
+    # 探索记录跟着场景一起落盘：写操作发生时，队伍视野覆盖的格子并入掩码。
+    _update_explored(room_dir, normalized)
     scene_store.save(room_dir, _persistable(normalized))
     return normalized
 
@@ -676,9 +737,13 @@ def _conflict_request(
     *,
     message: str = "",
     data: dict[str, Any] | None = None,
+    map_view: dict[str, Any] | None = None,
+    fog_view: dict[str, Any] | None = None,
 ):
     revision = int(state.get("revision") or 0)
-    body = {"map": state, "can_manage": manager}
+    body = {"map": map_view or state, "can_manage": manager}
+    if fog_view is not None:
+        body["fog"] = fog_view
     if isinstance(data, dict):
         body.update(data)
     return _receipt(
@@ -734,7 +799,12 @@ def _duplicate_record(state: dict[str, Any], request_id: str) -> dict[str, Any] 
 
 
 def _duplicate_receipt(
-    state: dict[str, Any], manager: bool, record: dict[str, Any]
+    state: dict[str, Any],
+    manager: bool,
+    record: dict[str, Any],
+    *,
+    map_view: dict[str, Any] | None = None,
+    fog_view: dict[str, Any] | None = None,
 ) -> Any:
     """重复提交直接返回成功，不再产生副作用。"""
     token = None
@@ -744,7 +814,9 @@ def _duplicate_receipt(
             (item for item in state.get("tokens") or [] if str(item.get("id")) == token_id),
             None,
         )
-    data: dict[str, Any] = {"map": state, "can_manage": manager}
+    data: dict[str, Any] = {"map": map_view or state, "can_manage": manager}
+    if fog_view is not None:
+        data["fog"] = fog_view
     if token is not None:
         data["token"] = token
     return _receipt(
@@ -758,17 +830,85 @@ def _duplicate_receipt(
     )
 
 
+def _move_for_observer(
+    move: dict[str, Any] | None,
+    state: dict[str, Any],
+    user_id: Any,
+    manager: bool,
+    visible: set[tuple[int, int]],
+) -> dict[str, Any] | None:
+    """移动提示按观察者裁剪：看不到的棋子动了，就不该收到提示。"""
+    if not isinstance(move, dict) or not move:
+        return None
+    if manager or str(move.get("actor_user_id") or "") == str(user_id or ""):
+        return move
+    grid, offset_x, offset_y = _grid_of(state)
+    token_id = str(move.get("token_id") or "")
+    for token in state.get("tokens") or []:
+        if str(token.get("id")) != token_id:
+            continue
+        if any(cell in visible for cell in _token_cells(token, grid, offset_x, offset_y)):
+            return move
+        return None
+    return None
+
+
 def _broadcast(room_id: str, state: dict[str, Any], move: dict[str, Any] | None = None) -> None:
+    """按观察者裁剪后推送。
+
+    迷雾关闭时没有需要隐藏的信息，沿用整房间广播；迷雾开启时逐个成员推到
+    各自的 ``user:<id>`` 频道：KP 收完整地图与全队可见范围，玩家只收自己
+    当前能看到的棋子、墙体、光源与视野掩码。
+    """
     socketio = current_app.extensions.get("socketio")
     if socketio is None:
         return
-    payload: dict[str, Any] = {"room_id": str(room_id), "map": state}
-    if isinstance(move, dict) and move:
-        payload["move"] = move
-    try:
-        socketio.emit("room_map_changed", payload, room=str(room_id))
-    except Exception:  # noqa: BLE001 - 广播失败不能影响写入结果
-        logger.warning("veil_map_broadcast_failed room=%s", room_id, exc_info=True)
+    room_dir, info = find_room(room_id)
+    fog = state.get("fog") or {}
+    if not info or not fog.get("enabled"):
+        payload: dict[str, Any] = {"room_id": str(room_id), "map": state}
+        if isinstance(move, dict) and move:
+            payload["move"] = move
+        try:
+            socketio.emit("room_map_changed", payload, room=str(room_id))
+        except Exception:  # noqa: BLE001 - 广播失败不能影响写入结果
+            logger.warning("veil_map_broadcast_failed room=%s", room_id, exc_info=True)
+        return
+
+    delivered = 0
+    seen: set[str] = set()
+    for member in _active_members(info):
+        user_id = str(member.get("user_id") or "").strip()
+        if not user_id or user_id in seen:
+            continue
+        seen.add(user_id)
+        manager = _user_is_manager(info, user_id)
+        view, fog_view, visible = _observer_scope(state, room_dir, user_id, manager)
+        payload = {
+            "room_id": str(room_id),
+            "map": view,
+            "fog": fog_view,
+            "can_manage": manager,
+        }
+        filtered_move = _move_for_observer(move, state, user_id, manager, visible)
+        if filtered_move:
+            payload["move"] = filtered_move
+        try:
+            socketio.emit("room_map_changed", payload, room=f"user:{user_id}")
+            delivered += 1
+        except Exception:  # noqa: BLE001 - 单个成员失败不影响其他人
+            logger.warning(
+                "veil_map_broadcast_failed room=%s user=%s", room_id, user_id, exc_info=True
+            )
+    if delivered == 0:
+        # 没有成员（或成员都没有 user_id）时退回房间广播，避免地图完全静默。
+        payload = {"room_id": str(room_id), "map": state}
+        if isinstance(move, dict) and move:
+            payload["move"] = move
+        try:
+            socketio.emit("room_map_changed", payload, room=str(room_id))
+        except Exception:  # noqa: BLE001
+            logger.warning("veil_map_broadcast_failed room=%s", room_id, exc_info=True)
 
 
 def _combat_payload(room_dir) -> dict[str, Any]:
@@ -845,6 +985,263 @@ def _cell_of(
         int(math.floor((x - offset_x) / grid + 1e-9)),
         int(math.floor((y - offset_y) / grid + 1e-9)),
     )
+
+
+# ---------------------------------------------------------------------------
+# 视线、迷雾与按观察者裁剪
+# ---------------------------------------------------------------------------
+
+MAX_VISION_SOURCES = 8
+
+
+def _vision_versions(state: dict[str, Any]) -> tuple[str, str]:
+    """墙体 / 光源内容版本；没有任何变化时可见性缓存直接命中。"""
+    return (
+        visibility.state_version(state.get("walls") or []),
+        visibility.state_version(state.get("lights") or []),
+    )
+
+
+def _scene_room_key(room_dir) -> str:
+    try:
+        return str(Path(room_dir).resolve())
+    except OSError:
+        return str(room_dir or "")
+
+
+def _pc_tokens(state: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        token
+        for token in state.get("tokens") or []
+        if str(token.get("kind") or "") == "pc"
+    ]
+
+
+def _vision_tokens(
+    state: dict[str, Any], user_id: Any, manager: bool
+) -> list[dict[str, Any]]:
+    """观察者来源：KP 用全队，玩家用自己绑定的棋子；没有绑定棋子时退回队伍视野。"""
+    pcs = _pc_tokens(state)
+    if manager:
+        return pcs
+    owned = [
+        token
+        for token in pcs
+        if str(token.get("owner_user_id") or "") == str(user_id or "")
+    ]
+    return owned or pcs
+
+
+def _vision_radius(token: dict[str, Any], fog: dict[str, Any]) -> int:
+    radius = _as_int(token.get("vision_cells"), 0)
+    if radius <= 0:
+        radius = _as_int(fog.get("vision_cells"), DEFAULT_VISION_CELLS)
+    return _clamp(radius, 1, MAX_VISION_CELLS)
+
+
+def _vision_for(
+    state: dict[str, Any], room_dir, tokens: list[dict[str, Any]]
+) -> tuple[set[tuple[int, int]], list[list[tuple[float, float]]], list[str]]:
+    """一组观察者棋子的可见格并集、可见多边形与来源 id。"""
+    fog = state.get("fog") or {}
+    if not fog.get("enabled"):
+        return set(), [], []
+    grid, offset_x, offset_y = _grid_of(state)
+    bounds = _clamp(
+        _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS
+    )
+    wall_version, light_version = _vision_versions(state)
+    room_key = _scene_room_key(room_dir)
+    cells: set[tuple[int, int]] = set()
+    polygons: list[list[tuple[float, float]]] = []
+    observers: list[str] = []
+    for token in tokens[:MAX_VISION_SOURCES]:
+        cell_x, cell_y = _cell_of(token, grid, offset_x, offset_y)
+        width, height = _footprint(token)
+        origin = visibility.footprint_center(
+            cell_x, cell_y, width, height, grid, (offset_x, offset_y)
+        )
+        result = visibility.visibility(
+            origin,
+            walls=state.get("walls") or [],
+            grid_size=grid,
+            offset=(offset_x, offset_y),
+            bounds_cells=bounds,
+            radius_cells=_vision_radius(token, fog),
+            wall_version=wall_version,
+            light_version=light_version,
+            room_key=room_key,
+        )
+        cells |= result["cells"]
+        polygons.append(result["polygon"])
+        observers.append(str(token.get("id") or ""))
+    return cells, polygons, observers
+
+
+def _token_cells(
+    token: dict[str, Any], grid: int, offset_x: int, offset_y: int
+) -> list[tuple[int, int]]:
+    cell_x, cell_y = _cell_of(token, grid, offset_x, offset_y)
+    width, height = _footprint(token)
+    return [
+        (cell_x + dx, cell_y + dy)
+        for dx in range(width)
+        for dy in range(height)
+    ]
+
+
+def _polyline_touches(
+    points: Any, cells: set[tuple[int, int]], grid: int, offset_x: int, offset_y: int
+) -> bool:
+    """折线是否经过给定格集合（按半格采样，避免整段逐点求交）。"""
+    if not cells or not isinstance(points, list) or len(points) < 2:
+        return False
+    step = max(1.0, grid * 0.5)
+    for index in range(len(points) - 1):
+        start, end = points[index], points[index + 1]
+        try:
+            ax, ay = float(start.get("x")), float(start.get("y"))
+            bx, by = float(end.get("x")), float(end.get("y"))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        length = math.hypot(bx - ax, by - ay)
+        count = max(1, int(math.ceil(length / step)))
+        for sample in range(count + 1):
+            ratio = sample / count
+            x = ax + (bx - ax) * ratio
+            y = ay + (by - ay) * ratio
+            cell = (
+                int(math.floor((x - offset_x) / grid + 1e-9)),
+                int(math.floor((y - offset_y) / grid + 1e-9)),
+            )
+            if cell in cells:
+                return True
+    return False
+
+
+def _fog_public(fog: dict[str, Any]) -> dict[str, Any]:
+    """给客户端的迷雾元信息；格位掩码放在载荷顶层的 fog 字段里。"""
+    return {
+        "enabled": bool(fog.get("enabled")),
+        "mode": str(fog.get("mode") or "static"),
+        "vision_cells": _as_int(fog.get("vision_cells"), DEFAULT_VISION_CELLS),
+        "bounds_cells": _as_int(fog.get("bounds_cells"), BOUNDS_DEFAULT),
+        "grid_size": _as_int(fog.get("grid_size"), DEFAULT_GRID),
+        "explored_count": _as_int(fog.get("explored_count"), 0),
+    }
+
+
+def _filter_map_for_observer(
+    state: dict[str, Any],
+    user_id: Any,
+    visible: set[tuple[int, int]],
+    known: set[tuple[int, int]],
+) -> dict[str, Any]:
+    """玩家只拿到自己该看到的棋子 / 墙体 / 光源子集。"""
+    grid, offset_x, offset_y = _grid_of(state)
+    view = dict(state)
+    tokens: list[dict[str, Any]] = []
+    for token in state.get("tokens") or []:
+        owner = str(token.get("owner_user_id") or "")
+        if owner and owner == str(user_id or ""):
+            tokens.append(token)
+            continue
+        if any(cell in visible for cell in _token_cells(token, grid, offset_x, offset_y)):
+            tokens.append(token)
+    view["tokens"] = tokens
+    view["walls"] = [
+        wall
+        for wall in state.get("walls") or []
+        if _polyline_touches(wall.get("points"), known, grid, offset_x, offset_y)
+    ]
+    lights: list[dict[str, Any]] = []
+    for light in state.get("lights") or []:
+        cell = (
+            int(math.floor((_as_int(light.get("x"), 0) - offset_x) / grid + 1e-9)),
+            int(math.floor((_as_int(light.get("y"), 0) - offset_y) / grid + 1e-9)),
+        )
+        if cell in known:
+            lights.append(light)
+    view["lights"] = lights
+    view["recent_requests"] = []
+    view["fog"] = _fog_public(state.get("fog") or {})
+    return view
+
+
+def _observer_scope(
+    state: dict[str, Any], room_dir, user_id: Any, manager: bool
+) -> tuple[dict[str, Any], dict[str, Any], set[tuple[int, int]]]:
+    """返回 ``(裁剪后的地图, 迷雾载荷, 当前可见格)``；KP 拿完整地图。"""
+    fog = state.get("fog") or {}
+    if not fog.get("enabled"):
+        return state, {"enabled": False}, set()
+    bounds = _clamp(
+        _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS
+    )
+    grid, offset_x, offset_y = _grid_of(state)
+    party_cells, _party_polygons, _party_observers = _vision_for(
+        state, room_dir, _pc_tokens(state)
+    )
+    visible, polygons, observers = _vision_for(
+        state, room_dir, _vision_tokens(state, user_id, manager)
+    )
+    explored = visibility.decode_mask(fog.get("explored"), bounds) | party_cells
+    if manager:
+        view = state
+    else:
+        known = visible | explored
+        view = _filter_map_for_observer(state, user_id, visible, known)
+    payload = {
+        "enabled": True,
+        "mode": str(fog.get("mode") or "static"),
+        "viewer": "kp" if manager else "player",
+        "bounds_cells": bounds,
+        "half": bounds // 2,
+        "grid_size": grid,
+        "grid_offset": {"x": offset_x, "y": offset_y},
+        "vision_cells": _as_int(fog.get("vision_cells"), DEFAULT_VISION_CELLS),
+        "explored": visibility.encode_mask(explored, bounds),
+        "visible": visibility.encode_mask(visible, bounds),
+        "explored_count": len(explored),
+        "visible_count": len(visible),
+        "observers": observers,
+        "polygons": [
+            [[round(point[0], 1), round(point[1], 1)] for point in polygon]
+            for polygon in polygons[:4]
+        ],
+    }
+    return view, payload, visible
+
+
+def _update_explored(room_dir, state: dict[str, Any]) -> None:
+    """把队伍当前可见格并入探索记录（只增不减）。"""
+    fog = state.get("fog") or {}
+    if not fog.get("enabled"):
+        return
+    bounds = _clamp(
+        _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS
+    )
+    cells, _polygons, _observers = _vision_for(state, room_dir, _pc_tokens(state))
+    if not cells:
+        return
+    explored = visibility.decode_mask(fog.get("explored"), bounds) | cells
+    encoded = visibility.encode_mask(explored, bounds)
+    if encoded != fog.get("explored"):
+        fog["explored"] = encoded
+        fog["explored_count"] = len(explored)
+
+
+def _user_is_manager(info: dict[str, Any], user_id: Any) -> bool:
+    target = str(user_id or "")
+    if not target:
+        return False
+    if target == str(info.get("creator_id") or ""):
+        return True
+    for member in _active_members(info):
+        if str(member.get("user_id") or "") != target:
+            continue
+        return str(member.get("room_role") or "").strip().lower() in _OWNER_ROLES
+    return False
 
 
 def _payload_cell(
@@ -1087,8 +1484,11 @@ def _map_payload(room_id: str, room_dir, info: dict[str, Any]) -> dict[str, Any]
         if _reconcile_tokens(state, info):
             state = _save_map(room_dir, state)
     _role, manager = _room_context(info)
+    user_id = str(session.get("user_id") or "")
+    view, fog_payload, _visible = _observer_scope(state, room_dir, user_id, manager)
     return {
-        "map": state,
+        "map": view,
+        "fog": fog_payload,
         "combat": _combat_payload(room_dir),
         "can_manage": manager,
         "room_id": str(room_id),
@@ -1137,6 +1537,7 @@ def update_map(room_id: str):
         if expected != state["revision"]:
             return _conflict_request(state, manager, request_id)
 
+        reset_fog = False
         if "grid_size" in payload:
             grid = _as_int(payload.get("grid_size"), state["grid_size"])
             if grid < MIN_GRID or grid > MAX_GRID:
@@ -1146,6 +1547,8 @@ def update_map(room_id: str):
                     request_id=request_id,
                     revision=state["revision"],
                 )
+            if grid != state["grid_size"]:
+                reset_fog = True
             state["grid_size"] = grid
         if "bounds_cells" in payload:
             bounds = _as_int(payload.get("bounds_cells"), state["bounds_cells"])
@@ -1156,6 +1559,8 @@ def update_map(room_id: str):
                     request_id=request_id,
                     revision=state["revision"],
                 )
+            if bounds != state["bounds_cells"]:
+                reset_fog = True
             state["bounds_cells"] = bounds
         if "background" in payload:
             background = _safe_background(payload.get("background"))
@@ -1170,11 +1575,32 @@ def update_map(room_id: str):
                 state["background_meta"] = {}
                 state["calibration"] = _default_calibration()
                 state["grid_offset"] = {"x": 0, "y": 0}
+                reset_fog = True
             state["background"] = background
+        if "fog_enabled" in payload:
+            # 关掉迷雾时保留已探索掩码，重新打开可以接着用。
+            state["fog"]["enabled"] = _as_bool(payload.get("fog_enabled"), state["fog"]["enabled"])
+        if "fog_vision_cells" in payload:
+            vision = _as_int(payload.get("fog_vision_cells"), state["fog"]["vision_cells"])
+            if vision < 1 or vision > MAX_VISION_CELLS:
+                return _invalid_request(
+                    f"视野半径必须在 1–{MAX_VISION_CELLS} 格之间。",
+                    "map.invalid_vision",
+                    request_id=request_id,
+                    revision=state["revision"],
+                )
+            state["fog"]["vision_cells"] = vision
+        if reset_fog:
+            # 网格 / 边界 / 背景变了，旧格位掩码失去意义，从当前位置重新探索。
+            state["fog"]["explored"] = ""
+            state["fog"]["explored_count"] = 0
         state = _save_map(
             room_dir,
             state,
             {"request_id": request_id, "action": "map.update"},
+        )
+        _view, fog_payload, _visible = _observer_scope(
+            state, room_dir, str(session.get("user_id") or ""), True
         )
     _broadcast(room_id, state)
     return _receipt(
@@ -1183,7 +1609,7 @@ def update_map(room_id: str):
         request_id=request_id,
         revision=state["revision"],
         code="map.updated",
-        data={"map": state, "can_manage": True},
+        data={"map": state, "fog": fog_payload, "can_manage": True},
     )
 
 
@@ -1282,6 +1708,9 @@ def add_token(room_id: str):
             state,
             {"request_id": request_id, "action": "token.add", "token_id": token["id"]},
         )
+        _view, fog_payload, _visible = _observer_scope(
+            state, room_dir, str(session.get("user_id") or ""), True
+        )
     _broadcast(room_id, state)
     return _receipt(
         "success",
@@ -1289,7 +1718,7 @@ def add_token(room_id: str):
         request_id=request_id,
         revision=state["revision"],
         code="map.token_added",
-        data={"map": state, "token": token, "can_manage": True},
+        data={"map": state, "fog": fog_payload, "token": token, "can_manage": True},
     )
 
 
@@ -1331,6 +1760,9 @@ def delete_token(room_id: str, token_id: str):
             state,
             {"request_id": request_id, "action": "token.delete", "token_id": token_id},
         )
+        _view, fog_payload, _visible = _observer_scope(
+            state, room_dir, str(session.get("user_id") or ""), True
+        )
     _broadcast(room_id, state)
     return _receipt(
         "success",
@@ -1338,7 +1770,7 @@ def delete_token(room_id: str, token_id: str):
         request_id=request_id,
         revision=state["revision"],
         code="map.token_deleted",
-        data={"map": state, "can_manage": True},
+        data={"map": state, "fog": fog_payload, "can_manage": True},
     )
 
 
@@ -1349,6 +1781,7 @@ def move_token(room_id: str, token_id: str):
         return denied
     payload = _write_payload()
     _role, manager = _room_context(info)
+    viewer_id = str(session.get("user_id") or "")
     with _MAP_LOCK:
         state = _load_map(room_dir)
         token = next((item for item in state["tokens"] if str(item.get("id")) == str(token_id)), None)
@@ -1360,7 +1793,7 @@ def move_token(room_id: str, token_id: str):
                 http_status=404,
             )
         owner_user_id = str(token.get("owner_user_id") or "")
-        if not manager and owner_user_id != str(session.get("user_id") or ""):
+        if not manager and owner_user_id != viewer_id:
             return _rejected_request(
                 "你只能移动自己绑定的棋子。",
                 "map.not_owner",
@@ -1369,11 +1802,16 @@ def move_token(room_id: str, token_id: str):
         request_id, expected, error = _read_envelope(payload, state)
         if error is not None:
             return error
+        view, fog_view, _visible = _observer_scope(state, room_dir, viewer_id, manager)
         record = _duplicate_record(state, request_id)
         if record is not None:
-            return _duplicate_receipt(state, manager, record)
+            return _duplicate_receipt(
+                state, manager, record, map_view=view, fog_view=fog_view
+            )
         if expected != state["revision"]:
-            return _conflict_request(state, manager, request_id)
+            return _conflict_request(
+                state, manager, request_id, map_view=view, fog_view=fog_view
+            )
 
         grid, offset_x, offset_y = _grid_of(state)
         target = _payload_cell(payload, grid, offset_x, offset_y)
@@ -1391,7 +1829,7 @@ def move_token(room_id: str, token_id: str):
                 "map.out_of_bounds",
                 request_id=request_id,
                 revision=state["revision"],
-                data={"map": state, "can_manage": manager},
+                data={"map": view, "fog": fog_view, "can_manage": manager},
             )
         occupied = _occupancy_conflict(state, token, cell_x, cell_y)
         if occupied:
@@ -1400,7 +1838,7 @@ def move_token(room_id: str, token_id: str):
                 "map.cell_occupied",
                 request_id=request_id,
                 revision=state["revision"],
-                data={"map": state, "can_manage": manager},
+                data={"map": view, "fog": fog_view, "can_manage": manager},
             )
         ok, code, message = _apply_combat_cost(room_id, room_dir, state, token, cell_x, cell_y)
         if not ok:
@@ -1410,7 +1848,7 @@ def move_token(room_id: str, token_id: str):
                 request_id=request_id,
                 revision=state["revision"],
                 http_status=409,
-                data={"map": state, "can_manage": manager},
+                data={"map": view, "fog": fog_view, "can_manage": manager},
             )
         _set_token_cell(token, cell_x, cell_y, fraction_x, fraction_y, grid, offset_x, offset_y)
         state = _save_map(
@@ -1418,6 +1856,7 @@ def move_token(room_id: str, token_id: str):
             state,
             {"request_id": request_id, "action": "token.move", "token_id": token["id"]},
         )
+        view, fog_view, _visible = _observer_scope(state, room_dir, viewer_id, manager)
     _broadcast(room_id, state)
     return _receipt(
         "success",
@@ -1425,7 +1864,13 @@ def move_token(room_id: str, token_id: str):
         request_id=request_id,
         revision=state["revision"],
         code="map.token_moved",
-        data={"map": state, "token": token, "combat": _combat_payload(room_dir), "can_manage": manager},
+        data={
+            "map": view,
+            "fog": fog_view,
+            "token": token,
+            "combat": _combat_payload(room_dir),
+            "can_manage": manager,
+        },
     )
 
 
@@ -1509,6 +1954,9 @@ def update_walls(room_id: str):
             state,
             {"request_id": request_id, "action": "map.walls"},
         )
+        _view, fog_payload, _visible = _observer_scope(
+            state, room_dir, str(session.get("user_id") or ""), True
+        )
     _broadcast(room_id, state)
     return _receipt(
         "success",
@@ -1516,7 +1964,7 @@ def update_walls(room_id: str):
         request_id=request_id,
         revision=state["revision"],
         code="map.walls_updated",
-        data={"map": state, "can_manage": True},
+        data={"map": state, "fog": fog_payload, "can_manage": True},
     )
 
 
@@ -1643,6 +2091,10 @@ def import_map(room_id: str):
                 code="map.import_failed",
                 http_status=500,
             )
+        # 视线的几何计算放在落盘之后：即使计算失败，也不会误删已提交的地图。
+        _view, fog_payload, _visible = _observer_scope(
+            state, room_dir, str(session.get("user_id") or ""), True
+        )
     _broadcast(room_id, state)
     summary = {
         "format": bundle["format"],
@@ -1672,6 +2124,7 @@ def import_map(room_id: str):
         code="map.imported",
         data={
             "map": state,
+            "fog": fog_payload,
             "can_manage": True,
             "import": summary,
             "background": {
@@ -1786,6 +2239,9 @@ def calibrate_map(room_id: str):
             state,
             {"request_id": request_id, "action": "map.calibration"},
         )
+        _view, fog_payload, _visible = _observer_scope(
+            state, room_dir, str(session.get("user_id") or ""), True
+        )
     _broadcast(room_id, state)
     return _receipt(
         "success",
@@ -1793,7 +2249,7 @@ def calibrate_map(room_id: str):
         request_id=request_id,
         revision=state["revision"],
         code="map.calibrated",
-        data={"map": state, "can_manage": True},
+        data={"map": state, "fog": fog_payload, "can_manage": True},
     )
 
 
@@ -1983,6 +2439,7 @@ def _move_token_agent(
     move: dict[str, Any] = {
         "source": "ai",
         "actor": _agent_actor_label(info, agent_id, user_id),
+        "actor_user_id": str(user_id or ""),
         "token_id": str(token.get("id") or ""),
         "token_name": str(token.get("name") or ""),
         "from": {"cell_x": from_cell_x, "cell_y": from_cell_y},

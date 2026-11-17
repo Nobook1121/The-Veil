@@ -169,7 +169,10 @@ def test_player_can_only_move_own_token(client):
     data = moved.get_json()["data"]
     assert _token(data, "member-u2")["x"] == 192
     events = [item for item in app.extensions["socketio"].events if item["event"] == "room_map_changed"]
-    assert events and events[-1]["room"] == "room1"
+    assert events
+    # 迷雾开启时不再整房间广播：每个成员收到自己的裁剪载荷。
+    assert all(str(item["room"]).startswith("user:") for item in events)
+    assert "user:u2" in {str(item["room"]) for item in events}
 
 
 def test_combat_move_uses_turn_and_movement_budget(tmp_path):
@@ -282,7 +285,8 @@ def test_duplicate_request_id_has_no_side_effect(client):
         for item in app.extensions["socketio"].events
         if item["event"] == "room_map_changed"
     ]
-    assert len(events) == 1
+    assert events
+    assert all(str(item["room"]).startswith("user:") for item in events)
 
 
 def test_stale_revision_returns_conflict_and_latest_map(client):
@@ -1200,3 +1204,210 @@ def test_legacy_pixel_tokens_migrate_to_cells_without_visual_shift(client):
     resized_token = resized.get_json()["data"]["map"]["tokens"][0]
     assert (resized_token["cell_x"], resized_token["cell_y"]) == (1, 2)
     assert (resized_token["x"], resized_token["y"]) == (75, 123)
+
+
+# ---------------------------------------------------------------------------
+# 视线与迷雾
+# ---------------------------------------------------------------------------
+
+
+def test_visibility_blocked_by_wall_and_cached_by_version():
+    module = veil_map.visibility
+    module.reset_cache()
+    walls = [
+        {
+            "id": "wall-fog",
+            "kind": "wall",
+            "points": [{"x": 320, "y": -1600}, {"x": 320, "y": 1600}],
+        }
+    ]
+    version = module.state_version(walls)
+    origin = (96, 32)  # 格 (1, 0) 的中心
+
+    opened = module.visibility(
+        origin,
+        walls=[],
+        grid_size=64,
+        offset=(0, 0),
+        bounds_cells=50,
+        radius_cells=10,
+        wall_version=module.state_version([]),
+    )
+    assert (10, 0) in opened["cells"]
+
+    blocked = module.visibility(
+        origin,
+        walls=walls,
+        grid_size=64,
+        offset=(0, 0),
+        bounds_cells=50,
+        radius_cells=10,
+        wall_version=version,
+    )
+    assert (0, 0) in blocked["cells"] and (1, 0) in blocked["cells"]
+    assert (6, 0) not in blocked["cells"]
+    assert (10, 0) not in blocked["cells"]
+    assert len(blocked["polygon"]) >= 4
+
+    again = module.visibility(
+        origin,
+        walls=walls,
+        grid_size=64,
+        offset=(0, 0),
+        bounds_cells=50,
+        radius_cells=10,
+        wall_version=version,
+    )
+    assert again["cached"] is True
+
+    # 墙体版本变化立即失效缓存，并反映新的几何。
+    changed = module.visibility(
+        origin,
+        walls=[],
+        grid_size=64,
+        offset=(0, 0),
+        bounds_cells=50,
+        radius_cells=10,
+        wall_version="walls-v2",
+    )
+    assert changed["cached"] is False
+    assert (10, 0) in changed["cells"]
+
+
+def test_fog_mask_roundtrip():
+    module = veil_map.visibility
+    cells = {(0, 0), (1, 0), (-5, 3), (9, -9)}
+    encoded = module.encode_mask(cells, 20)
+    assert module.decode_mask(encoded, 20) == cells
+    assert module.decode_mask("", 20) == set()
+
+
+def _fog_api_room(client):
+    manager, app = client
+    _login(manager, "u1")
+    _map(manager)
+    added = _write(manager, "post", "/api/plugins/veil-map/rooms/room1/tokens", {
+        "name": "Ogre",
+        "cell_x": 10,
+        "cell_y": 0,
+    })
+    assert added.status_code == 200
+    walls = [
+        {
+            "id": "wall-fog",
+            "kind": "wall",
+            "points": [{"x": 320, "y": -1600}, {"x": 320, "y": 1600}],
+        }
+    ]
+    saved = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/walls", {"walls": walls})
+    assert saved.status_code == 200
+    return app, Path(app.config["ROOMS_DIR"]) / "room1"
+
+
+def test_fog_filters_player_payload_and_keeps_kp_full(client):
+    manager, _unused = client
+    app, room_dir = _fog_api_room(client)
+    visitor = app.test_client()
+    _login(visitor, "u2")
+
+    player = _map(visitor)
+    names = {token["name"] for token in player["map"]["tokens"]}
+    assert "Ogre" not in names
+    assert {"Alice", "Bob", "Carol"} <= names
+    assert {"wall-fog"} <= {wall["id"] for wall in player["map"]["walls"]}
+    assert player["fog"]["enabled"] is True
+    assert player["fog"]["viewer"] == "player"
+    visible = veil_map.visibility.decode_mask(player["fog"]["visible"], 50)
+    assert (1, 0) in visible
+    assert (10, 0) not in visible
+    assert veil_map.visibility.decode_mask(player["fog"]["explored"], 50)
+
+    kp = _map(manager)
+    assert "Ogre" in {token["name"] for token in kp["map"]["tokens"]}
+    assert kp["fog"]["viewer"] == "kp"
+
+
+def test_fog_broadcast_is_cropped_per_observer(client):
+    manager, _unused = client
+    app, room_dir = _fog_api_room(client)
+    token_id = next(
+        token["id"] for token in _map(manager)["map"]["tokens"] if token["name"] == "Ogre"
+    )
+    app.extensions["socketio"].events.clear()
+
+    context = _agent_context(room_dir, user_id="u1", agent_id="kp")
+    with app.app_context():
+        result = veil_map._move_token_agent(
+            room_dir,
+            context.room_info(),
+            room_id="room1",
+            user_id="u1",
+            agent_id="kp",
+            token_ref=token_id,
+            cell_x=11,
+            cell_y=0,
+        )
+    assert result["ok"] is True, result
+
+    events = {
+        str(item["room"]): item["payload"]
+        for item in app.extensions["socketio"].events
+        if item["event"] == "room_map_changed"
+    }
+    assert "room1" not in events
+    assert "move" in events["user:u1"]
+    assert "move" not in events["user:u2"]
+    assert "Ogre" not in {token["name"] for token in events["user:u2"]["map"]["tokens"]}
+    assert "Ogre" in {token["name"] for token in events["user:u1"]["map"]["tokens"]}
+
+
+def test_fog_explored_mask_is_persisted_with_scene_revision(client):
+    _manager, app = client
+    _app, room_dir = _fog_api_room(client)
+    generation = _generation_dir(room_dir)
+    fog_payload = json.loads((generation / "fog.json").read_text(encoding="utf-8"))
+    scene = json.loads((generation / "scene.json").read_text(encoding="utf-8"))
+    assert fog_payload["revision"] == scene["revision"]
+    assert fog_payload["fog"]["enabled"] is True
+    explored = veil_map.visibility.decode_mask(fog_payload["fog"]["explored"], 50)
+    assert (1, 0) in explored or (0, 0) in explored
+
+    reloaded = veil_map._load_map(room_dir)
+    assert reloaded["fog"]["explored"]
+    assert reloaded["fog"]["bounds_cells"] == 50
+
+
+def test_fog_can_be_disabled_and_reenabled(client):
+    manager, _unused = client
+    app, _room_dir = _fog_api_room(client)
+    off = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map", {"fog_enabled": False})
+    assert off.status_code == 200
+    assert off.get_json()["data"]["map"]["fog"]["enabled"] is False
+
+    visitor = app.test_client()
+    _login(visitor, "u2")
+    player = _map(visitor)
+    assert player["fog"]["enabled"] is False
+    assert "Ogre" in {token["name"] for token in player["map"]["tokens"]}
+
+    on = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map", {"fog_enabled": True})
+    assert on.status_code == 200
+    assert on.get_json()["data"]["map"]["fog"]["enabled"] is True
+
+
+def test_coc7_room_has_no_fog_entry(tmp_path):
+    rooms = _write_room(tmp_path)
+    info_path = rooms / "room1" / "info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    info["ruleset_id"] = "coc7"
+    info_path.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.config.update(ROOMS_DIR=str(rooms), CONFIG_DIR=str(tmp_path / "config"))
+    app.register_blueprint(veil_map.bp)
+    client = app.test_client()
+    _login(client, "u1")
+
+    body = client.get("/api/plugins/veil-map/rooms/room1/map").get_json()
+    assert body["error"] == "map.ruleset_disabled"
+    assert "fog" not in body
