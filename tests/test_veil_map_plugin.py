@@ -1469,11 +1469,14 @@ def test_fog_explored_mask_is_persisted_with_scene_revision(client):
     scene = json.loads((generation / "scene.json").read_text(encoding="utf-8"))
     assert fog_payload["revision"] == scene["revision"]
     assert fog_payload["fog"]["enabled"] is True
-    explored = veil_map.visibility.decode_mask(fog_payload["fog"]["explored"], 50)
-    assert (1, 0) in explored or (0, 0) in explored
+    assert fog_payload["fog"]["scope"] == "observer"
+    recorded: set[tuple[int, int]] = set()
+    for value in fog_payload["fog"]["explored_by"].values():
+        recorded |= veil_map._parse_cells_text(value["cells"], 50)
+    assert (1, 0) in recorded or (0, 0) in recorded
 
     reloaded = veil_map._load_map(room_dir)
-    assert reloaded["fog"]["explored"]
+    assert reloaded["fog"]["explored_by"]
     assert reloaded["fog"]["bounds_cells"] == 50
 
 
@@ -1493,6 +1496,149 @@ def test_fog_can_be_disabled_and_reenabled(client):
     on = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map", {"fog_enabled": True})
     assert on.status_code == 200
     assert on.get_json()["data"]["map"]["fog"]["enabled"] is True
+
+
+def test_fog_explored_is_recorded_per_observer(client):
+    manager, app = client
+    _app, room_dir = _fog_api_room(client)
+    # 清掉挡在中间的单面墙，让两枚 PC 能各自去到地图两侧。
+    cleared = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/walls", {"walls": []})
+    assert cleared.status_code == 200
+    for token_id, cell_x in (("member-u2", -20), ("member-u3", 20)):
+        moved = _write(
+            manager,
+            "post",
+            f"/api/plugins/veil-map/rooms/room1/tokens/{token_id}/move",
+            {"cell_x": cell_x, "cell_y": 0},
+        )
+        assert moved.status_code == 200, moved.get_json()
+
+    bob = app.test_client()
+    _login(bob, "u2")
+    bob_view = _map(bob)
+    assert bob_view["fog"]["scope"] == "observer"
+    bob_explored = veil_map.visibility.decode_mask(bob_view["fog"]["explored"], 50)
+    assert (-20, 0) in bob_explored
+    assert (20, 0) not in bob_explored
+
+    carol = app.test_client()
+    _login(carol, "u3")
+    carol_explored = veil_map.visibility.decode_mask(_map(carol)["fog"]["explored"], 50)
+    assert (20, 0) in carol_explored
+    assert (-20, 0) not in carol_explored
+
+    # 落盘是每个观察者的稀疏增量（连续段压缩），不是一人一份整图掩码。
+    generation = _generation_dir(room_dir)
+    saved = json.loads((generation / "fog.json").read_text(encoding="utf-8"))["fog"]
+    assert set(saved["explored_by"]) >= {"user:u2", "user:u3"}
+    assert saved["explored"] == ""
+    cells_text = saved["explored_by"]["user:u2"]["cells"]
+    assert cells_text
+    recorded = veil_map._parse_cells_text(cells_text, 50)
+    assert (-20, 0) in recorded
+    assert (20, 0) not in recorded
+    assert len(cells_text) < 50 * 50
+
+
+def test_fog_sparse_cells_roundtrip_with_ranges():
+    cells = {(x, y) for x in range(-3, 3) for y in (0, 1)}
+    text = veil_map._cells_text(cells, 20)
+    assert veil_map._parse_cells_text(text, 20) == cells
+    assert veil_map._parse_cells_text("3-5,9", 20) == {
+        (-7, -10),
+        (-6, -10),
+        (-5, -10),
+        (-1, -10),
+    }
+
+
+def test_fog_party_scope_merges_observer_records(client):
+    manager, app = client
+    _fog_api_room(client)
+    cleared = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/walls", {"walls": []})
+    assert cleared.status_code == 200
+    for token_id, cell_x in (("member-u2", -20), ("member-u3", 20)):
+        moved = _write(
+            manager,
+            "post",
+            f"/api/plugins/veil-map/rooms/room1/tokens/{token_id}/move",
+            {"cell_x": cell_x, "cell_y": 0},
+        )
+        assert moved.status_code == 200, moved.get_json()
+
+    switched = _write(
+        manager,
+        "put",
+        "/api/plugins/veil-map/rooms/room1/map",
+        {"fog_scope": "party"},
+    )
+    assert switched.status_code == 200
+    fog = switched.get_json()["data"]["map"]["fog"]
+    assert fog["scope"] == "party"
+    assert fog["explored_by"] == {}
+    merged = veil_map.visibility.decode_mask(fog["explored"], 50)
+    assert (-20, 0) in merged and (20, 0) in merged
+
+    bob = app.test_client()
+    _login(bob, "u2")
+    shared = veil_map.visibility.decode_mask(_map(bob)["fog"]["explored"], 50)
+    assert (-20, 0) in shared and (20, 0) in shared
+
+    back = _write(
+        manager,
+        "put",
+        "/api/plugins/veil-map/rooms/room1/map",
+        {"fog_scope": "observer"},
+    )
+    assert back.status_code == 200
+    assert back.get_json()["data"]["map"]["fog"]["scope"] == "observer"
+
+
+def test_legacy_shared_mask_is_visible_to_every_observer(client):
+    manager, app = client
+    _app, room_dir = _fog_api_room(client)
+    generation = _generation_dir(room_dir)
+    path = generation / "fog.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    legacy = {(-24, 24), (24, -24)}
+    payload["fog"] = {
+        "enabled": True,
+        "mode": "static",
+        "vision_cells": 12,
+        "explored": veil_map.visibility.encode_mask(legacy, 50),
+        "explored_count": len(legacy),
+        "bounds_cells": 50,
+        "grid_size": 64,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    for user in ("u2", "u3"):
+        visitor = app.test_client()
+        _login(visitor, user)
+        view = _map(visitor)
+        assert view["fog"]["scope"] == "observer"
+        explored = veil_map.visibility.decode_mask(view["fog"]["explored"], 50)
+        assert legacy <= explored
+    # 旧掩码迁移后仍是共享基线，没有被改写成单份整图掩码。
+    assert veil_map.visibility.decode_mask(
+        veil_map._load_map(room_dir)["fog"]["explored"], 50
+    ) == legacy
+
+
+def test_fog_falls_back_to_party_view_without_bound_token(client):
+    manager, app = client
+    _app, room_dir = _fog_api_room(client)
+    _map(manager)
+    with app.app_context():
+        state = veil_map._load_map(room_dir)
+        _view, fog_payload, visible = veil_map._observer_scope(
+            state, room_dir, "ghost", False
+        )
+    assert fog_payload["viewer"] == "player"
+    party_visible = veil_map.visibility.decode_mask(fog_payload["visible"], 50)
+    assert visible == party_visible
+    # 队伍视野包含三枚 PC 棋子所在的格。
+    assert (0, 0) in visible and (1, 0) in visible and (2, 0) in visible
 
 
 def test_coc7_room_has_no_fog_entry(tmp_path):

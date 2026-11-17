@@ -146,6 +146,11 @@
             '<label class="vmap-check"><input type="checkbox" data-vmap-fog-enabled> 启用战争迷雾</label>',
             '<label class="vmap-field">默认视野半径（格）',
             '<input type="number" min="1" max="400" step="1" data-vmap-fog-vision></label>',
+            '<label class="vmap-field">探索记录范围',
+            '<select data-vmap-fog-scope>',
+            '<option value="observer">按观察者（默认，各自记录）</option>',
+            '<option value="party">队伍共享</option>',
+            '</select></label>',
             '<div class="vmap-note" data-vmap-fog-info hidden></div>',
             '<div class="vmap-divider"></div>',
             '<div class="vmap-section-label">场景光源</div>',
@@ -200,6 +205,7 @@
         var panelImportInfo = panel.querySelector("[data-vmap-import-info]");
         var panelFogEnabled = panel.querySelector("[data-vmap-fog-enabled]");
         var panelFogVision = panel.querySelector("[data-vmap-fog-vision]");
+        var panelFogScope = panel.querySelector("[data-vmap-fog-scope]");
         var panelFogInfo = panel.querySelector("[data-vmap-fog-info]");
         var panelLightList = panel.querySelector("[data-vmap-light-list]");
         var panelCalibration = panel.querySelector("[data-vmap-calibration]");
@@ -910,10 +916,16 @@
                 if (panelFogVision) {
                     panelFogVision.value = String(asInt(fogState.vision_cells, 12));
                 }
+                if (panelFogScope) {
+                    panelFogScope.value = fogState.scope === "party" ? "party" : "observer";
+                }
                 if (panelFogInfo) {
                     var explored = asInt(fogState.explored_count, 0);
+                    var shared = fogState.scope === "party";
                     panelFogInfo.hidden = fogState.enabled !== true;
-                    panelFogInfo.textContent = "已探索 " + explored + " 格；玩家只收到自己视野内的棋子与墙体。";
+                    panelFogInfo.textContent = (shared
+                        ? "当前按队伍共享记录：已记录 " + explored + " 格，所有玩家看到同一片区域。"
+                        : "当前按观察者记录：已记录 " + explored + " 格；每名玩家只看到自己探索过的区域，无绑定棋子的玩家退回队伍视野。");
                 }
             }
             if (mode === "token" && panelName) panelName.focus();
@@ -928,6 +940,7 @@
                 background: String(panelBackground.value || "").trim(),
                 fog_enabled: Boolean(panelFogEnabled && panelFogEnabled.checked),
                 fog_vision_cells: clamp(asInt(panelFogVision && panelFogVision.value, 12), 1, 400),
+                fog_scope: panelFogScope && panelFogScope.value === "party" ? "party" : "observer",
             })).then(function (response) {
                 if (destroyed) return;
                 if (!response || response.success !== true) {

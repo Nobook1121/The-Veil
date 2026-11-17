@@ -135,10 +135,23 @@ def _default_ambient() -> dict[str, Any]:
 DEFAULT_VISION_CELLS = 12
 MAX_VISION_CELLS = MAX_BOUNDS * 2
 MAX_ACTIVE_LIGHTS = 24
+MAX_FOG_OBSERVERS = 256
+_FOG_SCOPES = {"observer", "party"}
+_OBSERVER_KEY = re.compile(r"^(?:user|token):[A-Za-z0-9._:@-]{1,96}$")
 
 
 def _default_fog() -> dict[str, Any]:
-    """静态迷雾：探索记录（格位掩码）+ 观察者当前可见。
+    """静态迷雾：探索记录 + 观察者当前可见。
+
+    探索记录有两种范围（``scope``）：
+
+    - ``observer``（默认）：每名观察者分别记录自己探索过的区域，玩家之间
+      存在信息差；没有绑定棋子的玩家退回队伍视角。
+    - ``party``：队伍共享一份探索记录，所有玩家看到同一片已探索区域。
+
+    ``explored`` 保存共享基线（旧数据迁移来源，也是 ``party`` 范围的累计
+    记录）；``explored_by`` 按观察者保存**增量**：只存基线之外新探索到的
+    格，用线性下标的稀疏文本表示，不写一人一份整图掩码。
 
     动态光源投影做的是静态投影（光源位置、明暗半径、墙体遮挡），昼夜循环
     和天气没有实现。迷雾默认开启，房主可在面板里关掉；关掉后服务端退回
@@ -147,22 +160,115 @@ def _default_fog() -> dict[str, Any]:
     return {
         "enabled": True,
         "mode": "static",
+        "scope": "observer",
         "vision_cells": DEFAULT_VISION_CELLS,
         "explored": "",
         "explored_count": 0,
+        "explored_by": {},
         "bounds_cells": BOUNDS_DEFAULT,
         "grid_size": DEFAULT_GRID,
     }
 
 
+def _cells_text(cells: Any, bounds_cells: int) -> str:
+    """格集合 → 稀疏线性下标文本（升序、连续段写成 ``起-止``）。
+
+    只记录实际探索到的格，连续段压成一个区间：常见视野圆盘每行一段，
+    比逐个坐标或整图掩码都小。越界格丢弃。
+    """
+    bounds = max(1, int(bounds_cells))
+    half = bounds // 2
+    indices: set[int] = set()
+    for item in cells or []:
+        try:
+            cell_x, cell_y = int(item[0]), int(item[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if not (-half <= cell_x < bounds - half and -half <= cell_y < bounds - half):
+            continue
+        indices.add((cell_y + half) * bounds + (cell_x + half))
+    ordered = sorted(indices)
+    if not ordered:
+        return ""
+    parts: list[str] = []
+    start = prev = ordered[0]
+    for index in ordered[1:]:
+        if index == prev + 1:
+            prev = index
+            continue
+        parts.append(str(start) if start == prev else f"{start}-{prev}")
+        start = prev = index
+    parts.append(str(start) if start == prev else f"{start}-{prev}")
+    return ",".join(parts)
+
+
+def _parse_cells_text(text: Any, bounds_cells: int) -> set[tuple[int, int]]:
+    """稀疏线性下标文本 → 格集合；支持 ``起-止`` 区间，非法条目跳过。"""
+    bounds = max(1, int(bounds_cells))
+    half = bounds // 2
+    total = bounds * bounds
+    cells: set[tuple[int, int]] = set()
+    for chunk in str(text or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if "-" in chunk:
+            left, _sep, right = chunk.partition("-")
+            try:
+                start, end = int(left), int(right)
+            except (TypeError, ValueError):
+                continue
+            if start > end:
+                start, end = end, start
+            for index in range(max(0, start), min(total - 1, end) + 1):
+                cells.add((index % bounds - half, index // bounds - half))
+            continue
+        try:
+            index = int(chunk)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= index < total:
+            cells.add((index % bounds - half, index // bounds - half))
+    return cells
+
+
+def _fog_records(fog: dict[str, Any], bounds_cells: int) -> dict[str, set[tuple[int, int]]]:
+    """解码所有观察者增量记录；空记录不返回。"""
+    records: dict[str, set[tuple[int, int]]] = {}
+    raw = fog.get("explored_by")
+    for key, value in (raw if isinstance(raw, dict) else {}).items():
+        payload = value if isinstance(value, dict) else {}
+        cells = _parse_cells_text(payload.get("cells"), bounds_cells)
+        if cells:
+            records[str(key)] = cells
+    return records
+
+
+def _observer_key(token: dict[str, Any]) -> str:
+    """观察者键：优先绑定玩家，未绑定棋子时退回棋子 id。"""
+    owner = str(token.get("owner_user_id") or "").strip()
+    if owner:
+        return f"user:{owner}"
+    token_id = str(token.get("id") or "").strip()
+    return f"token:{token_id}" if token_id else ""
+
+
 def _normalize_fog(raw: Any, bounds_cells: int, grid_size: int) -> dict[str, Any]:
-    """迷雾掩码只在同一网格/边界下有效；标定变了就清空探索记录。"""
+    """迷雾掩码只在同一网格/边界下有效；标定变了就清空探索记录。
+
+    旧数据只有共享 ``explored`` 掩码：归一化后 ``scope`` 取默认 ``observer``，
+    共享掩码作为基线保留，所有观察者在它之上继续记录各自增量——迁移后每个
+    人看到的仍是原来那份共享探索记录。
+    """
     fog = _default_fog()
     fog["bounds_cells"] = int(bounds_cells)
     fog["grid_size"] = int(grid_size)
     if not isinstance(raw, dict):
         return fog
     fog["enabled"] = bool(raw.get("enabled", fog["enabled"]))
+    fog["scope"] = str(raw.get("scope") or "").strip().lower()
+    if fog["scope"] not in _FOG_SCOPES:
+        fog["scope"] = "observer"
     fog["vision_cells"] = _clamp(
         _as_int(raw.get("vision_cells"), fog["vision_cells"]), 1, MAX_VISION_CELLS
     )
@@ -171,9 +277,21 @@ def _normalize_fog(raw: Any, bounds_cells: int, grid_size: int) -> dict[str, Any
         _as_int(raw.get("bounds_cells"), 0) == int(bounds_cells)
         and _as_int(raw.get("grid_size"), 0) == int(grid_size)
     )
-    if same_space and text:
+    if not same_space:
+        return fog
+    if text:
         fog["explored"] = text
         fog["explored_count"] = max(0, _as_int(raw.get("explored_count"), 0))
+    records = raw.get("explored_by")
+    if isinstance(records, dict):
+        for key, value in list(records.items())[:MAX_FOG_OBSERVERS]:
+            key = str(key or "").strip()
+            if not _OBSERVER_KEY.match(key):
+                continue
+            payload = value if isinstance(value, dict) else {}
+            cells = _parse_cells_text(payload.get("cells"), bounds_cells)
+            if cells:
+                fog["explored_by"][key] = {"cells": _cells_text(cells, bounds_cells)}
     return fog
 
 
@@ -1171,21 +1289,6 @@ def _pc_tokens(state: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def _vision_tokens(
-    state: dict[str, Any], user_id: Any, manager: bool
-) -> list[dict[str, Any]]:
-    """观察者来源：KP 用全队，玩家用自己绑定的棋子；没有绑定棋子时退回队伍视野。"""
-    pcs = _pc_tokens(state)
-    if manager:
-        return pcs
-    owned = [
-        token
-        for token in pcs
-        if str(token.get("owner_user_id") or "") == str(user_id or "")
-    ]
-    return owned or pcs
-
-
 def _vision_radius(token: dict[str, Any], fog: dict[str, Any]) -> int:
     radius = _as_int(token.get("vision_cells"), 0)
     if radius <= 0:
@@ -1278,6 +1381,7 @@ def _fog_public(fog: dict[str, Any]) -> dict[str, Any]:
     return {
         "enabled": bool(fog.get("enabled")),
         "mode": str(fog.get("mode") or "static"),
+        "scope": str(fog.get("scope") or "observer"),
         "vision_cells": _as_int(fog.get("vision_cells"), DEFAULT_VISION_CELLS),
         "bounds_cells": _as_int(fog.get("bounds_cells"), BOUNDS_DEFAULT),
         "grid_size": _as_int(fog.get("grid_size"), DEFAULT_GRID),
@@ -1325,7 +1429,12 @@ def _filter_map_for_observer(
 def _observer_scope(
     state: dict[str, Any], room_dir, user_id: Any, manager: bool
 ) -> tuple[dict[str, Any], dict[str, Any], set[tuple[int, int]]]:
-    """返回 ``(裁剪后的地图, 迷雾载荷, 当前可见格)``；KP 拿完整地图。"""
+    """返回 ``(裁剪后的地图, 迷雾载荷, 当前可见格)``；KP 拿完整地图。
+
+    探索记录与可见区域按同一观察者对齐：玩家只用自己绑定棋子的记录，没有
+    绑定棋子时退回队伍视角（队伍当前可见 + 全队探索记录）；队伍共享模式下
+    所有玩家使用同一份累计记录。
+    """
     fog = state.get("fog") or {}
     if not fog.get("enabled"):
         return state, {"enabled": False}, set()
@@ -1333,13 +1442,35 @@ def _observer_scope(
         _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS
     )
     grid, offset_x, offset_y = _grid_of(state)
-    party_cells, _party_polygons, _party_observers = _vision_for(
-        state, room_dir, _pc_tokens(state)
-    )
-    visible, polygons, observers = _vision_for(
-        state, room_dir, _vision_tokens(state, user_id, manager)
-    )
-    explored = visibility.decode_mask(fog.get("explored"), bounds) | party_cells
+    pcs = _pc_tokens(state)
+    owned = [
+        token
+        for token in pcs
+        if str(token.get("owner_user_id") or "") == str(user_id or "")
+    ]
+    fallback = not manager and not owned
+    visible_tokens = pcs if (manager or fallback) else owned
+    visible, polygons, observers = _vision_for(state, room_dir, visible_tokens)
+    scope = str(fog.get("scope") or "observer")
+    if scope not in _FOG_SCOPES:
+        scope = "observer"
+    base = visibility.decode_mask(fog.get("explored"), bounds)
+    records = _fog_records(fog, bounds)
+    explored = set(base)
+    if manager or fallback or scope == "party":
+        # KP / 无棋子玩家 / 队伍共享：都看队伍整体探索；前两者另外并入所有
+        # 观察者的增量记录（KP 本就该看到全部信息）。
+        party_cells, _party_polygons, _party_observers = _vision_for(
+            state, room_dir, pcs
+        )
+        explored |= party_cells
+        if manager or fallback:
+            for cells in records.values():
+                explored |= cells
+    else:
+        explored |= visible
+        for token in owned:
+            explored |= records.get(_observer_key(token), set())
     ambient = state.get("ambient_light") or {}
     bright_all, dim_all, light_sources = _scene_lighting(state, room_dir)
     if ambient.get("enabled"):
@@ -1364,6 +1495,7 @@ def _observer_scope(
     payload = {
         "enabled": True,
         "mode": str(fog.get("mode") or "static"),
+        "scope": scope,
         "viewer": "kp" if manager else "player",
         "bounds_cells": bounds,
         "half": bounds // 2,
@@ -1388,21 +1520,51 @@ def _observer_scope(
 
 
 def _update_explored(room_dir, state: dict[str, Any]) -> None:
-    """把队伍当前可见格并入探索记录（只增不减）。"""
+    """把当前可见格并入探索记录（只增不减）。
+
+    队伍共享模式沿用单份累计掩码；默认的按观察者模式把每个 PC 棋子自己的
+    视野写进 ``explored_by`` 的稀疏增量，已有共享掩码作为基线不动。
+    """
     fog = state.get("fog") or {}
     if not fog.get("enabled"):
         return
     bounds = _clamp(
         _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS
     )
-    cells, _polygons, _observers = _vision_for(state, room_dir, _pc_tokens(state))
-    if not cells:
+    if str(fog.get("scope") or "observer") == "party":
+        cells, _polygons, _observers = _vision_for(state, room_dir, _pc_tokens(state))
+        if not cells:
+            return
+        explored = visibility.decode_mask(fog.get("explored"), bounds) | cells
+        encoded = visibility.encode_mask(explored, bounds)
+        if encoded != fog.get("explored"):
+            fog["explored"] = encoded
+            fog["explored_count"] = len(explored)
         return
-    explored = visibility.decode_mask(fog.get("explored"), bounds) | cells
-    encoded = visibility.encode_mask(explored, bounds)
-    if encoded != fog.get("explored"):
-        fog["explored"] = encoded
-        fog["explored_count"] = len(explored)
+    records = _fog_records(fog, bounds)
+    # 共享基线里的格所有人都已经能看到，不再重复写进各人的增量。
+    base = visibility.decode_mask(fog.get("explored"), bounds)
+    changed = False
+    for token in _pc_tokens(state):
+        key = _observer_key(token)
+        if not key:
+            continue
+        cells, _polygons, _observers = _vision_for(state, room_dir, [token])
+        if not cells:
+            continue
+        cells -= base
+        current = records.get(key, set())
+        merged = current | cells
+        if merged != current:
+            records[key] = merged
+            changed = True
+    if not changed:
+        return
+    fog["explored_by"] = {
+        key: {"cells": _cells_text(cells, bounds)}
+        for key, cells in sorted(records.items())
+        if cells
+    }
 
 
 def _user_is_manager(info: dict[str, Any], user_id: Any) -> bool:
@@ -1839,9 +2001,21 @@ def update_map(room_id: str):
                 state["grid_offset"] = {"x": 0, "y": 0}
                 reset_fog = True
             state["background"] = background
+        scope_before = str(state["fog"].get("scope") or "observer")
+        scope_requested = ""
         if "fog_enabled" in payload:
             # 关掉迷雾时保留已探索掩码，重新打开可以接着用。
             state["fog"]["enabled"] = _as_bool(payload.get("fog_enabled"), state["fog"]["enabled"])
+        if "fog_scope" in payload:
+            scope_requested = str(payload.get("fog_scope") or "").strip().lower()
+            if scope_requested not in _FOG_SCOPES:
+                return _invalid_request(
+                    "探索记录范围只能是 observer（按观察者）或 party（队伍共享）。",
+                    "map.invalid_fog_scope",
+                    request_id=request_id,
+                    revision=state["revision"],
+                )
+            state["fog"]["scope"] = scope_requested
         if "fog_vision_cells" in payload:
             vision = _as_int(payload.get("fog_vision_cells"), state["fog"]["vision_cells"])
             if vision < 1 or vision > MAX_VISION_CELLS:
@@ -1856,6 +2030,20 @@ def update_map(room_id: str):
             # 网格 / 边界 / 背景变了，旧格位掩码失去意义，从当前位置重新探索。
             state["fog"]["explored"] = ""
             state["fog"]["explored_count"] = 0
+            state["fog"]["explored_by"] = {}
+        elif scope_requested == "party" and scope_before != "party":
+            # 切回队伍共享：把各观察者的增量并进共享记录，避免信息差关闭时丢失
+            # 已经探索过的区域。
+            merged = visibility.decode_mask(
+                state["fog"].get("explored"), state["bounds_cells"]
+            )
+            for cells in _fog_records(state["fog"], state["bounds_cells"]).values():
+                merged |= cells
+            state["fog"]["explored"] = visibility.encode_mask(
+                merged, state["bounds_cells"]
+            )
+            state["fog"]["explored_count"] = len(merged)
+            state["fog"]["explored_by"] = {}
         state = _save_map(
             room_dir,
             state,
