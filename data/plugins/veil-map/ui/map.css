@@ -196,6 +196,37 @@
     accent-color: #c8a35a;
 }
 
+.vmap-light-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 6px 0 10px;
+}
+
+.vmap-light-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.72rem;
+    color: rgba(236, 231, 219, 0.78);
+    cursor: pointer;
+}
+
+.vmap-light-row input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: #c8a35a;
+}
+
+.vmap-light-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    box-shadow: 0 0 6px currentColor;
+    flex: 0 0 auto;
+}
+
 .vmap-fog-toggle {
     position: absolute;
     right: 12px;

@@ -147,6 +147,10 @@
             '<label class="vmap-field">默认视野半径（格）',
             '<input type="number" min="1" max="400" step="1" data-vmap-fog-vision></label>',
             '<div class="vmap-note" data-vmap-fog-info hidden></div>',
+            '<div class="vmap-divider"></div>',
+            '<div class="vmap-section-label">场景光源</div>',
+            '<div class="vmap-light-list" data-vmap-light-list></div>',
+            '<div class="vmap-actions"><button type="button" data-vmap-save-lights>保存光源开关</button></div>',
             '<div class="vmap-actions">',
             '<button type="button" data-vmap-save-map>保存地图</button>',
             '<button type="button" class="secondary" data-vmap-close>关闭</button>',
@@ -197,6 +201,7 @@
         var panelFogEnabled = panel.querySelector("[data-vmap-fog-enabled]");
         var panelFogVision = panel.querySelector("[data-vmap-fog-vision]");
         var panelFogInfo = panel.querySelector("[data-vmap-fog-info]");
+        var panelLightList = panel.querySelector("[data-vmap-light-list]");
         var panelCalibration = panel.querySelector("[data-vmap-calibration]");
         var panelCalibrationInfo = panel.querySelector("[data-vmap-calibration-info]");
         var panelCellsAcross = panel.querySelector("[data-vmap-cells-across]");
@@ -257,6 +262,8 @@
                 bounds: bounds,
                 explored: decodeMask(fog.explored, size),
                 visible: decodeMask(fog.visible, size),
+                bright: decodeMask(fog.bright, size),
+                dim: decodeMask(fog.dim, size),
             };
             fogSignature = "";
             updateFogToggle();
@@ -271,7 +278,13 @@
         function ensureFogMaskCanvas() {
             if (!fogMask) return null;
             var bounds = fogMask.bounds;
-            var signature = [bounds, fogState.explored || "", fogState.visible || ""].join("|");
+            var signature = [
+                bounds,
+                fogState.explored || "",
+                fogState.visible || "",
+                fogState.bright || "",
+                fogState.dim || "",
+            ].join("|");
             if (signature === fogSignature) return fogMaskCanvas;
             fogSignature = signature;
             // 一格一像素：大场景也只有 bounds²，绘制时再放大，不在每帧重建。
@@ -283,9 +296,15 @@
             var data = image.data;
             var total = bounds * bounds;
             for (var index = 0; index < total; index += 1) {
+                // 未见 → 全黑；探索过但不在视野 → 半暗；视野内按明/暗区分层。
                 var alpha = 242;
-                if (fogMask.visible[index]) alpha = 0;
-                else if (fogMask.explored[index]) alpha = 148;
+                if (fogMask.visible[index]) {
+                    if (fogMask.bright[index]) alpha = 0;
+                    else if (fogMask.dim[index]) alpha = 112;
+                    else alpha = 178;
+                } else if (fogMask.explored[index]) {
+                    alpha = 148;
+                }
                 var offset = index * 4;
                 data[offset] = 6;
                 data[offset + 1] = 8;
@@ -456,22 +475,51 @@
         function drawSceneLayers(camera) {
             if (!mapState) return;
             var grid = gridSize();
-            var lights = Array.isArray(mapState.lights) ? mapState.lights : [];
-            context.save();
-            lights.forEach(function (light) {
-                var point = ctx.worldToScreen(Number(light.x) || 0, Number(light.y) || 0);
-                var radius = Math.max(1, Number(light.range_cells) || 0) * grid * camera.zoom;
+
+            function paintLight(x, y, dimCells, brightCells, color, intensity) {
+                var point = ctx.worldToScreen(Number(x) || 0, Number(y) || 0);
+                var radius = Math.max(1, Number(dimCells) || 0) * grid * camera.zoom;
                 if (radius <= 2) return;
-                var color = String(light.color || "#ffaa00");
-                var intensity = clamp(Number(light.intensity) || 0, 0, 1.5);
+                var strength = clamp(Number(intensity) || 1, 0, 1.5);
+                var brightStop = brightCells > 0
+                    ? clamp(Number(brightCells) / Math.max(1, Number(dimCells)), 0.05, 1)
+                    : 1;
                 var gradient = context.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius);
-                gradient.addColorStop(0, hexToRgba(color, 0.24 * intensity));
-                gradient.addColorStop(0.55, hexToRgba(color, 0.10 * intensity));
+                gradient.addColorStop(0, hexToRgba(color, 0.24 * strength));
+                gradient.addColorStop(brightStop * 0.92, hexToRgba(color, 0.13 * strength));
                 gradient.addColorStop(1, hexToRgba(color, 0));
                 context.fillStyle = gradient;
                 context.beginPath();
                 context.arc(point.x, point.y, radius, 0, Math.PI * 2);
                 context.fill();
+            }
+
+            var lights = Array.isArray(mapState.lights) ? mapState.lights : [];
+            context.save();
+            lights.forEach(function (light) {
+                if (light.enabled === false) return;
+                paintLight(
+                    light.x,
+                    light.y,
+                    light.range_cells,
+                    light.bright_cells,
+                    String(light.color || "#ffaa00"),
+                    light.intensity
+                );
+            });
+            // 棋子自带光源：跟随棋子 footprint 中心；几何遮挡以服务端掩码为准。
+            activeTokens().forEach(function (token) {
+                var light = token.light;
+                if (!light || light.enabled === false) return;
+                var anchor = tokenWorld(token);
+                paintLight(
+                    anchor.x + (Number(token.w) || 1) * grid / 2,
+                    anchor.y + (Number(token.h) || 1) * grid / 2,
+                    light.dim_cells,
+                    light.bright_cells,
+                    String(light.color || "#ffaa00"),
+                    light.intensity
+                );
             });
             context.restore();
 
@@ -622,6 +670,27 @@
                 selectedId = "";
                 scheduleDraw();
             }));
+            if (canMove(token)) {
+                var tokenLight = token.light;
+                if (tokenLight) {
+                    var nextEnabled = tokenLight.enabled === false;
+                    menu.appendChild(menuButton(nextEnabled ? "点亮自带光源" : "熄灭火把", false, function () {
+                        updateTokenLight(token, tokenLightCopy(tokenLight, nextEnabled));
+                    }));
+                    menu.appendChild(menuButton("移除自带光源", true, function () {
+                        updateTokenLight(token, null, true);
+                    }));
+                } else {
+                    menu.appendChild(menuButton("添加火把（明亮4/昏暗8格）", false, function () {
+                        updateTokenLight(token, {
+                            bright_cells: 4,
+                            dim_cells: 8,
+                            color: "#ffaa00",
+                            enabled: true,
+                        });
+                    }));
+                }
+            }
             if (canManage || serverCanManage) {
                 menu.appendChild(menuButton("删除棋子", true, function () {
                     deleteToken(token);
@@ -718,6 +787,101 @@
             });
         }
 
+        function updateTokenLight(token, lightPayload, remove) {
+            var body = writeBody(remove ? { remove: true } : { light: lightPayload });
+            apiRequest(
+                "PUT",
+                "/rooms/" + encodeURIComponent(ctx.room.id) + "/tokens/" +
+                    encodeURIComponent(token.id) + "/light",
+                body
+            ).then(function (response) {
+                if (destroyed) return;
+                if (!response || response.success !== true) {
+                    applyWriteFailure(response, "更新棋子光源失败。");
+                    return;
+                }
+                applyPayload(response.data);
+                notify(remove ? "已移除棋子自带光源。" : "棋子光源已更新。", "success");
+            }).catch(function (error) {
+                console.error("veil-map token light failed", error);
+                notify("更新棋子光源失败，请稍后重试。", "error");
+            });
+        }
+
+        function tokenLightCopy(light, enabled) {
+            return {
+                bright_cells: asInt(light.bright_cells, 4),
+                dim_cells: asInt(light.dim_cells, 8),
+                color: String(light.color || "#ffaa00"),
+                intensity: Number(light.intensity) || 1,
+                shadows: light.shadows !== false,
+                enabled: Boolean(enabled),
+            };
+        }
+
+        function renderSceneLights() {
+            if (!panelLightList) return;
+            panelLightList.replaceChildren();
+            var lights = mapState && Array.isArray(mapState.lights) ? mapState.lights : [];
+            if (!lights.length) {
+                var empty = document.createElement("div");
+                empty.className = "vmap-note";
+                empty.textContent = "暂无场景光源；导入 UVTT 地图会自动带出。";
+                panelLightList.appendChild(empty);
+                return;
+            }
+            lights.forEach(function (light, index) {
+                var row = document.createElement("label");
+                row.className = "vmap-light-row";
+                var box = document.createElement("input");
+                box.type = "checkbox";
+                box.checked = light.enabled !== false;
+                box.setAttribute("data-vmap-light-toggle", String(index));
+                var dot = document.createElement("span");
+                dot.className = "vmap-light-dot";
+                dot.style.background = String(light.color || "#ffaa00");
+                var text = document.createElement("span");
+                text.textContent = "光源 " + (index + 1) + " · 明亮 " +
+                    asInt(light.bright_cells, 0) + " / 昏暗 " +
+                    asInt(light.range_cells, 0) + " 格";
+                row.appendChild(box);
+                row.appendChild(dot);
+                row.appendChild(text);
+                panelLightList.appendChild(row);
+            });
+        }
+
+        function saveSceneLights() {
+            var lights = (mapState && Array.isArray(mapState.lights) ? mapState.lights : []).map(function (light, index) {
+                var box = panelLightList
+                    ? panelLightList.querySelector('[data-vmap-light-toggle="' + index + '"]')
+                    : null;
+                var copy = {};
+                Object.keys(light).forEach(function (key) {
+                    copy[key] = light[key];
+                });
+                copy.enabled = Boolean(box && box.checked);
+                return copy;
+            });
+            apiRequest(
+                "PUT",
+                "/rooms/" + encodeURIComponent(ctx.room.id) + "/lights",
+                writeBody({ lights: lights })
+            ).then(function (response) {
+                if (destroyed) return;
+                if (!response || response.success !== true) {
+                    applyWriteFailure(response, "光源开关保存失败。");
+                    return;
+                }
+                applyPayload(response.data);
+                renderSceneLights();
+                notify("光源开关已保存。", "success");
+            }).catch(function (error) {
+                console.error("veil-map lights failed", error);
+                notify("光源开关保存失败，请稍后重试。", "error");
+            });
+        }
+
         function openPanel(mode) {
             if (!canManage && !serverCanManage) {
                 notify("只有房主或房管可以编辑地图。", "info");
@@ -737,6 +901,7 @@
                 renderCalibration();
                 var meta = mapState && mapState.background_meta;
                 renderImportInfo(meta && meta.import ? meta : null);
+                renderSceneLights();
                 if (panelFogEnabled) panelFogEnabled.checked = fogState.enabled === true;
                 if (panelFogVision) {
                     panelFogVision.value = String(asInt(fogState.vision_cells, 12));
@@ -1130,6 +1295,10 @@
             }
             if (target.closest("[data-vmap-add-token]")) {
                 addToken();
+                return;
+            }
+            if (target.closest("[data-vmap-save-lights]")) {
+                saveSceneLights();
                 return;
             }
             if (target.closest("[data-vmap-import-map]")) {
