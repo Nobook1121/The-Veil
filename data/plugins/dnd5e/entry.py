@@ -12,6 +12,7 @@ from dnd5e_plugin.content_search import Dnd5eContentSearch
 from dnd5e_plugin.effects import Dnd5eEffects
 from dnd5e_plugin.house_rules import house_rules as dnd5e_house_rules
 from dnd5e_plugin.http import bp
+from dnd5e_plugin.rest import Dnd5eRest
 from dnd5e_plugin.schema import Dnd5eCharacterSchema
 from dnd5e_plugin.spells import Dnd5eSpells
 from dnd5e_plugin.tools import Dnd5eTools
@@ -50,6 +51,8 @@ class Dnd5ePlugin:
         self.content_search = Dnd5eContentSearch()
         # 战斗与法术共享同一个专注/法术引擎，避免两套状态。
         self.combat.spells = self.spells
+        # 休息/生命骰/调谐能力；CoC7 不声明，核心不会给出这些入口。
+        self.rest = Dnd5eRest()
         # 回合调度器通过战斗规则对象读取效果能力（核心不认插件类型）。
         self.combat.effects = self.effects
         # KP 提示词片段与（当前为空的）专属工具声明；核心只负责拼接。

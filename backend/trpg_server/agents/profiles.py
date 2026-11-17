@@ -103,6 +103,16 @@ def effect_tool_names(ruleset_id: str | None = None) -> list[str]:
     return ["effect.list", "effect.apply", "effect.remove", "scene.advance"]
 
 
+def rest_tool_names(ruleset_id: str | None = None) -> list[str]:
+    """声明了 ``rest`` 能力的规则集才下发休息/同调工具。"""
+    plugin = _resolve_plugin(ruleset_id)
+    if plugin is None or getattr(plugin, "rest", None) is None:
+        return []
+    from trpg_server.agents.tools.rest import REST_TOOL_NAMES
+
+    return list(REST_TOOL_NAMES)
+
+
 def workflow_tool_names(ruleset_id: str | None = None) -> list[str]:
     """自动化工具由规则集插件声明；核心不写死任何规则集 id。"""
     plugin = _resolve_plugin(ruleset_id)
@@ -152,6 +162,7 @@ def build_kp_tool_names(ruleset_id: str | None = None) -> list[str]:
             *combat_budget_tool_names(ruleset_id),
             *spell_tool_names(ruleset_id),
             *effect_tool_names(ruleset_id),
+            *rest_tool_names(ruleset_id),
             *workflow_tool_names(ruleset_id),
             *plugin_tool_names(ruleset_id),
         )

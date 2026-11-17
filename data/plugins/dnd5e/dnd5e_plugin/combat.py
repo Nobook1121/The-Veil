@@ -241,6 +241,16 @@ def encumbrance_level(strength: int, weight_lb: float) -> str:
     return ""
 
 
+def armor_strength_requirement(sheet: Mapping[str, Any]) -> int:
+    """已装备护甲里最高的力量需求；盾牌不设需求。"""
+    requirement = 0
+    for row in _equipment_rows(sheet, "armor"):
+        if _text(row.get("armor_category")).casefold() == "shield":
+            continue
+        requirement = max(requirement, _as_int(row.get("strength_min"), 0))
+    return requirement
+
+
 def armor_class_from_equipment(sheet: Mapping[str, Any]) -> int:
     """按已装备的护甲/盾牌计算 AC；没有护甲条目时退回卡面显式 AC。"""
     dex_mod = ability_modifier(ability_score(sheet, "dex"))
@@ -447,6 +457,11 @@ class Dnd5eCombatRules:
         combatant["temp_hp"] = max(0, _as_int(hp.get("temp"), 0))
         combatant["armorClass"] = armor_class_from_equipment(sheet)
         combatant["speed_ft"] = max(0, _as_int(sheet.get("speed"), 30))
+        requirement = armor_strength_requirement(sheet)
+        if requirement and abilities.get("str", 10) < requirement:
+            # 力量不满足护甲需求：速度 -10 英尺（SRD 护甲表）。
+            combatant["armor_strength_penalty"] = requirement
+            combatant["speed_ft"] = max(0, combatant["speed_ft"] - 10)
         combatant["attacks"] = _player_attacks(sheet)
         combatant["carried_weight_lb"] = _carried_weight_lb(sheet)
         # 变体负重是房间开关；关闭时不写任何标记，行动经济按原速度结算。
