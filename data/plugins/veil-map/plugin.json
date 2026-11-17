@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "id": "veil-map",
+  "name": "地图插件",
+  "version": "0.1.0",
+  "description": "房间地图与棋子交互：拖拽移动、网格吸附、多格占位、先攻回合联动与移动力校验。仅对声明 canvas workspace 的规则集开放。",
+  "author": "The Veil",
+  "api_version": 1,
+  "requires": {
+    "plugins": {
+      "dnd5e": ">=0.1.0"
+    }
+  },
+  "code": {
+    "entry": "entry.py"
+  },
+  "capabilities": {
+    "http_blueprints": {
+      "module": "entry.py",
+      "blueprints": ["bp"]
+    },
+    "ui": {
+      "api_version": 1,
+      "slots": [
+        {
+          "id": "veil-map-stage",
+          "slot": "room.stage.primary",
+          "title_i18n": "map.title",
+          "rulesets": ["dnd5e"],
+          "requires": [],
+          "priority": 100,
+          "layout": {
+            "desktop": "fill"
+          },
+          "permissions": [
+            "room.read",
+            "token.read",
+            "token.move",
+            "token.move.dm"
+          ],
+          "mount": "mountMap"
+        }
+      ]
+    },
+    "frontend_assets": [
+      {
+        "path": "ui/map.js",
+        "type": "script"
+      },
+      {
+        "path": "ui/map.css",
+        "type": "style"
+      }
+    ]
+  }
+}
