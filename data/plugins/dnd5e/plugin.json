@@ -19,6 +19,10 @@
       "module": "entry.py",
       "ids": ["dnd5e"]
     },
+    "http_blueprints": {
+      "module": "entry.py",
+      "blueprints": ["bp"]
+    },
     "ui": {
       "api_version": 1,
       "workspace": {

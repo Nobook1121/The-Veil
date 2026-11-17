@@ -421,6 +421,12 @@ def apply_room_changes(actor: Any, character_id: str, changes: list[dict[str, An
             payload["attributes"] = attributes
         elif kind in {"item", "weapon", "item_remove", "weapon_remove"}:
             _apply_item_change(payload, existing, change)
+        elif kind == "sheet":
+            # 规则无关的整份卡面快照：插件升级规划等场景一次写入新 sheet，
+            # 核心只负责合并、打包与房间镜像同步。
+            value = change.get("value")
+            if isinstance(value, dict):
+                payload["sheet"] = dict(value)
         elif kind == "status":
             status = dict(payload.get("status") or existing.get("status") or {})
             value = change.get("value")

@@ -10,6 +10,7 @@ from dnd5e_plugin.checks import Dnd5eChecks
 from dnd5e_plugin.combat import Dnd5eCombatRules
 from dnd5e_plugin.effects import Dnd5eEffects
 from dnd5e_plugin.house_rules import house_rules as dnd5e_house_rules
+from dnd5e_plugin.http import bp
 from dnd5e_plugin.schema import Dnd5eCharacterSchema
 from dnd5e_plugin.spells import Dnd5eSpells
 from dnd5e_plugin.tools import Dnd5eTools
@@ -26,7 +27,9 @@ class Dnd5ePlugin:
     ruleset_version = "5.1"
     schema_version = 1
     supported_locales = ("zh-CN", "en-US")
-    capabilities = frozenset({"character_schema", "checks", "combat", "spells", "effects"})
+    capabilities = frozenset(
+        {"character_schema", "checks", "combat", "spells", "effects", "progression"}
+    )
 
     def __init__(self) -> None:
         self.schema = Dnd5eCharacterSchema()
