@@ -236,15 +236,38 @@ def _scheduler(
     )
 
 
+def _areas_enabled(context: Any) -> bool:
+    try:
+        return str(_combat_settings(context).ruleset_id or "").strip().lower() == "dnd5e"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _save_combat(context: Any, combat: dict[str, Any]) -> None:
     room_dir = getattr(context, "room_dir", None)
     if not room_dir:
         return
+    pending_turns = combat.pop("_area_turn_starts", None)
     state = load_room_state(room_dir)
     state["combat"] = combat
     save_room_state(room_dir, state)
     combat["room_id"] = str(getattr(context, "room_id", "") or "")
     _broadcast_state(combat)
+    if isinstance(pending_turns, list) and pending_turns and _areas_enabled(context):
+        try:
+            from trpg_server.workflows import areas as area_store
+
+            for item in pending_turns:
+                if not isinstance(item, dict):
+                    continue
+                area_store.notify_turn_start(
+                    room_dir,
+                    str(item.get("actor") or ""),
+                    _as_int(item.get("round"), 1),
+                    context=context,
+                )
+        except Exception:  # noqa: BLE001 - 区域钩子失败不能阻断回合保存
+            logger.exception("回合开始区域自动触发失败")
 
 
 def _combat_summary_state(combat: dict[str, Any]) -> dict[str, Any]:
@@ -1135,6 +1158,10 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     for text in _scheduler_instance.start_turn(combat):
         _append_log(combat, text, context)
     _append_log(combat, "战斗开始：" + " → ".join(order), context)
+    if order and _areas_enabled(context):
+        combat.setdefault("_area_turn_starts", []).append(
+            {"actor": str(order[int(combat.get("turn") or 0)]), "round": 1}
+        )
     _save_combat(context, combat)
     state = _combat_summary_state(combat)
     summary = (
@@ -1282,9 +1309,37 @@ def _advance(
 ) -> dict[str, Any]:
     if not (combat.get("order") or []):
         return combat
+    round_before = _as_int(combat.get("round"), 1)
+    turn_before = _as_int(combat.get("turn"), 0)
+    order_before = list(combat.get("order") or [])
+    actor_before = order_before[turn_before] if 0 <= turn_before < len(order_before) else ""
     scheduler = _scheduler(combat, context, settings)
     for text in scheduler.advance(combat, consume_all=consume_all):
         _append_log(combat, text, context)
+    round_after = _as_int(combat.get("round"), round_before)
+    turn_after = _as_int(combat.get("turn"), 0)
+    order_after = combat.get("order") or []
+    actor_after = order_after[turn_after] if 0 <= turn_after < len(order_after) else ""
+    if context is not None and getattr(context, "room_dir", None) and _areas_enabled(context):
+        try:
+            from trpg_server.workflows import areas as area_store
+
+            if round_after > round_before:
+                ticked = area_store.tick_areas(
+                    context.room_dir, rounds=round_after - round_before
+                )
+                for area in ticked.get("expired") or []:
+                    _append_log(
+                        combat,
+                        f"持续区域“{area.get('name')}”持续时间结束。",
+                        context,
+                    )
+        except Exception:  # noqa: BLE001 - 区域推进失败不能阻断回合
+            logger.exception("回合推进持续区域失败")
+        if actor_after and (actor_after != actor_before or round_after != round_before):
+            combat.setdefault("_area_turn_starts", []).append(
+                {"actor": actor_after, "round": max(1, round_after)}
+            )
     if context is not None:
         for text in _settle_due_poisons(combat, context, settings=settings):
             _append_log(combat, text, context)

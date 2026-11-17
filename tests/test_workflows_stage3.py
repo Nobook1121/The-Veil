@@ -33,6 +33,15 @@ def plugins():
     reset_builtin_registry()
 
 
+@pytest.fixture(autouse=True)
+def _reset_area_hooks():
+    yield
+    from trpg_server.agents.tools import areas as area_tools
+
+    area_tools.install_hooks()
+    area_store.register_position_provider(lambda *_args, **_kwargs: None)
+
+
 def _plugin():
     return builtin_registry().resolve("dnd5e")
 
@@ -412,3 +421,103 @@ def test_coc7_has_no_reaction_or_area_tools(plugins):
     assert "area.trigger" not in names
     assert "reaction.resolve" not in names
     assert "concentration.break" not in names
+
+
+# ---------------------------------------------------------------------------
+# 区域自动触发：移动进入 / 回合开始 / 去重 / 审计
+# ---------------------------------------------------------------------------
+def _area_context(tmp_path):
+    from trpg_server.agents.tools import areas as area_tools
+
+    area_tools.install_hooks()
+    context = _combat_context(tmp_path)
+    area_store.register_position_provider(
+        lambda _room_dir, _name: {"cell_x": 1, "cell_y": 1, "grid_ft": 5}
+    )
+    return context
+
+
+def _make_area(tmp_path, *, rounds=2, trigger="enter_or_start_turn"):
+    created = area_store.create_area(
+        tmp_path,
+        {
+            "name": "Spike Growth",
+            "shape": "sphere",
+            "size_ft": 20,
+            "origin": {"cell_x": 1, "cell_y": 1},
+            "grid_ft": 5,
+            "trigger": trigger,
+            "duration": {"unit": "round", "rounds": rounds},
+            "damage": [{"dice": "1d6", "type": "piercing"}],
+        },
+    )
+    return created["area"]
+
+
+def test_area_move_enter_triggers_and_audit_flow(tmp_path, plugins):
+    context = _area_context(tmp_path)
+    area = _make_area(tmp_path)
+    hp_before = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
+
+    results = area_store.notify_move(
+        tmp_path, "Goblin", (5, 5), (1, 1), round_number=1
+    )
+    assert len(results) == 1 and results[0].get("workflow")
+    flow = WorkflowEngine(tmp_path).get(results[0]["workflow"]["id"])
+    assert flow["kind"] == "area"
+    assert flow["status"] == "completed"
+    assert any(event["type"] == "step.completed" for event in flow["events"])
+    assert any(event["type"] == "side_effect.applied" for event in flow["events"])
+    hp_after = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
+    assert hp_after < hp_before
+
+    # 同一回合重复进入：自动钩子与手动触发共用去重状态。
+    again = area_store.notify_move(tmp_path, "Goblin", (5, 5), (1, 1), round_number=1)
+    assert again
+    assert combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"] == hp_after
+    manual = area_store.trigger(
+        tmp_path, area["id"], "Goblin", round_number=1, apply=lambda _a, _t: {"amount": 99}
+    )
+    assert manual["duplicate"] is True
+
+    # 在区域内移动不触发，离开也不触发。
+    assert area_store.notify_move(tmp_path, "Goblin", (1, 1), (2, 1), round_number=1) == []
+    assert area_store.notify_move(tmp_path, "Goblin", (2, 1), (6, 6), round_number=1) == []
+
+
+def test_area_turn_start_triggers_once_per_round(tmp_path, plugins):
+    context = _area_context(tmp_path)
+    _make_area(tmp_path, rounds=3, trigger="start_turn")
+    hp_before = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
+
+    first = area_store.notify_turn_start(tmp_path, "Goblin", 1, context=context)
+    assert first and first[0].get("workflow")
+    hp_after = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
+    assert hp_after < hp_before
+    second = area_store.notify_turn_start(tmp_path, "Goblin", 1, context=context)
+    assert combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"] == hp_after
+    assert second  # 命中同一条审计流程，不会再次结算
+
+    third = area_store.notify_turn_start(tmp_path, "Goblin", 2, context=context)
+    assert third
+    assert combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"] <= hp_after
+
+
+def test_area_ticks_with_combat_round(tmp_path, plugins):
+    context = _combat_context(tmp_path)
+    area_store.register_position_provider(lambda _room_dir, _name: None)
+    _make_area(tmp_path, rounds=1)
+    for _ in range(3):
+        combat_tools.next_turn({}, context)
+    assert area_store.list_areas(tmp_path) == []
+
+
+def test_area_ticks_with_noncombat_time(tmp_path, plugins):
+    context = _Context(tmp_path)
+    room_rules.save_room_info(tmp_path, context.room_info())
+    area_store.register_position_provider(lambda _room_dir, _name: None)
+    _make_area(tmp_path, rounds=1)
+    result = effects_tools.advance_scene({"minutes": 10}, context)
+    assert "error" not in result, result
+    assert area_store.list_areas(tmp_path) == []
+    assert result["areas"]["expired"]

@@ -155,7 +155,10 @@ def advance_scene(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     result = room_spells.advance_minutes(context.room_dir, context.room_info(), minutes=minutes)
     if result.get("error"):
         return result
-    return {**result, "noncombat": True}
+    from trpg_server.workflows import areas as area_store
+
+    ticked = area_store.tick_areas(context.room_dir, rounds=max(1, minutes // 10))
+    return {**result, "areas": ticked, "noncombat": True}
 
 
 EFFECT_LIST_TOOL = AgentTool(

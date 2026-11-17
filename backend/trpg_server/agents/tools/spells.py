@@ -281,11 +281,18 @@ def _apply_combat_cast(
         concentration_record.get("dc") if concentration_record else profile.get("spellSaveDC"),
         0,
     )
+    origin = area_store.lookup_position(
+        context.room_dir,
+        str((targets[0] if targets else caster).get("name") or ""),
+    )
     spec = area_store.area_spec_from_cast(
         result,
         caster=caster_name,
         dc=dc,
         scene_id=str(getattr(context, "scene_id", "") or ""),
+        origin=origin,
+        grid_ft=int((origin or {}).get("grid_ft") or 5),
+        targets=[str(target.get("name") or "") for target in targets],
     )
     if spec:
         created = area_store.create_area(context.room_dir, spec)

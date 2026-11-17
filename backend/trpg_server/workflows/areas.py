@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -22,6 +23,7 @@ AREAS_FILENAME = "scene_areas.json"
 AREAS_SCHEMA = 1
 SHAPES = {"sphere", "cube", "cylinder", "cone", "line", "square", "circle"}
 TRIGGERS = {"enter", "start_turn", "end_turn", "enter_or_end_turn", "enter_or_start_turn"}
+FEET_PER_CELL = 5
 
 
 def _as_int(value: Any, fallback: int = 0) -> int:
@@ -33,6 +35,180 @@ def _as_int(value: Any, fallback: int = 0) -> int:
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+# 地图插件注册位置查询；没有地图时自动触发直接跳过，不臆测格子。
+_POSITION_PROVIDER: Callable[[Any, str], Mapping[str, Any] | None] | None = None
+# 行动侧注册真正执行豁免/伤害的回调；区域核心只负责几何、去重与审计。
+_TRIGGER_HANDLER: Callable[..., Any] | None = None
+
+
+def register_position_provider(provider: Callable[[Any, str], Mapping[str, Any] | None]) -> None:
+    global _POSITION_PROVIDER
+    _POSITION_PROVIDER = provider
+
+
+def register_trigger_handler(handler: Callable[..., Any]) -> None:
+    global _TRIGGER_HANDLER
+    _TRIGGER_HANDLER = handler
+
+
+def clear_hooks() -> None:
+    global _POSITION_PROVIDER, _TRIGGER_HANDLER
+    _POSITION_PROVIDER = None
+    _TRIGGER_HANDLER = None
+
+
+def lookup_position(room_dir: Any, name: str) -> dict[str, Any] | None:
+    provider = _POSITION_PROVIDER
+    if provider is None:
+        return None
+    try:
+        found = provider(room_dir, str(name or ""))
+    except Exception:  # noqa: BLE001 - 地图数据异常时退回无位置
+        return None
+    return dict(found) if isinstance(found, Mapping) else None
+
+
+def contains(area: Mapping[str, Any], cell_x: Any, cell_y: Any) -> bool:
+    """区域是否覆盖某格；无原点时退回显式 targets 列表。"""
+    origin = area.get("origin") if isinstance(area.get("origin"), Mapping) else None
+    if origin is None:
+        names = {
+            _text(name).casefold()
+            for name in (area.get("targets") or [])
+            if _text(name)
+        }
+        return bool(names) and _text(area.get("_query_target")).casefold() in names
+    try:
+        ox = int(origin.get("cell_x", origin.get("col")))
+        oy = int(origin.get("cell_y", origin.get("row")))
+        x = int(cell_x)
+        y = int(cell_y)
+    except (TypeError, ValueError):
+        return False
+    grid_ft = max(1, _as_int(area.get("grid_ft"), FEET_PER_CELL))
+    size_ft = max(grid_ft, _as_int(area.get("size_ft"), grid_ft))
+    shape = _text(area.get("shape")).lower()
+    if shape in {"sphere", "circle", "cylinder", "cone"}:
+        radius = max(1, math.ceil(size_ft / grid_ft))
+        return (x - ox) ** 2 + (y - oy) ** 2 <= radius ** 2
+    if shape in {"cube", "square"}:
+        half = max(1, math.ceil(size_ft / grid_ft / 2))
+        return abs(x - ox) <= half and abs(y - oy) <= half
+    if shape == "line":
+        cells = max(1, math.ceil(size_ft / grid_ft))
+        return abs(x - ox) <= cells and abs(y - oy) <= cells
+    return (x - ox) ** 2 + (y - oy) ** 2 <= max(1, math.ceil(size_ft / grid_ft)) ** 2
+
+
+def _area_covers(area: Mapping[str, Any], target: str, cell_x: Any, cell_y: Any) -> bool:
+    if cell_x is None or cell_y is None:
+        return False
+    probe = {**dict(area), "_query_target": target}
+    return contains(probe, cell_x, cell_y)
+
+
+def _trigger_allowed(area: Mapping[str, Any], hook: str) -> bool:
+    trigger = _text(area.get("trigger")).lower()
+    if hook == "move_enter":
+        return trigger in {"enter", "enter_or_end_turn", "enter_or_start_turn"} or not trigger
+    if hook == "turn_start":
+        return trigger in {"start_turn", "enter_or_start_turn"} or not trigger
+    return True
+
+
+def _notify(
+    room_dir: Any,
+    *,
+    actor: str,
+    cell: tuple[Any, Any] | None,
+    hook: str,
+    round_number: int,
+    context: Any = None,
+) -> list[dict[str, Any]]:
+    handler = _TRIGGER_HANDLER
+    if handler is None or not _text(actor) or cell is None:
+        return []
+    results: list[dict[str, Any]] = []
+    for area in list_areas(room_dir, scene_id=scene_id_of(room_dir)):
+        if not _trigger_allowed(area, hook):
+            continue
+        if not _area_covers(area, actor, cell[0], cell[1]):
+            continue
+        try:
+            result = handler(
+                room_dir,
+                area,
+                _text(actor),
+                int(round_number or 0),
+                hook,
+                context,
+            )
+        except Exception:  # noqa: BLE001 - 单个区域失败不能阻断移动/回合
+            continue
+        if isinstance(result, Mapping) and result:
+            results.append(dict(result))
+    return results
+
+
+def notify_move(
+    room_dir: Any,
+    actor: str,
+    from_cell: tuple[Any, Any] | None,
+    to_cell: tuple[Any, Any] | None,
+    round_number: int = 0,
+    *,
+    hook: str = "move_enter",
+) -> list[dict[str, Any]]:
+    """棋子移动后触发“进入”区域；离开或原地移动不触发。"""
+    if to_cell is None:
+        return []
+    results: list[dict[str, Any]] = []
+    for area in list_areas(room_dir, scene_id=scene_id_of(room_dir)):
+        if not _trigger_allowed(area, hook):
+            continue
+        inside_new = _area_covers(area, actor, to_cell[0], to_cell[1])
+        inside_old = (
+            _area_covers(area, actor, from_cell[0], from_cell[1])
+            if from_cell is not None
+            else False
+        )
+        if not inside_new or inside_old:
+            continue
+        handler = _TRIGGER_HANDLER
+        if handler is None:
+            continue
+        try:
+            result = handler(room_dir, area, _text(actor), int(round_number or 0), hook, None)
+        except Exception:  # noqa: BLE001
+            continue
+        if isinstance(result, Mapping) and result:
+            results.append(dict(result))
+    return results
+
+
+def notify_turn_start(
+    room_dir: Any,
+    actor: str,
+    round_number: int,
+    *,
+    context: Any = None,
+) -> list[dict[str, Any]]:
+    """回合开始时对区域内目标判定一次。"""
+    position = lookup_position(room_dir, actor)
+    cell = None
+    if isinstance(position, Mapping):
+        cell = (position.get("cell_x"), position.get("cell_y"))
+    return _notify(
+        room_dir,
+        actor=actor,
+        cell=cell,
+        hook="turn_start",
+        round_number=round_number,
+        context=context,
+    )
+
 
 
 def store_path(room_dir: Any) -> Path:
@@ -115,6 +291,8 @@ def create_area(room_dir: Any, spec: Mapping[str, Any]) -> dict[str, Any]:
         "size_ft": size,
         "width_ft": _as_int(spec.get("width_ft"), 0),
         "origin": dict(origin) if origin else None,
+        "grid_ft": max(1, _as_int(spec.get("grid_ft"), FEET_PER_CELL)),
+        "targets": [str(name) for name in (spec.get("targets") or []) if str(name or "").strip()],
         "trigger": _text(spec.get("trigger") or "enter_or_end_turn"),
         "save": dict(spec.get("save")) if isinstance(spec.get("save"), Mapping) else None,
         "damage": [dict(row) for row in (spec.get("damage") or []) if isinstance(row, Mapping)],
@@ -189,6 +367,9 @@ def area_spec_from_cast(
     caster: str = "",
     dc: int = 0,
     scene_id: str = "",
+    origin: Mapping[str, Any] | None = None,
+    grid_ft: int = FEET_PER_CELL,
+    targets: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """从 ``spells.cast`` 结果提取持续区域描述；瞬时法术返回 ``None``。"""
     descriptor = result.get("descriptor") if isinstance(result.get("descriptor"), Mapping) else {}
@@ -223,6 +404,9 @@ def area_spec_from_cast(
         "shape": _text(area.get("shape")) or "sphere",
         "size_ft": area.get("size_ft") or area.get("radius_ft") or 0,
         "width_ft": area.get("width_ft") or area.get("length_ft") or 0,
+        "origin": dict(origin) if origin else None,
+        "grid_ft": max(1, int(grid_ft or FEET_PER_CELL)),
+        "targets": list(targets or []),
         "trigger": "enter_or_start_turn",
         "save": save,
         "damage": damage,
@@ -279,9 +463,16 @@ __all__ = [
     "AREAS_FILENAME",
     "SHAPES",
     "TRIGGERS",
+    "clear_hooks",
+    "contains",
     "create_area",
     "list_areas",
     "load",
+    "lookup_position",
+    "notify_move",
+    "notify_turn_start",
+    "register_position_provider",
+    "register_trigger_handler",
     "remove_area",
     "scene_id_of",
     "tick_areas",

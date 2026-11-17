@@ -55,6 +55,8 @@ def create_area(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         "shape": _as_text(arguments.get("shape")) or "sphere",
         "size_ft": arguments.get("size_ft"),
         "origin": arguments.get("origin"),
+        "grid_ft": arguments.get("grid_ft"),
+        "targets": arguments.get("targets"),
         "trigger": _as_text(arguments.get("trigger")) or "enter_or_end_turn",
         "save": arguments.get("save"),
         "damage": arguments.get("damage"),
@@ -70,34 +72,36 @@ def create_area(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     return {"area": result["area"], "revision": result["revision"]}
 
 
-def trigger_area(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
-    if not _is_dnd5e(context):
-        return {"error": "当前规则集未启用持续区域"}
+def _apply_area_trigger(
+    context: Any,
+    area_id: str,
+    target: Any,
+    round_number: int,
+) -> dict[str, Any]:
+    """真正结算一次区域触发；去重状态由 :mod:`workflows.areas` 维护。"""
     combat = _load_combat(context)
     if not combat:
         return {"error": "当前没有进行中的战斗，区域触发需要战斗上下文"}
-    target = _resolve_combatant(combat, arguments.get("target"))
-    if target is None:
+    target_obj = _resolve_combatant(combat, target)
+    if target_obj is None:
         return {"error": "缺少有效的 target"}
-    area_id = _as_text(arguments.get("area_id") or arguments.get("id"))
+    area_id = _as_text(area_id)
     if not area_id:
         return {"error": "缺少 area_id"}
-    round_number = _as_int(arguments.get("round"), _as_int(combat.get("round"), 0))
     ruleset = _combat_ruleset(combat, _combat_settings(context))
     spells = getattr(ruleset, "spells", None)
     if spells is None or not hasattr(spells, "trigger_area"):
         return {"error": "当前规则集没有区域结算能力"}
-    target_name = _as_text(target.get("name"))
+    target_name = _as_text(target_obj.get("name"))
 
     def apply(area: dict[str, Any], name: str) -> dict[str, Any]:
-        result = spells.trigger_area(
+        return spells.trigger_area(
             area,
-            target,
-            _player_card(target, context),
+            target_obj,
+            _player_card(target_obj, context),
             rng=_roller,
             combat=combat,
         )
-        return result
 
     result = area_store.trigger(
         context.room_dir,
@@ -132,6 +136,138 @@ def trigger_area(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         "result": result.get("result"),
         "summary": "；".join(notes),
     }
+
+
+def _run_area_trigger(
+    context: Any,
+    area_id: str,
+    target: str,
+    round_number: int,
+    *,
+    actor: str,
+    hook: str,
+    request_key: str = "",
+) -> dict[str, Any]:
+    """把一次区域判定包成工作流，事件日志可用 ``workflow.get`` 复盘。"""
+    from trpg_server.workflows.actions import flow_result, run_flow_action
+    from trpg_server.workflows.model import make_step
+
+    outcome = run_flow_action(
+        context.room_dir,
+        kind="area",
+        room_id=str(getattr(context, "room_id", "") or ""),
+        initiator=actor or target,
+        initiator_type="kp",
+        steps=[make_step("trigger", "区域判定")],
+        handlers={
+            "trigger": lambda _flow, _step: _apply_area_trigger(
+                context, area_id, target, round_number
+            )
+        },
+        request_key=str(request_key or ""),
+        metadata={"area_id": area_id, "target": target, "hook": hook, "round": round_number},
+        lock_character=False,
+    )
+    if outcome.get("error"):
+        return {"error": outcome["error"], "code": outcome.get("code")}
+    flow = outcome.get("flow") or {}
+    result = flow_result(flow, "trigger")
+    if not isinstance(result, dict):
+        return {"error": "区域结算返回了无法识别的结果"}
+    if result.get("error"):
+        return result
+    return {
+        **result,
+        "workflow": {
+            "id": flow.get("id"),
+            "status": flow.get("status"),
+            "duplicate": bool(outcome.get("duplicate")),
+        },
+    }
+
+
+class _AutoContext:
+    """自动钩子没有请求对象时，用房间信息构造最小上下文。"""
+
+    def __init__(self, room_dir: Any, info: dict[str, Any]):
+        from pathlib import Path
+
+        self.room_dir = room_dir
+        self.room_id = str(info.get("id") or "")
+        self.config_dir = Path(room_dir) / "config"
+        self.scenarios_dir = Path(room_dir) / "scenarios"
+        self.user_id = 0
+        self.agent_id = ""
+        self._info = info
+
+    def room_info(self) -> dict[str, Any]:
+        return self._info
+
+
+def _auto_trigger(
+    room_dir: Any,
+    area: dict[str, Any],
+    actor: str,
+    round_number: int,
+    hook: str,
+    context: Any = None,
+) -> dict[str, Any]:
+    """移动/回合开始钩子的公共入口；非 dnd5e 或无战斗时静默跳过。"""
+    from uuid import uuid4
+
+    if context is None:
+        from trpg_server.room_rules import load_room_info
+
+        context = _AutoContext(room_dir, load_room_info(room_dir))
+    if not _is_dnd5e(context):
+        return {}
+    if not _load_combat(context):
+        return {}
+    round_number = _as_int(round_number, 0)
+    if round_number:
+        key = f"area:{area.get('id')}:{actor}:{round_number}:{hook}"
+    else:
+        # 非战斗没有回合号；用事件 id 避免永久复用同一条审计流程。
+        key = f"area:{area.get('id')}:{actor}:time:{uuid4().hex[:10]}"
+    return _run_area_trigger(
+        context,
+        _as_text(area.get("id")),
+        actor,
+        round_number,
+        actor=actor,
+        hook=hook,
+        request_key=key,
+    )
+
+
+def install_hooks() -> None:
+    """安装移动/回合开始的自动触发回调（模块导入时自动调用）。"""
+    area_store.register_trigger_handler(_auto_trigger)
+
+
+install_hooks()
+
+
+def trigger_area(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    if not _is_dnd5e(context):
+        return {"error": "当前规则集未启用持续区域"}
+    area_id = _as_text(arguments.get("area_id") or arguments.get("id"))
+    target = _as_text(arguments.get("target"))
+    if not area_id:
+        return {"error": "缺少 area_id"}
+    if not target:
+        return {"error": "缺少有效的 target"}
+    combat = _load_combat(context)
+    round_number = _as_int(arguments.get("round"), _as_int((combat or {}).get("round"), 0))
+    return _run_area_trigger(
+        context,
+        area_id,
+        target,
+        round_number,
+        actor=target,
+        hook="manual",
+        request_key=_as_text(arguments.get("request_id")),
+    )
 
 
 def remove_area(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -201,6 +337,7 @@ AREA_TRIGGER_TOOL = AgentTool(
             "area_id": {"type": "string"},
             "target": {"type": "string"},
             "round": {"type": "integer"},
+            "request_id": {"type": "string", "description": "幂等键；重复提交只结算一次"},
         },
         "required": ["area_id", "target"],
     },

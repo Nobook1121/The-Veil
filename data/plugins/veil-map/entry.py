@@ -2105,6 +2105,7 @@ def move_token(room_id: str, token_id: str):
                 http_status=409,
                 data={"map": view, "fog": fog_view, "can_manage": manager},
             )
+        from_cell = _cell_of(token, grid, offset_x, offset_y)
         _set_token_cell(token, cell_x, cell_y, fraction_x, fraction_y, grid, offset_x, offset_y)
         state = _save_map(
             room_dir,
@@ -2112,6 +2113,7 @@ def move_token(room_id: str, token_id: str):
             {"request_id": request_id, "action": "token.move", "token_id": token["id"]},
         )
         view, fog_view, _visible = _observer_scope(state, room_dir, viewer_id, manager)
+    _notify_area_move(room_dir, token, from_cell, (cell_x, cell_y))
     _broadcast(room_id, state)
     return _receipt(
         "success",
@@ -2826,6 +2828,9 @@ def _move_token_agent(
         _set_token_cell(token, to_cell_x, to_cell_y, 0.0, 0.0, grid, offset_x, offset_y)
         state = _save_map(room_dir, state)
 
+    _notify_area_move(
+        room_dir, token, (from_cell_x, from_cell_y), (to_cell_x, to_cell_y)
+    )
     move: dict[str, Any] = {
         "source": "ai",
         "actor": _agent_actor_label(info, agent_id, user_id),
@@ -2970,6 +2975,40 @@ def _action_line_guard(payload: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _area_position_provider(room_dir: Any, name: str) -> dict[str, Any] | None:
+    """给核心区域引擎提供棋子格坐标；找不到棋子时返回 None。"""
+    if room_dir is None:
+        return None
+    try:
+        state = _load_map(room_dir)
+    except Exception:  # noqa: BLE001
+        return None
+    token = _find_token(state, name)
+    if token is None:
+        return None
+    grid, offset_x, offset_y = _grid_of(state)
+    cell_x, cell_y = _cell_of(token, grid, offset_x, offset_y)
+    return {"cell_x": cell_x, "cell_y": cell_y, "grid_ft": FEET_PER_CELL}
+
+
+def _notify_area_move(
+    room_dir: Any,
+    token: dict[str, Any],
+    from_cell: tuple[int, int],
+    to_cell: tuple[int, int],
+) -> None:
+    """移动成功后通知区域引擎；离开区域不触发。"""
+    try:
+        from trpg_server.workflows import areas as area_store
+
+        combat = load_room_state(room_dir).get("combat")
+        round_number = int((combat or {}).get("round") or 0) if isinstance(combat, dict) and combat.get("active") else 0
+        actor = str(token.get("combatant") or token.get("name") or "")
+        area_store.notify_move(room_dir, actor, from_cell, to_cell, round_number)
+    except Exception:  # noqa: BLE001 - 区域触发失败不能回滚移动
+        logger.warning("veil_map_area_move_trigger_failed", exc_info=True)
+
+
 _ACTION_GUARD_REGISTERED = False
 
 
@@ -2978,10 +3017,12 @@ def _register_action_guard() -> None:
     if _ACTION_GUARD_REGISTERED:
         return
     try:
+        from trpg_server.workflows import areas as area_store
         from trpg_server.workflows.guards import register_action_guard
     except Exception:  # noqa: BLE001 - 旧核心没有工作流时静默跳过
         return
     register_action_guard(_action_line_guard)
+    area_store.register_position_provider(_area_position_provider)
     _ACTION_GUARD_REGISTERED = True
 
 

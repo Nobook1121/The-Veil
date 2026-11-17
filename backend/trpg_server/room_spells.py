@@ -301,10 +301,17 @@ def cast(
         record = result.get("concentration") if isinstance(result.get("concentration"), Mapping) else {}
         profile = caster_holder.get("spellcasting") if isinstance(caster_holder.get("spellcasting"), Mapping) else {}
         dc = _as_int(record.get("dc") if record else profile.get("spellSaveDC"), 0)
+        origin = area_store.lookup_position(
+            room_dir,
+            _as_text((target_holders[0] if target_holders else caster_holder).get("name")),
+        )
         spec = area_store.area_spec_from_cast(
             result,
             caster=_as_text(caster_holder.get("name")),
             dc=dc,
+            origin=origin,
+            grid_ft=int((origin or {}).get("grid_ft") or 5),
+            targets=[_as_text(holder.get("name")) for holder in target_holders],
         )
         if spec:
             created = area_store.create_area(room_dir, spec)
