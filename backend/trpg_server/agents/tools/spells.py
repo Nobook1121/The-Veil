@@ -8,7 +8,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from typing import Any, Mapping
 
 from trpg_server import room_spells
 from trpg_server.agents.tools.base import AgentTool
@@ -203,6 +204,214 @@ def list_spells(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     }
 
 
+def _counter_candidates(
+    combat: Mapping[str, Any],
+    caster: Mapping[str, Any],
+    spell: str,
+) -> list[dict[str, Any]]:
+    """找出能反制这次施法的候选者（有反应额度、认识反制法术、还有三环位）。"""
+    if str(spell or "").strip().lower() in {"counter-spell", "counterspell"}:
+        return []
+    rows: list[dict[str, Any]] = []
+    for name, combatant in (combat.get("combatants") or {}).items():
+        if not isinstance(combatant, Mapping) or combatant is caster:
+            continue
+        if combatant.get("dead") or combatant.get("unconscious"):
+            continue
+        budget = combatant.get("budget") if isinstance(combatant.get("budget"), Mapping) else {}
+        if _as_int(budget.get("reaction"), 0) <= 0:
+            continue
+        known = {
+            str(item).strip().lower()
+            for key in ("spells_known", "spells_prepared", "known_spells")
+            for item in (combatant.get(key) or [])
+        }
+        if "counter-spell" not in known and "counterspell" not in known:
+            continue
+        slots = combatant.get("spell_slots") if isinstance(combatant.get("spell_slots"), Mapping) else {}
+        row = slots.get("3") if isinstance(slots.get("3"), Mapping) else {}
+        if _as_int(row.get("max"), 0) - _as_int(row.get("used"), 0) <= 0:
+            continue
+        rows.append({"name": str(name), "is_player": bool(combatant.get("is_player"))})
+    return rows
+
+
+def _apply_combat_cast(
+    context: Any,
+    combat: dict[str, Any],
+    caster: dict[str, Any],
+    spell: str,
+    targets: list[dict[str, Any]],
+    target_cards: Mapping[str, Mapping[str, Any]],
+    slot_level: int | None,
+) -> dict[str, Any]:
+    """执行一次战斗内施法；流程 handler 与反应续跑器共用。"""
+    _ruleset, spells, error = _require_spells(combat, context)
+    if error:
+        return error
+    slot = spells.required_slot(spell)
+    scheduler = _scheduler(combat, context)
+    budget = scheduler.budget_of(caster)
+    if budget and slot in budget and _as_int(budget.get(slot), 0) <= 0:
+        return {"error": f"{caster.get('name')} 的 {slot} 额度不足，无法施放 {spell}"}
+    result = spells.cast(
+        caster,
+        _player_card(caster, context),
+        spell=spell,
+        targets=targets,
+        slot_level=slot_level,
+        target_cards=target_cards,
+        rng=_roller,
+        combat=combat,
+        settings=_combat_settings(context),
+    )
+    if result.get("error"):
+        return result
+    caster_name = str(caster.get("name") or "")
+    result["caster"] = caster_name
+    _attach_spell_dice_message(result)
+    from trpg_server.workflows import areas as area_store
+    from trpg_server.workflows import concentration
+
+    concentration_record = (
+        result.get("concentration") if isinstance(result.get("concentration"), Mapping) else {}
+    )
+    profile = caster.get("spellcasting") if isinstance(caster.get("spellcasting"), Mapping) else {}
+    dc = _as_int(
+        concentration_record.get("dc") if concentration_record else profile.get("spellSaveDC"),
+        0,
+    )
+    spec = area_store.area_spec_from_cast(
+        result,
+        caster=caster_name,
+        dc=dc,
+        scene_id=str(getattr(context, "scene_id", "") or ""),
+    )
+    if spec:
+        created = area_store.create_area(context.room_dir, spec)
+        if created.get("area"):
+            result["area"] = created["area"]
+    concentration.sync(context.room_dir, concentration.holders_from_combat(combat))
+    if budget and slot in budget:
+        scheduler.spend_budget(caster, slot, 1)
+    _append_log(combat, str(result.get("summary") or f"{caster_name} 施放 {spell}。"), context)
+    _save_combat(context, combat)
+    return result
+
+
+class _FlowContext:
+    """续跑时重建一个最小的 room 上下文，避免依赖原请求对象。"""
+
+    def __init__(self, room_dir: Any, room_id: str, info: dict[str, Any]):
+        self.room_dir = room_dir
+        self.room_id = room_id
+        self.config_dir = Path(room_dir) / "config"
+        self.scenarios_dir = Path(room_dir) / "scenarios"
+        self.user_id = 0
+        self.agent_id = ""
+        self._info = info
+
+    def room_info(self) -> dict[str, Any]:
+        return self._info
+
+
+def _finish_cast_steps(
+    flow: dict[str, Any],
+    result: Mapping[str, Any],
+    *,
+    countered: bool = False,
+) -> None:
+    from trpg_server.workflows.model import stamp
+
+    for step in flow.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        if step.get("id") not in {"resolve", "effect", "concentration"}:
+            continue
+        if str(step.get("status")) not in {"pending", "running"}:
+            continue
+        step["status"] = "completed"
+        step["finished_at"] = stamp()
+        if step.get("id") == "resolve":
+            step["result"] = dict(result)
+        else:
+            step["result"] = {"skipped": countered, "countered": countered}
+
+
+def _cast_after_reaction(room_dir: Any, flow: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    """反应窗口收束后继续施法；被反制则只扣法术位，不产生效果。"""
+    from trpg_server.room_rules import load_room_info
+    from trpg_server.workflows import reactions
+
+    metadata = flow.get("metadata") if isinstance(flow.get("metadata"), Mapping) else {}
+    info = load_room_info(room_dir)
+    context = _FlowContext(room_dir, str(flow.get("room_id") or ""), info)
+    combat = _load_combat(context)
+    if not combat:
+        raise RuntimeError("反应结束后找不到战斗状态")
+    caster = _resolve_combatant(combat, metadata.get("caster"))
+    if caster is None:
+        raise RuntimeError("反应结束后找不到施法者")
+    spell = _as_text(metadata.get("spell"))
+    slot_level = _as_int(metadata.get("slot_level"), 0) or None
+    target_names = [str(name) for name in metadata.get("targets") or []]
+    targets = [item for item in (_resolve_combatant(combat, name) for name in target_names) if item]
+    caster_name = str(caster.get("name") or "")
+    countered_by = reactions.counter_used(flow)
+    if countered_by:
+        _ruleset, spells, error = _require_spells(combat, context)
+        if error:
+            raise RuntimeError(error.get("error") or "缺少法术能力")
+        scheduler = _scheduler(combat, context)
+        use_level = slot_level or 1
+        slots = caster.setdefault("spell_slots", {})
+        row = slots.get(str(use_level))
+        if not isinstance(row, dict):
+            row = {"max": 1, "used": 0}
+            slots[str(use_level)] = row
+        row["used"] = _as_int(row.get("used"), 0) + 1
+        scheduler.spend_budget(caster, spells.required_slot(spell), 1) if scheduler.budget_of(caster) else None
+        reactor = _resolve_combatant(combat, countered_by)
+        notes = [f"{caster_name} 的 {spell} 被 {countered_by} 反制，法术位不退还但效果未产生。"]
+        if reactor is not None:
+            reactor_slots = reactor.setdefault("spell_slots", {})
+            third = reactor_slots.get("3")
+            if isinstance(third, dict):
+                third["used"] = _as_int(third.get("used"), 0) + 1
+            if scheduler.budget_of(reactor):
+                scheduler.spend_budget(reactor, "reaction", 1)
+        result = {
+            "countered": True,
+            "countered_by": countered_by,
+            "caster": caster_name,
+            "spell": spell,
+            "summary": notes[0],
+        }
+        _append_log(combat, notes[0], context)
+        _save_combat(context, combat)
+        from trpg_server.workflows import concentration
+
+        concentration.sync(room_dir, concentration.holders_from_combat(combat))
+        _finish_cast_steps(flow, result, countered=True)
+        return result
+
+    target_cards = {
+        str(target.get("name") or ""): _player_card(target, context) for target in targets
+    }
+    result = _apply_combat_cast(
+        context, combat, caster, spell, targets, target_cards, slot_level
+    )
+    if result.get("error"):
+        raise RuntimeError(str(result.get("error")))
+    _finish_cast_steps(flow, result)
+    return result
+
+
+from trpg_server.workflows import continuations
+
+continuations.register("dnd5e.cast_after_reaction", _cast_after_reaction)
+
+
 def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     """施放法术：战斗中校验预算与法术位；战斗外走房间级结算。
 
@@ -249,6 +458,23 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                     "duplicate": True,
                 },
             }
+        awaiting = [
+            str(step.get("id")).split(":", 1)[1]
+            for step in flow_existing.get("steps") or []
+            if str(step.get("id") or "").startswith("reaction:")
+            and str(step.get("status")) == "waiting"
+        ]
+        return {
+            **_combat_summary_state(combat),
+            "status": str(flow_existing.get("status") or ""),
+            "awaiting": awaiting,
+            "summary": "该施法正在等待反应决定，重复提交不会再次结算。",
+            "workflow": {
+                "id": flow_existing.get("id"),
+                "status": flow_existing.get("status"),
+                "duplicate": True,
+            },
+        }
     caster = _resolve_combatant(combat, arguments.get("caster")) or _current_actor(combat)
     if caster is None:
         return {"error": "当前没有可施法的战斗者"}
@@ -278,26 +504,54 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     caster_name = str(caster.get("name") or "")
 
     def resolve(flow: dict[str, Any], step: dict[str, Any]) -> dict[str, Any]:
-        result = spells.cast(
+        return _apply_combat_cast(
+            context,
+            combat,
             caster,
-            _player_card(caster, context),
-            spell=spell,
-            targets=targets,
-            slot_level=_as_int(arguments.get("slot_level"), 0) or None,
-            target_cards=target_cards,
-            rng=_roller,
-            combat=combat,
-            settings=_combat_settings(context),
+            spell,
+            targets,
+            target_cards,
+            _as_int(arguments.get("slot_level"), 0) or None,
         )
-        if result.get("error"):
-            return result
-        result["caster"] = caster_name
-        _attach_spell_dice_message(result)
-        if budget and slot in budget:
-            scheduler.spend_budget(caster, slot, 1)
-        _append_log(combat, str(result.get("summary") or f"{caster_name} 施放 {spell}。"), context)
-        _save_combat(context, combat)
-        return result
+
+    # 有反制候选者时，把反应作为流程中的一个待决步骤，先不产生任何效果。
+    reactor_rows = _counter_candidates(combat, caster, spell)
+    if reactor_rows:
+        from trpg_server.workflows import reactions
+
+        window = reactions.open_cast_window(
+            context.room_dir,
+            room_id=str(getattr(context, "room_id", "") or ""),
+            caster=caster_name,
+            caster_type=executor_type_for(
+                is_player=bool(caster.get("is_player")),
+                agent_id=str(getattr(context, "agent_id", "") or ""),
+            ),
+            spell=spell,
+            slot_level=_as_int(arguments.get("slot_level"), 0) or 1,
+            targets=[str(target.get("name") or "") for target in targets],
+            reactors=reactor_rows,
+            ttl=60,
+            request_key=request_key,
+        )
+        if window.get("error"):
+            return {"error": window["error"], "code": window.get("code")}
+        waiting = window.get("flow") or {}
+        return {
+            **_combat_summary_state(combat),
+            "status": "awaiting_reaction",
+            "summary": (
+                f"{caster_name} 施放 {spell}，等待 "
+                + "、".join(row["name"] for row in reactor_rows)
+                + " 的反应。"
+            ),
+            "awaiting": [row["name"] for row in reactor_rows],
+            "workflow": {
+                "id": waiting.get("id"),
+                "status": waiting.get("status"),
+                "duplicate": False,
+            },
+        }
 
     outcome = run_flow_action(
         context.room_dir,

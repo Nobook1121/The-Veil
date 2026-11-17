@@ -21,7 +21,13 @@ from trpg_server.agents.tools.knowledge import SEARCH_RULESET_KNOWLEDGE_TOOL
 from trpg_server.agents.tools.content import CONTENT_SEARCH_TOOL
 from trpg_server.agents.tools.suggest import SUGGEST_ACTIONS_TOOL
 from trpg_server.agents.tools.combat import COMBAT_TOOLS, COMBAT_TOOL_NAMES
+from trpg_server.agents.tools.areas import AREA_TOOLS, AREA_TOOL_NAMES
+from trpg_server.agents.tools.concentration import (
+    CONCENTRATION_TOOLS,
+    CONCENTRATION_TOOL_NAMES,
+)
 from trpg_server.agents.tools.effects import EFFECT_TOOLS, EFFECT_TOOL_NAMES
+from trpg_server.agents.tools.reactions import REACTION_TOOLS, REACTION_TOOL_NAMES
 from trpg_server.agents.tools.spells import SPELL_TOOLS, SPELL_TOOL_NAMES
 from trpg_server.agents.tools.workflow import WORKFLOW_TOOLS, WORKFLOW_TOOL_NAMES
 from trpg_server.agents.tools.music import MUSIC_REQUEST_TOOL
@@ -73,6 +79,9 @@ def _core_tools() -> list[AgentTool]:
         *SPELL_TOOLS,
         *EFFECT_TOOLS,
         *WORKFLOW_TOOLS,
+        *AREA_TOOLS,
+        *CONCENTRATION_TOOLS,
+        *REACTION_TOOLS,
         *NARRATIVE_TOOLS,
         *TRIGGER_RUNTIME_TOOLS,
         *COC7_EXTRA_TOOLS,
@@ -123,6 +132,12 @@ __all__ = [
     "SPELL_TOOL_NAMES",
     "WORKFLOW_TOOLS",
     "WORKFLOW_TOOL_NAMES",
+    "AREA_TOOLS",
+    "AREA_TOOL_NAMES",
+    "CONCENTRATION_TOOLS",
+    "CONCENTRATION_TOOL_NAMES",
+    "REACTION_TOOLS",
+    "REACTION_TOOL_NAMES",
     "INTERLUDE_TOOLS",
     "INTERLUDE_TOOL_NAMES",
     "GAME_CLOCK_TOOLS",

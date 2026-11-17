@@ -98,12 +98,20 @@ def effect_tool_names(ruleset_id: str | None = None) -> list[str]:
 
 
 def workflow_tool_names(ruleset_id: str | None = None) -> list[str]:
-    """自动化工作流只在 dnd5e 房间下发；CoC7 不出现任何入口。"""
+    """自动化相关工具只在 dnd5e 房间下发；CoC7 不出现任何入口。"""
     if str(ruleset_id or "").strip().lower() != "dnd5e":
         return []
+    from trpg_server.agents.tools.areas import AREA_TOOL_NAMES
+    from trpg_server.agents.tools.concentration import CONCENTRATION_TOOL_NAMES
+    from trpg_server.agents.tools.reactions import REACTION_TOOL_NAMES
     from trpg_server.agents.tools.workflow import WORKFLOW_TOOL_NAMES
 
-    return list(WORKFLOW_TOOL_NAMES)
+    return [
+        *WORKFLOW_TOOL_NAMES,
+        *AREA_TOOL_NAMES,
+        *CONCENTRATION_TOOL_NAMES,
+        *REACTION_TOOL_NAMES,
+    ]
 
 
 def plugin_tool_names(ruleset_id: str | None = None) -> list[str]:

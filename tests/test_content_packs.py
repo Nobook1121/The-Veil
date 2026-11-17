@@ -88,14 +88,14 @@ def test_real_srd_pack_minimal_coverage_counts():
         "progression": 20,
         "equipment": 37,
         "condition": 15,
-        "spell": 9,
+        "spell": 11,
         "monster": 6,
         "class": 2,
     }
     assert library.types("dnd5e") == tuple(expected)
     for type_name, count in expected.items():
         assert len(library.entries("dnd5e", type_name)) == count, type_name
-    assert sum(expected.values()) == 113
+    assert sum(expected.values()) == 115
 
 
 def test_real_srd_pack_shapes_are_ready_for_engine_consumption():

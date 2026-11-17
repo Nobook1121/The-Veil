@@ -95,9 +95,14 @@ def apply_effect(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         "save_ends": arguments.get("save_ends"),
         "effect": arguments.get("effect"),
     }
-    result = effects.apply(target, payload)
+    result = effects.apply(target, payload, combat=combat)
     if result.get("error"):
         return result
+    from trpg_server.workflows import concentration
+
+    concentration.sync(
+        context.room_dir, concentration.holders_from_combat(combat)
+    )
     for text in result.get("notes") or []:
         _append_log(combat, str(text), context)
     _save_combat(context, combat)
@@ -125,6 +130,11 @@ def remove_effect_tool(arguments: dict[str, Any], context: Any) -> dict[str, Any
     if not identifier:
         return {"error": "缺少要移除的效果 id 或条件"}
     result = effects.remove(target, identifier)
+    from trpg_server.workflows import concentration
+
+    concentration.sync(
+        context.room_dir, concentration.holders_from_combat(combat)
+    )
     for text in result.get("notes") or []:
         _append_log(combat, str(text), context)
     _save_combat(context, combat)

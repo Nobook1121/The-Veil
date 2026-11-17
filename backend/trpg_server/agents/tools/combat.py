@@ -1637,6 +1637,11 @@ def _attack_d20(
         summary = str(outcome.get("summary") or "")
         if summary:
             _append_log(combat, summary, context, mirror=False)
+        from trpg_server.workflows import concentration
+
+        concentration.sync(
+            context.room_dir, concentration.holders_from_combat(combat)
+        )
         _save_combat(context, combat)
         result = dict(outcome)
         if summary:

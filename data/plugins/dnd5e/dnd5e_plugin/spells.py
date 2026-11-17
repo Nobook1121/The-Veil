@@ -553,6 +553,94 @@ class Dnd5eSpells:
         results["summary"] = self._summary(caster, label, use_level, results)
         return results
 
+    # -- 持续区域 ---------------------------------------------------------
+    def trigger_area(
+        self,
+        area: Mapping[str, Any],
+        target: dict[str, Any],
+        target_card: Mapping[str, Any] | None = None,
+        *,
+        rng: Callable[[int], int] | None = None,
+        combat: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """结算一次持续区域触发：豁免 → 伤害/减半 → 施加效果。
+
+        “每目标每回合一次”的去重由核心区域实体负责，这里只做单次结算。
+        """
+        name = _text(target.get("name"))
+        results: dict[str, Any] = {"target": name, "save": None, "damage": [], "effects": []}
+        save = area.get("save") if isinstance(area.get("save"), Mapping) else None
+        success = False
+        if save:
+            ability = _text(save.get("ability")) or "dex"
+            auto, disadvantage = save_modifiers(target, ability)
+            dc = max(1, _as_int(save.get("dc"), _as_int(area.get("dc"), 10)))
+            outcome = self.checks.roll_outcome(
+                target_card if isinstance(target_card, Mapping) else card_of(target),
+                CheckRequest(
+                    kind="save",
+                    name=f"{ability}豁免",
+                    target=dc,
+                    extra={
+                        "ability": ability,
+                        "auto_fail": auto,
+                        "disadvantage": disadvantage,
+                        "label": f"{_text(area.get('name')) or '区域'}豁免",
+                    },
+                ),
+                rng,
+            )
+            success = bool(outcome.success)
+            results["save"] = {
+                "ability": ability,
+                "success": success,
+                "total": outcome.total,
+                "dc": outcome.target,
+                "summary": outcome.presentation.get("summary", ""),
+                "dice": list(outcome.dice),
+                "detail": dict(outcome.detail),
+                "presentation": dict(outcome.presentation),
+                "degree": outcome.degree,
+            }
+        if success and not (save and save.get("half_on_success")):
+            return results
+        for row in area.get("damage") or []:
+            if not isinstance(row, Mapping):
+                continue
+            dice = _text(row.get("dice"))
+            damage_type = _text(row.get("type")) or "force"
+            terms, fixed = _parse_damage(dice)
+            amount, _detail = _roll_terms(terms, fixed, rng)
+            if success:
+                amount //= 2
+            if amount <= 0:
+                continue
+            if self.combat is None:
+                results["damage"].append(
+                    {"target": name, "amount": amount, "type": damage_type, "requested": amount}
+                )
+                continue
+            applied = self.combat._apply_damage(
+                target, amount, damage_type, combat=combat, rng=rng
+            )
+            applied["target"] = name
+            applied["dice"] = dice
+            results["damage"].append(applied)
+        effects = area.get("effects")
+        if isinstance(effects, Mapping) and effects:
+            effect = {
+                "id": f"area:{_text(area.get('id'))}:{uuid4().hex[:8]}",
+                "kind": "spell_effect",
+                "scope": "character",
+                "source": _text(area.get("source")) or _text(area.get("name")),
+                "duration": {"unit": "round", "remaining": 1},
+                "persistence": "removable",
+                "detail": {"label": _text(area.get("name")), "effects": dict(effects)},
+            }
+            stored = add_effect(target, effect)
+            results["effects"].append({**stored, "target": name})
+        return results
+
     # -- 专注 -------------------------------------------------------------
     def end_concentration(
         self,

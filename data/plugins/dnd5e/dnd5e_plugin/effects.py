@@ -226,7 +226,13 @@ class Dnd5eEffects:
     ruleset_id = "dnd5e"
 
     # -- 工具/法术调用 ---------------------------------------------------
-    def apply(self, combatant: dict[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+    def apply(
+        self,
+        combatant: dict[str, Any],
+        payload: Mapping[str, Any],
+        *,
+        combat: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         data = payload if isinstance(payload, Mapping) else {}
         notes: list[str] = []
         condition = _text(data.get("condition"))
@@ -262,7 +268,29 @@ class Dnd5eEffects:
             return {"error": "condition 或 effect 至少给一个"}
         stored = add_effect(combatant, effect)
         notes.append(f"{combatant.get('name')} 获得效果：{_label_of(stored)}。")
+        notes.extend(self.on_effects_changed(combatant, combat=combat, reason="失能"))
         return {"effect": stored, "notes": notes}
+
+    def on_effects_changed(
+        self,
+        combatant: dict[str, Any],
+        *,
+        combat: Mapping[str, Any] | None = None,
+        reason: str = "",
+    ) -> list[str]:
+        """效果变化后检查是否失能；失能会打断专注并清理关联效果。"""
+        if not isinstance(combatant.get("concentration"), Mapping):
+            return []
+        flags = flags_of(combatant)
+        incapacitated = bool(flags.get("incapacitated")) or flags.get("can_take_actions") is False
+        dead = bool(combatant.get("dead")) or bool(combatant.get("unconscious"))
+        if not (incapacitated or dead):
+            return []
+        from dnd5e_plugin.spells import Dnd5eSpells
+
+        why = reason or ("死亡" if combatant.get("dead") else "失去意识")
+        return Dnd5eSpells().end_concentration(combatant, combat=combat, reason=why)
+
 
     def remove(self, combatant: dict[str, Any], identifier: Mapping[str, Any] | str) -> dict[str, Any]:
         payload = identifier if isinstance(identifier, Mapping) else {}

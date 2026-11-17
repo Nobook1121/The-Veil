@@ -167,6 +167,9 @@ def new_flow(
         "side_effects": {},
         "submissions": {},
         "events": [],
+        "timed_out": False,
+        "continuation_result": None,
+        "continuation_error": "",
     }
     return flow
 
@@ -227,6 +230,9 @@ def normalize_flow(raw: Any) -> dict[str, Any] | None:
         "side_effects": dict(raw.get("side_effects")) if isinstance(raw.get("side_effects"), Mapping) else {},
         "submissions": dict(raw.get("submissions")) if isinstance(raw.get("submissions"), Mapping) else {},
         "events": [item for item in (raw.get("events") or []) if isinstance(item, Mapping)][-MAX_EVENTS:],
+        "timed_out": bool(raw.get("timed_out")),
+        "continuation_result": raw.get("continuation_result"),
+        "continuation_error": str(raw.get("continuation_error") or ""),
     }
     return flow
 

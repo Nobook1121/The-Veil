@@ -295,6 +295,24 @@ def cast(
             return result
         _sync_all(members, holders, ruleset)
         room_rules.save_room_info(room_dir, info)
+        from trpg_server.workflows import areas as area_store
+        from trpg_server.workflows import concentration
+
+        record = result.get("concentration") if isinstance(result.get("concentration"), Mapping) else {}
+        profile = caster_holder.get("spellcasting") if isinstance(caster_holder.get("spellcasting"), Mapping) else {}
+        dc = _as_int(record.get("dc") if record else profile.get("spellSaveDC"), 0)
+        spec = area_store.area_spec_from_cast(
+            result,
+            caster=_as_text(caster_holder.get("name")),
+            dc=dc,
+        )
+        if spec:
+            created = area_store.create_area(room_dir, spec)
+            if created.get("area"):
+                result["area"] = created["area"]
+        concentration.sync(
+            room_dir, concentration.holders_from_members(info.get("members"))
+        )
         result["noncombat"] = True
         result["caster"] = caster_holder.get("name")
         result["targets"] = [holder.get("name") for holder in target_holders]

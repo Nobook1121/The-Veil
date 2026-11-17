@@ -300,6 +300,7 @@ class WorkflowEngine:
                 actor=str(actor or ""),
                 payload={"step": step_id, "idempotency_key": key},
             )
+            self._run_continuation(flow, data)
             self._settle(flow, data)
             flow_store.save(self.room_dir, data)
             return {"flow": flow, "duplicate": False, "result": decision}
@@ -365,14 +366,24 @@ class WorkflowEngine:
         return {"flow": flow, "expired": True}
 
     def _expire(self, flow: dict[str, Any], data: dict[str, Any]) -> None:
+        continuation = str((flow.get("metadata") or {}).get("continuation") or "").strip()
+        registered = False
+        if continuation:
+            from trpg_server.workflows import continuations
+
+            registered = continuations.has(continuation)
         for step in flow.get("steps") or []:
-            if str(step.get("status")) not in {STEP_PENDING, STEP_WAITING, STEP_RUNNING}:
+            status = str(step.get("status"))
+            if status not in {STEP_PENDING, STEP_WAITING, STEP_RUNNING}:
+                continue
+            if registered and status == STEP_PENDING:
+                # 续跑器会自己补齐后续步骤；这里只把等待中的决定按默认值收尾。
                 continue
             step["status"] = STEP_COMPLETED
             step["result"] = step.get("default") or default_decision(str(step.get("id") or ""))
             step["result"] = {**step["result"], "timeout": True}
             step["finished_at"] = stamp()
-        flow["status"] = FLOW_EXPIRED
+        flow["timed_out"] = True
         flow["updated_at"] = stamp()
         self._append_event(
             flow,
@@ -386,7 +397,61 @@ class WorkflowEngine:
                 }
             },
         )
+        if registered:
+            flow["status"] = FLOW_RUNNING
+            self._run_continuation(flow, data)
+            self._settle(flow, data)
+            if str(flow.get("status")) == FLOW_RUNNING and not any(
+                str(step.get("status")) in {STEP_PENDING, STEP_WAITING, STEP_RUNNING}
+                for step in flow.get("steps") or []
+            ):
+                flow["status"] = FLOW_COMPLETED
+                self._release_lock(flow, data)
+            return
+        flow["status"] = FLOW_EXPIRED
         self._release_lock(flow, data)
+
+    def _run_continuation(self, flow: dict[str, Any], data: dict[str, Any]) -> None:
+        """流程收束后执行注册的续跑器；失败则终止流程。"""
+        metadata = flow.get("metadata") if isinstance(flow.get("metadata"), Mapping) else {}
+        name = str(metadata.get("continuation") or "").strip()
+        if not name or metadata.get("continuation_done"):
+            return
+        if any(
+            str(step.get("status")) == STEP_WAITING for step in flow.get("steps") or []
+        ):
+            return
+        from trpg_server.workflows import continuations
+
+        if not continuations.has(name):
+            return
+        try:
+            result = continuations.run(name, self.room_dir, flow, data)
+        except Exception as exc:  # noqa: BLE001 - 续跑失败不能留下半截流程
+            flow["status"] = FLOW_FAILED
+            flow["continuation_error"] = str(exc)
+            flow["updated_at"] = stamp()
+            self._append_event(
+                flow,
+                "flow.failed",
+                actor="system",
+                payload={"continuation": name, "error": str(exc)},
+            )
+            self._release_lock(flow, data)
+            return
+        metadata = dict(metadata)
+        metadata["continuation_done"] = True
+        flow["metadata"] = metadata
+        flow["continuation_result"] = result
+        self._append_event(
+            flow,
+            "flow.continued",
+            actor="system",
+            payload={"continuation": name},
+        )
+        if all_steps_settled(flow):
+            flow["status"] = FLOW_COMPLETED
+            self._release_lock(flow, data)
 
     def _schedule_expiry(self, flow_id: str, ttl: int) -> None:
         delay = max(1, int(ttl)) + 0.05

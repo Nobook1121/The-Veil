@@ -654,6 +654,13 @@ class Dnd5eCombatRules:
             result["concentration"] = self._concentration_check(
                 target, result["effective"], combat=combat, rng=rng
             )
+        elif isinstance(target.get("concentration"), Mapping) and (
+            target.get("dead") or target.get("unconscious")
+        ):
+            # 即使没有随机源（例如固定伤害/脚本结算），死亡与失能也必须打断专注。
+            result["concentration"] = self._concentration_check(
+                target, 0, combat=combat, rng=None
+            )
         return result
 
     # -- 专注 -------------------------------------------------------------
