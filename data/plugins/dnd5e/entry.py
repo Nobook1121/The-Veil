@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dnd5e_plugin.checks import Dnd5eChecks
 from dnd5e_plugin.combat import Dnd5eCombatRules
+from dnd5e_plugin.content_search import Dnd5eContentSearch
 from dnd5e_plugin.effects import Dnd5eEffects
 from dnd5e_plugin.house_rules import house_rules as dnd5e_house_rules
 from dnd5e_plugin.http import bp
@@ -28,7 +29,15 @@ class Dnd5ePlugin:
     schema_version = 1
     supported_locales = ("zh-CN", "en-US")
     capabilities = frozenset(
-        {"character_schema", "checks", "combat", "spells", "effects", "progression"}
+        {
+            "character_schema",
+            "checks",
+            "combat",
+            "spells",
+            "effects",
+            "progression",
+            "content_search",
+        }
     )
 
     def __init__(self) -> None:
@@ -37,6 +46,8 @@ class Dnd5ePlugin:
         self.effects = Dnd5eEffects()
         self.combat = Dnd5eCombatRules()
         self.spells = Dnd5eSpells(combat=self.combat, checks=self.checks, effects=self.effects)
+        # 通用内容检索能力：核心按能力下发，5e 词表与区分字段留在这里。
+        self.content_search = Dnd5eContentSearch()
         # 战斗与法术共享同一个专注/法术引擎，避免两套状态。
         self.combat.spells = self.spells
         # 回合调度器通过战斗规则对象读取效果能力（核心不认插件类型）。

@@ -18,6 +18,7 @@ from trpg_server.agents.tools.narrative_triggers import (
     TRIGGER_RUNTIME_TOOLS,
 )
 from trpg_server.agents.tools.knowledge import SEARCH_RULESET_KNOWLEDGE_TOOL
+from trpg_server.agents.tools.content import CONTENT_SEARCH_TOOL
 from trpg_server.agents.tools.suggest import SUGGEST_ACTIONS_TOOL
 from trpg_server.agents.tools.combat import COMBAT_TOOLS, COMBAT_TOOL_NAMES
 from trpg_server.agents.tools.effects import EFFECT_TOOLS, EFFECT_TOOL_NAMES
@@ -61,6 +62,7 @@ def _core_tools() -> list[AgentTool]:
         ROLL_DICE_FUNCTION_TOOL,
         REVEAL_SCENARIO_TRIGGER_TOOL,
         SEARCH_RULESET_KNOWLEDGE_TOOL,
+        CONTENT_SEARCH_TOOL,
         SUGGEST_ACTIONS_TOOL,
         MUSIC_REQUEST_TOOL,
         ADD_CHARACTER_ITEM_TOOL,
@@ -100,6 +102,7 @@ def default_tool_registry() -> ToolRegistry:
 
 
 __all__ = [
+    "CONTENT_SEARCH_TOOL",
     "COC7_EXTRA_TOOL_NAMES",
     "COC7_EXTRA_TOOLS",
     "CHASE_TOOL_NAMES",

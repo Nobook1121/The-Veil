@@ -11,6 +11,7 @@ from typing import Any
 from flask import Blueprint, current_app, request, session
 
 from dnd5e_plugin import progression
+from dnd5e_plugin.content_search import Dnd5eContentSearch
 from trpg_server.character_service import CharacterServiceError, apply_room_changes
 from trpg_server.responses import error_response, success_response
 from trpg_server.room_access import can_access, find_room, is_elevated
@@ -25,6 +26,7 @@ from trpg_server.room_rules import (
 logger = logging.getLogger(__name__)
 bp = Blueprint("dnd5e_plugin", __name__, url_prefix="/api/plugins/dnd5e")
 _OWNER_ROLES = {"owner", "admin"}
+_CONTENT_SEARCH = Dnd5eContentSearch()
 
 
 def _rank(info: dict[str, Any]) -> int:
@@ -83,6 +85,37 @@ class _HttpError(Exception):
         self.message = message
         self.status = status
         self.code = code
+
+
+@bp.route("/rooms/<room_id>/content/search", methods=["GET"])
+def content_search(room_id: str):
+    room_dir, info, denied = _room_or_error(room_id)
+    if denied:
+        return denied
+    type_name = str(request.args.get("type") or "").strip()
+    query = str(request.args.get("q") or request.args.get("query") or "").strip()
+    try:
+        limit = int(request.args.get("limit") or 10)
+    except (TypeError, ValueError):
+        limit = 10
+    limit = max(1, min(20, limit))
+    if not type_name:
+        return success_response(
+            {
+                "status": "none",
+                "query": query,
+                "type": "",
+                "types": _CONTENT_SEARCH.types(),
+                "matches": [],
+                "total": 0,
+            },
+            "Content types",
+        )
+    try:
+        result = _CONTENT_SEARCH.search(type_name, query, limit=limit)
+    except ValueError as exc:
+        return error_response(str(exc), 400, "dnd5e.invalid_content_type")
+    return success_response(result, "Content search")
 
 
 @bp.route("/rooms/<room_id>/progression/plan", methods=["POST"])

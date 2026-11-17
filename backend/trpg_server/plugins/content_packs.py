@@ -215,6 +215,57 @@ class ContentPackLibrary:
                         return found
         return found
 
+    def lookup(
+        self, ruleset_id: str, type_name: str, query: str, *, limit: int = 10
+    ) -> dict[str, Any]:
+        """通用内容消歧：返回 ``match`` / ``ambiguous`` / ``none``。
+
+        核心只按 id、名称、本地化名称、别名与文本做通用打分，不解释任何规则集
+        字段；多候选按内容版本、数据包版本与来源版本排序，区分信息由插件补充。
+        """
+        text = str(query or "").strip().casefold()
+        key = str(type_name or "").strip().lower()
+        if not text:
+            return {"status": "none", "query": "", "type": key, "matches": [], "total": 0}
+        seen: dict[str, dict[str, Any]] = {}
+        for pack in self.packs_for(ruleset_id):
+            for entry in pack.entries(key):
+                score, matched_by = _score_entry(entry, text)
+                if score <= 0:
+                    continue
+                candidate = {
+                    "id": str(entry.get("id") or ""),
+                    "name": str(entry.get("name") or entry.get("id") or ""),
+                    "names": _entry_names(entry),
+                    "score": score,
+                    "matched_by": matched_by,
+                    "pack": {
+                        "plugin_id": pack.plugin_id,
+                        "pack_id": pack.pack_id,
+                        "pack_version": pack.pack_version,
+                        "content_version": pack.content_version,
+                        "edition": pack.source.edition,
+                        "system": pack.source.system,
+                        "document": pack.source.document,
+                    },
+                }
+                previous = seen.get(candidate["id"])
+                if previous is None or candidate["score"] > int(previous.get("score") or 0):
+                    seen[candidate["id"]] = candidate
+        candidates = list(seen.values())
+        exact = [item for item in candidates if int(item.get("score") or 0) >= _EXACT_SCORE]
+        pool = exact or candidates
+        pool.sort(key=_candidate_sort_key)
+        pool = pool[: max(1, min(50, int(limit)))]
+        status = "none" if not pool else ("match" if len(pool) == 1 else "ambiguous")
+        return {
+            "status": status,
+            "query": text,
+            "type": key,
+            "matches": pool,
+            "total": len(pool),
+        }
+
     def sources(self, ruleset_id: str = "") -> list[dict[str, Any]]:
         return [pack.meta() for pack in self.packs_for(ruleset_id)]
 
@@ -398,6 +449,73 @@ def _has_name(entry: Mapping[str, Any]) -> bool:
             if isinstance(value, Mapping) and isinstance(value.get("name"), str) and value["name"].strip():
                 return True
     return False
+
+
+_EXACT_SCORE = 95
+
+
+def _entry_names(entry: Mapping[str, Any]) -> dict[str, str]:
+    names: dict[str, str] = {}
+    primary = str(entry.get("name") or "").strip()
+    if primary:
+        names["en"] = primary
+    locales = entry.get("locales")
+    if isinstance(locales, Mapping):
+        for locale, value in locales.items():
+            if isinstance(value, Mapping):
+                localized = str(value.get("name") or "").strip()
+                if localized:
+                    names[str(locale)] = localized
+    return names
+
+
+def _entry_aliases(entry: Mapping[str, Any]) -> list[str]:
+    aliases = entry.get("aliases")
+    if isinstance(aliases, str):
+        return [aliases.strip()] if aliases.strip() else []
+    if isinstance(aliases, list):
+        return [str(item).strip() for item in aliases if str(item).strip()]
+    return []
+
+
+def _score_entry(entry: Mapping[str, Any], text: str) -> tuple[int, str]:
+    """通用打分：精确 id/名称 > 别名 > 前缀 > 子串 > 全文。"""
+    entry_id = str(entry.get("id") or "").strip().casefold()
+    names = [value.casefold() for value in _entry_names(entry).values() if value]
+    aliases = [value.casefold() for value in _entry_aliases(entry)]
+    if text == entry_id:
+        return 120, "id"
+    if any(text == name for name in names):
+        return 100, "name"
+    if any(text == alias for alias in aliases):
+        return 95, "alias"
+    if entry_id.startswith(text):
+        return 80, "id_prefix"
+    if any(name.startswith(text) for name in names):
+        return 75, "name_prefix"
+    if any(text in name for name in names):
+        return 60, "name_part"
+    if any(text in alias for alias in aliases):
+        return 45, "alias_part"
+    if text in _search_blob(entry):
+        return 25, "content"
+    return 0, ""
+
+
+def _version_key(value: Any) -> tuple[int, ...]:
+    parts = tuple(int(part) for part in re.findall(r"\d+", str(value or "")))[:8]
+    return parts or (0,)
+
+
+def _candidate_sort_key(item: Mapping[str, Any]) -> tuple[Any, ...]:
+    pack = item.get("pack") if isinstance(item.get("pack"), Mapping) else {}
+    return (
+        -int(item.get("score") or 0),
+        tuple(-part for part in _version_key(pack.get("content_version"))),
+        tuple(-part for part in _version_key(pack.get("pack_version"))),
+        tuple(-part for part in _version_key(pack.get("edition"))),
+        str(item.get("name") or "").casefold(),
+    )
 
 
 def _search_blob(entry: Mapping[str, Any]) -> str:
