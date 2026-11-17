@@ -12,7 +12,9 @@ import logging
 import random
 import re
 import time
+from dataclasses import replace as _dataclass_replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -4052,6 +4054,55 @@ COMBAT_END_TOOL = AgentTool(
     handler=end_combat,
 )
 
+
+def _with_room_lock(handler: Any) -> Any:
+    """把一次战斗动作的「读状态 → 修改 → 保存」包进统一的房间锁。
+
+    地图插件、房间时钟与工作流都使用 ``room_clock.room_lock``；战斗动作也必须
+    用同一把锁，否则移动力扣减与掉血会互相覆盖。锁可重入，动作内部再调用
+    ``room_lock``（例如毒剂认领、工作流续跑）不会死锁。
+    """
+
+    def wrapped(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+        room_dir = getattr(context, "room_dir", None)
+        if not room_dir:
+            return handler(arguments, context)
+        from trpg_server.room_clock import room_lock
+
+        with room_lock(room_dir):
+            return handler(arguments, context)
+
+    wrapped.__name__ = getattr(handler, "__name__", "combat_handler")
+    wrapped.__doc__ = getattr(handler, "__doc__", "")
+    return wrapped
+
+
+# 所有会写房间/战斗状态的战斗工具；只读的 combat.state / combat.poison_queue
+# 不在此列，避免无谓串行。
+_ROOM_LOCKED_HANDLERS = (
+    "start_combat",
+    "join_combat",
+    "next_turn",
+    "delay_combatant",
+    "disengage_combatant",
+    "reload_combatant",
+    "ready_combatant",
+    "cast_spell",
+    "attack_combatant",
+    "shoot_combatant",
+    "damage_combatant",
+    "treat_combatant",
+    "heal_combatant",
+    "poison_combatant",
+    "knockout_combatant",
+    "hit_location_check",
+    "spend_combat_action",
+    "end_combat",
+)
+for _handler_name in _ROOM_LOCKED_HANDLERS:
+    globals()[_handler_name] = _with_room_lock(globals()[_handler_name])
+
+
 COMBAT_TOOLS = [
     COMBAT_START_TOOL,
     COMBAT_JOIN_TOOL,
@@ -4073,6 +4124,15 @@ COMBAT_TOOLS = [
     COMBAT_TREAT_TOOL,
     COMBAT_SPEND_TOOL,
     COMBAT_END_TOOL,
+]
+# AgentTool 是不可变 dataclass：把工具对象里的 handler 换成带锁版本。
+COMBAT_TOOLS = [
+    (
+        _dataclass_replace(tool, handler=globals()[tool.handler.__name__])
+        if getattr(tool.handler, "__name__", "") in _ROOM_LOCKED_HANDLERS
+        else tool
+    )
+    for tool in COMBAT_TOOLS
 ]
 COMBAT_TOOL_NAMES = [tool.name for tool in COMBAT_TOOLS]
 

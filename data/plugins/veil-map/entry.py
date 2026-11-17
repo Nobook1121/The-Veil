@@ -16,7 +16,6 @@ import logging
 import math
 import re
 import sys
-import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,6 +30,7 @@ from trpg_server.combat.scheduler import spend_budget
 from trpg_server.json_store import read_json
 from trpg_server.responses import error_response, success_response
 from trpg_server.room_access import can_access, find_room, is_elevated
+from trpg_server.room_clock import room_lock
 from trpg_server.room_rules import resolve_rule_id
 
 bp = Blueprint("veil_map", __name__, url_prefix="/api/plugins/veil-map")
@@ -55,7 +55,9 @@ MAX_WALL_POINTS = 64
 WALL_KINDS = {"wall", "door", "window", "terrain"}
 MAX_LIGHTS = 100
 RECENT_REQUEST_LIMIT = 64
-_MAP_LOCK = threading.RLock()
+# 房间状态统一用 ``room_clock.room_lock(room_dir)``：它同时覆盖地图、战斗预算
+# 与 info.json 的读改写，并与房间时钟/法术模块共用同一把跨进程锁。锁定顺序
+# 固定为「角色卡锁 → 房间锁」；持有房间锁时不再获取角色卡锁。
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 _OWNER_ROLES = {"owner", "admin"}
@@ -1908,7 +1910,7 @@ def _apply_combat_cost(
 
 
 def _map_payload(room_id: str, room_dir, info: dict[str, Any]) -> dict[str, Any]:
-    with _MAP_LOCK:
+    with room_lock(room_dir):
         state = _load_map(room_dir)
         if _reconcile_tokens(state, info):
             state = _save_map(room_dir, state)
@@ -1949,7 +1951,7 @@ def update_map(room_id: str):
         return denied
     payload = _write_payload()
     _role, manager = _room_context(info)
-    with _MAP_LOCK:
+    with room_lock(room_dir):
         state = _load_map(room_dir)
         if not manager:
             return _rejected_request(
@@ -2075,7 +2077,7 @@ def add_token(room_id: str):
         return denied
     payload = _write_payload()
     _role, manager = _room_context(info)
-    with _MAP_LOCK:
+    with room_lock(room_dir):
         state = _load_map(room_dir)
         if not manager:
             return _rejected_request(
@@ -2184,7 +2186,7 @@ def delete_token(room_id: str, token_id: str):
         return denied
     payload = _write_payload()
     _role, manager = _room_context(info)
-    with _MAP_LOCK:
+    with room_lock(room_dir):
         state = _load_map(room_dir)
         if not manager:
             return _rejected_request(
@@ -2237,7 +2239,7 @@ def move_token(room_id: str, token_id: str):
     payload = _write_payload()
     _role, manager = _room_context(info)
     viewer_id = str(session.get("user_id") or "")
-    with _MAP_LOCK:
+    with room_lock(room_dir):
         state = _load_map(room_dir)
         token = next((item for item in state["tokens"] if str(item.get("id")) == str(token_id)), None)
         if token is None:
@@ -2369,7 +2371,7 @@ def update_walls(room_id: str):
         return denied
     payload = _write_payload()
     _role, manager = _room_context(info)
-    with _MAP_LOCK:
+    with room_lock(room_dir):
         state = _load_map(room_dir)
         if not manager:
             return _rejected_request(
@@ -2428,7 +2430,7 @@ def update_lights(room_id: str):
         return denied
     payload = _write_payload()
     _role, manager = _room_context(info)
-    with _MAP_LOCK:
+    with room_lock(room_dir):
         state = _load_map(room_dir)
         if not manager:
             return _rejected_request(
@@ -2488,7 +2490,7 @@ def update_token_light(room_id: str, token_id: str):
     payload = _write_payload()
     _role, manager = _room_context(info)
     viewer_id = str(session.get("user_id") or "")
-    with _MAP_LOCK:
+    with room_lock(room_dir):
         state = _load_map(room_dir)
         token = next(
             (item for item in state["tokens"] if str(item.get("id")) == str(token_id)),
@@ -2594,7 +2596,7 @@ def import_map(room_id: str):
     doors = sum(1 for wall in walls or [] if str(wall.get("kind")) in {"door", "window"})
 
     form = dict(request.form)
-    with _MAP_LOCK:
+    with room_lock(room_dir):
         state = _load_map(room_dir)
         request_id, expected, error = _read_envelope(form, state)
         if error is not None:
@@ -2747,7 +2749,7 @@ def calibrate_map(room_id: str):
         return denied
     payload = _write_payload()
     _role, manager = _room_context(info)
-    with _MAP_LOCK:
+    with room_lock(room_dir):
         state = _load_map(room_dir)
         if not manager:
             return _rejected_request(
@@ -2862,7 +2864,7 @@ def spatial_range(room_id: str):
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return error_response("请求体必须是 JSON 对象。", 400, "map.invalid_payload")
-    with _MAP_LOCK:
+    with room_lock(room_dir):
         state = _load_map(room_dir)
     origin = _point_from_payload(payload.get("origin"), state)
     if origin is None:
@@ -2955,7 +2957,7 @@ def spatial_line(room_id: str):
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return error_response("请求体必须是 JSON 对象。", 400, "map.invalid_payload")
-    with _MAP_LOCK:
+    with room_lock(room_dir):
         state = _load_map(room_dir)
     mode = str(payload.get("mode") or "sight").strip().lower()
     if mode not in {"sight", "movement"}:
@@ -3045,7 +3047,7 @@ def _move_token_agent(
         return {"ok": False, "error": "缺少房间上下文，无法移动棋子。"}
     if _agent_ruleset_id(info, scenarios_dir) != "dnd5e":
         return {"ok": False, "error": "当前房间的规则集不支持地图棋子移动。"}
-    with _MAP_LOCK:
+    with room_lock(room_dir):
         state = _load_map(room_dir)
         _reconcile_tokens(state, info)
         token = _find_token(state, token_ref)

@@ -1,7 +1,8 @@
 """房间级工作流存储：JSON 落盘、房间写锁与角色锁。
 
 锁分两层：
-- 进程内 ``threading.RLock`` 保证同一房间的读改写串行；
+- 房间写锁复用 ``room_clock.room_lock``：与地图、战斗、时钟共用同一把
+  房间级锁（进程内重入 + 跨进程文件锁），避免工作流与战斗/地图互相覆盖；
 - 持久化的锁记录带 holder 与 ``expires_at``，让跨请求的语义可观察、可超时，
   服务重启后残留锁也会按 TTL 自动失效。
 
@@ -11,7 +12,6 @@
 
 from __future__ import annotations
 
-import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Mapping
@@ -29,32 +29,13 @@ from trpg_server.workflows.model import (
 
 WORKFLOWS_FILENAME = "workflows.json"
 
-_ROOM_LOCKS: dict[str, threading.RLock] = {}
-_ROOM_LOCKS_GUARD = threading.Lock()
-
-
-def _room_key(room_dir: Any) -> str:
-    try:
-        return str(Path(room_dir).resolve())
-    except OSError:
-        return str(room_dir)
-
-
-def room_mutex(room_dir: Any) -> threading.RLock:
-    key = _room_key(room_dir)
-    with _ROOM_LOCKS_GUARD:
-        lock = _ROOM_LOCKS.get(key)
-        if lock is None:
-            lock = threading.RLock()
-            _ROOM_LOCKS[key] = lock
-        return lock
-
 
 @contextmanager
 def room_write_lock(room_dir: Any) -> Iterator[None]:
-    """进程内房间写锁；所有工作流读改写都必须经过它。"""
-    lock = room_mutex(room_dir)
-    with lock:
+    """统一的房间级写锁：工作流、地图、战斗与时钟共用。"""
+    from trpg_server.room_clock import room_lock
+
+    with room_lock(room_dir):
         yield
 
 
@@ -209,7 +190,6 @@ __all__ = [
     "load",
     "prune_locks",
     "release_character_lock",
-    "room_mutex",
     "room_write_lock",
     "save",
     "store_path",
