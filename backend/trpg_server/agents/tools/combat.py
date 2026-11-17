@@ -1787,6 +1787,7 @@ def _attack_after_reaction(room_dir: Any, flow: dict[str, Any], data: dict[str, 
     from trpg_server.workflows import reactions
 
     metadata = flow.get("metadata") if isinstance(flow.get("metadata"), dict) else {}
+    guard_notes = [str(item) for item in metadata.get("guard_notes") or [] if str(item or "").strip()]
     info = load_room_info(room_dir)
     context = _ActionContext(room_dir, str(flow.get("room_id") or ""), info)
     combat = _load_combat(context)
@@ -1850,6 +1851,8 @@ def _attack_after_reaction(room_dir: Any, flow: dict[str, Any], data: dict[str, 
     )
     if result.get("error"):
         raise RuntimeError(str(result.get("error")))
+    if guard_notes:
+        result["guard_notes"] = list(guard_notes)
     _finish_attack_steps(
         flow,
         result,
@@ -1944,9 +1947,9 @@ def _attack_d20(
     budget = scheduler.budget_of(attacker)
     if budget and int(budget.get(slot) or 0) <= 0:
         return {"error": f"{attacker.get('name')} 的 {slot} 行动额度已用完"}
-    from trpg_server.workflows.guards import validate_action
+    from trpg_server.workflows.guards import validate_action_report
 
-    blocked = validate_action(
+    blocked, guard_notes = validate_action_report(
         room_dir,
         kind="attack",
         actor=str(attacker.get("name") or ""),
@@ -1965,7 +1968,10 @@ def _attack_d20(
             settings=settings,
             combat=combat,
         )
-        return _finalize_attack(context, combat, attacker, target, outcome, scheduler, slot)
+        result = _finalize_attack(context, combat, attacker, target, outcome, scheduler, slot)
+        if guard_notes and isinstance(result, dict):
+            result["guard_notes"] = list(guard_notes)
+        return result
 
     if not room_dir:
         # 没有房间目录（嵌入/单测直接调用）时退回直接结算，不创建流程。
@@ -2034,6 +2040,7 @@ def _attack_d20(
                     slot=slot,
                     ttl=60,
                     request_key=request_key,
+                    metadata={"guard_notes": list(guard_notes)},
                 )
                 if window.get("error"):
                     return {"error": window.get("error"), "code": window.get("code")}
@@ -2046,6 +2053,7 @@ def _attack_d20(
                         "等待护盾术反应。"
                     ),
                     "awaiting": [target_name],
+                    "guard_notes": list(guard_notes),
                     "workflow": {
                         "id": waiting.get("id"),
                         "status": waiting.get("status"),

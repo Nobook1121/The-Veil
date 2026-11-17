@@ -785,6 +785,86 @@ def test_high_level_counter_check_failure_lets_spell_through(tmp_path, plugins, 
     assert combat["combatants"]["Mira"]["spell_slots"]["4"]["used"] == 1
 
 
+# ---------------------------------------------------------------------------
+# 无棋子时的校验退化提示
+# ---------------------------------------------------------------------------
+def test_guard_notes_surface_in_flow_and_tool_result(tmp_path, plugins):
+    from trpg_server.workflows import guards
+
+    def note_guard(payload):
+        if str(payload.get("kind")) in {"cast", "attack"}:
+            return {"notes": ["本次未做视线与墙体校验（测试退化）"]}
+        return []
+
+    guards.register_action_guard(note_guard)
+    try:
+        context = _combat_context(tmp_path, [_wizard_card()])
+        cast = spell_tools.cast_spell(
+            {
+                "caster": "Mira",
+                "spell": "magic-missile",
+                "targets": ["Goblin"],
+                "slot_level": 1,
+                "request_id": "cast-guard-notes",
+            },
+            context,
+        )
+        assert any("本次未做视线与墙体校验" in note for note in cast["guard_notes"])
+        flow = WorkflowEngine(tmp_path).find_by_request_key("cast-guard-notes")
+        resolve = next(step for step in flow["steps"] if step["id"] == "resolve")
+        assert any("本次未做视线与墙体校验" in note for note in resolve["result"]["guard_notes"])
+        events = workflow_tools.get_workflow({"flow_id": flow["id"]}, context)["events"]
+        applied = [
+            event for event in events
+            if event["type"] == "side_effect.applied" and event["payload"].get("key") == "resolve"
+        ]
+        assert applied and any(
+            "本次未做视线与墙体校验" in note
+            for note in applied[0]["payload"]["result"]["guard_notes"]
+        )
+
+        combat = combat_tools._load_combat(context)
+        combat["combatants"]["Mira"].setdefault("budget", {})["action"] = 1
+        combat_tools._save_combat(context, combat)
+        attack = combat_tools.attack_combatant(
+            {
+                "attacker": "Mira",
+                "target": "Goblin",
+                "attack_roll": 18,
+                "request_id": "attack-guard-notes",
+            },
+            context,
+        )
+        assert any("本次未做视线与墙体校验" in note for note in attack["guard_notes"])
+        attack_flow = WorkflowEngine(tmp_path).find_by_request_key("attack-guard-notes")
+        attack_step = next(step for step in attack_flow["steps"] if step["id"] == "attack")
+        assert any(
+            "本次未做视线与墙体校验" in note
+            for note in attack_step["result"]["guard_notes"]
+        )
+    finally:
+        guards.clear_action_guards()
+
+
+def test_veil_map_guard_marks_missing_tokens(tmp_path, plugins):
+    import sys
+
+    module = sys.modules.get("trpg_plugin_veil_map_entry")
+    if module is None:
+        pytest.skip("veil-map 插件未加载")
+    result = module._action_line_guard(
+        {
+            "room_dir": tmp_path,
+            "kind": "cast",
+            "actor": "Mira",
+            "targets": ["Goblin"],
+            "range_ft": 60,
+        }
+    )
+    assert result.get("errors", []) == []
+    assert any("本次未做视线与墙体校验" in note for note in result.get("notes", []))
+
+
 def test_coc7_has_no_reaction_or_area_tools(plugins):
     from trpg_server.agents.profiles import workflow_tool_names
 

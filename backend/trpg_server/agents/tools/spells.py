@@ -529,6 +529,7 @@ def _cast_after_reaction(room_dir: Any, flow: dict[str, Any], data: dict[str, An
     target_names = [str(name) for name in metadata.get("targets") or []]
     targets = [item for item in (_resolve_combatant(combat, name) for name in target_names) if item]
     caster_name = str(caster.get("name") or "")
+    guard_notes = [str(item) for item in metadata.get("guard_notes") or [] if str(item or "").strip()]
     countered_by = reactions.counter_used(flow)
     if countered_by:
         ruleset, spells, error = _require_spells(combat, context)
@@ -581,6 +582,8 @@ def _cast_after_reaction(room_dir: Any, flow: dict[str, Any], data: dict[str, An
                 "summary": notes[0],
                 "counter_spell": counter_record,
             }
+            if guard_notes:
+                result["guard_notes"] = list(guard_notes)
             _append_log(combat, notes[0], context)
             _save_combat(context, combat)
             from trpg_server.workflows import concentration
@@ -624,6 +627,7 @@ def _cast_after_reaction(room_dir: Any, flow: dict[str, Any], data: dict[str, An
             "status": "awaiting_save",
             "awaiting": [reactions.save_target_of(str(step.get("id"))) for step in pending_saves],
             "counter_spell": (flow.get("metadata") or {}).get("counter_spell"),
+            "guard_notes": list(guard_notes),
         }
 
     target_cards = {
@@ -647,6 +651,8 @@ def _cast_after_reaction(room_dir: Any, flow: dict[str, Any], data: dict[str, An
         result["countered"] = False
         result["countered_by"] = countered_by
         result["counter_spell"] = counter_record
+    if guard_notes:
+        result["guard_notes"] = list(guard_notes)
     _finish_cast_steps(flow, result)
     return result
 
@@ -735,9 +741,9 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     targets, target_cards, target_error = _resolve_targets(combat, caster, arguments, context)
     if target_error:
         return target_error
-    from trpg_server.workflows.guards import validate_action
+    from trpg_server.workflows.guards import validate_action_report
 
-    blocked = validate_action(
+    blocked, guard_notes = validate_action_report(
         getattr(context, "room_dir", None),
         kind="cast",
         actor=str(caster.get("name") or ""),
@@ -748,7 +754,7 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     caster_name = str(caster.get("name") or "")
 
     def resolve(flow: dict[str, Any], step: dict[str, Any]) -> dict[str, Any]:
-        return _apply_combat_cast(
+        result = _apply_combat_cast(
             context,
             combat,
             caster,
@@ -757,6 +763,9 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             target_cards,
             _as_int(arguments.get("slot_level"), 0) or None,
         )
+        if guard_notes and isinstance(result, dict):
+            result["guard_notes"] = list(guard_notes)
+        return result
 
     # 有反制候选者或需要玩家决定的豁免时，把它作为流程中的待决步骤，
     # 先不产生任何效果；两者共用同一套 waiting/TTL/幂等收尾。
@@ -785,6 +794,7 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             save_steps=save_rows,
             ttl=60,
             request_key=request_key,
+            metadata={"guard_notes": list(guard_notes)},
         )
         if window.get("error"):
             return {"error": window["error"], "code": window.get("code")}
@@ -814,6 +824,7 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             "summary": f"{caster_name} 施放 {spell}，等待 " + " 与 ".join(parts) + "。",
             "awaiting": [*awaiting_reactions, *awaiting_saves],
             "awaiting_saves": awaiting_saves,
+            "guard_notes": list(guard_notes),
             "workflow": {
                 "id": waiting.get("id"),
                 "status": waiting.get("status"),

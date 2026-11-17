@@ -261,9 +261,9 @@ def cast(
         if found is not None and found not in target_holders:
             target_holders.append(found)
 
-    from trpg_server.workflows.guards import validate_action
+    from trpg_server.workflows.guards import validate_action_report
 
-    blocked = validate_action(
+    blocked, guard_notes = validate_action_report(
         room_dir,
         kind="cast",
         actor=str(caster_holder.get("name") or ""),
@@ -323,6 +323,8 @@ def cast(
         result["noncombat"] = True
         result["caster"] = caster_holder.get("name")
         result["targets"] = [holder.get("name") for holder in target_holders]
+        if guard_notes:
+            result["guard_notes"] = list(guard_notes)
         return result
 
     from trpg_server.workflows.actions import (

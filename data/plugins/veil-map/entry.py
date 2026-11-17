@@ -2912,12 +2912,14 @@ MOVE_TOKEN_TOOL = AgentTool(
 )
 
 
-def _action_line_guard(payload: dict[str, Any]) -> list[str]:
+def _action_line_guard(payload: dict[str, Any]) -> dict[str, Any]:
     """给服务端行动工作流提供墙体/视线校验。
 
     只看同时有地图棋子的施法者与目标；找不到棋子时不做臆测，交给规则集
-    自己的射程校验。门开着按 ``wall_blocks`` 的既有语义放行。
+    自己的射程校验。退化时在 ``notes`` 里明确标注，让 KP 知道本次是按纯
+    射程判的。门开着按 ``wall_blocks`` 的既有语义放行。
     """
+    skipped = "本次未做视线与墙体校验"
     room_dir = payload.get("room_dir")
     walls = []
     tokens = []
@@ -2928,9 +2930,10 @@ def _action_line_guard(payload: dict[str, Any]) -> list[str]:
         tokens = [token for token in state.get("tokens") or [] if isinstance(token, dict)]
         grid, offset_x, offset_y = _grid_of(state)
     except Exception:  # noqa: BLE001 - 没有地图时不影响规则结算
-        return []
-    if not walls or not tokens:
-        return []
+        return {"notes": [f"{skipped}（地图不可用）"]}
+    actor_name = str(payload.get("actor") or "施法者")
+    if not tokens:
+        return {"notes": [f"{skipped}（地图上没有棋子）"]}
 
     def find_token(name: Any) -> dict[str, Any] | None:
         wanted = str(name or "").strip().casefold()
@@ -2954,25 +2957,33 @@ def _action_line_guard(payload: dict[str, Any]) -> list[str]:
 
     actor_token = find_token(payload.get("actor"))
     if actor_token is None:
-        return []
+        return {"notes": [f"{skipped}（{actor_name} 没有绑定棋子）"]}
     actor_point = center(actor_token)
     if actor_point is None:
-        return []
+        return {"notes": [f"{skipped}（{actor_name} 的棋子位置无效）"]}
+    if not walls:
+        # 没有墙体时既没有可阻挡的线，也没有需要校验的墙；不算退化。
+        return {}
     actor_name = str(actor_token.get("name") or payload.get("actor") or "施法者")
     errors: list[str] = []
+    notes: list[str] = []
     for target_name in payload.get("targets") or []:
         target_token = find_token(target_name)
-        if target_token is None or target_token is actor_token:
+        if target_token is None:
+            notes.append(f"{skipped}（{target_name} 没有绑定棋子）")
+            continue
+        if target_token is actor_token:
             continue
         target_point = center(target_token)
         if target_point is None:
+            notes.append(f"{skipped}（{target_name} 的棋子位置无效）")
             continue
         blockers = spatial.segment_blockers(
             walls, actor_point, target_point, mode="sight"
         )
         if blockers:
             errors.append(f"{actor_name} 与 {target_name} 之间被墙体或关闭的门阻挡")
-    return errors
+    return {"errors": errors, "notes": notes}
 
 
 def _area_position_provider(room_dir: Any, name: str) -> dict[str, Any] | None:
