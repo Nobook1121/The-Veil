@@ -26,6 +26,82 @@ _MUSIC_REPORT_LOCK = threading.Lock()
 # 常量定义在 security 中（房间内在线/自动存档判定也要读它），这里直接复用避免重复。
 
 
+def _membership_store():
+    return current_app.config.setdefault(USER_ROOM_MEMBERSHIP_KEY, {})
+
+
+def forget_user_room(room_id: str, user_id: Any) -> set[str]:
+    """从进程内房间订阅记录中移除该用户；返回需要服务端退房的 sid 集合。"""
+    membership = _membership_store()
+    user_key = str(user_id or "")
+    entry = membership.get(user_key)
+    sids: set[str] = set()
+    if isinstance(entry, dict):
+        for sid, rooms in list(entry.items()):
+            if not isinstance(rooms, set):
+                continue
+            if room_id in rooms:
+                rooms.discard(room_id)
+                sids.add(str(sid))
+            if not rooms:
+                entry.pop(sid, None)
+        if not entry:
+            membership.pop(user_key, None)
+    elif isinstance(entry, set):
+        entry.discard(room_id)
+        if not entry:
+            membership.pop(user_key, None)
+    return sids
+
+
+def evict_user_from_room(room_id: str, user_id: Any) -> int:
+    """成员被移除/主动退出后，真正让他离开该房间的 Socket.IO 频道。
+
+    只靠 HTTP 写盘不够：浏览器连接仍会留在 ``room:<id>`` 里继续收房间广播。
+    这里做两件事：
+    1. 对该用户在本房间的每个 sid 调用服务端 ``leave_room``，并清理进程内的
+       订阅记录（迷雾视图按观察者实时计算，没有额外的用户级缓存需要清理）；
+    2. 给该用户推一条 ``room_evicted``，让前端主动断开/清理本地房间状态。
+
+    返回成功退房的 sid 数量。进程重启前的旧连接没有 membership 记录时无法
+    定位 sid，但 ``room_evicted`` 仍会送达，由客户端兜底退出。
+    """
+    room_key = str(room_id or "")
+    if not room_key:
+        return 0
+    sids = forget_user_room(room_key, user_id)
+    socketio = current_app.extensions.get("socketio")
+    if socketio is None:
+        return 0
+    moved = 0
+    for sid in sids:
+        try:
+            socketio.server.leave_room(sid, room_key, namespace="/")
+            moved += 1
+        except Exception:  # noqa: BLE001 - 单个连接失败不影响清理其余连接
+            logger.warning(
+                "socket_evict_failed room=%s user=%s sid=%s",
+                room_key,
+                user_id,
+                sid,
+                exc_info=True,
+            )
+    try:
+        socketio.emit(
+            "room_evicted",
+            {"room_id": room_key},
+            room=f"user:{user_id}",
+        )
+    except Exception:  # noqa: BLE001 - 推送失败不能影响成员移除
+        logger.warning(
+            "socket_evict_notify_failed room=%s user=%s",
+            room_key,
+            user_id,
+            exc_info=True,
+        )
+    return moved
+
+
 def register_socket_events(socketio):
     # 每次 create_app 都会通过 init_app 重建底层 server，因此事件必须重新绑定；
     # 已注册标记会让第二个 app（测试/多实例）丢失全部 Socket 处理器。

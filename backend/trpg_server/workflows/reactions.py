@@ -248,6 +248,9 @@ def decide(
     *,
     idempotency_key: str = "",
     actor: str = "",
+    actor_user_id: Any = "",
+    agent_id: Any = "",
+    is_manager: bool = False,
 ) -> dict[str, Any]:
     engine = WorkflowEngine(room_dir)
     return engine.submit(
@@ -256,6 +259,9 @@ def decide(
         decision=decision,
         idempotency_key=idempotency_key,
         actor=actor or candidate,
+        actor_user_id=actor_user_id,
+        agent_id=agent_id,
+        is_manager=is_manager,
     )
 
 

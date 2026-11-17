@@ -10,6 +10,7 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable, Mapping
 
+from trpg_server.workflows import access as flow_access
 from trpg_server.workflows import store as flow_store
 from trpg_server.workflows.model import (
     DEFAULT_TIMEOUT_SECONDS,
@@ -124,6 +125,9 @@ class WorkflowEngine:
         """新建流程并占用角色锁；返回 ``(flow, error, created)``。"""
         with flow_store.room_write_lock(self.room_dir):
             data = flow_store.load(self.room_dir)
+            # 先给到期流程做收尾（结算默认决策、释放角色锁），再抢锁：
+            # 避免旧流程的角色锁刚被 prune 掉、新流程立刻抢入造成重复结算。
+            self._expire_stale(data)
             flow_store.prune_locks(data)
             request_key = str(request_key or "").strip()
             if request_key:
@@ -265,8 +269,15 @@ class WorkflowEngine:
         decision: Any = None,
         idempotency_key: str = "",
         actor: str = "",
+        actor_user_id: Any = "",
+        agent_id: Any = "",
+        is_manager: bool = False,
     ) -> dict[str, Any]:
-        """提交一个待决步骤的决定；同一幂等键只生效一次。"""
+        """提交一个待决步骤的决定；同一幂等键只生效一次。
+
+        ``actor_user_id`` / ``agent_id`` / ``is_manager`` 用于服务端鉴权：
+        步骤只能由其目标角色的控制者、对应 AI 执行者或 KP / 房管提交。
+        """
         flow_id = str(flow_id or "").strip()
         step_id = str(step_id or "").strip()
         key = str(idempotency_key or "").strip() or f"{flow_id}:{step_id}"
@@ -287,8 +298,36 @@ class WorkflowEngine:
             )
             if step is None:
                 return {"error": f"工作流没有步骤“{step_id}”", "code": "workflow.unknown_step"}
+            # 过期流程先按默认决策收尾再拒绝：角色锁可能已被清理，不能留下
+            # 可被再次提交的半截流程造成重复结算。
+            try:
+                expires_at = float(flow.get("expires_at") or 0)
+            except (TypeError, ValueError):
+                expires_at = 0.0
+            if (
+                str(flow.get("status")) not in TERMINAL_STATUSES
+                and expires_at > 0
+                and expires_at <= now()
+            ):
+                self._expire(flow, data)
+                flow_store.save(self.room_dir, data)
+                return {
+                    "error": "工作流已超时结束，不能再提交决定",
+                    "code": "workflow.expired",
+                    "flow": flow,
+                }
             if str(flow.get("status")) in TERMINAL_STATUSES:
                 return {"error": "工作流已经结束", "code": "workflow.closed", "flow": flow}
+            allowed, code, message = flow_access.authorize_step(
+                flow,
+                step,
+                user_id=actor_user_id,
+                agent_id=agent_id,
+                manager=is_manager,
+                info=flow_access.load_room_info(self.room_dir),
+            )
+            if not allowed:
+                return {"error": message, "code": code}
             if str(step.get("status")) not in {STEP_WAITING, STEP_PENDING}:
                 return {"error": f"步骤“{step_id}”当前不可提交", "code": "workflow.step_not_waiting"}
             step["status"] = STEP_COMPLETED
@@ -306,7 +345,16 @@ class WorkflowEngine:
             flow_store.save(self.room_dir, data)
             return {"flow": flow, "duplicate": False, "result": decision}
 
-    def cancel(self, flow_id: str, *, actor: str = "", reason: str = "") -> dict[str, Any]:
+    def cancel(
+        self,
+        flow_id: str,
+        *,
+        actor: str = "",
+        reason: str = "",
+        actor_user_id: Any = "",
+        agent_id: Any = "",
+        is_manager: bool = False,
+    ) -> dict[str, Any]:
         with flow_store.room_write_lock(self.room_dir):
             data = flow_store.load(self.room_dir)
             flow = data["flows"].get(str(flow_id or ""))
@@ -314,6 +362,15 @@ class WorkflowEngine:
                 return {"error": "工作流不存在", "code": "workflow.not_found"}
             if str(flow.get("status")) in TERMINAL_STATUSES:
                 return {"flow": flow, "cancelled": False}
+            allowed, code, message = flow_access.authorize_control(
+                flow,
+                user_id=actor_user_id,
+                agent_id=agent_id,
+                manager=is_manager,
+                info=flow_access.load_room_info(self.room_dir),
+            )
+            if not allowed:
+                return {"error": message, "code": code}
             for step in flow.get("steps") or []:
                 if str(step.get("status")) in {STEP_PENDING, STEP_WAITING, STEP_RUNNING}:
                     step["status"] = STEP_SKIPPED
@@ -337,23 +394,23 @@ class WorkflowEngine:
         expired: list[str] = []
         with flow_store.room_write_lock(self.room_dir):
             data = flow_store.load(self.room_dir)
+            # 顺序很重要：先结算到期流程并释放各自角色锁，再清理剩余过期锁。
+            # 否则锁先被清掉、流程还没收尾，另一条流程可能抢入造成重复结算。
+            self._expire_stale(data, moment, expired)
             released = flow_store.prune_locks(data, moment)
-            for flow in data["flows"].values():
-                if str(flow.get("status")) in TERMINAL_STATUSES:
-                    continue
-                try:
-                    expires_at = float(flow.get("expires_at") or 0)
-                except (TypeError, ValueError):
-                    expires_at = 0.0
-                if expires_at > moment:
-                    continue
-                self._expire(flow, data)
-                expired.append(str(flow.get("id")))
             if expired or released:
                 flow_store.save(self.room_dir, data)
         return expired
 
-    def expire(self, flow_id: str) -> dict[str, Any]:
+    def expire(
+        self,
+        flow_id: str,
+        *,
+        actor: str = "",
+        actor_user_id: Any = "",
+        agent_id: Any = "",
+        is_manager: bool = False,
+    ) -> dict[str, Any]:
         flow_id = str(flow_id or "").strip()
         with flow_store.room_write_lock(self.room_dir):
             data = flow_store.load(self.room_dir)
@@ -362,9 +419,40 @@ class WorkflowEngine:
                 return {"error": "工作流不存在", "code": "workflow.not_found"}
             if str(flow.get("status")) in TERMINAL_STATUSES:
                 return {"flow": flow, "expired": False}
+            allowed, code, message = flow_access.authorize_control(
+                flow,
+                user_id=actor_user_id,
+                agent_id=agent_id,
+                manager=is_manager,
+                info=flow_access.load_room_info(self.room_dir),
+            )
+            if not allowed:
+                return {"error": message, "code": code}
             self._expire(flow, data)
             flow_store.save(self.room_dir, data)
         return {"flow": flow, "expired": True}
+
+    def _expire_stale(
+        self,
+        data: dict[str, Any],
+        moment: float | None = None,
+        expired: list[str] | None = None,
+    ) -> list[str]:
+        """把已到期且未结束的流程收尾；返回本次收尾的流程 id。"""
+        moment = now() if moment is None else float(moment)
+        rows = expired if expired is not None else []
+        for flow in list(data.get("flows", {}).values()):
+            if str(flow.get("status")) in TERMINAL_STATUSES:
+                continue
+            try:
+                expires_at = float(flow.get("expires_at") or 0)
+            except (TypeError, ValueError):
+                expires_at = 0.0
+            if expires_at > moment:
+                continue
+            self._expire(flow, data)
+            rows.append(str(flow.get("id")))
+        return rows
 
     def _expire(self, flow: dict[str, Any], data: dict[str, Any]) -> None:
         continuation = str((flow.get("metadata") or {}).get("continuation") or "").strip()

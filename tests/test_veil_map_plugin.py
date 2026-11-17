@@ -580,6 +580,81 @@ def test_spatial_distance_ranges_and_shapes():
     assert set(line) == {(1, 0), (2, 0), (3, 0)}
 
 
+def test_spatial_line_blocks_out_of_sight_probing_in_fog(client):
+    manager, _unused = client
+    app, _room_dir = _fog_api_room(client)
+    visitor = app.test_client()
+    _login(visitor, "u2")
+
+    outside = visitor.post(
+        "/api/plugins/veil-map/rooms/room1/spatial/line",
+        json={
+            "from": {"cell_x": 1, "cell_y": 0},
+            "to": {"cell_x": 10, "cell_y": 0},
+            "mode": "sight",
+        },
+    )
+    assert outside.status_code == 200
+    data = outside.get_json()["data"]
+    assert data["resolvable"] is False
+    assert data["blocked"] is None
+    assert data["blocked_by"] == []
+
+    # 起点本身不可见：直接拒绝，不暴露任何墙体信息。
+    hidden_start = visitor.post(
+        "/api/plugins/veil-map/rooms/room1/spatial/line",
+        json={
+            "from": {"cell_x": 10, "cell_y": 0},
+            "to": {"cell_x": 1, "cell_y": 0},
+            "mode": "sight",
+        },
+    )
+    assert hidden_start.status_code == 403
+    assert hidden_start.get_json()["error"] == "map.line_out_of_sight"
+
+    # KP 不受迷雾限制。
+    kp = manager.post(
+        "/api/plugins/veil-map/rooms/room1/spatial/line",
+        json={
+            "from": {"cell_x": 1, "cell_y": 0},
+            "to": {"cell_x": 10, "cell_y": 0},
+            "mode": "sight",
+        },
+    )
+    kp_data = kp.get_json()["data"]
+    assert kp_data["resolvable"] is True
+    assert isinstance(kp_data["blocked_by"], list)
+
+
+def test_move_conflict_message_hides_unknown_token_name():
+    state = {
+        "bounds_cells": 50,
+        "tokens": [
+            {
+                "id": "bob",
+                "name": "Bob",
+                "kind": "pc",
+                "cell_x": 0,
+                "cell_y": 0,
+                "owner_user_id": "u2",
+            },
+            {"id": "ogre", "name": "隐藏的食人魔", "kind": "npc", "cell_x": 1, "cell_y": 0},
+        ],
+    }
+    bob = state["tokens"][0]
+    code, message = veil_map._move_target_rejection(
+        state, bob, 1, 0, manager=False
+    )
+    assert code == "map.cell_occupied"
+    assert "食人魔" not in message
+
+    code, message = veil_map._move_target_rejection(
+        state, bob, 1, 0, manager=True
+    )
+    assert code == "map.cell_occupied"
+    assert "食人魔" in message
+
+
 def test_wall_payload_blocks_sight_and_movement(client):
     manager, _app = client
     _login(manager, "u1")

@@ -202,7 +202,7 @@ def test_cancel_closes_flow(tmp_path):
         request_key="req-cancel",
     )
     engine.run_auto(flow["id"], {})
-    result = engine.cancel(flow["id"], actor="KP", reason="玩家离线")
+    result = engine.cancel(flow["id"], actor="KP", reason="玩家离线", is_manager=True)
     assert result["cancelled"] is True
     assert result["flow"]["status"] == FLOW_CANCELLED
     assert engine.get(flow["id"], expire=False)["status"] == FLOW_CANCELLED
@@ -240,6 +240,7 @@ def test_room_policy_override_waits_and_submits(tmp_path):
         decision={"ok": True},
         idempotency_key="decision-1",
         actor="Mira",
+        is_manager=True,
     )
     assert submitted["duplicate"] is False
     assert submitted["flow"]["status"] == FLOW_COMPLETED

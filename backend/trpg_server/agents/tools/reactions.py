@@ -81,6 +81,9 @@ def resolve_reaction(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         decision,
         idempotency_key=str(arguments.get("idempotency_key") or ""),
         actor=candidate,
+        actor_user_id=getattr(context, "user_id", ""),
+        agent_id=getattr(context, "agent_id", ""),
+        is_manager=str(getattr(context, "agent_id", "") or "").strip().lower() == "kp",
     )
     if result.get("error"):
         return result

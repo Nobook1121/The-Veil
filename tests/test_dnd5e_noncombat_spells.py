@@ -111,6 +111,26 @@ class _Context:
         return self._info
 
 
+def test_unknown_caster_errors_instead_of_falling_back(tmp_path, plugins):
+    room_dir, info = _room(tmp_path)
+    result = room_spells.cast(
+        room_dir,
+        info,
+        caster="Nobody",
+        spell="cure-wounds",
+        targets=["Borin"],
+        slot_level=1,
+        rng=lambda sides: sides,
+    )
+    assert "找不到施法者" in result.get("error", "")
+    mira = _member(info, "Mira")
+    slots = mira["character_card"]["sheet"].get("spellcasting", {}).get("slots") or {}
+    assert all(int(row.get("used", 0)) == 0 for row in slots.values())
+
+    listing = room_spells.list_spells(info, caster="Nobody")
+    assert "找不到施法者" in listing.get("error", "")
+
+
 # ---------------------------------------------------------------------------
 # 治疗与法术位
 # ---------------------------------------------------------------------------

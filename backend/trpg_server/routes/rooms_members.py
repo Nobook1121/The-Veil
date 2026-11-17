@@ -111,6 +111,11 @@ def delete_room_member(room_id, user_id):
     if target.get("room_role") == ROOM_ROLE_ADMIN:
         target["room_role"] = ROOM_ROLE_MEMBER
     _write_room(room_dir, info)
+    # 真正退出 Socket.IO 房间并按观察者清理订阅；否则被移除的浏览器仍会收
+    # 房间级地图广播（迷雾房间下可能拿到 KP 视角的全量 state）。
+    from trpg_server.socket_events import evict_user_from_room
+
+    evict_user_from_room(room_id, user_id)
     log_room_event(
         room_dir,
         user_action_text(session.get("username"), "移除了房间成员"),
@@ -234,6 +239,10 @@ def leave_room(room_id):
         _write_room(room_dir, info)
 
     heir_username = str((heir or {}).get("username") or "")
+    # 自助退出同样要让连接离开房间频道，避免退出后仍收到房间动态。
+    from trpg_server.socket_events import evict_user_from_room
+
+    evict_user_from_room(room_id, user_id)
     leave_action = (
         f"退出了房间，房主自动移交给加入时间最早的活跃成员 {heir_username}"
         if heir

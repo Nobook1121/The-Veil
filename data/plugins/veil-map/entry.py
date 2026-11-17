@@ -1067,14 +1067,9 @@ def _broadcast(room_id: str, state: dict[str, Any], move: dict[str, Any] | None 
                 "veil_map_broadcast_failed room=%s user=%s", room_id, user_id, exc_info=True
             )
     if delivered == 0:
-        # 没有成员（或成员都没有 user_id）时退回房间广播，避免地图完全静默。
-        payload = {"room_id": str(room_id), "map": state}
-        if isinstance(move, dict) and move:
-            payload["move"] = move
-        try:
-            socketio.emit("room_map_changed", payload, room=str(room_id))
-        except Exception:  # noqa: BLE001
-            logger.warning("veil_map_broadcast_failed room=%s", room_id, exc_info=True)
+        # 没有可推送目标时不再回退到整房间全量 state：房间频道里可能仍有
+        # 已被移除但连接未断的客户端，全量下发会让迷雾失效。这里只记日志。
+        logger.debug("veil_map_broadcast_no_recipients room=%s", room_id)
 
 
 def _combat_payload(room_dir) -> dict[str, Any]:
@@ -1650,8 +1645,8 @@ def _within_bounds(state: dict[str, Any], token: dict[str, Any], cell_x: int, ce
 
 def _occupancy_conflict(
     state: dict[str, Any], token: dict[str, Any], cell_x: int, cell_y: int
-) -> str:
-    """返回目标 footprint 上已占用的棋子名称；无冲突时返回空串。"""
+) -> dict[str, Any] | None:
+    """返回目标 footprint 上已占用的棋子；无冲突时返回 ``None``。"""
     grid, offset_x, offset_y = _grid_of(state)
     width, height = _footprint(token)
     for other in state.get("tokens") or []:
@@ -1665,8 +1660,8 @@ def _occupancy_conflict(
             and cell_y < other_y + other_h
             and other_y < cell_y + height
         ):
-            return str(other.get("name") or "其他棋子")
-    return ""
+            return other
+    return None
 
 
 _MOVE_INSET_PX = 1.0
@@ -1738,17 +1733,27 @@ def _movement_block_message(state: dict[str, Any], blockers: list[str]) -> str:
 
 
 def _move_target_rejection(
-    state: dict[str, Any], token: dict[str, Any], cell_x: int, cell_y: int
+    state: dict[str, Any],
+    token: dict[str, Any],
+    cell_x: int,
+    cell_y: int,
+    *,
+    manager: bool = True,
 ) -> tuple[str, str] | None:
-    """移动入口共用的目标格校验：边界、占位与墙体穿越；被挡住时不改坐标与预算。"""
+    """移动入口共用的目标格校验：边界、占位与墙体穿越；被挡住时不改坐标与预算。
+
+    非管理者只拿中性文案：迷雾下逐个格试走不能用来枚举隐藏棋子的名字。
+    """
     if not _within_bounds(state, token, cell_x, cell_y):
         bounds = _clamp(
             _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS
         )
         return "map.out_of_bounds", f"目标位置超出地图边界（当前地图 {bounds} 格）。"
     occupied = _occupancy_conflict(state, token, cell_x, cell_y)
-    if occupied:
-        return "map.cell_occupied", f"目标格已被「{occupied}」占用。"
+    if occupied is not None:
+        if manager:
+            return "map.cell_occupied", f"目标格已被「{occupied.get('name') or '其他棋子'}」占用。"
+        return "map.cell_occupied", "目标格已有其他棋子或障碍物，无法进入。"
     grid, offset_x, offset_y = _grid_of(state)
     from_cell = _cell_of(token, grid, offset_x, offset_y)
     blockers = _movement_wall_blockers(state, token, from_cell, (cell_x, cell_y))
@@ -2273,7 +2278,9 @@ def move_token(room_id: str, token_id: str):
                 revision=state["revision"],
             )
         cell_x, cell_y, fraction_x, fraction_y = target
-        rejection = _move_target_rejection(state, token, cell_x, cell_y)
+        rejection = _move_target_rejection(
+            state, token, cell_x, cell_y, manager=manager
+        )
         if rejection is not None:
             code, message = rejection
             return _rejected_request(
@@ -2907,10 +2914,42 @@ def spatial_range(room_id: str):
     )
 
 
+def _segment_cells(
+    start: tuple[int, int],
+    end: tuple[int, int],
+    grid: int,
+    offset_x: int,
+    offset_y: int,
+) -> set[tuple[int, int]]:
+    """线段经过的格集合（半格采样，与视线/移动校验口径一致）。"""
+    step = max(1.0, grid * 0.5)
+    ax, ay = float(start[0]), float(start[1])
+    bx, by = float(end[0]), float(end[1])
+    length = math.hypot(bx - ax, by - ay)
+    count = max(1, int(math.ceil(length / step)))
+    cells: set[tuple[int, int]] = set()
+    for sample in range(count + 1):
+        ratio = sample / count
+        x = ax + (bx - ax) * ratio
+        y = ay + (by - ay) * ratio
+        cells.add(
+            (
+                int(math.floor((x - offset_x) / grid + 1e-9)),
+                int(math.floor((y - offset_y) / grid + 1e-9)),
+            )
+        )
+    return cells
+
+
 @bp.route("/rooms/<room_id>/spatial/line", methods=["POST"])
 def spatial_line(room_id: str):
-    """视线或移动阻挡：起点到终点是否被墙体挡住。"""
-    room_dir, _info, denied = _map_room_or_error(room_id)
+    """视线或移动阻挡：起点到终点是否被墙体挡住。
+
+    迷雾开启时，非管理者只能查询自己当前看得见的范围：起点必须可见，
+    整条线段也必须落在可见格内。范围外返回「无法判定」且不下发墙体 id，
+    避免用逐点探测还原整张地图与暗门位置。KP / 房管不受此限制。
+    """
+    room_dir, info, denied = _map_room_or_error(room_id)
     if denied:
         return denied
     payload = request.get_json(silent=True)
@@ -2929,25 +2968,63 @@ def spatial_line(room_id: str):
             400,
             "map.invalid_points",
         )
+    _role, manager = _room_context(info)
+    fog = state.get("fog") or {}
+    restricted = bool(fog.get("enabled")) and not manager
+    distance = spatial.cell_distance((start[2], start[3]), (end[2], end[3]))
+    from_point = {"cell_x": start[2], "cell_y": start[3], "x": start[0], "y": start[1]}
+    to_point = {"cell_x": end[2], "cell_y": end[3], "x": end[0], "y": end[1]}
+    if restricted:
+        viewer_id = str(session.get("user_id") or "")
+        _view, _fog_payload, visible = _observer_scope(
+            state, room_dir, viewer_id, manager
+        )
+        if (start[2], start[3]) not in visible:
+            return error_response(
+                "起点不在你的视野内，无法探测这条线段。",
+                403,
+                "map.line_out_of_sight",
+            )
+        grid, offset_x, offset_y = _grid_of(state)
+        crossed = _segment_cells(
+            (start[0], start[1]), (end[0], end[1]), grid, offset_x, offset_y
+        )
+        if any(cell not in visible for cell in crossed):
+            return success_response(
+                {
+                    "mode": mode,
+                    "blocked": None,
+                    "blocked_by": [],
+                    "blocked_by_count": 0,
+                    "resolvable": False,
+                    "reason": "线段超出你的可见范围，无法判定",
+                    "distance_cells": distance,
+                    "distance_ft": spatial.cells_to_feet(distance, FEET_PER_CELL),
+                    "from": from_point,
+                    "to": to_point,
+                },
+                "Line unresolved",
+            )
     blockers = spatial.segment_blockers(
         state.get("walls") or [],
         (start[0], start[1]),
         (end[0], end[1]),
         mode=mode,
     )
-    distance = spatial.cell_distance((start[2], start[3]), (end[2], end[3]))
-    return success_response(
-        {
-            "mode": mode,
-            "blocked": bool(blockers),
-            "blocked_by": blockers,
-            "distance_cells": distance,
-            "distance_ft": spatial.cells_to_feet(distance, FEET_PER_CELL),
-            "from": {"cell_x": start[2], "cell_y": start[3], "x": start[0], "y": start[1]},
-            "to": {"cell_x": end[2], "cell_y": end[3], "x": end[0], "y": end[1]},
-        },
-        "Line resolved",
-    )
+    data: dict[str, Any] = {
+        "mode": mode,
+        "blocked": bool(blockers),
+        "blocked_by": [] if restricted else blockers,
+        "resolvable": True,
+        "distance_cells": distance,
+        "distance_ft": spatial.cells_to_feet(distance, FEET_PER_CELL),
+        "from": from_point,
+        "to": to_point,
+    }
+    if restricted:
+        # 玩家只拿是否存在阻挡，不下发墙体 id，避免被逐条枚举。
+        data["blocked_by_count"] = len(blockers)
+    return success_response(data, "Line resolved")
 
 
 def _move_token_agent(

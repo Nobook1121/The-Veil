@@ -10,6 +10,7 @@ from typing import Any
 
 from trpg_server.agents.tools.base import AgentTool
 from trpg_server.combat.settings import resolve_settings
+from trpg_server.workflows import access as flow_access
 from trpg_server.workflows.engine import WorkflowEngine
 
 
@@ -25,7 +26,52 @@ def _engine(context: Any, info: dict[str, Any] | None = None) -> tuple[WorkflowE
     return WorkflowEngine(room_dir, room_id=str(getattr(context, "room_id", "") or "")), None
 
 
-def _summary(flow: dict[str, Any]) -> dict[str, Any]:
+def _identity(context: Any) -> dict[str, Any]:
+    """工具侧身份：KP agent 视为房管，其余按 AI 执行者判定。"""
+    agent_id = str(getattr(context, "agent_id", "") or "")
+    return {
+        "user_id": getattr(context, "user_id", ""),
+        "agent_id": agent_id,
+        "manager": agent_id.strip().lower() == "kp",
+    }
+
+
+def _engine_identity(context: Any) -> dict[str, Any]:
+    identity = _identity(context)
+    return {
+        "actor_user_id": identity["user_id"],
+        "agent_id": identity["agent_id"],
+        "is_manager": identity["manager"],
+    }
+
+
+def _summary(
+    flow: dict[str, Any],
+    *,
+    manager: bool = True,
+    info: dict[str, Any] | None = None,
+    user_id: Any = "",
+) -> dict[str, Any]:
+    steps = []
+    for step in flow.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        visible = manager or flow_access.step_belongs_to(
+            flow, step, user_id=user_id, info=info
+        )
+        steps.append(
+            {
+                "id": step.get("id"),
+                "label": step.get("label"),
+                "policy": step.get("policy"),
+                "status": step.get("status"),
+                "result": (
+                    step.get("result")
+                    if visible and step.get("status") == "waiting"
+                    else None
+                ),
+            }
+        )
     return {
         "id": flow.get("id"),
         "kind": flow.get("kind"),
@@ -34,17 +80,7 @@ def _summary(flow: dict[str, Any]) -> dict[str, Any]:
         "initiator_type": flow.get("initiator_type"),
         "created_at": flow.get("created_at"),
         "expires_at": flow.get("expires_at"),
-        "steps": [
-            {
-                "id": step.get("id"),
-                "label": step.get("label"),
-                "policy": step.get("policy"),
-                "status": step.get("status"),
-                "result": step.get("result") if step.get("status") == "waiting" else None,
-            }
-            for step in flow.get("steps") or []
-            if isinstance(step, dict)
-        ],
+        "steps": steps,
         "metadata": flow.get("metadata") or {},
     }
 
@@ -53,11 +89,34 @@ def list_workflows(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     engine, error = _engine(context)
     if error:
         return error
+    identity = _identity(context)
+    info = context.room_info() if hasattr(context, "room_info") else {}
     rows = engine.list(
         status=str(arguments.get("status") or "").strip() or None,
         limit=int(arguments.get("limit") or 20),
     )
-    return {"workflows": [_summary(flow) for flow in rows]}
+    rows = [
+        flow
+        for flow in rows
+        if flow_access.flow_visible_to(
+            flow,
+            user_id=identity["user_id"],
+            agent_id=identity["agent_id"],
+            manager=identity["manager"],
+            info=info,
+        )
+    ]
+    return {
+        "workflows": [
+            _summary(
+                flow,
+                manager=identity["manager"],
+                info=info,
+                user_id=identity["user_id"],
+            )
+            for flow in rows
+        ]
+    }
 
 
 def get_workflow(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -68,7 +127,25 @@ def get_workflow(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     flow = engine.get(flow_id)
     if flow is None:
         return {"error": "工作流不存在", "code": "workflow.not_found"}
-    return {"workflow": _summary(flow), "events": flow.get("events") or []}
+    identity = _identity(context)
+    info = context.room_info() if hasattr(context, "room_info") else {}
+    if not flow_access.flow_visible_to(
+        flow,
+        user_id=identity["user_id"],
+        agent_id=identity["agent_id"],
+        manager=identity["manager"],
+        info=info,
+    ):
+        return {"error": "该流程与你的角色无关，只有 KP 可以查看", "code": flow_access.FORBIDDEN}
+    return {
+        "workflow": _summary(
+            flow,
+            manager=identity["manager"],
+            info=info,
+            user_id=identity["user_id"],
+        ),
+        "events": (flow.get("events") or []) if identity["manager"] else [],
+    }
 
 
 def cancel_workflow(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -79,6 +156,7 @@ def cancel_workflow(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         str(arguments.get("flow_id") or ""),
         actor=str(getattr(context, "user_id", "") or ""),
         reason=str(arguments.get("reason") or ""),
+        **_engine_identity(context),
     )
     if result.get("error"):
         return result
@@ -98,12 +176,20 @@ def decide_workflow(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         decision=decision,
         idempotency_key=str(arguments.get("idempotency_key") or ""),
         actor=str(getattr(context, "user_id", "") or ""),
+        **_engine_identity(context),
     )
     if result.get("error"):
         return result
+    info = context.room_info() if hasattr(context, "room_info") else {}
+    identity = _identity(context)
     return {
         "duplicate": bool(result.get("duplicate")),
-        "workflow": _summary(result["flow"]),
+        "workflow": _summary(
+            result["flow"],
+            manager=identity["manager"],
+            info=info,
+            user_id=identity["user_id"],
+        ),
         "result": result.get("result"),
     }
 
@@ -114,7 +200,11 @@ def expire_workflows(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         return error
     flow_id = str(arguments.get("flow_id") or "").strip()
     if flow_id:
-        result = engine.expire(flow_id)
+        result = engine.expire(
+            flow_id,
+            actor=str(getattr(context, "user_id", "") or ""),
+            **_engine_identity(context),
+        )
         if result.get("error"):
             return result
         return {"expired": result.get("expired"), "workflow": _summary(result["flow"])}

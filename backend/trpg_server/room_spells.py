@@ -81,20 +81,31 @@ def find_member(info: Mapping[str, Any], identifier: Any) -> dict[str, Any] | No
     return None
 
 
-def default_member(info: Mapping[str, Any], context: Any = None) -> dict[str, Any] | None:
+def resolve_member(
+    info: Mapping[str, Any],
+    identifier: Any,
+    context: Any = None,
+    *,
+    role: str = "施法者",
+) -> tuple[dict[str, Any] | None, str]:
+    """解析房间成员；显式标识找不到时直接报错，不做“第一个有卡成员”的猜测。
+
+    只有完全未指定标识、且 ``context.user_id`` 能唯一对应当前成员时才回落到
+    「调用者本人」。这样 KP 或写错名字的 AI 工具不会把行动转嫁到其他玩家。
+    """
+    text = _as_text(identifier)
+    if text:
+        found = find_member(info, text)
+        if found is None:
+            return None, f"找不到{role}“{text}”（需要房间成员名或用户名）"
+        return found, ""
     user_id = getattr(context, "user_id", None)
     if user_id is not None:
         found = find_member(info, user_id)
         if found is not None:
-            return found
-    for member in info.get("members") or []:
-        if not isinstance(member, dict):
-            continue
-        if member.get("is_active", True) is False or member.get("status") == "removed":
-            continue
-        if isinstance(member.get("character_card"), Mapping):
-            return member
-    return None
+            return found, ""
+        return None, f"当前用户不是房间成员，无法确定{role}；请显式指定"
+    return None, f"找不到{role}；请显式指定（房间成员名）"
 
 
 def _prepare_holder(
@@ -215,11 +226,9 @@ def cast(
                         "duplicate": True,
                     },
                 }
-    caster_member = find_member(info, caster) if caster else None
+    caster_member, caster_error = resolve_member(info, caster, context, role="施法者")
     if caster_member is None:
-        caster_member = default_member(info, context)
-    if caster_member is None:
-        return {"error": "找不到施法者；请指定 caster（房间成员名）"}
+        return {"error": caster_error}
 
     holders, members = _holder_map(info, ruleset, settings)
     caster_holder = next(
@@ -378,9 +387,9 @@ def list_spells(
     spells = getattr(ruleset, "spells", None)
     if spells is None:
         return {"error": "当前规则集没有法术能力"}
-    member = find_member(info, caster) if caster else default_member(info, context)
+    member, member_error = resolve_member(info, caster, context, role="施法者")
     if member is None:
-        return {"error": "找不到施法者；请指定 caster（房间成员名）"}
+        return {"error": member_error}
     holder, card, _state = _prepare_holder(member, ruleset, settings)
     return {
         "noncombat": True,
@@ -442,9 +451,9 @@ def concentration(
     spells = getattr(ruleset, "spells", None)
     if spells is None:
         return {"error": "当前规则集没有法术能力"}
-    target_member = find_member(info, member) if member else default_member(info, context)
+    target_member, member_error = resolve_member(info, member, context, role="角色")
     if target_member is None:
-        return {"error": "找不到角色；请指定 member（房间成员名）"}
+        return {"error": member_error}
     holders, members = _holder_map(info, ruleset, settings)
     holder = next(
         (value for name, value in holders.items() if members.get(name) is target_member), None
@@ -497,10 +506,11 @@ __all__ = [
     "advance_minutes",
     "cast",
     "concentration",
-    "default_member",
     "effects_available",
     "find_member",
     "list_spells",
+    "member_names",
+    "resolve_member",
     "ruleset_for",
     "spells_available",
 ]

@@ -69,7 +69,8 @@ class _Context:
         self.config_dir = room_dir / "config"
         self.scenarios_dir = room_dir / "scenarios"
         self.user_id = 1
-        self.agent_id = ""
+        # 该文件模拟 KP 驱动整场战斗：NPC 反应/豁免由 KP 代为决定。
+        self.agent_id = "kp"
         self._card = card or _wizard_card()
 
     def room_info(self) -> dict:
@@ -499,7 +500,7 @@ def test_shield_timeout_uses_default_and_applies_damage(tmp_path, plugins):
     )
     hp_before = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
     engine = WorkflowEngine(tmp_path)
-    expired = engine.expire(awaiting["workflow"]["id"])
+    expired = engine.expire(awaiting["workflow"]["id"], is_manager=True)
     assert expired["expired"] is True
     flow = engine.get(awaiting["workflow"]["id"], expire=False)
     assert flow["status"] == "completed"
@@ -542,7 +543,7 @@ def test_reaction_timeout_uses_default_and_continues(tmp_path, plugins):
     )
     hp_before = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
     engine = WorkflowEngine(tmp_path)
-    expired = engine.expire(awaiting["workflow"]["id"])
+    expired = engine.expire(awaiting["workflow"]["id"], is_manager=True)
     assert expired["expired"] is True
     flow = engine.get(awaiting["workflow"]["id"], expire=False)
     # 超时按“不反制”继续结算，流程应完成而不是永久挂起。
@@ -636,7 +637,7 @@ def test_save_ask_timeout_uses_default_fail(tmp_path, plugins):
         context,
     )
     engine = WorkflowEngine(tmp_path)
-    expired = engine.expire(awaiting["workflow"]["id"])
+    expired = engine.expire(awaiting["workflow"]["id"], is_manager=True)
     assert expired["expired"] is True
     flow = engine.get(awaiting["workflow"]["id"], expire=False)
     assert flow["status"] == "completed"
