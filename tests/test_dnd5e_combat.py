@@ -250,7 +250,13 @@ def test_start_attack_and_action_economy(tmp_path, plugins, monkeypatch):
     assert state["combatants"]["Goblin"]["hp"] == 1
 
     blocked = combat.attack_combatant(
-        {"attacker": "Aria", "target": "Goblin", "attack_roll": 18}, context
+        {
+            "attacker": "Aria",
+            "target": "Goblin",
+            "attack_roll": 18,
+            "request_id": "atk-budget-2",
+        },
+        context,
     )
     assert "额度" in blocked["error"]
 
@@ -269,6 +275,88 @@ def test_start_attack_and_action_economy(tmp_path, plugins, monkeypatch):
     assert state["order"][state["turn"]] == "Aria"
     assert state["combatants"]["Aria"]["budget"]["action"] == 1
     assert state["combatants"]["Aria"]["budget"]["movement"] == 30
+
+
+def test_attack_request_id_is_idempotent(tmp_path, plugins, monkeypatch):
+    """同一 request_id 重试只结算一次：不二次扣预算、不二次伤害。"""
+    from trpg_server.workflows.actions import STEP_ATTACK, prior_flow
+    from trpg_server.workflows.engine import WorkflowEngine
+
+    context = FakeContext(tmp_path, _card())
+    monkeypatch.setattr(combat, "_roller", lambda sides: 10 if sides == 20 else 3)
+    started = combat.start_combat(
+        {
+            "participants": [
+                "Aria",
+                {"name": "Goblin", "monster_id": "goblin", "is_npc": True, "side": "enemy"},
+            ]
+        },
+        context,
+    )
+    assert "error" not in started
+    assert "request_id" in combat.COMBAT_ATTACK_TOOL.parameters["properties"]
+
+    first = combat.attack_combatant(
+        {
+            "attacker": "Aria",
+            "target": "Goblin",
+            "attack_roll": 18,
+            "request_id": "atk-idem-1",
+        },
+        context,
+    )
+    assert first.get("success") is True, first
+    state_after_first = combat._load_combat(context)
+    hp_after_first = state_after_first["combatants"]["Goblin"]["hp"]
+    assert state_after_first["combatants"]["Aria"]["budget"]["action"] == 0
+
+    second = combat.attack_combatant(
+        {
+            "attacker": "Aria",
+            "target": "Goblin",
+            "attack_roll": 18,
+            "request_id": "atk-idem-1",
+        },
+        context,
+    )
+    assert second["workflow"]["duplicate"] is True
+    assert "额度" not in str(second.get("error") or "")
+    state_after_second = combat._load_combat(context)
+    assert state_after_second["combatants"]["Goblin"]["hp"] == hp_after_first
+    assert state_after_second["combatants"]["Aria"]["budget"]["action"] == 0
+
+    flow = WorkflowEngine(tmp_path).get(first["workflow"]["id"])
+    assert flow is not None
+    assert flow["request_key"] == "atk-idem-1"
+    assert any(step["id"] == STEP_ATTACK for step in flow["steps"])
+    existing = prior_flow(tmp_path, "atk-idem-1", STEP_ATTACK)
+    assert existing is not None
+
+
+def test_attack_derives_stable_key_when_request_id_missing(tmp_path, plugins, monkeypatch):
+    """未传 request_id 时，同一回合同参数攻击重试命中同一流程。"""
+    context = FakeContext(tmp_path, _card())
+    monkeypatch.setattr(combat, "_roller", lambda sides: 10 if sides == 20 else 3)
+    combat.start_combat(
+        {
+            "participants": [
+                "Aria",
+                {"name": "Goblin", "monster_id": "goblin", "is_npc": True, "side": "enemy"},
+            ]
+        },
+        context,
+    )
+    first = combat.attack_combatant(
+        {"attacker": "Aria", "target": "Goblin", "attack_roll": 18},
+        context,
+    )
+    hp_after_first = combat._load_combat(context)["combatants"]["Goblin"]["hp"]
+    second = combat.attack_combatant(
+        {"attacker": "Aria", "target": "Goblin", "attack_roll": 18},
+        context,
+    )
+    assert second["workflow"]["duplicate"] is True
+    assert combat._load_combat(context)["combatants"]["Goblin"]["hp"] == hp_after_first
 
 
 def test_turn_model_budget_shape(plugins):

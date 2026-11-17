@@ -1896,11 +1896,30 @@ def _attack_d20(
         run_flow_action,
     )
 
+    slot = _as_text(arguments.get("slot") or arguments.get("action_slot") or "action").lower()
     request_key = _as_text(
         arguments.get("request_id")
         or arguments.get("idempotency_key")
         or arguments.get("requestId")
     )
+    if not request_key:
+        # AI 未显式传幂等键时，用同一回合/攻击者/目标/武器/槽位生成稳定键，
+        # 保证重试命中同一流程；一回合多次同参数攻击应由调用方传不同 request_id。
+        turn_key = f"{_as_int(combat.get('round'), 1)}:{_as_int(combat.get('turn'), 0)}"
+        request_key = "attack:" + ":".join(
+            [
+                turn_key,
+                str(attacker.get("name") or ""),
+                str(target.get("name") or ""),
+                _as_text(
+                    arguments.get("weapon")
+                    or arguments.get("weapon_id")
+                    or arguments.get("weapon_name")
+                    or ""
+                ),
+                slot,
+            ]
+        )
     room_dir = getattr(context, "room_dir", None)
     # 幂等重试必须在校验预算之前命中：第一次攻击已经花掉动作，不能因此报错。
     existing = prior_flow(room_dir, request_key, STEP_ATTACK)
@@ -1944,7 +1963,6 @@ def _attack_d20(
                 },
             }
     scheduler = _scheduler(combat, context, settings)
-    slot = _as_text(arguments.get("slot") or arguments.get("action_slot") or "action").lower()
     action: dict[str, Any] = dict(arguments)
     budget = scheduler.budget_of(attacker)
     if budget and int(budget.get(slot) or 0) <= 0:
@@ -3740,6 +3758,14 @@ COMBAT_ATTACK_TOOL = AgentTool(
                 "minimum": 1,
                 "maximum": 20,
                 "description": "d20 规则集：玩家前端已掷出的 d20 结果（覆盖服务端随机）",
+            },
+            "request_id": {
+                "type": "string",
+                "description": "同一 request_id 重复提交只结算一次，不会再次扣行动预算或结算伤害。",
+            },
+            "idempotency_key": {
+                "type": "string",
+                "description": "request_id 的别名。",
             },
         },
         "required": ["attacker", "target"],
