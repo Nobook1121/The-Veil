@@ -20,11 +20,20 @@ from trpg_server.immersive.external_music.service import (
     audio_target,
     cache_audio_bytes,
     in_flight,
+    is_safe_public_url,
+    load_selection,
+    notify_engine,
+    publish_selection,
     resolve_engine,
+    save_selection,
     search_and_select,
     submit,
 )
 
+# 注意：``immersive/service.py``、``routes/immersive.py`` 等调用方是
+# ``from trpg_server.immersive import external_music`` 后再取属性的，
+# 因此 service 里被用到的公开函数必须在这里导出，否则会在运行时抛
+# ``AttributeError: module '...external_music' has no attribute '...'``。
 __all__ = [
     "ENGINE_EXTERNAL",
     "ENGINE_OFF",
@@ -32,7 +41,12 @@ __all__ = [
     "audio_target",
     "cache_audio_bytes",
     "in_flight",
+    "is_safe_public_url",
+    "load_selection",
+    "notify_engine",
+    "publish_selection",
     "resolve_engine",
+    "save_selection",
     "search_and_select",
     "submit",
 ]

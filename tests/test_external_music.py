@@ -515,3 +515,33 @@ def test_dedupe_keeps_first_provider():
     first = _track(provider="jamendo", track_id="1", title="Same Song", artist="Same Artist")
     second = _track(provider="openverse", track_id="2", title="same song!", artist="same artist")
     assert len(search.dedupe([first, second])) == 1
+
+
+# ---------------------------------------------------------------- 包导出契约
+
+def test_package_exports_every_attribute_callers_use():
+    """调用方用 ``from trpg_server.immersive import external_music`` 再取属性。
+
+    ``immersive/service.py`` 与 ``routes/immersive.py`` 就是这么用的，所以
+    service 里被它们引用的公开函数必须在包 ``__init__`` 里导出；漏一个就是
+    运行时 ``AttributeError``（曾导致沉浸式回合整轮失败）。
+    """
+    import trpg_server.immersive.external_music as package
+
+    required = (
+        "ENGINE_EXTERNAL",
+        "ENGINE_OFF",
+        "ENGINE_PROCEDURAL",
+        "audio_target",
+        "cache_audio_bytes",
+        "in_flight",
+        "load_selection",
+        "notify_engine",
+        "publish_selection",
+        "resolve_engine",
+        "save_selection",
+        "search_and_select",
+        "submit",
+    )
+    missing = [name for name in required if not hasattr(package, name)]
+    assert missing == [], f"包未导出: {missing}"
