@@ -387,6 +387,145 @@ def test_reaction_declined_continues_cast(tmp_path, plugins):
     assert WorkflowEngine(tmp_path).get(awaiting["workflow"]["id"])["status"] == "completed"
 
 
+def _arm_shield(context: _Context, *, name: str = "Goblin") -> None:
+    combat = combat_tools._load_combat(context)
+    target = combat["combatants"][name]
+    target["spells_known"] = ["shield"]
+    target["spell_slots"] = {"1": {"max": 1, "used": 0}}
+    target.setdefault("budget", {})["reaction"] = 1
+    combat_tools._save_combat(context, combat)
+
+
+def test_shield_window_turns_hit_into_miss(tmp_path, plugins):
+    context = _combat_context(tmp_path, [_wizard_card()])
+    _arm_shield(context)
+    # Mira 徒手攻击加值 0：18 对 AC 15 命中，护盾 +5 后变未命中。
+    awaiting = combat_tools.attack_combatant(
+        {
+            "attacker": "Mira",
+            "target": "Goblin",
+            "attack_roll": 18,
+            "request_id": "atk-shield",
+        },
+        context,
+    )
+    assert awaiting.get("status") == "awaiting_reaction", awaiting
+    flow_id = awaiting["workflow"]["id"]
+    assert awaiting["awaiting"] == ["Goblin"]
+    pending = reaction_tools.list_reactions({"candidate": "Goblin"}, context)["pending"]
+    assert pending and pending[0]["flow_id"] == flow_id
+
+    hp_before = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
+    resolved = reaction_tools.resolve_reaction(
+        {
+            "flow_id": flow_id,
+            "candidate": "Goblin",
+            "decision": {"decision": "use"},
+            "idempotency_key": "shield-1",
+        },
+        context,
+    )
+    continuation = resolved["continuation"]
+    assert continuation["shield_used"] is True
+    assert continuation["success"] is False
+    assert continuation["damage"] is None
+    combat = combat_tools._load_combat(context)
+    assert combat["combatants"]["Goblin"]["hp"] == hp_before  # 未命中，无伤害
+    assert combat["combatants"]["Goblin"]["spell_slots"]["1"]["used"] == 1
+    assert combat["combatants"]["Goblin"]["budget"]["reaction"] == 0
+    assert combat["combatants"]["Mira"]["budget"]["action"] == 0
+    assert WorkflowEngine(tmp_path).get(flow_id)["status"] == "completed"
+
+    # 同一幂等键重复接受：不二次扣位、不二次结算。
+    again = reaction_tools.resolve_reaction(
+        {
+            "flow_id": flow_id,
+            "candidate": "Goblin",
+            "decision": {"decision": "use"},
+            "idempotency_key": "shield-1",
+        },
+        context,
+    )
+    assert again["duplicate"] is True
+    combat = combat_tools._load_combat(context)
+    assert combat["combatants"]["Goblin"]["spell_slots"]["1"]["used"] == 1
+    assert combat["combatants"]["Goblin"]["budget"]["reaction"] == 0
+
+
+def test_shield_declined_keeps_original_hit(tmp_path, plugins):
+    context = _combat_context(tmp_path, [_wizard_card()])
+    _arm_shield(context)
+    awaiting = combat_tools.attack_combatant(
+        {
+            "attacker": "Mira",
+            "target": "Goblin",
+            "attack_roll": 18,
+            "request_id": "atk-shield-decline",
+        },
+        context,
+    )
+    hp_before = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
+    resolved = reaction_tools.resolve_reaction(
+        {
+            "flow_id": awaiting["workflow"]["id"],
+            "candidate": "Goblin",
+            "decision": {"decision": "none"},
+            "idempotency_key": "shield-decline",
+        },
+        context,
+    )
+    continuation = resolved["continuation"]
+    assert continuation["shield_used"] is False
+    assert continuation["success"] is True
+    combat = combat_tools._load_combat(context)
+    assert combat["combatants"]["Goblin"]["hp"] < hp_before
+    assert combat["combatants"]["Goblin"]["spell_slots"]["1"]["used"] == 0
+    assert combat["combatants"]["Goblin"]["budget"]["reaction"] == 1
+    assert WorkflowEngine(tmp_path).get(awaiting["workflow"]["id"])["status"] == "completed"
+
+
+def test_shield_timeout_uses_default_and_applies_damage(tmp_path, plugins):
+    context = _combat_context(tmp_path, [_wizard_card()])
+    _arm_shield(context)
+    awaiting = combat_tools.attack_combatant(
+        {
+            "attacker": "Mira",
+            "target": "Goblin",
+            "attack_roll": 18,
+            "request_id": "atk-shield-timeout",
+        },
+        context,
+    )
+    hp_before = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
+    engine = WorkflowEngine(tmp_path)
+    expired = engine.expire(awaiting["workflow"]["id"])
+    assert expired["expired"] is True
+    flow = engine.get(awaiting["workflow"]["id"], expire=False)
+    assert flow["status"] == "completed"
+    assert flow["timed_out"] is True
+    combat = combat_tools._load_combat(context)
+    assert combat["combatants"]["Goblin"]["hp"] < hp_before
+    assert combat["combatants"]["Goblin"]["spell_slots"]["1"]["used"] == 0
+    assert combat["combatants"]["Goblin"]["budget"]["reaction"] == 1
+
+
+def test_shield_not_offered_on_miss(tmp_path, plugins):
+    context = _combat_context(tmp_path, [_wizard_card()])
+    _arm_shield(context)
+    resolved = combat_tools.attack_combatant(
+        {
+            "attacker": "Mira",
+            "target": "Goblin",
+            "attack_roll": 5,
+            "request_id": "atk-shield-miss",
+        },
+        context,
+    )
+    assert resolved.get("success") is False
+    assert resolved.get("status") != "awaiting_reaction"
+    assert WorkflowEngine(tmp_path).list(status="waiting") == []
+
+
 def test_reaction_timeout_uses_default_and_continues(tmp_path, plugins):
     context = _combat_context(tmp_path, [_wizard_card()])
     _arm_counter_spell(context)

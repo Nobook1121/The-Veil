@@ -417,6 +417,8 @@ class Dnd5eCombatRules:
         rng: Callable[[int], int] | None = None,
         settings: Any = None,
         combat: Mapping[str, Any] | None = None,
+        ac_bonus: int = 0,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         slot = _text(action.get("slot") or action.get("action_slot") or "action").lower()
         if slot not in {"action", "bonus_action", "reaction"}:
@@ -430,24 +432,31 @@ class Dnd5eCombatRules:
             target,
             ranged=_text(attack.get("kind")).casefold() == "ranged",
         )
-        attack_roll = action.get("attack_roll")
-        rolls: list[int] = []
-        if attack_roll not in (None, ""):
-            natural = max(1, min(20, _as_int(attack_roll, 10)))
-            rolls = [natural]
+        preset_rolls = action.get("attack_rolls")
+        if isinstance(preset_rolls, list) and preset_rolls:
+            rolls = [max(1, min(20, _as_int(item, 10))) for item in preset_rolls[:2]]
+            natural = _as_int(action.get("attack_roll"), rolls[0])
+            natural = max(1, min(20, natural)) if natural else rolls[0]
         else:
-            natural = _roll_die(rng, 20)
-            rolls = [natural]
+            attack_roll = action.get("attack_roll")
+            rolls = []
+            if attack_roll not in (None, ""):
+                natural = max(1, min(20, _as_int(attack_roll, 10)))
+                rolls = [natural]
+            else:
+                natural = _roll_die(rng, 20)
+                rolls = [natural]
         advantage = bool(action.get("advantage") or action.get("adv")) or condition_mods["advantage"]
         disadvantage = (
             bool(action.get("disadvantage") or action.get("dis")) or condition_mods["disadvantage"]
         )
         if advantage and disadvantage:
             advantage = disadvantage = False
-        if advantage or disadvantage:
-            second = _roll_die(rng, 20)
-            rolls.append(second)
-            natural = max(rolls) if advantage else min(rolls)
+        if not isinstance(preset_rolls, list) or not preset_rolls:
+            if advantage or disadvantage:
+                second = _roll_die(rng, 20)
+                rolls.append(second)
+                natural = max(rolls) if advantage else min(rolls)
 
         target_ac = _as_int(target.get("armorClass") or target.get("ac"), 10)
         cover = _text(action.get("cover")).lower()
@@ -471,6 +480,7 @@ class Dnd5eCombatRules:
                 advantage=advantage,
                 disadvantage=disadvantage,
             )
+        target_ac += max(0, _as_int(ac_bonus, 0))
 
         attack_bonus = _as_int(attack.get("attack_bonus"), 0)
         total = natural + attack_bonus
@@ -480,7 +490,7 @@ class Dnd5eCombatRules:
             critical = True
 
         damage_result = None
-        if hit:
+        if hit and not dry_run:
             terms, fixed = _parse_damage(attack.get("damage_dice"))
             if action.get("two_handed") and attack.get("versatile_dice"):
                 terms, fixed = _parse_damage(attack.get("versatile_dice"))
@@ -514,6 +524,19 @@ class Dnd5eCombatRules:
             summary,
             advantage=advantage,
             disadvantage=disadvantage,
+            ac_bonus=ac_bonus,
+        )
+
+    def plan_attack_action(
+        self,
+        attacker: dict[str, Any],
+        target: dict[str, Any],
+        action: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """只做命中判定、不落伤害，供核心在伤害前插入反应窗口。"""
+        return self.resolve_attack_action(
+            attacker, target, action, dry_run=True, **kwargs
         )
 
     def _select_attack(
@@ -784,6 +807,7 @@ class Dnd5eCombatRules:
         *,
         advantage: bool = False,
         disadvantage: bool = False,
+        ac_bonus: int = 0,
     ) -> dict[str, Any]:
         return {
             "attack_mode": "d20",
@@ -799,6 +823,7 @@ class Dnd5eCombatRules:
             "disadvantage": bool(disadvantage),
             "total": natural + attack_bonus,
             "target_ac": target_ac,
+            "ac_bonus": int(ac_bonus),
             "success": bool(hit),
             "success_level": "critical" if critical else ("hit" if hit else "miss"),
             "critical": bool(critical),

@@ -5,8 +5,8 @@
 - 提交决定或 TTL 到期后，流程通过续跑器继续结算；
 - 被反制的施法由续跑器扣除施法者法术位（不退还）但不产生任何效果。
 
-目前接入的是反制法术（counter-spell）。护盾术等其它反应复用同一队列，
-只需在触发点插入同名步骤。
+目前接入的是反制法术（counter-spell）与护盾术（shield）。护盾术复用同一
+队列，只在攻击流程的命中判定之后、伤害结算之前插入同名步骤。
 """
 
 from __future__ import annotations
@@ -35,6 +35,31 @@ def candidate_of(step_id: str) -> str:
     return text[len(REACTION_PREFIX):] if text.startswith(REACTION_PREFIX) else ""
 
 
+def _reaction_steps(
+    reactors: Iterable[Mapping[str, Any]],
+    *,
+    policy_overrides: Mapping[str, Any] | None = None,
+    label: str = "是否反应",
+) -> list[dict[str, Any]]:
+    """生成反应待决步骤；反制与护盾共用同一套策略与默认值。"""
+    steps: list[dict[str, Any]] = []
+    for reactor in reactors:
+        name = str(reactor.get("name") or "").strip()
+        if not name:
+            continue
+        executor = EXECUTOR_PLAYER if reactor.get("is_player") else EXECUTOR_KP
+        steps.append(
+            make_step(
+                reaction_step_id(name),
+                f"{name} {label}",
+                policy=resolve_policy("reaction", executor, policy_overrides),
+                executor=executor,
+                default={"decision": "none", "reason": "reaction_timeout"},
+            )
+        )
+    return steps
+
+
 def open_cast_window(
     room_dir: Any,
     *,
@@ -57,21 +82,8 @@ def open_cast_window(
         return {"error": "没有可反应的候选者", "code": "reaction.no_candidates"}
     steps: list[dict[str, Any]] = [
         make_step("validate", "校验射程与目标", policy="auto"),
+        *_reaction_steps(reactor_rows, policy_overrides=policy_overrides, label="是否反制"),
     ]
-    for reactor in reactor_rows:
-        name = str(reactor.get("name") or "").strip()
-        if not name:
-            continue
-        executor = EXECUTOR_PLAYER if reactor.get("is_player") else EXECUTOR_KP
-        steps.append(
-            make_step(
-                reaction_step_id(name),
-                f"{name} 是否反制",
-                policy=resolve_policy("reaction", executor, policy_overrides),
-                executor=executor,
-                default={"decision": "none", "reason": "reaction_timeout"},
-            )
-        )
     for step_id, label in (
         ("resolve", "法术结算"),
         ("effect", "附加效果"),
@@ -92,6 +104,63 @@ def open_cast_window(
             "slot_level": int(slot_level),
             "targets": [str(name) for name in targets if str(name or "").strip()],
             "reactors": [str(item.get("name") or "") for item in reactor_rows],
+        },
+        request_key=request_key,
+        lock_character=True,
+    )
+    if error:
+        return {"flow": None, **error}
+    updated = engine.run_auto(str(flow["id"]), {})
+    return {"flow": updated or flow}
+
+
+def open_attack_window(
+    room_dir: Any,
+    *,
+    room_id: str,
+    attacker: str,
+    attacker_type: str,
+    target: str,
+    reactor: Mapping[str, Any],
+    action: Mapping[str, Any],
+    attack_roll: int,
+    attack_rolls: Iterable[Any],
+    slot: str = "action",
+    ttl: int = DEFAULT_TIMEOUT_SECONDS,
+    request_key: str = "",
+    policy_overrides: Mapping[str, Any] | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """命中后、伤害前的护盾术反应窗口。
+
+    复用反制的 ``reaction:<角色>`` 步骤：流程停在 waiting，提交决定或 TTL
+    到期后由 ``dnd5e.attack_after_reaction`` 续跑。攻击掷骰在开窗前已冻结，
+    无论接受还是拒绝都基于同一颗骰子重算，不会二次掷骰。
+    """
+    engine = WorkflowEngine(room_dir, room_id=room_id)
+    steps: list[dict[str, Any]] = [
+        make_step("validate", "校验行动预算", policy="auto"),
+        *_reaction_steps([reactor], policy_overrides=policy_overrides, label="是否使用护盾术"),
+        make_step("attack", "攻击检定", policy="auto"),
+        make_step("damage", "伤害结算", policy="auto"),
+    ]
+    flow, error, _created = engine.open(
+        kind="attack",
+        initiator=str(attacker or ""),
+        initiator_type=str(attacker_type or EXECUTOR_KP),
+        steps=steps,
+        ttl=ttl,
+        metadata={
+            **dict(metadata or {}),
+            "continuation": "dnd5e.attack_after_reaction",
+            "attacker": str(attacker or ""),
+            "target": str(target or ""),
+            "reaction": "shield",
+            "reaction_slot_level": int(reactor.get("slot_level") or 1),
+            "attack_roll": int(attack_roll or 0),
+            "attack_rolls": [int(item) for item in (attack_rolls or [])],
+            "slot": str(slot or "action"),
+            "action": dict(action),
         },
         request_key=request_key,
         lock_character=True,
@@ -153,6 +222,7 @@ __all__ = [
     "candidate_of",
     "counter_used",
     "decide",
+    "open_attack_window",
     "open_cast_window",
     "pending_for",
     "reaction_step_id",

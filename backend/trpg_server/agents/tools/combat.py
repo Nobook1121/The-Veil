@@ -236,11 +236,15 @@ def _scheduler(
     )
 
 
-def _areas_enabled(context: Any) -> bool:
+def _dnd5e_room(context: Any) -> bool:
     try:
         return str(_combat_settings(context).ruleset_id or "").strip().lower() == "dnd5e"
     except Exception:  # noqa: BLE001
         return False
+
+
+def _areas_enabled(context: Any) -> bool:
+    return _dnd5e_room(context)
 
 
 def _save_combat(context: Any, combat: dict[str, Any]) -> None:
@@ -1613,6 +1617,254 @@ def _opposed_rolls(
     }
 
 
+class _ActionContext:
+    """续跑攻击时重建最小的房间上下文，不依赖原请求对象。"""
+
+    def __init__(self, room_dir: Any, room_id: str, info: dict[str, Any]):
+        self.room_dir = room_dir
+        self.room_id = room_id
+        self.config_dir = Path(room_dir) / "config"
+        self.scenarios_dir = Path(room_dir) / "scenarios"
+        self.user_id = 0
+        self.agent_id = ""
+        self._info = info
+
+    def room_info(self) -> dict[str, Any]:
+        return self._info
+
+
+def _available_slot_level(combatant: dict[str, Any], minimum: int = 1) -> int:
+    """返回最低可用法术位环阶；没有则返回 0。"""
+    slots = combatant.get("spell_slots")
+    if not isinstance(slots, dict):
+        return 0
+    for level in range(max(1, int(minimum or 1)), 10):
+        row = slots.get(str(level))
+        if isinstance(row, dict) and _as_int(row.get("max"), 0) - _as_int(row.get("used"), 0) > 0:
+            return level
+    return 0
+
+
+def _shield_candidate(target: dict[str, Any] | None) -> dict[str, Any] | None:
+    """被攻击方能否使用护盾术：还有反应、认识 shield、还有一环以上法术位。"""
+    if not isinstance(target, dict):
+        return None
+    if target.get("dead") or target.get("unconscious") or target.get("dying"):
+        return None
+    budget = target.get("budget") if isinstance(target.get("budget"), dict) else {}
+    if _as_int(budget.get("reaction"), 0) <= 0:
+        return None
+    known = {
+        str(item).strip().lower()
+        for key in ("spells_known", "spells_prepared", "known_spells")
+        for item in (target.get(key) or [])
+    }
+    if "shield" not in known:
+        return None
+    level = _available_slot_level(target)
+    if level <= 0:
+        return None
+    return {
+        "name": str(target.get("name") or ""),
+        "is_player": bool(target.get("is_player")),
+        "slot_level": level,
+    }
+
+
+def _pending_reaction_flow(room_dir: Any, candidate: str) -> dict[str, Any] | None:
+    """目标是否已在某个反应窗口里等待；用于避免重复打开窗口。"""
+    try:
+        from trpg_server.workflows import reactions
+
+        rows = reactions.pending_for(room_dir, candidate)
+    except Exception:  # noqa: BLE001
+        return None
+    return rows[0] if rows else None
+
+
+def _consume_spell_slot(combatant: dict[str, Any], level: int) -> None:
+    slots = combatant.setdefault("spell_slots", {})
+    row = slots.get(str(level))
+    if not isinstance(row, dict):
+        row = {"max": 1, "used": 0}
+        slots[str(level)] = row
+    row["used"] = _as_int(row.get("used"), 0) + 1
+
+
+def _finalize_attack(
+    context: Any,
+    combat: dict[str, Any],
+    attacker: dict[str, Any],
+    target: dict[str, Any],
+    outcome: Any,
+    scheduler: TurnScheduler,
+    slot: str,
+) -> dict[str, Any]:
+    """把一次攻击结果落地：扣预算、写日志、同步专注、保存状态。"""
+    if not isinstance(outcome, dict):
+        return {"error": "规则集返回了无法识别的攻击结果"}
+    if outcome.get("error"):
+        return outcome
+    if scheduler.budget_of(attacker):
+        scheduler.spend_budget(attacker, slot, 1)
+    summary = str(outcome.get("summary") or "")
+    if summary:
+        _append_log(combat, summary, context, mirror=False)
+    from trpg_server.workflows import concentration
+
+    concentration.sync(context.room_dir, concentration.holders_from_combat(combat))
+    _save_combat(context, combat)
+    result = dict(outcome)
+    if summary:
+        result["visible_message"] = _result_message(
+            summary,
+            "combat.attack",
+            check_type="combat_attack",
+            attacker=attacker.get("name"),
+            target=target.get("name"),
+            extra_metadata={
+                "dice_roll": _dice_roll_metadata(
+                    result,
+                    mode="d20",
+                    check_name=str(result.get("weapon") or "攻击"),
+                    target=result.get("target_ac"),
+                    roller=str(attacker.get("name") or ""),
+                )
+            },
+        )
+        _log_roll_result(
+            result,
+            context,
+            tool_name="combat.attack",
+            actor=str(attacker.get("name") or ""),
+        )
+    return result
+
+
+def _finish_attack_steps(
+    flow: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    shield_used: bool = False,
+    ac_bonus: int = 0,
+    slot_level: int = 0,
+) -> None:
+    from trpg_server.workflows.model import stamp
+
+    for step in flow.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        step_id = str(step.get("id") or "")
+        if step_id not in {"attack", "damage"}:
+            continue
+        if str(step.get("status")) not in {"pending", "running"}:
+            continue
+        step["status"] = "completed"
+        step["finished_at"] = stamp()
+        if step_id == "attack":
+            step["result"] = {
+                **{key: value for key, value in result.items() if key != "visible_message"},
+                "shield_used": bool(shield_used),
+                "shield_ac_bonus": int(ac_bonus),
+                "shield_slot_level": int(slot_level),
+            }
+        else:
+            step["result"] = {
+                "damage": result.get("damage"),
+                "success": bool(result.get("success")),
+                "shield_used": bool(shield_used),
+            }
+
+
+def _attack_after_reaction(room_dir: Any, flow: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    """护盾术窗口收束后继续攻击。
+
+    接受时以 +5 AC 重算这次命中（原本命中可能变为未命中），并消耗目标反应
+    与法术位；拒绝或超时则按同一颗骰子的原结果结算。重复接受由幂等键与
+    可用性复检共同兜住，不会二次扣位。
+    """
+    from trpg_server.room_rules import load_room_info
+    from trpg_server.workflows import reactions
+
+    metadata = flow.get("metadata") if isinstance(flow.get("metadata"), dict) else {}
+    info = load_room_info(room_dir)
+    context = _ActionContext(room_dir, str(flow.get("room_id") or ""), info)
+    combat = _load_combat(context)
+    if not combat:
+        raise RuntimeError("反应结束后找不到战斗状态")
+    attacker = _resolve_combatant(combat, metadata.get("attacker"))
+    target = _resolve_combatant(combat, metadata.get("target"))
+    if attacker is None or target is None:
+        raise RuntimeError("反应结束后找不到攻击双方")
+    settings = _combat_settings(context)
+    ruleset = _combat_ruleset(combat, settings)
+    resolver = getattr(ruleset, "resolve_attack_action", None)
+    if not callable(resolver):
+        raise RuntimeError("当前规则集没有攻击结算能力")
+
+    target_name = str(target.get("name") or "")
+    shield_used = reactions.counter_used(flow) == target_name
+    ac_bonus = 0
+    slot_level = 0
+    if shield_used:
+        budget = target.get("budget") if isinstance(target.get("budget"), dict) else {}
+        level = _available_slot_level(target, _as_int(metadata.get("reaction_slot_level"), 1) or 1)
+        if _as_int(budget.get("reaction"), 0) > 0 and level > 0:
+            ac_bonus = 5
+            slot_level = level
+            shield_scheduler = _scheduler(combat, context, settings)
+            if shield_scheduler.budget_of(target):
+                shield_scheduler.spend_budget(target, "reaction", 1)
+            _consume_spell_slot(target, level)
+            _append_log(
+                combat,
+                f"{target_name} 使用护盾术，AC +5（消耗 {level} 环法术位与反应）。",
+                context,
+            )
+        else:
+            shield_used = False
+            _append_log(combat, f"{target_name} 的护盾术未能生效：反应或法术位已不可用。", context)
+
+    action = dict(metadata.get("action") or {})
+    action["attack_rolls"] = list(metadata.get("attack_rolls") or [])
+    action["attack_roll"] = _as_int(metadata.get("attack_roll"), 0)
+    scheduler = _scheduler(combat, context, settings)
+    outcome = resolver(
+        attacker,
+        target,
+        action,
+        attacker_card=_player_card(attacker, context),
+        rng=_roller,
+        settings=settings,
+        combat=combat,
+        ac_bonus=ac_bonus,
+    )
+    result = _finalize_attack(
+        context,
+        combat,
+        attacker,
+        target,
+        outcome,
+        scheduler,
+        str(metadata.get("slot") or "action"),
+    )
+    if result.get("error"):
+        raise RuntimeError(str(result.get("error")))
+    _finish_attack_steps(
+        flow,
+        result,
+        shield_used=shield_used,
+        ac_bonus=ac_bonus,
+        slot_level=slot_level,
+    )
+    return {
+        **{key: value for key, value in result.items() if key != "visible_message"},
+        "shield_used": bool(shield_used),
+        "shield_ac_bonus": int(ac_bonus),
+        "shield_slot_level": int(slot_level),
+    }
+
+
 def _attack_d20(
     combat: dict[str, Any],
     attacker: dict[str, Any],
@@ -1644,8 +1896,9 @@ def _attack_d20(
         or arguments.get("idempotency_key")
         or arguments.get("requestId")
     )
+    room_dir = getattr(context, "room_dir", None)
     # 幂等重试必须在校验预算之前命中：第一次攻击已经花掉动作，不能因此报错。
-    existing = prior_flow(getattr(context, "room_dir", None), request_key, STEP_ATTACK)
+    existing = prior_flow(room_dir, request_key, STEP_ATTACK)
     if existing is not None:
         flow_existing, cached = existing
         if isinstance(cached, dict):
@@ -1657,15 +1910,44 @@ def _attack_d20(
                     "duplicate": True,
                 },
             }
+        awaiting = [
+            str(step.get("id")).split(":", 1)[1]
+            for step in flow_existing.get("steps") or []
+            if str(step.get("id") or "").startswith("reaction:")
+            and str(step.get("status")) == "waiting"
+        ]
+        if awaiting:
+            return {
+                **_combat_summary_state(combat),
+                "status": "awaiting_reaction",
+                "summary": "该攻击正在等待反应决定，重复提交不会再次结算。",
+                "awaiting": awaiting,
+                "workflow": {
+                    "id": flow_existing.get("id"),
+                    "status": flow_existing.get("status"),
+                    "duplicate": True,
+                },
+            }
+        continuation = flow_existing.get("continuation_result")
+        if isinstance(continuation, dict):
+            return {
+                **continuation,
+                "workflow": {
+                    "id": flow_existing.get("id"),
+                    "status": flow_existing.get("status"),
+                    "duplicate": True,
+                },
+            }
     scheduler = _scheduler(combat, context, settings)
     slot = _as_text(arguments.get("slot") or arguments.get("action_slot") or "action").lower()
+    action: dict[str, Any] = dict(arguments)
     budget = scheduler.budget_of(attacker)
     if budget and int(budget.get(slot) or 0) <= 0:
         return {"error": f"{attacker.get('name')} 的 {slot} 行动额度已用完"}
     from trpg_server.workflows.guards import validate_action
 
     blocked = validate_action(
-        getattr(context, "room_dir", None),
+        room_dir,
         kind="attack",
         actor=str(attacker.get("name") or ""),
         targets=[str(target.get("name") or "")],
@@ -1677,54 +1959,14 @@ def _attack_d20(
         outcome = resolver(
             attacker,
             target,
-            arguments,
+            action,
             attacker_card=_player_card(attacker, context),
             rng=_roller,
             settings=settings,
             combat=combat,
         )
-        if not isinstance(outcome, dict):
-            return {"error": "规则集返回了无法识别的攻击结果"}
-        if outcome.get("error"):
-            return outcome
-        if budget:
-            scheduler.spend_budget(attacker, slot, 1)
-        summary = str(outcome.get("summary") or "")
-        if summary:
-            _append_log(combat, summary, context, mirror=False)
-        from trpg_server.workflows import concentration
+        return _finalize_attack(context, combat, attacker, target, outcome, scheduler, slot)
 
-        concentration.sync(
-            context.room_dir, concentration.holders_from_combat(combat)
-        )
-        _save_combat(context, combat)
-        result = dict(outcome)
-        if summary:
-            result["visible_message"] = _result_message(
-                summary,
-                "combat.attack",
-                check_type="combat_attack",
-                attacker=attacker.get("name"),
-                target=target.get("name"),
-                extra_metadata={
-                    "dice_roll": _dice_roll_metadata(
-                        result,
-                        mode="d20",
-                        check_name=str(result.get("weapon") or "攻击"),
-                        target=result.get("target_ac"),
-                        roller=str(attacker.get("name") or ""),
-                    )
-                },
-            )
-            _log_roll_result(
-                result,
-                context,
-                tool_name="combat.attack",
-                actor=str(attacker.get("name") or ""),
-            )
-        return result
-
-    room_dir = getattr(context, "room_dir", None)
     if not room_dir:
         # 没有房间目录（嵌入/单测直接调用）时退回直接结算，不创建流程。
         return resolve({}, {})
@@ -1733,6 +1975,84 @@ def _attack_d20(
         is_player=bool(attacker.get("is_player")),
         agent_id=str(getattr(context, "agent_id", "") or ""),
     )
+    target_name = str(target.get("name") or "")
+
+    # 目标已在某个反应窗口里等待：同一次攻击重复调用直接返回该窗口；若是
+    # 别的反应（如反制法术）占用了队列，本次攻击不再开重复窗口。
+    pending = _pending_reaction_flow(room_dir, target_name)
+    if pending is not None:
+        meta = pending.get("metadata") if isinstance(pending.get("metadata"), dict) else {}
+        if pending.get("kind") == "attack" and meta.get("attacker") == str(
+            attacker.get("name") or ""
+        ):
+            return {
+                **_combat_summary_state(combat),
+                "status": "awaiting_reaction",
+                "summary": "该攻击正在等待反应决定，重复提交不会再次结算。",
+                "awaiting": [target_name],
+                "workflow": {
+                    "id": pending.get("id"),
+                    "status": pending.get("status"),
+                    "duplicate": True,
+                },
+            }
+
+    # 护盾术窗口：先做一次不落伤害的命中判定，命中但非暴击才停下来等反应。
+    planner = getattr(ruleset, "plan_attack_action", None)
+    candidate = (
+        _shield_candidate(target)
+        if _dnd5e_room(context) and pending is None and callable(planner)
+        else None
+    )
+    if candidate is not None:
+        plan = planner(
+            attacker,
+            target,
+            action,
+            attacker_card=_player_card(attacker, context),
+            rng=_roller,
+            settings=settings,
+            combat=combat,
+        )
+        if isinstance(plan, dict) and not plan.get("error"):
+            # 冻结这颗骰子：接受与拒绝都基于同一次攻击检定重算。
+            action["attack_roll"] = _as_int(plan.get("natural"), 0)
+            action["attack_rolls"] = list(plan.get("rolls") or [])
+            if plan.get("success") and not plan.get("critical"):
+                from trpg_server.workflows import reactions
+
+                window = reactions.open_attack_window(
+                    room_dir,
+                    room_id=str(getattr(context, "room_id", "") or ""),
+                    attacker=str(attacker.get("name") or ""),
+                    attacker_type=initiator_type,
+                    target=target_name,
+                    reactor=candidate,
+                    action=action,
+                    attack_roll=_as_int(action.get("attack_roll"), 0),
+                    attack_rolls=action.get("attack_rolls") or [],
+                    slot=slot,
+                    ttl=60,
+                    request_key=request_key,
+                )
+                if window.get("error"):
+                    return {"error": window.get("error"), "code": window.get("code")}
+                waiting = window.get("flow") or {}
+                return {
+                    **_combat_summary_state(combat),
+                    "status": "awaiting_reaction",
+                    "summary": (
+                        f"{attacker.get('name')} 的攻击命中 {target_name}，"
+                        "等待护盾术反应。"
+                    ),
+                    "awaiting": [target_name],
+                    "workflow": {
+                        "id": waiting.get("id"),
+                        "status": waiting.get("status"),
+                        "duplicate": False,
+                    },
+                }
+
     outcome = run_flow_action(
         getattr(context, "room_dir", None),
         kind="attack",
@@ -3747,3 +4067,8 @@ COMBAT_TOOLS = [
     COMBAT_END_TOOL,
 ]
 COMBAT_TOOL_NAMES = [tool.name for tool in COMBAT_TOOLS]
+
+from trpg_server.workflows import continuations
+
+continuations.register("dnd5e.attack_after_reaction", _attack_after_reaction)
+
