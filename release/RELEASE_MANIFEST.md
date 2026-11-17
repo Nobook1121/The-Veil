@@ -1,6 +1,6 @@
 # 帷幕 The Veil · 发布说明
 
-**版本：1.0.5**
+**版本：1.0.6**
 
 帷幕是一个可以自己部署的 AI 跑团（TRPG）平台：AI 当守秘人，你和朋友用浏览器进入同一个房间，掷骰、聊天、推进剧情。账号、剧本、聊天记录都保存在你自己的电脑上。
 
@@ -11,19 +11,19 @@
 ## 一、获取发布包
 
 1. 打开 [GitHub Releases](https://github.com/Nobook1121/The-Veil/releases/latest)，选择最新版本。
-2. 下载 `the-veil-v1.0.5.zip` 与同名 `.sha256` 校验文件。
+2. 下载 `the-veil-v1.0.6.zip` 与同名 `.sha256` 校验文件。
 3. 可选：校验下载是否完整。
 
    Windows PowerShell：
 
    ```powershell
-   Get-FileHash .\the-veil-v1.0.5.zip -Algorithm SHA256
+   Get-FileHash .\the-veil-v1.0.6.zip -Algorithm SHA256
    ```
 
    macOS / Linux：
 
    ```bash
-   sha256sum the-veil-v1.0.5.zip
+   sha256sum the-veil-v1.0.6.zip
    ```
 
    输出应与 `.sha256` 文件中的值一致；不一致说明下载损坏，请重新下载。
@@ -158,6 +158,21 @@ python3 -m venv .venv
 - 需要临时全部禁用时，启动时加 `--no-plugins`，或设置环境变量 `TRPG_PLUGINS_DISABLED=1`。
 - 插件代码以服务进程权限运行，**只安装你信任来源的插件**。
 
+### 随包插件：D&D 5e 与地图
+
+发布包在 `data/plugins/` 下附带三个可直接启用的插件：
+
+| 插件 | 作用 | 依赖 |
+|---|---|---|
+| `dnd5e-srd` | D&D 5e SRD 5.1 的法术、怪物、装备与条件数据 | 无 |
+| `dnd5e` | 5e 角色卡、检定、战斗、法术、状态与主视图声明 | `dnd5e-srd` |
+| `veil-map` | 房间地图、棋子拖拽、多格占位、先攻条与移动力校验 | `dnd5e` |
+
+- **怎么启用**：进入「设置 → 插件 → 第三方插件」，按 `dnd5e-srd` → `dnd5e` → `veil-map` 的顺序逐个启用；也可以直接编辑 `data/plugins/enabled.json` 的 `enabled` 列表。启用状态显示为「已加载」即表示可用。
+- **没启用会怎样**：创建 5e 房间时会提示规则集不可用；已经存在的 5e 房间会失去 5e 角色卡、检定、战斗与地图能力，主视图回到普通聊天布局。重新启用插件并刷新页面即可恢复。
+- 只启用 `dnd5e` 而没启用 `dnd5e-srd` 时，规则集插件会因依赖缺失进入失败状态，设置页会给出原因。
+- 地图插件依赖 `dnd5e`，只对 5e 房间生效；CoC7 房间不加载地图，也不受影响。
+
 ### 自定义道具模板
 
 - 用户模板放在 `data/props/templates/<模板 id>/`，至少包含 `manifest.json`、`page.html`、`style.css`，可选 `assets/`。
@@ -226,8 +241,8 @@ icacls "D:\TheVeil" /setintegritylevel "(OI)(CI)Medium" /T
 
 ## 九、版本与更新记录
 
-- 本发布包版本为 **1.0.5**。
-- 每个版本的改动记录在仓库的 `release/changelog/` 下；**最新一份 changelog 的版本号就是当前发布版本**，本版本对应 `release/changelog/v1.0.5.md`。
+- 本发布包版本为 **1.0.6**。
+- 每个版本的改动记录在仓库的 `release/changelog/` 下；**最新一份 changelog 的版本号就是当前发布版本**，本版本对应 `release/changelog/v1.0.6.md`。
 - changelog 与开发文档不随发布包分发，可在 GitHub 仓库查看。
 - 网页「设置 → 关于」可以检查新版本并下载更新包；下载后仍需按上面的「升级」步骤手动替换程序目录，不会自动覆盖你的 `data`。
 
