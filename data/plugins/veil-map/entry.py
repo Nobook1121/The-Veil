@@ -131,18 +131,68 @@ def _default_map() -> dict[str, Any]:
     }
 
 
-def _normalize_token(raw: Any) -> dict[str, Any] | None:
+def _fraction(value: Any) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return number if math.isfinite(number) else 0.0
+
+
+def _carry_fraction(cell: int, fraction: float) -> tuple[int, float]:
+    """把格内偏移折进 ``[0, 1)``，超出部分进位到格坐标。"""
+    carry = math.floor(fraction)
+    return int(cell) + int(carry), fraction - carry
+
+
+def _normalize_token(raw: Any, grid: int, offset_x: int, offset_y: int) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
     token_id = str(raw.get("id") or "").strip()
     if not token_id:
         return None
     name = str(raw.get("name") or "").strip()[:MAX_NAME]
+    fraction_x = 0.0
+    fraction_y = 0.0
+    raw_cell_x, raw_cell_y = raw.get("cell_x"), raw.get("cell_y")
+    if raw_cell_x is not None and raw_cell_y is not None:
+        try:
+            cell_x = int(round(float(raw_cell_x)))
+            cell_y = int(round(float(raw_cell_y)))
+        except (TypeError, ValueError):
+            return None
+        fraction_x = _fraction(raw.get("offset_x"))
+        fraction_y = _fraction(raw.get("offset_y"))
+    else:
+        # 旧数据是图片像素坐标：换算成“格 + 格内偏移”，世界位置保持不变。
+        x = _coordinate(raw.get("x"))
+        y = _coordinate(raw.get("y"))
+        if x is None:
+            x = 0
+        if y is None:
+            y = 0
+        exact_x = (x - offset_x) / grid
+        exact_y = (y - offset_y) / grid
+        cell_x = int(math.floor(exact_x + 1e-9))
+        cell_y = int(math.floor(exact_y + 1e-9))
+        fraction_x = exact_x - cell_x
+        fraction_y = exact_y - cell_y
+    cell_x, fraction_x = _carry_fraction(cell_x, fraction_x)
+    cell_y, fraction_y = _carry_fraction(cell_y, fraction_y)
+    cell_x = _clamp(cell_x, -1_000_000, 1_000_000)
+    cell_y = _clamp(cell_y, -1_000_000, 1_000_000)
+    fraction_x = round(fraction_x, 6)
+    fraction_y = round(fraction_y, 6)
     return {
         "id": token_id[:64],
         "name": name or "棋子",
-        "x": _as_int(raw.get("x"), 0),
-        "y": _as_int(raw.get("y"), 0),
+        "cell_x": cell_x,
+        "cell_y": cell_y,
+        "offset_x": fraction_x,
+        "offset_y": fraction_y,
+        # 派生世界坐标只用于渲染与旧接口兼容；落盘时会被去掉。
+        "x": int(round(offset_x + (cell_x + fraction_x) * grid)),
+        "y": int(round(offset_y + (cell_y + fraction_y) * grid)),
         "w": _clamp(_as_int(raw.get("w"), 1), 1, 4),
         "h": _clamp(_as_int(raw.get("h"), 1), 1, 4),
         "color": str(raw.get("color") or TOKEN_COLORS[0]),
@@ -390,7 +440,7 @@ def _normalize_map(raw: Any) -> dict[str, Any]:
     )
     tokens: list[dict[str, Any]] = []
     for item in state.get("tokens") or []:
-        token = _normalize_token(item)
+        token = _normalize_token(item, grid, state["grid_offset"]["x"], state["grid_offset"]["y"])
         if token is not None:
             tokens.append(token)
     state["tokens"] = tokens[-MAX_TOKENS:]
@@ -405,6 +455,17 @@ def _normalize_map(raw: Any) -> dict[str, Any]:
 def _load_map(room_dir) -> dict[str, Any]:
     state, _source = scene_store.load(room_dir)
     return _normalize_map(state)
+
+
+def _persistable(state: dict[str, Any]) -> dict[str, Any]:
+    """棋子以格坐标落盘；``x/y`` 是派生字段，不写进分片。"""
+    persisted = dict(state)
+    persisted["tokens"] = [
+        {key: value for key, value in token.items() if key not in {"x", "y"}}
+        for token in state.get("tokens") or []
+        if isinstance(token, dict)
+    ]
+    return persisted
 
 
 def _save_map(
@@ -431,7 +492,7 @@ def _save_map(
         }
         records.append(record)
         normalized["recent_requests"] = records[-RECENT_REQUEST_LIMIT:]
-    scene_store.save(room_dir, normalized)
+    scene_store.save(room_dir, _persistable(normalized))
     return normalized
 
 
@@ -453,8 +514,7 @@ def _member_name(member: dict[str, Any]) -> str:
 
 
 def _reconcile_tokens(state: dict[str, Any], info: dict[str, Any]) -> bool:
-    """按活跃成员补齐 PC 棋子；已有棋子保留坐标与尺寸。"""
-    grid, offset_x, offset_y = _grid_of(state)
+    """按活跃成员补齐 PC 棋子；已有棋子保留格坐标与尺寸。"""
     tokens = state.setdefault("tokens", [])
     by_id = {str(token.get("id")): token for token in tokens}
     by_owner = {
@@ -480,8 +540,10 @@ def _reconcile_tokens(state: dict[str, Any], info: dict[str, Any]) -> bool:
         token = {
             "id": f"member-{user_id}",
             "name": name,
-            "x": offset_x + (index % 6) * grid,
-            "y": offset_y + (index // 6) * grid,
+            "cell_x": index % 6,
+            "cell_y": index // 6,
+            "offset_x": 0.0,
+            "offset_y": 0.0,
             "w": 1,
             "h": 1,
             "color": TOKEN_COLORS[index % len(TOKEN_COLORS)],
@@ -773,10 +835,64 @@ def _snap(value: Any, grid: int, offset: int = 0) -> int | None:
 def _cell_of(
     token: dict[str, Any], grid: int, offset_x: int = 0, offset_y: int = 0
 ) -> tuple[int, int]:
+    """棋子所在格；优先格坐标，旧数据才回退到像素坐标换算。"""
+    raw_x, raw_y = token.get("cell_x"), token.get("cell_y")
+    if raw_x is not None and raw_y is not None:
+        return _as_int(raw_x, 0), _as_int(raw_y, 0)
+    x = _as_int(token.get("x"), 0)
+    y = _as_int(token.get("y"), 0)
     return (
-        int(round((_as_int(token.get("x"), 0) - offset_x) / grid)),
-        int(round((_as_int(token.get("y"), 0) - offset_y) / grid)),
+        int(math.floor((x - offset_x) / grid + 1e-9)),
+        int(math.floor((y - offset_y) / grid + 1e-9)),
     )
+
+
+def _payload_cell(
+    payload: Any, grid: int, offset_x: int, offset_y: int
+) -> tuple[int, int, float, float] | None:
+    """解析目标位置：优先 ``cell_x/cell_y``，兼容旧的像素 ``x/y``。"""
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("cell_x") is not None or payload.get("cell_y") is not None:
+        try:
+            cell_x = int(round(float(payload.get("cell_x"))))
+            cell_y = int(round(float(payload.get("cell_y"))))
+        except (TypeError, ValueError):
+            return None
+        fraction_x = _fraction(payload.get("offset_x"))
+        fraction_y = _fraction(payload.get("offset_y"))
+        cell_x, fraction_x = _carry_fraction(cell_x, fraction_x)
+        cell_y, fraction_y = _carry_fraction(cell_y, fraction_y)
+        return cell_x, cell_y, round(fraction_x, 6), round(fraction_y, 6)
+    x = _snap(payload.get("x"), grid, offset_x)
+    y = _snap(payload.get("y"), grid, offset_y)
+    if x is None or y is None:
+        return None
+    exact_x = (x - offset_x) / grid
+    exact_y = (y - offset_y) / grid
+    cell_x = int(math.floor(exact_x + 1e-9))
+    cell_y = int(math.floor(exact_y + 1e-9))
+    return cell_x, cell_y, round(exact_x - cell_x, 6), round(exact_y - cell_y, 6)
+
+
+def _set_token_cell(
+    token: dict[str, Any],
+    cell_x: int,
+    cell_y: int,
+    fraction_x: float,
+    fraction_y: float,
+    grid: int,
+    offset_x: int,
+    offset_y: int,
+) -> None:
+    cell_x, fraction_x = _carry_fraction(cell_x, fraction_x)
+    cell_y, fraction_y = _carry_fraction(cell_y, fraction_y)
+    token["cell_x"] = int(cell_x)
+    token["cell_y"] = int(cell_y)
+    token["offset_x"] = round(fraction_x, 6)
+    token["offset_y"] = round(fraction_y, 6)
+    token["x"] = int(round(offset_x + (cell_x + token["offset_x"]) * grid))
+    token["y"] = int(round(offset_y + (cell_y + token["offset_y"]) * grid))
 
 
 def _footprint(token: dict[str, Any]) -> tuple[int, int]:
@@ -905,10 +1021,10 @@ def _apply_combat_cost(
     room_dir,
     map_state: dict[str, Any],
     token: dict[str, Any],
-    target_x: int,
-    target_y: int,
+    target_cell_x: int,
+    target_cell_y: int,
 ) -> tuple[bool, str, str]:
-    """校验并扣除移动力；返回 ``(True, "", "")`` 或 ``(False, code, message)``。"""
+    """校验并扣除移动力；距离按格坐标计算。"""
     combat = load_room_state(room_dir).get("combat")
     if not isinstance(combat, dict) or not combat.get("active"):
         return True, "", ""
@@ -926,9 +1042,10 @@ def _apply_combat_cost(
         )
     grid, offset_x, offset_y = _grid_of(map_state)
     from_col, from_row = _cell_of(token, grid, offset_x, offset_y)
-    to_col = int(round((target_x - offset_x) / grid))
-    to_row = int(round((target_y - offset_y) / grid))
-    cells = max(abs(to_col - from_col), abs(to_row - from_row))
+    cells = max(
+        abs(int(target_cell_x) - from_col),
+        abs(int(target_cell_y) - from_row),
+    )
     cost = cells * FEET_PER_CELL
     if cost <= 0:
         return True, "", ""
@@ -1120,23 +1237,37 @@ def add_token(room_id: str):
                 revision=state["revision"],
             )
         grid, offset_x, offset_y = _grid_of(state)
-        x = _snap(payload.get("x", 0), grid, offset_x)
-        y = _snap(payload.get("y", 0), grid, offset_y)
-        if x is None or y is None:
+        target = _payload_cell(
+            {
+                "cell_x": payload.get("cell_x"),
+                "cell_y": payload.get("cell_y"),
+                "offset_x": payload.get("offset_x"),
+                "offset_y": payload.get("offset_y"),
+                "x": payload.get("x", 0),
+                "y": payload.get("y", 0),
+            },
+            grid,
+            offset_x,
+            offset_y,
+        )
+        if target is None:
             return _invalid_request(
                 "棋子坐标不合法。",
                 "map.invalid_coordinates",
                 request_id=request_id,
                 revision=state["revision"],
             )
+        cell_x, cell_y, fraction_x, fraction_y = target
         color = str(payload.get("color") or "").strip()
         if not _HEX_COLOR.match(color):
             color = TOKEN_COLORS[len(state["tokens"]) % len(TOKEN_COLORS)]
         token = {
             "id": f"token-{uuid4().hex[:10]}",
             "name": name,
-            "x": x,
-            "y": y,
+            "cell_x": cell_x,
+            "cell_y": cell_y,
+            "offset_x": fraction_x,
+            "offset_y": fraction_y,
             "w": _clamp(_as_int(payload.get("w"), 1), 1, 4),
             "h": _clamp(_as_int(payload.get("h"), 1), 1, 4),
             "color": color,
@@ -1144,6 +1275,7 @@ def add_token(room_id: str):
             "kind": "pc" if owner_user_id else "npc",
             "combatant": name,
         }
+        _set_token_cell(token, cell_x, cell_y, fraction_x, fraction_y, grid, offset_x, offset_y)
         state["tokens"].append(token)
         state = _save_map(
             room_dir,
@@ -1244,16 +1376,33 @@ def move_token(room_id: str, token_id: str):
             return _conflict_request(state, manager, request_id)
 
         grid, offset_x, offset_y = _grid_of(state)
-        x = _snap(payload.get("x"), grid, offset_x)
-        y = _snap(payload.get("y"), grid, offset_y)
-        if x is None or y is None:
+        target = _payload_cell(payload, grid, offset_x, offset_y)
+        if target is None:
             return _invalid_request(
                 "棋子坐标不合法。",
                 "map.invalid_coordinates",
                 request_id=request_id,
                 revision=state["revision"],
             )
-        ok, code, message = _apply_combat_cost(room_id, room_dir, state, token, x, y)
+        cell_x, cell_y, fraction_x, fraction_y = target
+        if not _within_bounds(state, token, cell_x, cell_y):
+            return _rejected_request(
+                "目标位置超出地图边界。",
+                "map.out_of_bounds",
+                request_id=request_id,
+                revision=state["revision"],
+                data={"map": state, "can_manage": manager},
+            )
+        occupied = _occupancy_conflict(state, token, cell_x, cell_y)
+        if occupied:
+            return _rejected_request(
+                f"目标格已被「{occupied}」占用。",
+                "map.cell_occupied",
+                request_id=request_id,
+                revision=state["revision"],
+                data={"map": state, "can_manage": manager},
+            )
+        ok, code, message = _apply_combat_cost(room_id, room_dir, state, token, cell_x, cell_y)
         if not ok:
             return _rejected_request(
                 message,
@@ -1263,8 +1412,7 @@ def move_token(room_id: str, token_id: str):
                 http_status=409,
                 data={"map": state, "can_manage": manager},
             )
-        token["x"] = x
-        token["y"] = y
+        _set_token_cell(token, cell_x, cell_y, fraction_x, fraction_y, grid, offset_x, offset_y)
         state = _save_map(
             room_dir,
             state,
@@ -1791,12 +1939,11 @@ def _move_token_agent(
             return {"ok": False, "error": denied}
 
         grid, offset_x, offset_y = _grid_of(state)
-        target_x = _snap(cell_x * grid + offset_x, grid, offset_x)
-        target_y = _snap(cell_y * grid + offset_y, grid, offset_y)
-        if target_x is None or target_y is None:
+        try:
+            to_cell_x = int(cell_x)
+            to_cell_y = int(cell_y)
+        except (TypeError, ValueError):
             return {"ok": False, "error": "目标格坐标不合法。"}
-        to_cell_x = int(round((target_x - offset_x) / grid))
-        to_cell_y = int(round((target_y - offset_y) / grid))
         from_cell_x, from_cell_y = _cell_of(token, grid, offset_x, offset_y)
 
         if not _within_bounds(state, token, to_cell_x, to_cell_y):
@@ -1823,15 +1970,14 @@ def _move_token_agent(
 
         # 战斗内复用现有行动经济：当前行动者、movement 预算、扣减与回滚。
         ok, code, message = _apply_combat_cost(
-            room_id, room_dir, state, token, target_x, target_y
+            room_id, room_dir, state, token, to_cell_x, to_cell_y
         )
         if not ok:
             return {"ok": False, "error": message or "移动被战斗规则拒绝。", "code": code}
 
         distance = max(abs(to_cell_x - from_cell_x), abs(to_cell_y - from_cell_y))
         cost_ft = distance * FEET_PER_CELL if combat_active else 0
-        token["x"] = target_x
-        token["y"] = target_y
+        _set_token_cell(token, to_cell_x, to_cell_y, 0.0, 0.0, grid, offset_x, offset_y)
         state = _save_map(room_dir, state)
 
     move: dict[str, Any] = {

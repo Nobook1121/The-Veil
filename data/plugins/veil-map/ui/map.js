@@ -269,10 +269,40 @@
             return String(token.owner_user_id || "") === String(ctx.user.id || "");
         }
 
+        function tokenWorld(token) {
+            var grid = gridSize();
+            var origin = gridOffset();
+            var cellX = Number(token.cell_x);
+            var cellY = Number(token.cell_y);
+            if (!Number.isFinite(cellX) || !Number.isFinite(cellY)) {
+                cellX = Math.floor(((Number(token.x) || 0) - origin.x) / grid + 1e-9);
+                cellY = Math.floor(((Number(token.y) || 0) - origin.y) / grid + 1e-9);
+            }
+            var fractionX = Number(token.offset_x);
+            var fractionY = Number(token.offset_y);
+            if (!Number.isFinite(fractionX)) fractionX = 0;
+            if (!Number.isFinite(fractionY)) fractionY = 0;
+            return {
+                x: origin.x + (cellX + fractionX) * grid,
+                y: origin.y + (cellY + fractionY) * grid,
+            };
+        }
+
+        function setTokenCell(token, cellX, cellY) {
+            token.cell_x = cellX;
+            token.cell_y = cellY;
+            token.offset_x = 0;
+            token.offset_y = 0;
+            var world = tokenWorld(token);
+            token.x = Math.round(world.x);
+            token.y = Math.round(world.y);
+        }
+
         function tokenRect(token) {
             var grid = gridSize();
             var camera = ctx.getCamera();
-            var point = ctx.worldToScreen(Number(token.x) || 0, Number(token.y) || 0);
+            var world = tokenWorld(token);
+            var point = ctx.worldToScreen(world.x, world.y);
             var width = Math.max(1, asInt(token.w, 1)) * grid * camera.zoom;
             var height = Math.max(1, asInt(token.h, 1)) * grid * camera.zoom;
             var inset = Math.max(1.5, 2 * camera.zoom);
@@ -517,16 +547,20 @@
             });
         }
 
-        function persistMove(token, previousX, previousY) {
+        function persistMove(token, previous) {
             apiRequest("POST", "/rooms/" + encodeURIComponent(ctx.room.id) + "/tokens/" + encodeURIComponent(token.id) + "/move", writeBody({
-                x: token.x,
-                y: token.y,
+                cell_x: token.cell_x,
+                cell_y: token.cell_y,
+                offset_x: Number(token.offset_x) || 0,
+                offset_y: Number(token.offset_y) || 0,
             })).then(function (response) {
                 if (destroyed) return;
                 if (!response || response.success !== true) {
                     if (!response || !response.data || !response.data.map) {
-                        token.x = previousX;
-                        token.y = previousY;
+                        token.cell_x = previous.cell_x;
+                        token.cell_y = previous.cell_y;
+                        token.offset_x = previous.offset_x;
+                        token.offset_y = previous.offset_y;
                         scheduleDraw();
                     }
                     applyWriteFailure(response, "棋子移动失败。");
@@ -535,8 +569,10 @@
                 applyPayload(response.data);
             }).catch(function (error) {
                 console.error("veil-map move failed", error);
-                token.x = previousX;
-                token.y = previousY;
+                token.cell_x = previous.cell_x;
+                token.cell_y = previous.cell_y;
+                token.offset_x = previous.offset_x;
+                token.offset_y = previous.offset_y;
                 scheduleDraw();
                 notify("棋子移动失败，请稍后重试。", "error");
             });
@@ -732,8 +768,10 @@
             var offset = gridOffset();
             apiRequest("POST", "/rooms/" + encodeURIComponent(ctx.room.id) + "/tokens", writeBody({
                 name: name,
-                x: offset.x + Math.round((world.x - offset.x) / grid) * grid,
-                y: offset.y + Math.round((world.y - offset.y) / grid) * grid,
+                cell_x: Math.round((world.x - offset.x) / grid),
+                cell_y: Math.round((world.y - offset.y) / grid),
+                offset_x: 0,
+                offset_y: 0,
                 w: clamp(asInt(panelWidth.value, 1), 1, 4),
                 h: clamp(asInt(panelHeight.value, 1), 1, 4),
             })).then(function (response) {
@@ -773,13 +811,18 @@
                     return;
                 }
                 var world = ctx.screenToWorld(point.x, point.y);
+                var tokenWorldPoint = tokenWorld(token);
                 dragging = {
                     token: token,
                     pointerId: event.pointerId,
-                    offsetX: world.x - (Number(token.x) || 0),
-                    offsetY: world.y - (Number(token.y) || 0),
-                    previousX: Number(token.x) || 0,
-                    previousY: Number(token.y) || 0,
+                    offsetX: world.x - tokenWorldPoint.x,
+                    offsetY: world.y - tokenWorldPoint.y,
+                    previous: {
+                        cell_x: token.cell_x,
+                        cell_y: token.cell_y,
+                        offset_x: token.offset_x,
+                        offset_y: token.offset_y,
+                    },
                     moved: false,
                 };
                 canvas.classList.remove("is-panning");
@@ -799,12 +842,11 @@
                 var world = ctx.screenToWorld(point.x, point.y);
                 var grid = gridSize();
                 var offset = gridOffset();
-                var nextX = offset.x + Math.round((world.x - dragging.offsetX - offset.x) / grid) * grid;
-                var nextY = offset.y + Math.round((world.y - dragging.offsetY - offset.y) / grid) * grid;
-                if (nextX !== dragging.token.x || nextY !== dragging.token.y) {
-                    dragging.token.x = nextX;
-                    dragging.token.y = nextY;
-                    dragging.moved = nextX !== dragging.previousX || nextY !== dragging.previousY;
+                var nextCellX = Math.round((world.x - dragging.offsetX - offset.x) / grid);
+                var nextCellY = Math.round((world.y - dragging.offsetY - offset.y) / grid);
+                if (nextCellX !== Number(dragging.token.cell_x) || nextCellY !== Number(dragging.token.cell_y)) {
+                    setTokenCell(dragging.token, nextCellX, nextCellY);
+                    dragging.moved = nextCellX !== dragging.previous.cell_x || nextCellY !== dragging.previous.cell_y;
                     scheduleDraw();
                 }
                 return;
@@ -834,11 +876,10 @@
             if (dragging && dragging.pointerId === event.pointerId) {
                 var token = dragging.token;
                 var moved = dragging.moved;
-                var previousX = dragging.previousX;
-                var previousY = dragging.previousY;
+                var previous = dragging.previous;
                 dragging = null;
                 releasePointer(event.pointerId);
-                if (moved) persistMove(token, previousX, previousY);
+                if (moved) persistMove(token, previous);
                 else scheduleDraw();
                 return;
             }

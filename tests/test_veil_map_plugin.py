@@ -174,6 +174,11 @@ def test_player_can_only_move_own_token(client):
 
 def test_combat_move_uses_turn_and_movement_budget(tmp_path):
     rooms = _write_room(tmp_path, combat=_combat(["Alice", "Bob"]))
+    # 只保留两名成员，避免第三枚棋子占住 Alice 的移动目标格。
+    info_path = rooms / "room1" / "info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    info["members"] = [member for member in info["members"] if member["user_id"] != "u3"]
+    info_path.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
     app = Flask(__name__)
     app.secret_key = "test"
     app.config.update(ROOMS_DIR=str(rooms), CONFIG_DIR=str(tmp_path / "config"))
@@ -429,7 +434,9 @@ def test_agent_kp_moves_player_token_in_exploration(tmp_path):
     assert result["to"] == {"cell_x": 2, "cell_y": 3}
     assert result["cost_ft"] == 0
     bob = next(token for token in _read_map_tokens(room_dir) if token["name"] == "Bob")
-    assert (bob["x"], bob["y"]) == (128, 192)
+    assert (bob["cell_x"], bob["cell_y"]) == (2, 3)
+    assert (bob["offset_x"], bob["offset_y"]) == (0.0, 0.0)
+    assert "x" not in bob and "y" not in bob
 
     events = [item for item in app.extensions["socketio"].events if item["event"] == "room_map_changed"]
     move = events[-1]["payload"]["move"]
@@ -478,7 +485,7 @@ def test_agent_move_uses_combat_turn_and_budget(tmp_path):
     state = json.loads((room_dir / "state.json").read_text(encoding="utf-8"))
     assert state["combat"]["combatants"]["Alice"]["budget"]["movement"] == 15
     alice = next(token for token in _read_map_tokens(room_dir) if token["name"] == "Alice")
-    assert (alice["x"], alice["y"]) == (192, 0)
+    assert (alice["cell_x"], alice["cell_y"]) == (3, 0)
 
 
 def test_agent_move_rejects_bounds_and_occupied_cell(tmp_path):
@@ -804,12 +811,13 @@ def test_import_requires_manager(client, tmp_path):
     assert not asset_dir.exists() or not list(asset_dir.iterdir())
 
 
-def test_calibration_saves_and_keeps_token_coordinates(client):
+def test_calibration_saves_and_keeps_token_cells(client):
     manager, _app = client
     _login(manager, "u1")
     before = _map(manager)
-    token_positions = {
-        token["id"]: (token["x"], token["y"]) for token in before["map"]["tokens"]
+    token_cells = {
+        token["id"]: (token["cell_x"], token["cell_y"], token["offset_x"], token["offset_y"])
+        for token in before["map"]["tokens"]
     }
     imported = _import_map(manager, _png(2048, 1536), "big.png", "cal-import")
     assert imported.status_code == 200
@@ -827,9 +835,11 @@ def test_calibration_saves_and_keeps_token_coordinates(client):
     assert state["calibration"]["cells_across"] == 32
     assert state["calibration"]["offset_x"] == 12
     assert state["grid_offset"]["x"] == 12
+    # 标定只改网格锚点；棋子仍留在原来的格里。
     assert {
-        token["id"]: (token["x"], token["y"]) for token in state["tokens"]
-    } == token_positions
+        token["id"]: (token["cell_x"], token["cell_y"], token["offset_x"], token["offset_y"])
+        for token in state["tokens"]
+    } == token_cells
 
     # 重新调整：改为 64 格 → 每格 32px，旧标定可覆盖。
     recalibrated = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map/calibration", {
@@ -1137,3 +1147,56 @@ def test_scene_loader_falls_back_to_previous_complete_generation(client):
     state = veil_map._load_map(room_dir)
     assert state["revision"] == first.get_json()["revision"]
     assert state["grid_size"] == 48
+
+
+def test_legacy_pixel_tokens_migrate_to_cells_without_visual_shift(client):
+    _manager, app = client
+    room_dir = Path(app.config["ROOMS_DIR"]) / "room1"
+    info_path = room_dir / "info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    info["members"] = [member for member in info["members"] if member["user_id"] == "u1"]
+    info_path.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+    legacy = {
+        "version": 1,
+        "revision": 3,
+        "scene_id": "default",
+        "grid_size": 64,
+        "bounds_cells": 50,
+        "tokens": [
+            {
+                "id": "member-u1",
+                "name": "Alice",
+                "x": 100,
+                "y": 164,
+                "w": 1,
+                "h": 1,
+                "kind": "pc",
+                "owner_user_id": "u1",
+                "combatant": "Alice",
+            }
+        ],
+    }
+    map_dir = room_dir / "plugins" / "veil-map"
+    map_dir.mkdir(parents=True, exist_ok=True)
+    (map_dir / "map.json").write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+
+    manager = app.test_client()
+    _login(manager, "u1")
+    token = _map(manager)["map"]["tokens"][0]
+    assert (token["cell_x"], token["cell_y"]) == (1, 2)
+    assert round(token["offset_x"], 4) == 0.5625
+    assert round(token["offset_y"], 4) == 0.5625
+    assert (token["x"], token["y"]) == (100, 164)
+
+    saved = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map", {"bounds_cells": 40})
+    assert saved.status_code == 200
+    stored = _read_map_tokens(room_dir)[0]
+    assert (stored["cell_x"], stored["cell_y"]) == (1, 2)
+    assert "x" not in stored and "y" not in stored
+
+    # 改网格尺寸后棋子仍停在原来的格，不再相对网格漂移。
+    resized = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map", {"grid_size": 48})
+    assert resized.status_code == 200
+    resized_token = resized.get_json()["data"]["map"]["tokens"][0]
+    assert (resized_token["cell_x"], resized_token["cell_y"]) == (1, 2)
+    assert (resized_token["x"], resized_token["y"]) == (75, 123)
