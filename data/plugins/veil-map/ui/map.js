@@ -32,8 +32,11 @@
             if (method === "POST") return api.post(API_BASE + path, body);
             if (method === "DELETE") return api.del(API_BASE + path);
         }
+        var isForm = typeof FormData !== "undefined" && body instanceof FormData;
         var options = { method: method, headers: { Accept: "application/json" } };
-        if (body !== undefined) {
+        if (isForm) {
+            options.body = body;
+        } else if (body !== undefined) {
             options.headers["Content-Type"] = "application/json";
             options.body = JSON.stringify(body);
         }
@@ -153,6 +156,37 @@
 
         function gridSize() {
             return clamp(asInt(mapState && mapState.grid_size, ctx.getGridSize()), MIN_GRID, MAX_GRID);
+        }
+
+        function gridOffset() {
+            var grid = gridSize();
+            var offset = mapState && mapState.grid_offset;
+            return {
+                x: clamp(asInt(offset && offset.x, 0), -grid, grid),
+                y: clamp(asInt(offset && offset.y, 0), -grid, grid),
+            };
+        }
+
+        function newRequestId() {
+            if (window.crypto && typeof window.crypto.randomUUID === "function") {
+                return window.crypto.randomUUID();
+            }
+            return "req-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+        }
+
+        function writeBody(extra) {
+            var body = extra || {};
+            body.request_id = newRequestId();
+            body.revision = asInt(mapState && mapState.revision, 0);
+            return body;
+        }
+
+        function applyWriteFailure(response, fallback) {
+            if (response && response.data && response.data.map) {
+                applyPayload(response.data);
+            }
+            var message = (response && response.message) || fallback;
+            notify(String(message), "error");
         }
 
         function tokens() {
@@ -367,6 +401,9 @@
 
         function applyPayload(data) {
             if (!data || !data.map) return;
+            // 拖拽期间不替换地图状态：松手后用写回执（成功或冲突）统一对齐，
+            // 避免正在拖的棋子从列表里消失。
+            if (dragging) return;
             mapState = data.map;
             if (data.combat && typeof data.combat === "object") {
                 combat = data.combat.active ? data.combat : { active: false };
@@ -394,16 +431,18 @@
         }
 
         function persistMove(token, previousX, previousY) {
-            apiRequest("POST", "/rooms/" + encodeURIComponent(ctx.room.id) + "/tokens/" + encodeURIComponent(token.id) + "/move", {
+            apiRequest("POST", "/rooms/" + encodeURIComponent(ctx.room.id) + "/tokens/" + encodeURIComponent(token.id) + "/move", writeBody({
                 x: token.x,
                 y: token.y,
-            }).then(function (response) {
+            })).then(function (response) {
                 if (destroyed) return;
                 if (!response || response.success !== true) {
-                    token.x = previousX;
-                    token.y = previousY;
-                    scheduleDraw();
-                    notify((response && response.message) || "棋子移动失败。", "error");
+                    if (!response || !response.data || !response.data.map) {
+                        token.x = previousX;
+                        token.y = previousY;
+                        scheduleDraw();
+                    }
+                    applyWriteFailure(response, "棋子移动失败。");
                     return;
                 }
                 applyPayload(response.data);
@@ -417,10 +456,14 @@
         }
 
         function deleteToken(token) {
-            apiRequest("DELETE", "/rooms/" + encodeURIComponent(ctx.room.id) + "/tokens/" + encodeURIComponent(token.id)).then(function (response) {
+            var body = writeBody({});
+            var path = "/rooms/" + encodeURIComponent(ctx.room.id) + "/tokens/" + encodeURIComponent(token.id) +
+                "?request_id=" + encodeURIComponent(body.request_id) +
+                "&revision=" + encodeURIComponent(String(body.revision));
+            apiRequest("DELETE", path).then(function (response) {
                 if (destroyed) return;
                 if (!response || response.success !== true) {
-                    notify((response && response.message) || "删除棋子失败。", "error");
+                    applyWriteFailure(response, "删除棋子失败。");
                     return;
                 }
                 if (String(token.id) === selectedId) selectedId = "";
@@ -453,14 +496,14 @@
         function saveMapSettings() {
             var grid = clamp(asInt(panelGrid.value, gridSize()), MIN_GRID, MAX_GRID);
             var bounds = clamp(asInt(panelBounds.value, DEFAULT_BOUNDS), MIN_BOUNDS, MAX_BOUNDS);
-            apiRequest("PUT", "/rooms/" + encodeURIComponent(ctx.room.id) + "/map", {
+            apiRequest("PUT", "/rooms/" + encodeURIComponent(ctx.room.id) + "/map", writeBody({
                 grid_size: grid,
                 bounds_cells: bounds,
                 background: String(panelBackground.value || "").trim(),
-            }).then(function (response) {
+            })).then(function (response) {
                 if (destroyed) return;
                 if (!response || response.success !== true) {
-                    notify((response && response.message) || "地图设置保存失败。", "error");
+                    applyWriteFailure(response, "地图设置保存失败。");
                     return;
                 }
                 applyPayload(response.data);
@@ -482,16 +525,17 @@
             var viewport = ctx.getViewport();
             var world = ctx.screenToWorld(viewport.width / 2, viewport.height / 2);
             var grid = gridSize();
-            apiRequest("POST", "/rooms/" + encodeURIComponent(ctx.room.id) + "/tokens", {
+            var offset = gridOffset();
+            apiRequest("POST", "/rooms/" + encodeURIComponent(ctx.room.id) + "/tokens", writeBody({
                 name: name,
-                x: Math.round(world.x / grid) * grid,
-                y: Math.round(world.y / grid) * grid,
+                x: offset.x + Math.round((world.x - offset.x) / grid) * grid,
+                y: offset.y + Math.round((world.y - offset.y) / grid) * grid,
                 w: clamp(asInt(panelWidth.value, 1), 1, 4),
                 h: clamp(asInt(panelHeight.value, 1), 1, 4),
-            }).then(function (response) {
+            })).then(function (response) {
                 if (destroyed) return;
                 if (!response || response.success !== true) {
-                    notify((response && response.message) || "添加棋子失败。", "error");
+                    applyWriteFailure(response, "添加棋子失败。");
                     return;
                 }
                 applyPayload(response.data);
@@ -550,8 +594,9 @@
                 var point = localPoint(event);
                 var world = ctx.screenToWorld(point.x, point.y);
                 var grid = gridSize();
-                var nextX = Math.round((world.x - dragging.offsetX) / grid) * grid;
-                var nextY = Math.round((world.y - dragging.offsetY) / grid) * grid;
+                var offset = gridOffset();
+                var nextX = offset.x + Math.round((world.x - dragging.offsetX - offset.x) / grid) * grid;
+                var nextY = offset.y + Math.round((world.y - dragging.offsetY - offset.y) / grid) * grid;
                 if (nextX !== dragging.token.x || nextY !== dragging.token.y) {
                     dragging.token.x = nextX;
                     dragging.token.y = nextY;

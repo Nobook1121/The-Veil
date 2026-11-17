@@ -19,7 +19,7 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
-from flask import Blueprint, current_app, request, session
+from flask import Blueprint, current_app, jsonify, request, session
 
 from trpg_server.agents.room_state import load_room_state
 from trpg_server.agents.tools.base import AgentTool
@@ -32,7 +32,7 @@ from trpg_server.room_rules import resolve_rule_id
 bp = Blueprint("veil_map", __name__, url_prefix="/api/plugins/veil-map")
 logger = logging.getLogger(__name__)
 
-MAP_VERSION = 1
+MAP_VERSION = 2
 DEFAULT_GRID = 64
 MIN_GRID = 16
 MAX_GRID = 256
@@ -44,9 +44,12 @@ BOUNDS_DEFAULT = 50
 MIN_BOUNDS = 5
 MAX_BOUNDS = 200
 DM_AGENT_IDS = {"kp"}
+SUPPORTED_RULESETS = {"dnd5e"}
 TOKEN_COLORS = ("#c8a35a", "#6fa8dc", "#93c47d", "#e06666", "#8e7cc3", "#76a5af", "#f6b26b", "#a64d79")
+RECENT_REQUEST_LIMIT = 64
 _MAP_LOCK = threading.RLock()
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+_REQUEST_ID = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 _OWNER_ROLES = {"owner", "admin"}
 
 
@@ -72,11 +75,14 @@ def _map_path(room_dir):
 def _default_map() -> dict[str, Any]:
     return {
         "version": MAP_VERSION,
+        "revision": 0,
         "scene_id": "default",
         "background": "",
         "grid_size": DEFAULT_GRID,
+        "grid_offset": {"x": 0, "y": 0},
         "bounds_cells": BOUNDS_DEFAULT,
         "tokens": [],
+        "recent_requests": [],
         "updated_at": "",
     }
 
@@ -102,14 +108,41 @@ def _normalize_token(raw: Any) -> dict[str, Any] | None:
     }
 
 
+def _normalize_recent_requests(raw: Any) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        request_id = str(item.get("request_id") or "").strip()
+        if not _REQUEST_ID.match(request_id):
+            continue
+        records.append(
+            {
+                "request_id": request_id,
+                "action": str(item.get("action") or "")[:32],
+                "revision": max(0, _as_int(item.get("revision"), 0)),
+                "token_id": str(item.get("token_id") or "")[:64],
+                "at": str(item.get("at") or "")[:32],
+            }
+        )
+    return records[-RECENT_REQUEST_LIMIT:]
+
+
 def _normalize_map(raw: Any) -> dict[str, Any]:
     state = _default_map()
     if isinstance(raw, dict):
         state.update(raw)
     state["version"] = MAP_VERSION
+    state["revision"] = max(0, _as_int(state.get("revision"), 0))
     state["scene_id"] = str(state.get("scene_id") or "default")[:64]
     state["background"] = str(state.get("background") or "")[:2048]
     state["grid_size"] = _clamp(_as_int(state.get("grid_size"), DEFAULT_GRID), MIN_GRID, MAX_GRID)
+    offset = state.get("grid_offset") if isinstance(state.get("grid_offset"), dict) else {}
+    grid = int(state["grid_size"])
+    state["grid_offset"] = {
+        "x": _clamp(_as_int(offset.get("x"), 0), -grid, grid),
+        "y": _clamp(_as_int(offset.get("y"), 0), -grid, grid),
+    }
     state["bounds_cells"] = _clamp(
         _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS
     )
@@ -119,6 +152,7 @@ def _normalize_map(raw: Any) -> dict[str, Any]:
         if token is not None:
             tokens.append(token)
     state["tokens"] = tokens[-MAX_TOKENS:]
+    state["recent_requests"] = _normalize_recent_requests(state.get("recent_requests"))
     state["updated_at"] = str(state.get("updated_at") or "")
     return state
 
@@ -127,9 +161,26 @@ def _load_map(room_dir) -> dict[str, Any]:
     return _normalize_map(read_json(_map_path(room_dir), default={}))
 
 
-def _save_map(room_dir, state: dict[str, Any]) -> dict[str, Any]:
+def _save_map(
+    room_dir,
+    state: dict[str, Any],
+    request_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """写入地图并推进 revision；成功的写请求会留下幂等记录。"""
+    state["revision"] = max(0, _as_int(state.get("revision"), 0)) + 1
     normalized = _normalize_map(state)
     normalized["updated_at"] = _now()
+    if isinstance(request_record, dict) and request_record.get("request_id"):
+        records = list(normalized.get("recent_requests") or [])
+        record = {
+            "request_id": str(request_record.get("request_id"))[:64],
+            "action": str(request_record.get("action") or "")[:32],
+            "revision": normalized["revision"],
+            "token_id": str(request_record.get("token_id") or "")[:64],
+            "at": normalized["updated_at"],
+        }
+        records.append(record)
+        normalized["recent_requests"] = records[-RECENT_REQUEST_LIMIT:]
     path = _map_path(room_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     write_json_atomic(path, normalized)
@@ -222,6 +273,181 @@ def _room_or_error(room_id: str):
     return room_dir, info, None
 
 
+def _ruleset_enabled(info: dict[str, Any]) -> bool:
+    return _agent_ruleset_id(info) in SUPPORTED_RULESETS
+
+
+def _map_room_or_error(room_id: str):
+    """地图接口统一入口：房间访问 + 规则集门闸。
+
+    Coc7 等未声明 canvas workspace 的规则集不会挂载地图插件；服务端再挡一层，
+    避免旧链接或脚本在 coc7 房间创建空舞台与地图数据。
+    """
+    room_dir, info, denied = _room_or_error(room_id)
+    if denied:
+        return room_dir, info, denied
+    if not _ruleset_enabled(info):
+        return room_dir, info, error_response(
+            "当前房间的规则集未启用地图。", 400, "map.ruleset_disabled"
+        )
+    return room_dir, info, None
+
+
+def _receipt(
+    status: str,
+    message: str,
+    *,
+    request_id: str = "",
+    revision: int = 0,
+    code: str = "",
+    http_status: int = 200,
+    data: dict[str, Any] | None = None,
+    duplicate: bool = False,
+):
+    """统一写操作回执：success / conflict / rejected / invalid。"""
+    payload: dict[str, Any] = {
+        "success": status == "success",
+        "status": status,
+        "code": code,
+        "message": message,
+        "request_id": str(request_id or ""),
+        "revision": int(revision),
+        "duplicate": bool(duplicate),
+    }
+    if data is not None:
+        payload["data"] = data
+    return jsonify(payload), http_status
+
+
+def _invalid_request(
+    message: str,
+    code: str,
+    *,
+    request_id: str = "",
+    revision: int = 0,
+    data: dict[str, Any] | None = None,
+    http_status: int = 400,
+):
+    return _receipt(
+        "invalid",
+        message,
+        request_id=request_id,
+        revision=revision,
+        code=code,
+        http_status=http_status,
+        data=data,
+    )
+
+
+def _rejected_request(
+    message: str,
+    code: str,
+    *,
+    request_id: str = "",
+    revision: int = 0,
+    http_status: int = 403,
+    data: dict[str, Any] | None = None,
+):
+    return _receipt(
+        "rejected",
+        message,
+        request_id=request_id,
+        revision=revision,
+        code=code,
+        http_status=http_status,
+        data=data,
+    )
+
+
+def _conflict_request(
+    state: dict[str, Any],
+    manager: bool,
+    request_id: str,
+    *,
+    message: str = "",
+    data: dict[str, Any] | None = None,
+):
+    revision = int(state.get("revision") or 0)
+    body = {"map": state, "can_manage": manager}
+    if isinstance(data, dict):
+        body.update(data)
+    return _receipt(
+        "conflict",
+        message or f"地图已被其他成员更新（当前版本 {revision}），请刷新后再试。",
+        request_id=request_id,
+        revision=revision,
+        code="map.revision_conflict",
+        http_status=409,
+        data=body,
+    )
+
+
+def _read_envelope(
+    payload: Any, state: dict[str, Any]
+) -> tuple[str, int, Any]:
+    """校验 request_id / revision；返回 ``(request_id, revision, error)``。"""
+    if not isinstance(payload, dict):
+        return "", 0, _invalid_request(
+            "请求体必须是 JSON 对象。",
+            "map.invalid_payload",
+            revision=state.get("revision", 0),
+        )
+    request_id = str(payload.get("request_id") or "").strip()
+    if not _REQUEST_ID.match(request_id):
+        return "", 0, _invalid_request(
+            "写请求缺少合法的 request_id（1–64 位字母、数字或 . _ : -）。",
+            "map.invalid_request_id",
+            revision=state.get("revision", 0),
+        )
+    raw_revision = payload.get("revision")
+    if isinstance(raw_revision, bool):
+        raw_revision = None
+    try:
+        expected = int(str(raw_revision).strip())
+    except (TypeError, ValueError):
+        expected = None
+    if expected is None or expected < 0:
+        return request_id, 0, _invalid_request(
+            "写请求缺少非负整数 revision。",
+            "map.invalid_revision",
+            request_id=request_id,
+            revision=state.get("revision", 0),
+        )
+    return request_id, expected, None
+
+
+def _duplicate_record(state: dict[str, Any], request_id: str) -> dict[str, Any] | None:
+    for record in state.get("recent_requests") or []:
+        if str(record.get("request_id")) == str(request_id):
+            return record
+    return None
+
+
+def _duplicate_receipt(
+    state: dict[str, Any], manager: bool, record: dict[str, Any]
+) -> Any:
+    """重复提交直接返回成功，不再产生副作用。"""
+    token = None
+    token_id = str(record.get("token_id") or "")
+    if token_id:
+        token = next(
+            (item for item in state.get("tokens") or [] if str(item.get("id")) == token_id),
+            None,
+        )
+    data: dict[str, Any] = {"map": state, "can_manage": manager}
+    if token is not None:
+        data["token"] = token
+    return _receipt(
+        "success",
+        "该操作已生效，重复提交已忽略。",
+        request_id=str(record.get("request_id") or ""),
+        revision=int(state.get("revision") or 0),
+        code="map.duplicate_request",
+        data=data,
+        duplicate=True,
+    )
+
+
 def _broadcast(room_id: str, state: dict[str, Any], move: dict[str, Any] | None = None) -> None:
     socketio = current_app.extensions.get("socketio")
     if socketio is None:
@@ -278,22 +504,30 @@ def _combatant_for_token(combat: dict[str, Any], token: dict[str, Any]) -> tuple
     return "", None
 
 
-def _snap(value: Any, grid: int) -> int | None:
+def _grid_of(state: dict[str, Any]) -> tuple[int, int, int]:
+    grid = int(state.get("grid_size") or DEFAULT_GRID)
+    offset = state.get("grid_offset") if isinstance(state.get("grid_offset"), dict) else {}
+    return grid, _as_int(offset.get("x"), 0), _as_int(offset.get("y"), 0)
+
+
+def _snap(value: Any, grid: int, offset: int = 0) -> int | None:
     try:
         number = float(value)
     except (TypeError, ValueError):
         return None
     if number != number or number in (float("inf"), float("-inf")):
         return None
-    cell = int(round(number / grid))
+    cell = int(round((number - offset) / grid))
     cell = _clamp(cell, -1000, 1000)
-    return cell * grid
+    return offset + cell * grid
 
 
-def _cell_of(token: dict[str, Any], grid: int) -> tuple[int, int]:
+def _cell_of(
+    token: dict[str, Any], grid: int, offset_x: int = 0, offset_y: int = 0
+) -> tuple[int, int]:
     return (
-        int(round(_as_int(token.get("x"), 0) / grid)),
-        int(round(_as_int(token.get("y"), 0) / grid)),
+        int(round((_as_int(token.get("x"), 0) - offset_x) / grid)),
+        int(round((_as_int(token.get("y"), 0) - offset_y) / grid)),
     )
 
 
@@ -321,12 +555,12 @@ def _occupancy_conflict(
     state: dict[str, Any], token: dict[str, Any], cell_x: int, cell_y: int
 ) -> str:
     """返回目标 footprint 上已占用的棋子名称；无冲突时返回空串。"""
-    grid = int(state.get("grid_size") or DEFAULT_GRID)
+    grid, offset_x, offset_y = _grid_of(state)
     width, height = _footprint(token)
     for other in state.get("tokens") or []:
         if other is token or str(other.get("id")) == str(token.get("id")):
             continue
-        other_x, other_y = _cell_of(other, grid)
+        other_x, other_y = _cell_of(other, grid, offset_x, offset_y)
         other_w, other_h = _footprint(other)
         if (
             cell_x < other_x + other_w
@@ -407,24 +641,6 @@ def _agent_ruleset_id(info: dict[str, Any], scenarios_dir: Any = None) -> str:
         return str((info or {}).get("ruleset_id") or "").strip().lower()
 
 
-def _response_message(response: Any) -> str:
-    if response is None:
-        return ""
-    # error_response 返回 (Response, status) 元组，取第一段解析 JSON。
-    if isinstance(response, tuple) and response:
-        response = response[0]
-    try:
-        data = response.get_json(silent=True)
-    except (AttributeError, TypeError):
-        data = None
-    if isinstance(data, dict):
-        return str(data.get("message") or data.get("error") or "").strip()
-    try:
-        return str(response.get_data(as_text=True) or "").strip()
-    except Exception:  # noqa: BLE001 - 非 Flask 响应对象按空消息处理
-        return ""
-
-
 def _safe_background(value: Any) -> str | None:
     text = str(value or "").strip()
     if not text:
@@ -443,52 +659,51 @@ def _apply_combat_cost(
     token: dict[str, Any],
     target_x: int,
     target_y: int,
-) -> tuple[bool, Any]:
-    """校验并扣除移动力；返回 ``(True, None)`` 或 ``(False, error_response)``。"""
+) -> tuple[bool, str, str]:
+    """校验并扣除移动力；返回 ``(True, "", "")`` 或 ``(False, code, message)``。"""
     combat = load_room_state(room_dir).get("combat")
     if not isinstance(combat, dict) or not combat.get("active"):
-        return True, None
+        return True, "", ""
     name, combatant = _combatant_for_token(combat, token)
     if not name or combatant is None:
-        return True, None
+        return True, "", ""
     order = [str(item) for item in combat.get("order") or []]
     turn = _as_int(combat.get("turn"), 0)
     current = order[turn] if 0 <= turn < len(order) else ""
     if current and name != current:
-        return False, error_response(
-            f"现在轮到「{current}」行动，不能移动「{token.get('name')}」。",
-            409,
+        return (
+            False,
             "map.not_your_turn",
+            f"现在轮到「{current}」行动，不能移动「{token.get('name')}」。",
         )
-    grid = int(map_state.get("grid_size") or DEFAULT_GRID)
-    from_col = int(round(_as_int(token.get("x"), 0) / grid))
-    from_row = int(round(_as_int(token.get("y"), 0) / grid))
-    to_col = int(round(target_x / grid))
-    to_row = int(round(target_y / grid))
+    grid, offset_x, offset_y = _grid_of(map_state)
+    from_col, from_row = _cell_of(token, grid, offset_x, offset_y)
+    to_col = int(round((target_x - offset_x) / grid))
+    to_row = int(round((target_y - offset_y) / grid))
     cells = max(abs(to_col - from_col), abs(to_row - from_row))
     cost = cells * FEET_PER_CELL
     if cost <= 0:
-        return True, None
+        return True, "", ""
     budget = combatant.get("budget")
     if not isinstance(budget, dict) or "movement" not in budget:
-        return False, error_response(
-            "战斗行动预算尚未初始化，请重新进入战斗后再移动。",
-            409,
+        return (
+            False,
             "map.budget_missing",
+            "战斗行动预算尚未初始化，请重新进入战斗后再移动。",
         )
     remaining = _as_int(budget.get("movement"), 0)
     if cost > remaining:
-        return False, error_response(
-            f"移动距离超出本回合剩余移动力（剩余 {remaining} 英尺，需要 {cost} 英尺）。",
-            409,
+        return (
+            False,
             "map.movement_exhausted",
+            f"移动距离超出本回合剩余移动力（剩余 {remaining} 英尺，需要 {cost} 英尺）。",
         )
     budget_before = remaining
     if not spend_budget(combatant, "movement", cost):
-        return False, error_response(
-            f"移动距离超出本回合剩余移动力（剩余 {remaining} 英尺，需要 {cost} 英尺）。",
-            409,
+        return (
+            False,
             "map.movement_exhausted",
+            f"移动距离超出本回合剩余移动力（剩余 {remaining} 英尺，需要 {cost} 英尺）。",
         )
     try:
         from trpg_server.agents.tools.combat import _save_combat
@@ -497,8 +712,8 @@ def _apply_combat_cost(
     except Exception:  # noqa: BLE001 - 预算回滚后按服务端错误返回
         budget["movement"] = budget_before
         logger.warning("veil_map_combat_save_failed room=%s", room_id, exc_info=True)
-        return False, error_response("战斗状态保存失败，请稍后重试。", 500, "map.combat_save_failed")
-    return True, None
+        return False, "map.combat_save_failed", "战斗状态保存失败，请稍后重试。"
+    return True, "", ""
 
 
 def _map_payload(room_id: str, room_dir, info: dict[str, Any]) -> dict[str, Any]:
@@ -515,9 +730,19 @@ def _map_payload(room_id: str, room_dir, info: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def _write_payload() -> dict[str, Any] | None:
+    """写请求体：优先 JSON，其次表单/查询参数（DELETE 没有请求体）。"""
+    payload = request.get_json(silent=True)
+    if isinstance(payload, dict):
+        return payload
+    merged = dict(request.args)
+    merged.update(request.form)
+    return merged or None
+
+
 @bp.route("/rooms/<room_id>/map", methods=["GET"])
 def get_map(room_id: str):
-    room_dir, info, denied = _room_or_error(room_id)
+    room_dir, info, denied = _map_room_or_error(room_id)
     if denied:
         return denied
     return success_response(_map_payload(room_id, room_dir, info), "Map loaded")
@@ -525,78 +750,136 @@ def get_map(room_id: str):
 
 @bp.route("/rooms/<room_id>/map", methods=["PUT"])
 def update_map(room_id: str):
-    room_dir, info, denied = _room_or_error(room_id)
+    room_dir, info, denied = _map_room_or_error(room_id)
     if denied:
         return denied
+    payload = _write_payload()
     _role, manager = _room_context(info)
-    if not manager:
-        return error_response("只有房主或房管可以编辑地图。", 403, "map.manager_only")
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict):
-        return error_response("请求体必须是 JSON 对象。", 400, "map.invalid_payload")
     with _MAP_LOCK:
         state = _load_map(room_dir)
+        if not manager:
+            return _rejected_request(
+                "只有房主或房管可以编辑地图。",
+                "map.manager_only",
+                revision=state["revision"],
+            )
+        request_id, expected, error = _read_envelope(payload, state)
+        if error is not None:
+            return error
+        record = _duplicate_record(state, request_id)
+        if record is not None:
+            return _duplicate_receipt(state, manager, record)
+        if expected != state["revision"]:
+            return _conflict_request(state, manager, request_id)
+
         if "grid_size" in payload:
-            raw_grid = payload.get("grid_size")
-            grid = _as_int(raw_grid, state["grid_size"])
+            grid = _as_int(payload.get("grid_size"), state["grid_size"])
             if grid < MIN_GRID or grid > MAX_GRID:
-                return error_response(
+                return _invalid_request(
                     f"网格尺寸必须在 {MIN_GRID}–{MAX_GRID} 之间。",
-                    400,
                     "map.invalid_grid",
+                    request_id=request_id,
+                    revision=state["revision"],
                 )
             state["grid_size"] = grid
         if "bounds_cells" in payload:
             bounds = _as_int(payload.get("bounds_cells"), state["bounds_cells"])
             if bounds < MIN_BOUNDS or bounds > MAX_BOUNDS:
-                return error_response(
+                return _invalid_request(
                     f"地图边界必须在 {MIN_BOUNDS}–{MAX_BOUNDS} 格之间。",
-                    400,
                     "map.invalid_bounds",
+                    request_id=request_id,
+                    revision=state["revision"],
                 )
             state["bounds_cells"] = bounds
         if "background" in payload:
             background = _safe_background(payload.get("background"))
             if background is None:
-                return error_response(
+                return _invalid_request(
                     "背景图地址必须是站内路径、http(s) 链接或 data:image 数据。",
-                    400,
                     "map.invalid_background",
+                    request_id=request_id,
+                    revision=state["revision"],
                 )
-            state["background"] = background
-        state = _save_map(room_dir, state)
+            if background != state.get("background"):
+                state["background"] = background
+                state.pop("background_meta", None)
+                state.pop("calibration", None)
+        state = _save_map(
+            room_dir,
+            state,
+            {"request_id": request_id, "action": "map.update"},
+        )
     _broadcast(room_id, state)
-    return success_response({"map": state, "can_manage": True}, "Map updated")
+    return _receipt(
+        "success",
+        "地图设置已保存。",
+        request_id=request_id,
+        revision=state["revision"],
+        code="map.updated",
+        data={"map": state, "can_manage": True},
+    )
 
 
 @bp.route("/rooms/<room_id>/tokens", methods=["POST"])
 def add_token(room_id: str):
-    room_dir, info, denied = _room_or_error(room_id)
+    room_dir, info, denied = _map_room_or_error(room_id)
     if denied:
         return denied
+    payload = _write_payload()
     _role, manager = _room_context(info)
-    if not manager:
-        return error_response("只有房主或房管可以添加棋子。", 403, "map.manager_only")
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict):
-        return error_response("请求体必须是 JSON 对象。", 400, "map.invalid_payload")
-    name = str(payload.get("name") or "").strip()[:MAX_NAME]
-    if not name:
-        return error_response("棋子名称不能为空。", 400, "map.invalid_name")
-    owner_user_id = str(payload.get("owner_user_id") or "").strip()
-    if owner_user_id:
-        members = {str(member.get("user_id")) for member in _active_members(info)}
-        if owner_user_id not in members:
-            return error_response("绑定成员不在该房间中。", 400, "map.invalid_owner")
     with _MAP_LOCK:
         state = _load_map(room_dir)
+        if not manager:
+            return _rejected_request(
+                "只有房主或房管可以添加棋子。",
+                "map.manager_only",
+                revision=state["revision"],
+            )
+        request_id, expected, error = _read_envelope(payload, state)
+        if error is not None:
+            return error
+        record = _duplicate_record(state, request_id)
+        if record is not None:
+            return _duplicate_receipt(state, manager, record)
+        if expected != state["revision"]:
+            return _conflict_request(state, manager, request_id)
+
+        name = str(payload.get("name") or "").strip()[:MAX_NAME]
+        if not name:
+            return _invalid_request(
+                "棋子名称不能为空。",
+                "map.invalid_name",
+                request_id=request_id,
+                revision=state["revision"],
+            )
+        owner_user_id = str(payload.get("owner_user_id") or "").strip()
+        if owner_user_id:
+            members = {str(member.get("user_id")) for member in _active_members(info)}
+            if owner_user_id not in members:
+                return _invalid_request(
+                    "绑定成员不在该房间中。",
+                    "map.invalid_owner",
+                    request_id=request_id,
+                    revision=state["revision"],
+                )
         if len(state["tokens"]) >= MAX_TOKENS:
-            return error_response("棋子数量已达上限。", 400, "map.too_many_tokens")
-        grid = int(state["grid_size"])
-        x = _snap(payload.get("x", 0), grid)
-        y = _snap(payload.get("y", 0), grid)
+            return _invalid_request(
+                "棋子数量已达上限。",
+                "map.too_many_tokens",
+                request_id=request_id,
+                revision=state["revision"],
+            )
+        grid, offset_x, offset_y = _grid_of(state)
+        x = _snap(payload.get("x", 0), grid, offset_x)
+        y = _snap(payload.get("y", 0), grid, offset_y)
         if x is None or y is None:
-            return error_response("棋子坐标不合法。", 400, "map.invalid_coordinates")
+            return _invalid_request(
+                "棋子坐标不合法。",
+                "map.invalid_coordinates",
+                request_id=request_id,
+                revision=state["revision"],
+            )
         color = str(payload.get("color") or "").strip()
         if not _HEX_COLOR.match(color):
             color = TOKEN_COLORS[len(state["tokens"]) % len(TOKEN_COLORS)]
@@ -613,62 +896,139 @@ def add_token(room_id: str):
             "combatant": name,
         }
         state["tokens"].append(token)
-        state = _save_map(room_dir, state)
+        state = _save_map(
+            room_dir,
+            state,
+            {"request_id": request_id, "action": "token.add", "token_id": token["id"]},
+        )
     _broadcast(room_id, state)
-    return success_response({"map": state, "token": token}, "Token added")
+    return _receipt(
+        "success",
+        "棋子已添加。",
+        request_id=request_id,
+        revision=state["revision"],
+        code="map.token_added",
+        data={"map": state, "token": token, "can_manage": True},
+    )
 
 
 @bp.route("/rooms/<room_id>/tokens/<token_id>", methods=["DELETE"])
 def delete_token(room_id: str, token_id: str):
-    room_dir, info, denied = _room_or_error(room_id)
+    room_dir, info, denied = _map_room_or_error(room_id)
     if denied:
         return denied
+    payload = _write_payload()
     _role, manager = _room_context(info)
-    if not manager:
-        return error_response("只有房主或房管可以删除棋子。", 403, "map.manager_only")
     with _MAP_LOCK:
         state = _load_map(room_dir)
+        if not manager:
+            return _rejected_request(
+                "只有房主或房管可以删除棋子。",
+                "map.manager_only",
+                revision=state["revision"],
+            )
+        request_id, expected, error = _read_envelope(payload, state)
+        if error is not None:
+            return error
+        record = _duplicate_record(state, request_id)
+        if record is not None:
+            return _duplicate_receipt(state, manager, record)
+        if expected != state["revision"]:
+            return _conflict_request(state, manager, request_id)
         tokens = [token for token in state["tokens"] if str(token.get("id")) != str(token_id)]
         if len(tokens) == len(state["tokens"]):
-            return error_response("棋子不存在。", 404, "map.token_not_found")
+            return _invalid_request(
+                "棋子不存在。",
+                "map.token_not_found",
+                request_id=request_id,
+                revision=state["revision"],
+                http_status=404,
+            )
         state["tokens"] = tokens
-        state = _save_map(room_dir, state)
+        state = _save_map(
+            room_dir,
+            state,
+            {"request_id": request_id, "action": "token.delete", "token_id": token_id},
+        )
     _broadcast(room_id, state)
-    return success_response({"map": state}, "Token removed")
+    return _receipt(
+        "success",
+        "棋子已删除。",
+        request_id=request_id,
+        revision=state["revision"],
+        code="map.token_deleted",
+        data={"map": state, "can_manage": True},
+    )
 
 
 @bp.route("/rooms/<room_id>/tokens/<token_id>/move", methods=["POST"])
 def move_token(room_id: str, token_id: str):
-    room_dir, info, denied = _room_or_error(room_id)
+    room_dir, info, denied = _map_room_or_error(room_id)
     if denied:
         return denied
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict):
-        return error_response("请求体必须是 JSON 对象。", 400, "map.invalid_payload")
+    payload = _write_payload()
     _role, manager = _room_context(info)
     with _MAP_LOCK:
         state = _load_map(room_dir)
         token = next((item for item in state["tokens"] if str(item.get("id")) == str(token_id)), None)
         if token is None:
-            return error_response("棋子不存在。", 404, "map.token_not_found")
+            return _invalid_request(
+                "棋子不存在。",
+                "map.token_not_found",
+                revision=state["revision"],
+                http_status=404,
+            )
         owner_user_id = str(token.get("owner_user_id") or "")
         if not manager and owner_user_id != str(session.get("user_id") or ""):
-            return error_response("你只能移动自己绑定的棋子。", 403, "map.not_owner")
-        grid = int(state.get("grid_size") or DEFAULT_GRID)
-        x = _snap(payload.get("x"), grid)
-        y = _snap(payload.get("y"), grid)
-        if x is None or y is None:
-            return error_response("棋子坐标不合法。", 400, "map.invalid_coordinates")
-        ok, error = _apply_combat_cost(room_id, room_dir, state, token, x, y)
-        if not ok:
+            return _rejected_request(
+                "你只能移动自己绑定的棋子。",
+                "map.not_owner",
+                revision=state["revision"],
+            )
+        request_id, expected, error = _read_envelope(payload, state)
+        if error is not None:
             return error
+        record = _duplicate_record(state, request_id)
+        if record is not None:
+            return _duplicate_receipt(state, manager, record)
+        if expected != state["revision"]:
+            return _conflict_request(state, manager, request_id)
+
+        grid, offset_x, offset_y = _grid_of(state)
+        x = _snap(payload.get("x"), grid, offset_x)
+        y = _snap(payload.get("y"), grid, offset_y)
+        if x is None or y is None:
+            return _invalid_request(
+                "棋子坐标不合法。",
+                "map.invalid_coordinates",
+                request_id=request_id,
+                revision=state["revision"],
+            )
+        ok, code, message = _apply_combat_cost(room_id, room_dir, state, token, x, y)
+        if not ok:
+            return _rejected_request(
+                message,
+                code,
+                request_id=request_id,
+                revision=state["revision"],
+                http_status=409,
+                data={"map": state, "can_manage": manager},
+            )
         token["x"] = x
         token["y"] = y
-        state = _save_map(room_dir, state)
+        state = _save_map(
+            room_dir,
+            state,
+            {"request_id": request_id, "action": "token.move", "token_id": token["id"]},
+        )
     _broadcast(room_id, state)
-    return success_response(
-        {"map": state, "token": token, "combat": _combat_payload(room_dir)},
-        "Token moved",
+    return _receipt(
+        "success",
+        "棋子已移动。",
+        request_id=request_id,
+        revision=state["revision"],
+        code="map.token_moved",
+        data={"map": state, "token": token, "combat": _combat_payload(room_dir), "can_manage": manager},
     )
 
 
@@ -700,14 +1060,14 @@ def _move_token_agent(
         if not allowed:
             return {"ok": False, "error": denied}
 
-        grid = int(state.get("grid_size") or DEFAULT_GRID)
-        target_x = _snap(cell_x * grid, grid)
-        target_y = _snap(cell_y * grid, grid)
+        grid, offset_x, offset_y = _grid_of(state)
+        target_x = _snap(cell_x * grid + offset_x, grid, offset_x)
+        target_y = _snap(cell_y * grid + offset_y, grid, offset_y)
         if target_x is None or target_y is None:
             return {"ok": False, "error": "目标格坐标不合法。"}
-        to_cell_x = int(round(target_x / grid))
-        to_cell_y = int(round(target_y / grid))
-        from_cell_x, from_cell_y = _cell_of(token, grid)
+        to_cell_x = int(round((target_x - offset_x) / grid))
+        to_cell_y = int(round((target_y - offset_y) / grid))
+        from_cell_x, from_cell_y = _cell_of(token, grid, offset_x, offset_y)
 
         if not _within_bounds(state, token, to_cell_x, to_cell_y):
             bounds = _clamp(
@@ -732,10 +1092,11 @@ def _move_token_agent(
                 }
 
         # 战斗内复用现有行动经济：当前行动者、movement 预算、扣减与回滚。
-        ok, error = _apply_combat_cost(room_id, room_dir, state, token, target_x, target_y)
+        ok, code, message = _apply_combat_cost(
+            room_id, room_dir, state, token, target_x, target_y
+        )
         if not ok:
-            message = _response_message(error)
-            return {"ok": False, "error": message or "移动被战斗规则拒绝。"}
+            return {"ok": False, "error": message or "移动被战斗规则拒绝。", "code": code}
 
         distance = max(abs(to_cell_x - from_cell_x), abs(to_cell_y - from_cell_y))
         cost_ft = distance * FEET_PER_CELL if combat_active else 0
