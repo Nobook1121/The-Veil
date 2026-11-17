@@ -28,6 +28,8 @@
                 </small><br>
                 <small class="text-muted">剧本：<span data-user-content="true">{{ scenarioTitle }}</span></small><br>
                 <small class="text-muted">成员：<span data-user-content="true">{{ members }}</span></small>
+                <br>
+                <small class="text-muted">在线人数：<span data-room-online-count="{{ roomId }}">{{ onlineCount }}</span></small>
                 {{{ usageHtml }}}
             </p>
         </div>
@@ -53,6 +55,7 @@
 </template>
 
 <template id="room-character-binding-table">
+{{{ toolbarHtml }}}
 <table class="table table-sm align-middle room-binding-table">
     <thead>
         <tr>
@@ -66,17 +69,40 @@
 </table>
 </template>
 
+<template id="room-ai-player-toolbar">
+<div class="room-ai-player-toolbar">
+    <button type="button" class="btn btn-sm btn-outline-primary" data-add-ai-player>
+        <i class="fa fa-robot" aria-hidden="true"></i> 添加 AI 玩家
+    </button>
+</div>
+</template>
+
 <template id="room-character-binding-row">
 <tr class="{{ rowClass }}">
-    <td>{{ username }}</td>
+    <td>{{ username }}{{{ controlBadgeHtml }}}</td>
     <td>{{{ cardPreviewHtml }}}</td>
     <td>{{ permission }}</td>
     <td class="room-binding-actions text-end">
         {{{ changeButtonHtml }}}
+        {{{ aiControlButtonHtml }}}
+        {{{ aiActButtonHtml }}}
+        {{{ takeoverButtonHtml }}}
         {{{ promoteButtonHtml }}}
         {{{ removeButtonHtml }}}
     </td>
 </tr>
+</template>
+
+<template id="room-ai-control-button">
+<button type="button" class="btn btn-sm btn-outline-info" data-ai-control-user-id="{{ userId }}" data-ai-control-enabled="{{ enabled }}">{{ label }}</button>
+</template>
+
+<template id="room-ai-act-button">
+<button type="button" class="btn btn-sm btn-outline-success" data-ai-act-user-id="{{ userId }}">让 AI 行动</button>
+</template>
+
+<template id="room-takeover-ai-button">
+<button type="button" class="btn btn-sm btn-outline-warning" data-takeover-ai-user-id="{{ userId }}">接管</button>
 </template>
 
 <template id="room-member-group">
@@ -96,6 +122,7 @@
         <span class="home-room-member-name{{ roleClass }}">
             <span class="home-room-member-name-text">{{ username }}</span>
             {{{ roleBadgeHtml }}}
+            {{{ controlBadgeHtml }}}
             {{{ selfBadgeHtml }}}
         </span>
         <span class="home-room-member-card{{ cardClass }}">{{ cardName }}</span>

@@ -82,9 +82,20 @@ def create_room_message(room_id):
     member = _find_member(info, user_id=session["user_id"], active_only=True)
     if not member:
         return _denied(room_id)
+    message_type = str(data.get("type") or "player")
+    # 同一角色不能同时被 AI 与真人操作：托管期间只允许 AI 回合写入，
+    # 真人必须先收回控制权再发言。AI 回合由服务端直接落库，不走本路由。
+    from trpg_server.room_ops.ai_players import ai_controlled
+
+    if message_type == "player" and ai_controlled(member):
+        return error_response(
+            "该角色当前由 AI 托管，请先收回控制权再发言",
+            409,
+            "ai_controlled",
+        )
     message = {
         "id": uuid4().hex,
-        "type": data.get("type", "player"),
+        "type": message_type,
         "sender_id": member["user_id"],
         "sender_name": member["username"],
         "avatar": member["avatar"],

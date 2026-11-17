@@ -182,6 +182,13 @@ function initChat(): void {
             showNotification("请先加入房间后再发送消息", "error");
             return;
         }
+        const selfMember = getCurrentRoom()?.members?.find(
+            (member) => String(member.user_id) === String(getCurrentUserId()),
+        );
+        if (selfMember?.control_mode === "ai") {
+            showNotification("你的角色当前由 AI 托管，请先在成员列表收回控制权", "error");
+            return;
+        }
 
         const lockInput = document.getElementById("enableAIResponseLock") as HTMLInputElement | null;
         if (isAIThinking && lockInput?.checked) {
@@ -530,6 +537,10 @@ async function sendToAI(chatInput: HTMLInputElement, sendButton: HTMLButtonEleme
             }
         }
 
+        // KP 回合结束后，让所有 AI 托管角色按顺序补一次行动；AI 行动不会反过来触发 KP，
+        // 因此不会形成自动循环。单个角色失败只影响该角色。
+        void triggerAiControlledTeammates();
+
     } catch (error) {
         const processingTime = Math.round((Date.now() - startTime) / 1000);
         replaceThinkingMessage(thinkingMessageId, chatT("chat.error.reply", "AI 回复失败: {detail}", { detail: chatErrorMessage(error) }), processingTime, null);
@@ -542,6 +553,42 @@ async function sendToAI(chatInput: HTMLInputElement, sendButton: HTMLButtonEleme
         if (pendingMessages.length > 0) {
             void sendToAI(chatInput, sendButton);
         }
+    }
+}
+
+let aiTeammateTurnsRunning = false;
+
+/**
+ * 在真人推进 KP 回合后，让房间内 AI 托管/AI 玩家依次行动。
+ * 后端按成员加锁并去重，多个客户端同时触发时只有一次会真正执行。
+ */
+async function triggerAiControlledTeammates(): Promise<void> {
+    const room = getCurrentRoom();
+    if (!room || room.invisible_view || room.archived || aiTeammateTurnsRunning) return;
+    const controlled = (room.members || []).filter(
+        (member) => member.status !== "removed" && member.is_active !== false && member.control_mode === "ai",
+    );
+    if (controlled.length === 0) return;
+    aiTeammateTurnsRunning = true;
+    try {
+        for (const member of controlled) {
+            const latest = getCurrentRoom();
+            if (!latest || latest.archived) return;
+            const current = (latest.members || []).find(
+                (item) => String(item.user_id) === String(member.user_id),
+            );
+            if (!current || current.control_mode !== "ai" || current.status === "removed") continue;
+            try {
+                await TrpgApi.post(
+                    `/api/rooms/${latest.id}/members/${encodeURIComponent(String(member.user_id))}/ai-act`,
+                    {},
+                );
+            } catch (error) {
+                console.warn("AI 托管行动失败", member.user_id, error);
+            }
+        }
+    } finally {
+        aiTeammateTurnsRunning = false;
     }
 }
 
@@ -1421,6 +1468,7 @@ function addMessage(
     tokenCount: number | null = null,
     cacheHitRate: number | null = null,
     message: ChatMessage | null = null,
+    senderBadgeHtml = "",
 ): string | number {
     const resolvedMessageId = messageId || Date.now();
     const chatHistory = document.getElementById("chatHistory");
@@ -1433,6 +1481,7 @@ function addMessage(
     const messageDiv = document.createElement("div");
     messageDiv.className = `message ${messageClass}`;
     messageDiv.setAttribute("data-id", String(resolvedMessageId));
+    messageDiv.setAttribute("data-message-type", type);
     if (message?.sender_id !== undefined && message.sender_id !== null) {
         messageDiv.setAttribute("data-sender-id", String(message.sender_id));
     }
@@ -1447,6 +1496,7 @@ function addMessage(
     messageDiv.innerHTML = window.TrpgTemplates.render("chat-message", {
         avatarSrc,
         sender,
+        senderBadgeHtml,
         displayTime,
         contentHtml: renderedContent,
         processingHtml: renderProcessingTime(type, processingTime, tokenCount, cacheHitRate),
@@ -1830,6 +1880,9 @@ function renderRoomMessage(message: ChatMessage | null, animate = false): void {
         numericMetadata(metadata, "tokenCount") ?? numericMetadata(metadata, "token_count"),
         numericMetadata(metadata, "cacheHitRate") ?? numericMetadata(metadata, "cache_hit_rate"),
         displayMessage,
+        metadata.ai_controlled === true
+            ? `<span class="message-ai-badge${metadata.ai_player === true ? " is-player" : ""}">${metadata.ai_player === true ? "AI 玩家" : "AI 代打"}</span>`
+            : "",
     );
     const messageElement = document.querySelector<HTMLElement>(`#chatHistory .message[data-id="${String(renderedId)}"]`);
     // 骰子结果按房间生效档位渲染虚拟投掷桌；历史消息静态展示，避免回看时重播动画。
@@ -1870,6 +1923,8 @@ function initWebSocket(): void {
         socket.on("connect", () => {
             const room = getCurrentRoom();
             if (room && !room.invisible_view) socket?.emit("join_room", { room_id: room.id });
+            // 不在房间内时（房间列表）重连后补拉一次，修复掉线期间错过的人数变化。
+            else void window.loadRoomsList?.();
         });
         socket.on("session_expired", () => {
             showNotification("当前账号已在其他会话登录，请重新登录。", "error");
@@ -1888,6 +1943,10 @@ function initWebSocket(): void {
         socket.on("room_members_changed", () => {
             void window.refreshCurrentRoomMembers?.();
             window.refreshRoomAiChanges?.();
+        });
+        // 房间在线人数：后端按真实连接状态推送，房间列表卡片即时更新。
+        socket.on("room_presence_changed", (data) => {
+            window.updateRoomCardPresence?.(data as RoomPresencePayload);
         });
         socket.on("room_interlude_updated", (data) => {
             const payload = data as { room_id?: string; interlude?: RoomInterludeState };

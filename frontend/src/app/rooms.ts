@@ -844,6 +844,7 @@ function renderRoomCard(room: Room): string {
                   ? "无 AI 主持（无剧本）"
                   : "未知"),
         members,
+        onlineCount: formatRoomOnlineCount(room),
         usageHtml:
             room.usage && room.ai_kp_enabled !== false
                 ? `<br><small class="text-muted room-card-usage">AI 用量：${roomUsageText(room.usage)}</small>`
@@ -1180,6 +1181,7 @@ async function refreshCurrentRoomMembers(): Promise<void> {
 }
 
 window.refreshCurrentRoomMembers = refreshCurrentRoomMembers;
+window.updateRoomCardPresence = updateRoomCardPresence;
 window.refreshRoomNodes = loadRoomNodes;
 
 function canManageRoom(room: Room): boolean {
@@ -1913,12 +1915,35 @@ function renderRoomCharacterBindings(room: Room): void {
         return;
     }
 
+    const canManage = canManageRoomMembers(room);
+    const toolbarHtml = canManage
+        ? window.TrpgTemplates.render("room-ai-player-toolbar", {})
+        : "";
     container.innerHTML = window.TrpgTemplates.render("room-character-binding-table", {
+        toolbarHtml,
         rowsHtml: members.map((member) => renderRoomMemberBindingRow(room, member)).join(""),
     });
 
     container.querySelectorAll<HTMLButtonElement>("[data-bind-user-id]").forEach((button) => {
         button.addEventListener("click", () => openRoomCharacterBindModal(button.dataset.bindUserId || ""));
+    });
+    container.querySelectorAll<HTMLButtonElement>("[data-add-ai-player]").forEach((button) => {
+        button.addEventListener("click", () => openRoomCharacterBindModal("__new_ai_player__", "选择一张角色卡作为 AI 玩家。"));
+    });
+    container.querySelectorAll<HTMLButtonElement>("[data-ai-control-user-id]").forEach((button) => {
+        button.addEventListener("click", () => void setRoomMemberAiControl(
+            button.dataset.aiControlUserId || "",
+            button.dataset.aiControlEnabled === "true",
+        ));
+    });
+    container.querySelectorAll<HTMLButtonElement>("[data-ai-act-user-id]").forEach((button) => {
+        button.addEventListener("click", () => void runRoomMemberAiTurn(
+            button.dataset.aiActUserId || "",
+            button,
+        ));
+    });
+    container.querySelectorAll<HTMLButtonElement>("[data-takeover-ai-user-id]").forEach((button) => {
+        button.addEventListener("click", () => void takeoverRoomAiPlayer(button.dataset.takeoverAiUserId || ""));
     });
     container.querySelectorAll<HTMLButtonElement>("[data-remove-user-id]").forEach((button) => {
         button.addEventListener("click", () => void removeRoomMember(button.dataset.removeUserId || ""));
@@ -1939,21 +1964,49 @@ function renderRoomMemberBindingRow(room: Room, member: RoomMember): string {
     const canManage = canManageRoomMembers(room);
     const isSelf = String(member.user_id) === String(window.currentUser?.user_id);
     const isActive = isActiveRoomMember(member);
+    const isAiPlayer = member.is_ai_player === true;
+    const isAiControlled = member.control_mode === "ai";
     const isOnline = member.is_online === true;
-    const canChangeCard = isActive && (isElevatedUser() || isSelf || canManage);
+    const canChangeCard = isActive && (isElevatedUser() || (isAiPlayer ? canManage : (isSelf || canManage)));
     const canRemove = isActive && canManage && String(member.user_id) !== String(room.creator_id);
-    const canPromote = isActive && canManage && String(member.user_id) !== String(room.creator_id) && member.room_role !== "admin";
+    const canPromote = isActive && !isAiPlayer && canManage && String(member.user_id) !== String(room.creator_id) && member.room_role !== "admin";
+    const canToggleAi = isActive && !isAiPlayer && Boolean(card) && (isSelf || canManage);
+    const canAct = isActive && isAiControlled;
+    // AI 玩家可由任意活跃真人成员接管；接管即把角色卡与运行状态转给本人。
+    const canTakeover = isActive && isAiPlayer;
     const cardPreviewHtml = card
         ? `<button type="button" class="btn btn-link p-0 room-character-preview" data-room-character-preview="${encodeURIComponent(JSON.stringify(card))}" data-room-user-id="${escapeRoomHtml(member.user_id)}">${escapeRoomHtml(card.name || "未命名角色卡")}</button>`
         : "未绑定";
+    const presenceText = isAiPlayer
+        ? roomText("home.members.ai_player", "AI 玩家")
+        : isOnline ? "在线" : "离线";
+    const controlBadge = isAiPlayer
+        ? `<span class="home-room-member-ai">${escapeRoomHtml(roomText("home.members.ai_player", "AI 玩家"))}</span>`
+        : isAiControlled
+            ? `<span class="home-room-member-ai is-hosted">${escapeRoomHtml(roomText("home.members.ai_hosted", "AI 托管"))}</span>`
+            : "";
     return window.TrpgTemplates.render("room-character-binding-row", {
         userId: member.user_id || "",
-        username: `${member.username || "-"}（${isOnline ? "在线" : "离线"}）`,
+        username: `${member.username || "-"}（${presenceText}）`,
+        controlBadgeHtml: controlBadge,
         rowClass: isActive ? "" : "room-member-removed",
         cardName: card ? card.name || "未命名角色卡" : "未绑定",
         cardPreviewHtml,
         permission: member.permission_label || roomPermissionLabel(room, member),
         changeButtonHtml: canChangeCard ? window.TrpgTemplates.render("room-bind-character-button", { userId: member.user_id || "" }) : "",
+        aiControlButtonHtml: canToggleAi
+            ? window.TrpgTemplates.render("room-ai-control-button", {
+                userId: member.user_id || "",
+                enabled: isAiControlled ? "true" : "false",
+                label: roomText(isAiControlled ? "room.ai_control.reclaim" : "room.ai_control.enable", isAiControlled ? "收回控制" : "AI 托管"),
+            })
+            : "",
+        aiActButtonHtml: canAct
+            ? window.TrpgTemplates.render("room-ai-act-button", { userId: member.user_id || "" })
+            : "",
+        takeoverButtonHtml: canTakeover
+            ? window.TrpgTemplates.render("room-takeover-ai-button", { userId: member.user_id || "" })
+            : "",
         removeButtonHtml: canRemove ? window.TrpgTemplates.render("room-remove-member-button", { userId: member.user_id || "" }) : "",
         promoteButtonHtml: canPromote ? window.TrpgTemplates.render("room-promote-member-button", { userId: member.user_id || "" }) : "",
     });
@@ -2001,9 +2054,12 @@ function renderRoomMemberList(room: Room | null): void {
             itemsHtml: group.members.map((member) => renderRoomMemberListItem(visibleRoom, member)).join(""),
         }))
         .join("");
+    window.dispatchEvent(new CustomEvent("trpg:room-members-rendered", { detail: { room } }));
 }
 
 function renderRoomMemberListItem(room: Room, member: RoomMember): string {
+    const isAiPlayer = member.is_ai_player === true;
+    const isAiHosted = member.control_mode === "ai" && !isAiPlayer;
     const isOnline = member.is_online === true;
     const isSelf = String(member.user_id) === String(window.currentUser?.user_id);
     const hasCard = Boolean(member.character_card?.name);
@@ -2013,15 +2069,25 @@ function renderRoomMemberListItem(room: Room, member: RoomMember): string {
     const roleKind = AuthModule.memberRoleKind(room, member);
     const roleLabel = member.permission_label || roomPermissionLabel(room, member);
     const roleBadgeHtml = `<span class="home-room-member-role is-${roleKind}">${escapeRoomHtml(roleLabel)}</span>`;
+    const controlBadgeHtml = isAiPlayer
+        ? `<span class="home-room-member-ai">${escapeRoomHtml(roomText("home.members.ai_player", "AI 玩家"))}</span>`
+        : isAiHosted
+            ? `<span class="home-room-member-ai is-hosted">${escapeRoomHtml(roomText("home.members.ai_hosted", "AI 托管"))}</span>`
+            : "";
+    const presenceClass = isAiPlayer ? "is-ai" : isOnline ? "is-online" : "is-offline";
+    const presenceTitle = isAiPlayer
+        ? roomText("home.members.ai_player", "AI 玩家")
+        : roomText(isOnline ? "home.members.online" : "home.members.offline", isOnline ? "在线" : "离线");
     return window.TrpgTemplates.render("room-member-item", {
         userId: String(member.user_id || ""),
         selfClass: isSelf ? " is-self" : "",
         roleClass: roleKind === "member" ? "" : ` is-${roleKind}`,
         avatar: TrpgAvatar.resolveAvatarSrc(member.username || "", member.avatar),
-        presenceClass: isOnline ? "is-online" : "is-offline",
-        presenceTitle: roomText(isOnline ? "home.members.online" : "home.members.offline", isOnline ? "在线" : "离线"),
+        presenceClass,
+        presenceTitle,
         username: member.username || "-",
         roleBadgeHtml,
+        controlBadgeHtml,
         selfBadgeHtml,
         cardClass: hasCard ? "" : " is-spectator",
         cardName: hasCard
@@ -2074,6 +2140,18 @@ async function confirmRoomCharacterBindingUnlocked(userId: string): Promise<void
         showNotification("已取消绑定：角色卡基础值超过房间规则上限", "info");
         return;
     }
+    if (userId === "__new_ai_player__") {
+        const created = await TrpgApi.post<ApiResponse<Room>>(`/api/rooms/${currentRoom.id}/ai-players`, {
+            character_card: characterCard,
+        });
+        if (!created.success || !created.data) {
+            showNotification(created.message || created.error || "添加 AI 玩家失败", "error");
+            return;
+        }
+        bootstrap.Modal.getInstance(document.getElementById("roomCharacterBindModal"))?.hide();
+        await enterRoom(created.data);
+        return;
+    }
     const response = await TrpgApi.put<ApiResponse<Room>>(`/api/rooms/${currentRoom.id}/members/${encodeURIComponent(userId)}/character`, {
         character_card: characterCard,
     });
@@ -2085,6 +2163,66 @@ async function confirmRoomCharacterBindingUnlocked(userId: string): Promise<void
         syncRoomCharacterSelection(currentRoom.id, characterCard);
     }
     bootstrap.Modal.getInstance(document.getElementById("roomCharacterBindModal"))?.hide();
+    await enterRoom(response.data);
+}
+
+async function setRoomMemberAiControl(userId: string, enabled: boolean): Promise<void> {
+    if (!currentRoom?.id || !userId) return;
+    const response = await TrpgApi.put<ApiResponse<Room>>(
+        `/api/rooms/${currentRoom.id}/members/${encodeURIComponent(userId)}/ai-control`,
+        { enabled },
+    );
+    if (!response.success || !response.data) {
+        showNotification(response.message || response.error || "切换 AI 托管失败", "error");
+        return;
+    }
+    await enterRoom(response.data);
+}
+
+async function runRoomMemberAiTurn(userId: string, button?: HTMLButtonElement): Promise<void> {
+    if (!currentRoom?.id || !userId) return;
+    const originalHtml = button?.innerHTML;
+    if (button) {
+        button.disabled = true;
+        button.textContent = "AI 行动中…";
+    }
+    try {
+        const response = await TrpgApi.post<ApiResponse<{ messages?: ChatMessage[] }>>(
+            `/api/rooms/${currentRoom.id}/members/${encodeURIComponent(userId)}/ai-act`,
+            {},
+        );
+        if (!response.success) {
+            showNotification(response.message || response.error || "AI 行动失败", "error");
+        }
+    } finally {
+        if (button) {
+            button.disabled = false;
+            if (originalHtml !== undefined) button.innerHTML = originalHtml;
+        }
+    }
+}
+
+async function takeoverRoomAiPlayer(userId: string): Promise<void> {
+    const roomId = currentRoom?.id;
+    if (!roomId || !userId) return;
+    const send = (replace: boolean) => TrpgApi.post<ApiResponse<Room>>(
+        `/api/rooms/${roomId}/ai-players/${encodeURIComponent(userId)}/takeover`,
+        { replace },
+    );
+    let response = await send(false);
+    if (!response.success && response.error === "character_already_bound") {
+        const confirmed = await window.TrpgDialog?.confirm?.({
+            title: "接管 AI 玩家",
+            message: "你已绑定角色卡，接管后会替换当前角色。确认继续？",
+            confirmText: "接管",
+        });
+        if (!confirmed) return;
+        response = await send(true);
+    }
+    if (!response.success || !response.data) {
+        showNotification(response.message || response.error || "接管 AI 玩家失败", "error");
+        return;
+    }
     await enterRoom(response.data);
 }
 
@@ -2476,12 +2614,44 @@ async function loadRoomCardDiff(roomId: string, userId: string): Promise<RoomCar
     return response.success ? response.data?.diff || null : null;
 }
 
+function formatOnlineCount(online: number, total: number, aiPlayers = 0): string {
+    const base = window.TrpgI18n?.t("room.status.online_players.count", `在线玩家 ${online}/${total}`, { online, total })
+        || `在线玩家 ${online}/${total}`;
+    if (aiPlayers <= 0) return base;
+    const aiText = window.TrpgI18n?.t("room.status.online_players.ai", ` · AI ${aiPlayers}`, { count: aiPlayers })
+        || ` · AI ${aiPlayers}`;
+    return `${base}${aiText}`;
+}
+
 function formatRoomOnlineCount(room: Room): string {
     const members = room.members || [];
-    const online = members.filter((member) => member.is_online === true).length;
-    const total = members.filter((member) => member.status !== "removed").length;
-    return window.TrpgI18n?.t("room.status.online_players.count", `在线玩家 ${online}/${total}`, { online, total })
-        || `在线玩家 ${online}/${total}`;
+    const online = typeof room.online_count === "number"
+        ? room.online_count
+        : members.filter((member) => member.is_online === true && member.is_ai_player !== true).length;
+    const total = members.filter(
+        (member) => member.status !== "removed" && member.is_ai_player !== true,
+    ).length;
+    const aiPlayers = typeof room.ai_player_count === "number"
+        ? room.ai_player_count
+        : members.filter((member) => member.is_ai_player === true && member.status !== "removed").length;
+    return formatOnlineCount(online, total, aiPlayers);
+}
+
+/** 房间列表在线人数实时更新：后端按真实 socket 连接状态推送，不重绘整张卡片。 */
+function updateRoomCardPresence(payload: RoomPresencePayload): void {
+    const roomId = String(payload?.room_id || "");
+    if (!roomId) return;
+    const online = Math.max(0, Number(payload.online_count) || 0);
+    const total = Math.max(0, Number(payload.member_count) || 0);
+    const aiPlayers = Math.max(0, Number(payload.ai_player_count) || 0);
+    const text = formatOnlineCount(online, total, aiPlayers);
+    document.querySelectorAll<HTMLElement>("[data-room-online-count]").forEach((element) => {
+        if (element.dataset.roomOnlineCount === roomId) element.textContent = text;
+    });
+    // 当前房间的桌面条在线人数同步刷新（成员列表由 room_members_changed 另发）。
+    if (currentRoom?.id === roomId) {
+        window.dispatchEvent(new CustomEvent("trpg:room-presence", { detail: payload }));
+    }
 }
 
 function escapeRoomHtml(value: unknown): string {

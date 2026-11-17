@@ -63,7 +63,7 @@ def bind_room_member_character(room_id, user_id):
 
     data = request.get_json(silent=True) or {}
     character_card = data.get("character_card")
-    if not _can_bind_character_card(character_card, target):
+    if not _can_bind_character_card(character_card, target, info):
         return _denied(room_id)
     if not _bind_character(target, character_card):
         return error_response("Character card is required", 400, "Character card is required")

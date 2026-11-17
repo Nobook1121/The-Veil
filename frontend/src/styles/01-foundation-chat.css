@@ -1169,6 +1169,11 @@ input[type="search"] {
     background-color: var(--color-muted);
 }
 
+.home-room-member-presence.is-ai {
+    background-color: var(--color-info, #6ea8fe);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-info, #6ea8fe) 25%, transparent);
+}
+
 .home-room-member-body {
     display: flex;
     flex-direction: column;
@@ -1259,6 +1264,42 @@ input[type="search"] {
     background-color: var(--color-panel-muted);
     color: var(--color-muted);
     font-size: 0.7rem;
+}
+
+.home-room-member-ai {
+    flex: 0 0 auto;
+    padding: 0 6px;
+    border-radius: 999px;
+    background-color: color-mix(in srgb, var(--color-info, #6ea8fe) 18%, transparent);
+    color: var(--color-info, #3d8bfd);
+    font-size: 0.7rem;
+    white-space: nowrap;
+}
+
+.home-room-member-ai.is-hosted {
+    background-color: color-mix(in srgb, var(--color-warning, #f0ad4e) 18%, transparent);
+    color: var(--color-warning, #b26b00);
+}
+
+.room-ai-player-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.5rem;
+}
+
+.message-ai-badge {
+    flex: 0 0 auto;
+    padding: 0 6px;
+    border-radius: 999px;
+    background-color: color-mix(in srgb, var(--color-info, #6ea8fe) 18%, transparent);
+    color: var(--color-info, #3d8bfd);
+    font-size: 0.68rem;
+    line-height: 1.5;
+}
+
+.message-ai-badge.is-player {
+    background-color: color-mix(in srgb, var(--color-warning, #f0ad4e) 18%, transparent);
+    color: var(--color-warning, #b26b00);
 }
 
 .home-room-member-card {

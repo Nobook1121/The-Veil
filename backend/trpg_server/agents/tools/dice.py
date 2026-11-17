@@ -563,6 +563,12 @@ def _player_online(user_id: Any) -> bool:
         return True
 
 
+def _ai_player_turn(context: Any) -> bool:
+    """AI 托管/AI 玩家回合：检定直接由服务端结算，绝不等待真人点击。"""
+    state = getattr(context, "tool_state", None)
+    return bool(isinstance(state, dict) and state.get("ai_player_turn"))
+
+
 def _should_wait_for_visual_roll(context: Any, arguments: dict[str, Any], roller_user_id: Any) -> bool:
     """物理结果模式：需要等待客户端动画落定并上报骰面。
 
@@ -570,6 +576,8 @@ def _should_wait_for_visual_roll(context: Any, arguments: dict[str, Any], roller
     直接使用服务端旧生成器兜底。
     """
     if arguments.get("dark") or arguments.get("secret"):
+        return False
+    if _ai_player_turn(context):
         return False
     settings = _effective_dice_settings(context)
     if not settings.get("physics_results"):
@@ -593,6 +601,8 @@ def _should_wait_for_visual_roll(context: Any, arguments: dict[str, Any], roller
 def _should_wait_for_player(context: Any, arguments: dict[str, Any], roller_user_id: Any) -> bool:
     """是否需要阻塞等待玩家投掷（与动画档位无关，只有暗投/模式关闭/离线才跳过）。"""
     if arguments.get("dark") or arguments.get("secret"):
+        return False
+    if _ai_player_turn(context):
         return False
     settings = _effective_dice_settings(context)
     if not settings.get("player_roll"):

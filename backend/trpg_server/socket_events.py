@@ -7,10 +7,11 @@ from flask import current_app, request, session
 from flask_socketio import disconnect, emit, join_room, leave_room
 
 from trpg_server.logging_config import user_action_text
-from trpg_server.room_access import can_access, find_room
+from trpg_server.room_access import ROOM_MEMBER_REMOVED, can_access, find_room
 from trpg_server.room_log import log_room_event, set_room_log_broadcaster
 from trpg_server.security import (
     USER_ROOM_MEMBERSHIP_KEY,
+    is_socket_user_online,
     is_user_in_room,
     session_is_current,
 )
@@ -105,10 +106,56 @@ def register_socket_events(socketio):
         # 兼容旧结构：新连接已接管时，旧连接的断开不应把用户标记为离线。
         return set(membership.pop(user_key, set())) if was_active else set()
 
+    def _room_presence_payload(room_id, info):
+        """按真实连接状态统计房间在线人数（只算已进入房间且 socket 在线的活跃成员）。"""
+        members = [member for member in (info or {}).get("members") or [] if isinstance(member, dict)]
+        total = 0
+        online = 0
+        ai_players = 0
+        for member in members:
+            if member.get("is_active", True) is False or member.get("status") == ROOM_MEMBER_REMOVED:
+                continue
+            # AI 玩家没有真实连接，不计入「在线玩家」分母，单独统计。
+            if member.get("is_ai_player"):
+                ai_players += 1
+                continue
+            total += 1
+            user_id = member.get("user_id")
+            if user_id is None:
+                continue
+            if is_socket_user_online(user_id) and is_user_in_room(user_id, room_id):
+                online += 1
+        return {
+            "room_id": room_id,
+            "online_count": online,
+            "member_count": total,
+            "ai_player_count": ai_players,
+        }
+
+    def _notify_room_presence(room_id):
+        """推送给能看到该房间的用户：公开房间全员可见，私人房间仅房间成员。"""
+        _, info = find_room(room_id)
+        if not info:
+            return
+        payload = _room_presence_payload(room_id, info)
+        if str(info.get("visibility") or "").strip().lower() == "public":
+            socketio.emit("room_presence_changed", payload)
+            return
+        for member in info.get("members") or []:
+            if not isinstance(member, dict):
+                continue
+            if member.get("is_active", True) is False or member.get("status") == ROOM_MEMBER_REMOVED:
+                continue
+            user_id = member.get("user_id")
+            if user_id is not None:
+                socketio.emit("room_presence_changed", payload, room=f"user:{user_id}")
+
     def _notify_room_members_changed(room_id):
         # 广播「成员列表已变化」：客户端据此重新拉取房间，刷新在线状态与角色配色。
         if room_id:
             socketio.emit("room_members_changed", {"room_id": room_id}, room=room_id)
+            # 房间列表（不在房间内）收不到上面的房间内广播，这里额外推送在线人数。
+            _notify_room_presence(room_id)
 
     def _session_is_current():
         return session_is_current()

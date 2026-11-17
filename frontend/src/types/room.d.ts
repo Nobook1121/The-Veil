@@ -10,6 +10,27 @@ interface RoomMember {
     character_card?: Partial<COC7CharacterCard>;
     character_state?: CharacterRuntimeState;
     is_online?: boolean;
+    // AI 托管/AI 玩家：control_mode 是控制权唯一来源，其余为后端派生字段。
+    control_mode?: "human" | "ai";
+    is_ai_player?: boolean;
+    ai_controlled?: boolean;
+    ai_control?: {
+        enabled?: boolean;
+        enabled_at?: string;
+        enabled_by?: string | number;
+        updated_at?: string;
+        updated_by?: string | number;
+    };
+    created_by?: string | number;
+    taken_over_by?: string | number;
+}
+
+/** 房间在线人数实时事件载荷（后端按真实 socket 连接状态统计）。 */
+interface RoomPresencePayload {
+    room_id?: string;
+    online_count?: number;
+    member_count?: number;
+    ai_player_count?: number;
 }
 
 interface CharacterRuntimeRecord {
@@ -99,6 +120,10 @@ interface Room {
     // 显式幕间阶段；旧房间该字段缺省或 active=false 时按非幕间处理。
     interlude?: RoomInterludeState;
     members?: RoomMember[];
+    // 在线人数只计真人；AI 玩家人数与真人托管人数单独给出。
+    online_count?: number;
+    ai_player_count?: number;
+    ai_hosted_count?: number;
     messages?: ChatMessage[];
     ai_history?: ChatMessage[];
     house_rules?: RoomHouseRules;

@@ -127,10 +127,19 @@ def _can_manage(info):
     member = _find_member(info, user_id=session.get("user_id"), active_only=True)
     return _room_permission(member, info) in {ROOM_ROLE_OWNER, ROOM_ROLE_ADMIN}
 
-def _can_bind_character_card(character_card, target_member):
+def _can_bind_character_card(character_card, target_member, info=None):
     if _is_elevated():
         return True
     player_id = str((character_card or {}).get("playerId") or "")
+    # AI 玩家没有真实账号，卡归属按「房间管理者本人的卡」判断：
+    # 允许房主/房管从自己的角色卡里选一张给 AI 玩家，而不是把卡所有权转到合成账号。
+    if target_member.get("is_ai_player"):
+        if info is None or not _can_manage_members(info):
+            return False
+        return player_id in {
+            str(session.get("user_id")),
+            str(session.get("username")),
+        }
     return player_id in {
         str(target_member.get("user_id")),
         str(target_member.get("username")),

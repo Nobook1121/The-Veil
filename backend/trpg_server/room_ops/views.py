@@ -10,6 +10,7 @@ from trpg_server.room_log import ARCHIVE_LOG_LIMIT
 from trpg_server.room_log import load_room_log
 from trpg_server.room_mode import has_bound_scenario
 from trpg_server.room_mode import normalize_room_mode
+from trpg_server.room_ops.ai_players import control_mode_of, is_ai_player
 from trpg_server.room_ops.access import (
     _can_manage,
     _is_active_member,
@@ -259,7 +260,25 @@ def _room_summary(info):
         view["is_active"] = _is_active_member(member)
         view["is_online"] = _is_member_online(member, info.get("id"))
         view["permission_label"] = _room_permission_label(view, info)
+        # 归一化控制权，旧房间不写回 info.json；前端只认这三个派生字段。
+        mode = control_mode_of(member)
+        view["control_mode"] = mode
+        view["is_ai_player"] = is_ai_player(member)
+        view["ai_controlled"] = mode == "ai"
         return view
+
+    member_views = [_member_view(member) for member in info.get("members", [])]
+    online_count = sum(
+        1
+        for member, view in zip(info.get("members", []), member_views)
+        if view.get("is_online") and not is_ai_player(member)
+    )
+    ai_player_count = sum(1 for member in info.get("members", []) if is_ai_player(member) and _is_active_member(member))
+    ai_hosted_count = sum(
+        1
+        for member in info.get("members", [])
+        if not is_ai_player(member) and _is_active_member(member) and control_mode_of(member) == "ai"
+    )
 
     return {
         "id": info.get("id"),
@@ -284,7 +303,11 @@ def _room_summary(info):
         "interlude": room_interlude.snapshot(info),
         "creator_id": info.get("creator_id"),
         "creator_name": info.get("creator_name"),
-        "members": [_member_view(member) for member in info.get("members", [])],
+        "members": member_views,
+        # 在线人数只计真人；AI 玩家人数与真人托管人数单独给出，避免混算。
+        "online_count": online_count,
+        "ai_player_count": ai_player_count,
+        "ai_hosted_count": ai_hosted_count,
         "house_rules": _room_house_rules(info),
         # 全房间统一的骰娘大成功/大失败阈值（房规优先，其次管理员默认值）。
         "dice_thresholds": _room_dice_thresholds(info),

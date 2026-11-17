@@ -203,3 +203,10 @@ from trpg_server.routes.rooms_messages import (
     restore_room_node,
     trigger_room_scenario,
 )
+
+from trpg_server.routes.rooms_ai_players import (
+    create_ai_player,
+    run_member_ai_turn,
+    takeover_ai_player,
+    update_member_ai_control,
+)
