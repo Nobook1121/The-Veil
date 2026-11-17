@@ -97,6 +97,15 @@ def effect_tool_names(ruleset_id: str | None = None) -> list[str]:
     return ["effect.list", "effect.apply", "effect.remove", "scene.advance"]
 
 
+def workflow_tool_names(ruleset_id: str | None = None) -> list[str]:
+    """自动化工作流只在 dnd5e 房间下发；CoC7 不出现任何入口。"""
+    if str(ruleset_id or "").strip().lower() != "dnd5e":
+        return []
+    from trpg_server.agents.tools.workflow import WORKFLOW_TOOL_NAMES
+
+    return list(WORKFLOW_TOOL_NAMES)
+
+
 def plugin_tool_names(ruleset_id: str | None = None) -> list[str]:
     """插件注册的 Agent 工具；按工具声明的 ``rulesets`` 过滤。
 
@@ -136,6 +145,7 @@ def build_kp_tool_names(ruleset_id: str | None = None) -> list[str]:
             *combat_budget_tool_names(ruleset_id),
             *spell_tool_names(ruleset_id),
             *effect_tool_names(ruleset_id),
+            *workflow_tool_names(ruleset_id),
             *plugin_tool_names(ruleset_id),
         )
         if name not in names

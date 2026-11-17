@@ -70,6 +70,12 @@ def clear_plugin_runtime() -> None:
         _EXTRA_TOOLS.clear()
         _EXTRA_RULESETS.clear()
         _CONTENT_PACKS.clear()
+    try:
+        from trpg_server.workflows.guards import clear_action_guards
+
+        clear_action_guards()
+    except Exception:  # noqa: BLE001 - 核心未加载工作流时忽略
+        pass
 
 
 def unregister_plugin(plugin_id: str) -> None:

@@ -1567,62 +1567,142 @@ def _attack_d20(
     settings: CombatSettings,
     ruleset: Any,
 ) -> dict[str, Any]:
-    """把整次 d20 攻击交给规则集；核心只做预算、日志与保存。"""
+    """把整次 d20 攻击交给规则集；核心只做预算、日志与保存。
+
+    攻击与伤害是一个服务端工作流：同一次攻击带流程 id 与幂等键，重复提交
+    只返回上次结果，不会再次扣预算或二次伤害。
+    """
     resolver = getattr(ruleset, "resolve_attack_action", None)
     if not callable(resolver):
         return {"error": "该规则集声明了 d20 攻击，但没有实现 resolve_attack_action"}
+    from trpg_server.workflows.actions import (
+        STEP_ATTACK,
+        action_steps,
+        executor_type_for,
+        flow_result,
+        prior_flow,
+        run_flow_action,
+    )
+
+    request_key = _as_text(
+        arguments.get("request_id")
+        or arguments.get("idempotency_key")
+        or arguments.get("requestId")
+    )
+    # 幂等重试必须在校验预算之前命中：第一次攻击已经花掉动作，不能因此报错。
+    existing = prior_flow(getattr(context, "room_dir", None), request_key, STEP_ATTACK)
+    if existing is not None:
+        flow_existing, cached = existing
+        if isinstance(cached, dict):
+            return {
+                **cached,
+                "workflow": {
+                    "id": flow_existing.get("id"),
+                    "status": flow_existing.get("status"),
+                    "duplicate": True,
+                },
+            }
     scheduler = _scheduler(combat, context, settings)
     slot = _as_text(arguments.get("slot") or arguments.get("action_slot") or "action").lower()
     budget = scheduler.budget_of(attacker)
     if budget and int(budget.get(slot) or 0) <= 0:
         return {"error": f"{attacker.get('name')} 的 {slot} 行动额度已用完"}
+    from trpg_server.workflows.guards import validate_action
 
-    outcome = resolver(
-        attacker,
-        target,
-        arguments,
-        attacker_card=_player_card(attacker, context),
-        rng=_roller,
-        settings=settings,
-        combat=combat,
+    blocked = validate_action(
+        getattr(context, "room_dir", None),
+        kind="attack",
+        actor=str(attacker.get("name") or ""),
+        targets=[str(target.get("name") or "")],
     )
-    if not isinstance(outcome, dict):
-        return {"error": "规则集返回了无法识别的攻击结果"}
+    if blocked:
+        return {"error": "；".join(blocked), "code": "workflow.blocked"}
+
+    def resolve(flow: dict[str, Any], step: dict[str, Any]) -> dict[str, Any]:
+        outcome = resolver(
+            attacker,
+            target,
+            arguments,
+            attacker_card=_player_card(attacker, context),
+            rng=_roller,
+            settings=settings,
+            combat=combat,
+        )
+        if not isinstance(outcome, dict):
+            return {"error": "规则集返回了无法识别的攻击结果"}
+        if outcome.get("error"):
+            return outcome
+        if budget:
+            scheduler.spend_budget(attacker, slot, 1)
+        summary = str(outcome.get("summary") or "")
+        if summary:
+            _append_log(combat, summary, context, mirror=False)
+        _save_combat(context, combat)
+        result = dict(outcome)
+        if summary:
+            result["visible_message"] = _result_message(
+                summary,
+                "combat.attack",
+                check_type="combat_attack",
+                attacker=attacker.get("name"),
+                target=target.get("name"),
+                extra_metadata={
+                    "dice_roll": _dice_roll_metadata(
+                        result,
+                        mode="d20",
+                        check_name=str(result.get("weapon") or "攻击"),
+                        target=result.get("target_ac"),
+                        roller=str(attacker.get("name") or ""),
+                    )
+                },
+            )
+            _log_roll_result(
+                result,
+                context,
+                tool_name="combat.attack",
+                actor=str(attacker.get("name") or ""),
+            )
+        return result
+
+    room_dir = getattr(context, "room_dir", None)
+    if not room_dir:
+        # 没有房间目录（嵌入/单测直接调用）时退回直接结算，不创建流程。
+        return resolve({}, {})
+
+    initiator_type = executor_type_for(
+        is_player=bool(attacker.get("is_player")),
+        agent_id=str(getattr(context, "agent_id", "") or ""),
+    )
+    outcome = run_flow_action(
+        getattr(context, "room_dir", None),
+        kind="attack",
+        room_id=str(getattr(context, "room_id", "") or ""),
+        initiator=str(attacker.get("name") or ""),
+        initiator_type=initiator_type,
+        steps=action_steps("attack", executor_type=initiator_type),
+        handlers={STEP_ATTACK: resolve},
+        request_key=request_key,
+        metadata={
+            "target": str(target.get("name") or ""),
+            "weapon": str(arguments.get("weapon") or ""),
+        },
+    )
     if outcome.get("error"):
-        return outcome
-    if budget:
-        scheduler.spend_budget(attacker, slot, 1)
-
-    summary = str(outcome.get("summary") or "")
-    if summary:
-        _append_log(combat, summary, context, mirror=False)
-    _save_combat(context, combat)
-
-    result = dict(outcome)
-    if summary:
-        result["visible_message"] = _result_message(
-            summary,
-            "combat.attack",
-            check_type="combat_attack",
-            attacker=attacker.get("name"),
-            target=target.get("name"),
-            extra_metadata={
-                "dice_roll": _dice_roll_metadata(
-                    result,
-                    mode="d20",
-                    check_name=str(result.get("weapon") or "攻击"),
-                    target=result.get("target_ac"),
-                    roller=str(attacker.get("name") or ""),
-                )
-            },
-        )
-        _log_roll_result(
-            result,
-            context,
-            tool_name="combat.attack",
-            actor=str(attacker.get("name") or ""),
-        )
-    return result
+        return {"error": outcome["error"], "code": outcome.get("code")}
+    flow = outcome.get("flow") or {}
+    result = flow_result(flow, STEP_ATTACK) or {}
+    if not isinstance(result, dict):
+        return {"error": "攻击结算返回了无法识别的结果"}
+    if result.get("error"):
+        return result
+    return {
+        **result,
+        "workflow": {
+            "id": flow.get("id"),
+            "status": flow.get("status"),
+            "duplicate": bool(outcome.get("duplicate")),
+        },
+    }
 
 
 def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:

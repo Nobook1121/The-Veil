@@ -265,6 +265,8 @@ def _action_arguments(payload: dict[str, Any], prepared: dict[str, Any]) -> dict
         "penalty_dice": prepared["penalty"],
         "range": payload.get("range"),
         "burst": payload.get("burst") or 1,
+        # 客户端可带幂等键；重复提交不会二次扣血或二次消耗行动。
+        "request_id": str(payload.get("request_id") or "").strip(),
     }
 
 

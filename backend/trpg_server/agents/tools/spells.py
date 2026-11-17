@@ -27,6 +27,14 @@ from trpg_server.agents.tools.combat import (
     _save_combat,
     _scheduler,
 )
+from trpg_server.workflows.actions import (
+    STEP_RESOLVE,
+    action_steps,
+    executor_type_for,
+    flow_result,
+    prior_flow,
+    run_flow_action,
+)
 
 
 def _current_actor(combat: dict[str, Any]) -> dict[str, Any] | None:
@@ -196,8 +204,17 @@ def list_spells(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
 
 
 def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
-    """施放法术：战斗中校验预算与法术位；战斗外走房间级结算。"""
+    """施放法术：战斗中校验预算与法术位；战斗外走房间级结算。
+
+    真正的状态变更由服务端工作流执行：同一次施法带流程 id、步骤与 TTL，
+    重复提交（同一个 ``request_id``）直接返回上次结果，不会二次扣法术位或伤害。
+    """
     combat = _load_combat(context)
+    request_key = _as_text(
+        arguments.get("request_id")
+        or arguments.get("idempotency_key")
+        or arguments.get("requestId")
+    )
     if not combat:
         result = room_spells.cast(
             context.room_dir,
@@ -209,6 +226,7 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             ritual=bool(arguments.get("ritual")),
             context=context,
             rng=_roller,
+            request_key=request_key,
         )
         _attach_spell_dice_message(result)
         return result
@@ -217,6 +235,20 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         return error
     if arguments.get("ritual"):
         return {"error": "仪式施法只能在战斗外使用"}
+    # 幂等重试先于预算/法术位校验：第一次施法已经花掉额度，重试应返回原结果。
+    existing = prior_flow(getattr(context, "room_dir", None), request_key, STEP_RESOLVE)
+    if existing is not None:
+        flow_existing, cached = existing
+        if isinstance(cached, dict):
+            return {
+                **_combat_summary_state(combat),
+                **cached,
+                "workflow": {
+                    "id": flow_existing.get("id"),
+                    "status": flow_existing.get("status"),
+                    "duplicate": True,
+                },
+            }
     caster = _resolve_combatant(combat, arguments.get("caster")) or _current_actor(combat)
     if caster is None:
         return {"error": "当前没有可施法的战斗者"}
@@ -228,29 +260,80 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     budget = scheduler.budget_of(caster)
     if budget and slot in budget and _as_int(budget.get(slot), 0) <= 0:
         return {"error": f"{caster.get('name')} 的 {slot} 额度不足，无法施放 {spell}"}
+    # 射程、目标限制与法术位都必须在创建流程之前校验；
+    # 插件内部还会在扣法术位前再校验一次，防止并发期间状态变化。
     targets, target_cards, target_error = _resolve_targets(combat, caster, arguments, context)
     if target_error:
         return target_error
-    result = spells.cast(
-        caster,
-        _player_card(caster, context),
-        spell=spell,
-        targets=targets,
-        slot_level=_as_int(arguments.get("slot_level"), 0) or None,
-        target_cards=target_cards,
-        rng=_roller,
-        combat=combat,
-        settings=_combat_settings(context),
+    from trpg_server.workflows.guards import validate_action
+
+    blocked = validate_action(
+        getattr(context, "room_dir", None),
+        kind="cast",
+        actor=str(caster.get("name") or ""),
+        targets=[str(target.get("name") or "") for target in targets],
     )
+    if blocked:
+        return {"error": "；".join(blocked), "code": "workflow.blocked"}
+    caster_name = str(caster.get("name") or "")
+
+    def resolve(flow: dict[str, Any], step: dict[str, Any]) -> dict[str, Any]:
+        result = spells.cast(
+            caster,
+            _player_card(caster, context),
+            spell=spell,
+            targets=targets,
+            slot_level=_as_int(arguments.get("slot_level"), 0) or None,
+            target_cards=target_cards,
+            rng=_roller,
+            combat=combat,
+            settings=_combat_settings(context),
+        )
+        if result.get("error"):
+            return result
+        result["caster"] = caster_name
+        _attach_spell_dice_message(result)
+        if budget and slot in budget:
+            scheduler.spend_budget(caster, slot, 1)
+        _append_log(combat, str(result.get("summary") or f"{caster_name} 施放 {spell}。"), context)
+        _save_combat(context, combat)
+        return result
+
+    outcome = run_flow_action(
+        context.room_dir,
+        kind="cast",
+        room_id=str(getattr(context, "room_id", "") or ""),
+        initiator=caster_name,
+        initiator_type=executor_type_for(
+            is_player=bool(caster.get("is_player")),
+            agent_id=str(getattr(context, "agent_id", "") or ""),
+        ),
+        steps=action_steps(
+            "cast",
+            executor_type=str(caster.get("is_player") and "player" or "kp"),
+        ),
+        handlers={STEP_RESOLVE: resolve},
+        request_key=request_key,
+        metadata={"spell": spell, "slot_level": arguments.get("slot_level")},
+    )
+    if outcome.get("error"):
+        return {"error": outcome["error"], "code": outcome.get("code")}
+    flow = outcome.get("flow") or {}
+    result = flow_result(flow, STEP_RESOLVE) or {}
+    if not isinstance(result, dict):
+        result = {"result": result}
     if result.get("error"):
         return result
-    result["caster"] = caster.get("name")
-    _attach_spell_dice_message(result)
-    if budget and slot in budget:
-        scheduler.spend_budget(caster, slot, 1)
-    _append_log(combat, str(result.get("summary") or f"{caster.get('name')} 施放 {spell}。"), context)
-    _save_combat(context, combat)
-    return {**_combat_summary_state(combat), **result}
+    refreshed = _load_combat(context) or combat
+    return {
+        **_combat_summary_state(refreshed),
+        **result,
+        "workflow": {
+            "id": flow.get("id"),
+            "status": flow.get("status"),
+            "duplicate": bool(outcome.get("duplicate")),
+        },
+    }
 
 
 def concentration(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -298,6 +381,10 @@ SPELL_CAST_TOOL = AgentTool(
             "spell": {"type": "string", "description": "法术 id 或名称（含中文名）"},
             "slot_level": {"type": "integer", "minimum": 0, "description": "消耗的法术位环阶；戏法为 0"},
             "ritual": {"type": "boolean", "description": "以仪式施法（仅战斗外，不消耗法术位）"},
+            "request_id": {
+                "type": "string",
+                "description": "幂等键；同一 request_id 重复提交只结算一次",
+            },
             "targets": {
                 "type": "array",
                 "items": {"type": "string"},

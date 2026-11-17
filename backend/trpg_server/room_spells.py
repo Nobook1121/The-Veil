@@ -188,12 +188,33 @@ def cast(
     ritual: bool = False,
     context: Any = None,
     rng: Any = None,
+    request_key: str = "",
 ) -> dict[str, Any]:
-    """非战斗施法：解析成员、委托插件结算、写回法术位/HP/效果/专注。"""
+    """非战斗施法：解析成员、委托插件结算、写回法术位/HP/效果/专注。
+
+    与战斗施法共用服务端工作流入口；``request_key`` 相同的重复提交只返回
+    上一次的结果，不会二次消耗法术位或重复治疗/伤害。
+    """
     ruleset, settings = ruleset_for(info)
     spells = getattr(ruleset, "spells", None)
     if spells is None:
         return {"error": "当前规则集没有法术能力"}
+    if request_key:
+        # 幂等重试先于成员解析与目标校验，返回第一次施法的结果。
+        from trpg_server.workflows.actions import STEP_RESOLVE, prior_flow
+
+        existing = prior_flow(room_dir, request_key, STEP_RESOLVE)
+        if existing is not None:
+            flow_existing, cached = existing
+            if isinstance(cached, dict):
+                return {
+                    **cached,
+                    "workflow": {
+                        "id": flow_existing.get("id"),
+                        "status": flow_existing.get("status"),
+                        "duplicate": True,
+                    },
+                }
     caster_member = find_member(info, caster) if caster else None
     if caster_member is None:
         caster_member = default_member(info, context)
@@ -240,31 +261,84 @@ def cast(
         if found is not None and found not in target_holders:
             target_holders.append(found)
 
-    combat = {"combatants": holders, "round": 0}
-    result = spells.cast(
-        caster_holder,
-        room_rules.member_card(caster_member),
-        spell=spell,
-        targets=target_holders,
-        slot_level=_as_int(slot_level, 0) or None,
-        target_cards={
-            _as_text(holder.get("name")): room_rules.member_card(members[_as_text(holder.get("name"))])
-            for holder in target_holders
-        },
-        rng=rng,
-        combat=combat,
-        settings=settings,
-        noncombat=True,
-        ritual=bool(ritual),
+    from trpg_server.workflows.guards import validate_action
+
+    blocked = validate_action(
+        room_dir,
+        kind="cast",
+        actor=str(caster_holder.get("name") or ""),
+        targets=[str(holder.get("name") or "") for holder in target_holders],
     )
+    if blocked:
+        return {"error": "；".join(blocked), "code": "workflow.blocked"}
+
+    combat = {"combatants": holders, "round": 0}
+
+    def resolve(flow: dict[str, Any], step: dict[str, Any]) -> dict[str, Any]:
+        result = spells.cast(
+            caster_holder,
+            room_rules.member_card(caster_member),
+            spell=spell,
+            targets=target_holders,
+            slot_level=_as_int(slot_level, 0) or None,
+            target_cards={
+                _as_text(holder.get("name")): room_rules.member_card(members[_as_text(holder.get("name"))])
+                for holder in target_holders
+            },
+            rng=rng,
+            combat=combat,
+            settings=settings,
+            noncombat=True,
+            ritual=bool(ritual),
+        )
+        if result.get("error"):
+            return result
+        _sync_all(members, holders, ruleset)
+        room_rules.save_room_info(room_dir, info)
+        result["noncombat"] = True
+        result["caster"] = caster_holder.get("name")
+        result["targets"] = [holder.get("name") for holder in target_holders]
+        return result
+
+    from trpg_server.workflows.actions import (
+        STEP_RESOLVE,
+        action_steps,
+        executor_type_for,
+        flow_result,
+        run_flow_action,
+    )
+
+    initiator_type = executor_type_for(
+        is_player=True,
+        agent_id=str(getattr(context, "agent_id", "") or ""),
+    )
+    outcome = run_flow_action(
+        room_dir,
+        kind="cast",
+        room_id=str(info.get("id") or ""),
+        initiator=str(caster_holder.get("name") or ""),
+        initiator_type=initiator_type,
+        steps=action_steps("cast", executor_type=initiator_type),
+        handlers={STEP_RESOLVE: resolve},
+        request_key=str(request_key or ""),
+        metadata={"spell": _as_text(spell), "noncombat": True},
+    )
+    if outcome.get("error"):
+        return {"error": outcome["error"], "code": outcome.get("code")}
+    flow = outcome.get("flow") or {}
+    result = flow_result(flow, STEP_RESOLVE) or {}
+    if not isinstance(result, dict):
+        return {"error": "法术结算返回了无法识别的结果"}
     if result.get("error"):
         return result
-    _sync_all(members, holders, ruleset)
-    room_rules.save_room_info(room_dir, info)
-    result["noncombat"] = True
-    result["caster"] = caster_holder.get("name")
-    result["targets"] = [holder.get("name") for holder in target_holders]
-    return result
+    return {
+        **result,
+        "workflow": {
+            "id": flow.get("id"),
+            "status": flow.get("status"),
+            "duplicate": bool(outcome.get("duplicate")),
+        },
+    }
 
 
 def list_spells(

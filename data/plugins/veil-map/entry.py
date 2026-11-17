@@ -2907,8 +2907,88 @@ MOVE_TOKEN_TOOL = AgentTool(
 )
 
 
+def _action_line_guard(payload: dict[str, Any]) -> list[str]:
+    """给服务端行动工作流提供墙体/视线校验。
+
+    只看同时有地图棋子的施法者与目标；找不到棋子时不做臆测，交给规则集
+    自己的射程校验。门开着按 ``wall_blocks`` 的既有语义放行。
+    """
+    room_dir = payload.get("room_dir")
+    walls = []
+    tokens = []
+    grid, offset_x, offset_y = DEFAULT_GRID, 0, 0
+    try:
+        state, _source = scene_store.load(room_dir)
+        walls = state.get("walls") or []
+        tokens = [token for token in state.get("tokens") or [] if isinstance(token, dict)]
+        grid, offset_x, offset_y = _grid_of(state)
+    except Exception:  # noqa: BLE001 - 没有地图时不影响规则结算
+        return []
+    if not walls or not tokens:
+        return []
+
+    def find_token(name: Any) -> dict[str, Any] | None:
+        wanted = str(name or "").strip().casefold()
+        if not wanted:
+            return None
+        for token in tokens:
+            for key in ("name", "combatant", "label"):
+                if str(token.get(key) or "").strip().casefold() == wanted:
+                    return token
+        return None
+
+    def center(token: dict[str, Any]) -> tuple[float, float] | None:
+        try:
+            cell_x, cell_y = _cell_of(token, grid, offset_x, offset_y)
+            width, height = _footprint(token)
+            return visibility.footprint_center(
+                cell_x, cell_y, width, height, grid, (offset_x, offset_y)
+            )
+        except Exception:  # noqa: BLE001
+            return None
+
+    actor_token = find_token(payload.get("actor"))
+    if actor_token is None:
+        return []
+    actor_point = center(actor_token)
+    if actor_point is None:
+        return []
+    actor_name = str(actor_token.get("name") or payload.get("actor") or "施法者")
+    errors: list[str] = []
+    for target_name in payload.get("targets") or []:
+        target_token = find_token(target_name)
+        if target_token is None or target_token is actor_token:
+            continue
+        target_point = center(target_token)
+        if target_point is None:
+            continue
+        blockers = spatial.segment_blockers(
+            walls, actor_point, target_point, mode="sight"
+        )
+        if blockers:
+            errors.append(f"{actor_name} 与 {target_name} 之间被墙体或关闭的门阻挡")
+    return errors
+
+
+_ACTION_GUARD_REGISTERED = False
+
+
+def _register_action_guard() -> None:
+    global _ACTION_GUARD_REGISTERED
+    if _ACTION_GUARD_REGISTERED:
+        return
+    try:
+        from trpg_server.workflows.guards import register_action_guard
+    except Exception:  # noqa: BLE001 - 旧核心没有工作流时静默跳过
+        return
+    register_action_guard(_action_line_guard)
+    _ACTION_GUARD_REGISTERED = True
+
+
 def create_tools() -> list[AgentTool]:
+    _register_action_guard()
     return [MOVE_TOKEN_TOOL]
 
 
 __all__ = ["bp", "create_tools", "MOVE_TOKEN_TOOL"]
+
