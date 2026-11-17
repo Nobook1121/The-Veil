@@ -694,6 +694,97 @@ def test_reaction_then_ask_save_keeps_one_queue(tmp_path, plugins):
     assert combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"] == hp_before
 
 
+# ---------------------------------------------------------------------------
+# 高环反制：施法属性检定走判定壳
+# ---------------------------------------------------------------------------
+def _arm_fourth_slot(context: _Context) -> None:
+    combat = combat_tools._load_combat(context)
+    combat["combatants"]["Mira"].setdefault("spell_slots", {})["4"] = {"max": 1, "used": 0}
+    combat_tools._save_combat(context, combat)
+
+
+def _cast_at_fourth(context: _Context, request_id: str) -> dict:
+    return spell_tools.cast_spell(
+        {
+            "caster": "Mira",
+            "spell": "magic-missile",
+            "targets": ["Goblin"],
+            "slot_level": 4,
+            "request_id": request_id,
+        },
+        context,
+    )
+
+
+def test_high_level_counter_check_success_negates_spell(tmp_path, plugins, monkeypatch):
+    context = _combat_context(tmp_path, [_wizard_card(known=["magic-missile"])])
+    _arm_counter_spell(context)
+    _arm_fourth_slot(context)
+    monkeypatch.setattr(spell_tools, "_roller", lambda sides: 20)
+    awaiting = _cast_at_fourth(context, "counter-high-success")
+    assert awaiting.get("status") == "awaiting_reaction", awaiting
+    flow_id = awaiting["workflow"]["id"]
+    hp_before = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
+    resolved = reaction_tools.resolve_reaction(
+        {
+            "flow_id": flow_id,
+            "candidate": "Rival",
+            "decision": {"decision": "use"},
+            "idempotency_key": "counter-high-ok",
+        },
+        context,
+    )
+    continuation = resolved["continuation"]
+    assert continuation["countered"] is True
+    check = continuation["counter_spell"]
+    assert check["dc"] == 14 and check["spell_level"] == 4
+    assert check["success"] is True and check["ability"]
+    flow = WorkflowEngine(tmp_path).get(flow_id, expire=False)
+    assert any(
+        event["type"] == "counter.check" and event["payload"]["success"] is True
+        for event in flow["events"]
+    )
+    combat = combat_tools._load_combat(context)
+    assert combat["combatants"]["Goblin"]["hp"] == hp_before  # 反制成功，无伤害
+    assert combat["combatants"]["Rival"]["spell_slots"]["3"]["used"] == 1
+    assert combat["combatants"]["Rival"]["budget"]["reaction"] == 0
+    assert combat["combatants"]["Mira"]["spell_slots"]["4"]["used"] == 1
+
+
+def test_high_level_counter_check_failure_lets_spell_through(tmp_path, plugins, monkeypatch):
+    context = _combat_context(tmp_path, [_wizard_card(known=["magic-missile"])])
+    _arm_counter_spell(context)
+    _arm_fourth_slot(context)
+    monkeypatch.setattr(spell_tools, "_roller", lambda sides: 1)
+    awaiting = _cast_at_fourth(context, "counter-high-fail")
+    flow_id = awaiting["workflow"]["id"]
+    hp_before = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
+    resolved = reaction_tools.resolve_reaction(
+        {
+            "flow_id": flow_id,
+            "candidate": "Rival",
+            "decision": {"decision": "use"},
+            "idempotency_key": "counter-high-fail-1",
+        },
+        context,
+    )
+    continuation = resolved["continuation"]
+    assert continuation["countered"] is False
+    check = continuation["counter_spell"]
+    assert check["dc"] == 14 and check["success"] is False
+    flow = WorkflowEngine(tmp_path).get(flow_id, expire=False)
+    assert any(
+        event["type"] == "counter.check" and event["payload"]["success"] is False
+        for event in flow["events"]
+    )
+    combat = combat_tools._load_combat(context)
+    assert combat["combatants"]["Goblin"]["hp"] < hp_before  # 原法术照常生效
+    # 反制法术已经施放：反应与 3 环位不退。
+    assert combat["combatants"]["Rival"]["spell_slots"]["3"]["used"] == 1
+    assert combat["combatants"]["Rival"]["budget"]["reaction"] == 0
+    assert combat["combatants"]["Mira"]["spell_slots"]["4"]["used"] == 1
+
+
 def test_coc7_has_no_reaction_or_area_tools(plugins):
     from trpg_server.agents.profiles import workflow_tool_names
 

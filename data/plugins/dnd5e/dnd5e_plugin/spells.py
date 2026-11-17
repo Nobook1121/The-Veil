@@ -305,6 +305,19 @@ class Dnd5eSpells:
         save = (entry or {}).get("save") if isinstance(entry, Mapping) else None
         return _text(save.get("ability")) if isinstance(save, Mapping) else ""
 
+    def casting_ability(
+        self,
+        caster: Mapping[str, Any],
+        card: Mapping[str, Any] | None = None,
+    ) -> str:
+        """返回施法者的施法属性；没有显式配置时按职业与卡面推算。"""
+        profile = caster.get("spellcasting") if isinstance(caster.get("spellcasting"), Mapping) else None
+        ability = _text((profile or {}).get("ability")).casefold()
+        if ability:
+            return ability
+        computed = spellcasting_profile(sheet_of(card) if isinstance(card, Mapping) else {})
+        return _text((computed or {}).get("ability")).casefold()
+
     # -- 施法 -------------------------------------------------------------
     def cast(
         self,

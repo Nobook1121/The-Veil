@@ -28,6 +28,7 @@ from trpg_server.agents.tools.combat import (
     _save_combat,
     _scheduler,
 )
+from trpg_server.ruleset.contracts import CheckRequest
 from trpg_server.workflows.actions import (
     STEP_RESOLVE,
     action_steps,
@@ -438,6 +439,77 @@ def _finish_cast_steps(
             step["result"] = {"skipped": countered, "countered": countered}
 
 
+def _append_flow_event(
+    flow: dict[str, Any],
+    event_type: str,
+    *,
+    actor: str = "",
+    payload: Mapping[str, Any] | None = None,
+) -> None:
+    from trpg_server.workflows.model import stamp
+
+    events = flow.setdefault("events", [])
+    events.append(
+        {
+            "seq": len(events) + 1,
+            "at": stamp(),
+            "type": str(event_type),
+            "actor": str(actor or ""),
+            "payload": dict(payload or {}),
+        }
+    )
+    if len(events) > 200:
+        del events[:-200]
+
+
+def _counter_check(
+    ruleset: Any,
+    spells: Any,
+    reactor: Mapping[str, Any] | None,
+    reactor_name: str,
+    context: Any,
+    *,
+    cast_level: int,
+) -> tuple[bool, dict[str, Any]]:
+    """高环反制的施法属性检定：DC = 10 + 被反制法术等级。"""
+    checks = getattr(spells, "checks", None)
+    if checks is None:
+        checks = getattr(ruleset, "checks", None)
+    if checks is None or not callable(getattr(checks, "roll_outcome", None)):
+        raise RuntimeError("当前规则集没有判定能力，无法结算高环反制")
+    card = _player_card(reactor, context) if isinstance(reactor, Mapping) else None
+    ability = ""
+    ability_of = getattr(spells, "casting_ability", None)
+    if callable(ability_of) and isinstance(reactor, Mapping):
+        ability = str(ability_of(reactor, card) or "").strip()
+    ability = ability or "int"
+    dc = 10 + int(cast_level)
+    target_card = card if isinstance(card, Mapping) else (reactor or {})
+    outcome = checks.roll_outcome(
+        target_card,
+        CheckRequest(
+            kind="check",
+            name=f"{ability}检定",
+            target=dc,
+            extra={"label": "反制法术检定"},
+        ),
+        _roller,
+    )
+    presentation = outcome.presentation if isinstance(outcome.presentation, Mapping) else {}
+    record = {
+        "reactor": reactor_name,
+        "ability": ability,
+        "dc": dc,
+        "spell_level": int(cast_level),
+        "success": bool(outcome.success),
+        "total": outcome.total,
+        "dice": list(outcome.dice),
+        "degree": outcome.degree,
+        "summary": str(presentation.get("summary") or ""),
+    }
+    return bool(outcome.success), record
+
+
 def _cast_after_reaction(room_dir: Any, flow: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     """反应窗口收束后继续施法；被反制则只扣法术位，不产生效果。"""
     from trpg_server.room_rules import load_room_info
@@ -459,20 +531,12 @@ def _cast_after_reaction(room_dir: Any, flow: dict[str, Any], data: dict[str, An
     caster_name = str(caster.get("name") or "")
     countered_by = reactions.counter_used(flow)
     if countered_by:
-        _ruleset, spells, error = _require_spells(combat, context)
+        ruleset, spells, error = _require_spells(combat, context)
         if error:
             raise RuntimeError(error.get("error") or "缺少法术能力")
         scheduler = _scheduler(combat, context)
-        use_level = slot_level or 1
-        slots = caster.setdefault("spell_slots", {})
-        row = slots.get(str(use_level))
-        if not isinstance(row, dict):
-            row = {"max": 1, "used": 0}
-            slots[str(use_level)] = row
-        row["used"] = _as_int(row.get("used"), 0) + 1
-        scheduler.spend_budget(caster, spells.required_slot(spell), 1) if scheduler.budget_of(caster) else None
         reactor = _resolve_combatant(combat, countered_by)
-        notes = [f"{caster_name} 的 {spell} 被 {countered_by} 反制，法术位不退还但效果未产生。"]
+        # 反制法术一旦施放，反应与 3 环位都要扣除；检定失败也不退还。
         if reactor is not None:
             reactor_slots = reactor.setdefault("spell_slots", {})
             third = reactor_slots.get("3")
@@ -480,20 +544,57 @@ def _cast_after_reaction(room_dir: Any, flow: dict[str, Any], data: dict[str, An
                 third["used"] = _as_int(third.get("used"), 0) + 1
             if scheduler.budget_of(reactor):
                 scheduler.spend_budget(reactor, "reaction", 1)
-        result = {
-            "countered": True,
-            "countered_by": countered_by,
-            "caster": caster_name,
-            "spell": spell,
-            "summary": notes[0],
-        }
-        _append_log(combat, notes[0], context)
-        _save_combat(context, combat)
-        from trpg_server.workflows import concentration
+        cast_level = max(0, _as_int(slot_level, 0))
+        counter_works = True
+        counter_record: dict[str, Any] | None = None
+        if cast_level >= 4:
+            # 4 环及以上：自动结算施法属性检定，DC = 10 + 法术等级。
+            counter_works, counter_record = _counter_check(
+                ruleset,
+                spells,
+                reactor,
+                countered_by,
+                context,
+                cast_level=cast_level,
+            )
+            _append_flow_event(
+                flow,
+                "counter.check",
+                actor=countered_by,
+                payload=counter_record,
+            )
+        if counter_works:
+            use_level = slot_level or 1
+            slots = caster.setdefault("spell_slots", {})
+            row = slots.get(str(use_level))
+            if not isinstance(row, dict):
+                row = {"max": 1, "used": 0}
+                slots[str(use_level)] = row
+            row["used"] = _as_int(row.get("used"), 0) + 1
+            scheduler.spend_budget(caster, spells.required_slot(spell), 1) if scheduler.budget_of(caster) else None
+            notes = [f"{caster_name} 的 {spell} 被 {countered_by} 反制，法术位不退还但效果未产生。"]
+            result = {
+                "countered": True,
+                "countered_by": countered_by,
+                "caster": caster_name,
+                "spell": spell,
+                "summary": notes[0],
+                "counter_spell": counter_record,
+            }
+            _append_log(combat, notes[0], context)
+            _save_combat(context, combat)
+            from trpg_server.workflows import concentration
 
-        concentration.sync(room_dir, concentration.holders_from_combat(combat))
-        _finish_cast_steps(flow, result, countered=True)
-        return result
+            concentration.sync(room_dir, concentration.holders_from_combat(combat))
+            _finish_cast_steps(flow, result, countered=True)
+            return result
+        # 反制失败：原法术照常结算。把检定结果留在流程元数据里，供最终结果与复盘。
+        _append_log(
+            combat,
+            f"{countered_by} 的反制检定失败（DC {counter_record.get('dc')}），{caster_name} 的 {spell} 照常生效。",
+            context,
+        )
+        flow["metadata"] = {**metadata, "counter_spell": counter_record}
 
     # 反制窗口结束后才轮到豁免：把待决的 save:<目标> 步骤挂起，等当事人决定。
     pending_saves = [
@@ -522,6 +623,7 @@ def _cast_after_reaction(room_dir: Any, flow: dict[str, Any], data: dict[str, An
         return {
             "status": "awaiting_save",
             "awaiting": [reactions.save_target_of(str(step.get("id"))) for step in pending_saves],
+            "counter_spell": (flow.get("metadata") or {}).get("counter_spell"),
         }
 
     target_cards = {
@@ -539,6 +641,12 @@ def _cast_after_reaction(room_dir: Any, flow: dict[str, Any], data: dict[str, An
     )
     if result.get("error"):
         raise RuntimeError(str(result.get("error")))
+    counter_record = (flow.get("metadata") or {}).get("counter_spell")
+    if countered_by:
+        # 反制者出手但检定失败：原法术成功结算，结果里保留检定明细。
+        result["countered"] = False
+        result["countered_by"] = countered_by
+        result["counter_spell"] = counter_record
     _finish_cast_steps(flow, result)
     return result
 
