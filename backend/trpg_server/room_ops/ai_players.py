@@ -18,7 +18,12 @@ from uuid import uuid4
 
 from trpg_server.room_ops.cards import _initial_character_state, _sanitize_character_card
 from trpg_server.room_ops.constants import ROOM_MEMBER_ACTIVE, ROOM_ROLE_MEMBER
-from trpg_server.room_ops.storage import _read_messages, _timestamp, _write_messages
+from trpg_server.room_ops.storage import (
+    _read_messages,
+    _timestamp,
+    _write_messages,
+    mutate_messages,
+)
 
 AI_PLAYER_USER_PREFIX = "ai-player:"
 CONTROL_MODE_HUMAN = "human"
@@ -161,20 +166,21 @@ def persist_player_turn(
 ) -> list[dict[str, Any]]:
     """把一次 AI 玩家回合的消息一次性写入房间消息文件，返回实际落库的消息。"""
     created: list[dict[str, Any]] = []
-    messages = _read_messages(room_dir)
-    if not isinstance(messages, list):
-        messages = []
-    for tool_message in tool_messages or []:
-        normalized = _tool_message(member, tool_message)
-        if normalized:
-            messages.append(normalized)
-            created.append(normalized)
-    final = _player_message(member, content)
-    if final["content"]:
-        messages.append(final)
-        created.append(final)
-    if created:
-        _write_messages(room_dir, messages)
+
+    def _append(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for tool_message in tool_messages or []:
+            normalized = _tool_message(member, tool_message)
+            if normalized:
+                messages.append(normalized)
+                created.append(normalized)
+        final = _player_message(member, content)
+        if final["content"]:
+            messages.append(final)
+            created.append(final)
+        return messages
+
+    if tool_messages or content:
+        mutate_messages(room_dir, _append)
     return created
 
 

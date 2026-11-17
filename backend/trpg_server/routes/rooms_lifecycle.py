@@ -2,7 +2,7 @@
 from flask import current_app
 from flask import request
 from flask import session
-from trpg_server.agents.room_state import save_room_state
+from trpg_server.agents.room_state import mutate_room_state, save_room_state
 from trpg_server.agents.versioning import migrate_room_binding
 from trpg_server.house_rules_store import active_ruleset_id, switch_namespaces
 from trpg_server.json_store import read_json
@@ -597,12 +597,12 @@ def switch_room_scenario(room_id):
 
     if preserve_progress:
         # 继承进度：保留线索/物品/任务/已触发事件/滚动摘要与开场状态，仅同步场景指针。
-        state = read_json(room_dir / "state.json", default={})
-        if not isinstance(state, dict):
-            state = {}
-        if updated.get("active_scene_id"):
-            state["active_scene_id"] = updated["active_scene_id"]
-        save_room_state(room_dir, state)
+        def _sync_scene(state: dict) -> dict:
+            if updated.get("active_scene_id"):
+                state["active_scene_id"] = updated["active_scene_id"]
+            return state
+
+        mutate_room_state(room_dir, _sync_scene)
     else:
         # 重置剧情进度：线索/物品/任务/已触发事件/时间线/事件日志/滚动摘要全部清空，
         # 否则旧剧本的进度会被当作新剧本的状态继续注入，正是「剧本错乱」的来源。

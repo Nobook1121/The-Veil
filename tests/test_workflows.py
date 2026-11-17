@@ -432,6 +432,75 @@ def test_auto_reaction_skips_step_and_settle_runs_continuation(tmp_path):
         continuations.unregister(name)
 
 
+def test_continuation_renewal_extends_character_lock(tmp_path):
+    from trpg_server.workflows import continuations
+    from trpg_server.workflows import store as flow_store
+    from trpg_server.workflows.actions import run_flow_action
+
+    name = "test.renew.continuation"
+
+    def continuation(_room_dir, flow, _data):
+        for step in flow.get("steps") or []:
+            if step.get("status") == "pending":
+                step["status"] = "waiting"
+                step["decision_schema"] = {"type": "object"}
+        return {"waiting": True}
+
+    continuations.register(name, continuation)
+    try:
+        outcome = run_flow_action(
+            tmp_path,
+            kind="cast",
+            initiator="Mira",
+            initiator_type="player",
+            steps=[make_step("resolve", "结算", deferred=True)],
+            handlers={},
+            request_key="renew-lock",
+            metadata={"continuation": name},
+        )
+        flow = outcome["flow"]
+        assert flow["status"] == "waiting"
+        record = flow_store.load(tmp_path)["locks"]["characters"]["Mira"]
+        assert record["flow_id"] == flow["id"]
+        assert record.get("renewed_at")
+        assert record["expires_at"] > flow["created_epoch"]
+    finally:
+        continuations.unregister(name)
+
+
+def test_continuation_fails_when_character_lock_is_gone(tmp_path):
+    from trpg_server.workflows import continuations
+    from trpg_server.workflows.actions import run_flow_action
+
+    name = "test.lock.gone.continuation"
+
+    def continuation(_room_dir, flow, data):
+        # 模拟锁已过期并被清理，而流程还想继续等待。
+        (data.get("locks") or {}).get("characters", {}).pop("Mira", None)
+        for step in flow.get("steps") or []:
+            if step.get("status") == "pending":
+                step["status"] = "waiting"
+        return {"waiting": True}
+
+    continuations.register(name, continuation)
+    try:
+        outcome = run_flow_action(
+            tmp_path,
+            kind="cast",
+            initiator="Mira",
+            initiator_type="player",
+            steps=[make_step("resolve", "结算", deferred=True)],
+            handlers={},
+            request_key="lock-gone",
+            metadata={"continuation": name},
+        )
+        flow = outcome["flow"]
+        assert flow["status"] == "failed"
+        assert "角色锁已失效" in flow["continuation_error"]
+    finally:
+        continuations.unregister(name)
+
+
 def test_declared_continuation_missing_fails_explicitly(tmp_path):
     from trpg_server.workflows.actions import run_flow_action
 

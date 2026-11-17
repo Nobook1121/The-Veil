@@ -138,7 +138,36 @@ def _read_messages(room_dir):
     return read_json(_messages_file(room_dir), default=[])
 
 def _write_messages(room_dir, messages):
-    write_json_atomic(_messages_file(room_dir), messages)
+    # 消息文件也归房间写锁：整份覆盖与追加都串行，避免并发追加丢消息。
+    from trpg_server.room_clock import room_lock
+
+    with room_lock(room_dir):
+        write_json_atomic(_messages_file(room_dir), messages)
+
+
+def mutate_messages(room_dir, mutator):
+    """在房间写锁内完成一次消息读改写；``mutator`` 原地修改列表。"""
+    from trpg_server.room_clock import room_lock
+
+    with room_lock(room_dir):
+        messages = _read_messages(room_dir)
+        if not isinstance(messages, list):
+            messages = []
+        result = mutator(messages)
+        if isinstance(result, list):
+            messages = result
+        write_json_atomic(_messages_file(room_dir), messages)
+        return messages
+
+
+def append_message(room_dir, message):
+    """并发安全地追加一条消息；返回写入的消息。"""
+    def _append(messages):
+        messages.append(message)
+        return messages
+
+    mutate_messages(room_dir, _append)
+    return message
 
 def _configured_role(role_id="kp"):
     roles = load_roles(_get_role_config_file(), _get_kp_prompt_file(), _get_ai_platform_dir())

@@ -19,7 +19,7 @@ from typing import Any
 from uuid import uuid4
 
 from trpg_server import weapon_catalog
-from trpg_server.agents.room_state import load_room_state, save_room_state
+from trpg_server.agents.room_state import load_room_state, mutate_room_state
 from trpg_server.agents.tools.base import AgentTool
 from trpg_server.agents.tools.dice import (
     _context_thresholds,
@@ -254,9 +254,12 @@ def _save_combat(context: Any, combat: dict[str, Any]) -> None:
     if not room_dir:
         return
     pending_turns = combat.pop("_area_turn_starts", None)
-    state = load_room_state(room_dir)
-    state["combat"] = combat
-    save_room_state(room_dir, state)
+
+    def _apply(state: dict[str, Any]) -> dict[str, Any]:
+        state["combat"] = combat
+        return state
+
+    mutate_room_state(room_dir, _apply)
     combat["room_id"] = str(getattr(context, "room_id", "") or "")
     _broadcast_state(combat)
     if isinstance(pending_turns, list) and pending_turns and _areas_enabled(context):

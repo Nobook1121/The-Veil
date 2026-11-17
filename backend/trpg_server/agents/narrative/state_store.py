@@ -14,7 +14,10 @@ from typing import Any, Mapping
 
 from trpg_server.agents.narrative.coerce import as_bool as _as_bool, as_str_list as _str_list
 from trpg_server.agents.narrative.logger import log_event, log_warning
-from trpg_server.agents.room_state import load_room_state, save_room_state
+from trpg_server.agents.room_state import (
+    load_room_state,
+    mutate_room_state,
+)
 from trpg_server.json_store import read_json, write_json_atomic
 
 logger = logging.getLogger(__name__)
@@ -292,33 +295,36 @@ def save_narrative_state(room_dir: Path | str, narrative: Mapping[str, Any]) -> 
     """唯一写入口：写 `narrative` 并把旧字段投影同步，避免两套状态不一致。"""
     directory = Path(room_dir)
     normalized = normalize_narrative_state(narrative)
-    state = load_room_state(directory)
-    state[NARRATIVE_KEY] = normalized
-
     location = normalized.get("location")
-    if location:
-        state["active_scene_id"] = location
-        state["cursor"] = location
-    state["path"] = list(normalized.get("visit_log") or [])
-    if normalized.get("revealed_clues"):
-        state["clues"] = list(normalized["revealed_clues"])
 
-    attitudes = state.get("npc_attitudes")
-    attitudes = dict(attitudes) if isinstance(attitudes, Mapping) else {}
-    for npc_id, entry in (normalized.get("npc_state") or {}).items():
-        if isinstance(entry, Mapping) and "attitude" in entry:
-            attitudes[npc_id] = entry["attitude"]
-    state["npc_attitudes"] = attitudes
+    def _apply(state: dict[str, Any]) -> dict[str, Any]:
+        state[NARRATIVE_KEY] = normalized
 
-    inventory: list[str] = []
-    for entry in (normalized.get("pc_state") or {}).values():
-        if isinstance(entry, Mapping):
-            inventory.extend(_str_list(entry.get("inventory")))
-    # 空背包也要显式写回，否则旧局遗留的 items 会一直残留。
-    state["items"] = list(dict.fromkeys(inventory))
+        location = normalized.get("location")
+        if location:
+            state["active_scene_id"] = location
+            state["cursor"] = location
+        state["path"] = list(normalized.get("visit_log") or [])
+        if normalized.get("revealed_clues"):
+            state["clues"] = list(normalized["revealed_clues"])
+
+        attitudes = state.get("npc_attitudes")
+        attitudes = dict(attitudes) if isinstance(attitudes, Mapping) else {}
+        for npc_id, entry in (normalized.get("npc_state") or {}).items():
+            if isinstance(entry, Mapping) and "attitude" in entry:
+                attitudes[npc_id] = entry["attitude"]
+        state["npc_attitudes"] = attitudes
+
+        inventory: list[str] = []
+        for entry in (normalized.get("pc_state") or {}).values():
+            if isinstance(entry, Mapping):
+                inventory.extend(_str_list(entry.get("inventory")))
+        # 空背包也要显式写回，否则旧局遗留的 items 会一直残留。
+        state["items"] = list(dict.fromkeys(inventory))
+        return state
 
     try:
-        saved = save_room_state(directory, state)
+        saved = mutate_room_state(directory, _apply)
     except Exception as exc:  # noqa: BLE001 - 持久化失败要留痕，但仍需抛给调用方
         log_warning(
             "state.persist.failed",
@@ -358,13 +364,16 @@ def reset_narrative_state(room_dir: Path | str, narrative: Mapping[str, Any]) ->
     """
     directory = Path(room_dir)
     normalized = normalize_narrative_state(narrative)
-    state = load_room_state(directory)
-    state[NARRATIVE_KEY] = normalized
-    state["active_scene_id"] = normalized.get("location")
-    state["cursor"] = normalized.get("location")
-    state["path"] = list(normalized.get("visit_log") or [])
-    state.update({key: value for key, value in _LEGACY_RESET.items()})
-    saved = save_room_state(directory, state)
+
+    def _reset(state: dict[str, Any]) -> dict[str, Any]:
+        state[NARRATIVE_KEY] = normalized
+        state["active_scene_id"] = normalized.get("location")
+        state["cursor"] = normalized.get("location")
+        state["path"] = list(normalized.get("visit_log") or [])
+        state.update({key: value for key, value in _LEGACY_RESET.items()})
+        return state
+
+    saved = mutate_room_state(directory, _reset)
     # 重开局必须清空账本：否则关键帧重放会把上一局的事件重新叠加进来。
     from trpg_server.agents.narrative.ledger import clear_ledger
 

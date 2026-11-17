@@ -762,9 +762,9 @@ def _insert(
         "created_at": _timestamp(),
         "metadata": {"source": "gm_narrative", "actor_id": actor_id},
     }
-    messages = _read_messages(room_dir)
-    messages.append(message)
-    _write_messages(room_dir, messages)
+    from trpg_server.room_ops.storage import append_message
+
+    append_message(room_dir, message)
 
     try:
         from trpg_server.immersive import broadcast

@@ -41,6 +41,7 @@ from trpg_server.routes.rooms import (
     _timestamp,
     _write_messages,
 )
+from trpg_server.room_ops.storage import append_message
 
 bp = Blueprint("props", __name__)
 logger = logging.getLogger(__name__)
@@ -633,9 +634,7 @@ def reveal_prop(room_id, prop_id):
             "revealed_to": recipients,
         },
     }
-    messages = _read_messages(room_dir)
-    messages.append(message)
-    _write_messages(room_dir, messages)
+    append_message(room_dir, message)
 
     try:
         from trpg_server.immersive import broadcast

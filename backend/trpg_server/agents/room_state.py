@@ -62,14 +62,37 @@ def load_room_state(room_dir: Path) -> dict[str, Any]:
 
 
 def save_room_state(room_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+    """整份写入房间状态；写锁与其他房间状态写入共用 ``room_lock``。
+
+    调用方如果是「读—改—写」，应改用 :func:`mutate_room_state`，否则两份
+    旧快照仍可能互相覆盖。
+    """
+    from trpg_server.room_clock import room_lock
+
     normalized = _normalize_state(state)
     Path(room_dir).mkdir(parents=True, exist_ok=True)
-    write_json_atomic(_state_path(room_dir), normalized)
+    with room_lock(room_dir):
+        write_json_atomic(_state_path(room_dir), normalized)
     return normalized
 
 
+def mutate_room_state(room_dir: Path, mutator: Any) -> dict[str, Any]:
+    """在房间写锁内完成一次「读—改—写」，避免并发写入互相丢更新。"""
+    from trpg_server.room_clock import room_lock
+
+    directory = Path(room_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    with room_lock(directory):
+        state = load_room_state(directory)
+        result = mutator(state)
+        if isinstance(result, dict):
+            state = result
+        normalized = _normalize_state(state)
+        write_json_atomic(_state_path(directory), normalized)
+        return normalized
+
+
 def append_room_event(room_dir: Path, event: dict[str, Any]) -> dict[str, Any]:
-    state = load_room_state(room_dir)
     item = {
         "id": str(event.get("id") or uuid4().hex),
         "kind": str(event.get("kind") or "event")[:80],
@@ -79,9 +102,13 @@ def append_room_event(room_dir: Path, event: dict[str, Any]) -> dict[str, Any]:
     for key in ("scene_id", "actor", "metadata"):
         if key in event:
             item[key] = event[key]
-    state["event_log"].append(item)
-    state["event_log"] = state["event_log"][-MAX_EVENT_LOG:]
-    save_room_state(room_dir, state)
+
+    def _append(state: dict[str, Any]) -> dict[str, Any]:
+        state["event_log"].append(item)
+        state["event_log"] = state["event_log"][-MAX_EVENT_LOG:]
+        return state
+
+    mutate_room_state(room_dir, _append)
     return item
 
 

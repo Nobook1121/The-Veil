@@ -686,8 +686,25 @@ class WorkflowEngine:
             str(step.get("status")) == STEP_WAITING for step in flow.get("steps") or []
         ):
             # 续跑器可能把后续步骤（例如反制之后的豁免）挂起：保留续跑资格，
-            # 重新按 TTL 计时，等下一次决定到达再继续。
+            # 重新按 TTL 计时，等下一次决定到达再继续。流程 TTL 与角色锁必须
+            # 同时续期，否则会出现「流程还在等，角色锁已过期被别的流程抢入」。
             ttl = max(1, int(flow.get("ttl") or DEFAULT_TIMEOUT_SECONDS))
+            renewed = flow_store.renew_character_lock(
+                data,
+                str(flow.get("initiator") or ""),
+                flow_id=str(flow.get("id") or ""),
+                ttl=ttl,
+            )
+            if not renewed:
+                flow["continuation_error"] = "角色锁已失效，无法继续等待决定"
+                now_stamp = stamp()
+                for step in flow.get("steps") or []:
+                    if str(step.get("status")) == STEP_WAITING:
+                        step["status"] = STEP_FAILED
+                        step["error"] = flow["continuation_error"]
+                        step["finished_at"] = now_stamp
+                flow["updated_at"] = now_stamp
+                return
             flow["status"] = FLOW_WAITING
             flow["updated_at"] = stamp()
             flow["expires_at"] = now() + ttl

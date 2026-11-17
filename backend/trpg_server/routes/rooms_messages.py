@@ -34,6 +34,7 @@ from trpg_server.room_ops.storage import (
     _find_room_by_name,
     _get_scenarios_dir,
     _read_messages,
+    append_message,
     _timestamp,
     _write_messages,
     _write_room,
@@ -122,9 +123,7 @@ def create_room_message(room_id):
         message["sender_name"] = data.get("sender_name") or "触发器"
         message["avatar"] = normalize_avatar(data.get("avatar"))
 
-    messages = _read_messages(room_dir)
-    messages.append(message)
-    _write_messages(room_dir, messages)
+    append_message(room_dir, message)
     _write_room(room_dir, info)
 
     log_room_event(
@@ -197,9 +196,7 @@ def trigger_room_scenario(room_id):
         "created_at": _timestamp(),
         "metadata": trigger_message.get("metadata", {}),
     }
-    messages = _read_messages(room_dir)
-    messages.append(message)
-    _write_messages(room_dir, messages)
+    append_message(room_dir, message)
     _write_room(room_dir, info)
     if new_trigger:
         record_trigger(room_dir, str(trigger_id), reason=str(data.get("reason") or "manual trigger"))

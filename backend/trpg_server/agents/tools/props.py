@@ -13,7 +13,12 @@ from typing import Any, Mapping
 from trpg_server.agents.tools.base import AgentTool
 from trpg_server.props import normalize, registry, store
 from trpg_server.props import props_settings
-from trpg_server.room_ops.storage import _read_messages, _timestamp, _write_messages
+from trpg_server.room_ops.storage import (
+    _read_messages,
+    _timestamp,
+    _write_messages,
+    append_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -178,9 +183,7 @@ def _deliver(
             "revealed_to": recipients,
         },
     }
-    messages = _read_messages(room_dir)
-    messages.append(payload)
-    _write_messages(room_dir, messages)
+    append_message(room_dir, payload)
     try:
         from trpg_server.immersive import broadcast
 

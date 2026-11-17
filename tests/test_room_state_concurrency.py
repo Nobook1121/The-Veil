@@ -198,3 +198,116 @@ def test_poison_registration_during_settlement_is_not_lost(tmp_path):
     assert not errors
     # 所有条目都未到期，串行化的读改写不应丢失任何登记。
     assert len(room_poison.load_queue(tmp_path)) == rounds
+
+
+# ---------------------------------------------------------------------------
+# G4：战斗状态、叙事状态与消息在交叠写入下不丢
+# ---------------------------------------------------------------------------
+def _join(threads: list[threading.Thread]) -> None:
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+
+def test_concurrent_message_appends_do_not_lose_messages(tmp_path):
+    from trpg_server.room_ops.storage import _read_messages, append_message
+
+    workers = 8
+    rounds = 25
+    errors: list[BaseException] = []
+
+    def worker(index: int) -> None:
+        try:
+            for round_index in range(rounds):
+                append_message(
+                    tmp_path,
+                    {"id": f"{index}-{round_index}", "content": f"消息 {index}-{round_index}"},
+                )
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    _join([threading.Thread(target=worker, args=(index,)) for index in range(workers)])
+
+    assert not errors
+    messages = _read_messages(tmp_path)
+    assert len(messages) == workers * rounds
+    assert len({item["id"] for item in messages}) == workers * rounds
+
+
+def test_concurrent_combat_state_and_events_do_not_lose_updates(tmp_path):
+    from trpg_server.agents.room_state import (
+        append_room_event,
+        load_room_state,
+        mutate_room_state,
+        save_room_state,
+    )
+
+    save_room_state(tmp_path, {"combat": {"turn": 0}})
+    workers = 6
+    rounds = 20
+    errors: list[BaseException] = []
+
+    def worker(index: int) -> None:
+        try:
+            for round_index in range(rounds):
+                def _apply(state):
+                    combat = state.setdefault("combat", {})
+                    combat["turn"] = int(combat.get("turn", 0)) + 1
+                    return state
+
+                mutate_room_state(tmp_path, _apply)
+                append_room_event(
+                    tmp_path, {"kind": "turn", "content": f"{index}-{round_index}"}
+                )
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    _join([threading.Thread(target=worker, args=(index,)) for index in range(workers)])
+
+    assert not errors
+    state = load_room_state(tmp_path)
+    assert state["combat"]["turn"] == workers * rounds
+    assert len(state["event_log"]) == workers * rounds
+
+
+def test_narrative_write_keeps_concurrent_event_log(tmp_path):
+    from trpg_server.agents.narrative.state_store import save_narrative_state
+    from trpg_server.agents.room_state import append_room_event, load_room_state, save_room_state
+
+    save_room_state(tmp_path, {"combat": {"turn": 0}})
+    writers = 4
+    rounds = 15
+    errors: list[BaseException] = []
+
+    def writer(index: int) -> None:
+        try:
+            for round_index in range(rounds):
+                save_narrative_state(
+                    tmp_path,
+                    {
+                        "location": f"scene-{index}",
+                        "visit_log": [f"scene-{index}-{round_index}"],
+                    },
+                )
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    def eventer(index: int) -> None:
+        try:
+            for round_index in range(rounds):
+                append_room_event(
+                    tmp_path, {"kind": "narrative", "content": f"{index}-{round_index}"}
+                )
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(index,)) for index in range(writers)]
+    threads += [threading.Thread(target=eventer, args=(index,)) for index in range(writers)]
+    _join(threads)
+
+    assert not errors
+    state = load_room_state(tmp_path)
+    assert len(state["event_log"]) == writers * rounds
+    location = str(state.get("narrative", {}).get("location") or state.get("active_scene_id") or "")
+    assert location.startswith("scene-")

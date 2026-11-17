@@ -158,6 +158,29 @@ def acquire_character_lock(
     return True, None
 
 
+def renew_character_lock(
+    store: dict[str, Any],
+    character: str,
+    *,
+    flow_id: str,
+    ttl: int,
+) -> bool:
+    """延长当前流程持有的角色锁；锁已丢失或被他人持有时返回 ``False``。"""
+    name = str(character or "").strip()
+    if not name:
+        return True
+    characters = store["locks"].setdefault("characters", {})
+    record = characters.get(name)
+    if not isinstance(record, dict):
+        return False
+    if str(record.get("flow_id") or "") != str(flow_id):
+        return False
+    moment = now()
+    record["expires_at"] = moment + max(1, int(ttl or 1))
+    record["renewed_at"] = stamp(moment)
+    return True
+
+
 def release_character_lock(store: dict[str, Any], character: str, *, flow_id: str = "") -> None:
     name = str(character or "").strip()
     if not name:
@@ -190,6 +213,7 @@ __all__ = [
     "load",
     "prune_locks",
     "release_character_lock",
+    "renew_character_lock",
     "room_write_lock",
     "save",
     "store_path",
