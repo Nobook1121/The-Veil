@@ -12,6 +12,8 @@
   规则（与项目发布约束一致）：
     - 文件名前缀使用 the-veil，而不是 aibasedtrpg。
     - 排除密钥、虚拟环境、构建缓存、开发文档、changelog、开发脚本、本机用户数据。
+    - 演示剧本 data/scenarios/scenario-demo-dnd5e-001 与预置角色卡
+      （data/runtime/characters）仅本地使用，不随包分发；打包脚本用禁止清单守住这条规则。
     - 保留预构建前端 dist/public、部署指南、许可证汇总、配置模板、示例剧本与最小运行资源。
 #>
 param(
@@ -357,6 +359,7 @@ $forbidden = @(
     'data/runtime',
     'data/users',
     'backend/data',
+    'data/scenarios/scenario-demo-dnd5e-001',
     'data/assets/aiplatform',
     'data/assets/avatars',
     'data/assets/bgm'

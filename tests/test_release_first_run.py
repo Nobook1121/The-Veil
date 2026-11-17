@@ -94,3 +94,16 @@ def test_package_script_guards_first_run_state():
     assert "Assert-ZipFirstRunReady" in script
     assert "setup_dismissed" in script
     assert "dist/public/js/setup-wizard.js" in script
+
+
+def test_package_script_excludes_local_demo_scenario_and_cards():
+    """演示剧本与预置角色卡只在本机保留，打包脚本必须显式守住。"""
+    script = PACKAGE_SCRIPT.read_text(encoding="utf-8")
+
+    # 演示剧本在禁止清单里，打包失败即中止，不靠事后删文件。
+    assert "data/scenarios/scenario-demo-dnd5e-001" in script
+    # 只按目录名复制示例剧本，不整目录复制 data/scenarios。
+    assert "Copy-Relative 'data/scenarios'" not in script
+    assert "Copy-Relative 'data/scenarios/scenario-1793438085450'" in script
+    # 预置角色卡位于 data/runtime/characters，随 data/runtime 一起排除。
+    assert "'data/runtime'" in script
