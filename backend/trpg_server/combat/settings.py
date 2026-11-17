@@ -106,9 +106,18 @@ class CombatSettings:
         # 房间规则集具备战斗能力时优先跟随房间，避免 5e 房间按站点默认的 CoC
         # 战斗语义结算；旧房间/未绑定规则集仍回退站点默认。
         room_default = str(room_ruleset_id or "").strip().lower()
-        if room_default and room_default in (combat_ruleset_ids() or ()):
+        available = combat_ruleset_ids()
+        if room_default:
+            if room_default not in available:
+                from trpg_server.ruleset import RulesetSelectionError
+
+                raise RulesetSelectionError(
+                    room_default,
+                    f"房间使用的规则集 {room_default} 未启用战斗能力，不能进入战斗",
+                    "ruleset_combat_unavailable",
+                )
             default_ruleset = room_default
-        allowed_rulesets = combat_ruleset_ids() or ((default_ruleset,) if default_ruleset else ())
+        allowed_rulesets = available or ((default_ruleset,) if default_ruleset else ())
 
         return cls(
             ruleset_id=_choice("combat_ruleset", default_ruleset, allowed_rulesets),

@@ -187,6 +187,14 @@ def create_app(config=None):
             return error_response("API endpoint not found", 404, str(error))
         return error
 
+    from trpg_server.ruleset import RulesetSelectionError
+
+    @app.errorhandler(RulesetSelectionError)
+    def _ruleset_unavailable(error: RulesetSelectionError):
+        from trpg_server.responses import error_response
+
+        return error_response(error.message, 409, error.reason_code)
+
     @app.errorhandler(405)
     def _api_method_not_allowed(error):
         if request.path.startswith("/api/"):

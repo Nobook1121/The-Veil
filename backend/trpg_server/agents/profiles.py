@@ -55,9 +55,21 @@ CORE_KP_TOOL_NAMES = [
 ]
 
 
+def _resolve_plugin(ruleset_id: str | None):
+    """显式规则集不可用时抛错；只有「未指定规则集」才允许空降级。"""
+    from trpg_server.ruleset import RulesetSelectionError
+
+    try:
+        return builtin_registry().resolve(ruleset_id)
+    except RulesetSelectionError:
+        if str(ruleset_id or "").strip():
+            raise
+        return None
+
+
 def ruleset_tool_names(ruleset_id: str | None = None) -> list[str]:
     """当前规则集声明的专属工具（如 CoC7 的检定 / SAN 工具）。"""
-    plugin = builtin_registry().resolve(ruleset_id)
+    plugin = _resolve_plugin(ruleset_id)
     provider = getattr(plugin, "tools", None)
     if provider is None:
         return []
@@ -68,50 +80,37 @@ def combat_budget_tool_names(ruleset_id: str | None = None) -> list[str]:
     """多槽行动经济（动作/附赠/反应/移动）才下发通用扣减工具。"""
     from trpg_server.ruleset.session import turn_model_of
 
-    try:
-        model = turn_model_of(builtin_registry().resolve(ruleset_id))
-    except Exception:  # noqa: BLE001 - 规则集不可用时按无战斗处理
+    plugin = _resolve_plugin(ruleset_id)
+    if plugin is None:
         return []
+    model = turn_model_of(plugin)
     return ["combat.spend"] if len(model.budget) > 1 else []
 
 
 def spell_tool_names(ruleset_id: str | None = None) -> list[str]:
     """声明了 ``spells`` 能力的规则集才下发施法工具。"""
-    try:
-        plugin = builtin_registry().resolve(ruleset_id)
-    except Exception:  # noqa: BLE001 - 规则集不可用时按无施法处理
-        return []
-    if getattr(plugin, "spells", None) is None:
+    plugin = _resolve_plugin(ruleset_id)
+    if plugin is None or getattr(plugin, "spells", None) is None:
         return []
     return ["spell.list", "spell.cast", "spell.concentration"]
 
 
 def effect_tool_names(ruleset_id: str | None = None) -> list[str]:
     """声明了 ``effects`` 能力的规则集才下发状态与效果工具。"""
-    try:
-        plugin = builtin_registry().resolve(ruleset_id)
-    except Exception:  # noqa: BLE001 - 规则集不可用时按无状态能力处理
-        return []
-    if getattr(plugin, "effects", None) is None:
+    plugin = _resolve_plugin(ruleset_id)
+    if plugin is None or getattr(plugin, "effects", None) is None:
         return []
     return ["effect.list", "effect.apply", "effect.remove", "scene.advance"]
 
 
 def workflow_tool_names(ruleset_id: str | None = None) -> list[str]:
-    """自动化相关工具只在 dnd5e 房间下发；CoC7 不出现任何入口。"""
-    if str(ruleset_id or "").strip().lower() != "dnd5e":
+    """自动化工具由规则集插件声明；核心不写死任何规则集 id。"""
+    plugin = _resolve_plugin(ruleset_id)
+    provider = getattr(plugin, "tools", None) if plugin is not None else None
+    getter = getattr(provider, "workflow_tool_names", None)
+    if not callable(getter):
         return []
-    from trpg_server.agents.tools.areas import AREA_TOOL_NAMES
-    from trpg_server.agents.tools.concentration import CONCENTRATION_TOOL_NAMES
-    from trpg_server.agents.tools.reactions import REACTION_TOOL_NAMES
-    from trpg_server.agents.tools.workflow import WORKFLOW_TOOL_NAMES
-
-    return [
-        *WORKFLOW_TOOL_NAMES,
-        *AREA_TOOL_NAMES,
-        *CONCENTRATION_TOOL_NAMES,
-        *REACTION_TOOL_NAMES,
-    ]
+    return [str(name) for name in getter() if str(name).strip()]
 
 
 def plugin_tool_names(ruleset_id: str | None = None) -> list[str]:

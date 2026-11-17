@@ -119,12 +119,24 @@ def resolve_rule_id(info: dict[str, Any] | None, *, scenarios_dir: Any = None) -
     优先级：房间显式 ``ruleset_id`` > 剧本 ``ruleset_id`` > 默认规则集。
     旧房间没有该字段时按剧本推断，仍推断不出则回退 coc7。
     """
-    from trpg_server.ruleset import get_plugin
+    from trpg_server.ruleset import RulesetSelectionError, builtin_registry
 
     data = info or {}
+    registry = builtin_registry()
+
+    def _resolve(ruleset_id: str) -> str:
+        try:
+            return registry.resolve_for_room({"ruleset_id": ruleset_id}).id
+        except RulesetSelectionError as exc:
+            raise RulesetSelectionError(
+                exc.ruleset_id,
+                f"房间使用的规则集 {exc.ruleset_id} 未启用或不存在（{exc.message}）",
+                "ruleset_unavailable_for_room",
+            ) from exc
+
     explicit = str(data.get("ruleset_id") or "").strip()
     if explicit:
-        return get_plugin(explicit).id
+        return _resolve(explicit)
     scenario_id = str(data.get("scenario_id") or "").strip()
     if scenario_id and scenarios_dir:
         try:
@@ -137,10 +149,15 @@ def resolve_rule_id(info: dict[str, Any] | None, *, scenarios_dir: Any = None) -
             )
             inferred = str((scenario or {}).get("ruleset_id") or "").strip()
             if inferred:
-                return get_plugin(inferred).id
+                return _resolve(inferred)
+        except RulesetSelectionError:
+            raise
         except Exception:  # pragma: no cover - 剧本缺失时按默认规则集处理
             logger.debug("Failed to infer ruleset from scenario %s", scenario_id, exc_info=True)
-    return get_plugin(None).id
+    snapshot = data.get("scenario")
+    if isinstance(snapshot, dict) and str(snapshot.get("ruleset_id") or "").strip():
+        return _resolve(str(snapshot.get("ruleset_id") or "").strip())
+    return registry.resolve_for_room(data).id
 
 
 def room_rule_label(info: dict[str, Any] | None, *, scenarios_dir: Any = None) -> str:

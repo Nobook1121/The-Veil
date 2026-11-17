@@ -362,6 +362,52 @@ def test_dnd5e_real_room_check_and_save_reach_log(plugins, tmp_path):
     assert any("敏捷豁免" in message and "DC 12" in message for message in messages)
 
 
+def test_disabled_ruleset_fails_in_room_house_rules_and_combat(plugins, monkeypatch):
+    from trpg_server import house_rules_store, room_rules
+    from trpg_server.combat.settings import CombatSettings
+    from trpg_server.ruleset import RulesetSelectionError
+    from trpg_server.ruleset.registry import RulesetRegistry
+
+    real = builtin_registry()
+    coc7 = real.get("coc7")
+    assert coc7 is not None
+    disabled = RulesetRegistry(plugins=[coc7], default_id="coc7")
+    monkeypatch.setattr("trpg_server.ruleset.registry._BUILTIN_REGISTRY", disabled)
+
+    info = {"id": "room-5e", "ruleset_id": "dnd5e"}
+    with pytest.raises(RulesetSelectionError) as exc:
+        room_rules.resolve_rule_id(info)
+    assert "dnd5e" in str(exc.value)
+    assert "未启用" in str(exc.value)
+
+    with pytest.raises(RulesetSelectionError):
+        house_rules_store.ruleset_definitions("dnd5e")
+
+    with pytest.raises(RulesetSelectionError) as combat_exc:
+        CombatSettings.from_house_rules({}, room_ruleset_id="dnd5e")
+    assert "dnd5e" in str(combat_exc.value)
+
+
+def test_unknown_ruleset_message_is_readable(plugins):
+    from trpg_server import room_rules
+    from trpg_server.ruleset import RulesetSelectionError
+
+    with pytest.raises(RulesetSelectionError) as exc:
+        room_rules.resolve_rule_id({"ruleset_id": "dnd5e-x"})
+    message = str(exc.value)
+    assert "dnd5e-x" in message
+    assert "未知的规则集" in message
+
+
+def test_workflow_tools_are_declared_by_ruleset(plugins):
+    from trpg_server.agents.profiles import workflow_tool_names
+
+    assert workflow_tool_names("coc7") == []
+    dnd5e_tools = workflow_tool_names("dnd5e")
+    assert "workflow.policy" in dnd5e_tools
+    assert "reaction.list" in dnd5e_tools
+
+
 def test_role_prompt_is_assembled_per_ruleset(plugins):
     from trpg_server.ruleset.prompts import assemble_role_prompt
 

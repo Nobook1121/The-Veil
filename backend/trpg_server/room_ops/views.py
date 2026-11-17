@@ -229,25 +229,13 @@ def _room_visibility(info):
     return value if value in ROOM_VISIBILITIES else ROOM_VISIBILITY_PRIVATE
 
 def _room_ruleset_id(info):
-    """解析房间规则集：显式字段优先，旧房间按剧本推断，最后回退 coc7。"""
-    data = info or {}
-    explicit = str(data.get("ruleset_id") or "").strip()
-    if explicit:
-        return builtin_registry().resolve(explicit).id
-    scenario_id = str(data.get("scenario_id") or "").strip()
-    if scenario_id:
-        try:
-            _, scenario = load_scenario_by_id(
-                _get_scenarios_dir(),
-                scenario_id,
-                scenario_version=data.get("scenario_version"),
-            )
-            inferred = str((scenario or {}).get("ruleset_id") or "").strip()
-            if inferred:
-                return builtin_registry().resolve(inferred).id
-        except Exception:  # pragma: no cover - 剧本缺失时按默认规则集处理
-            logger.debug("Failed to infer ruleset for room %s", data.get("id"), exc_info=True)
-    return builtin_registry().resolve("").id
+    """解析房间规则集：显式字段优先，旧房间按剧本推断，未知/禁用显式失败。"""
+    from trpg_server import room_rules
+
+    return room_rules.resolve_rule_id(
+        info or {},
+        scenarios_dir=_get_scenarios_dir(),
+    )
 
 def _room_summary(info):
     _normalize_members(info)

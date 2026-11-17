@@ -33,16 +33,14 @@ def core_definitions() -> dict[str, dict[str, Any]]:
 
 
 def ruleset_definitions(ruleset_id: str) -> dict[str, dict[str, Any]]:
-    from trpg_server.ruleset import RulesetSelectionError, builtin_registry
+    from trpg_server.ruleset import builtin_registry
     from trpg_server.ruleset.capabilities import house_rules_definitions_of
 
     key = str(ruleset_id or "").strip().lower()
     if not key:
         return {}
-    try:
-        plugin = builtin_registry().resolve(key)
-    except (RulesetSelectionError, RuntimeError):
-        return {}
+    # 未知/禁用规则集必须显式失败，不能静默返回空定义让房间按默认规则跑。
+    plugin = builtin_registry().resolve(key)
     return house_rules_definitions_of(plugin)
 
 
@@ -57,18 +55,25 @@ def default_flat(ruleset_id: str) -> dict[str, Any]:
 
 
 def active_ruleset_id(info: Mapping[str, Any] | None) -> str:
-    data = info if isinstance(info, Mapping) else {}
-    explicit = str(data.get("ruleset_id") or "").strip().lower()
-    if explicit:
-        return explicit
-    scenario = data.get("scenario")
-    if isinstance(scenario, Mapping):
-        scenario_id = str(scenario.get("ruleset_id") or "").strip().lower()
-        if scenario_id:
-            return scenario_id
-    try:
-        from trpg_server.ruleset import builtin_registry
+    """房规所属规则集；显式/场景快照不可用时显式失败，不回退 coc7。"""
+    from trpg_server.ruleset import RulesetSelectionError, builtin_registry
 
+    data = info if isinstance(info, Mapping) else {}
+    explicit = str(data.get("ruleset_id") or "").strip()
+    scenario = data.get("scenario")
+    scenario_id = ""
+    if isinstance(scenario, Mapping):
+        scenario_id = str(scenario.get("ruleset_id") or "").strip()
+    if explicit or scenario_id:
+        try:
+            return builtin_registry().resolve_for_room(data).id
+        except RulesetSelectionError as exc:
+            raise RulesetSelectionError(
+                exc.ruleset_id,
+                f"房间使用的规则集 {exc.ruleset_id} 未启用或不存在（{exc.message}）",
+                "ruleset_unavailable_for_room",
+            ) from exc
+    try:
         return str(builtin_registry().default_id() or "").strip().lower()
     except Exception:  # noqa: BLE001 - 规则集不可用时按“无规则集”处理
         return ""

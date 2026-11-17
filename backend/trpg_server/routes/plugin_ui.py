@@ -55,12 +55,10 @@ def _room_permissions(info: dict) -> tuple[list[str], bool]:
 
 
 def _room_ruleset(info: dict) -> str:
-    try:
-        from trpg_server.room_ops.views import _room_ruleset_id
+    """房间规则集解析失败时显式抛错，由全局错误处理返回 409。"""
+    from trpg_server.room_ops.views import _room_ruleset_id
 
-        return str(_room_ruleset_id(info) or "coc7")
-    except Exception:  # noqa: BLE001 - 规则集解析失败时按显式字段兜底
-        return str(info.get("ruleset_id") or "coc7")
+    return _room_ruleset_id(info)
 
 
 def _slot_assets(plugin_id: str, capabilities: dict) -> list[dict[str, str]]:

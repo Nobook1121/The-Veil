@@ -72,3 +72,17 @@ class Dnd5eTools:
 
     def role_prompt(self, role_id: str) -> str:
         return DND5E_KP_PROMPT if str(role_id or "").strip().lower() == "kp" else ""
+
+    def workflow_tool_names(self) -> tuple[str, ...]:
+        """5e 的自动化工具入口；CoC7 不声明，因此不会下发。"""
+        from trpg_server.agents.tools.areas import AREA_TOOL_NAMES
+        from trpg_server.agents.tools.concentration import CONCENTRATION_TOOL_NAMES
+        from trpg_server.agents.tools.reactions import REACTION_TOOL_NAMES
+        from trpg_server.agents.tools.workflow import WORKFLOW_TOOL_NAMES
+
+        return (
+            *WORKFLOW_TOOL_NAMES,
+            *AREA_TOOL_NAMES,
+            *CONCENTRATION_TOOL_NAMES,
+            *REACTION_TOOL_NAMES,
+        )

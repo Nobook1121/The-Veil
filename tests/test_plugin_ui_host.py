@@ -78,8 +78,9 @@ def _clean_plugins():
 
 def _app(tmp_path: Path):
     plugins = tmp_path / "plugins"
-    _write_plugin(plugins, "stage-ui", rulesets=["dnd5e"])
-    _write_plugin(plugins, "disabled-ui", rulesets=["dnd5e"])
+    # 测试环境只加载内置 coc7；dnd5e 房间用来验证“禁用规则集显式失败”。
+    _write_plugin(plugins, "stage-ui", rulesets=["coc7"])
+    _write_plugin(plugins, "disabled-ui", rulesets=["coc7"])
     (plugins / "enabled.json").write_text(
         json.dumps({"version": 1, "enabled": ["stage-ui"]}, ensure_ascii=False),
         encoding="utf-8",
@@ -109,30 +110,32 @@ def _login(client, user_id: str = "u2") -> None:
         session.update(user_id=user_id, username=user_id, role="USER", session_token="t", csrf_token="c")
 
 
-def test_room_ui_filters_by_ruleset_and_permissions(tmp_path):
+def test_room_ui_filters_by_ruleset_and_rejects_disabled(tmp_path):
     app, _plugins = _app(tmp_path)
     client = app.test_client()
     _login(client, "u2")
 
-    response = client.get("/api/rooms/room-dnd/ui")
+    response = client.get("/api/rooms/room-coc/ui")
     assert response.status_code == 200
     data = response.get_json()["data"]
-    assert data["ruleset_id"] == "dnd5e"
+    assert data["ruleset_id"] == "coc7"
     assert [slot["plugin_id"] for slot in data["slots"]] == ["stage-ui"]
     assert data["slots"][0]["assets"][0]["url"] == "/api/plugins/stage-ui/assets/ui/stage.js"
     assert "token.move.dm" not in data["permissions"]
 
-    coc = client.get("/api/rooms/room-coc/ui").get_json()["data"]
-    assert coc["slots"] == []
+    # 房间声明 dnd5e，但服务端未启用该规则集：显式 409，不能静默按 coc7 返回槽位。
+    disabled = client.get("/api/rooms/room-dnd/ui")
+    assert disabled.status_code == 409
+    assert "dnd5e" in str(disabled.get_json())
 
     owner = app.test_client()
     _login(owner, "u1")
-    owner_data = owner.get("/api/rooms/room-dnd/ui").get_json()["data"]
+    owner_data = owner.get("/api/rooms/room-coc/ui").get_json()["data"]
     assert "token.move.dm" in owner_data["permissions"]
 
     outsider = app.test_client()
     _login(outsider, "u9")
-    assert outsider.get("/api/rooms/room-dnd/ui").status_code == 403
+    assert outsider.get("/api/rooms/room-coc/ui").status_code == 403
 
 
 def test_plugin_asset_only_serves_declared_files(tmp_path):
