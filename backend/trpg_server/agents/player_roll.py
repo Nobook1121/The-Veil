@@ -9,13 +9,15 @@ Chat 请求线程在工具内部调用 :func:`wait_for_player_roll` 阻塞等待
 
     pending ──roll──> rolled（重投关闭，5 秒后自动完成）
        │                 └─complete──> finished
+       ├──expires_at 到达──> timeout（系统自动投掷，同时视为已确认）
        └──roll──> awaiting_confirm（重投开启）
                       ├─reroll──> awaiting_confirm
                       ├─confirm─> finished
                       └─expires_at 到达──> timeout（自动确认最后结果）
 
 重投开启时 ``complete`` 不解除阻塞，只有 ``confirm`` 或 ``expires_at`` 到期才
-让等待中的工具线程继续，保证 AI 拿到的是玩家最终确认的结果。
+让等待中的工具线程继续，保证 AI 拿到的是玩家最终确认的结果。超时自动投掷是
+终局：服务端直接置 ``confirmed``，客户端不得再等投掷者点「确定」。
 """
 from __future__ import annotations
 
@@ -435,55 +437,86 @@ def create_roll_request(
 
 
 def _expire(request_id: str) -> None:
-    """等待超时：未投掷则自动投掷，已投掷则自动确认最后一次结果。"""
-    pending = None
+    """等待超时：未投掷则自动投掷，已投掷则自动确认最后一次结果。
+
+    自动投掷是一次性的终局结算：``confirmed`` 直接置真，广播里也带上该标记，
+    客户端据此收桌，不再等待不在场的投掷者点「确定」。
+    """
     with _LOCK:
         pending = _PENDING.get(request_id)
     if pending is None:
         return
     rolled = False
-    with pending.lock:
-        if pending.state == "pending":
-            pending.state = "timeout"
-            pending.result = _annotate(pending.resolver(), request_id, auto=True)
-            pending.rolled_at = time.time()
-            pending.confirmed = True
-            rolled = True
-        elif pending.state in ("rolled", "awaiting_confirm"):
-            pending.state = "timeout"
-            pending.confirmed = True
-    if rolled:
-        _emit(
-            "player_dice_rolled",
-            {
-                "room_id": pending.room_id,
-                "request_id": request_id,
-                "auto": True,
-                "fallback": True,
-                "reason": "timeout",
-                "state": pending.state,
-                "reroll": _reroll_state(pending),
-                **_result_snapshot(pending.result or {}),
-            },
-        )
-        _log(pending.room_dir, "等待玩家投掷超时，系统自动投掷", actor=pending.roller_name, room_id=pending.room_id, 请求ID=request_id)
-    else:
-        _emit(
-            "player_dice_confirmed",
-            {
-                "room_id": pending.room_id,
-                "request_id": request_id,
-                "reason": "timeout",
-                "confirmed_by": "",
-                "state": pending.state,
-                "reroll": _reroll_state(pending),
-                "result": _result_snapshot(pending.result or {}),
-            },
-        )
-        _log(pending.room_dir, "等待玩家确认超时，自动确认最后一次结果", actor=pending.roller_name, room_id=pending.room_id, 请求ID=request_id)
-    pending.event.set()
-    # 非阻塞创建的请求没有等待线程来做收尾，这里统一清理。
-    _remove(request_id)
+    resolve_failed = False
+    try:
+        with pending.lock:
+            if pending.state == "pending":
+                pending.state = "timeout"
+                try:
+                    pending.result = _annotate(pending.resolver(), request_id, auto=True)
+                    pending.confirmed = True
+                except Exception:  # noqa: BLE001 - 自动结算失败也必须结束等待
+                    resolve_failed = True
+                    logger.exception("Auto roll resolver failed for request %s", request_id)
+                pending.rolled_at = time.time()
+                rolled = True
+            elif pending.state in ("rolled", "awaiting_confirm"):
+                pending.state = "timeout"
+                pending.confirmed = True
+        if resolve_failed:
+            _emit(
+                "player_dice_cancelled",
+                {
+                    "room_id": pending.room_id,
+                    "request_id": request_id,
+                    "reason": "resolve_failed",
+                    "state": pending.state,
+                    "summary": "自动投掷失败，本次检定已结束",
+                },
+            )
+            _log(
+                pending.room_dir,
+                "等待玩家投掷超时，自动投掷失败，已结束本次检定",
+                actor=pending.roller_name,
+                room_id=pending.room_id,
+                level="warning",
+                请求ID=request_id,
+            )
+        elif rolled:
+            _emit(
+                "player_dice_rolled",
+                {
+                    "room_id": pending.room_id,
+                    "request_id": request_id,
+                    "auto": True,
+                    "confirmed": True,
+                    "fallback": True,
+                    "reason": "timeout",
+                    "state": pending.state,
+                    "reroll": _reroll_state(pending),
+                    **_result_snapshot(pending.result or {}),
+                },
+            )
+            _log(pending.room_dir, "等待玩家投掷超时，系统自动投掷", actor=pending.roller_name, room_id=pending.room_id, 请求ID=request_id)
+        else:
+            _emit(
+                "player_dice_confirmed",
+                {
+                    "room_id": pending.room_id,
+                    "request_id": request_id,
+                    "reason": "timeout",
+                    "confirmed_by": "",
+                    "state": pending.state,
+                    "reroll": _reroll_state(pending),
+                    "result": _result_snapshot(pending.result or {}),
+                },
+            )
+            _log(pending.room_dir, "等待玩家确认超时，自动确认最后一次结果", actor=pending.roller_name, room_id=pending.room_id, 请求ID=request_id)
+    finally:
+        # 结算/广播无论成败都要唤醒等待线程并清理请求：否则工具线程会一直阻塞，
+        # 残留的 pending 还会让该房间后续检定全部被当成「重复检定」拒绝。
+        pending.event.set()
+        _remove(request_id)
 
 
 def _remove(request_id: str) -> None:

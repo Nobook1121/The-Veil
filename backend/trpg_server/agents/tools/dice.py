@@ -541,7 +541,11 @@ def _context_username(context: Any) -> str:
 
 
 def _player_online(user_id: Any) -> bool:
-    """目标玩家是否在线；无 Socket 基础设施（测试/控制台）时视为在线。"""
+    """目标玩家是否在线；无 Socket 基础设施（测试/控制台）时视为在线。
+
+    只要进程登记过 Socket 连接，就以在线表为准：目标玩家（例如跨机拷了 data
+    但人不在本机上的投掷者）不在线时不再空等超时，由服务端立即结算。
+    """
     if user_id in (None, ""):
         return False
     try:
@@ -549,8 +553,8 @@ def _player_online(user_id: Any) -> bool:
 
         if not has_app_context():
             return True
-        registry = current_app.config.get("ACTIVE_SOCKET_SESSIONS") or {}
-        if not registry:
+        if "ACTIVE_SOCKET_SESSIONS" not in current_app.config:
+            # 从未有客户端连过 Socket（测试/控制台/刚启动），无法判定在线。
             return True
         from trpg_server.security import is_socket_user_online
 

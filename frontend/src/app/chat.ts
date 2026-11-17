@@ -447,7 +447,7 @@ async function sendToAI(chatInput: HTMLInputElement, sendButton: HTMLButtonEleme
         // 战斗轮的检定与伤害明细只进战斗面板与战斗日志，不再作为聊天消息刷屏。
         for (const toolMessage of toolMessages) {
             if (isCombatPanelMessage(toolMessage)) continue;
-            const visibleMessage = await persistDirectRoomMessage(toolMessage);
+            const visibleMessage = await persistToolMessageWithTimeout(toolMessage);
             if (visibleMessage) {
                 renderRoomMessage(visibleMessage);
                 broadcastMessage(visibleMessage);
@@ -997,6 +997,22 @@ async function persistDirectRoomMessage(message: ChatMessage): Promise<ChatMessa
     });
     if (!response.success) throw new Error(response.message || "保存直接消息失败");
     return response.data || null;
+}
+
+/** 工具消息落库是旁路：接口卡住时不能让 KP 气泡一直停在「正在整理回复」。 */
+const TOOL_MESSAGE_PERSIST_TIMEOUT_MS = 15000;
+
+function persistToolMessageWithTimeout(message: ChatMessage): Promise<ChatMessage | null> {
+    return Promise.race([
+        persistDirectRoomMessage(message).catch((error) => {
+            console.warn("保存工具消息失败", error);
+            return null;
+        }),
+        new Promise<null>((resolve) => window.setTimeout(() => {
+            console.warn("保存工具消息超时，跳过落地", message.type);
+            resolve(null);
+        }, TOOL_MESSAGE_PERSIST_TIMEOUT_MS)),
+    ]);
 }
 
 async function persistRoomMessage(type: string, content: string, metadata: Record<string, unknown> = {}): Promise<ChatMessage | null> {
