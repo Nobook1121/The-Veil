@@ -542,3 +542,159 @@ def test_agent_move_rejects_coc7_room(tmp_path):
 
     assert result["ok"] is False
     assert "规则集不支持" in result["error"]
+
+
+def test_spatial_distance_ranges_and_shapes():
+    spatial = veil_map.spatial
+
+    assert spatial.feet_to_cells(30) == 6
+    assert spatial.feet_to_cells(29) == 5
+    assert spatial.cells_to_feet(6) == 30
+    assert spatial.cell_distance((0, 0), (3, 4)) == 4
+    assert spatial.cell_distance((0, 0), (3, 4), "euclidean") == 5
+
+    circle = spatial.range_cells((0, 0), shape="circle", size_cells=2)
+    assert len(circle) == 25
+    assert (2, 2) in circle
+
+    cone = spatial.range_cells((0, 0), shape="cone", size_cells=2, direction="e")
+    assert len(cone) == 8
+    assert (2, 0) in cone and (2, 1) in cone
+    assert (-1, 0) not in cone and (0, 1) not in cone
+
+    line = spatial.range_cells((0, 0), shape="line", size_cells=3, direction="e")
+    assert set(line) == {(1, 0), (2, 0), (3, 0)}
+
+
+def test_wall_payload_blocks_sight_and_movement(client):
+    manager, _app = client
+    _login(manager, "u1")
+    walls = [
+        {
+            "id": "wall-a",
+            "kind": "wall",
+            "points": [{"x": 0, "y": -128}, {"x": 0, "y": 128}],
+        },
+        {
+            "id": "door-b",
+            "kind": "door",
+            "state": "open",
+            "points": [{"x": 128, "y": -128}, {"x": 128, "y": 128}],
+        },
+    ]
+    saved = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/walls", {"walls": walls})
+    assert saved.status_code == 200
+    assert saved.get_json()["status"] == "success"
+    assert [wall["id"] for wall in saved.get_json()["data"]["map"]["walls"]] == ["wall-a", "door-b"]
+
+    blocked = manager.post(
+        "/api/plugins/veil-map/rooms/room1/spatial/line",
+        json={
+            "from": {"cell_x": -2, "cell_y": 0},
+            "to": {"cell_x": 2, "cell_y": 0},
+            "mode": "sight",
+        },
+    )
+    assert blocked.status_code == 200
+    data = blocked.get_json()["data"]
+    assert data["blocked"] is True
+    assert data["blocked_by"] == ["wall-a"]
+    assert data["distance_cells"] == 4
+    assert data["distance_ft"] == 20
+
+    # 开着的门不阻挡视线。
+    doorway = manager.post(
+        "/api/plugins/veil-map/rooms/room1/spatial/line",
+        json={
+            "from": {"cell_x": 2, "cell_y": -2},
+            "to": {"cell_x": 2, "cell_y": 2},
+            "mode": "sight",
+        },
+    )
+    assert doorway.get_json()["data"]["blocked"] is False
+
+
+def test_walls_survive_map_settings_and_require_manager(client):
+    manager, _app = client
+    _login(manager, "u1")
+    walls = [
+        {
+            "id": "wall-a",
+            "kind": "wall",
+            "points": [[-64, -64], [64, -64]],
+        }
+    ]
+    assert _write(manager, "put", "/api/plugins/veil-map/rooms/room1/walls", {"walls": walls}).status_code == 200
+
+    updated = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map", {
+        "background": "https://example.com/next-map.png",
+    })
+    assert updated.status_code == 200
+    assert [wall["id"] for wall in updated.get_json()["data"]["map"]["walls"]] == ["wall-a"]
+
+    invalid = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/walls", {"walls": "nope"})
+    assert invalid.status_code == 400
+    assert invalid.get_json()["status"] == "invalid"
+
+    _login(manager, "u2")
+    denied = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/walls", {"walls": walls})
+    assert denied.status_code == 403
+    assert denied.get_json()["status"] == "rejected"
+
+
+def test_spatial_range_endpoint_returns_cells(client):
+    manager, _app = client
+    _login(manager, "u2")
+    _map(manager)
+
+    response = manager.post(
+        "/api/plugins/veil-map/rooms/room1/spatial/range",
+        json={
+            "origin": {"cell_x": 0, "cell_y": 0},
+            "shape": "circle",
+            "range_ft": 10,
+        },
+    )
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["size_cells"] == 2
+    assert data["size_ft"] == 10
+    assert data["count"] == 25
+    assert {"cell_x": 0, "cell_y": 0, "x": 0, "y": 0} in data["cells"]
+
+    cone = manager.post(
+        "/api/plugins/veil-map/rooms/room1/spatial/range",
+        json={
+            "origin": {"cell_x": 0, "cell_y": 0},
+            "shape": "cone",
+            "size_cells": 2,
+            "direction": "e",
+        },
+    )
+    assert cone.status_code == 200
+    assert cone.get_json()["data"]["count"] == 8
+
+    bad = manager.post(
+        "/api/plugins/veil-map/rooms/room1/spatial/range",
+        json={"origin": {"cell_x": 0, "cell_y": 0}, "shape": "line", "size_cells": 2},
+    )
+    assert bad.status_code == 400
+
+
+def test_spatial_window_blocks_movement_not_sight():
+    spatial = veil_map.spatial
+    walls = [
+        {
+            "id": "window-1",
+            "kind": "window",
+            "points": [{"x": -64, "y": 0}, {"x": 64, "y": 0}],
+        },
+        {
+            "id": "door-1",
+            "kind": "door",
+            "state": "open",
+            "points": [{"x": 0, "y": -64}, {"x": 0, "y": 64}],
+        },
+    ]
+    assert spatial.segment_blockers(walls, (0, -64), (0, 64), mode="sight") == []
+    assert spatial.segment_blockers(walls, (0, -64), (0, 64), mode="movement") == ["window-1"]

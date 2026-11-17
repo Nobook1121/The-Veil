@@ -11,10 +11,14 @@
 
 from __future__ import annotations
 
+import importlib.util
 import logging
+import math
 import re
+import sys
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -46,11 +50,38 @@ MAX_BOUNDS = 200
 DM_AGENT_IDS = {"kp"}
 SUPPORTED_RULESETS = {"dnd5e"}
 TOKEN_COLORS = ("#c8a35a", "#6fa8dc", "#93c47d", "#e06666", "#8e7cc3", "#76a5af", "#f6b26b", "#a64d79")
+MAX_WALLS = 200
+MAX_WALL_POINTS = 64
+WALL_KINDS = {"wall", "door", "window", "terrain"}
 RECENT_REQUEST_LIMIT = 64
 _MAP_LOCK = threading.RLock()
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 _OWNER_ROLES = {"owner", "admin"}
+
+_PLUGIN_DIR = Path(__file__).resolve().parent
+
+
+def _load_local_module(name: str):
+    """加载同目录模块。
+
+    插件运行时会把插件目录临时加入 ``sys.path``，但测试会直接用 importlib 加载
+    entry.py；这里按文件路径加载并用带前缀的模块名，避免和核心包重名。
+    """
+    module_name = f"veil_map_{name}"
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        return existing
+    spec = importlib.util.spec_from_file_location(module_name, _PLUGIN_DIR / f"{name}.py")
+    if spec is None or spec.loader is None:
+        raise ImportError(f"无法加载 veil-map 模块：{name}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+spatial = _load_local_module("spatial")
 
 
 def _now() -> str:
@@ -82,6 +113,7 @@ def _default_map() -> dict[str, Any]:
         "grid_offset": {"x": 0, "y": 0},
         "bounds_cells": BOUNDS_DEFAULT,
         "tokens": [],
+        "walls": [],
         "recent_requests": [],
         "updated_at": "",
     }
@@ -106,6 +138,82 @@ def _normalize_token(raw: Any) -> dict[str, Any] | None:
         "kind": str(raw.get("kind") or "npc"),
         "combatant": str(raw.get("combatant") or ""),
     }
+
+
+def _coordinate(value: Any) -> int | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number) or abs(number) > 1_000_000:
+        return None
+    return int(round(number))
+
+
+def _normalize_wall(raw: Any, index: int) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    points: list[dict[str, int]] = []
+    for item in raw.get("points") or []:
+        if isinstance(item, dict):
+            x, y = _coordinate(item.get("x")), _coordinate(item.get("y"))
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            x, y = _coordinate(item[0]), _coordinate(item[1])
+        else:
+            continue
+        if x is None or y is None:
+            continue
+        points.append({"x": x, "y": y})
+        if len(points) >= MAX_WALL_POINTS:
+            break
+    if len(points) < 2:
+        return None
+    kind = str(raw.get("kind") or "wall").strip().lower()
+    if kind not in WALL_KINDS:
+        kind = "wall"
+    state = str(raw.get("state") or "closed").strip().lower()
+    if state not in {"closed", "open"}:
+        state = "closed"
+    wall_id = str(raw.get("id") or "").strip()[:64] or f"wall-{index + 1}"
+    try:
+        opacity = float(raw.get("opacity", 1.0))
+    except (TypeError, ValueError):
+        opacity = 1.0
+    if not math.isfinite(opacity):
+        opacity = 1.0
+    try:
+        height = float(raw.get("height", 1.0))
+    except (TypeError, ValueError):
+        height = 1.0
+    if not math.isfinite(height):
+        height = 1.0
+    return {
+        "id": wall_id,
+        "kind": kind,
+        "points": points,
+        "blocks_sight": bool(raw.get("blocks_sight", kind != "window")),
+        "blocks_movement": bool(raw.get("blocks_movement", kind != "window")),
+        "blocks_light": bool(raw.get("blocks_light", kind != "window")),
+        "opacity": max(0.0, min(1.0, opacity)),
+        "height": max(0.0, min(100.0, height)),
+        "state": state,
+    }
+
+
+def _normalize_walls(raw: Any) -> list[dict[str, Any]]:
+    walls: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw if isinstance(raw, list) else []):
+        wall = _normalize_wall(item, index)
+        if wall is None:
+            continue
+        if wall["id"] in seen:
+            wall["id"] = f"{wall['id']}-{index + 1}"
+        seen.add(wall["id"])
+        walls.append(wall)
+        if len(walls) >= MAX_WALLS:
+            break
+    return walls
 
 
 def _normalize_recent_requests(raw: Any) -> list[dict[str, Any]]:
@@ -152,6 +260,7 @@ def _normalize_map(raw: Any) -> dict[str, Any]:
         if token is not None:
             tokens.append(token)
     state["tokens"] = tokens[-MAX_TOKENS:]
+    state["walls"] = _normalize_walls(state.get("walls"))
     state["recent_requests"] = _normalize_recent_requests(state.get("recent_requests"))
     state["updated_at"] = str(state.get("updated_at") or "")
     return state
@@ -801,10 +910,7 @@ def update_map(room_id: str):
                     request_id=request_id,
                     revision=state["revision"],
                 )
-            if background != state.get("background"):
-                state["background"] = background
-                state.pop("background_meta", None)
-                state.pop("calibration", None)
+            state["background"] = background
         state = _save_map(
             room_dir,
             state,
@@ -1029,6 +1135,189 @@ def move_token(room_id: str, token_id: str):
         revision=state["revision"],
         code="map.token_moved",
         data={"map": state, "token": token, "combat": _combat_payload(room_dir), "can_manage": manager},
+    )
+
+
+def _point_from_payload(raw: Any, state: dict[str, Any]) -> tuple[int, int, int, int] | None:
+    """解析 ``{cell_x, cell_y}`` 或 ``{x, y}``，返回 ``(world_x, world_y, cell_x, cell_y)``。"""
+    if not isinstance(raw, dict):
+        return None
+    grid, offset_x, offset_y = _grid_of(state)
+    if "cell_x" in raw or "cell_y" in raw:
+        try:
+            cell_x = int(raw.get("cell_x"))
+            cell_y = int(raw.get("cell_y"))
+        except (TypeError, ValueError):
+            return None
+        return (
+            offset_x + cell_x * grid,
+            offset_y + cell_y * grid,
+            cell_x,
+            cell_y,
+        )
+    x, y = _coordinate(raw.get("x")), _coordinate(raw.get("y"))
+    if x is None or y is None:
+        return None
+    cell_x = int(round((x - offset_x) / grid))
+    cell_y = int(round((y - offset_y) / grid))
+    return x, y, cell_x, cell_y
+
+
+@bp.route("/rooms/<room_id>/walls", methods=["PUT"])
+def update_walls(room_id: str):
+    room_dir, info, denied = _map_room_or_error(room_id)
+    if denied:
+        return denied
+    payload = _write_payload()
+    _role, manager = _room_context(info)
+    with _MAP_LOCK:
+        state = _load_map(room_dir)
+        if not manager:
+            return _rejected_request(
+                "只有房主或房管可以编辑墙体。",
+                "map.manager_only",
+                revision=state["revision"],
+            )
+        request_id, expected, error = _read_envelope(payload, state)
+        if error is not None:
+            return error
+        record = _duplicate_record(state, request_id)
+        if record is not None:
+            return _duplicate_receipt(state, manager, record)
+        if expected != state["revision"]:
+            return _conflict_request(state, manager, request_id)
+        raw_walls = payload.get("walls")
+        if not isinstance(raw_walls, list):
+            return _invalid_request(
+                "walls 必须是墙体数组。",
+                "map.invalid_walls",
+                request_id=request_id,
+                revision=state["revision"],
+            )
+        if len(raw_walls) > MAX_WALLS:
+            return _invalid_request(
+                f"墙体数量不能超过 {MAX_WALLS} 段。",
+                "map.too_many_walls",
+                request_id=request_id,
+                revision=state["revision"],
+            )
+        state["walls"] = _normalize_walls(raw_walls)
+        state = _save_map(
+            room_dir,
+            state,
+            {"request_id": request_id, "action": "map.walls"},
+        )
+    _broadcast(room_id, state)
+    return _receipt(
+        "success",
+        "墙体已保存。",
+        request_id=request_id,
+        revision=state["revision"],
+        code="map.walls_updated",
+        data={"map": state, "can_manage": True},
+    )
+
+
+@bp.route("/rooms/<room_id>/spatial/range", methods=["POST"])
+def spatial_range(room_id: str):
+    room_dir, _info, denied = _map_room_or_error(room_id)
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return error_response("请求体必须是 JSON 对象。", 400, "map.invalid_payload")
+    with _MAP_LOCK:
+        state = _load_map(room_dir)
+    origin = _point_from_payload(payload.get("origin"), state)
+    if origin is None:
+        return error_response("origin 需要 {cell_x, cell_y} 或 {x, y}。", 400, "map.invalid_origin")
+    shape = str(payload.get("shape") or "circle").strip().lower()
+    if shape not in {"circle", "cone", "line"}:
+        return error_response("shape 只能是 circle / cone / line。", 400, "map.invalid_shape")
+    metric = str(payload.get("metric") or "chebyshev").strip().lower()
+    if metric not in spatial.METRICS:
+        return error_response("metric 只能是 chebyshev 或 euclidean。", 400, "map.invalid_metric")
+    if "size_cells" in payload:
+        size = _as_int(payload.get("size_cells"), -1)
+    elif "range_ft" in payload:
+        size = spatial.feet_to_cells(payload.get("range_ft"), FEET_PER_CELL)
+    else:
+        return error_response("需要 size_cells 或 range_ft。", 400, "map.missing_range")
+    if size < 0 or size > MAX_BOUNDS * 2:
+        return error_response("范围大小不合法。", 400, "map.invalid_range")
+    try:
+        cells = spatial.range_cells(
+            (origin[2], origin[3]),
+            shape=shape,
+            size_cells=size,
+            direction=payload.get("direction"),
+            metric=metric,
+        )
+    except ValueError as exc:
+        return error_response(str(exc), 400, "map.invalid_direction")
+    grid, offset_x, offset_y = _grid_of(state)
+    return success_response(
+        {
+            "shape": shape,
+            "metric": metric,
+            "origin": {"cell_x": origin[2], "cell_y": origin[3], "x": origin[0], "y": origin[1]},
+            "size_cells": size,
+            "size_ft": spatial.cells_to_feet(size, FEET_PER_CELL),
+            "cells": [
+                {
+                    "cell_x": cell_x,
+                    "cell_y": cell_y,
+                    "x": offset_x + cell_x * grid,
+                    "y": offset_y + cell_y * grid,
+                }
+                for cell_x, cell_y in cells
+            ],
+            "count": len(cells),
+        },
+        "Range resolved",
+    )
+
+
+@bp.route("/rooms/<room_id>/spatial/line", methods=["POST"])
+def spatial_line(room_id: str):
+    """视线或移动阻挡：起点到终点是否被墙体挡住。"""
+    room_dir, _info, denied = _map_room_or_error(room_id)
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return error_response("请求体必须是 JSON 对象。", 400, "map.invalid_payload")
+    with _MAP_LOCK:
+        state = _load_map(room_dir)
+    mode = str(payload.get("mode") or "sight").strip().lower()
+    if mode not in {"sight", "movement"}:
+        return error_response("mode 只能是 sight 或 movement。", 400, "map.invalid_mode")
+    start = _point_from_payload(payload.get("from"), state)
+    end = _point_from_payload(payload.get("to"), state)
+    if start is None or end is None:
+        return error_response(
+            "from / to 需要 {cell_x, cell_y} 或 {x, y}。",
+            400,
+            "map.invalid_points",
+        )
+    blockers = spatial.segment_blockers(
+        state.get("walls") or [],
+        (start[0], start[1]),
+        (end[0], end[1]),
+        mode=mode,
+    )
+    distance = spatial.cell_distance((start[2], start[3]), (end[2], end[3]))
+    return success_response(
+        {
+            "mode": mode,
+            "blocked": bool(blockers),
+            "blocked_by": blockers,
+            "distance_cells": distance,
+            "distance_ft": spatial.cells_to_feet(distance, FEET_PER_CELL),
+            "from": {"cell_x": start[2], "cell_y": start[3], "x": start[0], "y": start[1]},
+            "to": {"cell_x": end[2], "cell_y": end[3], "x": end[0], "y": end[1]},
+        },
+        "Line resolved",
     )
 
 
