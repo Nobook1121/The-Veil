@@ -2028,7 +2028,9 @@ def _attack_d20(
             action["attack_rolls"] = list(plan.get("rolls") or [])
             if plan.get("success") and not plan.get("critical"):
                 from trpg_server.workflows import reactions
+                from trpg_server.workflows.engine import WorkflowEngine
 
+                policy_overrides = WorkflowEngine(room_dir).policy()
                 window = reactions.open_attack_window(
                     room_dir,
                     room_id=str(getattr(context, "room_id", "") or ""),
@@ -2042,11 +2044,26 @@ def _attack_d20(
                     slot=slot,
                     ttl=60,
                     request_key=request_key,
+                    policy_overrides=policy_overrides,
                     metadata={"guard_notes": list(guard_notes)},
                 )
                 if window.get("error"):
                     return {"error": window.get("error"), "code": window.get("code")}
                 waiting = window.get("flow") or {}
+                if str(waiting.get("status") or "") == "completed":
+                    # reaction=auto 时窗口同步完成，必须直接返回续跑器的攻击结果。
+                    resolved = waiting.get("continuation_result")
+                    if not isinstance(resolved, dict):
+                        resolved = {}
+                    return {
+                        **dict(resolved),
+                        "status": "resolved",
+                        "workflow": {
+                            "id": waiting.get("id"),
+                            "status": waiting.get("status"),
+                            "duplicate": False,
+                        },
+                    }
                 return {
                     **_combat_summary_state(combat),
                     "status": "awaiting_reaction",

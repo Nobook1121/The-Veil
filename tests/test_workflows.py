@@ -213,9 +213,11 @@ def test_room_policy_override_waits_and_submits(tmp_path):
     from trpg_server.workflows.model import STEP_COMPLETED
 
     engine = WorkflowEngine(tmp_path, room_id="r")
-    engine.set_policy({"resolve": {"player": "manual"}, "save": {"player": "not-a-policy"}})
+    with pytest.raises(ValueError):
+        engine.set_policy({"save": {"player": "not-a-policy"}})
+    engine.set_policy({"resolve": {"player": "manual"}})
     assert engine.policy()["resolve"]["player"] == "manual"
-    assert "save" not in engine.policy()  # 非法策略被丢弃
+    assert "save" not in engine.policy()
 
     outcome = run_flow_action(
         tmp_path,
@@ -254,6 +256,287 @@ def test_room_policy_override_waits_and_submits(tmp_path):
     )
     assert again["duplicate"] is True
     assert again["flow"]["status"] == FLOW_COMPLETED
+
+
+def test_missing_handler_fails_instead_of_silent_success(tmp_path):
+    from trpg_server.workflows.actions import run_flow_action
+
+    outcome = run_flow_action(
+        tmp_path,
+        kind="cast",
+        initiator="Mira",
+        initiator_type="player",
+        steps=[make_step("resolve", "结算")],
+        handlers={},
+        request_key="missing-handler",
+    )
+    flow = outcome["flow"]
+    assert flow["status"] == "failed"
+    step = flow["steps"][0]
+    assert step["status"] == "failed"
+    assert step["result"]["code"] == "workflow.missing_handler"
+
+
+def test_policy_ask_waits_then_runs_handler_once(tmp_path):
+    from trpg_server.workflows.actions import run_flow_action
+
+    engine = WorkflowEngine(tmp_path, room_id="r")
+    engine.set_policy({"resolve": {"player": "ask"}})
+    calls: list[str] = []
+
+    def handler(_flow, _step):
+        calls.append("resolve")
+        return {"ok": True, "damage": 3}
+
+    outcome = run_flow_action(
+        tmp_path,
+        kind="cast",
+        initiator="Mira",
+        initiator_type="player",
+        steps=[{**make_step("resolve", "结算"), "executor": "player"}],
+        handlers={"resolve": handler},
+        request_key="policy-ask",
+    )
+    flow = outcome["flow"]
+    assert flow["status"] == FLOW_WAITING
+    assert calls == []
+
+    submitted = engine.submit(
+        flow["id"],
+        "resolve",
+        decision={"approve": True},
+        idempotency_key="ask-1",
+        actor="Mira",
+        is_manager=True,
+    )
+    assert submitted["flow"]["status"] == FLOW_COMPLETED
+    assert calls == ["resolve"]
+    assert submitted["result"]["damage"] == 3
+    assert submitted["result"]["approve"] is True
+
+    again = engine.submit(
+        flow["id"],
+        "resolve",
+        decision={"approve": True},
+        idempotency_key="ask-1",
+    )
+    assert again["duplicate"] is True
+    assert calls == ["resolve"]
+
+
+def test_policy_ask_rejection_does_not_run_handler(tmp_path):
+    from trpg_server.workflows.actions import run_flow_action
+
+    engine = WorkflowEngine(tmp_path, room_id="r")
+    engine.set_policy({"resolve": {"player": "ask"}})
+    calls: list[str] = []
+
+    def handler(_flow, _step):
+        calls.append("resolve")
+        return {"ok": True}
+
+    outcome = run_flow_action(
+        tmp_path,
+        kind="cast",
+        initiator="Mira",
+        initiator_type="player",
+        steps=[{**make_step("resolve", "结算"), "executor": "player"}],
+        handlers={"resolve": handler},
+        request_key="policy-ask-reject",
+    )
+    flow = outcome["flow"]
+    submitted = engine.submit(
+        flow["id"],
+        "resolve",
+        decision={"approve": False},
+        idempotency_key="ask-reject",
+        actor="Mira",
+        is_manager=True,
+    )
+    assert submitted["flow"]["status"] == FLOW_COMPLETED
+    assert calls == []
+    assert submitted["result"] == {"approve": False}
+
+
+def test_policy_manual_uses_decision_without_handler(tmp_path):
+    from trpg_server.workflows.actions import run_flow_action
+
+    engine = WorkflowEngine(tmp_path, room_id="r")
+    engine.set_policy({"resolve": {"player": "manual"}})
+    calls: list[str] = []
+
+    def handler(_flow, _step):
+        calls.append("resolve")
+        return {"ok": True}
+
+    outcome = run_flow_action(
+        tmp_path,
+        kind="cast",
+        initiator="Mira",
+        initiator_type="player",
+        steps=[{**make_step("resolve", "结算"), "executor": "player"}],
+        handlers={"resolve": handler},
+        request_key="policy-manual",
+    )
+    flow = outcome["flow"]
+    assert flow["status"] == FLOW_WAITING
+    submitted = engine.submit(
+        flow["id"],
+        "resolve",
+        decision={"manual_result": 7},
+        idempotency_key="manual-1",
+        actor="Mira",
+        is_manager=True,
+    )
+    assert submitted["flow"]["status"] == FLOW_COMPLETED
+    assert calls == []
+    assert submitted["result"] == {"manual_result": 7}
+
+
+def test_auto_reaction_skips_step_and_settle_runs_continuation(tmp_path):
+    from trpg_server.workflows import continuations
+    from trpg_server.workflows.actions import run_flow_action
+
+    name = "test.auto.continuation"
+    calls: list[str] = []
+
+    def continuation(_room_dir, flow, _data):
+        calls.append("continuation")
+        for step in flow.get("steps") or []:
+            if step.get("status") == "pending":
+                step["status"] = "completed"
+                step["result"] = {"filled": True}
+        return {"filled": True}
+
+    continuations.register(name, continuation)
+    try:
+        outcome = run_flow_action(
+            tmp_path,
+            kind="cast",
+            initiator="Mira",
+            initiator_type="player",
+            steps=[
+                make_step("validate", "校验"),
+                make_step("resolve", "结算", deferred=True),
+            ],
+            handlers={},
+            request_key="auto-continuation",
+            metadata={"continuation": name},
+        )
+        flow = outcome["flow"]
+        assert flow["status"] == FLOW_COMPLETED
+        assert calls == ["continuation"]
+        assert flow["continuation_result"] == {"filled": True}
+        assert [step["status"] for step in flow["steps"]] == ["completed", "completed"]
+    finally:
+        continuations.unregister(name)
+
+
+def test_declared_continuation_missing_fails_explicitly(tmp_path):
+    from trpg_server.workflows.actions import run_flow_action
+
+    outcome = run_flow_action(
+        tmp_path,
+        kind="cast",
+        initiator="Mira",
+        initiator_type="player",
+        steps=[make_step("resolve", "结算", deferred=True)],
+        handlers={},
+        request_key="missing-continuation",
+        metadata={"continuation": "test.not.registered"},
+    )
+    flow = outcome["flow"]
+    assert flow["status"] == "failed"
+    assert flow["continuation_error"]
+
+
+def test_continuation_that_leaves_pending_fails_explicitly(tmp_path):
+    from trpg_server.workflows import continuations
+    from trpg_server.workflows.actions import run_flow_action
+
+    name = "test.incomplete.continuation"
+    continuations.register(name, lambda _room_dir, _flow, _data: {"ok": True})
+    try:
+        outcome = run_flow_action(
+            tmp_path,
+            kind="cast",
+            initiator="Mira",
+            initiator_type="player",
+            steps=[make_step("resolve", "结算", deferred=True)],
+            handlers={},
+            request_key="incomplete-continuation",
+            metadata={"continuation": name},
+        )
+        flow = outcome["flow"]
+        assert flow["status"] == "failed"
+        assert flow["steps"][0]["status"] == "skipped"
+        assert "续跑器没有补齐" in flow["continuation_error"]
+    finally:
+        continuations.unregister(name)
+
+
+@pytest.mark.parametrize("step_id", ["attack", "resolve", "damage", "effect"])
+@pytest.mark.parametrize("policy", ["auto", "ask", "manual"])
+def test_policy_matrix_per_step_kind(tmp_path, step_id, policy):
+    """每一类承载副作用的步骤都要证明 auto/ask/manual 的真实行为。"""
+    from trpg_server.workflows.actions import run_flow_action
+
+    engine = WorkflowEngine(tmp_path, room_id="r")
+    engine.set_policy({step_id: {"player": policy}})
+    calls: list[str] = []
+
+    def handler(_flow, _step):
+        calls.append(step_id)
+        return {"ok": True, "step": step_id}
+
+    outcome = run_flow_action(
+        tmp_path,
+        kind="cast",
+        initiator="Mira",
+        initiator_type="player",
+        steps=[{**make_step(step_id, step_id), "executor": "player"}],
+        handlers={step_id: handler},
+        request_key=f"matrix-{step_id}-{policy}",
+    )
+    flow = outcome["flow"]
+    if policy == "auto":
+        assert flow["status"] == FLOW_COMPLETED
+        assert calls == [step_id]
+        return
+    assert flow["status"] == FLOW_WAITING
+    assert calls == []
+    if policy == "ask":
+        submitted = engine.submit(
+            flow["id"],
+            step_id,
+            decision={"approve": True},
+            idempotency_key=f"matrix-ask-{step_id}",
+            actor="Mira",
+            is_manager=True,
+        )
+        assert submitted["flow"]["status"] == FLOW_COMPLETED
+        assert calls == [step_id]
+    else:
+        submitted = engine.submit(
+            flow["id"],
+            step_id,
+            decision={"manual": step_id},
+            idempotency_key=f"matrix-manual-{step_id}",
+            actor="Mira",
+            is_manager=True,
+        )
+        assert submitted["flow"]["status"] == FLOW_COMPLETED
+        assert submitted["result"] == {"manual": step_id}
+        assert calls == []
+
+
+def test_reaction_steps_only_created_for_ask_or_manual():
+    from trpg_server.workflows.reactions import _reaction_steps
+
+    rows = [{"name": "Mira", "is_player": True}]
+    assert _reaction_steps(rows, policy_overrides={"reaction": {"player": "auto"}}) == []
+    assert len(_reaction_steps(rows, policy_overrides={"reaction": {"player": "ask"}})) == 1
+    assert len(_reaction_steps(rows, policy_overrides={"reaction": {"player": "manual"}})) == 1
 
 
 # ---------------------------------------------------------------------------

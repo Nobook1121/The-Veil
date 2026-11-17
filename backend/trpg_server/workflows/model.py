@@ -107,6 +107,7 @@ def make_step(
     policy: str = POLICY_AUTO,
     executor: str = "system",
     default: Any = None,
+    deferred: bool = False,
 ) -> dict[str, Any]:
     return {
         "id": str(step_id),
@@ -115,6 +116,7 @@ def make_step(
         "executor": str(executor or "system"),
         "status": STEP_PENDING,
         "default": default if default is not None else default_decision(step_id),
+        "deferred": bool(deferred),
         "result": None,
         "error": "",
         "started_at": "",
@@ -184,6 +186,7 @@ def _normalize_step(raw: Mapping[str, Any]) -> dict[str, Any]:
         "executor": str(raw.get("executor") or "system"),
         "status": str(raw.get("status") or STEP_PENDING),
         "default": raw.get("default") if isinstance(raw.get("default"), Mapping) else default_decision(step_id),
+        "deferred": bool(raw.get("deferred")),
         "result": raw.get("result"),
         "error": str(raw.get("error") or ""),
         "started_at": str(raw.get("started_at") or ""),

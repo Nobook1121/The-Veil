@@ -219,7 +219,10 @@ def workflow_policy(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         return error
     overrides = arguments.get("policy")
     if isinstance(overrides, dict):
-        effective = engine.set_policy(overrides)
+        try:
+            effective = engine.set_policy(overrides)
+        except ValueError as exc:
+            return {"error": str(exc), "code": "workflow.invalid_policy"}
         return {"policy": effective, "updated": True}
     return {"policy": engine.policy(), "updated": False}
 

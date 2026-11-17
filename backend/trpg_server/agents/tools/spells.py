@@ -774,9 +774,10 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
 
     reactor_rows = _counter_candidates(combat, caster, spell)
     save_candidates = _save_candidates(spells, spell, targets)
+    policy_overrides = WorkflowEngine(context.room_dir).policy()
     save_rows = reactions.save_steps(
         save_candidates,
-        policy_overrides=WorkflowEngine(context.room_dir).policy(),
+        policy_overrides=policy_overrides,
     )
     if reactor_rows or save_rows:
         window = reactions.open_cast_window(
@@ -794,11 +795,28 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             save_steps=save_rows,
             ttl=60,
             request_key=request_key,
+            policy_overrides=policy_overrides,
             metadata={"guard_notes": list(guard_notes)},
         )
         if window.get("error"):
             return {"error": window["error"], "code": window.get("code")}
         waiting = window.get("flow") or {}
+        if str(waiting.get("status") or "") == "completed":
+            # reaction=auto 等策略下窗口会同步被续跑器完成：直接返回结算结果，
+            # 不能返回一个 awaiting=[] 的“假等待”。
+            resolved = waiting.get("continuation_result")
+            if not isinstance(resolved, Mapping):
+                resolved = {}
+            return {
+                **{key: value for key, value in resolved.items() if key != "visible_message"},
+                "status": "resolved",
+                "summary": str(resolved.get("summary") or f"{caster_name} 施放 {spell}。"),
+                "workflow": {
+                    "id": waiting.get("id"),
+                    "status": waiting.get("status"),
+                    "duplicate": False,
+                },
+            }
         awaiting_reactions = [
             reactions.candidate_of(str(step.get("id")))
             for step in waiting.get("steps") or []

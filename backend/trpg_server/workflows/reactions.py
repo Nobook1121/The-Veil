@@ -97,11 +97,15 @@ def _reaction_steps(
         if not name:
             continue
         executor = EXECUTOR_PLAYER if reactor.get("is_player") else EXECUTOR_KP
+        policy = resolve_policy("reaction", executor, policy_overrides)
+        if policy not in {POLICY_ASK, POLICY_MANUAL}:
+            # auto 不生成待决步骤；由续跑器按“不反应”直接继续，避免流程空转。
+            continue
         steps.append(
             make_step(
                 reaction_step_id(name),
                 f"{name} {label}",
-                policy=resolve_policy("reaction", executor, policy_overrides),
+                policy=policy,
                 executor=executor,
                 default={"decision": "none", "reason": "reaction_timeout"},
             )
@@ -141,7 +145,8 @@ def open_cast_window(
         ("effect", "附加效果"),
         ("concentration", "专注登记"),
     ):
-        steps.append(make_step(step_id, label, policy="auto"))
+        # 这些步骤由续跑器统一补齐，不能在没有 handler 时被伪造成成功。
+        steps.append(make_step(step_id, label, policy="auto", deferred=True))
     flow, error, _created = engine.open(
         kind="cast",
         initiator=caster,
@@ -196,8 +201,8 @@ def open_attack_window(
     steps: list[dict[str, Any]] = [
         make_step("validate", "校验行动预算", policy="auto"),
         *_reaction_steps([reactor], policy_overrides=policy_overrides, label="是否使用护盾术"),
-        make_step("attack", "攻击检定", policy="auto"),
-        make_step("damage", "伤害结算", policy="auto"),
+        make_step("attack", "攻击检定", policy="auto", deferred=True),
+        make_step("damage", "伤害结算", policy="auto", deferred=True),
     ]
     flow, error, _created = engine.open(
         kind="attack",

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from trpg_server.workflows import access as flow_access
@@ -39,6 +40,42 @@ from trpg_server.workflows.model import (
 )
 
 StepHandler = Callable[[dict[str, Any], dict[str, Any]], Any]
+
+# 纯投影/决策步骤：没有 handler 时由流程自身完成，不产生副作用。
+# 其余步骤（attack / resolve 等）缺少 handler 必须显式失败，不能静默成功。
+PROJECTION_STEP_IDS = frozenset({"validate", "effect", "concentration", "damage", "save", "reaction"})
+
+# ask/manual 决定提交后需要补执行的 handler。handler 是闭包，不能落盘，
+# 因此按进程内 (room_dir, flow_id) 登记；路由/工具提交决定时从这里取回。
+_HANDLERS: dict[tuple[str, str], dict[str, StepHandler]] = {}
+_HANDLERS_LOCK = threading.Lock()
+
+
+def _handler_key(room_dir: Any, flow_id: Any) -> tuple[str, str]:
+    try:
+        root = str(Path(room_dir).resolve())
+    except (TypeError, ValueError, OSError):
+        root = str(room_dir)
+    return root, str(flow_id or "")
+
+
+def _decision_rejected(decision: Any) -> bool:
+    """ask 决定是否明确拒绝；拒绝时不执行 handler。"""
+    if not isinstance(decision, Mapping):
+        return False
+    for key in ("approve", "approved", "allow", "confirm"):
+        if key in decision and not bool(decision.get(key)):
+            return True
+    return str(decision.get("decision") or "").strip().lower() in {
+        "none",
+        "no",
+        "reject",
+        "rejected",
+        "decline",
+        "cancel",
+        "cancelled",
+        "skip",
+    }
 
 
 class WorkflowEngine:
@@ -87,19 +124,29 @@ class WorkflowEngine:
         return dict(data.get("policy") or {})
 
     def set_policy(self, overrides: Mapping[str, Any]) -> dict[str, Any]:
-        """合并房间级策略覆盖；只接受 auto/ask/manual 与合法执行者。"""
+        """合并房间级策略覆盖；非法执行者或策略显式报错，不静默丢弃。"""
         cleaned: dict[str, dict[str, str]] = {}
         for step, rule in (overrides or {}).items():
+            step_id = str(step or "").strip()
+            if not step_id:
+                raise ValueError("策略步骤名不能为空")
             if not isinstance(rule, Mapping):
-                continue
-            entry = {
-                str(executor): str(policy).strip().lower()
-                for executor, policy in rule.items()
-                if str(executor).strip().lower() in {"kp", "player", "ai"}
-                and str(policy).strip().lower() in {"auto", "ask", "manual"}
-            }
+                raise ValueError(f"步骤 {step_id} 的策略必须是对象")
+            entry: dict[str, str] = {}
+            for executor, policy in rule.items():
+                executor_id = str(executor).strip().lower()
+                policy_id = str(policy).strip().lower()
+                if executor_id not in {"kp", "player", "ai"}:
+                    raise ValueError(
+                        f"步骤 {step_id} 的执行者 {executor_id} 无效，只能是 kp/player/ai"
+                    )
+                if policy_id not in {"auto", "ask", "manual"}:
+                    raise ValueError(
+                        f"步骤 {step_id} 的策略 {policy_id} 无效，只能是 auto/ask/manual"
+                    )
+                entry[executor_id] = policy_id
             if entry:
-                cleaned[str(step)] = entry
+                cleaned[step_id] = entry
         with flow_store.room_write_lock(self.room_dir):
             data = flow_store.load(self.room_dir)
             merged = {**data.get("policy", {})}
@@ -180,6 +227,7 @@ class WorkflowEngine:
                 return None
             if str(flow.get("status")) in TERMINAL_STATUSES:
                 return flow
+            self._remember_handlers(flow, handlers)
             for step in flow.get("steps") or []:
                 if not isinstance(step, dict):
                     continue
@@ -206,6 +254,35 @@ class WorkflowEngine:
                     step["finished_at"] = stamp()
                     continue
                 handler = handlers.get(step_id)
+                if not callable(handler):
+                    if step.get("deferred"):
+                        # 后续由续跑器统一补齐；这里不能伪造成功结果。
+                        continue
+                    if step_id in PROJECTION_STEP_IDS:
+                        step["result"] = {"ok": True}
+                        step["status"] = STEP_COMPLETED
+                        step["finished_at"] = stamp()
+                        self._append_event(
+                            flow,
+                            "step.completed",
+                            actor=str(flow.get("initiator") or ""),
+                            payload={"step": step_id},
+                        )
+                        continue
+                    message = f"工作流步骤“{step_id}”缺少处理器"
+                    code = "workflow.missing_handler"
+                    step["status"] = STEP_FAILED
+                    step["error"] = message
+                    step["result"] = {"error": message, "code": code}
+                    step["finished_at"] = stamp()
+                    flow["status"] = FLOW_FAILED
+                    self._append_event(
+                        flow,
+                        "step.failed",
+                        actor=str(flow.get("initiator") or ""),
+                        payload={"step": step_id, "error": message, "code": code},
+                    )
+                    break
                 step["status"] = STEP_RUNNING
                 step["started_at"] = stamp()
                 self._append_event(
@@ -215,7 +292,7 @@ class WorkflowEngine:
                     payload={"step": step_id},
                 )
                 try:
-                    result = handler(flow, step) if callable(handler) else {"ok": True}
+                    result = handler(flow, step)
                 except Exception as exc:  # noqa: BLE001 - 单步失败不能留下半截流程
                     step["status"] = STEP_FAILED
                     step["error"] = str(exc)
@@ -330,20 +407,87 @@ class WorkflowEngine:
                 return {"error": message, "code": code}
             if str(step.get("status")) not in {STEP_WAITING, STEP_PENDING}:
                 return {"error": f"步骤“{step_id}”当前不可提交", "code": "workflow.step_not_waiting"}
+            policy = str(step.get("policy") or "auto")
+            result: Any = decision
+            if policy == POLICY_ASK and not _decision_rejected(decision):
+                handler = self._handlers_for(flow_id).get(step_id)
+                if not callable(handler) and step_id in self._handler_steps(flow):
+                    return {
+                        "error": "该步骤的处理器已不可用，请重新发起行动",
+                        "code": "workflow.handler_unavailable",
+                        "flow": flow,
+                    }
+                if callable(handler):
+                    step["status"] = STEP_RUNNING
+                    step["decision"] = decision
+                    self._append_event(
+                        flow,
+                        "step.started",
+                        actor=str(actor or ""),
+                        payload={"step": step_id, "policy": policy},
+                    )
+                    try:
+                        result = handler(flow, step)
+                    except Exception as exc:  # noqa: BLE001 - 决定已收到，失败要显式收尾
+                        step["status"] = STEP_FAILED
+                        step["error"] = str(exc)
+                        step["finished_at"] = stamp()
+                        flow["status"] = FLOW_FAILED
+                        self._append_event(
+                            flow,
+                            "step.failed",
+                            actor=str(actor or ""),
+                            payload={"step": step_id, "error": str(exc)},
+                        )
+                        self._settle(flow, data)
+                        flow_store.save(self.room_dir, data)
+                        return {
+                            "error": str(exc),
+                            "code": "workflow.handler_failed",
+                            "flow": flow,
+                        }
+                    if isinstance(result, Mapping) and result.get("error"):
+                        step["status"] = STEP_FAILED
+                        step["error"] = str(result.get("error"))
+                        step["result"] = dict(result)
+                        step["finished_at"] = stamp()
+                        flow["status"] = FLOW_FAILED
+                        self._append_event(
+                            flow,
+                            "step.failed",
+                            actor=str(actor or ""),
+                            payload={"step": step_id, "error": step["error"]},
+                        )
+                        self._settle(flow, data)
+                        flow_store.save(self.room_dir, data)
+                        return {
+                            "error": step["error"],
+                            "code": "workflow.handler_failed",
+                            "flow": flow,
+                        }
+                    if isinstance(result, Mapping) and isinstance(decision, Mapping):
+                        result = {**dict(result), **dict(decision)}
+                    flow["side_effects"][step_id] = result
+                    self._append_event(
+                        flow,
+                        "side_effect.applied",
+                        actor=str(actor or ""),
+                        payload={"key": step_id, "result": result},
+                    )
             step["status"] = STEP_COMPLETED
-            step["result"] = decision
+            step["result"] = result
+            step["decision"] = decision
             step["finished_at"] = stamp()
-            flow["submissions"][key] = decision
+            flow["submissions"][key] = result
             self._append_event(
                 flow,
                 "step.decided",
                 actor=str(actor or ""),
                 payload={"step": step_id, "idempotency_key": key},
             )
-            self._run_continuation(flow, data)
             self._settle(flow, data)
             flow_store.save(self.room_dir, data)
-            return {"flow": flow, "duplicate": False, "result": decision}
+            return {"flow": flow, "duplicate": False, "result": result}
 
     def cancel(
         self,
@@ -384,6 +528,7 @@ class WorkflowEngine:
                 payload={"reason": str(reason or "")},
             )
             self._release_lock(flow, data)
+            self._clear_handlers(flow)
             flow_store.save(self.room_dir, data)
         return {"flow": flow, "cancelled": True}
 
@@ -487,21 +632,21 @@ class WorkflowEngine:
             },
         )
         if registered:
-            flow["status"] = FLOW_RUNNING
-            self._run_continuation(flow, data)
             self._settle(flow, data)
-            if str(flow.get("status")) == FLOW_RUNNING and not any(
-                str(step.get("status")) in {STEP_PENDING, STEP_WAITING, STEP_RUNNING}
-                for step in flow.get("steps") or []
-            ):
-                flow["status"] = FLOW_COMPLETED
-                self._release_lock(flow, data)
+            if str(flow.get("status")) == FLOW_RUNNING:
+                self._fail_flow(
+                    flow,
+                    data,
+                    "workflow.continuation_incomplete",
+                    "流程超时后续跑器未能完成剩余步骤",
+                )
             return
         flow["status"] = FLOW_EXPIRED
         self._release_lock(flow, data)
+        self._clear_handlers(flow)
 
     def _run_continuation(self, flow: dict[str, Any], data: dict[str, Any]) -> None:
-        """流程收束后执行注册的续跑器；失败则终止流程。"""
+        """流程收束后执行注册的续跑器；状态收尾统一交给 ``_settle``。"""
         metadata = flow.get("metadata") if isinstance(flow.get("metadata"), Mapping) else {}
         name = str(metadata.get("continuation") or "").strip()
         if not name or metadata.get("continuation_done"):
@@ -526,9 +671,10 @@ class WorkflowEngine:
                 actor="system",
                 payload={"continuation": name, "error": str(exc)},
             )
-            self._release_lock(flow, data)
             return
-        metadata = dict(metadata)
+        # 续跑器可能写入 counter_spell 等 metadata；重读后合并，不能整体覆盖。
+        current = flow.get("metadata") if isinstance(flow.get("metadata"), Mapping) else {}
+        metadata = dict(current)
         flow["continuation_result"] = result
         self._append_event(
             flow,
@@ -545,13 +691,12 @@ class WorkflowEngine:
             flow["status"] = FLOW_WAITING
             flow["updated_at"] = stamp()
             flow["expires_at"] = now() + ttl
+            metadata["continuation_done"] = False
+            flow["metadata"] = metadata
             self._schedule_expiry(str(flow.get("id")), ttl)
             return
         metadata["continuation_done"] = True
         flow["metadata"] = metadata
-        if all_steps_settled(flow):
-            flow["status"] = FLOW_COMPLETED
-            self._release_lock(flow, data)
 
     def _schedule_expiry(self, flow_id: str, ttl: int) -> None:
         delay = max(1, int(ttl)) + 0.05
@@ -655,23 +800,148 @@ class WorkflowEngine:
 
     # -- 内部 -------------------------------------------------------------
     def _settle(self, flow: dict[str, Any], data: dict[str, Any]) -> None:
+        """唯一的流程收尾点：先判定失败/等待，再推进续跑器，最后完成。"""
+        failed = any(str(step.get("status")) == STEP_FAILED for step in flow.get("steps") or [])
         waiting = any(
             str(step.get("status")) == STEP_WAITING for step in flow.get("steps") or []
         )
-        failed = any(str(step.get("status")) == STEP_FAILED for step in flow.get("steps") or [])
         if failed:
+            if str(flow.get("status")) != FLOW_FAILED:
+                self._append_event(
+                    flow,
+                    "flow.failed",
+                    actor="system",
+                    payload={"error": str(flow.get("continuation_error") or "")},
+                )
             flow["status"] = FLOW_FAILED
-            self._append_event(flow, "flow.failed", actor="system", payload={})
             self._release_lock(flow, data)
+            self._clear_handlers(flow)
         elif waiting:
             flow["status"] = FLOW_WAITING
+        elif self._continuation_pending(flow):
+            self._run_continuation(flow, data)
+            failed = any(
+                str(step.get("status")) == STEP_FAILED for step in flow.get("steps") or []
+            )
+            waiting = any(
+                str(step.get("status")) == STEP_WAITING for step in flow.get("steps") or []
+            )
+            if failed:
+                if str(flow.get("status")) != FLOW_FAILED:
+                    self._append_event(
+                        flow,
+                        "flow.failed",
+                        actor="system",
+                        payload={"error": str(flow.get("continuation_error") or "")},
+                    )
+                flow["status"] = FLOW_FAILED
+                self._release_lock(flow, data)
+                self._clear_handlers(flow)
+            elif waiting:
+                flow["status"] = FLOW_WAITING
+            elif all_steps_settled(flow):
+                self._mark_completed(flow, data)
+            else:
+                self._fail_flow(
+                    flow,
+                    data,
+                    "workflow.continuation_incomplete",
+                    "续跑器没有补齐后续步骤",
+                )
         elif all_steps_settled(flow):
-            flow["status"] = FLOW_COMPLETED
-            self._append_event(flow, "flow.completed", actor="system", payload={})
-            self._release_lock(flow, data)
+            self._mark_completed(flow, data)
+        elif self._continuation_declared(flow):
+            name = str((flow.get("metadata") or {}).get("continuation") or "").strip()
+            self._fail_flow(
+                flow,
+                data,
+                "workflow.continuation_unavailable",
+                f"续跑器 {name} 未注册或不可用",
+            )
         else:
             flow["status"] = FLOW_RUNNING
         flow["updated_at"] = stamp()
+
+    def _mark_completed(self, flow: dict[str, Any], data: dict[str, Any]) -> None:
+        if str(flow.get("status")) != FLOW_COMPLETED:
+            flow["status"] = FLOW_COMPLETED
+            self._append_event(flow, "flow.completed", actor="system", payload={})
+        self._release_lock(flow, data)
+        self._clear_handlers(flow)
+
+    def _fail_flow(
+        self,
+        flow: dict[str, Any],
+        data: dict[str, Any],
+        code: str,
+        message: str,
+    ) -> None:
+        for step in flow.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            if str(step.get("status")) in {STEP_PENDING, STEP_WAITING, STEP_RUNNING}:
+                step["status"] = STEP_SKIPPED
+                step["finished_at"] = stamp()
+        flow["status"] = FLOW_FAILED
+        flow["continuation_error"] = message
+        self._append_event(
+            flow,
+            "flow.failed",
+            actor="system",
+            payload={"code": code, "error": message},
+        )
+        self._release_lock(flow, data)
+        self._clear_handlers(flow)
+
+    def _continuation_declared(self, flow: Mapping[str, Any]) -> bool:
+        metadata = flow.get("metadata") if isinstance(flow.get("metadata"), Mapping) else {}
+        return bool(str(metadata.get("continuation") or "").strip())
+
+    def _continuation_pending(self, flow: Mapping[str, Any]) -> bool:
+        metadata = flow.get("metadata") if isinstance(flow.get("metadata"), Mapping) else {}
+        name = str(metadata.get("continuation") or "").strip()
+        if not name or metadata.get("continuation_done"):
+            return False
+        from trpg_server.workflows import continuations
+
+        if not continuations.has(name):
+            return False
+        if any(
+            str(step.get("status")) in {STEP_WAITING, STEP_FAILED}
+            for step in flow.get("steps") or []
+        ):
+            return False
+        return any(
+            str(step.get("status")) == STEP_PENDING for step in flow.get("steps") or []
+        )
+
+    def _remember_handlers(
+        self,
+        flow: dict[str, Any],
+        handlers: Mapping[str, StepHandler] | None,
+    ) -> None:
+        if not handlers:
+            return
+        with _HANDLERS_LOCK:
+            _HANDLERS[_handler_key(self.room_dir, flow.get("id"))] = dict(handlers)
+        metadata = dict(flow.get("metadata") or {})
+        known = {str(item) for item in metadata.get("handler_steps") or [] if str(item)}
+        known.update(str(item) for item in handlers)
+        metadata["handler_steps"] = sorted(known)
+        flow["metadata"] = metadata
+
+    def _handlers_for(self, flow_id: Any) -> dict[str, StepHandler]:
+        with _HANDLERS_LOCK:
+            return dict(_HANDLERS.get(_handler_key(self.room_dir, flow_id)) or {})
+
+    @staticmethod
+    def _handler_steps(flow: Mapping[str, Any]) -> set[str]:
+        metadata = flow.get("metadata") if isinstance(flow.get("metadata"), Mapping) else {}
+        return {str(item) for item in metadata.get("handler_steps") or [] if str(item)}
+
+    def _clear_handlers(self, flow: Mapping[str, Any]) -> None:
+        with _HANDLERS_LOCK:
+            _HANDLERS.pop(_handler_key(self.room_dir, flow.get("id")), None)
 
     def _release_lock(self, flow: Mapping[str, Any], data: dict[str, Any]) -> None:
         flow_store.release_character_lock(

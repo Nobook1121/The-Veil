@@ -528,6 +528,54 @@ def test_shield_not_offered_on_miss(tmp_path, plugins):
     assert WorkflowEngine(tmp_path).list(status="waiting") == []
 
 
+def test_shield_reaction_auto_resolves_without_waiting(tmp_path, plugins):
+    """生产攻击路径必须透传 reaction 策略：auto 时不停窗口，直接结算。"""
+    context = _combat_context(tmp_path, [_wizard_card()])
+    _arm_shield(context)
+    WorkflowEngine(tmp_path).set_policy({"reaction": {"kp": "auto"}})
+    hp_before = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
+    resolved = combat_tools.attack_combatant(
+        {
+            "attacker": "Mira",
+            "target": "Goblin",
+            "attack_roll": 18,
+            "request_id": "atk-shield-auto",
+        },
+        context,
+    )
+    assert resolved.get("status") == "resolved", resolved
+    assert resolved.get("success") is True
+    combat = combat_tools._load_combat(context)
+    assert combat["combatants"]["Goblin"]["hp"] < hp_before
+    assert combat["combatants"]["Goblin"]["spell_slots"]["1"]["used"] == 0
+    assert combat["combatants"]["Goblin"]["budget"]["reaction"] == 1
+    assert WorkflowEngine(tmp_path).list(status="waiting") == []
+
+
+def test_counter_spell_reaction_auto_resolves_without_waiting(tmp_path, plugins):
+    """生产施法路径必须透传 reaction 策略：auto 时反制候选不阻断施法。"""
+    context = _combat_context(tmp_path, [_wizard_card()])
+    _arm_counter_spell(context)
+    WorkflowEngine(tmp_path).set_policy({"reaction": {"kp": "auto"}})
+    hp_before = combat_tools._load_combat(context)["combatants"]["Goblin"]["hp"]
+    resolved = spell_tools.cast_spell(
+        {
+            "caster": "Mira",
+            "spell": "magic-missile",
+            "targets": ["Goblin"],
+            "slot_level": 1,
+            "request_id": "cast-auto-reaction",
+        },
+        context,
+    )
+    assert resolved.get("status") == "resolved", resolved
+    assert resolved.get("countered") is not True
+    combat = combat_tools._load_combat(context)
+    assert combat["combatants"]["Goblin"]["hp"] < hp_before
+    assert combat["combatants"]["Rival"]["spell_slots"]["3"]["used"] == 0
+    assert WorkflowEngine(tmp_path).list(status="waiting") == []
+
+
 def test_reaction_timeout_uses_default_and_continues(tmp_path, plugins):
     context = _combat_context(tmp_path, [_wizard_card()])
     _arm_counter_spell(context)
