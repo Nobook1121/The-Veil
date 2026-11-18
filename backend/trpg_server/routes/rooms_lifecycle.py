@@ -1,4 +1,6 @@
 """房间生命周期路由：创建/加入/查询/场景切换/删除/归档/邀请令牌。"""
+from typing import Any
+
 from flask import current_app
 from flask import request
 from flask import session
@@ -434,8 +436,8 @@ def get_room_usage(room_id):
         return _denied(room_id)
     return success_response(load_room_usage(room_dir, str(room_id)), "Room usage loaded successfully")
 
-class RulesetSwitchBlocked(Exception):
-    """规则集切换被房间状态拒绝（例如战斗进行中）。"""
+COMBAT_ARCHIVE_FILENAME = "combat_archive.json"
+MAX_COMBAT_ARCHIVES = 20
 
 
 def _has_active_combat(room_dir) -> bool:
@@ -444,23 +446,129 @@ def _has_active_combat(room_dir) -> bool:
     return isinstance(combat, dict) and bool(combat.get("active"))
 
 
-def _apply_ruleset_switch(info, target_ruleset_id, room_dir=None):
-    """规则集切换事务：快照旧命名空间、初始化新默认、暂停不兼容绑定。
+def _archive_active_combat(room_dir, *, reason: str, actor: str = "") -> dict | None:
+    """把进行中的战斗快照写入独立的归档文件，并就地标记战斗已结束。
 
-    返回 ``(old_ruleset_id, new_ruleset_id, paused_bindings)``；调用方负责落盘与广播。
-    规则集未变化时原样返回，不触碰房规与绑定。
-    切换目标与当前规则集不同且房间有进行中的战斗时，抛 ``RulesetSwitchBlocked``，
-    避免静默丢弃战斗状态。
+    归档不写回 room state 的默认字段，因此后续剧本切换重置 ``state.json`` 时
+    仍然保留；最多保留最近 ``MAX_COMBAT_ARCHIVES`` 场。
+    """
+    from pathlib import Path
+
+    archived: dict[str, Any] = {}
+
+    def _archive(state: dict[str, Any]) -> dict[str, Any]:
+        combat = state.get("combat")
+        if not isinstance(combat, dict) or not combat.get("active"):
+            return state
+        moment = _timestamp()
+        path = Path(room_dir) / COMBAT_ARCHIVE_FILENAME
+        raw = read_json(path, default={})
+        rows = raw.get("archived") if isinstance(raw, dict) else None
+        rows = list(rows) if isinstance(rows, list) else []
+        rows.append(
+            {
+                "archived_at": moment,
+                "reason": reason,
+                "actor": str(actor or ""),
+                "combat": combat,
+            }
+        )
+        write_json_atomic(
+            path,
+            {"schema": 1, "archived": rows[-MAX_COMBAT_ARCHIVES:]},
+        )
+        archived["combat"] = combat
+        state["combat"] = {
+            **combat,
+            "active": False,
+            "ended_at": moment,
+            "ended_reason": reason,
+        }
+        return state
+
+    mutate_room_state(room_dir, _archive)
+    return archived.get("combat")
+
+
+def _cancel_open_workflows(room_dir, *, reason: str) -> list[str]:
+    """取消房间内所有未结束流程，包括等待中的反应窗口与豁免。"""
+    from trpg_server.workflows import store as flow_store
+    from trpg_server.workflows.engine import WorkflowEngine
+    from trpg_server.workflows.model import TERMINAL_STATUSES
+
+    data = flow_store.load(room_dir)
+    flow_ids = [
+        str(flow_id)
+        for flow_id, flow in (data.get("flows") or {}).items()
+        if isinstance(flow, dict) and str(flow.get("status")) not in TERMINAL_STATUSES
+    ]
+    if not flow_ids:
+        return []
+    engine = WorkflowEngine(room_dir)
+    cancelled: list[str] = []
+    for flow_id in flow_ids:
+        result = engine.cancel(
+            flow_id,
+            actor="system:ruleset_switch",
+            reason=reason,
+            is_manager=True,
+        )
+        if result.get("cancelled"):
+            cancelled.append(flow_id)
+    return cancelled
+
+
+def _end_active_areas(room_dir, *, reason: str) -> list[str]:
+    """结束所有场景的持续区域；区域随规则集切换失效，但保留结束原因。"""
+    from trpg_server.workflows import areas as area_store
+
+    ended: list[str] = []
+    for area in area_store.list_areas(room_dir, scene_id="", active_only=True):
+        area_id = str(area.get("id") or "")
+        if not area_id:
+            continue
+        result = area_store.remove_area(room_dir, area_id, reason=reason)
+        if not result.get("error"):
+            ended.append(area_id)
+    return ended
+
+
+def _clear_combat_state_for_switch(room_dir, *, actor: str = "") -> dict[str, Any]:
+    """切换规则集前结束旧规则集的战斗、流程与持续区域。"""
+    reason = "ruleset_switch"
+    combat = _archive_active_combat(room_dir, reason=reason, actor=actor)
+    cancelled = _cancel_open_workflows(room_dir, reason=reason)
+    ended_areas = _end_active_areas(room_dir, reason=reason)
+    return {
+        "combat_archived": bool(combat),
+        "cancelled_workflows": len(cancelled),
+        "ended_areas": len(ended_areas),
+    }
+
+
+def _apply_ruleset_switch(info, target_ruleset_id, room_dir=None, *, actor: str = ""):
+    """规则集切换事务：结束旧规则集状态、快照旧命名空间、初始化新默认、暂停不兼容绑定。
+
+    返回 ``(old_ruleset_id, new_ruleset_id, paused_bindings, cleanup)``；调用方负责
+    落盘与广播。规则集未变化时原样返回，不触碰房规与绑定。
+
+    切换目标与当前规则集不同且房间有进行中的战斗时，不再拒绝切换，而是按顺序
+    归档战斗、取消等待中的工作流/反应窗口、结束持续区域，再执行命名空间迁移。
     """
     current_ruleset_id = active_ruleset_id(info)
     target = str(target_ruleset_id or "").strip().lower()
-    if room_dir is not None and target and target != current_ruleset_id and _has_active_combat(room_dir):
-        raise RulesetSwitchBlocked("战斗进行中，不能切换规则集；请先结束战斗再切换。")
+    cleanup: dict[str, Any] = {
+        "combat_archived": False,
+        "cancelled_workflows": 0,
+        "ended_areas": 0,
+    }
+    if room_dir is not None and target and target != current_ruleset_id:
+        cleanup = _clear_combat_state_for_switch(room_dir, actor=actor)
     old_ruleset_id, new_ruleset_id = switch_namespaces(info, target_ruleset_id)
     if old_ruleset_id == new_ruleset_id:
-        return old_ruleset_id, new_ruleset_id, []
+        return old_ruleset_id, new_ruleset_id, [], cleanup
     paused = pause_incompatible_bindings(info, new_ruleset_id)
-    return old_ruleset_id, new_ruleset_id, paused
+    return old_ruleset_id, new_ruleset_id, paused, cleanup
 
 
 @bp.route("/api/rooms/<room_id>/scenario-migration", methods=["POST"])
@@ -499,10 +607,9 @@ def migrate_room_scenario(room_id):
     target_ruleset_id = builtin_registry().resolve(
         str(target.get("ruleset_id") or updated.get("ruleset_id") or "")
     ).id
-    try:
-        old_ruleset_id, new_ruleset_id, paused = _apply_ruleset_switch(updated, target_ruleset_id, room_dir)
-    except RulesetSwitchBlocked as exc:
-        return error_response(str(exc), 409, "Combat in progress")
+    old_ruleset_id, new_ruleset_id, paused, cleanup = _apply_ruleset_switch(
+        updated, target_ruleset_id, room_dir, actor=session.get("username")
+    )
     updated["ruleset_id"] = new_ruleset_id
     _write_room(room_dir, updated)
     if old_ruleset_id != new_ruleset_id:
@@ -516,8 +623,12 @@ def migrate_room_scenario(room_id):
             原规则集=old_ruleset_id,
             新规则集=new_ruleset_id,
             暂停绑定=len(paused),
+            **cleanup,
         )
-    return success_response(_room_summary(updated), "Room migrated to scenario version")
+    data = _room_summary(updated)
+    if any(cleanup.values()):
+        data["ruleset_switch"] = cleanup
+    return success_response(data, "Room migrated to scenario version")
 
 def _first_scene(target: dict) -> dict | None:
     """取剧本的第一个场景模块，作为换绑后的开场场景指针。"""
@@ -567,10 +678,9 @@ def switch_room_scenario(room_id):
     updated["scenario_version"] = str(target.get("scenario_version") or target.get("version") or "1")
     updated["scenario_title"] = str(target.get("title") or payload.get("scenario_title") or "").strip() or f"剧本 {target_id}"
     target_ruleset_id = builtin_registry().resolve(str(target.get("ruleset_id") or "")).id
-    try:
-        old_ruleset_id, new_ruleset_id, paused = _apply_ruleset_switch(updated, target_ruleset_id, room_dir)
-    except RulesetSwitchBlocked as exc:
-        return error_response(str(exc), 409, "Combat in progress")
+    old_ruleset_id, new_ruleset_id, paused, cleanup = _apply_ruleset_switch(
+        updated, target_ruleset_id, room_dir, actor=session.get("username")
+    )
     updated["ruleset_id"] = new_ruleset_id
     # 场景指针：继承进度时，只要旧场景在新剧本中仍存在就保留，避免打断当前场景；
     # 否则回退到新剧本的第一个场景。
@@ -627,12 +737,20 @@ def switch_room_scenario(room_id):
         原剧本=previous_title,
         新剧本=updated["scenario_title"],
         **(
-            {"原规则集": old_ruleset_id, "新规则集": new_ruleset_id, "暂停绑定": len(paused)}
+            {
+                "原规则集": old_ruleset_id,
+                "新规则集": new_ruleset_id,
+                "暂停绑定": len(paused),
+                **cleanup,
+            }
             if old_ruleset_id != new_ruleset_id
             else {}
         ),
     )
-    return success_response(_room_summary(updated), "Room scenario switched")
+    data = _room_summary(updated)
+    if any(cleanup.values()):
+        data["ruleset_switch"] = cleanup
+    return success_response(data, "Room scenario switched")
 
 @bp.route("/api/rooms/<room_id>/spectate", methods=["GET"])
 def spectate_room(room_id):

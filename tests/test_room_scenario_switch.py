@@ -32,7 +32,7 @@ def _login(client, role="ADMIN", user_id=1):
         session.update(user_id=user_id, username="tester", role=role, session_token="token", csrf_token="csrf")
 
 
-def _write_scenario(tmp_path, scenario_id, title, scene_id, scenario_version="1.0.0"):
+def _write_scenario(tmp_path, scenario_id, title, scene_id, scenario_version="1.0.0", ruleset_id=None):
     """写入一个最小的剧本描述文件；场景 id 会被归一化为整数（与真实剧本一致）。"""
     scenarios_dir = tmp_path / "scenarios"
     scenarios_dir.mkdir(parents=True, exist_ok=True)
@@ -42,6 +42,8 @@ def _write_scenario(tmp_path, scenario_id, title, scene_id, scenario_version="1.
         "scenario_version": scenario_version,
         "modules": [{"id": scene_id, "module_type": "scene", "title": f"{title} 开场"}],
     }
+    if ruleset_id:
+        payload["ruleset_id"] = ruleset_id
     (scenarios_dir / f"{scenario_id}.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
@@ -114,6 +116,65 @@ def test_switch_room_scenario_rebinds_and_resets_progress(tmp_path):
     assert state["triggered_event_ids"] == []
     # 检索游标按剧本绑定，换绑后应被删除。
     assert not (room_dir / "knowledge_cursor.json").exists()
+
+
+def test_switch_room_scenario_archives_combat_and_cancels_pending_state(tmp_path):
+    """切换规则集不再 409：归档战斗、取消等待流程、结束区域，然后完成换绑。"""
+    from trpg_server.workflows import areas as area_store
+    from trpg_server.workflows.engine import WorkflowEngine
+    from trpg_server.workflows.model import FLOW_CANCELLED, make_step
+
+    room_dir, _ = _write_room(
+        tmp_path,
+        ruleset_id="dnd5e",
+        scenario_id=1,
+        scenario_title="旧剧本",
+        scenario_version="1.0.0",
+    )
+    (room_dir / "state.json").write_text(
+        json.dumps({"combat": {"active": True, "round": 2, "combatants": {"Aria": {"hp": 9}}}}),
+        encoding="utf-8",
+    )
+    flow, _error, _created = WorkflowEngine(room_dir).open(
+        kind="cast",
+        initiator="Aria",
+        initiator_type="player",
+        steps=[make_step("resolve", "法术结算", policy="manual", executor="player")],
+        ttl=600,
+    )
+    area_store.create_area(
+        room_dir,
+        {
+            "name": "Moonbeam",
+            "shape": "cylinder",
+            "size_ft": 10,
+            "origin": {"cell_x": 2, "cell_y": 2},
+            "duration": {"unit": "round", "rounds": 10},
+        },
+    )
+    _write_scenario(tmp_path, 2, "新剧本", 202, ruleset_id="coc7")
+
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client)
+    response = client.post(
+        "/api/rooms/r-1/scenario-switch",
+        json={"scenario_id": 2, "scenario_title": "新剧本"},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+
+    assert response.status_code == 200, response.get_json()
+    data = response.get_json()["data"]
+    assert data["ruleset_id"] == "coc7"
+    assert data["ruleset_switch"] == {
+        "combat_archived": True,
+        "cancelled_workflows": 1,
+        "ended_areas": 1,
+    }
+    archive = json.loads((room_dir / "combat_archive.json").read_text(encoding="utf-8"))
+    assert archive["archived"][0]["reason"] == "ruleset_switch"
+    assert WorkflowEngine(room_dir).get(flow["id"], expire=False)["status"] == FLOW_CANCELLED
+    assert area_store.list_areas(room_dir, scene_id="", active_only=True) == []
 
 
 def test_switch_room_scenario_preserve_progress_keeps_state(tmp_path):

@@ -367,22 +367,58 @@ def test_turn_model_budget_shape(plugins):
 # ---------------------------------------------------------------------------
 # 规则集切换拦截
 # ---------------------------------------------------------------------------
-def test_switch_is_blocked_while_combat_active(tmp_path, plugins):
-    from trpg_server.routes.rooms_lifecycle import RulesetSwitchBlocked, _apply_ruleset_switch
+def test_switch_clears_combat_workflows_and_areas(tmp_path, plugins):
+    from trpg_server.workflows import areas as area_store
+    from trpg_server.workflows.engine import WorkflowEngine
+    from trpg_server.workflows.model import FLOW_CANCELLED, make_step
+
+    from trpg_server.routes.rooms_lifecycle import _apply_ruleset_switch
 
     info = {"ruleset_id": "dnd5e", "house_rules": {"by_ruleset": {"dnd5e": {}, "coc7": {}}}}
     (tmp_path / "state.json").write_text(
-        json.dumps({"combat": {"active": True, "round": 1}}), encoding="utf-8"
+        json.dumps({"combat": {"active": True, "round": 3, "combatants": {"Aria": {"hp": 12}}}}),
+        encoding="utf-8",
     )
-    with pytest.raises(RulesetSwitchBlocked):
-        _apply_ruleset_switch(info, "coc7", tmp_path)
+    flow, _error, _created = WorkflowEngine(tmp_path).open(
+        kind="cast",
+        initiator="Aria",
+        initiator_type="player",
+        steps=[make_step("resolve", "法术结算", policy="manual", executor="player")],
+        ttl=600,
+    )
+    area = area_store.create_area(
+        tmp_path,
+        {
+            "name": "Spike Growth",
+            "shape": "sphere",
+            "size_ft": 20,
+            "origin": {"cell_x": 0, "cell_y": 0},
+            "duration": {"unit": "round", "rounds": 10},
+        },
+    )["area"]
 
-    # 同一规则集不受影响（例如版本迁移/保存）。
-    _apply_ruleset_switch(info, "dnd5e", tmp_path)
-
-    (tmp_path / "state.json").write_text(json.dumps({"combat": None}), encoding="utf-8")
-    old, new, _paused = _apply_ruleset_switch(info, "coc7", tmp_path)
+    old, new, _paused, cleanup = _apply_ruleset_switch(info, "coc7", tmp_path)
     assert (old, new) == ("dnd5e", "coc7")
+    assert cleanup == {
+        "combat_archived": True,
+        "cancelled_workflows": 1,
+        "ended_areas": 1,
+    }
+
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["combat"]["active"] is False
+    assert state["combat"]["ended_reason"] == "ruleset_switch"
+    archive = json.loads((tmp_path / "combat_archive.json").read_text(encoding="utf-8"))
+    assert archive["archived"][0]["combat"]["round"] == 3
+    assert WorkflowEngine(tmp_path).get(flow["id"], expire=False)["status"] == FLOW_CANCELLED
+    assert area_store.list_areas(tmp_path) == []
+    assert area["id"] not in {item["id"] for item in area_store.list_areas(tmp_path, active_only=False)}
+
+    # 同一规则集不受影响（例如版本迁移/保存），不会再次归档。
+    _old, _new, _paused, noop = _apply_ruleset_switch(info, "coc7", tmp_path)
+    assert noop == {"combat_archived": False, "cancelled_workflows": 0, "ended_areas": 0}
+    archive_again = json.loads((tmp_path / "combat_archive.json").read_text(encoding="utf-8"))
+    assert len(archive_again["archived"]) == 1
 
 
 # ---------------------------------------------------------------------------
