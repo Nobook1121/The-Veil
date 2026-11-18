@@ -184,6 +184,16 @@
         return self?.room_role === "owner" || self?.room_role === "admin";
     }
 
+    /** 场景内容（棋子 / 墙体 / 地图设置）由模组决定：玩家侧直接收起这些入口。 */
+    function syncDmOnlyTools(): void {
+        const dm = isDm();
+        document.querySelectorAll<HTMLElement>("[data-ws-dm-only]").forEach((button) => {
+            button.hidden = !dm;
+            button.setAttribute("aria-hidden", dm ? "false" : "true");
+            button.tabIndex = dm ? 0 : -1;
+        });
+    }
+
     async function loadWorkspaces(): Promise<void> {
         if (rowsRequest) return rowsRequest;
         rowsRequest = (async () => {
@@ -1341,6 +1351,7 @@
             spec = null;
             applyLayout("conversation");
             refreshTopbar(null);
+            syncDmOnlyTools();
             return;
         }
 
@@ -1349,6 +1360,7 @@
         spec = specFor(roomRulesetId(room));
         applyLayout(resolveLayout(room));
         refreshTopbar(room);
+        syncDmOnlyTools();
     }
 
     async function refresh(): Promise<void> {
@@ -1361,8 +1373,12 @@
             const detail = (event as CustomEvent<{ room?: Room | null }>).detail;
             void onRoomChanged(detail?.room || null);
         });
+        window.addEventListener("trpg:user-changed", () => {
+            syncDmOnlyTools();
+        });
         window.addEventListener("trpg:room-meta", (event) => {
             const detail = (event as CustomEvent<{ room?: Room | null }>).detail;
+            syncDmOnlyTools();
             if (layout === "canvas") {
                 refreshTopbar(detail?.room || activeRoom());
                 emitPluginEvent("members", detail?.room || activeRoom());
@@ -1447,6 +1463,10 @@
             syncResponsiveState();
         });
         byId<HTMLElement>("wsSceneButton")?.addEventListener("click", () => {
+            if (!isDm()) {
+                window.showNotification?.("场景内容由模组（房主或房管）管理。", "info");
+                return;
+            }
             if (stagePlugin) {
                 emitPluginEvent("tool", { tool: "scene" });
                 return;
@@ -1466,6 +1486,10 @@
         document.querySelectorAll<HTMLElement>("[data-ws-tool]").forEach((button) => {
             button.addEventListener("click", () => {
                 const tool = String(button.dataset.wsTool || "");
+                if (button.dataset.wsDmOnly === "true" && !isDm()) {
+                    window.showNotification?.("场景内容由模组（房主或房管）添加，玩家不能放置棋子、墙体或地图物件。", "info");
+                    return;
+                }
                 if (tool === "grid") {
                     showGrid = !showGrid;
                     button.classList.toggle("is-active", showGrid);

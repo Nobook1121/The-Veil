@@ -585,20 +585,8 @@
             context.restore();
         }
 
-        /** 0 → A，25 → Z，26 → AA；原点左侧的 -1 → -A，-26 → -Z。 */
-        function columnLabel(index) {
-            var value = Math.floor(index);
-            if (value < 0) return "-" + columnLabel(-value - 1);
-            var text = "";
-            do {
-                text = String.fromCharCode(65 + (value % 26)) + text;
-                value = Math.floor(value / 26) - 1;
-            } while (value >= 0);
-            return text;
-        }
-
-        /** 行号以地图左上角为 1；跑到地图外时保持连续（0、-1…）。 */
-        function rowLabel(index) {
+        /** 横纵坐标统一用数字：左上角为 1；原点左侧 / 上方为 0、-1…，保持连续。 */
+        function axisLabel(index) {
             return String(index >= 0 ? index + 1 : index);
         }
 
@@ -609,7 +597,7 @@
         }
 
         /**
-         * 视口坐标尺：上沿列字母、左沿行号，与网格标定（grid_size/grid_offset）同源。
+         * 视口坐标尺：上沿列号、左沿行号，均为数字，与网格标定（grid_size/grid_offset）同源。
          * 画在棋子之前，棋子会盖住标签边缘，不会出现浮层挡住棋子。
          * 格子太小时按固定列间隔抽样，避免标签糊成一片。
          */
@@ -649,12 +637,12 @@
             for (var col = firstCol; col <= lastCol; col += 1) {
                 if (((col % step) + step) % step !== 0) continue;
                 var screenX = ctx.worldToScreen(offset.x + col * grid, 0).x + cellPx / 2;
-                paintChip(columnLabel(col + half), screenX, 10);
+                paintChip(axisLabel(col + half), screenX, 10);
             }
             for (var row = firstRow; row <= lastRow; row += 1) {
                 if (((row % step) + step) % step !== 0) continue;
                 var screenY = ctx.worldToScreen(0, offset.y + row * grid).y + cellPx / 2;
-                var text = rowLabel(row + half);
+                var text = axisLabel(row + half);
                 var chipWidth = Math.ceil(context.measureText(text).width) + 8;
                 paintChip(text, 4 + chipWidth / 2, screenY);
             }

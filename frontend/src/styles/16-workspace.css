@@ -142,6 +142,13 @@ body:has(.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"]) {
     border-color: var(--border-subtle, rgba(255, 255, 255, 0.08));
 }
 
+/* 场景内容入口按角色隐藏：flex 布局会覆盖原生 [hidden]，这里显式兜底。 */
+.ws-rail-btn[hidden],
+.ws-topbar-icon[hidden],
+.ws-topbar-btn[hidden] {
+    display: none !important;
+}
+
 .ws-topbar-players {
     display: flex;
     align-items: center;

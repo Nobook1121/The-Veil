@@ -144,7 +144,7 @@ export function HomeChat() {
                 */}
                 <header className="ws-chrome ws-topbar" id="wsTopbar" aria-label="房间桌面条">
                     <div className="ws-topbar-scene">
-                        <button type="button" className="ws-topbar-icon" id="wsSceneButton" title="场景" aria-label="场景">
+                        <button type="button" className="ws-topbar-icon" id="wsSceneButton" title="场景（DM）" aria-label="场景" data-ws-dm-only="true">
                             <i className="fa fa-map-o" aria-hidden="true" />
                         </button>
                         <strong className="ws-topbar-title" id="wsSceneName">未加入房间</strong>
