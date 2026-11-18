@@ -49,7 +49,7 @@ def _login(client, role="ADMIN", user_id=1):
         session.update(user_id=user_id, username="tester", role=role, session_token="token", csrf_token="csrf")
 
 
-def _write_scenario(tmp_path, scenario_id, title, scene_id, scenario_version="1.0.0"):
+def _write_scenario(tmp_path, scenario_id, title, scene_id, scenario_version="1.0.0", ruleset_id=None):
     scenarios_dir = tmp_path / "scenarios"
     scenarios_dir.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -58,6 +58,8 @@ def _write_scenario(tmp_path, scenario_id, title, scene_id, scenario_version="1.
         "scenario_version": scenario_version,
         "modules": [{"id": scene_id, "module_type": "scene", "title": f"{title} 开场"}],
     }
+    if ruleset_id:
+        payload["ruleset_id"] = ruleset_id
     (scenarios_dir / f"{scenario_id}.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
@@ -98,6 +100,33 @@ def test_create_freeform_room_rejects_scenario(tmp_path):
     _login(client)
     response = _post_room(client, {"name": "自由房", "room_mode": "freeform", "scenario_id": 1})
     assert response.status_code == 400, response.get_json()
+
+
+def test_create_room_fails_loudly_when_scenario_ruleset_is_unavailable(tmp_path, monkeypatch):
+    """5e 插件未启用时不能用 5e 剧本静默建出 CoC7 房间。"""
+    from trpg_server.ruleset import RulesetSelectionError, builtin_registry
+
+    _write_scenario(tmp_path, "demo-5e", "5e 演示", 501, ruleset_id="dnd5e")
+    client = _app(tmp_path).test_client()
+    _login(client)
+    # 应用初始化会重建注册表，必须在 _app 之后取当前实例再打补丁。
+    registry = builtin_registry()
+    original_resolve = registry.resolve
+
+    def resolve(ruleset_id=None):
+        if str(ruleset_id or "").strip().lower() == "dnd5e":
+            raise RulesetSelectionError(
+                "dnd5e", "规则集 dnd5e 当前不可用", "ruleset_unavailable"
+            )
+        return original_resolve(ruleset_id)
+
+    monkeypatch.setattr(registry, "resolve", resolve)
+    response = _post_room(client, {"name": "5e 房", "scenario_id": "demo-5e"})
+    assert response.status_code == 400, response.get_json()
+    body = response.get_json()
+    assert body["error"] == "ruleset_unavailable", body
+    assert "dnd5e" in body["message"]
+    assert not list((tmp_path / "rooms").glob("*/info.json"))
 
 
 def test_create_freeform_room_has_no_scenario_and_ai_enabled(tmp_path):

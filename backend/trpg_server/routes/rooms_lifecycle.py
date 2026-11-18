@@ -144,6 +144,36 @@ def create_room():
             403,
             "Room creation limit reached",
         )
+    # 剧本规则集必须先于角色卡与房间快照解析：否则 5e 剧本失败时会被静默
+    # 降级成默认规则集，建出一个“5e 剧本 + CoC7 房间/角色卡”的混合体。
+    bound_scenario: dict | None = None
+    if room_mode == ROOM_MODE_SCRIPTED:
+        try:
+            _, bound_scenario = load_scenario_by_id(
+                current_app.config.get("SCENARIOS_DIR", SCENARIOS_DIR), scenario_id
+            )
+        except Exception:
+            logger.exception("Failed to load bound scenario")
+            bound_scenario = None
+        if bound_scenario:
+            scenario_ruleset = str(bound_scenario.get("ruleset_id") or "").strip()
+            if scenario_ruleset:
+                try:
+                    scenario_plugin = builtin_registry().resolve(scenario_ruleset)
+                except RulesetSelectionError as exc:
+                    return error_response(
+                        f"剧本需要规则集“{scenario_ruleset}”，但当前不可用：{exc.message}",
+                        400,
+                        exc.reason_code,
+                    )
+                if requested_ruleset and scenario_plugin.id != ruleset_id:
+                    return error_response(
+                        "房间规则集必须与剧本一致",
+                        400,
+                        "ruleset_mismatch",
+                    )
+                ruleset_id = scenario_plugin.id
+
     room_id = uuid4().hex
     room_dir = _room_dir(room_id)
     # 目录由建房方显式创建：房间锁不再替调用方 mkdir（否则已删除的房间会被
@@ -178,30 +208,25 @@ def create_room():
     # Pin a deterministic starting scene in room state. The KP receives this
     # pointer and can only move it via room.activate_scenario_scene.
     # 只有 scripted 房间需要场景指针；freeform 无剧本，manual 不跑 AI 流程。
-    if room_mode == ROOM_MODE_SCRIPTED:
+    if bound_scenario:
         try:
-            from trpg_server.scenario_store import load_scenario_by_id
-            _, bound_scenario = load_scenario_by_id(
-                current_app.config.get("SCENARIOS_DIR", SCENARIOS_DIR), scenario_id
+            info["scenario_version"] = str(
+                bound_scenario.get("scenario_version")
+                or bound_scenario.get("version")
+                or "1"
             )
-            if bound_scenario:
-                scenario_ruleset = str(bound_scenario.get("ruleset_id") or "").strip()
-                if scenario_ruleset:
-                    scenario_plugin = builtin_registry().resolve(scenario_ruleset)
-                    if requested_ruleset and scenario_plugin.id != ruleset_id:
-                        return error_response(
-                            "房间规则集必须与剧本一致",
-                            400,
-                            "ruleset_mismatch",
-                        )
-                    ruleset_id = scenario_plugin.id
-                    info["ruleset_id"] = ruleset_id
-                info["scenario_version"] = str(bound_scenario.get("scenario_version") or bound_scenario.get("version") or "1")
-                scene = next((m for m in bound_scenario.get("modules", [])
-                              if isinstance(m, dict) and str(m.get("module_type")) == "scene"), None)
-                if scene:
-                    info["active_scene_id"] = str(scene.get("scene_id") or scene.get("id"))
-                    info["active_scene_title"] = scene.get("title")
+            scene = next(
+                (
+                    module
+                    for module in bound_scenario.get("modules", [])
+                    if isinstance(module, dict)
+                    and str(module.get("module_type")) == "scene"
+                ),
+                None,
+            )
+            if scene:
+                info["active_scene_id"] = str(scene.get("scene_id") or scene.get("id"))
+                info["active_scene_title"] = scene.get("title")
         except Exception:
             logger.exception("Failed to initialize room active scene")
     # 与加入房间共用同一把占用锁：建房也会绑定角色卡，同一张卡不能同时存在于两个房间。

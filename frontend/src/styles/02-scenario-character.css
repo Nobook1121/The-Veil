@@ -3757,6 +3757,14 @@ body.is-guest .guest-login-hint {
     display: none;
 }
 
+.room-scenario-ruleset-hint {
+    margin-top: 6px;
+    color: var(--color-muted);
+    font-size: 0.76rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
 @media (max-width: 576px) {
     .room-scenario-dropdown {
         max-height: min(50vh, 300px);

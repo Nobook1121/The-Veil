@@ -41,7 +41,9 @@ let roomEntryRulesetId = "";
 const roomActionLocks = new Set<string>();
 // 创建房间弹窗的剧本选择器状态（点击后展开下拉搜索，避免结果撑高弹窗）。
 let roomScenarioPickerScenarios: Scenario[] = [];
-let roomScenarioPickerSelected: { id: number; title: string } | null = null;
+// 剧本 id 既可能是数字（常规剧本），也可能是字符串（如仓库里的 5e 演示剧本），
+// 不能只按数字解析，否则这类剧本会渲染出来却无法选中。
+let roomScenarioPickerSelected: { id: string | number; title: string } | null = null;
 // 键盘导航当前高亮项；默认落在已选项或第一项。
 let roomScenarioActiveIndex = 0;
 
@@ -602,8 +604,10 @@ function closeRoomScenarioPicker(): void {
 }
 
 function selectRoomScenarioOption(option: HTMLElement): void {
-    const id = Number.parseInt(option.dataset.scenarioId || "", 10);
-    if (!Number.isFinite(id)) return;
+    const rawId = (option.dataset.scenarioId || "").trim();
+    if (!rawId) return;
+    const numericId = Number(rawId);
+    const id = Number.isFinite(numericId) && String(numericId) === rawId ? numericId : rawId;
     roomScenarioPickerSelected = { id, title: option.dataset.title || "" };
     renderRoomScenarioPicker();
     closeRoomScenarioPicker();
@@ -630,7 +634,7 @@ function renderRoomScenarioPicker(): void {
     list.innerHTML = "";
     let selectedIndex = 0;
     scenarios.forEach((scenario, index) => {
-        const selected = roomScenarioPickerSelected?.id === scenario.id;
+        const selected = String(roomScenarioPickerSelected?.id ?? "") === String(scenario.id);
         if (selected) selectedIndex = index;
         const option = document.createElement("button");
         option.type = "button";
@@ -679,14 +683,16 @@ function renderRoomScenarioPicker(): void {
     positionRoomScenarioDropdown();
 }
 
-async function loadRoomScenarioPicker(scenarioId?: number): Promise<void> {
+async function loadRoomScenarioPicker(scenarioId?: number | string): Promise<void> {
     const list = document.getElementById("roomScenarioList");
     if (list) list.innerHTML = `<p class="room-scenario-loading">正在加载剧本…</p>`;
     try {
         const data = await TrpgApi.get<ApiResponse<Scenario[]>>("/api/scenarios");
         roomScenarioPickerScenarios = data.success && data.data ? data.data : [];
-        if (scenarioId) {
-            const match = roomScenarioPickerScenarios.find((scenario) => scenario.id === scenarioId);
+        if (scenarioId !== undefined && scenarioId !== null && scenarioId !== "") {
+            const match = roomScenarioPickerScenarios.find(
+                (scenario) => String(scenario.id) === String(scenarioId)
+            );
             if (match) roomScenarioPickerSelected = { id: match.id, title: match.title };
         }
     } catch (error) {
