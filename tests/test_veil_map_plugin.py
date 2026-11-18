@@ -412,6 +412,8 @@ def test_agent_tool_is_scoped_to_dnd5e(registered_plugin_tools, monkeypatch):
         "combat_budget_tool_names",
         "spell_tool_names",
         "effect_tool_names",
+        "rest_tool_names",
+        "workflow_tool_names",
     ):
         monkeypatch.setattr(profiles, name, lambda *_args, **_kwargs: [])
     assert "veil-map.move_token" in profiles.build_kp_tool_names("dnd5e")
@@ -1941,3 +1943,125 @@ def test_token_light_permissions_and_removal(client):
     )
     assert manager_added.status_code == 200
     assert manager_added.get_json()["data"]["token"]["light"]["enabled"] is True
+
+
+# ---------------------------------------------------------------------------
+# 多场景与断线重连
+# ---------------------------------------------------------------------------
+def _scene_body(title: str = "", copy: bool = False) -> dict:
+    return {"request_id": uuid4().hex, "revision": 0, "title": title, "copy": copy}
+
+
+def test_map_payload_lists_scenes(client):
+    manager, _app = client
+    _login(manager, "u1")
+    data = _map(manager)
+    assert data["scene_id"] == "default"
+    assert data["scenes"] and data["scenes"][0]["scene_id"] == "default"
+    assert data["scenes"][0]["active"] is True
+
+
+def test_scene_create_switch_isolates_tokens_and_lights(client):
+    manager, _app = client
+    _login(manager, "u1")
+
+    added = _write(manager, "post", "/api/plugins/veil-map/rooms/room1/tokens", {
+        "name": "Ogre", "x": 64, "y": 64,
+    })
+    assert added.status_code == 200
+    ogre_id = added.get_json()["data"]["token"]["id"]
+
+    created = manager.post(
+        "/api/plugins/veil-map/rooms/room1/map/scenes",
+        json=_scene_body("地下室"),
+    )
+    assert created.status_code == 200
+    created_data = created.get_json()["data"]
+    scene_id = created_data["scene_id"]
+    assert scene_id != "default"
+    assert not any(token["id"] == ogre_id for token in created_data["map"]["tokens"])
+    assert {item["scene_id"] for item in created_data["scenes"]} >= {"default", scene_id}
+
+    # 在新场景加一个只属于它的棋子与光源。
+    cellar = _write(manager, "post", "/api/plugins/veil-map/rooms/room1/tokens", {
+        "name": "Cultist", "x": 64, "y": 64,
+    })
+    cellar_token = cellar.get_json()["data"]["token"]["id"]
+    lit = _write(manager, "put", f"/api/plugins/veil-map/rooms/room1/tokens/{cellar_token}/light", {
+        "light": {"bright_cells": 2, "dim_cells": 4},
+    })
+    assert lit.status_code == 200
+
+    back = manager.post(
+        "/api/plugins/veil-map/rooms/room1/map/scenes/default/activate",
+        json=_scene_body(),
+    )
+    assert back.status_code == 200
+    back_tokens = {token["id"] for token in back.get_json()["data"]["map"]["tokens"]}
+    assert ogre_id in back_tokens and cellar_token not in back_tokens
+
+    again = manager.post(
+        f"/api/plugins/veil-map/rooms/room1/map/scenes/{scene_id}/activate",
+        json=_scene_body(),
+    )
+    again_tokens = again.get_json()["data"]["map"]["tokens"]
+    restored = next(token for token in again_tokens if token["id"] == cellar_token)
+    assert restored["light"]["enabled"] is True
+
+
+def test_scene_switch_requires_manager(client):
+    player, _app = client
+    _login(player, "u2")
+    response = player.post(
+        "/api/plugins/veil-map/rooms/room1/map/scenes/default/activate",
+        json=_scene_body(),
+    )
+    assert response.status_code == 403
+    assert response.get_json()["code"] == "map.manager_only"
+
+
+def test_copy_scene_keeps_tokens_but_resets_fog(client):
+    manager, _app = client
+    _login(manager, "u1")
+    added = _write(manager, "post", "/api/plugins/veil-map/rooms/room1/tokens", {
+        "name": "Ogre", "x": 64, "y": 64,
+    })
+    ogre_id = added.get_json()["data"]["token"]["id"]
+
+    copied = manager.post(
+        "/api/plugins/veil-map/rooms/room1/map/scenes",
+        json=_scene_body("Boss 房", copy=True),
+    )
+    assert copied.status_code == 200
+    data = copied.get_json()["data"]
+    assert any(token["id"] == ogre_id for token in data["map"]["tokens"])
+    assert data["map"]["title"] == "Boss 房"
+
+
+def test_scene_store_keeps_fog_per_scene(tmp_path):
+    store = veil_map.scene_store
+    room = tmp_path / "room"
+    room.mkdir()
+    store.save(room, {
+        "scene_id": "default",
+        "revision": 1,
+        "bounds_cells": 8,
+        "fog": {"explored": "0101", "explored_count": 2},
+        "tokens": [],
+    })
+    store.save(room, {
+        "scene_id": "cellar",
+        "revision": 1,
+        "bounds_cells": 8,
+        "fog": {},
+        "tokens": [],
+    })
+    active, source = store.load(room)
+    assert source == "scene" and active["scene_id"] == "cellar"
+    assert not active["fog"].get("explored")
+
+    assert store.activate(room, "default") is True
+    restored, _source = store.load(room)
+    assert restored["scene_id"] == "default"
+    assert restored["fog"]["explored"] == "0101"
+    assert store.activate(room, "missing") is False

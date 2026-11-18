@@ -38,6 +38,7 @@ _GENERATION = re.compile(r"^g-\d{6,}$")
 
 META_KEYS = (
     "version",
+    "title",
     "background",
     "background_meta",
     "grid_size",
@@ -151,6 +152,56 @@ def _load_scene(root: Path, scene_id: str) -> dict[str, Any] | None:
         if state is not None:
             return state
     return None
+
+
+def active_scene_id(room_dir) -> str:
+    """当前场景 id；没有分片时返回空串（由调用方按旧 map.json 处理）。"""
+    root = scenes_root(room_dir)
+    scene_id = _active_scene_id(root)
+    if scene_id:
+        return scene_id
+    candidates = _scene_candidates(root)
+    return candidates[0] if candidates else ""
+
+
+def list_scenes(room_dir) -> list[dict[str, Any]]:
+    """列出所有可用场景及其概览，按「当前场景在前、其余最近更新在前」排序。"""
+    root = scenes_root(room_dir)
+    active = active_scene_id(room_dir)
+    items: list[dict[str, Any]] = []
+    for candidate in _scene_candidates(root):
+        state = _load_scene(root, candidate)
+        if state is None:
+            continue
+        items.append(
+            {
+                "scene_id": candidate,
+                "title": str(state.get("title") or candidate)[:80],
+                "revision": int(state.get("revision") or 0),
+                "updated_at": str(state.get("updated_at") or ""),
+                "background": str(state.get("background") or ""),
+                "tokens": len(state.get("tokens") or []),
+                "active": candidate == active,
+            }
+        )
+    items.sort(key=lambda item: (bool(item["active"]), item["updated_at"]), reverse=True)
+    return items
+
+
+def has_scene(room_dir, scene_id: str) -> bool:
+    root = scenes_root(room_dir)
+    sid = safe_scene_id(scene_id)
+    return bool(sid) and _load_scene(root, sid) is not None
+
+
+def activate(room_dir, scene_id: str) -> bool:
+    """切换房间当前场景；场景不存在或没有完整代时返回 ``False``。"""
+    root = scenes_root(room_dir)
+    sid = safe_scene_id(scene_id)
+    if _load_scene(root, sid) is None:
+        return False
+    write_json_atomic(root / "active.json", {"schema": SCENE_SCHEMA, "scene_id": sid})
+    return True
 
 
 def load(room_dir) -> tuple[dict[str, Any], str]:

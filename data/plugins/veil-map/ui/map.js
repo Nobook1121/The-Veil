@@ -136,6 +136,17 @@
             '<div class="vmap-panel-title"><span data-vmap-panel-title>地图设置</span>',
             '<button type="button" data-vmap-close aria-label="关闭">×</button></div>',
             '<div data-vmap-section="scene">',
+            '<div class="vmap-section-label">场景</div>',
+            '<label class="vmap-field">当前场景',
+            '<select data-vmap-scene-select></select></label>',
+            '<label class="vmap-field">新场景名称',
+            '<input type="text" maxlength="80" placeholder="例如：地下室" data-vmap-scene-title></label>',
+            '<div class="vmap-actions">',
+            '<button type="button" data-vmap-switch-scene>切换场景</button>',
+            '<button type="button" class="secondary" data-vmap-create-scene>新建空场景</button>',
+            '<button type="button" class="secondary" data-vmap-copy-scene>复制当前场景</button>',
+            '</div>',
+            '<div class="vmap-divider"></div>',
             '<div class="vmap-section-label">地图</div>',
             '<label class="vmap-field">网格尺寸（px）',
             '<input type="number" min="' + MIN_GRID + '" max="' + MAX_GRID + '" step="8" data-vmap-grid></label>',
@@ -213,6 +224,8 @@
         var panelCellsAcross = panel.querySelector("[data-vmap-cells-across]");
         var panelOffsetX = panel.querySelector("[data-vmap-offset-x]");
         var panelOffsetY = panel.querySelector("[data-vmap-offset-y]");
+        var panelSceneSelect = panel.querySelector("[data-vmap-scene-select]");
+        var panelSceneTitle = panel.querySelector("[data-vmap-scene-title]");
 
         function notify(message, type) {
             ctx.notify(String(message || ""), type || "info");
@@ -710,12 +723,29 @@
             menu.style.top = clamp(clientY, 8, Math.max(8, window.innerHeight - rect.height - 8)) + "px";
         }
 
+        function renderScenes(data) {
+            if (!panelSceneSelect) return;
+            var list = data && Array.isArray(data.scenes) ? data.scenes : [];
+            var current = String((data && data.scene_id) || (mapState && mapState.scene_id) || "");
+            panelSceneSelect.textContent = "";
+            list.forEach(function (scene) {
+                if (!scene || !scene.scene_id) return;
+                var option = document.createElement("option");
+                option.value = String(scene.scene_id);
+                option.textContent = String(scene.title || scene.scene_id) +
+                    (scene.active ? "（当前）" : "");
+                panelSceneSelect.appendChild(option);
+            });
+            if (current) panelSceneSelect.value = current;
+        }
+
         function applyPayload(data) {
             if (!data || !data.map) return;
             // 拖拽期间不替换地图状态：松手后用写回执（成功或冲突）统一对齐，
             // 避免正在拖的棋子从列表里消失。
             if (dragging) return;
             mapState = data.map;
+            renderScenes(data);
             if (data.combat && typeof data.combat === "object") {
                 combat = data.combat.active ? data.combat : { active: false };
             }
@@ -929,6 +959,40 @@
                 }
             }
             if (mode === "token" && panelName) panelName.focus();
+        }
+
+        function requestScene(path, body, successMessage) {
+            apiRequest("POST", "/rooms/" + encodeURIComponent(ctx.room.id) + path, body).then(function (response) {
+                if (destroyed) return;
+                if (!response || response.success !== true) {
+                    applyWriteFailure(response, "场景操作失败。");
+                    return;
+                }
+                applyPayload(response.data);
+                notify(successMessage, "success");
+            }).catch(function (error) {
+                console.error("veil-map scene failed", error);
+                notify("场景操作失败，请稍后重试。", "error");
+            });
+        }
+
+        function switchScene() {
+            var sceneId = panelSceneSelect && panelSceneSelect.value;
+            if (!sceneId) return;
+            requestScene(
+                "/map/scenes/" + encodeURIComponent(sceneId) + "/activate",
+                writeBody({}),
+                "已切换场景。"
+            );
+        }
+
+        function createScene(copy) {
+            var title = panelSceneTitle ? String(panelSceneTitle.value || "").trim() : "";
+            requestScene(
+                "/map/scenes",
+                writeBody({ title: title, copy: Boolean(copy) }),
+                copy ? "已复制并切换到新场景。" : "已新建并切换到新场景。"
+            );
         }
 
         function saveMapSettings() {
@@ -1253,16 +1317,31 @@
             }
         }
 
+        function onSocketReconnect() {
+            // 断线期间地图/迷雾/场景可能已经变化：重连后必须重新拉取，
+            // 不能沿用断线前的内存副本。
+            if (destroyed) return;
+            loadMap(true);
+        }
+
         function attachSocket() {
             socket = window.TrpgSocket || null;
             if (!socket) return;
             socketHandler = onSocketMapChanged;
             socket.on("room_map_changed", socketHandler);
+            if (typeof socket.on === "function") {
+                socket.on("connect", onSocketReconnect);
+                socket.on("reconnect", onSocketReconnect);
+            }
         }
 
         function detachSocket() {
             if (socket && socketHandler && typeof socket.off === "function") {
                 socket.off("room_map_changed", socketHandler);
+            }
+            if (socket && typeof socket.off === "function") {
+                socket.off("connect", onSocketReconnect);
+                socket.off("reconnect", onSocketReconnect);
             }
             socket = null;
             socketHandler = null;
@@ -1308,6 +1387,18 @@
             }
             if (target.closest("[data-vmap-save-map]")) {
                 saveMapSettings();
+                return;
+            }
+            if (target.closest("[data-vmap-switch-scene]")) {
+                switchScene();
+                return;
+            }
+            if (target.closest("[data-vmap-create-scene]")) {
+                createScene(false);
+                return;
+            }
+            if (target.closest("[data-vmap-copy-scene]")) {
+                createScene(true);
                 return;
             }
             if (target.closest("[data-vmap-add-token]")) {
@@ -1371,7 +1462,8 @@
                 loadMap(true);
                 return;
             }
-            if (!window.TrpgSocket) loadMap(true);
+            // socket 存在但已断开时，轮询同样要重新拉取服务端状态。
+            if (!window.TrpgSocket || (socket && socket.connected === false)) loadMap(true);
         }, POLL_INTERVAL);
 
         return {

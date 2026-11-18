@@ -302,6 +302,7 @@ def _default_map() -> dict[str, Any]:
         "version": MAP_VERSION,
         "revision": 0,
         "scene_id": "default",
+        "title": "主场景",
         "background": "",
         "background_meta": {},
         "grid_size": DEFAULT_GRID,
@@ -651,6 +652,7 @@ def _normalize_map(raw: Any) -> dict[str, Any]:
     state["version"] = MAP_VERSION
     state["revision"] = max(0, _as_int(state.get("revision"), 0))
     state["scene_id"] = str(state.get("scene_id") or "default")[:64]
+    state["title"] = str(state.get("title") or state["scene_id"])[:80]
     state["background"] = str(state.get("background") or "")[:2048]
     state["background_meta"] = _normalize_background_meta(state.get("background_meta"))
     state["grid_size"] = _clamp(_as_int(state.get("grid_size"), DEFAULT_GRID), MIN_GRID, MAX_GRID)
@@ -1921,6 +1923,7 @@ def _map_payload(room_id: str, room_dir, info: dict[str, Any]) -> dict[str, Any]
         state = _load_map(room_dir)
         if _reconcile_tokens(state, info):
             state = _save_map(room_dir, state)
+        scenes = scene_store.list_scenes(room_dir)
     _role, manager = _room_context(info)
     user_id = str(session.get("user_id") or "")
     view, fog_payload, _visible = _observer_scope(state, room_dir, user_id, manager)
@@ -1930,6 +1933,8 @@ def _map_payload(room_id: str, room_dir, info: dict[str, Any]) -> dict[str, Any]
         "combat": _combat_payload(room_dir),
         "can_manage": manager,
         "room_id": str(room_id),
+        "scene_id": view.get("scene_id") or state.get("scene_id"),
+        "scenes": scenes,
     }
 
 
@@ -2074,6 +2079,88 @@ def update_map(room_id: str):
         revision=state["revision"],
         code="map.updated",
         data={"map": state, "fog": fog_payload, "can_manage": True},
+    )
+
+
+@bp.route("/rooms/<room_id>/map/scenes", methods=["GET"])
+def list_map_scenes(room_id: str):
+    room_dir, info, denied = _map_room_or_error(room_id)
+    if denied:
+        return denied
+    active = scene_store.active_scene_id(room_dir)
+    return success_response(
+        {"scenes": scene_store.list_scenes(room_dir), "active_scene_id": active},
+        "Scenes loaded",
+    )
+
+
+@bp.route("/rooms/<room_id>/map/scenes", methods=["POST"])
+def create_map_scene(room_id: str):
+    """新建场景并切换过去；``copy=true`` 时复制当前场景的棋子/墙/光源。"""
+    room_dir, info, denied = _map_room_or_error(room_id)
+    if denied:
+        return denied
+    payload = _write_payload() or {}
+    _role, manager = _room_context(info)
+    with room_lock(room_dir):
+        state = _load_map(room_dir)
+        if not manager:
+            return error_response("只有房主或房管可以新建场景。", 403, code="map.manager_only")
+        scene_id = scene_store.safe_scene_id(payload.get("scene_id") or "")
+        if not scene_id or scene_id == "default" or scene_store.has_scene(room_dir, scene_id):
+            scene_id = uuid4().hex[:12]
+        title = str(payload.get("title") or "").strip()[:80] or "新场景"
+        if _as_bool(payload.get("copy"), False):
+            created = dict(state)
+            created["scene_id"] = scene_id
+            created["title"] = title
+            created["revision"] = 0
+            created["recent_requests"] = []
+            # 新场景从未探索过：迷雾要按场景隔离，不能继承旧场景的记录。
+            created["fog"] = _default_fog()
+        else:
+            created = _default_map()
+            created["scene_id"] = scene_id
+            created["title"] = title
+        saved = _save_map(
+            room_dir,
+            created,
+            {"request_id": str(payload.get("request_id") or uuid4().hex), "action": "scene.create"},
+        )
+        scene_store.activate(room_dir, scene_id)
+    _broadcast(room_id, saved)
+    return success_response(
+        {
+            "map": saved,
+            "scenes": scene_store.list_scenes(room_dir),
+            "scene_id": scene_id,
+            "can_manage": True,
+        },
+        "场景已创建并切换。",
+    )
+
+
+@bp.route("/rooms/<room_id>/map/scenes/<scene_id>/activate", methods=["POST"])
+def activate_map_scene(room_id: str, scene_id: str):
+    room_dir, info, denied = _map_room_or_error(room_id)
+    if denied:
+        return denied
+    _role, manager = _room_context(info)
+    with room_lock(room_dir):
+        if not manager:
+            return error_response("只有房主或房管可以切换场景。", 403, code="map.manager_only")
+        if not scene_store.activate(room_dir, scene_id):
+            return error_response("场景不存在或尚未完整保存。", 404, code="map.scene_not_found")
+        state = _load_map(room_dir)
+    _broadcast(room_id, state)
+    return success_response(
+        {
+            "map": state,
+            "scenes": scene_store.list_scenes(room_dir),
+            "scene_id": state["scene_id"],
+            "can_manage": True,
+        },
+        "已切换场景。",
     )
 
 
