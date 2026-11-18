@@ -146,7 +146,7 @@ def _can_bind_character_card(character_card, target_member, info=None):
     }
 
 
-def _current_member(character_card=None):
+def _current_member(character_card=None, *, info=None, ruleset_id: str = ""):
     user_id = session["user_id"]
     user = None
     try:
@@ -171,7 +171,9 @@ def _current_member(character_card=None):
         "joined_at": _timestamp(),
     }
     if character_card:
-        member["character_card"] = _sanitize_character_card(character_card)
+        member["character_card"] = _sanitize_character_card(
+            character_card, room_info=info, ruleset_id=ruleset_id
+        )
         member["character_state"] = _initial_character_state(member["character_card"])
     return member
 

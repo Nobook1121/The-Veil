@@ -67,9 +67,10 @@ def make_ai_player_member(
     created_by: Any,
     username: str | None = None,
     avatar: str = "",
+    info: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """构造一个 AI 玩家成员记录；角色卡无效时返回 ``None``。"""
-    card = _sanitize_character_card(character_card)
+    card = _sanitize_character_card(character_card, room_info=info)
     if not card:
         return None
     display_name = str(username or card.get("name") or "AI 玩家").strip()[:80]

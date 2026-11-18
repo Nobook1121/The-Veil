@@ -1,4 +1,6 @@
 """角色卡与成员运行状态：卡清洗、规则集派生、资源状态初始化与写回判定。"""
+import logging
+
 from trpg_server import weapon_catalog
 from trpg_server.responses import error_response
 from trpg_server.room_card_occupancy import card_id_of
@@ -6,12 +8,32 @@ from trpg_server.room_card_occupancy import find_card_occupancy
 from trpg_server.room_ops.storage import _get_rooms_dir
 from trpg_server.ruleset import default_ruleset_id
 
+logger = logging.getLogger(__name__)
+
+
 def _fallback_ruleset_id() -> str:
     """当前默认插件 id；无可用插件时返回空串，避免读取旧房间快照时抛错。"""
     try:
         return default_ruleset_id()
     except RuntimeError:
         return ""
+
+
+def _room_ruleset_id(room_info=None, ruleset_id: str = "") -> str:
+    """角色卡缺 ``rulesetId`` 时的归属：优先房间规则集，其次全局默认。"""
+    explicit = str(ruleset_id or "").strip()
+    if explicit:
+        return explicit
+    if isinstance(room_info, dict) and room_info:
+        try:
+            from trpg_server.room_rules import resolve_rule_id
+
+            resolved = str(resolve_rule_id(room_info) or "").strip()
+            if resolved:
+                return resolved
+        except Exception:  # noqa: BLE001 - 房间规则集不可用时退回默认，不阻断绑卡
+            logger.warning("房间规则集解析失败，角色卡回退默认规则集", exc_info=True)
+    return _fallback_ruleset_id()
 
 def _card_in_use_response(conflict):
     """角色卡已被其它活跃房间占用时的统一拒绝响应。
@@ -56,7 +78,7 @@ def _pending_room_changes(member):
         return len(legacy_items)
     return 1 if state.get("pending_persist") else 0
 
-def _sanitize_character_card(character_card):
+def _sanitize_character_card(character_card, *, room_info=None, ruleset_id: str = ""):
     if not isinstance(character_card, dict):
         return None
 
@@ -73,7 +95,10 @@ def _sanitize_character_card(character_card):
     sanitized = {
         "id": card_id[:80],
         "name": name[:80],
-        "rulesetId": str(character_card.get("rulesetId") or _fallback_ruleset_id())[:40],
+        "rulesetId": str(
+            character_card.get("rulesetId")
+            or _room_ruleset_id(room_info, ruleset_id)
+        )[:40],
         "occupationId": str(character_card.get("occupationId", character_card.get("occupation_id", "")))[:80],
         "attributes": attributes,
         "maxHp": max_hp,
@@ -185,8 +210,10 @@ def _ensure_character_state(member):
     clamp_resource_state(plugin, card, state)
     return state
 
-def _bind_character(member, character_card):
-    sanitized = _sanitize_character_card(character_card)
+def _bind_character(member, character_card, *, info=None, ruleset_id: str = ""):
+    sanitized = _sanitize_character_card(
+        character_card, room_info=info, ruleset_id=ruleset_id
+    )
     if not sanitized:
         return False
     member["character_card"] = sanitized

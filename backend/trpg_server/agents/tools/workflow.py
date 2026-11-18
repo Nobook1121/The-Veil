@@ -65,11 +65,9 @@ def _summary(
                 "label": step.get("label"),
                 "policy": step.get("policy"),
                 "status": step.get("status"),
-                "result": (
-                    step.get("result")
-                    if visible and step.get("status") == "waiting"
-                    else None
-                ),
+                # 与 REST _summary 保持一致：只要该步骤对观察者可见就返回结果，
+                # 不区分 waiting / completed，避免 AI 与网页看到不同的流程状态。
+                "result": step.get("result") if visible else None,
             }
         )
     return {

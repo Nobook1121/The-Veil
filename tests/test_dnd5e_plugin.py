@@ -54,6 +54,22 @@ def _card(plugin) -> dict:
     )
 
 
+def test_card_without_ruleset_inherits_room_ruleset(plugins):
+    from trpg_server.room_ops.cards import _sanitize_character_card
+
+    card = _sanitize_character_card(
+        {"id": "card-x", "name": "无规则卡", "maxHp": 10, "maxSan": 0},
+        room_info={"ruleset_id": "dnd5e"},
+    )
+    assert card["rulesetId"] == "dnd5e"
+
+    explicit = _sanitize_character_card(
+        {"id": "card-y", "name": "显式规则卡", "rulesetId": "coc7"},
+        room_info={"ruleset_id": "dnd5e"},
+    )
+    assert explicit["rulesetId"] == "coc7"
+
+
 def test_enabled_state_turns_on_ruleset_and_srd_pack():
     data = json.loads((PLUGIN_ROOT / "enabled.json").read_text(encoding="utf-8"))
     assert {"dnd5e", "dnd5e-srd"} <= set(data["enabled"])

@@ -96,7 +96,10 @@ def _reaction_steps(
         name = str(reactor.get("name") or "").strip()
         if not name:
             continue
-        executor = EXECUTOR_PLAYER if reactor.get("is_player") else EXECUTOR_KP
+        if str(reactor.get("agent_id") or "").strip():
+            executor = EXECUTOR_AI
+        else:
+            executor = EXECUTOR_PLAYER if reactor.get("is_player") else EXECUTOR_KP
         policy = resolve_policy("reaction", executor, policy_overrides)
         if policy not in {POLICY_ASK, POLICY_MANUAL}:
             # auto 不生成待决步骤；由续跑器按“不反应”直接继续，避免流程空转。

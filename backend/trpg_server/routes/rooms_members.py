@@ -65,7 +65,7 @@ def bind_room_member_character(room_id, user_id):
     character_card = data.get("character_card")
     if not _can_bind_character_card(character_card, target, info):
         return _denied(room_id)
-    if not _bind_character(target, character_card):
+    if not _bind_character(target, character_card, info=info):
         return error_response("Character card is required", 400, "Character card is required")
     # 换卡同样是「绑定」，要在同一把占用锁里校验并落盘，否则先换卡再加入别的房间会绕过校验。
     with card_binding_lock():

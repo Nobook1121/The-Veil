@@ -739,34 +739,6 @@ class WorkflowEngine:
         except Exception:  # noqa: BLE001 - 定时器异常不能影响请求线程
             return
 
-    # -- 幂等副作用 -------------------------------------------------------
-    def apply_once(self, flow_id: str, key: str, fn: Callable[[], Any]) -> tuple[Any, bool]:
-        """执行一次副作用；同一个 ``key`` 再次调用直接返回缓存。"""
-        flow_id = str(flow_id or "").strip()
-        cache_key = str(key or "").strip()
-        with flow_store.room_write_lock(self.room_dir):
-            data = flow_store.load(self.room_dir)
-            flow = data["flows"].get(flow_id)
-            if flow is None:
-                raise ValueError("workflow not found")
-            if cache_key in flow["side_effects"]:
-                return flow["side_effects"][cache_key], True
-        result = fn()
-        with flow_store.room_write_lock(self.room_dir):
-            data = flow_store.load(self.room_dir)
-            flow = data["flows"].get(flow_id)
-            if flow is not None:
-                flow["side_effects"][cache_key] = result
-                flow["updated_at"] = stamp()
-                self._append_event(
-                    flow,
-                    "side_effect.applied",
-                    actor=str(flow.get("initiator") or ""),
-                    payload={"key": cache_key, "result": result},
-                )
-                flow_store.save(self.room_dir, data)
-        return result, False
-
     # -- 重放 -------------------------------------------------------------
     def replay(self, flow_id: str) -> dict[str, Any] | None:
         """从事件日志重建流程快照，用于排查与验证幂等/取消/超时。"""

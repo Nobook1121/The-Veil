@@ -98,6 +98,7 @@ def create_ai_player(room_id):
         created_by=session.get("user_id"),
         username=data.get("username"),
         avatar=str(data.get("avatar") or ""),
+        info=info,
     )
     if member is None:
         return error_response("Character card is required", 400, "Character card is required")

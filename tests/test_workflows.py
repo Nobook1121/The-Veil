@@ -218,6 +218,11 @@ def test_room_policy_override_waits_and_submits(tmp_path):
     engine.set_policy({"resolve": {"player": "manual"}})
     assert engine.policy()["resolve"]["player"] == "manual"
     assert "save" not in engine.policy()
+    calls: list[str] = []
+
+    def handler(_flow, _step):
+        calls.append("resolve")
+        return {"ok": True}
 
     outcome = run_flow_action(
         tmp_path,
@@ -230,7 +235,7 @@ def test_room_policy_override_waits_and_submits(tmp_path):
                 "executor": "player",
             }
         ],
-        handlers={"resolve": lambda _flow, _step: {"ok": True}},
+        handlers={"resolve": handler},
         request_key="policy-1",
     )
     flow = outcome["flow"]
@@ -247,6 +252,9 @@ def test_room_policy_override_waits_and_submits(tmp_path):
     assert submitted["duplicate"] is False
     assert submitted["flow"]["status"] == FLOW_COMPLETED
     assert submitted["flow"]["steps"][0]["status"] == STEP_COMPLETED
+    # manual 表示人工裁定：决策本身就是结果，不再执行服务端 handler。
+    assert calls == []
+    assert submitted["result"] == {"ok": True}
     # 同一个幂等键重复提交不再生效。
     again = engine.submit(
         flow["id"],
@@ -256,6 +264,7 @@ def test_room_policy_override_waits_and_submits(tmp_path):
     )
     assert again["duplicate"] is True
     assert again["flow"]["status"] == FLOW_COMPLETED
+    assert calls == []
 
 
 def test_missing_handler_fails_instead_of_silent_success(tmp_path):
@@ -599,6 +608,38 @@ def test_policy_matrix_per_step_kind(tmp_path, step_id, policy):
         assert calls == []
 
 
+def test_agent_summary_matches_rest_for_completed_results():
+    from trpg_server.agents.tools.workflow import _summary as agent_summary
+    from trpg_server.routes.workflows import _summary as rest_summary
+
+    flow = {
+        "id": "flow-1",
+        "kind": "attack",
+        "status": "completed",
+        "initiator": "Mira",
+        "initiator_type": "player",
+        "steps": [
+            {
+                "id": "attack",
+                "label": "攻击结算",
+                "policy": "auto",
+                "status": "completed",
+                "result": {"hit": True, "damage": 7},
+            }
+        ],
+        "metadata": {},
+    }
+    from flask import Flask, session
+
+    app = Flask(__name__)
+    app.secret_key = "test"
+    with app.test_request_context():
+        session["user_id"] = "u1"
+        rest_step = rest_summary(flow, manager=True, info={})["steps"][0]
+    agent_step = agent_summary(flow, manager=True, info={}, user_id="u1")["steps"][0]
+    assert agent_step["result"] == rest_step["result"] == {"hit": True, "damage": 7}
+
+
 def test_reaction_steps_only_created_for_ask_or_manual():
     from trpg_server.workflows.reactions import _reaction_steps
 
@@ -606,6 +647,13 @@ def test_reaction_steps_only_created_for_ask_or_manual():
     assert _reaction_steps(rows, policy_overrides={"reaction": {"player": "auto"}}) == []
     assert len(_reaction_steps(rows, policy_overrides={"reaction": {"player": "ask"}})) == 1
     assert len(_reaction_steps(rows, policy_overrides={"reaction": {"player": "manual"}})) == 1
+
+    # AI 托管的反应者按 ai 策略解析，而不是当成玩家或 KP。
+    ai_rows = [{"name": "Bot", "agent_id": "agent-1"}]
+    ai_steps = _reaction_steps(ai_rows, policy_overrides={"reaction": {"ai": "ask"}})
+    assert len(ai_steps) == 1
+    assert ai_steps[0]["executor"] == "ai"
+    assert _reaction_steps(ai_rows, policy_overrides={"reaction": {"ai": "auto"}}) == []
 
 
 # ---------------------------------------------------------------------------

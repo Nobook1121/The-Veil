@@ -147,7 +147,7 @@ def create_room():
     # 目录由建房方显式创建：房间锁不再替调用方 mkdir（否则已删除的房间会被
     # 后续写入“复活”，删除与写入在 Windows 上互相拉扯出 145）。
     room_dir.mkdir(parents=True, exist_ok=True)
-    member = _current_member(data.get("character_card"))
+    member = _current_member(data.get("character_card"), ruleset_id=ruleset_id)
     member["room_role"] = ROOM_ROLE_OWNER
     now = _timestamp()
     preset = MODE_PRESETS[room_mode]
@@ -313,9 +313,11 @@ def join_room_by_code():
                 return _card_in_use_response(conflict)
         changed = True
         if not member:
-            info.setdefault("members", []).append(_current_member(character_card))
+            info.setdefault("members", []).append(
+                _current_member(character_card, info=info)
+            )
         elif not _is_active_member(member):
-            current_member = _current_member(character_card)
+            current_member = _current_member(character_card, info=info)
             member.update(
                 {
                     "username": current_member["username"],
@@ -327,9 +329,9 @@ def join_room_by_code():
                 }
             )
             if character_card:
-                _bind_character(member, character_card)
+                _bind_character(member, character_card, info=info)
         elif character_card and not member.get("character_card"):
-            _bind_character(member, character_card)
+            _bind_character(member, character_card, info=info)
         else:
             # 已在房间里且无需绑卡：重复加入保持幂等，不写盘也不报冲突。
             changed = False
