@@ -1089,6 +1089,7 @@ interface Dnd5eModuleApi {
         ...api,
         id: RULESET_ID,
         label: "D&D 5e",
+        tag: "DND",
         initCharacterSheet,
         clearCharacterManagement,
         reloadCharacterManagement: reloadCharacterSheet,

@@ -15,7 +15,10 @@ interface RoomRecordResponse {
 }
 
 interface RoomEntrySelection {
-    action: "join" | "create" | "invisible";
+    /**
+     * bind：房间已创建并进入，这里只补绑角色卡；不选卡即保持旁观玩家身份。
+     */
+    action: "join" | "create" | "bind" | "invisible";
     createCharacter?: boolean;
     characterCard?: Partial<COC7CharacterCard>;
 }
@@ -322,11 +325,13 @@ function activeRoomMembers(room: Room): RoomMember[] {
     return (room.members || []).filter(isActiveRoomMember);
 }
 
-function populateCharacterSelect(selectId: string): void {
+function populateCharacterSelect(selectId: string, rulesetId?: string | null): void {
     const select = document.getElementById(selectId) as HTMLSelectElement | null;
     if (!select) return;
     const currentValue = select.value;
-    const cards = getCharacterCards(roomEntryRulesetId);
+    // 房内绑卡以房间规则集为准；进入流程中则沿用当前目标房间的规则集。
+    const targetRuleset = String(rulesetId || "").trim().toLowerCase() || roomEntryRulesetId;
+    const cards = getCharacterCards(targetRuleset);
     select.innerHTML = window.TrpgTemplates.render("select-placeholder-option", { label: "请选择角色卡" });
     cards.forEach((card) => {
         const option = document.createElement("option");
@@ -363,15 +368,30 @@ function populateRoomEntryCharacterSelect(): void {
     if (nextValue) select.value = nextValue;
     if (emptyMessage) {
         emptyMessage.hidden = cards.length > 0;
-        emptyMessage.textContent = roomEntryAllowCardless
-            ? "当前账户还没有角色卡：无 AI 房间仍可直接进入，但只能使用基础掷骰。"
-            : "当前账户还没有角色卡，请先创建角色卡再进入房间。";
+        emptyMessage.textContent = roomEntrySelectionAction === "bind"
+            ? "当前账户还没有角色卡：可直接进入房间（旁观玩家），之后可在房间内绑定角色卡。"
+            : roomEntryAllowCardless
+                ? "当前账户还没有角色卡：无 AI 房间仍可直接进入，但只能使用基础掷骰。"
+                : "当前账户还没有角色卡，请先创建角色卡再进入房间。";
     }
-    if (confirmButton) confirmButton.disabled = cards.length === 0;
+    if (confirmButton) {
+        confirmButton.disabled = cards.length === 0;
+        confirmButton.textContent = roomEntrySelectionAction === "bind" ? "绑定角色卡" : "进入房间";
+    }
     const cardlessButton = document.getElementById("roomEntryCardless") as HTMLButtonElement | null;
-    if (cardlessButton) cardlessButton.hidden = !roomEntryAllowCardless;
+    if (cardlessButton) {
+        cardlessButton.hidden = !roomEntryAllowCardless;
+        // 建房后的补绑弹窗里，这个按钮就是「直接进入房间」（旁观）。
+        cardlessButton.textContent = roomEntrySelectionAction === "bind" ? "直接进入房间" : "不绑定角色卡进入";
+    }
     const invisibleButton = document.getElementById("roomEntryInvisible") as HTMLButtonElement | null;
-    if (invisibleButton) invisibleButton.hidden = !isElevatedUser() || roomEntrySelectionAction === "create";
+    if (invisibleButton) {
+        invisibleButton.hidden = !isElevatedUser()
+            || roomEntrySelectionAction === "create"
+            || roomEntrySelectionAction === "bind";
+    }
+    const cancelButton = document.getElementById("roomEntryCancel") as HTMLButtonElement | null;
+    if (cancelButton) cancelButton.textContent = roomEntrySelectionAction === "bind" ? "稍后绑定" : "取消";
 }
 
 async function promptRoomEntryCharacterSelection(
@@ -394,11 +414,16 @@ async function promptRoomEntryCharacterSelection(
     await (entryModule?.reloadCharacterManagement?.() || window.reloadCharacterManagement?.());
     populateRoomEntryCharacterSelect();
     roomEntrySelectionSettled = false;
-    const baseMessage = action === "create" ? "创建房间前请选择要使用的角色卡。" : "进入房间前请选择要使用的角色卡。";
-    setText(
-        "roomEntryCharacterMessage",
-        roomEntryAllowCardless ? `${baseMessage}本房间未启用 AI KP，也可以不绑定角色卡直接进入。` : baseMessage
-    );
+    setText("roomEntryCharacterModalLabel", action === "bind" ? "选择角色卡进入房间" : "进入房间前选择角色卡");
+    let message: string;
+    if (action === "bind") {
+        // 建房后：房间已创建并进入，这里只决定要不要立刻绑卡。
+        message = "房间已创建。选择一张角色卡绑定，或直接进入房间（旁观玩家，不绑定角色卡，之后可在房间内绑定）。";
+    } else {
+        message = action === "create" ? "创建房间前请选择要使用的角色卡。" : "进入房间前请选择要使用的角色卡。";
+        if (roomEntryAllowCardless) message += "本房间未启用 AI KP，也可以不绑定角色卡直接进入。";
+    }
+    setText("roomEntryCharacterMessage", message);
     if (!roomEntryCharacterModal) return Promise.resolve(null);
 
     return new Promise((resolve) => {
@@ -444,7 +469,7 @@ function createCharacterFromRoomEntry(): void {
     document.getElementById("createCharacter")?.click();
 }
 
-function getSelectedCharacterCardSnapshot(selectId: string): Partial<COC7CharacterCard> | null {
+function getSelectedCharacterCardSnapshot(selectId: string, rulesetId?: string | null): Partial<COC7CharacterCard> | null {
     const cardId = (document.getElementById(selectId) as HTMLSelectElement | null)?.value;
     if (!cardId) return null;
     const registry = window.TrpgCharacterSheetRegistry;
@@ -454,9 +479,10 @@ function getSelectedCharacterCardSnapshot(selectId: string): Partial<COC7Charact
     }
     // 目标房间声明了规则集时只问对应模块；否则遍历时按快照的 rulesetId 归位，
     // 避免 CoC 模块把 5e 卡先转成 CoC 骨架。
-    const preferred = roomEntryRulesetId ? registry.forRuleset(roomEntryRulesetId) : undefined;
+    const targetRuleset = String(rulesetId || "").trim().toLowerCase() || roomEntryRulesetId;
+    const preferred = targetRuleset ? registry.forRuleset(targetRuleset) : undefined;
     const modules: Array<{ id: string; sheet: RoomCharacterSheet }> = preferred
-        ? [{ id: roomEntryRulesetId, sheet: preferred as unknown as RoomCharacterSheet }]
+        ? [{ id: targetRuleset, sheet: preferred as unknown as RoomCharacterSheet }]
         : registry.ids()
             .map((id) => ({ id: String(id).toLowerCase(), sheet: registry.get(id) as unknown as RoomCharacterSheet }))
             .filter((item) => Boolean(item.sheet));
@@ -835,42 +861,101 @@ async function createRoomUnlocked(): Promise<void> {
         return;
     }
 
-    // 剧本决定房间规则集：先按剧本规则集筛选角色卡，避免 5e 房间列出 / 误建 CoC 卡。
+    // 剧本决定房间规则集：建房后用房间实际规则集筛选可绑定角色卡。
     const scenarioRulesetId = roomMode === "freeform" ? "" : String(roomScenarioPickerSelected?.rulesetId || "").trim();
-    const entryOptions: { allowCardless?: boolean; rulesetId?: string } = {};
-    if (roomMode === "manual") entryOptions.allowCardless = true;
-    if (scenarioRulesetId) entryOptions.rulesetId = scenarioRulesetId;
 
-    const roomEntrySelection = await promptRoomEntryCharacterSelection("create", null, {}, entryOptions);
-    // 取消选择时保留创建弹窗与已填内容，用户可改选剧本或直接重试。
-    if (!roomEntrySelection) return;
-    // 去创建角色卡时同样保留创建弹窗：创建完成后回来点「创建」即可直接选到新卡。
-    if (roomEntrySelection.createCharacter) return;
-    if (roomEntrySelection.action === "invisible") {
-        bootstrap.Modal.getInstance(document.getElementById("createSaveModal"))?.hide();
-        return;
-    }
-
+    let createdRoom: Room;
     try {
+        // 先建房（不绑卡）：创建者以无卡成员身份成为房主，随后再决定要不要绑卡。
         const data = await TrpgApi.post<ApiResponse<Room>>("/api/rooms", {
             name: roomName,
             room_mode: roomMode,
             ...(scenarioId ? { scenario_id: scenarioId, scenario_title: scenarioTitle } : {}),
             visibility: (document.getElementById("roomVisibilitySelect") as HTMLSelectElement | null)?.value || "private",
-            ...(roomEntrySelection.characterCard ? { character_card: roomEntrySelection.characterCard } : {}),
         });
         if (!data.success || !data.data) {
             showNotification(`创建房间失败：${data.message || data.error || "未知错误"}`, "error");
             return;
         }
-
-        bootstrap.Modal.getInstance(document.getElementById("createSaveModal"))?.hide();
-        await enterRoom(data.data);
-        await loadRoomsList();
-        showNotification(`房间已创建：${data.data.room_code || data.data.code || data.data.id}`, "success");
+        createdRoom = data.data;
     } catch (error) {
         showNotification(`创建房间失败：${roomErrorMessage(error)}`, "error");
+        return;
     }
+
+    const roomLabel = createdRoom.room_code || createdRoom.code || createdRoom.id;
+    try {
+        // 先关闭建房弹窗并等动画结束，再弹出选卡弹窗，避免两个弹窗叠在一起。
+        await hideModalAndWait("createSaveModal");
+        await enterRoom(createdRoom);
+        await loadRoomsList();
+
+        const roomEntrySelection = await promptRoomEntryCharacterSelection(
+            "bind",
+            createdRoom.id,
+            roomSkillBaseOverrides(createdRoom),
+            { allowCardless: true, rulesetId: String(createdRoom.ruleset_id || scenarioRulesetId || "") },
+        );
+        // 去建角色卡：房间已创建并进入，建完卡后可在房间内自行绑定。
+        if (roomEntrySelection?.createCharacter) {
+            showNotification(`房间已创建：${roomLabel}，已以旁观玩家身份进入`, "success");
+            return;
+        }
+        if (roomEntrySelection?.characterCard) {
+            const bound = await bindSelfCharacterCard(createdRoom.id, roomEntrySelection.characterCard);
+            if (bound) {
+                showNotification(`房间已创建：${roomLabel}，角色卡已绑定`, "success");
+                return;
+            }
+        }
+        // 直接进入 / 取消：保持旁观玩家身份，之后仍可在房间成员栏绑定角色卡。
+        showNotification(`房间已创建：${roomLabel}，已以旁观玩家身份进入，可在房间内绑定角色卡`, "success");
+    } catch (error) {
+        // 房间已经创建成功，这里失败只影响进入 / 选卡，不要把提示说成创建失败。
+        console.error("房间已创建，但进入或选卡流程出错:", error);
+        showNotification(`房间已创建：${roomLabel}，可在房间列表中找到它`, "warning");
+    }
+}
+
+/** 关闭弹窗并等待动画结束；两个弹窗连续切换时避免遮罩层叠加。 */
+function hideModalAndWait(modalId: string): Promise<void> {
+    const element = document.getElementById(modalId);
+    if (!element || typeof bootstrap === "undefined") return Promise.resolve();
+    const instance = bootstrap.Modal.getInstance(element);
+    if (!instance || !element.classList.contains("show")) return Promise.resolve();
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (): void => {
+            if (settled) return;
+            settled = true;
+            element.removeEventListener("hidden.bs.modal", finish);
+            resolve();
+        };
+        element.addEventListener("hidden.bs.modal", finish);
+        instance.hide();
+        // 兜底：动画被外部环境打断时也要继续流程。
+        window.setTimeout(finish, 600);
+    });
+}
+
+/** 建房后补绑自己的角色卡；失败时提示并保持旁观状态。 */
+async function bindSelfCharacterCard(roomId: string, characterCard: Partial<COC7CharacterCard>): Promise<Room | null> {
+    const userId = String(window.currentUser?.user_id || "");
+    if (!userId) return null;
+    const response = await TrpgApi.put<ApiResponse<Room>>(
+        `/api/rooms/${encodeURIComponent(roomId)}/members/${encodeURIComponent(userId)}/character`,
+        { character_card: characterCard },
+    );
+    if (!response.success || !response.data) {
+        showNotification(
+            characterCardConflictMessage(response) || response.message || response.error || "绑定角色卡失败",
+            "error"
+        );
+        return null;
+    }
+    syncRoomCharacterSelection(roomId, characterCard);
+    await enterRoom(response.data);
+    return response.data;
 }
 
 /**
@@ -991,6 +1076,16 @@ function renderRoomsList(rooms: Room[]): void {
     });
 }
 
+/** 房间卡右上角的规则集标签；与角色卡共用 `.character-card-tag` 样式。 */
+function roomRulesetTagHtml(room: Room): string {
+    const rulesetId = String(room.ruleset_id || room.scenario?.ruleset_id || "").trim().toLowerCase();
+    if (!rulesetId) return "";
+    const tag = window.TrpgRulesetMeta?.tag(rulesetId) || "";
+    if (!tag) return "";
+    const escape = window.TrpgTemplates.escapeHtml;
+    return `<span class="character-card-tag" data-ruleset="${escape(rulesetId)}">${escape(tag)}</span>`;
+}
+
 function renderRoomCard(room: Room): string {
     const isActive = currentRoom?.id === room.id;
     const members = activeRoomMembers(room).map((member) => member.username).join(", ") || "-";
@@ -1000,6 +1095,7 @@ function renderRoomCard(room: Room): string {
         activeHeaderHtml: isActive ? window.TrpgTemplates.render("room-active-header") : "",
         archivedBadgeHtml: room.archived || room.archived_at ? window.TrpgTemplates.render("room-archived-badge", { archivedAt: room.archived_at || "" }) : "",
         name: room.name,
+        rulesetTagHtml: roomRulesetTagHtml(room),
         visibilityBadgeHtml: roomVisibilityBadge(room),
         modeBadgeHtml: roomModeBadge(room),
         roomCode: room.room_code || room.code || "-",
@@ -1046,13 +1142,14 @@ async function openRoomDetail(roomId: string): Promise<void> {
         const existingMember = currentUserId
             ? activeRoomMembers(data.data).find((member) => String(member.user_id) === currentUserId)
             : undefined;
-        // 无 AI 房间允许无卡进入：已有成员记录（即使没有角色卡）直接恢复房间。
-        const cardlessAllowed = data.data.ai_kp_enabled === false;
-        if (existingMember?.character_card || (cardlessAllowed && existingMember) || (isElevatedUser() && !existingMember)) {
+        // 已有成员记录（即使没有角色卡）直接恢复房间：旁观进入的玩家可以在房内再绑定。
+        if (existingMember || isElevatedUser()) {
             await enterRoom(data.data);
             return;
         }
 
+        // 无 AI 房间允许不绑定角色卡进入；其余模式在进入前仍引导选择。
+        const cardlessAllowed = data.data.ai_kp_enabled === false;
         const roomEntrySelection = await promptRoomEntryCharacterSelection("join", roomId, roomSkillBaseOverrides(data.data), {
             allowCardless: cardlessAllowed,
             rulesetId: String(data.data.ruleset_id || ""),
@@ -2461,7 +2558,8 @@ function roomPermissionLabel(room: Room, member: RoomMember): string {
 }
 
 function openRoomCharacterBindModal(userId: string, message = "\u8bf7\u9009\u62e9\u8981\u7ed1\u5b9a\u5230\u8be5\u73a9\u5bb6\u7684\u89d2\u8272\u5361\u3002"): void {
-    populateCharacterSelect("roomBindCharacterSelect");
+    // 房内补绑 / 换卡都按当前房间规则集列卡，旁观进入的玩家也能选到正确规则集的卡。
+    populateCharacterSelect("roomBindCharacterSelect", currentRoom?.ruleset_id || roomEntryRulesetId);
     const targetInput = document.getElementById("roomBindTargetUserId") as HTMLInputElement | null;
     if (targetInput) targetInput.value = userId;
     setText("roomCharacterBindMessage", message);
@@ -2479,7 +2577,7 @@ async function confirmRoomCharacterBinding(): Promise<void> {
 
 async function confirmRoomCharacterBindingUnlocked(userId: string): Promise<void> {
     if (!currentRoom?.id) return;
-    const selectedCard = getSelectedCharacterCardSnapshot("roomBindCharacterSelect");
+    const selectedCard = getSelectedCharacterCardSnapshot("roomBindCharacterSelect", currentRoom?.ruleset_id || roomEntryRulesetId);
     if (!selectedCard) {
         showNotification("请选择要绑定的角色卡", "error");
         return;

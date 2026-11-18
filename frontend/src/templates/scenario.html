@@ -1,7 +1,10 @@
 <template id="scenario-card">
 {{{ coverHtml }}}
 <div class="scenario-card-body">
-    <div class="scenario-card-title" data-user-content="true" title="{{ title }}">{{ title }}</div>
+    <div class="scenario-card-heading">
+        <div class="scenario-card-title" data-user-content="true" title="{{ title }}">{{ title }}</div>
+        <span class="character-card-tag" data-ruleset="{{ rulesetId }}">{{ rulesetTag }}</span>
+    </div>
     <div class="scenario-card-meta">
         <p><span data-i18n="scenario.card.author">作者</span>：<span data-user-content="true">{{ author }}</span></p>
         <p><span data-i18n="scenario.card.creator">创建者</span>：<span data-user-content="true">{{ createdBy }}</span></p>

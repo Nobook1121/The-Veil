@@ -5392,6 +5392,7 @@ interface Window {
         ...api,
         id: "coc7",
         label: "CoC 7th",
+        tag: "COC",
         initCharacterSheet,
         clearCharacterManagement: clearCharacterSheetState,
         reloadCharacterManagement: reloadCharacterSheet,

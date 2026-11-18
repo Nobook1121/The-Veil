@@ -74,6 +74,9 @@ class ScenarioView {
             card.innerHTML = window.TrpgTemplates.render("scenario-card", {
                 coverHtml: scenarioCoverHtml(scenario.title, scenario.cover),
                 title: scenario.title,
+                // 剧本列表跨规则集统一展示，卡片右上角标出规则集便于区分。
+                rulesetTag: window.TrpgRulesetMeta?.tag(scenario.ruleset_id) || "",
+                rulesetId: String(scenario.ruleset_id || "").trim().toLowerCase(),
                 author: scenario.author,
                 createdBy: scenario.creator_username || scenario.author || "Unknown",
                 playerCount: scenario.playerCount,
