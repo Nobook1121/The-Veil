@@ -154,6 +154,43 @@ def test_get_map_reconciles_member_tokens(client):
     assert data["map"]["grid_size"] == 64
 
 
+def test_get_map_is_read_only_for_optimistic_locking(client, tmp_path):
+    manager, _app = client
+    _login(manager, "u1")
+    before = _map(manager)
+    revision = before["map"]["revision"]
+
+    info_path = tmp_path / "rooms" / "room1" / "info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    info["members"].append(
+        {
+            "user_id": "u4",
+            "username": "dave",
+            "room_role": "member",
+            "status": "active",
+            "is_active": True,
+            "character_card": {"name": "Dave"},
+        }
+    )
+    info_path.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+
+    after = _map(manager)
+    assert after["map"]["revision"] == revision
+    assert "member-u4" in {token["id"] for token in after["map"]["tokens"]}
+
+    # 另一个客户端拿着成员加入前的 revision 写地图仍然成功。
+    written = manager.put(
+        "/api/plugins/veil-map/rooms/room1/map",
+        json={
+            "grid_size": 48,
+            "revision": revision,
+            "request_id": uuid4().hex,
+        },
+    )
+    assert written.status_code == 200
+    assert written.get_json()["data"]["map"]["revision"] == revision + 1
+
+
 def test_player_can_only_move_own_token(client):
     manager, app = client
     _login(manager, "u2")

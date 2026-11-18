@@ -200,6 +200,9 @@ def run_member_ai_turn(room_id, user_id):
     # 观战者可以看 AI 行动，但不能消耗房间的 AI 回合。
     if not _find_member(info, user_id=session.get("user_id"), active_only=True):
         return _denied(room_id)
+    # 只有角色绑定者本人或房管可以触发该 AI 回合；其他成员不能代按。
+    if str(session.get("user_id")) != str(user_id) and not _can_manage_members(info):
+        return _denied(room_id)
 
     target = _find_member(info, user_id=user_id, active_only=True)
     if not target:

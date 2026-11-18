@@ -214,6 +214,37 @@ def test_ai_turn_persists_messages_with_ai_attribution(tmp_path):
     assert any("我推开门" in item.get("content", "") for item in history)
 
 
+def test_only_bound_member_or_manager_can_trigger_ai_turn(tmp_path):
+    app, rooms_dir = _make_app(tmp_path)
+    _make_room(
+        rooms_dir,
+        members=[
+            _member(1, _card()),
+            _member(2, _card("card-2", "调查员乙", player_id="2")),
+        ],
+    )
+    created = _client(app, 1).post(
+        "/api/rooms/r-ai/ai-players",
+        json={"character_card": _card("card-ai", "AI 调查员", player_id="1")},
+        headers=_headers(),
+    )
+    assert created.status_code == 201
+    ai_member = next(row for row in created.get_json()["data"]["members"] if row.get("is_ai_player"))
+    path = f"/api/rooms/r-ai/members/{ai_member['user_id']}/ai-act"
+
+    with patch(
+        "trpg_server.routes.rooms_ai_players.run_player_turn",
+        return_value={"ok": True, "content": "我观察四周。", "tool_messages": []},
+    ) as run:
+        denied = _client(app, 2).post(path, json={}, headers=_headers())
+        assert denied.status_code == 403
+        run.assert_not_called()
+
+        allowed = _client(app, 1).post(path, json={}, headers=_headers())
+        assert allowed.status_code == 200
+        assert run.call_count == 1
+
+
 def test_player_agent_uses_player_tools_and_ai_turn_context(tmp_path):
     app, rooms_dir = _make_app(tmp_path)
     room_dir = _make_room(

@@ -62,6 +62,8 @@ def _text(value: Any) -> str:
 
 # 地图插件注册位置查询；没有地图时自动触发直接跳过，不臆测格子。
 _POSITION_PROVIDER: Callable[[Any, str], Mapping[str, Any] | None] | None = None
+# 地图插件注册当前场景查询；核心不直接读插件私有文件。
+_SCENE_ID_PROVIDER: Callable[[Any], str] | None = None
 # 行动侧注册真正执行豁免/伤害的回调；区域核心只负责几何、去重与审计。
 _TRIGGER_HANDLER: Callable[..., Any] | None = None
 
@@ -71,14 +73,30 @@ def register_position_provider(provider: Callable[[Any, str], Mapping[str, Any] 
     _POSITION_PROVIDER = provider
 
 
+def clear_position_provider() -> None:
+    global _POSITION_PROVIDER
+    _POSITION_PROVIDER = None
+
+
+def register_scene_id_provider(provider: Callable[[Any], str]) -> None:
+    global _SCENE_ID_PROVIDER
+    _SCENE_ID_PROVIDER = provider
+
+
+def clear_scene_id_provider() -> None:
+    global _SCENE_ID_PROVIDER
+    _SCENE_ID_PROVIDER = None
+
+
 def register_trigger_handler(handler: Callable[..., Any]) -> None:
     global _TRIGGER_HANDLER
     _TRIGGER_HANDLER = handler
 
 
 def clear_hooks() -> None:
-    global _POSITION_PROVIDER, _TRIGGER_HANDLER
-    _POSITION_PROVIDER = None
+    global _TRIGGER_HANDLER
+    clear_position_provider()
+    clear_scene_id_provider()
     _TRIGGER_HANDLER = None
 
 
@@ -401,6 +419,15 @@ def save(room_dir: Any, state: Mapping[str, Any]) -> None:
 
 
 def scene_id_of(room_dir: Any) -> str:
+    provider = _SCENE_ID_PROVIDER
+    if provider is not None:
+        try:
+            scene = _text(provider(room_dir))
+            if scene:
+                return scene
+        except Exception:  # noqa: BLE001 - 场景提供方异常时退回兼容读取
+            logger.exception("场景 id 查询失败 room=%s", room_dir)
+    # 兼容没有加载地图插件的房间与旧测试；生产路径由插件注册的 provider 提供。
     root = Path(room_dir) / "plugins" / "veil-map" / "scenes"
     pointer = read_json(root / "active.json", default={})
     if isinstance(pointer, Mapping):
@@ -672,6 +699,8 @@ __all__ = [
     "TRIGGERS",
     "cells_of",
     "clear_hooks",
+    "clear_position_provider",
+    "clear_scene_id_provider",
     "clear_trigger",
     "contains",
     "create_area",
@@ -681,6 +710,7 @@ __all__ = [
     "notify_move",
     "notify_turn_start",
     "register_position_provider",
+    "register_scene_id_provider",
     "register_trigger_handler",
     "remove_area",
     "scene_id_of",

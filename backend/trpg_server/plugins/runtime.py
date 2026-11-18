@@ -10,8 +10,11 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _LOCK = threading.RLock()
 _EXTRA_TOOLS: dict[str, tuple[Any, ...]] = {}
@@ -71,11 +74,15 @@ def clear_plugin_runtime() -> None:
         _EXTRA_RULESETS.clear()
         _CONTENT_PACKS.clear()
     try:
+        from trpg_server.workflows import areas
         from trpg_server.workflows.guards import clear_action_guards
 
         clear_action_guards()
+        # 插件卸载后不能继续把旧地图的坐标 / 场景注入核心区域引擎。
+        areas.clear_position_provider()
+        areas.clear_scene_id_provider()
     except Exception:  # noqa: BLE001 - 核心未加载工作流时忽略
-        pass
+        logger.exception("插件运行时清理钩子失败")
 
 
 def unregister_plugin(plugin_id: str) -> None:

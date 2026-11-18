@@ -1204,6 +1204,30 @@ def test_area_move_uses_full_token_footprint(tmp_path, plugins):
     assert seen == [area["id"]]
 
 
+def test_clear_plugin_runtime_clears_area_providers(tmp_path, plugins):
+    area_store.register_position_provider(
+        lambda _room_dir, _name: {"cell_x": 1, "cell_y": 1}
+    )
+    area_store.register_scene_id_provider(lambda _room_dir: "scene-x")
+    assert area_store.scene_id_of(tmp_path) == "scene-x"
+
+    runtime.clear_plugin_runtime()
+
+    assert area_store.lookup_position(tmp_path, "Goblin") is None
+    assert area_store.scene_id_of(tmp_path) == "default"
+
+
+def test_area_scene_provider_drives_scene_isolation(tmp_path, plugins):
+    area_store.register_scene_id_provider(lambda _room_dir: "scene-2")
+    try:
+        area = _raw_area(tmp_path)
+        assert area["scene_id"] == "scene-2"
+        assert area_store.list_areas(tmp_path, scene_id="scene-2")
+        assert area_store.list_areas(tmp_path, scene_id="default") == []
+    finally:
+        area_store.clear_scene_id_provider()
+
+
 def test_guard_exception_degrades_or_fails_closed():
     from pathlib import Path
 

@@ -279,6 +279,11 @@ def _save_combat(context: Any, combat: dict[str, Any]) -> None:
             logger.exception("回合开始区域自动触发失败")
 
 
+def save_combat(context: Any, combat: dict[str, Any]) -> None:
+    """公共战斗状态写入口；插件不要依赖私有 ``_save_combat``。"""
+    _save_combat(context, combat)
+
+
 def _combat_summary_state(combat: dict[str, Any]) -> dict[str, Any]:
     order = combat.get("order") or []
     current = order[combat.get("turn")] if 0 <= int(combat.get("turn") or 0) < len(order) else None

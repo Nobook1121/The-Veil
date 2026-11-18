@@ -1908,9 +1908,9 @@ def _apply_combat_cost(
             f"移动距离超出本回合剩余移动力（剩余 {remaining} 英尺，需要 {cost} 英尺）。",
         )
     try:
-        from trpg_server.agents.tools.combat import _save_combat
+        from trpg_server.agents.tools.combat import save_combat
 
-        _save_combat(SimpleNamespace(room_dir=room_dir, room_id=room_id), combat)
+        save_combat(SimpleNamespace(room_dir=room_dir, room_id=room_id), combat)
     except Exception:  # noqa: BLE001 - 预算回滚后按服务端错误返回
         budget["movement"] = budget_before
         logger.warning("veil_map_combat_save_failed room=%s", room_id, exc_info=True)
@@ -1921,9 +1921,24 @@ def _apply_combat_cost(
 def _map_payload(room_id: str, room_dir, info: dict[str, Any]) -> dict[str, Any]:
     with room_lock(room_dir):
         state = _load_map(room_dir)
-        if _reconcile_tokens(state, info):
-            state = _save_map(room_dir, state)
+        # GET 必须只读：补齐 PC 棋子只发生在内存视图里，不写盘也不推进 revision，
+        # 否则一个成员打开地图会让其他客户端手里的乐观锁版本立即过期。
+        _reconcile_tokens(state, info)
+        state = _normalize_map(state)
         scenes = scene_store.list_scenes(room_dir)
+        if not scenes:
+            # 还没有任何场景分片时，视图仍然要能展示当前（未落盘的）默认场景。
+            scenes = [
+                {
+                    "scene_id": "default",
+                    "title": "default",
+                    "revision": _as_int(state.get("revision"), 0),
+                    "updated_at": str(state.get("updated_at") or ""),
+                    "background": str(state.get("background") or ""),
+                    "tokens": len(state.get("tokens") or []),
+                    "active": True,
+                }
+            ]
     _role, manager = _room_context(info)
     user_id = str(session.get("user_id") or "")
     view, fog_payload, _visible = _observer_scope(state, room_dir, user_id, manager)
@@ -1965,6 +1980,7 @@ def update_map(room_id: str):
     _role, manager = _room_context(info)
     with room_lock(room_dir):
         state = _load_map(room_dir)
+        _reconcile_tokens(state, info)
         if not manager:
             return _rejected_request(
                 "只有房主或房管可以编辑地图。",
@@ -2104,6 +2120,7 @@ def create_map_scene(room_id: str):
     _role, manager = _room_context(info)
     with room_lock(room_dir):
         state = _load_map(room_dir)
+        _reconcile_tokens(state, info)
         if not manager:
             return error_response("只有房主或房管可以新建场景。", 403, code="map.manager_only")
         scene_id = scene_store.safe_scene_id(payload.get("scene_id") or "")
@@ -2152,6 +2169,7 @@ def activate_map_scene(room_id: str, scene_id: str):
         if not scene_store.activate(room_dir, scene_id):
             return error_response("场景不存在或尚未完整保存。", 404, code="map.scene_not_found")
         state = _load_map(room_dir)
+        _reconcile_tokens(state, info)
     _broadcast(room_id, state)
     return success_response(
         {
@@ -2173,6 +2191,7 @@ def add_token(room_id: str):
     _role, manager = _room_context(info)
     with room_lock(room_dir):
         state = _load_map(room_dir)
+        _reconcile_tokens(state, info)
         if not manager:
             return _rejected_request(
                 "只有房主或房管可以添加棋子。",
@@ -2282,6 +2301,7 @@ def delete_token(room_id: str, token_id: str):
     _role, manager = _room_context(info)
     with room_lock(room_dir):
         state = _load_map(room_dir)
+        _reconcile_tokens(state, info)
         if not manager:
             return _rejected_request(
                 "只有房主或房管可以删除棋子。",
@@ -2335,6 +2355,7 @@ def move_token(room_id: str, token_id: str):
     viewer_id = str(session.get("user_id") or "")
     with room_lock(room_dir):
         state = _load_map(room_dir)
+        _reconcile_tokens(state, info)
         token = next((item for item in state["tokens"] if str(item.get("id")) == str(token_id)), None)
         if token is None:
             return _invalid_request(
@@ -2467,6 +2488,7 @@ def update_walls(room_id: str):
     _role, manager = _room_context(info)
     with room_lock(room_dir):
         state = _load_map(room_dir)
+        _reconcile_tokens(state, info)
         if not manager:
             return _rejected_request(
                 "只有房主或房管可以编辑墙体。",
@@ -2526,6 +2548,7 @@ def update_lights(room_id: str):
     _role, manager = _room_context(info)
     with room_lock(room_dir):
         state = _load_map(room_dir)
+        _reconcile_tokens(state, info)
         if not manager:
             return _rejected_request(
                 "只有房主或房管可以编辑场景光源。",
@@ -2586,6 +2609,7 @@ def update_token_light(room_id: str, token_id: str):
     viewer_id = str(session.get("user_id") or "")
     with room_lock(room_dir):
         state = _load_map(room_dir)
+        _reconcile_tokens(state, info)
         token = next(
             (item for item in state["tokens"] if str(item.get("id")) == str(token_id)),
             None,
@@ -2692,6 +2716,7 @@ def import_map(room_id: str):
     form = dict(request.form)
     with room_lock(room_dir):
         state = _load_map(room_dir)
+        _reconcile_tokens(state, info)
         request_id, expected, error = _read_envelope(form, state)
         if error is not None:
             return error
@@ -2845,6 +2870,7 @@ def calibrate_map(room_id: str):
     _role, manager = _room_context(info)
     with room_lock(room_dir):
         state = _load_map(room_dir)
+        _reconcile_tokens(state, info)
         if not manager:
             return _rejected_request(
                 "只有房主或房管可以标定地图网格。",
@@ -3378,6 +3404,15 @@ def _area_position_provider(room_dir: Any, name: str) -> dict[str, Any] | None:
     }
 
 
+def _area_scene_provider(room_dir: Any) -> str:
+    """给核心区域引擎提供当前场景 id，避免核心直接读取插件私有文件。"""
+    try:
+        return scene_store.active_scene_id(room_dir) or ""
+    except Exception:  # noqa: BLE001 - 场景损坏时退回核心默认场景
+        logger.warning("veil_map_scene_provider_failed room=%s", room_dir, exc_info=True)
+        return ""
+
+
 def _notify_area_move(
     room_dir: Any,
     token: dict[str, Any],
@@ -3417,6 +3452,7 @@ def _register_action_guard() -> None:
         return
     register_action_guard(_action_line_guard, critical=True)
     area_store.register_position_provider(_area_position_provider)
+    area_store.register_scene_id_provider(_area_scene_provider)
     _ACTION_GUARD_REGISTERED = True
 
 
