@@ -1,30 +1,31 @@
-// 角色卡页面外壳。
+// 角色卡页面外壳与统一角色卡列表。
 //
-// 这里不含任何规则集私有逻辑：只从 TrpgCharacterSheetRegistry 取默认模块并委托初始化。
-// 页眉标题/描述由 /api/rulesets 返回的插件元数据驱动，插件缺省时回退到中性通用文案。
-// 「兜底」策略是明确阻断而不是通用只读渲染——当前没有任何通用渲染器能可靠编辑
-// CoC 卡的属性/技能/物品并完成导入导出与保存，给出半残界面只会让人误以为数据还在、
-// 实际改不了，因此模块缺失时直接报错并禁用入口。
+// 角色卡是规则集私有结构，但列表是跨规则集共享的：本文件负责拉取 /api/characters，
+// 按卡片的 rulesetId 解析到对应模块，由模块提供卡面摘要（describeCharacterCard），
+// 核心只负责统一排版、规则集标签、批量管理与入口路由；详情 / 编辑 / 新建仍交给模块。
+// 模块缺失时明确阻断并提示，绝不退化成只读伪界面。
 
 interface CharacterSheetHostApi {
     init: () => void;
 }
 
-interface RulesetHeaderOption {
-    id: string;
-    display_name?: string;
-    description?: string;
-    selectable?: boolean;
+interface CharacterListBridge {
+    enabled: boolean;
+    /** 由规则集模块在每次列表刷新时调用：先用缓存渲染，再异步拉取最新数据。 */
+    render: () => void;
+    refresh: () => Promise<void>;
 }
 
 interface Window {
     TrpgCharacterSheetHost?: CharacterSheetHostApi;
+    TrpgCharacterListBridge?: CharacterListBridge;
 }
 
 (function installCharacterSheetHost(global: Window & typeof globalThis): void {
     "use strict";
 
-    const RULESET_HEADER_ENDPOINT = "/api/rulesets";
+    const CARD_DEFAULT_BIO = "这位角色还没有写下简介。";
+
     const BLOCKED_ACTION_IDS = [
         "createCharacter",
         "importCharacter",
@@ -33,13 +34,17 @@ interface Window {
         "characterBatchToggle",
     ];
 
-    let cachedRulesetOptions: RulesetHeaderOption[] | null = null;
-    let rulesetHeaderRequest: Promise<void> | null = null;
-    let rulesetHeaderEventsBound = false;
     let roomEventsBound = false;
-    let activeSheetRulesetId = "";
+    let initialized = false;
     let activeModule: CharacterSheetModule | null = null;
     let activeModuleId = "";
+
+    /** /api/characters 的原始数据；null 表示尚未加载。 */
+    let listCards: Record<string, unknown>[] | null = null;
+    let listRequest: Promise<void> | null = null;
+    let refreshTimer: number | null = null;
+    let batchMode = false;
+    const batchSelection = new Set<string>();
 
     function escapeHtml(value: unknown): string {
         return String(value ?? "")
@@ -50,95 +55,172 @@ interface Window {
             .replace(/'/g, "&#039;");
     }
 
-    function i18nText(key: string, fallback: string, values?: Record<string, string>): string {
+    function i18nText(key: string, fallback: string, values?: Record<string, string | number>): string {
         return global.TrpgI18n?.t(key, fallback, values) || fallback;
     }
 
     function pluginText(value: unknown): string {
         const text = String(value ?? "").trim();
         if (!text) return "";
-        // legacy 词典按源文案做映射；插件文案随中文源进入 locale，英文界面可自动翻译。
         return global.TrpgI18n?.t("", text) || text;
     }
 
-    function pickRuleset(options: RulesetHeaderOption[] | null): RulesetHeaderOption | null {
-        if (!options) return null;
-        const usable = options.filter((option) => (
-            option
-            && option.selectable !== false
-            && Boolean(pluginText(option.display_name))
-        ));
-        if (!usable.length) return null;
-        if (activeSheetRulesetId) {
-            const preferred = usable.find((option) => (
-                String(option.id || "").trim().toLowerCase() === activeSheetRulesetId
-            ));
-            if (preferred) return preferred;
+    function notify(message: string, type: string = "info"): void {
+        const notifier = global.showNotification;
+        if (typeof notifier === "function") notifier(message, type);
+    }
+
+    function cardIdOf(raw: Record<string, unknown>): string {
+        return String(raw?.id ?? "").trim();
+    }
+
+    function rulesetIdOf(raw: Record<string, unknown>): string {
+        const explicit = String(raw?.rulesetId ?? "").trim().toLowerCase();
+        if (explicit) return explicit;
+        // 历史卡没有 rulesetId：交给默认模块解释，避免核心硬编码某个规则集 id。
+        return String(global.TrpgCharacterSheetRegistry?.defaultModule()?.id ?? "").trim().toLowerCase();
+    }
+
+    function moduleForCard(raw: Record<string, unknown>): CharacterSheetModule | undefined {
+        return global.TrpgCharacterSheetRegistry?.forRuleset(rulesetIdOf(raw));
+    }
+
+    function describeCard(raw: Record<string, unknown>): CharacterSheetCardSummary & { rulesetId: string } {
+        const rulesetId = rulesetIdOf(raw);
+        let summary: CharacterSheetCardSummary = {};
+        try {
+            summary = moduleForCard(raw)?.describeCharacterCard?.(raw) || {};
+        } catch {
+            // 单个模块的摘要异常不应拖垮整个列表。
         }
-        return usable[0] || null;
+        return {
+            rulesetId,
+            tag: String(summary.tag || rulesetId || "?").trim().toUpperCase(),
+            name: pluginText(summary.name || raw?.name || "未命名角色卡"),
+            avatar: String(summary.avatar ?? raw?.avatar ?? ""),
+            subtitle: pluginText(summary.subtitle || ""),
+            bio: pluginText(summary.bio || "") || i18nText("character.card.default_bio", CARD_DEFAULT_BIO),
+        };
     }
 
-    function setHeaderText(element: HTMLElement | null, text: string): void {
-        if (!element) return;
-        element.removeAttribute("data-i18n");
-        element.dataset.i18nDynamic = "true";
-        element.textContent = text;
+    function pruneBatchSelection(): void {
+        if (!listCards) return;
+        const ids = new Set(listCards.map(cardIdOf));
+        [...batchSelection].forEach((id) => {
+            if (!ids.has(id)) batchSelection.delete(id);
+        });
     }
 
-    function applyRulesetHeader(option: RulesetHeaderOption | null): void {
-        if (typeof document === "undefined") return;
-        const title = document.getElementById("characterPageTitle");
-        const subtitle = document.getElementById("characterPageSubtitle");
-        if (!title && !subtitle) return;
-        const name = option ? pluginText(option.display_name) : "";
-        const description = option ? pluginText(option.description) : "";
-        setHeaderText(
-            title,
-            name
-                ? i18nText("character.page.title.ruleset", "{ruleset} 角色卡", { ruleset: name })
-                : i18nText("character.page.title", "角色卡工作区"),
-        );
-        setHeaderText(
-            subtitle,
-            description || i18nText("character.page.subtitle", "管理角色卡的属性、技能、装备、伤势与状态记录。"),
-        );
+    function renderEmptyState(message: string, withCreate: boolean): string {
+        return `
+            <div class="character-empty-state">
+                <i class="fa fa-id-badge" aria-hidden="true"></i>
+                <p>${escapeHtml(message)}</p>
+                ${withCreate ? `<button type="button" class="btn btn-sm btn-primary" data-card-action="create">新建角色卡</button>` : ""}
+            </div>`;
     }
 
-    async function loadRulesetHeader(): Promise<void> {
-        if (rulesetHeaderRequest) return rulesetHeaderRequest;
-        rulesetHeaderRequest = (async () => {
+    function renderCard(raw: Record<string, unknown>): string {
+        const id = cardIdOf(raw);
+        const summary = describeCard(raw);
+        const avatar = TrpgAvatar.resolveAvatarSrc(summary.name || "?", summary.avatar || "");
+        const selected = batchSelection.has(id);
+        const classes = [
+            "character-card",
+            batchMode ? "batch-mode" : "",
+            selected ? "batch-selected" : "",
+        ].filter(Boolean).join(" ");
+        return `
+            <article class="${classes}" data-character-card-id="${escapeHtml(id)}" data-character-ruleset="${escapeHtml(summary.rulesetId)}">
+                ${batchMode ? `<span class="batch-card-check" aria-hidden="true"><i class="fa ${selected ? "fa-check-square-o" : "fa-square-o"}"></i></span>` : ""}
+                <div class="character-card-avatar"><img src="${escapeHtml(avatar)}" alt=""></div>
+                <h5>${escapeHtml(summary.name || "未命名角色卡")}<span class="character-card-tag" data-ruleset="${escapeHtml(summary.rulesetId)}">${escapeHtml(summary.tag || "?")}</span></h5>
+                ${summary.subtitle ? `<p class="character-card-subtitle">${escapeHtml(summary.subtitle)}</p>` : ""}
+                <p class="character-card-bio">${escapeHtml(summary.bio || "")}</p>
+                ${batchMode ? "" : `
+                <div class="character-card-actions">
+                    <button type="button" data-card-action="detail">详情</button>
+                    <button type="button" data-card-action="edit">编辑</button>
+                    <button type="button" data-card-action="delete">删除</button>
+                </div>`}
+            </article>
+        `;
+    }
+
+    function updateBatchToolbar(): void {
+        const toolbar = document.getElementById("characterBatchToolbar");
+        const count = document.getElementById("characterBatchCount");
+        const selectAll = document.getElementById("characterBatchSelectAll") as HTMLInputElement | null;
+        const deleteBtn = document.getElementById("characterBatchDelete") as HTMLButtonElement | null;
+        const toggle = document.getElementById("characterBatchToggle");
+        toggle?.classList.toggle("active", batchMode);
+        if (toolbar) toolbar.hidden = !batchMode;
+        const selectedCount = batchSelection.size;
+        if (count) {
+            count.textContent = selectedCount > 0
+                ? i18nText("common.batch.selected", `已选 ${selectedCount} 项`, { count: String(selectedCount) })
+                : "";
+        }
+        if (selectAll) {
+            const selectable = listCards ? listCards.length : 0;
+            selectAll.checked = selectable > 0 && selectedCount === selectable;
+            selectAll.indeterminate = selectedCount > 0 && selectedCount < selectable;
+            selectAll.disabled = selectable === 0;
+        }
+        if (deleteBtn) deleteBtn.disabled = selectedCount === 0;
+    }
+
+    function renderUnifiedList(): void {
+        const list = document.getElementById("characterList");
+        if (!list) return;
+        if (batchMode) pruneBatchSelection();
+        if (!global.currentUser) {
+            list.innerHTML = renderEmptyState(i18nText("character.card.login_required", "登录后查看角色卡。"), false);
+            updateBatchToolbar();
+            return;
+        }
+        if (listCards === null) {
+            list.innerHTML = renderEmptyState(i18nText("character.card.loading", "正在加载角色卡…"), false);
+            void refreshCards();
+            updateBatchToolbar();
+            return;
+        }
+        if (!listCards.length) {
+            list.innerHTML = renderEmptyState(i18nText("character.card.empty", "还没有角色卡。"), true);
+            updateBatchToolbar();
+            return;
+        }
+        list.innerHTML = listCards.map(renderCard).join("");
+        updateBatchToolbar();
+    }
+
+    async function refreshCards(): Promise<void> {
+        if (!global.currentUser) {
+            listCards = [];
+            renderUnifiedList();
+            return;
+        }
+        if (listRequest) return listRequest;
+        const request = (async () => {
             try {
-                await global.TrpgI18n?.ready;
+                const response = await TrpgApi.get<ApiResponse<Record<string, unknown>[]>>("/api/characters");
+                listCards = response?.success && Array.isArray(response.data) ? response.data : [];
             } catch {
-                // 词典加载失败不阻塞角色卡操作，直接使用源码文案。
+                listCards = [];
             }
-            try {
-                const result = await global.TrpgApi.requestWithResponse<ApiResponse<RulesetHeaderOption[]>>(RULESET_HEADER_ENDPOINT);
-                const body = result?.data;
-                cachedRulesetOptions = body?.success && Array.isArray(body.data) ? body.data : [];
-            } catch {
-                // 未登录、接口不可达或旧服务端都不阻塞角色卡页面：用中性文案即可。
-                cachedRulesetOptions = [];
-            }
-            applyRulesetHeader(pickRuleset(cachedRulesetOptions));
-            rulesetHeaderRequest = null;
+            listRequest = null;
+            renderUnifiedList();
         })();
-        return rulesetHeaderRequest;
+        listRequest = request;
+        await request;
     }
 
-    function bindRulesetHeaderEvents(): void {
-        if (rulesetHeaderEventsBound) return;
-        rulesetHeaderEventsBound = true;
-        global.addEventListener("trpg:locale-changed", () => {
-            applyRulesetHeader(pickRuleset(cachedRulesetOptions));
-        });
-        global.addEventListener("trpg:user-changed", () => {
-            cachedRulesetOptions = null;
-            void (async () => {
-                if (rulesetHeaderRequest) await rulesetHeaderRequest;
-                await loadRulesetHeader();
-            })();
-        });
+    function scheduleRefresh(): void {
+        if (refreshTimer !== null) return;
+        refreshTimer = global.setTimeout(() => {
+            refreshTimer = null;
+            void refreshCards();
+        }, 150);
     }
 
     function block(reason: string): void {
@@ -157,8 +239,7 @@ interface Window {
             const element = document.getElementById(id) as HTMLButtonElement | null;
             if (element) element.disabled = true;
         });
-        const notifier = (global as unknown as { showNotification?: (message: string, type?: string) => void }).showNotification;
-        if (typeof notifier === "function") notifier(reason, "error");
+        notify(reason, "error");
     }
 
     /**
@@ -189,13 +270,11 @@ interface Window {
         global.reloadCharacterManagement = async () => {
             await module.reloadCharacterManagement?.();
         };
-        activeSheetRulesetId = moduleId;
         try {
             global.localStorage?.setItem("trpg:active-character-ruleset", moduleId);
         } catch {
             // 隐私模式下不可写；不影响本次切换。
         }
-        applyRulesetHeader(pickRuleset(cachedRulesetOptions));
         module.initCharacterSheet();
     }
 
@@ -215,15 +294,23 @@ interface Window {
         return (rulesetId ? registry?.forRuleset(rulesetId) : undefined) || registry?.defaultModule();
     }
 
+    function createModule(): CharacterSheetModule | undefined {
+        const roomRulesetId = String(global.currentRoom?.ruleset_id || "").trim().toLowerCase();
+        if (roomRulesetId) {
+            const roomModule = global.TrpgCharacterSheetRegistry?.forRuleset(roomRulesetId);
+            if (roomModule) return roomModule;
+        }
+        return activeModule || global.TrpgCharacterSheetRegistry?.defaultModule();
+    }
+
     function syncModule(): void {
         const module = resolveModule();
         if (!module) {
-            const roomRulesetId = String(global.currentRoom?.ruleset_id || "").trim().toLowerCase();
             global.clearCharacterManagement = () => {};
             global.reloadCharacterManagement = async () => {};
             block(
-                roomRulesetId
-                    ? `没有可用的角色卡渲染器：当前房间规则集 ${roomRulesetId} 尚未加载对应模块。`
+                global.currentRoom?.ruleset_id
+                    ? `没有可用的角色卡渲染器：当前房间规则集 ${String(global.currentRoom.ruleset_id)} 尚未加载对应模块。`
                     : "没有可用的角色卡渲染器：规则集模块未加载，无法打开或编辑角色卡。"
             );
             return;
@@ -231,14 +318,202 @@ interface Window {
         activateModule(module);
     }
 
+    async function openCard(raw: Record<string, unknown>, mode: "detail" | "edit"): Promise<void> {
+        const module = moduleForCard(raw);
+        if (!module) {
+            notify(`没有可用的角色卡渲染器：规则集「${rulesetIdOf(raw)}」尚未加载对应模块。`, "error");
+            return;
+        }
+        if (String(module.id || "").trim().toLowerCase() !== activeModuleId) {
+            activateModule(module);
+        }
+        try {
+            await module.openCharacter?.(raw, mode);
+        } catch (error) {
+            notify(`打开角色卡失败：${String((error as Error)?.message || error)}`, "error");
+        }
+    }
+
+    async function deleteCard(raw: Record<string, unknown>): Promise<void> {
+        const id = cardIdOf(raw);
+        if (!id) return;
+        const summary = describeCard(raw);
+        const confirmed = global.TrpgDialog?.confirm
+            ? await global.TrpgDialog.confirm({ title: "删除角色卡", message: `确定删除「${summary.name}」吗？`, confirmText: "删除", danger: true })
+            : global.confirm(`确定删除「${summary.name}」吗？`);
+        if (!confirmed) return;
+        try {
+            const response = await TrpgApi.del<ApiResponse>(`/api/characters/${encodeURIComponent(id)}`);
+            if (!response?.success) {
+                notify(response?.message || response?.error || "删除角色卡失败", "error");
+                return;
+            }
+            batchSelection.delete(id);
+            if (listCards) listCards = listCards.filter((card) => cardIdOf(card) !== id);
+            renderUnifiedList();
+            notify("角色卡已删除", "success");
+            void activeModule?.reloadCharacterManagement?.();
+        } catch (error) {
+            notify(`删除角色卡失败：${String((error as Error)?.message || error)}`, "error");
+        }
+    }
+
+    async function deleteSelectedCards(): Promise<void> {
+        const ids = [...batchSelection];
+        if (!ids.length) return;
+        const confirmed = global.TrpgDialog?.confirm
+            ? await global.TrpgDialog.confirm({
+                title: "批量删除",
+                message: `确定删除选中的 ${ids.length} 张角色卡吗？`,
+                confirmText: "删除",
+                danger: true,
+            })
+            : global.confirm(`确定删除选中的 ${ids.length} 张角色卡吗？`);
+        if (!confirmed) return;
+        let deleted = 0;
+        let failed = 0;
+        for (const id of ids) {
+            try {
+                const response = await TrpgApi.del<ApiResponse>(`/api/characters/${encodeURIComponent(id)}`);
+                if (response?.success) {
+                    deleted += 1;
+                    batchSelection.delete(id);
+                    if (listCards) listCards = listCards.filter((card) => cardIdOf(card) !== id);
+                } else {
+                    failed += 1;
+                }
+            } catch {
+                failed += 1;
+            }
+        }
+        batchMode = false;
+        renderUnifiedList();
+        if (failed === 0) notify(`已删除 ${deleted} 项`, "success");
+        else notify(`已删除 ${deleted} 项，${failed} 项失败`, "error");
+        void activeModule?.reloadCharacterManagement?.();
+    }
+
+    function createCharacter(): void {
+        if (!global.currentUser) {
+            notify("请先登录后再创建角色卡", "warning");
+            return;
+        }
+        const module = createModule();
+        if (!module) {
+            notify("没有可用的角色卡渲染器，无法创建角色卡", "error");
+            return;
+        }
+        if (String(module.id || "").trim().toLowerCase() !== activeModuleId) {
+            activateModule(module);
+        }
+        if (!module.createCharacter) {
+            notify("当前规则集暂不支持新建角色卡", "error");
+            return;
+        }
+        module.createCharacter();
+    }
+
+    function toggleBatchMode(next: boolean): void {
+        batchMode = next;
+        batchSelection.clear();
+        renderUnifiedList();
+    }
+
+    function handleListClick(event: MouseEvent): void {
+        const target = event.target as HTMLElement | null;
+        if (!target) return;
+        const cardElement = target.closest<HTMLElement>("[data-character-card-id]");
+        if (!cardElement) return;
+        const id = cardElement.dataset.characterCardId || "";
+        const raw = listCards?.find((card) => cardIdOf(card) === id);
+        if (!raw) return;
+        if (batchMode) {
+            if (batchSelection.has(id)) batchSelection.delete(id);
+            else batchSelection.add(id);
+            renderUnifiedList();
+            return;
+        }
+        const action = target.closest<HTMLElement>("[data-card-action]")?.dataset.cardAction || "detail";
+        if (action === "delete") {
+            void deleteCard(raw);
+            return;
+        }
+        void openCard(raw, action === "edit" ? "edit" : "detail");
+    }
+
+    function bindGlobalEvents(): void {
+        // 统一列表由外壳渲染，模块切换会克隆工作区节点，因此监听挂在 document 上。
+        document.addEventListener("click", (event) => {
+            const target = event.target as HTMLElement | null;
+            if (!target) return;
+            if (target.closest("#createCharacter")) {
+                event.preventDefault();
+                event.stopPropagation();
+                createCharacter();
+                return;
+            }
+            if (target.closest("#characterBatchToggle")) {
+                event.stopPropagation();
+                toggleBatchMode(!batchMode);
+                return;
+            }
+            if (target.closest("#characterBatchExit")) {
+                event.stopPropagation();
+                toggleBatchMode(false);
+                return;
+            }
+            if (target.closest("#characterBatchDelete")) {
+                event.stopPropagation();
+                void deleteSelectedCards();
+                return;
+            }
+            if (target.closest('[data-card-action="create"]')) {
+                event.stopPropagation();
+                createCharacter();
+                return;
+            }
+            handleListClick(event);
+        }, true);
+        document.addEventListener("change", (event) => {
+            const target = event.target as HTMLElement | null;
+            if (!target || target.id !== "characterBatchSelectAll") return;
+            const selectAll = target as HTMLInputElement;
+            batchSelection.clear();
+            if (selectAll.checked && listCards) {
+                listCards.forEach((card) => batchSelection.add(cardIdOf(card)));
+            }
+            renderUnifiedList();
+        });
+        global.addEventListener("trpg:user-changed", () => {
+            listCards = null;
+            batchSelection.clear();
+            batchMode = false;
+            void refreshCards();
+        });
+        global.addEventListener("trpg:locale-changed", () => renderUnifiedList());
+    }
+
     function init(): void {
-        bindRulesetHeaderEvents();
+        if (initialized) return;
+        initialized = true;
+        bindGlobalEvents();
         if (!roomEventsBound) {
             roomEventsBound = true;
-            global.addEventListener("trpg:room-changed", () => syncModule());
+            global.addEventListener("trpg:room-changed", () => {
+                syncModule();
+                void refreshCards();
+            });
         }
-        void loadRulesetHeader();
+        global.TrpgCharacterListBridge = {
+            enabled: true,
+            render: () => {
+                renderUnifiedList();
+                scheduleRefresh();
+            },
+            refresh: () => refreshCards(),
+        };
         syncModule();
+        void refreshCards();
     }
 
     global.TrpgCharacterSheetHost = { init };

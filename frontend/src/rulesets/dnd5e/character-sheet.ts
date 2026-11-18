@@ -62,6 +62,7 @@ interface Dnd5eSheet {
     equipment?: Dnd5eEquipmentItem[];
     features?: string[];
     notes?: string;
+    bio?: string;
     status?: string[] | string;
 }
 
@@ -173,12 +174,13 @@ interface Dnd5eModuleApi {
     ];
 
     let cards: Dnd5eCard[] = [];
-    let persistedIds = new Set<string>();
     let activeCardId = "";
-    let editing = false;
     let active = false;
     let loading: Promise<void> | null = null;
+    let initialLoad: Promise<void> | null = null;
     let sections: Dnd5eSheetSectionDescriptor[] = FALLBACK_SECTIONS;
+    let editorModal: BootstrapModalInstance | null = null;
+    let editorDraft: Dnd5eCard | null = null;
 
     function escapeHtml(value: unknown): string {
         return String(value ?? "")
@@ -235,6 +237,7 @@ interface Dnd5eModuleApi {
             equipment: [],
             features: [],
             notes: "",
+            bio: "一位初出茅庐的冒险者。",
             status: [],
         };
     }
@@ -295,6 +298,7 @@ interface Dnd5eModuleApi {
             : [];
         base.features = stringList(source.features);
         base.notes = String(source.notes ?? "");
+        base.bio = String(source.bio ?? base.bio ?? "");
         base.status = Array.isArray(source.status) ? stringList(source.status) : String(source.status ?? "");
         return base;
     }
@@ -613,13 +617,6 @@ interface Dnd5eModuleApi {
             </div>
         `).join("");
         return `
-            <header class="character-inspector-header">
-                <div><h3>编辑 ${escapeHtml(card.name)}</h3></div>
-                <div class="character-inline-actions">
-                    <button type="button" data-dnd5e-action="cancel">取消</button>
-                    <button type="button" data-dnd5e-action="save">保存</button>
-                </div>
-            </header>
             <form class="character-detail-dashboard dnd5e-editor" data-dnd5e-editor>
                 <section class="character-detail-band">
                     <h4>基础信息</h4>
@@ -632,6 +629,7 @@ interface Dnd5eModuleApi {
                         ${inputRow("背景", "background", sheet.background)}
                         ${inputRow("阵营", "alignment", sheet.alignment)}
                         ${inputRow("经验值", "xp", sheet.xp, "number", 'min="0"')}
+                        ${textRow("角色简介", "bio", sheet.bio, 3)}
                     </div>
                 </section>
                 <section class="character-detail-band">
@@ -744,6 +742,7 @@ interface Dnd5eModuleApi {
         sheet.features = readField(root, "features").split(/\n+/).map((line) => line.trim()).filter(Boolean);
         sheet.status = splitList(readField(root, "status"));
         sheet.notes = readField(root, "notes").trim();
+        sheet.bio = readField(root, "bio").trim();
         return sheet;
     }
 
@@ -753,13 +752,11 @@ interface Dnd5eModuleApi {
         if (listView) listView.hidden = false;
         if (detailPage) detailPage.hidden = true;
         activeCardId = "";
-        editing = false;
         render();
     }
 
     function showDetail(cardId: string): void {
         activeCardId = cardId;
-        editing = false;
         const listView = document.getElementById("character-list-view");
         const detailPage = document.getElementById("character-detail-page");
         const empty = document.querySelector<HTMLElement>("#characterInspector .character-empty-state");
@@ -771,40 +768,22 @@ interface Dnd5eModuleApi {
         render();
     }
 
+    /** 统一角色卡列表由页面外壳渲染；本模块只在没有外壳时给出说明。 */
+    function unifiedListBridge(): { render: () => void } | null {
+        const bridge = (global as unknown as { TrpgCharacterListBridge?: { enabled?: boolean; render?: () => void } }).TrpgCharacterListBridge;
+        if (!bridge?.enabled || typeof bridge.render !== "function") return null;
+        return { render: () => bridge.render?.() };
+    }
+
     function renderList(): void {
-        const list = document.getElementById("characterList");
-        if (!list) return;
-        if (!cards.length) {
-            list.innerHTML = `
-                <div class="character-empty-state">
-                    <i class="fa fa-id-badge" aria-hidden="true"></i>
-                    <p>还没有 D&amp;D 5e 角色卡。</p>
-                    <button type="button" class="btn btn-sm btn-primary" data-dnd5e-action="create">新建角色卡</button>
-                </div>`;
+        const bridge = unifiedListBridge();
+        if (bridge) {
+            bridge.render();
             return;
         }
-        list.innerHTML = cards.map((card) => {
-            const sheet = card.sheet;
-            const hp = sheet.hp || {};
-            const avatar = TrpgAvatar.resolveAvatarSrc(card.name, String(card.avatar ?? ""));
-            return `
-                <article class="character-card ${card.id === activeCardId ? "active" : ""}" data-dnd5e-card-id="${escapeHtml(card.id)}">
-                    <div class="character-card-avatar"><img src="${escapeHtml(avatar)}" alt=""></div>
-                    <h5>${escapeHtml(card.name)}</h5>
-                    <p>${escapeHtml(`${sheet.level || 1} 级 ${sheet.class || "未知职业"}${sheet.race ? ` · ${sheet.race}` : ""}`)}</p>
-                    <div class="character-card-metrics">
-                        <span>HP ${asInt(hp.current, 0)}/${asInt(hp.max, 1)}</span>
-                        <span>AC ${asInt(card.armorClass ?? sheet.armorClass, 0)}</span>
-                        <span>速度 ${asInt(sheet.speed, 0)}</span>
-                    </div>
-                    <div class="character-card-actions">
-                        <button type="button" data-dnd5e-action="detail">详情</button>
-                        <button type="button" data-dnd5e-action="edit">编辑</button>
-                        <button type="button" data-dnd5e-action="delete">删除</button>
-                    </div>
-                </article>
-            `;
-        }).join("");
+        const list = document.getElementById("characterList");
+        if (!list) return;
+        list.innerHTML = `<div class="character-empty-filter">角色卡列表需要页面外壳提供统一渲染。</div>`;
     }
 
     function renderDetail(): void {
@@ -815,7 +794,7 @@ interface Dnd5eModuleApi {
             host.innerHTML = "";
             return;
         }
-        host.innerHTML = editing ? renderEditor(card) : renderCharacterDetail(card);
+        host.innerHTML = renderCharacterDetail(card);
     }
 
     function render(): void {
@@ -832,7 +811,6 @@ interface Dnd5eModuleApi {
             cards = rows
                 .filter((row) => String(row?.rulesetId || "").toLowerCase() === RULESET_ID)
                 .map((row) => createCharacterCard(row));
-            persistedIds = new Set(cards.map((card) => card.id));
         } catch (error) {
             notify(`加载 5e 角色卡失败：${escapeHtml((error as Error)?.message || error)}`, "error");
             cards = [];
@@ -854,56 +832,102 @@ interface Dnd5eModuleApi {
         });
     }
 
+    /** 与 CoC 一致的弹窗新建 / 编辑：卡面字段不同，交互流程相同。 */
+    function ensureEditorModal(): BootstrapModalInstance | null {
+        if (editorModal) return editorModal;
+        if (typeof bootstrap === "undefined") return null;
+        const element = document.createElement("div");
+        element.id = "dnd5eCharacterModal";
+        element.className = "modal fade";
+        element.tabIndex = -1;
+        element.innerHTML = `
+            <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">编辑角色卡</h5>
+                        <button type="button" class="btn-close" data-dnd5e-action="cancel" aria-label="关闭"></button>
+                    </div>
+                    <div class="modal-body" data-dnd5e-modal-body></div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dnd5e-action="cancel">取消</button>
+                        <button type="button" class="btn btn-primary" data-dnd5e-action="save">保存</button>
+                    </div>
+                </div>
+            </div>`;
+        element.addEventListener("click", (event) => {
+            const button = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-dnd5e-action]");
+            const action = button?.dataset.dnd5eAction || "";
+            if (action === "cancel") {
+                closeEditorModal();
+                return;
+            }
+            if (action === "save") {
+                const form = element.querySelector<HTMLElement>("[data-dnd5e-editor]");
+                if (form) void saveActiveCard(form);
+            }
+        });
+        element.addEventListener("hidden.bs.modal", () => {
+            editorDraft = null;
+            const body = element.querySelector<HTMLElement>("[data-dnd5e-modal-body]");
+            if (body) body.innerHTML = "";
+        });
+        document.body.appendChild(element);
+        editorModal = new bootstrap.Modal(element);
+        return editorModal;
+    }
+
+    function closeEditorModal(): void {
+        editorModal?.hide();
+    }
+
+    function openEditorModal(card: Dnd5eCard, isNew: boolean): void {
+        const instance = ensureEditorModal();
+        const element = document.getElementById("dnd5eCharacterModal");
+        if (!instance || !element) {
+            notify("角色卡编辑窗口不可用", "error");
+            return;
+        }
+        editorDraft = isNew ? card : null;
+        activeCardId = card.id;
+        const title = element.querySelector<HTMLElement>(".modal-title");
+        if (title) title.textContent = isNew ? "创建角色卡" : `编辑 ${card.name}`;
+        const body = element.querySelector<HTMLElement>("[data-dnd5e-modal-body]");
+        if (body) body.innerHTML = renderEditor(card);
+        instance.show();
+    }
+
+    function openEditorForCard(cardId: string): void {
+        const card = cards.find((item) => item.id === cardId);
+        if (!card || !canEditCard(card)) {
+            notify("没有权限编辑这张角色卡", "error");
+            return;
+        }
+        openEditorModal(card, false);
+    }
+
     async function saveActiveCard(root: HTMLElement): Promise<void> {
-        const existing = cards.find((item) => item.id === activeCardId);
+        const existing = cards.find((item) => item.id === activeCardId) || editorDraft;
         if (!existing) return;
         const name = readField(root, "name").trim() || "未命名冒险者";
         const sheet = buildSheetFromEditor(existing, root);
         const payload: Dnd5eCard = { ...existing, name, sheet, rulesetId: RULESET_ID };
         try {
             const response = await TrpgApi.put<ApiResponse<Dnd5eCardInput>>(`/api/characters/${encodeURIComponent(payload.id)}`, payload);
-            if (!response.success) {
-                notify(response.message || response.error || "保存角色卡失败", "error");
+            if (!response?.success) {
+                notify(response?.message || response?.error || "保存角色卡失败", "error");
                 return;
             }
             const saved = createCharacterCard(response.data || payload);
-            cards = cards.map((item) => item.id === saved.id ? saved : item);
-            persistedIds.add(saved.id);
+            cards = cards.some((item) => item.id === saved.id)
+                ? cards.map((item) => item.id === saved.id ? saved : item)
+                : [saved, ...cards];
             activeCardId = saved.id;
-            editing = false;
-            render();
+            editorDraft = null;
+            closeEditorModal();
+            showDetail(saved.id);
             notify("角色卡已保存", "success");
         } catch (error) {
             notify(`保存角色卡失败：${escapeHtml((error as Error)?.message || error)}`, "error");
-        }
-    }
-
-    async function deleteCard(cardId: string): Promise<void> {
-        const card = cards.find((item) => item.id === cardId);
-        if (!card) return;
-        const confirmed = global.TrpgDialog?.confirm
-            ? await global.TrpgDialog.confirm({ title: "删除角色卡", message: `确定删除「${card.name}」吗？`, confirmText: "删除", danger: true })
-            : global.confirm(`确定删除「${card.name}」吗？`);
-        if (!confirmed) return;
-        if (!persistedIds.has(cardId)) {
-            cards = cards.filter((item) => item.id !== cardId);
-            showList();
-            render();
-            return;
-        }
-        try {
-            const response = await TrpgApi.del<ApiResponse>(`/api/characters/${encodeURIComponent(cardId)}`);
-            if (!response.success) {
-                notify(response.message || response.error || "删除角色卡失败", "error");
-                return;
-            }
-            cards = cards.filter((item) => item.id !== cardId);
-            persistedIds.delete(cardId);
-            if (activeCardId === cardId) showList();
-            render();
-            notify("角色卡已删除", "success");
-        } catch (error) {
-            notify(`删除角色卡失败：${escapeHtml((error as Error)?.message || error)}`, "error");
         }
     }
 
@@ -911,62 +935,51 @@ interface Dnd5eModuleApi {
         const target = event.target as HTMLElement | null;
         const button = target?.closest<HTMLElement>("[data-dnd5e-action]");
         const action = button?.dataset.dnd5eAction || "";
-        if (!action) return;
-        const cardElement = button?.closest<HTMLElement>("[data-dnd5e-card-id]");
-        const cardId = cardElement?.dataset.dnd5eCardId || activeCardId;
-        if (action === "create") {
-            const card = newCard();
-            cards = [card, ...cards];
-            showDetail(card.id);
-            editing = true;
-            render();
-            return;
-        }
-        if (action === "detail") { showDetail(cardId); return; }
-        if (action === "edit") {
-            const card = cards.find((item) => item.id === cardId);
-            if (!card || !canEditCard(card)) {
-                notify("没有权限编辑这张角色卡", "error");
-                return;
-            }
-            showDetail(cardId);
-            editing = true;
-            render();
-            return;
-        }
-        if (action === "cancel") {
-            editing = false;
-            render();
-            return;
-        }
-        if (action === "save") {
-            const form = document.querySelector<HTMLElement>("[data-dnd5e-editor]");
-            if (form) void saveActiveCard(form);
-            return;
-        }
-        if (action === "delete") { void deleteCard(cardId); }
+        if (action === "edit") openEditorForCard(activeCardId);
     }
 
-    function createAndEdit(): void {
-        const card = newCard();
-        cards = [card, ...cards];
+    function describeCharacterCard(raw: Record<string, unknown>): CharacterSheetCardSummary {
+        const card = createCharacterCard(raw as Dnd5eCardInput);
+        const sheet = card.sheet;
+        const bio = String(sheet.bio || "").trim();
+        return {
+            tag: "DND",
+            name: card.name,
+            avatar: String(card.avatar || ""),
+            subtitle: `${sheet.level || 1} 级 ${sheet.class || "未知职业"}${sheet.race ? ` · ${sheet.race}` : ""}`,
+            bio: bio || "一位初出茅庐的冒险者。",
+        };
+    }
+
+    function createCharacterFromList(): void {
+        if (!global.currentUser) {
+            notify("请先登录后再创建角色卡", "warning");
+            return;
+        }
+        openEditorModal(newCard(), true);
+    }
+
+    async function openCharacter(raw: Record<string, unknown>, mode?: "detail" | "edit"): Promise<void> {
+        if (initialLoad) await initialLoad.catch(() => undefined);
+        const card = createCharacterCard(raw as Dnd5eCardInput);
+        cards = cards.some((item) => item.id === card.id)
+            ? cards.map((item) => item.id === card.id ? card : item)
+            : [card, ...cards];
+        if (mode === "edit") {
+            openEditorModal(card, false);
+            return;
+        }
         showDetail(card.id);
-        editing = true;
-        render();
     }
 
     function bind(): void {
         const workspace = document.getElementById("characterWorkspace");
         if (!workspace || workspace.dataset.dnd5eBound === "true") return;
         workspace.dataset.dnd5eBound = "true";
-        // 入口按钮由工作区统一代理，并用 active 标记隔离：切到 CoC 后本模块不再响应。
+        // 创建入口由页面外壳统一分派；这里只处理详情页内的编辑与返回列表。
         workspace.addEventListener("click", (event) => {
             if (!active) return;
             const target = event.target as HTMLElement | null;
-            if (target?.closest("#createCharacter")) {
-                createAndEdit();
-                return;
-            }
             if (target?.closest("#backToCharacterList")) {
                 showList();
                 return;
@@ -977,6 +990,8 @@ interface Dnd5eModuleApi {
 
     function clearCharacterManagement(): void {
         active = false;
+        editorDraft = null;
+        closeEditorModal();
         showList();
     }
 
@@ -984,12 +999,16 @@ interface Dnd5eModuleApi {
         active = true;
         bind();
         showList();
-        void (async () => {
-            if (loading) await loading;
-            loading = reloadCharacterSheet();
-            await loading;
-            loading = null;
+        const previous = loading;
+        const request = (async () => {
+            if (previous) await previous.catch(() => undefined);
+            await reloadCharacterSheet();
         })();
+        loading = request;
+        initialLoad = request;
+        void request.finally(() => {
+            if (loading === request) loading = null;
+        });
     }
 
     const api: Dnd5eModuleApi = {
@@ -1008,5 +1027,8 @@ interface Dnd5eModuleApi {
         clearCharacterManagement,
         reloadCharacterManagement: reloadCharacterSheet,
         supportsRuleset,
+        describeCharacterCard,
+        openCharacter,
+        createCharacter: createCharacterFromList,
     });
 })(typeof window !== "undefined" ? window : globalThis as Window & typeof globalThis);

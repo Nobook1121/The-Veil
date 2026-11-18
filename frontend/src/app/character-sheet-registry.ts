@@ -4,6 +4,15 @@
 // 这里只做「按 id 登记 / 查询」，不解释任何规则语义；未登记时统一交给外壳做阻断提示，
 // 绝不退化成只读伪界面（否则会出现「看似正常、实际改不了」的状态）。
 
+interface CharacterSheetCardSummary {
+    /** 列表卡面上的规则集标签，如 COC / DND。 */
+    tag?: string;
+    name?: string;
+    avatar?: string;
+    subtitle?: string;
+    bio?: string;
+}
+
 interface CharacterSheetModule {
     id: string;
     /** 接管 #characterWorkspace 的渲染与事件绑定。 */
@@ -12,6 +21,15 @@ interface CharacterSheetModule {
     reloadCharacterManagement?: () => Promise<void>;
     /** 该模块能否接管指定规则集的卡；缺省表示只接管登记时使用的 id。 */
     supportsRuleset?: (rulesetId?: string | null) => boolean;
+    /**
+     * 为统一角色卡列表提供卡面摘要。核心只负责排版与规则集标签，
+     * 具体职业 / 等级 / 简介如何取值由规则集自己解释。
+     */
+    describeCharacterCard?: (raw: Record<string, unknown>) => CharacterSheetCardSummary;
+    /** 打开一张持久化角色卡（统一列表点击详情 / 编辑时调用）。 */
+    openCharacter?: (raw: Record<string, unknown>, mode?: "detail" | "edit") => void | Promise<void>;
+    /** 弹窗新建角色卡（统一入口「新建」按当前规则集分派）。 */
+    createCharacter?: () => void;
 }
 
 interface CharacterSheetRegistryApi {

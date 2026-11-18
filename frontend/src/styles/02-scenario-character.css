@@ -1007,6 +1007,10 @@ body.is-guest .guest-login-hint {
 }
 
 .character-card h5 {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
     margin: 0;
     font-size: 1rem;
 }
@@ -1015,6 +1019,34 @@ body.is-guest .guest-login-hint {
     margin: 6px 0;
     color: var(--color-muted);
     font-size: 0.86rem;
+}
+
+/* 统一角色卡列表：规则集标签 + 简介，两种规则集共用同一套排版。 */
+.character-card-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border: 1px solid color-mix(in srgb, var(--color-primary) 45%, var(--border-subtle));
+    border-radius: 999px;
+    color: var(--color-primary);
+    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+}
+
+.character-card-bio {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+    min-height: 3.4em;
+}
+
+.character-card-actions {
+    margin-top: auto;
+    padding-top: 10px;
 }
 
 .character-card-avatar {
@@ -1046,7 +1078,6 @@ body.is-guest .guest-login-hint {
     font-size: 0.76rem;
 }
 
-.character-card-metrics,
 .character-vital-grid,
 .character-detail-info-grid,
 .character-attribute-grid,
@@ -1057,12 +1088,6 @@ body.is-guest .guest-login-hint {
     gap: 10px;
 }
 
-.character-card-metrics {
-    grid-template-columns: repeat(3, 1fr);
-    margin: 10px 0;
-}
-
-.character-card-metrics span,
 .character-stat-card,
 .skill-card,
 .equipment-row,
@@ -1071,12 +1096,6 @@ body.is-guest .guest-login-hint {
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     background: var(--color-panel-muted);
-}
-
-.character-card-metrics span {
-    padding: 6px;
-    text-align: center;
-    font-size: 0.78rem;
 }
 
 .character-card button,

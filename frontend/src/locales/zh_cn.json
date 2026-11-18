@@ -613,7 +613,7 @@
     "scenario.action.import_document": "导入剧本文档",
     "scenario.action.import_entry": "导入剧本",
     "character.page.title": "角色卡工作区",
-    "character.page.subtitle": "管理角色卡的属性、技能、装备、伤势与状态记录。",
+    "character.page.subtitle": "统一查看与管理所有规则集的角色卡，卡片标签用于区分 dnd / coc。",
     "character.page.title.ruleset": "{ruleset} 角色卡",
     "character.page.kicker": "CHARACTER WORKSPACE",
     "character.action.import": "导入",

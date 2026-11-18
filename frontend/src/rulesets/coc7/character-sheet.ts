@@ -388,6 +388,9 @@ interface CharacterApi {
     listCharacterCards: () => COC7CharacterCard[];
     getCharacterCardSnapshot: (cardId: string) => Partial<COC7CharacterCard> | null;
     renderCharacterDetail: (card: COC7CharacterCard, roomDiff?: RoomCardDiff) => string;
+    describeCharacterCard: (raw: Record<string, unknown>) => CharacterSheetCardSummary;
+    openCharacter: (raw: Record<string, unknown>, mode?: "detail" | "edit") => Promise<void>;
+    createCharacter: () => void;
     clearCharacterManagement: () => void;
     reloadCharacterManagement: () => Promise<void>;
     initCharacterSheet: () => void;
@@ -546,6 +549,7 @@ interface Window {
     let activeGallerySearchTerm = "";
     let activeGalleryEditId = "";
     let assignableUsers: CharacterAssignableUser[] = [];
+    let initialLoad: Promise<void> | null = null;
     let modal: BootstrapModalInstance | null = null;
     let nameGeneratorModal: BootstrapModalInstance | null = null;
     let occupationTemplateModal: BootstrapModalInstance | null = null;
@@ -1580,7 +1584,10 @@ interface Window {
         try {
             const response = await TrpgApi.get<ApiResponse<COC7CharacterCardInput[]>>("/api/characters");
             if (response.success && Array.isArray(response.data)) {
-                cards = response.data.map((card) => createCharacterCard(cardInputFromSchema(card)));
+                // 其他规则集的卡由统一列表按模块分派，本模块只保留自己的卡，避免重复展示。
+                cards = response.data
+                    .map((card) => createCharacterCard(cardInputFromSchema(card)))
+                    .filter((card) => supportsCard(card));
             }
         } catch (error) {
             console.warn("加载角色卡失败：", error);
@@ -1839,11 +1846,12 @@ interface Window {
         skillBaseSettingsModal = skillBaseSettingsModalElement && typeof bootstrap !== "undefined" ? new bootstrap.Modal(skillBaseSettingsModalElement) : null;
         hydrateOccupationSelect();
         bindEvents();
-        void Promise.all([loadSkillCatalog(), loadOccupationCatalogs(), loadWeaponCatalog()]).then(() => {
+        const catalogLoad = Promise.all([loadSkillCatalog(), loadOccupationCatalogs(), loadWeaponCatalog()]).then(() => {
             hydrateOccupationSelect();
-            void Promise.all([loadCards(), loadCharacterGallery()]).then(render);
+            return Promise.all([loadCards(), loadCharacterGallery()]).then(render);
         });
-        void loadAssignableUsers().then(render);
+        const usersLoad = loadAssignableUsers().then(render);
+        initialLoad = Promise.all([catalogLoad, usersLoad]).then(() => undefined);
     }
 
     function bindEvents(): void {
@@ -3826,54 +3834,22 @@ interface Window {
         showCharacterList();
     }
 
-    function renderList(): void {
-        const list = byId("characterList");
-        if (!list) return;
-        pruneCharacterBatchSelection("card");
-        const visibleCards = visibleCharacterCards();
-        if (visibleCards.length === 0) {
-            list.innerHTML = `<div class="character-empty-filter">没有符合筛选条件的角色卡。</div>`;
-            updateCharacterBatchToolbar("card");
-            return;
-        }
-        list.innerHTML = visibleCards.map(renderCharacterCardSummary).join("");
-        list.querySelectorAll<HTMLElement>(".character-card").forEach((cardElement) => {
-            cardElement.addEventListener("click", (event) => {
-                const id = cardElement.dataset.characterId || "";
-                if (characterBatchStates.card.mode) {
-                    toggleCharacterBatchSelection("card", id, cardElement);
-                    return;
-                }
-                const action = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-action]")?.dataset.action || "detail";
-                const card = visibleCards.find((item) => item.id === id);
-                if (!card) return;
-                if (action === "edit") openEditor(card);
-                else if (action === "delete") void deleteCard(id);
-                else openCharacterDetail(id);
-            });
-        });
-        updateCharacterBatchToolbar("card");
+    /** 统一角色卡列表由页面外壳渲染；本模块只在没有外壳时给出说明。 */
+    function unifiedListBridge(): { render: () => void } | null {
+        const bridge = (global as unknown as { TrpgCharacterListBridge?: { enabled?: boolean; render?: () => void } }).TrpgCharacterListBridge;
+        if (!bridge?.enabled || typeof bridge.render !== "function") return null;
+        return { render: () => bridge.render?.() };
     }
 
-    function renderCharacterCardSummary(card: COC7CharacterCard): string {
-        const batch = characterBatchStates.card;
-        const selected = batch.mode && batch.selected.has(card.id);
-        return `
-            <article class="character-card ${card.id === activeCardId ? "active" : ""}${batch.mode ? " batch-mode" : ""}${selected ? " batch-selected" : ""}" data-character-id="${escapeHtml(card.id)}"${batch.mode ? ' data-batch-selectable="true"' : ""}>
-                ${batch.mode ? `<span class="batch-card-check" aria-hidden="true"><i class="fa ${selected ? "fa-check-square-o" : "fa-square-o"}"></i></span>` : ""}
-                <div class="character-card-avatar"><img src="${escapeHtml(TrpgAvatar.resolveAvatarSrc(card.name, card.avatar))}" alt=""></div>
-                <h5>${escapeHtml(card.name)}</h5>
-                <p>${escapeHtml(getOccupation(card).name)} · ${escapeHtml(card.residence || "未知居住地")}</p>
-                <div class="character-card-metrics">
-                    <span>HP 上限 ${card.maxHp}</span>
-                    <span>SAN 上限 ${card.maxSan}</span>
-                    <span>MOV ${card.mov}</span>
-                </div>
-                <div class="character-card-actions">
-                    ${batch.mode ? "" : `<button type="button" data-action="detail">详情</button><button type="button" data-action="edit">编辑</button><button type="button" data-action="delete">删除</button>`}
-                </div>
-            </article>
-        `;
+    function renderList(): void {
+        const bridge = unifiedListBridge();
+        if (bridge) {
+            bridge.render();
+            return;
+        }
+        const list = byId("characterList");
+        if (!list) return;
+        list.innerHTML = `<div class="character-empty-filter">角色卡列表需要页面外壳提供统一渲染。</div>`;
     }
 
     /**
@@ -4025,6 +4001,8 @@ interface Window {
     }
 
     function bindCharacterBatchControls(target: CharacterBatchTarget): void {
+        // 个人角色卡列表的批量管理已由页面外壳统一接管，这里只保留广场的绑定。
+        if (target === "card" && unifiedListBridge()) return;
         const { toggle, exitBtn, deleteBtn, selectAll } = characterBatchElements(target);
         toggle?.addEventListener("click", () => setCharacterBatchMode(target, !characterBatchStates[target].mode));
         exitBtn?.addEventListener("click", () => setCharacterBatchMode(target, false));
@@ -4077,6 +4055,40 @@ interface Window {
         if (detail) detail.hidden = true;
         if (empty) empty.hidden = false;
         document.querySelectorAll(".character-card").forEach((item) => item.classList.remove("active"));
+    }
+
+    /** 统一角色卡列表使用的卡面摘要；规则集自己解释职业 / 居住地 / 简介。 */
+    function describeCharacterCard(raw: Record<string, unknown>): CharacterSheetCardSummary {
+        const card = createCharacterCard(cardInputFromSchema(raw as COC7CharacterCardInput));
+        const bio = String(card.background.story || card.background.appearance || "").trim();
+        return {
+            tag: "COC",
+            name: card.name,
+            avatar: card.avatar,
+            subtitle: `${getOccupation(card).name} · ${card.residence || "未知居住地"}`,
+            bio: bio || "一位初出茅庐的调查员。",
+        };
+    }
+
+    /** 统一列表点击「详情 / 编辑」：先把卡并入本地列表，再复用原有详情与编辑器。 */
+    async function openUnifiedCharacter(raw: Record<string, unknown>, mode?: "detail" | "edit"): Promise<void> {
+        if (initialLoad) await initialLoad.catch(() => undefined);
+        const card = createCharacterCard(cardInputFromSchema(raw as COC7CharacterCardInput));
+        cards = cards.some((item) => item.id === card.id)
+            ? cards.map((item) => item.id === card.id ? card : item)
+            : [card, ...cards];
+        if (mode === "edit") {
+            openEditor(card);
+            return;
+        }
+        openCharacterDetail(card.id);
+    }
+
+    /** 统一列表的「新建」入口：与页面内按钮保持同一套登录与数量校验。 */
+    function createCharacterFromList(): void {
+        if (!requireLoginForCharacterAction("创建角色卡")) return;
+        if (!canCreateCharacterCard()) return;
+        openEditor();
     }
 
     function renderCharacterDetail(card: COC7CharacterCard, roomDiff?: RoomCardDiff): string {
@@ -5365,6 +5377,9 @@ interface Window {
         listCharacterCards,
         getCharacterCardSnapshot,
         renderCharacterDetail,
+        describeCharacterCard,
+        openCharacter: openUnifiedCharacter,
+        createCharacter: createCharacterFromList,
         clearCharacterManagement: clearCharacterSheetState,
         reloadCharacterManagement: reloadCharacterSheet,
         initCharacterSheet

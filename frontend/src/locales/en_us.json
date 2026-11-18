@@ -613,7 +613,7 @@
     "scenario.action.import_document": "Import Script Document",
     "scenario.action.import_entry": "Import Scenario",
     "character.page.title": "Character Sheet Workspace",
-    "character.page.subtitle": "Manage attributes, skills, equipment, injuries, and status records for your character sheets.",
+    "character.page.subtitle": "View and manage character sheets from every ruleset in one place; the card tag tells dnd from coc.",
     "character.page.title.ruleset": "{ruleset} Character Sheets",
     "character.page.kicker": "CHARACTER WORKSPACE",
     "character.action.import": "Import",
