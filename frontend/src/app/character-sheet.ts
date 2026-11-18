@@ -7,6 +7,8 @@
 
 interface CharacterSheetHostApi {
     init: () => void;
+    /** 新建角色卡；传入规则集时直接使用该规则集，否则在多个可用规则集间选择。 */
+    createCharacterForRuleset: (rulesetId?: string) => void;
 }
 
 interface CharacterListBridge {
@@ -294,15 +296,6 @@ interface Window {
         return (rulesetId ? registry?.forRuleset(rulesetId) : undefined) || registry?.defaultModule();
     }
 
-    function createModule(): CharacterSheetModule | undefined {
-        const roomRulesetId = String(global.currentRoom?.ruleset_id || "").trim().toLowerCase();
-        if (roomRulesetId) {
-            const roomModule = global.TrpgCharacterSheetRegistry?.forRuleset(roomRulesetId);
-            if (roomModule) return roomModule;
-        }
-        return activeModule || global.TrpgCharacterSheetRegistry?.defaultModule();
-    }
-
     function syncModule(): void {
         const module = resolveModule();
         if (!module) {
@@ -393,24 +386,100 @@ interface Window {
         void activeModule?.reloadCharacterManagement?.();
     }
 
-    function createCharacter(): void {
-        if (!global.currentUser) {
-            notify("请先登录后再创建角色卡", "warning");
-            return;
-        }
-        const module = createModule();
-        if (!module) {
-            notify("没有可用的角色卡渲染器，无法创建角色卡", "error");
-            return;
-        }
-        if (String(module.id || "").trim().toLowerCase() !== activeModuleId) {
-            activateModule(module);
-        }
+    function creatableModules(): CharacterSheetModule[] {
+        const registry = global.TrpgCharacterSheetRegistry;
+        if (!registry) return [];
+        return registry.ids()
+            .map((id) => registry.get(id))
+            .filter((module): module is CharacterSheetModule => Boolean(module?.createCharacter));
+    }
+
+    function startCharacterCreation(module: CharacterSheetModule): void {
+        if (String(module.id || "").trim().toLowerCase() !== activeModuleId) activateModule(module);
         if (!module.createCharacter) {
             notify("当前规则集暂不支持新建角色卡", "error");
             return;
         }
         module.createCharacter();
+    }
+
+    /** 同时启用多个规则集时，先让用户选择要创建的规则集。 */
+    function openRulesetPicker(modules: CharacterSheetModule[]): void {
+        document.getElementById("characterRulesetPickerModal")?.remove();
+        const first = modules[0];
+        if (!first) return;
+        if (typeof bootstrap === "undefined") {
+            startCharacterCreation(first);
+            return;
+        }
+        const element = document.createElement("div");
+        element.id = "characterRulesetPickerModal";
+        element.className = "modal fade";
+        element.tabIndex = -1;
+        element.innerHTML = `
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">新建角色卡</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="mb-2">请选择要创建的规则集：</p>
+                        <div class="d-grid gap-2">
+                            ${modules.map((module) => `
+                                <button type="button" class="btn btn-outline-primary" data-character-ruleset-choice="${escapeHtml(module.id)}">
+                                    ${escapeHtml(module.label || module.id)}
+                                </button>`).join("")}
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        const instance = new bootstrap.Modal(element);
+        element.addEventListener("hidden.bs.modal", () => element.remove());
+        element.addEventListener("click", (event) => {
+            const button = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-character-ruleset-choice]");
+            if (!button) return;
+            const module = global.TrpgCharacterSheetRegistry?.get(button.dataset.characterRulesetChoice || "");
+            instance.hide();
+            if (module) startCharacterCreation(module);
+        });
+        document.body.appendChild(element);
+        instance.show();
+    }
+
+    function createCharacterForRuleset(rulesetId?: string): void {
+        if (!global.currentUser) {
+            notify("请先登录后再创建角色卡", "warning");
+            return;
+        }
+        const target = String(rulesetId || "").trim().toLowerCase();
+        if (!target) {
+            createCharacter();
+            return;
+        }
+        const module = global.TrpgCharacterSheetRegistry?.forRuleset(target);
+        if (!module?.createCharacter) {
+            notify(`规则集「${target}」暂不支持新建角色卡`, "error");
+            return;
+        }
+        startCharacterCreation(module);
+    }
+
+    function createCharacter(): void {
+        if (!global.currentUser) {
+            notify("请先登录后再创建角色卡", "warning");
+            return;
+        }
+        const modules = creatableModules();
+        if (modules.length === 0) {
+            notify("没有可用的角色卡渲染器，无法创建角色卡", "error");
+            return;
+        }
+        if (modules.length === 1) {
+            startCharacterCreation(modules[0] as CharacterSheetModule);
+            return;
+        }
+        openRulesetPicker(modules);
     }
 
     function toggleBatchMode(next: boolean): void {
@@ -516,5 +585,5 @@ interface Window {
         void refreshCards();
     }
 
-    global.TrpgCharacterSheetHost = { init };
+    global.TrpgCharacterSheetHost = { init, createCharacterForRuleset };
 })(typeof window !== "undefined" ? window : globalThis as Window & typeof globalThis);

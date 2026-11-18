@@ -393,18 +393,27 @@ interface Dnd5eModuleApi {
 
     function renderIdentity(card: Dnd5eCard): string {
         const sheet = card.sheet;
+        const avatarSrc = TrpgAvatar.resolveAvatarSrc(card.name, String(card.avatar || ""));
         return `
             <section class="character-detail-band">
                 <h4>基础信息</h4>
-                <div class="character-detail-info-grid">
-                    ${statCard("姓名", card.name)}
-                    ${statCard("等级", sheet.level)}
-                    ${statCard("职业", sheet.class)}
-                    ${statCard("子职", sheet.subclass)}
-                    ${statCard("种族", sheet.race)}
-                    ${statCard("背景", sheet.background)}
-                    ${statCard("阵营", sheet.alignment)}
-                    ${statCard("经验值", sheet.xp)}
+                <div class="character-basic-info-layout">
+                    <div class="character-avatar-column">
+                        <div class="character-avatar-preview"><img src="${escapeHtml(avatarSrc)}" alt="角色头像"></div>
+                    </div>
+                    <div class="character-basic-fields">
+                        <div class="character-detail-info-grid">
+                            ${statCard("姓名", card.name)}
+                            ${statCard("等级", sheet.level)}
+                            ${statCard("职业", sheet.class)}
+                            ${statCard("子职", sheet.subclass)}
+                            ${statCard("种族", sheet.race)}
+                            ${statCard("背景", sheet.background)}
+                            ${statCard("阵营", sheet.alignment)}
+                            ${statCard("经验值", sheet.xp)}
+                        </div>
+                        ${sheet.bio ? `<p class="character-bio-line">${escapeHtml(sheet.bio)}</p>` : ""}
+                    </div>
                 </div>
             </section>
         `;
@@ -609,6 +618,13 @@ interface Dnd5eModuleApi {
             .map((item) => `${item.name || ""} x${asInt(item.quantity, 1)} w${Math.max(0, Number(item.weight) || 0)}`)
             .join("\n");
         const abilityInputs = ABILITIES.map((item) => inputRow(`${item.label} ${item.short}`, `ability.${item.key}`, abilities[item.key], "number", 'min="1" max="30"')).join("");
+        const avatarSrc = TrpgAvatar.resolveAvatarSrc(card.name, String(card.avatar || ""));
+        // 基础信息字段沿用 CoC 角色卡的标签结构，仅字段内容不同。
+        const basicField = (label: string, name: string, value: unknown, type: string = "text"): string => `
+            <label class="character-field">
+                <span>${escapeHtml(label)}</span>
+                <input type="${type}" class="form-control" data-dnd5e-field="${name}" value="${escapeHtml(value ?? "")}">
+            </label>`;
         const slotInputs = Object.keys(slots).sort((a, b) => asInt(a) - asInt(b)).map((level) => `
             <div class="dnd5e-slot-row">
                 <span>${escapeHtml(level)} 环</span>
@@ -620,16 +636,37 @@ interface Dnd5eModuleApi {
             <form class="character-detail-dashboard dnd5e-editor" data-dnd5e-editor>
                 <section class="character-detail-band">
                     <h4>基础信息</h4>
-                    <div class="dnd5e-field-grid">
-                        ${inputRow("姓名", "name", card.name)}
-                        ${inputRow("等级", "level", sheet.level, "number", 'min="1" max="20"')}
-                        ${inputRow("职业", "class", sheet.class)}
-                        ${inputRow("子职", "subclass", sheet.subclass)}
-                        ${inputRow("种族", "race", sheet.race)}
-                        ${inputRow("背景", "background", sheet.background)}
-                        ${inputRow("阵营", "alignment", sheet.alignment)}
-                        ${inputRow("经验值", "xp", sheet.xp, "number", 'min="0"')}
-                        ${textRow("角色简介", "bio", sheet.bio, 3)}
+                    <div class="character-basic-info-layout">
+                        <div class="character-avatar-column">
+                            <button type="button" class="character-avatar-preview" data-dnd5e-avatar-preview aria-label="上传角色头像">
+                                <img data-dnd5e-avatar-image alt="角色头像预览" src="${escapeHtml(avatarSrc)}">
+                                <i class="fa fa-camera" aria-hidden="true"></i>
+                            </button>
+                            <input type="file" class="character-avatar-file" data-dnd5e-avatar-upload accept="image/*">
+                            <input type="hidden" data-dnd5e-field="avatar" value="${escapeHtml(String(card.avatar || ""))}">
+                        </div>
+                        <div class="character-basic-fields">
+                            <div class="character-basic-row">
+                                ${basicField("姓名", "name", card.name)}
+                                ${basicField("种族", "race", sheet.race)}
+                            </div>
+                            <div class="character-basic-row">
+                                ${basicField("职业", "class", sheet.class)}
+                                ${basicField("等级", "level", sheet.level, "number")}
+                            </div>
+                            <div class="character-basic-row">
+                                ${basicField("子职", "subclass", sheet.subclass)}
+                                ${basicField("背景", "background", sheet.background)}
+                            </div>
+                            <div class="character-basic-row">
+                                ${basicField("阵营", "alignment", sheet.alignment)}
+                                ${basicField("经验值", "xp", sheet.xp, "number")}
+                            </div>
+                            <label class="character-field">
+                                <span>角色简介</span>
+                                <textarea class="form-control" rows="3" data-dnd5e-field="bio">${escapeHtml(sheet.bio || "")}</textarea>
+                            </label>
+                        </div>
                     </div>
                 </section>
                 <section class="character-detail-band">
@@ -855,7 +892,12 @@ interface Dnd5eModuleApi {
                 </div>
             </div>`;
         element.addEventListener("click", (event) => {
-            const button = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-dnd5e-action]");
+            const target = event.target as HTMLElement | null;
+            if (target?.closest("[data-dnd5e-avatar-preview]")) {
+                element.querySelector<HTMLInputElement>("[data-dnd5e-avatar-upload]")?.click();
+                return;
+            }
+            const button = target?.closest<HTMLElement>("[data-dnd5e-action]");
             const action = button?.dataset.dnd5eAction || "";
             if (action === "cancel") {
                 closeEditorModal();
@@ -865,6 +907,22 @@ interface Dnd5eModuleApi {
                 const form = element.querySelector<HTMLElement>("[data-dnd5e-editor]");
                 if (form) void saveActiveCard(form);
             }
+        });
+        element.addEventListener("change", (event) => {
+            const input = event.target as HTMLInputElement | null;
+            if (!input?.matches("[data-dnd5e-avatar-upload]")) return;
+            const file = input.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                const value = String(reader.result || "");
+                const field = element.querySelector<HTMLInputElement>('[data-dnd5e-field="avatar"]');
+                if (field) field.value = value;
+                const nameInput = element.querySelector<HTMLInputElement>('[data-dnd5e-field="name"]');
+                const image = element.querySelector<HTMLImageElement>("[data-dnd5e-avatar-image]");
+                if (image) image.src = TrpgAvatar.resolveAvatarSrc(nameInput?.value || "?", value);
+            };
+            reader.readAsDataURL(file);
         });
         element.addEventListener("hidden.bs.modal", () => {
             editorDraft = null;
@@ -910,7 +968,14 @@ interface Dnd5eModuleApi {
         if (!existing) return;
         const name = readField(root, "name").trim() || "未命名冒险者";
         const sheet = buildSheetFromEditor(existing, root);
-        const payload: Dnd5eCard = { ...existing, name, sheet, rulesetId: RULESET_ID };
+        const avatar = readField(root, "avatar").trim() || String(existing.avatar || "");
+        const payload: Dnd5eCard = {
+            ...existing,
+            name,
+            sheet,
+            rulesetId: RULESET_ID,
+            ...(avatar ? { avatar } : {}),
+        };
         try {
             const response = await TrpgApi.put<ApiResponse<Dnd5eCardInput>>(`/api/characters/${encodeURIComponent(payload.id)}`, payload);
             if (!response?.success) {
@@ -1023,6 +1088,7 @@ interface Dnd5eModuleApi {
     global.TrpgCharacterSheetRegistry?.register?.(RULESET_ID, {
         ...api,
         id: RULESET_ID,
+        label: "D&D 5e",
         initCharacterSheet,
         clearCharacterManagement,
         reloadCharacterManagement: reloadCharacterSheet,

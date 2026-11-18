@@ -5391,6 +5391,7 @@ interface Window {
     global.TrpgCharacterSheetRegistry?.register?.("coc7", {
         ...api,
         id: "coc7",
+        label: "CoC 7th",
         initCharacterSheet,
         clearCharacterManagement: clearCharacterSheetState,
         reloadCharacterManagement: reloadCharacterSheet,

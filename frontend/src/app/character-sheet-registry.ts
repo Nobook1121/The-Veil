@@ -15,6 +15,8 @@ interface CharacterSheetCardSummary {
 
 interface CharacterSheetModule {
     id: string;
+    /** 新建角色卡时展示给用户的规则集名称，如「CoC 7th」「D&D 5e」。 */
+    label?: string;
     /** 接管 #characterWorkspace 的渲染与事件绑定。 */
     initCharacterSheet: () => void;
     clearCharacterManagement?: () => void;

@@ -45,7 +45,7 @@ const roomActionLocks = new Set<string>();
 let roomScenarioPickerScenarios: Scenario[] = [];
 // 剧本 id 既可能是数字（常规剧本），也可能是字符串（如仓库里的 5e 演示剧本），
 // 不能只按数字解析，否则这类剧本会渲染出来却无法选中。
-let roomScenarioPickerSelected: { id: string | number; title: string } | null = null;
+let roomScenarioPickerSelected: { id: string | number; title: string; rulesetId?: string } | null = null;
 // 键盘导航当前高亮项；默认落在已选项或第一项。
 let roomScenarioActiveIndex = 0;
 // 下拉浮层已挪到 body 下，避免任何祖先的 transform/filter/contain 成为 fixed 包含块。
@@ -348,7 +348,7 @@ function populateRoomEntryCharacterSelect(): void {
     if (!select) return;
 
     const currentValue = select.value;
-    const cards = getRoomEntryCards();
+    const cards = getRoomEntryCards(roomEntryRulesetId);
     select.innerHTML = window.TrpgTemplates.render("select-placeholder-option", { label: "请选择角色卡" });
     cards.forEach((card) => {
         const option = document.createElement("option");
@@ -432,9 +432,15 @@ async function confirmRoomEntryCharacterSelection(): Promise<void> {
 }
 
 function createCharacterFromRoomEntry(): void {
+    const rulesetId = String(roomEntryRulesetId || "").trim();
     settleRoomEntrySelection({ action: roomEntrySelectionAction, createCharacter: true });
     roomEntryCharacterModal?.hide();
-    window.switchMainTab?.("characters");
+    window.switchMainTab?.("character");
+    // 指定目标规则集，避免同时加载 CoC / 5e 时误建另一种卡导致房间仍提示没有角色卡。
+    if (window.TrpgCharacterSheetHost?.createCharacterForRuleset) {
+        window.TrpgCharacterSheetHost.createCharacterForRuleset(rulesetId || undefined);
+        return;
+    }
     document.getElementById("createCharacter")?.click();
 }
 
@@ -658,7 +664,11 @@ function selectRoomScenarioOption(option: HTMLElement): void {
     if (!rawId) return;
     const numericId = Number(rawId);
     const id = Number.isFinite(numericId) && String(numericId) === rawId ? numericId : rawId;
-    roomScenarioPickerSelected = { id, title: option.dataset.title || "" };
+    roomScenarioPickerSelected = {
+        id,
+        title: option.dataset.title || "",
+        ...(option.dataset.rulesetId ? { rulesetId: option.dataset.rulesetId } : {}),
+    };
     renderRoomScenarioPicker();
     closeRoomScenarioPicker();
 }
@@ -691,6 +701,7 @@ function renderRoomScenarioPicker(): void {
         option.className = `room-scenario-option${selected ? " selected" : ""}`;
         option.dataset.scenarioId = String(scenario.id);
         option.dataset.title = scenario.title;
+        option.dataset.rulesetId = String(scenario.ruleset_id || "");
         option.setAttribute("role", "option");
         option.setAttribute("aria-selected", String(selected));
 
@@ -743,7 +754,13 @@ async function loadRoomScenarioPicker(scenarioId?: number | string): Promise<voi
             const match = roomScenarioPickerScenarios.find(
                 (scenario) => String(scenario.id) === String(scenarioId)
             );
-            if (match) roomScenarioPickerSelected = { id: match.id, title: match.title };
+            if (match) {
+                roomScenarioPickerSelected = {
+                    id: match.id,
+                    title: match.title,
+                    ...(match.ruleset_id ? { rulesetId: String(match.ruleset_id) } : {}),
+                };
+            }
         }
     } catch (error) {
         console.error("加载剧本列表失败:", error);
@@ -818,11 +835,21 @@ async function createRoomUnlocked(): Promise<void> {
         return;
     }
 
-    bootstrap.Modal.getInstance(document.getElementById("createSaveModal"))?.hide();
-    const roomEntrySelection = await promptRoomEntryCharacterSelection("create", null, {}, {
-        allowCardless: roomMode === "manual",
-    });
-    if (!roomEntrySelection || roomEntrySelection.createCharacter || roomEntrySelection.action === "invisible") return;
+    // 剧本决定房间规则集：先按剧本规则集筛选角色卡，避免 5e 房间列出 / 误建 CoC 卡。
+    const scenarioRulesetId = roomMode === "freeform" ? "" : String(roomScenarioPickerSelected?.rulesetId || "").trim();
+    const entryOptions: { allowCardless?: boolean; rulesetId?: string } = {};
+    if (roomMode === "manual") entryOptions.allowCardless = true;
+    if (scenarioRulesetId) entryOptions.rulesetId = scenarioRulesetId;
+
+    const roomEntrySelection = await promptRoomEntryCharacterSelection("create", null, {}, entryOptions);
+    // 取消选择时保留创建弹窗与已填内容，用户可改选剧本或直接重试。
+    if (!roomEntrySelection) return;
+    // 去创建角色卡时同样保留创建弹窗：创建完成后回来点「创建」即可直接选到新卡。
+    if (roomEntrySelection.createCharacter) return;
+    if (roomEntrySelection.action === "invisible") {
+        bootstrap.Modal.getInstance(document.getElementById("createSaveModal"))?.hide();
+        return;
+    }
 
     try {
         const data = await TrpgApi.post<ApiResponse<Room>>("/api/rooms", {

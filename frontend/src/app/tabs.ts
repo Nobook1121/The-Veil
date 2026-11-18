@@ -81,12 +81,13 @@ function handleMainNavigationClick(
 function switchMainTab(tabId: string, options: { clearNav?: boolean } = {}): void {
     const navLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>("#sidebar .nav-link"));
     const tabContents = Array.from(document.querySelectorAll<HTMLElement>("#mainContent > .tab-content"));
-    tabContents.forEach((tab) => tab.classList.remove("active"));
+    // 先确认目标存在再清空，避免 id 写错时把所有内容都隐藏、页面变成空白。
     const targetTab = document.getElementById(tabId);
     if (!targetTab) {
         console.error(`找不到 id 为 ${tabId} 的标签内容`);
         return;
     }
+    tabContents.forEach((tab) => tab.classList.remove("active"));
     targetTab.classList.add("active");
 
     navLinks.forEach((item) => item.classList.remove("active"));

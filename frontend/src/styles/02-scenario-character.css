@@ -1049,6 +1049,15 @@ body.is-guest .guest-login-hint {
     padding-top: 10px;
 }
 
+/* 详情页简介：与编辑器里的角色简介对应。 */
+.character-bio-line {
+    margin: 10px 0 0;
+    color: var(--color-muted);
+    font-size: 0.86rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
 .character-card-avatar {
     position: absolute;
     top: 15px;

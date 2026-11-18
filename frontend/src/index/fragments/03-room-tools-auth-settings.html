@@ -9,7 +9,7 @@
                             <div class="modal-body">
                                 <div class="form-group">
                                     <label for="saveName">房间名称 *</label>
-                                    <input type="text" class="form-control" id="saveName" placeholder="请输入房间名称" required>
+                                    <input type="text" class="form-control" id="saveName" placeholder="请输入房间名称" required autocomplete="off" autocapitalize="off" spellcheck="false">
                                 </div>
                                 <div class="form-group mt-3">
                                     <label for="roomModeSelect" data-i18n="room.mode.label">房间模式</label>
@@ -24,7 +24,7 @@
                                     <label><span data-i18n="room.field.scenario">房间剧本</span> <span id="roomScenarioRequiredMark">*</span></label>
                                     <div class="room-scenario-picker">
                                         <div class="room-scenario-combobox">
-                                            <input type="search" class="form-control form-control-sm" id="roomScenarioSearch" placeholder="点击搜索剧本名、作者或简介（star: 只看收藏）" autocomplete="off" aria-expanded="false" aria-controls="roomScenarioDropdown">
+                                            <input type="search" class="form-control form-control-sm" id="roomScenarioSearch" placeholder="点击搜索剧本名、作者或简介" autocomplete="off" aria-expanded="false" aria-controls="roomScenarioDropdown">
                                             <div class="room-scenario-dropdown" id="roomScenarioDropdown" hidden>
                                                 <div class="room-scenario-list" id="roomScenarioList" role="listbox" aria-label="剧本列表"></div>
                                                 <p class="room-scenario-empty" id="roomScenarioEmpty" hidden>没有匹配的剧本</p>
@@ -32,10 +32,6 @@
                                         </div>
                                         <p class="room-scenario-selected" id="roomScenarioSelected" hidden></p>
                                     </div>
-                                    <p class="form-text room-scenario-ruleset-hint mb-0">
-                                        规则集跟随剧本：房间的规则集由所选剧本的「运行规则」决定，创建后只能换剧本才会改变。<br>
-                                        列表里没有 5e 剧本时，先到「设置 → 插件」确认 dnd5e / dnd5e-srd 已安装并启用（发布包默认不含 5e 插件和 5e 演示剧本），再到「剧本」页新建剧本，把「运行规则」选为 D&amp;D 5e。
-                                    </p>
                                 </div>
                                 <div class="form-group mt-3">
                                     <label for="roomVisibilitySelect">房间可见性</label>
