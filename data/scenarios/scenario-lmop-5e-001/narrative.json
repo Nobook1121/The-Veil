@@ -1,0 +1,5549 @@
+{
+  "schema_version": 2,
+  "scenario_id": "scenario-lmop-5e-001",
+  "scenario_version": "1.0.0",
+  "topology": "hybrid",
+  "topology_confidence": 1.0,
+  "topology_source": "author",
+  "start": {
+    "location_id": "p1_ambush",
+    "opening_mode": "free",
+    "opening_text": ""
+  },
+  "nodes": [
+    {
+      "id": "act_1",
+      "kind": "act",
+      "title": "第一部分：地精箭矢",
+      "parent": null,
+      "summary": "第一部分：地精箭矢（LMoP 剧情结构）",
+      "visibility": "public",
+      "keywords": [
+        "第一部分：地精箭矢"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "act_2",
+      "kind": "act",
+      "title": "第二部分：凡达林",
+      "parent": null,
+      "summary": "第二部分：凡达林（LMoP 剧情结构）",
+      "visibility": "public",
+      "keywords": [
+        "第二部分：凡达林"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "act_3",
+      "kind": "act",
+      "title": "第三部分：蜘蛛网",
+      "parent": null,
+      "summary": "第三部分：蜘蛛网（LMoP 剧情结构）",
+      "visibility": "public",
+      "keywords": [
+        "第三部分：蜘蛛网"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "act_4",
+      "kind": "act",
+      "title": "第四部分：回声洞",
+      "parent": null,
+      "summary": "第四部分：回声洞（LMoP 剧情结构）",
+      "visibility": "public",
+      "keywords": [
+        "第四部分：回声洞"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "p1_ambush",
+      "kind": "location",
+      "title": "地精伏击",
+      "parent": "act_1",
+      "order": 0,
+      "summary": "在无冬城中，一位名叫刚铎·寻岩者的矮人委托你们将一车补给品运送到城市东南方数日行程外的粗犷聚居地凡达林。",
+      "body": "",
+      "keywords": [
+        "地精伏击",
+        "刚铎·寻岩者",
+        "修达·霍温特",
+        "克拉摩窝点",
+        "凡达林",
+        "三猪小径",
+        "莱妮",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p1_ambush"
+      }
+    },
+    {
+      "id": "p1_trail",
+      "kind": "location",
+      "title": "地精踪迹",
+      "parent": "act_1",
+      "order": 1,
+      "summary": "在角色们击败地精后，任何对该区域的检查都会发现这些生物已利用此地设伏多时。一条隐藏在道路北侧灌木丛后的小径向西北延伸。",
+      "body": "",
+      "keywords": [
+        "地精踪迹",
+        "克拉摩窝点",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p1_trail"
+      }
+    },
+    {
+      "id": "p1_hideout",
+      "kind": "location",
+      "title": "克拉摩窝点：总述",
+      "parent": "act_1",
+      "order": 2,
+      "summary": "地精的碎颅部落建立了一个藏身处，可以轻易骚扰和掠夺沿着三猪小径或通往凡达林路径的交通。碎颅部落之所以得名，是因为部落的每个成员都会磨尖牙齿，使它们看起来凶猛而参差不齐。",
+      "body": "",
+      "keywords": [
+        "克拉摩窝点：总述",
+        "克拉摩窝点",
+        "总述",
+        "刚铎·寻岩者",
+        "黑蜘蛛",
+        "克拉格",
+        "格罗尔",
+        "克拉摩堡"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p1_hideout"
+      }
+    },
+    {
+      "id": "p1_hideout_1_cave_mouth",
+      "kind": "location",
+      "title": "1. 洞口",
+      "parent": "p1_hideout",
+      "order": 3,
+      "summary": "从地精伏击地点的小径通向克拉摩窝点的入口。 朗读文本 跟随地精的踪迹，你们在距离伏击地点五英里的山坡上发现了一个大型洞穴。一条浅浅的溪流从洞口流出，洞口被茂密的荆棘灌木丛遮蔽。在溪流右侧有一条狭窄的干燥路径通向洞穴。",
+      "body": "",
+      "keywords": [
+        "1. 洞口",
+        "1.",
+        "洞口",
+        "克拉摩窝点",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p1_hideout_1_cave_mouth"
+      }
+    },
+    {
+      "id": "p1_hideout_2_lookout",
+      "kind": "location",
+      "title": "2. 地精暗哨",
+      "parent": "p1_hideout",
+      "order": 4,
+      "summary": "当角色们穿过溪流东侧时，他们可以透过遮蔽的灌木丛看到区域 2 。这是一个地精哨站，不过这里的地精们百无聊赖且心不在焉。 朗读文本 在从洞口流出的溪流东侧，灌木丛中的一小块区域被挖空形成了一个瞭望点或隐蔽处。",
+      "body": "",
+      "keywords": [
+        "2. 地精暗哨",
+        "2.",
+        "地精暗哨",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p1_hideout_2_lookout"
+      }
+    },
+    {
+      "id": "p1_hideout_3_kennel",
+      "kind": "location",
+      "title": "3. 犬舍",
+      "parent": "p1_hideout",
+      "order": 5,
+      "summary": "克拉摩窝点饲养着一群脾气暴躁的狼，他们正在对这些狼进行战斗训练。 朗读文本 就在洞穴入口处，几级不平整的石阶通向通道东侧一个潮湿的小型洞室。洞穴在远端尽头收窄成陡峭的岩缝，空气中弥漫着动物的恶臭。",
+      "body": "",
+      "keywords": [
+        "3. 犬舍",
+        "3.",
+        "犬舍",
+        "克拉摩窝点",
+        "地精",
+        "熊地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p1_hideout_3_kennel"
+      }
+    },
+    {
+      "id": "p1_hideout_4_passage",
+      "kind": "location",
+      "title": "4. 陡峭的通道",
+      "parent": "p1_hideout",
+      "order": 6,
+      "summary": "从此刻起，没有黑暗视觉的角色将需要光亮来观察周围环境。 朗读文本 从洞口的主通道陡峭向上延伸，溪流在其西侧倾泻而下。在阴影中，一条侧道向西穿过溪流的另一侧。",
+      "body": "",
+      "keywords": [
+        "4. 陡峭的通道",
+        "4.",
+        "陡峭的通道",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p1_hideout_4_passage"
+      }
+    },
+    {
+      "id": "p1_hideout_5_bridge",
+      "kind": "location",
+      "title": "5. 天桥",
+      "parent": "p1_hideout",
+      "order": 7,
+      "summary": "在一条较高的隧道穿过下方较大的洞窟处，地精们设立了一个桥梁警卫岗哨。 朗读文本 溪流通道继续向上延伸，经过前方另一组不平整的台阶，向东弯曲延伸。前方某处更大的洞窟传来瀑布的声响。",
+      "body": "",
+      "keywords": [
+        "5. 天桥",
+        "5.",
+        "天桥",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p1_hideout_5_bridge"
+      }
+    },
+    {
+      "id": "p1_hideout_6_rest",
+      "kind": "location",
+      "title": "6. 地精休息室",
+      "parent": "p1_hideout",
+      "order": 8,
+      "summary": "驻扎在窝点的克拉摩掠夺者将这个区域用作公共休息室和营房。 朗读文本 这个大型洞穴被一道十英尺高的陡坡一分为二。一道陡峭的天然阶梯从下层通往上方岩架。空气中弥漫着炊火的浓烟，还有未鞣制好的兽皮和未洗澡的地精散发的刺鼻气味。",
+      "body": "",
+      "keywords": [
+        "6. 地精休息室",
+        "6.",
+        "地精休息室",
+        "刚铎·寻岩者",
+        "修达·霍温特",
+        "黑蜘蛛",
+        "克拉格",
+        "伊阿诺"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p1_hideout_6_rest"
+      }
+    },
+    {
+      "id": "p1_hideout_7_pools",
+      "kind": "location",
+      "title": "7. 双子池",
+      "parent": "p1_hideout",
+      "order": 9,
+      "summary": "如果地精已经排空任一水池使通道上涨，请相应调整以下方框内的文本。 朗读文本 这个洞窟半满着两个大型水池。东侧墙壁高处的一道狭窄瀑布注入水池，水从洞窟西端排出形成下方洞穴口流出的溪流。低矮的毛石墙作为水坝拦住水流。",
+      "body": "",
+      "keywords": [
+        "7. 双子池",
+        "7.",
+        "双子池",
+        "克拉格",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p1_hideout_7_pools"
+      }
+    },
+    {
+      "id": "p1_hideout_8_cave",
+      "kind": "location",
+      "title": "8. 克拉格的洞穴",
+      "parent": "p1_hideout",
+      "order": 10,
+      "summary": "类地精的首领坚持将掠夺者的大部分赃物留在自己的巢穴中。克拉摩帮派上个月袭击和伏击商队所得的掠夺品都在这里。 朗读文本 掠夺来的物资袋子和板条箱堆积在这个大型洞穴的南端。向西，地面向一个狭窄的开口倾斜，通向黑暗。",
+      "body": "",
+      "keywords": [
+        "8. 克拉格的洞穴",
+        "8.",
+        "克拉格的洞穴",
+        "克拉格",
+        "凡达林",
+        "莱妮",
+        "地精",
+        "熊地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p1_hideout_8_cave"
+      }
+    },
+    {
+      "id": "p2_phandalin",
+      "kind": "location",
+      "title": "凡达林：总述",
+      "parent": "act_2",
+      "order": 11,
+      "summary": "崎岖的小径从树木繁茂的山坡延伸而出，你第一次瞥见了凡达林。这个小镇由四五十座简易的原木建筑组成，有些建在古老的田野石地基上。",
+      "body": "",
+      "keywords": [
+        "凡达林：总述",
+        "凡达林",
+        "总述",
+        "修达·霍温特",
+        "红标帮",
+        "哈利娅",
+        "加莱尔",
+        "哈宾"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_phandalin"
+      }
+    },
+    {
+      "id": "p2_stonehill_inn",
+      "kind": "location",
+      "title": "石丘旅馆",
+      "parent": "p2_phandalin",
+      "order": 12,
+      "summary": "在小镇中心矗立着一座新建成的大型路屋，由原石和粗凿木材建造。公共休息室里挤满了当地人，他们手捧麦芽酒或苹果酒，全都用好奇的目光打量着你。 这家俭朴的旅店有六间可供出租的房间（修达·霍温特占用了一间）。",
+      "body": "",
+      "keywords": [
+        "石丘旅馆",
+        "修达·霍温特",
+        "红标帮",
+        "凡达林",
+        "三猪小径",
+        "哈利娅",
+        "加莱尔",
+        "哈宾"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_stonehill_inn"
+      }
+    },
+    {
+      "id": "p2_barthen_supplies",
+      "kind": "location",
+      "title": "巴森补给",
+      "parent": "p2_phandalin",
+      "order": 13,
+      "summary": "巴森商行是凡达林最大的贸易站。其货架上备有大多数普通商品和补给品，包括背包、铺盖卷、绳索和口粮。该地点从日出营业到日落。",
+      "body": "",
+      "keywords": [
+        "巴森补给",
+        "刚铎·寻岩者",
+        "修达·霍温特",
+        "红标帮",
+        "回声洞",
+        "凡达林",
+        "南卓"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_barthen_supplies"
+      }
+    },
+    {
+      "id": "p2_edermath_orchard",
+      "kind": "location",
+      "title": "埃德玛果园",
+      "parent": "p2_phandalin",
+      "order": 14,
+      "summary": "达朗·埃德玛是一位退休的冒险者，住在苹果园旁一间整洁的小屋里。这位体格健壮、银发的半精灵已有一百多岁高龄，曾是一名战士，在遥远的东南方龙海岸地区担任了多年的执法官和先驱魔斧。退休后，他回到了自己最初的家乡无冬城地区。",
+      "body": "",
+      "keywords": [
+        "埃德玛果园",
+        "玻璃杖",
+        "红标帮",
+        "凡达林",
+        "崔森德庄园",
+        "古枭井",
+        "达朗"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_edermath_orchard"
+      }
+    },
+    {
+      "id": "p2_lionshield_coster",
+      "kind": "location",
+      "title": "狮盾小贩",
+      "parent": "p2_phandalin",
+      "order": 15,
+      "summary": "这家俭朴的贸易站前门上方悬挂着一个标志，形状是一个绘有蓝色狮子的木制盾牌。 这座建筑由狮盾公司所有，这是一家总部位于东方一百多英里外的雅塔尔城的商行。",
+      "body": "",
+      "keywords": [
+        "狮盾小贩",
+        "红标帮",
+        "克拉摩窝点",
+        "凡达林",
+        "莱妮",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_lionshield_coster"
+      }
+    },
+    {
+      "id": "p2_miners_exchange",
+      "kind": "location",
+      "title": "凡达林矿工兑换所",
+      "parent": "p2_phandalin",
+      "order": 16,
+      "summary": "矿工交易所是一个贸易站，当地矿工在此称重、测量并领取他们发现的贵重物品报酬。在缺乏任何地方领主或权威的情况下，该交易所还充当非官方的记录办公室，登记对该地区各处溪流和矿坑的开采权。",
+      "body": "",
+      "keywords": [
+        "凡达林矿工兑换所",
+        "玻璃杖",
+        "红标帮",
+        "克拉摩堡",
+        "凡达林",
+        "崔森德庄园",
+        "哈利娅",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_miners_exchange"
+      }
+    },
+    {
+      "id": "p2_adabra_farm",
+      "kind": "location",
+      "title": "阿德里夫农场",
+      "parent": "p2_phandalin",
+      "order": 17,
+      "summary": "奎琳·阿德里夫是一位45岁的睿智女性半身人，是个务实的农民，似乎对镇上发生的一切都了如指掌。她是个好客的主人，如果角色们不想住在石丘旅馆，她愿意让他们住在她的干草棚里。 奎琳的儿子卡普是个十岁大、活泼早熟的半身人男孩。",
+      "body": "",
+      "keywords": [
+        "阿德里夫农场",
+        "红标帮",
+        "克拉摩堡",
+        "回声洞",
+        "凡达林",
+        "崔森德庄园",
+        "雷树废墟",
+        "里多斯"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_adabra_farm"
+      }
+    },
+    {
+      "id": "p2_shrine_luck",
+      "kind": "location",
+      "title": "幸运神殿",
+      "parent": "p2_phandalin",
+      "order": 18,
+      "summary": "凡达林唯一的庙宇是一座用附近遗迹的石头建造的小型神龛。它供奉着吉兆与好运女神泰摩拉。 这座神殿由一位名叫加莱尔修女的学者侍僧照料，她是一位热情的青年精灵，对永远无法清除凡达林的红标帮感到绝望。",
+      "body": "",
+      "keywords": [
+        "幸运神殿",
+        "阿加莎",
+        "红标帮",
+        "凡达林",
+        "加莱尔"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_shrine_luck"
+      }
+    },
+    {
+      "id": "p2_sleeping_giant",
+      "kind": "location",
+      "title": "沉睡的巨人",
+      "parent": "p2_phandalin",
+      "order": 19,
+      "summary": "这家破旧的酒馆位于凡达林主街的尽头，是一个肮脏而危险的饮酒场所。这里经常有红标帮恶霸光顾，由一位名叫格莉斯塔的暴躁女性矮人经营。如果角色选择造访该地点，则触发\"红标帮恶霸\"遭遇。",
+      "body": "",
+      "keywords": [
+        "沉睡的巨人",
+        "红标帮",
+        "凡达林"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_sleeping_giant"
+      }
+    },
+    {
+      "id": "p2_townmaster_hall",
+      "kind": "location",
+      "title": "镇长大厅",
+      "parent": "p2_phandalin",
+      "order": 20,
+      "summary": "有着坚固的岩石墙壁、倾斜的木制屋顶，以及后方的铃铛塔楼。前门旁的公告板上贴着一张用通用语写的告示，上面写着：\"奖励——飞龙突岩附近的兽人！有意对抗兽人威胁者可入内询问。\"告示上盖有小镇印章和一个难以辨认的签名。",
+      "body": "",
+      "keywords": [
+        "镇长大厅",
+        "修达·霍温特",
+        "玻璃杖",
+        "伊阿诺",
+        "红标帮",
+        "克拉摩堡",
+        "回声洞",
+        "凡达林"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_townmaster_hall"
+      }
+    },
+    {
+      "id": "p2_tresendar_manor",
+      "kind": "location",
+      "title": "崔森德庄园",
+      "parent": "p2_phandalin",
+      "order": 21,
+      "summary": "更像是一座城堡而非住宅，它坐落在小镇东侧低矮的山坡上，周围环绕着树林和灌木丛。这座远古庄园早已被废弃，但其地下室已被改造成红标帮的要塞。如果角色们调查这个地点，他们会发现红标帮窝点的入口。",
+      "body": "",
+      "keywords": [
+        "崔森德庄园",
+        "红标帮"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_tresendar_manor"
+      }
+    },
+    {
+      "id": "p2_redbrand_ruffians",
+      "kind": "location",
+      "title": "红标帮恶霸",
+      "parent": "p2_phandalin",
+      "order": 22,
+      "summary": "在冒险者们抵达凡达林一天左右的时间内，与红标帮的对抗将变得不可避免。这种情况可能以多种不同方式发生： - 与小镇中的若干NPC交谈后，角色们决定在沉睡的巨人酒馆对抗红标帮。 - 角色们决定调查崔森德庄园。",
+      "body": "",
+      "keywords": [
+        "红标帮恶霸",
+        "红标帮",
+        "凡达林",
+        "崔森德庄园",
+        "哈宾"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_redbrand_ruffians"
+      }
+    },
+    {
+      "id": "p2_redbrand_hideout",
+      "kind": "location",
+      "title": "红标帮窝点：总述",
+      "parent": "p2_phandalin",
+      "order": 23,
+      "summary": "红标帮在凡达林的基地是崔森德庄园下的一个地牢复合体。在庄园被毁之前，其地窖作为粮食与水的安全储藏室，以防庄园遭受攻击，而相邻的墓穴则为崔森德家族的逝者提供了安息之所。",
+      "body": "",
+      "keywords": [
+        "红标帮窝点：总述",
+        "红标帮窝点",
+        "总述",
+        "黑蜘蛛",
+        "玻璃杖",
+        "伊阿诺",
+        "红标帮",
+        "凡达林"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_redbrand_hideout"
+      }
+    },
+    {
+      "id": "p2_redbrand_1_cellar",
+      "kind": "location",
+      "title": "1. 地窖",
+      "parent": "p2_redbrand_hideout",
+      "order": 24,
+      "summary": "对庄园地面的任何探索都会发现这里空无一人，但有许多踪迹通向大型厨房废墟旁的一个岩石楼梯。楼梯底部有一扇未上锁的门，门后是一个地窖。",
+      "body": "",
+      "keywords": [
+        "1. 地窖",
+        "1.",
+        "地窖",
+        "伊阿诺",
+        "红标帮"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_redbrand_1_cellar"
+      }
+    },
+    {
+      "id": "p2_redbrand_2_barracks",
+      "kind": "location",
+      "title": "2. 营房",
+      "parent": "p2_redbrand_hideout",
+      "order": 25,
+      "summary": "红标帮的大多数人类成员在凡达林有住所。这个营房是在敲诈当地矿工和毛皮商人后躲藏的好地方。 朗读文本 这里似乎是一个被临时用作生活区的储藏室。两张双层床靠墙立在门边，而桶和板条箱则占据了房间的南半部分。",
+      "body": "",
+      "keywords": [
+        "2. 营房",
+        "2.",
+        "营房",
+        "红标帮",
+        "凡达林"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_redbrand_2_barracks"
+      }
+    },
+    {
+      "id": "p2_redbrand_3_trap_corridor",
+      "kind": "location",
+      "title": "3. 陷阱走廊",
+      "parent": "p2_redbrand_hideout",
+      "order": 26,
+      "summary": "该区域曾是崔森德庄园原始地窖的一部分。红标帮挖空了石质地板下的泥土，制造了一个隐藏陷坑陷阱。 朗读文本 厚厚的灰尘覆盖着这条昏暗走廊的石板。",
+      "body": "",
+      "keywords": [
+        "3. 陷阱走廊",
+        "3.",
+        "陷阱走廊",
+        "红标帮",
+        "崔森德庄园"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_redbrand_3_trap_corridor"
+      }
+    },
+    {
+      "id": "p2_redbrand_4_crypt",
+      "kind": "location",
+      "title": "4. 崔森德墓室",
+      "parent": "p2_redbrand_hideout",
+      "order": 27,
+      "summary": "早已消逝的崔森德家族的长者们曾安葬于这座陵墓中。 朗读文本 三具大型石棺矗立在这座布满灰尘的墓穴中，每具石棺旁都倚靠着一具穿着锈蚀锁子甲碎片的人类骷髅。墙壁上的假柱雕刻着蔓延橡树形象的浮雕。",
+      "body": "",
+      "keywords": [
+        "4. 崔森德墓室",
+        "4.",
+        "崔森德墓室",
+        "红标帮"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_redbrand_4_crypt"
+      }
+    },
+    {
+      "id": "p2_redbrand_5_slave_pens",
+      "kind": "location",
+      "title": "5. 奴隶围栏",
+      "parent": "p2_redbrand_hideout",
+      "order": 28,
+      "summary": "过去两个月里，红标帮一直在该区域抓捕旅人，将他们关在这些围栏中，直到能被卖为奴隶。 朗读文本 这个长房间被分隔成三个区域，铁栏杆将南北两侧隔开。肮脏的稻草铺在那些牢房的地板上，铰链门由链条和挂锁固定。",
+      "body": "",
+      "keywords": [
+        "5. 奴隶围栏",
+        "5.",
+        "奴隶围栏",
+        "红标帮",
+        "凡达林",
+        "雷树废墟",
+        "米尔娜",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_redbrand_5_slave_pens"
+      }
+    },
+    {
+      "id": "p2_redbrand_6_armory",
+      "kind": "location",
+      "title": "6. 军械库",
+      "parent": "p2_redbrand_hideout",
+      "order": 29,
+      "summary": "这个房间的门从外面锁上了。锁着的门对面有一扇通往区域 7 的暗门。有关锁着的门和暗门的更多信息，请参阅\"通用特性\"部分（第20页）。 朗读文本 武器架排列在这个房间的墙壁上，包括三叉枪、剑、弩和弩矢。",
+      "body": "",
+      "keywords": [
+        "6. 军械库",
+        "6.",
+        "军械库",
+        "红标帮"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_redbrand_6_armory"
+      }
+    },
+    {
+      "id": "p2_redbrand_7_storeroom",
+      "kind": "location",
+      "title": "7. 储藏室和工作间",
+      "parent": "p2_redbrand_hideout",
+      "order": 30,
+      "summary": "在这个房间里，红标帮清点他们偷来的货物，要么通过南边的洞窟运出，要么打包准备储存在要塞中。 朗读文本 这个区域是一个大型天然洞穴的北端，但已经用修整过的石砖墙和石板地面进行了修整。",
+      "body": "",
+      "keywords": [
+        "7. 储藏室和工作间",
+        "7.",
+        "储藏室和工作间",
+        "红标帮",
+        "三猪小径"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_redbrand_7_storeroom"
+      }
+    },
+    {
+      "id": "p2_redbrand_8_chasm",
+      "kind": "location",
+      "title": "8. 裂隙",
+      "parent": "p2_redbrand_hideout",
+      "order": 31,
+      "summary": "角色们可以通过三条路线之一到达这里：来自区域 1 的隧道、区域 7 的储藏室，或是向南延伸的粗凿通道，这条通道在地图上继续延伸约一百英尺，从崔森德庄园南面树林中的一个隧道出现。",
+      "body": "",
+      "keywords": [
+        "8. 裂隙",
+        "8.",
+        "裂隙",
+        "伊阿诺",
+        "红标帮",
+        "凡达林",
+        "崔森德庄园"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_redbrand_8_chasm"
+      }
+    },
+    {
+      "id": "p2_redbrand_9_guard_barracks",
+      "kind": "location",
+      "title": "9. 警卫营房",
+      "parent": "p2_redbrand_hideout",
+      "order": 32,
+      "summary": "一个角色若在此门前通过DC 10的感知（察觉）检定成功聆听，会听到几个粗哑的声音用地精语发出侮辱性命令。示例包括\"舔地板！\"和\"像狗一样打滚！\"这里的熊地精正在欺凌他们的地精奴隶。",
+      "body": "",
+      "keywords": [
+        "9. 警卫营房",
+        "9.",
+        "警卫营房",
+        "黑蜘蛛",
+        "伊阿诺",
+        "红标帮",
+        "克拉摩堡",
+        "回声洞"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_redbrand_9_guard_barracks"
+      }
+    },
+    {
+      "id": "p2_redbrand_10_common_room",
+      "kind": "location",
+      "title": "10. 公共休息室",
+      "parent": "p2_redbrand_hideout",
+      "order": 33,
+      "summary": "该区域作为红标帮的总部和会议室使用。当没有正式事务需要讨论时，这里会兼作警卫们下岗时休息的公共休息室。 一个角色若成功通过DC 10感知（察觉）检定在门边聆听，会听到里面的受害者正在玩骰子游戏。",
+      "body": "",
+      "keywords": [
+        "10. 公共休息室",
+        "10.",
+        "公共休息室",
+        "红标帮"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_redbrand_10_common_room"
+      }
+    },
+    {
+      "id": "p2_redbrand_11_workshop",
+      "kind": "location",
+      "title": "11. 法师的工作坊",
+      "parent": "p2_redbrand_hideout",
+      "order": 34,
+      "summary": "通过成功的DC 15感知（察觉）检定，可以听到这个房间的任一扇门外传来微弱的气泡声和滴水声。 朗读文本 这个房间看起来像是一个法师的工坊。",
+      "body": "",
+      "keywords": [
+        "11. 法师的工作坊",
+        "11.",
+        "法师的工作坊",
+        "伊阿诺",
+        "回声洞",
+        "凡达林"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_redbrand_11_workshop"
+      }
+    },
+    {
+      "id": "p2_redbrand_12_glasstaff",
+      "kind": "location",
+      "title": "12. 玻璃手杖的居所",
+      "parent": "p2_redbrand_hideout",
+      "order": 35,
+      "summary": "如果角色们通过区域 7 的秘密通道接近这个房间，他们可以突袭红标帮的首领——伊阿诺·\"玻璃杖\"·阿尔布雷克。否则，他的老鼠魔宠会警告他任何通过区域 11 过来的人，并在角色们到达前逃离。",
+      "body": "",
+      "keywords": [
+        "12. 玻璃手杖的居所",
+        "12.",
+        "玻璃手杖的居所",
+        "修达·霍温特",
+        "黑蜘蛛",
+        "玻璃杖",
+        "伊阿诺",
+        "红标帮"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p2_redbrand_12_glasstaff"
+      }
+    },
+    {
+      "id": "p3_travel",
+      "kind": "location",
+      "title": "三猪小径与大地图",
+      "parent": "act_3",
+      "order": 36,
+      "summary": "凡达林位于北地一个被称为\"三猪小径\"、\"三猪岔路\"或\"科尼峡口\"的地区。这片连绵起伏的丘陵与稀疏林地平原向南延伸至宝剑山脉，向北延伸至无冬森林。",
+      "body": "",
+      "keywords": [
+        "三猪小径与大地图",
+        "克拉摩堡",
+        "凡达林",
+        "三猪小径",
+        "飞龙突岩",
+        "地精",
+        "大地精",
+        "食尸鬼"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_travel"
+      }
+    },
+    {
+      "id": "p3_agatha",
+      "kind": "location",
+      "title": "兔莓与阿加莎的巢穴",
+      "parent": "act_3",
+      "order": 37,
+      "summary": "兔莓镇多年前被野蛮人洗劫，如今只剩废墟。三猪小径径直穿过这座废弃小镇，为寻找报丧妖阿加莎的巢穴提供了容易辨识的地标。从科尼伯里废墟出发，一条古老小径向西北延伸至无冬森林。阿加莎的巢穴位于镇外数英里处。",
+      "body": "",
+      "keywords": [
+        "兔莓与阿加莎的巢穴",
+        "黑蜘蛛",
+        "阿加莎",
+        "克拉摩堡",
+        "回声洞",
+        "三猪小径",
+        "古枭井",
+        "飞龙突岩"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_agatha"
+      }
+    },
+    {
+      "id": "p3_old_owl_well",
+      "kind": "location",
+      "title": "古枭井",
+      "parent": "act_3",
+      "order": 38,
+      "summary": "由早已消失的帝国于数千年前建造，是一座受难者的瞭望塔，如今仅存几堵摇摇欲坠的墙壁和一座破碎的塔楼残基。在塔楼的庭院中有一口古井，至今仍能提供干净清新的饮水。古枭井位于三猪小径以南狂野崎岖的丘陵地带。",
+      "body": "",
+      "keywords": [
+        "古枭井",
+        "阿加莎",
+        "凡达林",
+        "三猪小径",
+        "飞龙突岩",
+        "达朗"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_old_owl_well"
+      }
+    },
+    {
+      "id": "p3_thundertree",
+      "kind": "location",
+      "title": "雷树废墟：总述",
+      "parent": "act_3",
+      "order": 39,
+      "summary": "在无冬城河从无冬森林流出的地点附近，矗立着被遗弃的Thundertree村庄。这里曾经是森林边缘一个繁荣的团队，靠伐木工和捕兽者的工作而富裕。三十年前，北方的Hotenow山天灾爆发摧毁了Thundertree。",
+      "body": "",
+      "keywords": [
+        "雷树废墟：总述",
+        "雷树废墟",
+        "总述"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_thundertree"
+      }
+    },
+    {
+      "id": "p3_thundertree_1_cottage",
+      "kind": "location",
+      "title": "1. 最西边的小屋",
+      "parent": "p3_thundertree",
+      "order": 40,
+      "summary": "这小屋已经破旧不堪。 朗读文本 一棵老树的幽影下蜷缩着一座没有屋顶的破败岩石小屋。这里杂草丛生。 两只枯枝怪躲藏在敞开的小屋门道两侧的杂草中。",
+      "body": "",
+      "keywords": [
+        "1. 最西边的小屋",
+        "1.",
+        "最西边的小屋"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_thundertree_1_cottage"
+      }
+    },
+    {
+      "id": "p3_thundertree_2_withered_cottage",
+      "kind": "location",
+      "title": "2. 枯萎的小屋",
+      "parent": "p3_thundertree",
+      "order": 41,
+      "summary": "风势和天气已在此完成了它们的工作，这些房屋或其昔日内容所剩无几。 朗读文本 这些受难者并排的小屋看起来可能是曾经富裕店主或小康农民的家园。如今只剩下倒塌的墙壁和成堆的瓦砾。几棵青年树木在废墟中生长起来。",
+      "body": "",
+      "keywords": [
+        "2. 枯萎的小屋",
+        "2.",
+        "枯萎的小屋"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_thundertree_2_withered_cottage"
+      }
+    },
+    {
+      "id": "p3_thundertree_3_brown_horse",
+      "kind": "location",
+      "title": "3. 棕马酒馆",
+      "parent": "p3_thundertree",
+      "order": 42,
+      "summary": "这里曾是棕马酒馆，一家以优质麦芽酒闻名的酒馆。 朗读文本 这座大型建筑门旁的一块风化招牌上，显示着一匹驮马叼着麦芽酒壶的褪色图像。建筑已经倾斜破败，但比起旅路对面的遗迹要完整些。",
+      "body": "",
+      "keywords": [
+        "3. 棕马酒馆",
+        "3.",
+        "棕马酒馆"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_thundertree_3_brown_horse"
+      }
+    },
+    {
+      "id": "p3_thundertree_4_druid_outpost",
+      "kind": "location",
+      "title": "4. 德鲁伊哨点",
+      "parent": "p3_thundertree",
+      "order": 43,
+      "summary": "当雷多斯造访雷鸣镇时，他就在此处扎营。 朗读文本 这间小型房屋看起来比附近破败的建筑状况要好。门用重型铁条加固，厚实的百叶窗保护着窗户。 雷多斯是一个瘦削、白胡子的人类，能用一词绝不用两词。尽管访客稀少，他仍相当好客。",
+      "body": "",
+      "keywords": [
+        "4. 德鲁伊哨点",
+        "4.",
+        "德鲁伊哨点",
+        "克拉摩堡",
+        "回声洞",
+        "毒牙",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_thundertree_4_druid_outpost"
+      }
+    },
+    {
+      "id": "p3_thundertree_5_withered_farmhouse",
+      "kind": "location",
+      "title": "5. 枯萎的农舍",
+      "parent": "p3_thundertree",
+      "order": 44,
+      "summary": "这片农场南面毗邻一片长满茂密荆豆和荆棘丛的田地。 朗读文本 这片废墟看起来可能曾是一座农舍。现在它被茂密的灌木丛吞没了一半，树木从它受难的地基中生长出来。",
+      "body": "",
+      "keywords": [
+        "5. 枯萎的农舍",
+        "5.",
+        "枯萎的农舍"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_thundertree_5_withered_farmhouse"
+      }
+    },
+    {
+      "id": "p3_thundertree_6_shop_ruins",
+      "kind": "location",
+      "title": "6. 商店废墟",
+      "parent": "p3_thundertree",
+      "order": 45,
+      "summary": "这家昔日的杂货店尚未完全成为废墟，其瓦片屋顶的部分结构仍然完好。 朗读文本 在村庄中部附近的一个交叉路口，一条狭窄的小径蜿蜒通向北面陡峭的山坡。正南方是一座可能曾是商店或工坊的受难者建筑。",
+      "body": "",
+      "keywords": [
+        "6. 商店废墟",
+        "6.",
+        "商店废墟"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_thundertree_6_shop_ruins"
+      }
+    },
+    {
+      "id": "p3_thundertree_7_dragons_tower",
+      "kind": "location",
+      "title": "7. 龙之塔",
+      "parent": "p3_thundertree",
+      "order": 46,
+      "summary": "这座塔楼曾是一位人类法师的家园，他在三十年前与席卷雷霆树的灰烬僵尸战斗中丧生。 朗读文本 在丘陵顶部矗立着一座圆形塔楼，旁边附有一间小屋。两者都状态良好，尽管塔楼的一半屋顶已经消失。",
+      "body": "",
+      "keywords": [
+        "7. 龙之塔",
+        "7.",
+        "龙之塔",
+        "毒牙"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_thundertree_7_dragons_tower"
+      }
+    },
+    {
+      "id": "p3_thundertree_8_smithy",
+      "kind": "location",
+      "title": "8. 旧铁匠铺",
+      "parent": "p3_thundertree",
+      "order": 47,
+      "summary": "这间铁匠铺早已被废弃。 朗读文本 一个宽阔的烟囱和腐烂的柴火堆杂乱地堆在这座倾斜建筑的外墙边，暗示着这里昔日曾是铁匠铺。 两只灰烬丧尸（见\"灰烬僵尸\"边栏）瘫倒在地板上。",
+      "body": "",
+      "keywords": [
+        "8. 旧铁匠铺",
+        "8.",
+        "旧铁匠铺"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_thundertree_8_smithy"
+      }
+    },
+    {
+      "id": "p3_thundertree_9_herbalist",
+      "kind": "location",
+      "title": "9. 草药店",
+      "parent": "p3_thundertree",
+      "order": 48,
+      "summary": "这里曾是米尔娜·丹德拉尔家族的草药和炼金商店，她现在居住在凡达林（见\"区域 红标帮窝点 \"部分的区域 遭遇5 ）。 朗读文本 这个受难者店铺里堆满了倾斜的储藏室货架和破碎的家具。",
+      "body": "",
+      "keywords": [
+        "9. 草药店",
+        "9.",
+        "草药店",
+        "红标帮",
+        "凡达林",
+        "米尔娜"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_thundertree_9_herbalist"
+      }
+    },
+    {
+      "id": "p3_thundertree_10_town_square",
+      "kind": "location",
+      "title": "10. 城镇广场",
+      "parent": "p3_thundertree",
+      "order": 49,
+      "summary": "蔓延的灌木丛尚未吞没这个方格。 朗读文本 在小镇的东侧，小巷延伸形成一个小型广场。几座破败的建筑物环绕在广场南侧，而北侧一座较大的完好建筑看起来像是兵营。",
+      "body": "",
+      "keywords": [
+        "10. 城镇广场",
+        "10.",
+        "城镇广场"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_thundertree_10_town_square"
+      }
+    },
+    {
+      "id": "p3_thundertree_11_old_garrison",
+      "kind": "location",
+      "title": "11. 旧卫戍营",
+      "parent": "p3_thundertree",
+      "order": 50,
+      "summary": "对于桑达树的居民来说，生活在如此靠近无冬森林的地方需要时刻保持警惕。 朗读文本 这座兵营似乎比小镇上大多数建筑物更能经受岁月的洗礼。它的屋顶设有简易的城垛，箭缝窗户证实了它是为在紧急事件发生时充当小型要塞而建造的。",
+      "body": "",
+      "keywords": [
+        "11. 旧卫戍营",
+        "11.",
+        "旧卫戍营"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_thundertree_11_old_garrison"
+      }
+    },
+    {
+      "id": "p3_thundertree_12_weavers_cottage",
+      "kind": "location",
+      "title": "12. 织布工小屋",
+      "parent": "p3_thundertree",
+      "order": 51,
+      "summary": "这座堕落小屋是附近巢穴生物的诱饵。 朗读文本 成堆的残骸散落在这座废墟内部。角落里立着一台破碎的织布机。 六只枯枝怪潜伏在这片废墟南方的灌木丛中。",
+      "body": "",
+      "keywords": [
+        "12. 织布工小屋",
+        "12.",
+        "织布工小屋"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_thundertree_12_weavers_cottage"
+      }
+    },
+    {
+      "id": "p3_thundertree_13_dragon_cultists",
+      "kind": "location",
+      "title": "13. 龙之邪教徒",
+      "parent": "p3_thundertree",
+      "order": 52,
+      "summary": "一个自称龙之邪教的团体试图与剑湾的强大龙类建立联盟。为此，四名邪教徒最近追踪一条绿龙来到桑达巴（见区域 7 ），正在等待合适的时机接近这条龙并促成联盟。他们一直在远处监视这条龙，试图评估它的性情和需求。",
+      "body": "",
+      "keywords": [
+        "13. 龙之邪教徒",
+        "13.",
+        "龙之邪教徒"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_thundertree_13_dragon_cultists"
+      }
+    },
+    {
+      "id": "p3_wyvern_tor",
+      "kind": "location",
+      "title": "飞龙突岩",
+      "parent": "act_3",
+      "order": 53,
+      "summary": "这座突岩是宝剑山脉东北部崎岖丘陵中显著的地标，从二十英里外就能轻易看到。沿着三猪小径旅行的人们在兔莓镇附近行进时，会瞥见南方的飞龙突岩。这里曾是一大群危险飞龙的巢穴，但多年前一队勇敢的冒险者解决了这些怪物。",
+      "body": "",
+      "keywords": [
+        "飞龙突岩",
+        "凡达林",
+        "三猪小径",
+        "古枭井",
+        "哈宾"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_wyvern_tor"
+      }
+    },
+    {
+      "id": "p3_cragmaw_castle",
+      "kind": "location",
+      "title": "克拉摩堡：总述",
+      "parent": "act_3",
+      "order": 54,
+      "summary": "克拉摩部落由劫掠团伙和竞争对手的哥布林据点组成，散布在三猪小径和无冬森林区域。然而，有一位首领被其他所有成员勉强承认为至高无上的：克拉摩堡的君王格罗尔。 克拉摩堡并非地精所建，也非该建筑原名。",
+      "body": "",
+      "keywords": [
+        "克拉摩堡：总述",
+        "克拉摩堡",
+        "总述",
+        "格罗尔",
+        "三猪小径",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_cragmaw_castle"
+      }
+    },
+    {
+      "id": "p3_castle_1_entrance",
+      "kind": "location",
+      "title": "1. 城堡入口",
+      "parent": "p3_cragmaw_castle",
+      "order": 55,
+      "summary": "区域区域 1 和区域区域 2 之间的主大门由青铜覆盖的木材制成，但它们已经腐蚀倒塌。 朗读文本 这座城堡由七座不同大小和高度的摇摇欲坠的塔楼组成，但上层建筑都处于不同程度的坍塌状态。一段短台阶通向主入口前的一个露台。",
+      "body": "",
+      "keywords": [
+        "1. 城堡入口",
+        "1.",
+        "城堡入口",
+        "黑蜘蛛",
+        "格罗尔",
+        "玻璃杖",
+        "伊阿诺",
+        "红标帮"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_castle_1_entrance"
+      }
+    },
+    {
+      "id": "p3_castle_2_trap_hall",
+      "kind": "location",
+      "title": "2. 陷阱大厅",
+      "parent": "p3_cragmaw_castle",
+      "order": 56,
+      "summary": "这座宽阔的大厅曾是城堡的门厅，如今成为了危险的战场。 朗读文本 北面和南面的门紧闭着，一堆摇摇欲坠的瓦砾部分遮挡了南面的走廊。东面，一条宽阔的走廊尽头有两扇门分别通向南方和东方。",
+      "body": "",
+      "keywords": [
+        "2. 陷阱大厅",
+        "2.",
+        "陷阱大厅",
+        "地精",
+        "大地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_castle_2_trap_hall"
+      }
+    },
+    {
+      "id": "p3_castle_3_archers_post",
+      "kind": "location",
+      "title": "3. 弓箭手岗哨",
+      "parent": "p3_cragmaw_castle",
+      "order": 57,
+      "summary": "克拉摩堡的主要防御是其秘密位置和看似已被废弃的外貌。此外，国王短刃会布置哨兵驱赶过于接近的入侵者。 朗读文本 这个小型房间散落着碎片。门对面的箭缝提供了对城堡大门前露台的绝佳火焰射界。 两个地精分别占据这两个房间。",
+      "body": "",
+      "keywords": [
+        "3. 弓箭手岗哨",
+        "3.",
+        "弓箭手岗哨",
+        "克拉摩堡",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_castle_3_archers_post"
+      }
+    },
+    {
+      "id": "p3_castle_4_barracks_ruins",
+      "kind": "location",
+      "title": "4. 营房废墟",
+      "parent": "p3_cragmaw_castle",
+      "order": 58,
+      "summary": "峭壁地精们充分利用了城堡中的每一寸可用空间。 朗读文本 城堡的西南塔楼几乎只剩下一堆瓦砾。几张破旧的铺盖卷散落在剩余的地面空间上，一条狭窄曲折的通道向东穿过废墟。 三只地精在此驻扎。",
+      "body": "",
+      "keywords": [
+        "4. 营房废墟",
+        "4.",
+        "营房废墟",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_castle_4_barracks_ruins"
+      }
+    },
+    {
+      "id": "p3_castle_5_storeroom",
+      "kind": "location",
+      "title": "5. 储藏室",
+      "parent": "p3_cragmaw_castle",
+      "order": 59,
+      "summary": "沿大公路和三猪小径行进的商队遭裂颅部落袭击，为城堡提供了补给物资。 朗读文本 这个储藏区域堆满了陈旧的腌肉桶和腐烂的谷物袋。在补给品中，你看到一件血迹斑斑的链甲、一把重弩和一柄未入鞘的长剑，剑柄上刻着无冬城的徽章。",
+      "body": "",
+      "keywords": [
+        "5. 储藏室",
+        "5.",
+        "储藏室",
+        "修达·霍温特",
+        "三猪小径",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_castle_5_storeroom"
+      }
+    },
+    {
+      "id": "p3_castle_6_bugbear_barracks",
+      "kind": "location",
+      "title": "6. 大地精营房",
+      "parent": "p3_cragmaw_castle",
+      "order": 60,
+      "summary": "峭壁行者是一个混合类地精部落，少数熊地精统治着大量悲惨的地精和少数大地精。大地精们计划有朝一日除掉熊地精并接管部落，但目前熊地精的威胁仍然太强。 朗读文本 四个简陋的草垫和铺盖卷在这间营房的地板上排成一列。",
+      "body": "",
+      "keywords": [
+        "6. 大地精营房",
+        "6.",
+        "大地精营房",
+        "地精",
+        "大地精",
+        "熊地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_castle_6_bugbear_barracks"
+      }
+    },
+    {
+      "id": "p3_castle_7_banquet_hall",
+      "kind": "location",
+      "title": "7. 宴会厅",
+      "parent": "p3_cragmaw_castle",
+      "order": 61,
+      "summary": "城堡领主曾在此招待宾客，举办奢华宴会和舞会。如今这地点成了污秽的地精餐厅。 朗读文本 这个大型大厅的西部尽头是一堵瓦砾墙，但其余部分仍然完好无损。这里曾经一定是城堡的宴会厅，有着高达二十五英尺的挑高天花板。",
+      "body": "",
+      "keywords": [
+        "7. 宴会厅",
+        "7.",
+        "宴会厅",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_castle_7_banquet_hall"
+      }
+    },
+    {
+      "id": "p3_castle_8_dark_hall",
+      "kind": "location",
+      "title": "8. 黑暗大厅",
+      "parent": "p3_cragmaw_castle",
+      "order": 62,
+      "summary": "即使在白昼，这个区域也没有外部光照。方框文本假设角色拥有黑暗视觉或光源。 朗读文本 这个高而狭窄的大厅看起来曾经可能是小教堂或神殿的一部分。天使般的雕像雕刻在房间的上部，俯视着下方的地板。",
+      "body": "",
+      "keywords": [
+        "8. 黑暗大厅",
+        "8.",
+        "黑暗大厅",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_castle_8_dark_hall"
+      }
+    },
+    {
+      "id": "p3_castle_9_goblin_shrine",
+      "kind": "location",
+      "title": "9. 地精圣坛",
+      "parent": "p3_cragmaw_castle",
+      "order": 63,
+      "summary": "地精对人类的神明毫无兴趣，因此裂颅部落将此地重新献给了地精与大地精之神马格鲁比耶。 朗读文本 这个房间占据了城堡的北塔楼。一座岩石祭坛矗立在房间中央，上面覆盖着血迹斑斑的黑布。",
+      "body": "",
+      "keywords": [
+        "9. 地精圣坛",
+        "9.",
+        "地精圣坛",
+        "地精",
+        "大地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_castle_9_goblin_shrine"
+      }
+    },
+    {
+      "id": "p3_castle_10_back_door",
+      "kind": "location",
+      "title": "10. 后门",
+      "parent": "p3_cragmaw_castle",
+      "order": 64,
+      "summary": "城堡的这个配菜入口已上锁但无人看守。 朗读文本 在古堡南侧的配菜处，一条杂草丛生的路径通向一条爬入墙内的通行道。一扇大型铁门矗立于此，免受外界直接攻击。地面十英尺高的箭垛俯瞰着这条路径。 这扇铁门被锁上了。",
+      "body": "",
+      "keywords": [
+        "10. 后门",
+        "10.",
+        "后门",
+        "地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_castle_10_back_door"
+      }
+    },
+    {
+      "id": "p3_castle_11_tower_ruins",
+      "kind": "location",
+      "title": "11. 塔楼废墟",
+      "parent": "p3_cragmaw_castle",
+      "order": 65,
+      "summary": "布满灰尘的帆布（在地图上标有\"C\"）隐藏了这个区域的北入口，与周围的石工和瓦砾融为一体。一个成功通过DC 15感知（察觉）检定的角色会发现一条通往隐藏入口的小径。",
+      "body": "",
+      "keywords": [
+        "11. 塔楼废墟",
+        "11.",
+        "塔楼废墟"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_castle_11_tower_ruins"
+      }
+    },
+    {
+      "id": "p3_castle_12_guard_barracks",
+      "kind": "location",
+      "title": "12. 警卫营房",
+      "parent": "p3_cragmaw_castle",
+      "order": 66,
+      "summary": "这里的生物从箭缝处守卫，所以任何在城堡东侧潜行的角色都可能被发现并遭到攻击。 朗读文本 一个装满煤炭的石制火盆在这个小型营房中央发光。四张草垫沿着东墙排列。南面的墙已经倒塌，但那个方向上一扇上了闩的木门仍然清晰可见。",
+      "body": "",
+      "keywords": [
+        "12. 警卫营房",
+        "12.",
+        "警卫营房",
+        "格罗尔",
+        "地精",
+        "大地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_castle_12_guard_barracks"
+      }
+    },
+    {
+      "id": "p3_castle_13_owlbear_tower",
+      "kind": "location",
+      "title": "13. 枭熊塔楼",
+      "parent": "p3_cragmaw_castle",
+      "order": 67,
+      "summary": "这个房间的门被一根重型木闩牢牢锁住——这是一个微妙的警告，暗示着门后潜藏着危险。当木闩被抬起时，房间里的生物会苏醒并发出可怕的咆哮。 这里的箭垛被关闭，使房间陷入黑暗。方框文本假设角色拥有黑暗视觉或光源。",
+      "body": "",
+      "keywords": [
+        "13. 枭熊塔楼",
+        "13.",
+        "枭熊塔楼",
+        "格罗尔"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_castle_13_owlbear_tower"
+      }
+    },
+    {
+      "id": "p3_castle_14_king_quarters",
+      "kind": "location",
+      "title": "14. 王之居所",
+      "parent": "p3_cragmaw_castle",
+      "order": 68,
+      "summary": "任何在门边聆听的角色都会听到两个声音在激烈讨论——一个响亮、咆哮的声音要求为某事支付报酬，以及一个柔软平滑的回应。",
+      "body": "",
+      "keywords": [
+        "14. 王之居所",
+        "14.",
+        "王之居所",
+        "刚铎·寻岩者",
+        "黑蜘蛛",
+        "格罗尔",
+        "克拉摩堡",
+        "回声洞"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p3_castle_14_king_quarters"
+      }
+    },
+    {
+      "id": "p4_wave_echo",
+      "kind": "location",
+      "title": "回声洞：总述",
+      "parent": "act_4",
+      "order": 69,
+      "summary": "这部分冒险是为至少4级的角色设计的，并假设每个角色已获得至少2,700点经验值。如果冒险者跳过了第三部分中过多的可选调查和遭遇，他们可能未达到4级，那么本节中的许多遭遇对他们来说可能会很困难。",
+      "body": "",
+      "keywords": [
+        "回声洞：总述",
+        "回声洞",
+        "总述",
+        "地精",
+        "熊地精",
+        "食尸鬼"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_wave_echo"
+      }
+    },
+    {
+      "id": "p4_cave_1_entrance",
+      "kind": "location",
+      "title": "1. 洞穴入口",
+      "parent": "p4_wave_echo",
+      "order": 70,
+      "summary": "无论角色们是跟随刚铎的地图还是从其他来源获得回声洞的指引，他们最初的接近路线会引导他们来到一个狭窄的隧道，其入口隐藏在剑山山麓中。 朗读文本 入口隧道通向一个由天然石柱支撑的大型洞窟，洞内有三根石笋。",
+      "body": "",
+      "keywords": [
+        "1. 洞穴入口",
+        "1.",
+        "洞穴入口",
+        "黑蜘蛛",
+        "内兹纳",
+        "回声洞",
+        "南卓"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_1_entrance"
+      }
+    },
+    {
+      "id": "p4_cave_2_mine_tunnel",
+      "kind": "location",
+      "title": "2. 矿道",
+      "parent": "p4_wave_echo",
+      "order": 71,
+      "summary": "这个通道迷宫是回声洞原始矿井遗址的一个古老区域。 朗读文本 该区域由众多交叉通道组成。此处天花板仅有六尺高，部分通道尽头是半挖掘的岩面。 这些死胡同通道是矿工们放弃并决定转移到其他地点的地方。",
+      "body": "",
+      "keywords": [
+        "2. 矿道",
+        "2.",
+        "矿道",
+        "回声洞"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_2_mine_tunnel"
+      }
+    },
+    {
+      "id": "p4_cave_3_old_entrance",
+      "kind": "location",
+      "title": "3. 旧入口",
+      "parent": "p4_wave_echo",
+      "order": 72,
+      "summary": "向南延伸的隧道曾是回声洞的原始入口，但在数个世纪前被摧毁矿山的灾难所掩埋。当兽人突袭矿山时，这里曾发生过一场激烈的战斗。死者仍躺在他们倒下的地方。 朗读文本 许多隧道在这个天然的三十尺高洞窟中交错。",
+      "body": "",
+      "keywords": [
+        "3. 旧入口",
+        "3.",
+        "旧入口",
+        "回声洞"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_3_old_entrance"
+      }
+    },
+    {
+      "id": "p4_cave_4_old_guardroom",
+      "kind": "location",
+      "title": "4. 旧警卫室",
+      "parent": "p4_wave_echo",
+      "order": 73,
+      "summary": "这个警卫室曾经保护着附近矿井的入口，但在兽人进攻时，战斗初期就被强冲了。 朗读文本 部分坍塌的天花板散落的碎裂岩石长凳和成堆的瓦砾填满了这个房间。在受损的岩石床铺和倾倒的武器架之间，散落着几名矮人和兽人的骸骨。",
+      "body": "",
+      "keywords": [
+        "4. 旧警卫室",
+        "4.",
+        "旧警卫室"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_4_old_guardroom"
+      }
+    },
+    {
+      "id": "p4_cave_5_assayers_office",
+      "kind": "location",
+      "title": "5. 试金师办公室",
+      "parent": "p4_wave_echo",
+      "order": 74,
+      "summary": "矿山的试金师们曾在此工作，负责称重和评估矿石样本，并为矿工们的劳动支付报酬。 朗读文本 这个房间曾经是某种办公室或储藏室。一个大型岩石柜台将房间一分为二，上面摆放着三个布满灰尘的铁制平衡秤。",
+      "body": "",
+      "keywords": [
+        "5. 试金师办公室",
+        "5.",
+        "试金师办公室"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_5_assayers_office"
+      }
+    },
+    {
+      "id": "p4_cave_6_south_barracks",
+      "kind": "location",
+      "title": "6. 南部营房",
+      "parent": "p4_wave_echo",
+      "order": 75,
+      "summary": "这里曾是矿工的营房，在回声洞中工作的熟练矿工们在此轮班休息。任何角色若在部分开启的门边倾听，并通过DC 10的感知（察觉）检定，就能听到微弱的嘎吱碎裂声。",
+      "body": "",
+      "keywords": [
+        "6. 南部营房",
+        "6.",
+        "南部营房",
+        "回声洞",
+        "食尸鬼"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_6_south_barracks"
+      }
+    },
+    {
+      "id": "p4_cave_7_storeroom_ruins",
+      "kind": "location",
+      "title": "7. 储物间废墟",
+      "parent": "p4_wave_echo",
+      "order": 76,
+      "summary": "尽管周围一片毁灭景象，这个储藏区域的北部却完好无损地保存了下来。 朗读文本 这个房间的东侧墙壁已经坍塌成一堆瓦砾。北面有一扇半开的门，通向一个大小适中的储藏室。布满灰尘的木桶整齐地靠墙摆放，全都因年代久远而开裂破损。",
+      "body": "",
+      "keywords": [
+        "7. 储物间废墟",
+        "7.",
+        "储物间废墟"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_7_storeroom_ruins"
+      }
+    },
+    {
+      "id": "p4_cave_8_fungi_cavern",
+      "kind": "location",
+      "title": "8. 真菌洞窟",
+      "parent": "p4_wave_echo",
+      "order": 77,
+      "summary": "这个洞穴阻碍了内兹纳的探索。卓尔怀疑矿井的魔法工坊就在附近，但他不愿冒险对付这里的怪物。 朗读文本 怪异的真菌在这座洞窟的地面上形成了密集的覆盖层。",
+      "body": "",
+      "keywords": [
+        "8. 真菌洞窟",
+        "8.",
+        "真菌洞窟",
+        "内兹纳"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_8_fungi_cavern"
+      }
+    },
+    {
+      "id": "p4_cave_9_great_cavern",
+      "kind": "location",
+      "title": "9. 大洞窟",
+      "parent": "p4_wave_echo",
+      "order": 78,
+      "summary": "这个洞穴曾是矿工的宴会厅、会议区域和蜜酒大厅。 朗读文本 陡峭的悬崖将这个大型洞窟分成三个部分——两端的高台和中间的低洼区域。雕刻的石制楼梯攀爬通向高台。中间区域摆放着两张大型桌子和一对旧火盆。东侧高台上有一张小桌子。",
+      "body": "",
+      "keywords": [
+        "9. 大洞窟",
+        "9.",
+        "大洞窟",
+        "食尸鬼"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_9_great_cavern"
+      }
+    },
+    {
+      "id": "p4_cave_10_dark_pool",
+      "kind": "location",
+      "title": "10. 黑水池",
+      "parent": "p4_wave_echo",
+      "order": 79,
+      "summary": "宝藏隐匿在这个充满水的洞穴中。 朗读文本 一个静止的水池占据了这洞窟的大部分空间。水色幽暗，难以窥见其中可能藏有何物。池岸由一层薄薄的奇异苍白贻贝的破碎贝壳组成，空气中弥漫着鱼腥味。",
+      "body": "",
+      "keywords": [
+        "10. 黑水池",
+        "10.",
+        "黑水池",
+        "凡达林"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_10_dark_pool"
+      }
+    },
+    {
+      "id": "p4_cave_11_north_barracks",
+      "kind": "location",
+      "title": "11. 北部营房",
+      "parent": "p4_wave_echo",
+      "order": 80,
+      "summary": "东边的门从房间内部被堵住了，需要成功通过DC 20的力量检定才能强行打开。一个角色若在任一扇门边倾听并通过DC 10的感知（察觉）检定，会听到粗哑的声音说着地精语，谈论他们有多饿。",
+      "body": "",
+      "keywords": [
+        "11. 北部营房",
+        "11.",
+        "北部营房",
+        "黑蜘蛛",
+        "内兹纳",
+        "回声洞",
+        "地精",
+        "熊地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_11_north_barracks"
+      }
+    },
+    {
+      "id": "p4_cave_12_smelting_cavern",
+      "kind": "location",
+      "title": "12. 冶炼洞窟",
+      "parent": "p4_wave_echo",
+      "order": 81,
+      "summary": "如同区域 8 的真菌洞窟，这个房间构成了严重障碍，阻止内兹纳尔抵达他的目标——法术锻造厂（区域 15 ）。这名卓尔仍在制定计划以通过该区域的不死生物守卫。 朗读文本 一座高炉和一个由水车驱动的机械风箱占据了这个大型洞室。",
+      "body": "",
+      "keywords": [
+        "12. 冶炼洞窟",
+        "12.",
+        "冶炼洞窟",
+        "内兹纳",
+        "回声洞"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_12_smelting_cavern"
+      }
+    },
+    {
+      "id": "p4_cave_13_bright_cavern",
+      "kind": "location",
+      "title": "13. 明亮的洞窟",
+      "parent": "p4_wave_echo",
+      "order": 82,
+      "summary": "此处的结构损坏和骸骨残骸，是数个世纪前兽人及其雇佣的法师突袭矿场时，在此地爆发的毁灭性法术战斗的证据。 朗读文本 这个大型洞窟顶部的闪亮矿物捕获光线并反射回来，创造出繁星点点的夜空印象。",
+      "body": "",
+      "keywords": [
+        "13. 明亮的洞窟",
+        "13.",
+        "明亮的洞窟"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_13_bright_cavern"
+      }
+    },
+    {
+      "id": "p4_cave_14_mages_quarters",
+      "kind": "location",
+      "title": "14. 法师的居所",
+      "parent": "p4_wave_echo",
+      "order": 83,
+      "summary": "通往这个区域的门已经开裂，铁铰链部分熔化。强行撬开或砸开这些门需要通过一个DC 15的力量检定。 朗读文本 灰尘、灰烬、被火焰熏黑的墙壁以及下垂天花板下的成堆碎片表明这个房间曾遭到破坏性爆炸的损坏。",
+      "body": "",
+      "keywords": [
+        "14. 法师的居所",
+        "14.",
+        "法师的居所",
+        "回声洞",
+        "墨梅斯克"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_14_mages_quarters"
+      }
+    },
+    {
+      "id": "p4_cave_15_forge_of_spells",
+      "kind": "location",
+      "title": "15. 法术工厂",
+      "parent": "p4_wave_echo",
+      "order": 84,
+      "summary": "这里是法师们与法德尔契约的矮人和侏儒结盟的地方，他们引导这些洞穴的魔法来为矮人武器和侏儒装置附魔。最北边的门被烧焦并裂开，其铁铰链部分熔化；强行打开它需要通过一个DC 15的力量检定。西边的双开门同样受损，但微微敞开。",
+      "body": "",
+      "keywords": [
+        "15. 法术工厂",
+        "15.",
+        "法术工厂",
+        "回声洞",
+        "墨梅斯克",
+        "食尸鬼"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_15_forge_of_spells"
+      }
+    },
+    {
+      "id": "p4_cave_16_booming_cavern",
+      "kind": "location",
+      "title": "16. 轰鸣洞窟",
+      "parent": "p4_wave_echo",
+      "order": 85,
+      "summary": "赋予回声洞其名的澎湃波涛声源自这个充满水的洞窟。 朗读文本 一条狭窄的岩架俯瞰着一个容纳着汹涌翻腾水体的大型洞窟。矿井中回荡的有节奏轰鸣声在此处更为响亮。每隔一段时间，一股新的水流涌入这个洞室，猛烈撞击岩架下方的墙壁。",
+      "body": "",
+      "keywords": [
+        "16. 轰鸣洞窟",
+        "16.",
+        "轰鸣洞窟",
+        "回声洞"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_16_booming_cavern"
+      }
+    },
+    {
+      "id": "p4_cave_17_old_riverbed",
+      "kind": "location",
+      "title": "17. 古老河床",
+      "parent": "p4_wave_echo",
+      "order": 86,
+      "summary": "从区域 10 流向区域 18 的溪流曾流经这条低矮通道，最终注入区域 16 。 朗读文本 这条通道仅有四英尺高，被圆形的巨石和鹅卵石所阻碍。它可能曾是一条河床，尽管现在这里没有水流。",
+      "body": "",
+      "keywords": [
+        "17. 古老河床",
+        "17.",
+        "古老河床",
+        "回声洞"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_17_old_riverbed"
+      }
+    },
+    {
+      "id": "p4_cave_18_collapsed_cavern",
+      "kind": "location",
+      "title": "18. 崩塌的洞窟",
+      "parent": "p4_wave_echo",
+      "order": 87,
+      "summary": "涅兹纳的仆人占据着这个洞窟，防范不死生物的入侵并仔细筛检瓦砾。黑蜘蛛的预言显示，一些有价值的宝藏隐藏在这个区域被摧毁时形成的裂谷底部。 朗读文本 一个宽阔的裂谷占据了这洞窟的东半部。",
+      "body": "",
+      "keywords": [
+        "18. 崩塌的洞窟",
+        "18.",
+        "崩塌的洞窟",
+        "黑蜘蛛",
+        "内兹纳",
+        "地精",
+        "熊地精"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_18_collapsed_cavern"
+      }
+    },
+    {
+      "id": "p4_cave_19_temple",
+      "kind": "location",
+      "title": "19. 杜马松的神庙",
+      "parent": "p4_wave_echo",
+      "order": 88,
+      "summary": "涅兹纳在探索矿井并寻找法术锻造间时将此房间作为他的总部。 朗读文本 六根开裂的大理石柱排列在这个大厅的墙壁旁，北端矗立着一座九英尺高的矮人雕像，坐在王座上，一把巨大的岩石战锤横放在他的膝上。",
+      "body": "",
+      "keywords": [
+        "19. 杜马松的神庙",
+        "19.",
+        "杜马松的神庙",
+        "修达·霍温特",
+        "黑蜘蛛",
+        "那兹纳尔",
+        "内兹纳",
+        "红标帮"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_19_temple"
+      }
+    },
+    {
+      "id": "p4_cave_20_priests_quarters",
+      "kind": "location",
+      "title": "20. 祭司的居所",
+      "parent": "p4_wave_echo",
+      "order": 89,
+      "summary": "这个房间的门被锁上了，需要使用盗贼工具并通过一个DC 15的敏捷检定才能打开。内兹纳（区域 19 ）携带着钥匙。",
+      "body": "",
+      "keywords": [
+        "20. 祭司的居所",
+        "20.",
+        "祭司的居所",
+        "内兹纳",
+        "回声洞",
+        "南卓"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": null,
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_cave_20_priests_quarters"
+      }
+    },
+    {
+      "id": "p4_ending",
+      "kind": "ending",
+      "title": "结局",
+      "parent": "act_4",
+      "order": 90,
+      "summary": "通过艰苦的工作和一点幸运，冒险者们击败了黑蜘蛛并挫败了他破坏性的阴谋，清除了威胁凡达林居民的暴徒，并收复了回声洞的失落矿井。他们的功绩将在剑湾的这一角落被长久铭记。",
+      "body": "",
+      "keywords": [
+        "结局",
+        "黑蜘蛛",
+        "回声洞",
+        "凡达林",
+        "崔森德庄园",
+        "南卓"
+      ],
+      "aliases": [],
+      "visibility": "public",
+      "scene_role": "ending",
+      "access": "free",
+      "repeatable": true,
+      "spoiler_level": 0,
+      "source": "scenario_pack",
+      "body_ref": {
+        "module_id": "p4_ending"
+      },
+      "completion": {
+        "type": "location",
+        "id": "p4_cave_19_temple"
+      }
+    },
+    {
+      "id": "npc_gundren",
+      "kind": "npc",
+      "title": "NPC：刚铎·寻岩者",
+      "parent": "p3_castle_14_king_quarters",
+      "summary": "如果你正在使用\"在凡达林见我\"这个冒险引子，那么任何靠近进行更详细调查的角色都能鉴定出这些马匹属于刚铎·寻岩者和修达·霍温特。它们已经死亡约一天，很明显这些马匹是被箭矢射杀的。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：刚铎·寻岩者",
+        "NPC",
+        "刚铎",
+        "寻岩者",
+        "刚铎·寻岩者",
+        "修达·霍温特",
+        "黑蜘蛛",
+        "克拉格"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_sildar",
+      "kind": "npc",
+      "title": "NPC：修达·霍温特",
+      "parent": "p1_hideout_6_rest",
+      "summary": "修达·霍温特，一名人类战士，被囚禁在这个房间中。他被牢牢地绑在洞窟南边的岩架上。地精们一直在殴打折磨他，因此他现在很虚弱，只剩下1点生命值。 地精首领耶米克是整个窝点的二把手。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：修达·霍温特",
+        "NPC",
+        "修达",
+        "霍温特",
+        "刚铎·寻岩者",
+        "修达·霍温特",
+        "黑蜘蛛",
+        "克拉格"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_klarg",
+      "kind": "npc",
+      "title": "NPC：克拉格",
+      "parent": "p1_hideout_8_cave",
+      "summary": "类地精的首领坚持将掠夺者的大部分赃物留在自己的巢穴中。克拉摩帮派上个月袭击和伏击商队所得的掠夺品都在这里。 朗读文本 掠夺来的物资袋子和板条箱堆积在这个大型洞穴的南端。向西，地面向一个狭窄的开口倾斜，通向黑暗。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：克拉格",
+        "NPC",
+        "克拉格",
+        "凡达林",
+        "莱妮",
+        "地精",
+        "熊地精"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_king_grol",
+      "kind": "npc",
+      "title": "NPC：格罗尔国王",
+      "parent": "p3_castle_14_king_quarters",
+      "summary": "任何在门边聆听的角色都会听到两个声音在激烈讨论——一个响亮、咆哮的声音要求为某事支付报酬，以及一个柔软平滑的回应。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：格罗尔国王",
+        "NPC",
+        "格罗尔国王",
+        "刚铎·寻岩者",
+        "黑蜘蛛",
+        "格罗尔",
+        "克拉摩堡",
+        "回声洞"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_agatha",
+      "kind": "npc",
+      "title": "NPC：阿加莎",
+      "parent": "p3_agatha",
+      "summary": "兔莓镇多年前被野蛮人洗劫，如今只剩废墟。三猪小径径直穿过这座废弃小镇，为寻找报丧妖阿加莎的巢穴提供了容易辨识的地标。从科尼伯里废墟出发，一条古老小径向西北延伸至无冬森林。阿加莎的巢穴位于镇外数英里处。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：阿加莎",
+        "NPC",
+        "阿加莎",
+        "黑蜘蛛",
+        "克拉摩堡",
+        "回声洞",
+        "三猪小径",
+        "古枭井"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_iarno",
+      "kind": "npc",
+      "title": "NPC：伊阿诺 / 玻璃杖",
+      "parent": "p2_redbrand_12_glasstaff",
+      "summary": "如果角色们通过区域 7 的秘密通道接近这个房间，他们可以突袭红标帮的首领——伊阿诺·\"玻璃杖\"·阿尔布雷克。否则，他的老鼠魔宠会警告他任何通过区域 11 过来的人，并在角色们到达前逃离。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：伊阿诺 / 玻璃杖",
+        "NPC",
+        "伊阿诺",
+        "玻璃杖",
+        "修达·霍温特",
+        "黑蜘蛛",
+        "红标帮",
+        "回声洞"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_nezznar",
+      "kind": "npc",
+      "title": "NPC：那兹纳尔 / 黑蜘蛛",
+      "parent": "p4_cave_19_temple",
+      "summary": "内兹纳承认自己是黑蜘蛛，并利用峭壁地精和红标帮确保回声洞仍是他的秘密。他会说或做任何事情来让角色们放松警惕，包括承诺投降或提议合作对抗阻碍他接近法术锻造厂的怪物。然而，一旦角色们失去利用价值，他就会立即背叛他们。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：那兹纳尔 / 黑蜘蛛",
+        "NPC",
+        "那兹纳尔",
+        "黑蜘蛛",
+        "内兹纳",
+        "红标帮",
+        "回声洞",
+        "凡达林"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_mormesk",
+      "kind": "npc",
+      "title": "NPC：墨梅斯克",
+      "parent": "p4_cave_14_mages_quarters",
+      "summary": "通往这个区域的门已经开裂，铁铰链部分熔化。强行撬开或砸开这些门需要通过一个DC 15的力量检定。 朗读文本 灰尘、灰烬、被火焰熏黑的墙壁以及下垂天花板下的成堆碎片表明这个房间曾遭到破坏性爆炸的损坏。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：墨梅斯克",
+        "NPC",
+        "墨梅斯克",
+        "回声洞"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_venomfang",
+      "kind": "npc",
+      "title": "NPC：毒牙",
+      "parent": "p3_thundertree_7_dragons_tower",
+      "summary": "这座塔楼曾是一位人类法师的家园，他在三十年前与席卷雷霆树的灰烬僵尸战斗中丧生。 朗读文本 在丘陵顶部矗立着一座圆形塔楼，旁边附有一间小屋。两者都状态良好，尽管塔楼的一半屋顶已经消失。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：毒牙",
+        "NPC",
+        "毒牙"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_reidoth",
+      "kind": "npc",
+      "title": "NPC：里多斯",
+      "parent": "p3_thundertree_4_druid_outpost",
+      "summary": "当雷多斯造访雷鸣镇时，他就在此处扎营。 朗读文本 这间小型房屋看起来比附近破败的建筑状况要好。门用重型铁条加固，厚实的百叶窗保护着窗户。 雷多斯是一个瘦削、白胡子的人类，能用一词绝不用两词。尽管访客稀少，他仍相当好客。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：里多斯",
+        "NPC",
+        "里多斯",
+        "克拉摩堡",
+        "回声洞",
+        "毒牙",
+        "地精"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_halia",
+      "kind": "npc",
+      "title": "NPC：哈利娅·桑顿",
+      "parent": "p2_miners_exchange",
+      "summary": "矿工交易所是一个贸易站，当地矿工在此称重、测量并领取他们发现的贵重物品报酬。在缺乏任何地方领主或权威的情况下，该交易所还充当非官方的记录办公室，登记对该地区各处溪流和矿坑的开采权。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：哈利娅·桑顿",
+        "NPC",
+        "哈利娅",
+        "桑顿",
+        "玻璃杖",
+        "红标帮",
+        "克拉摩堡",
+        "凡达林"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_garaele",
+      "kind": "npc",
+      "title": "NPC：加莱尔修女",
+      "parent": "p2_shrine_luck",
+      "summary": "凡达林唯一的庙宇是一座用附近遗迹的石头建造的小型神龛。它供奉着吉兆与好运女神泰摩拉。 这座神殿由一位名叫加莱尔修女的学者侍僧照料，她是一位热情的青年精灵，对永远无法清除凡达林的红标帮感到绝望。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：加莱尔修女",
+        "NPC",
+        "加莱尔修女",
+        "阿加莎",
+        "红标帮",
+        "凡达林",
+        "加莱尔"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_harbin",
+      "kind": "npc",
+      "title": "NPC：哈宾·威斯特",
+      "parent": "p2_townmaster_hall",
+      "summary": "镇长大厅有着坚固的岩石墙壁、倾斜的木制屋顶，以及后方的铃铛塔楼。前门旁的公告板上贴着一张用通用语写的告示，上面写着：\"奖励——飞龙突岩附近的兽人！有意对抗兽人威胁者可入内询问。\"告示上盖有小镇印章和一个难以辨认的签名。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：哈宾·威斯特",
+        "NPC",
+        "哈宾",
+        "威斯特",
+        "修达·霍温特",
+        "玻璃杖",
+        "伊阿诺",
+        "红标帮"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_linene",
+      "kind": "npc",
+      "title": "NPC：莱妮·灰风",
+      "parent": "p2_lionshield_coster",
+      "summary": "这家俭朴的贸易站前门上方悬挂着一个标志，形状是一个绘有蓝色狮子的木制盾牌。 这座建筑由狮盾公司所有，这是一家总部位于东方一百多英里外的雅塔尔城的商行。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：莱妮·灰风",
+        "NPC",
+        "莱妮",
+        "灰风",
+        "红标帮",
+        "克拉摩窝点",
+        "凡达林",
+        "地精"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_daran",
+      "kind": "npc",
+      "title": "NPC：达朗·埃德玛",
+      "parent": "p2_edermath_orchard",
+      "summary": "达朗·埃德玛是一位退休的冒险者，住在苹果园旁一间整洁的小屋里。这位体格健壮、银发的半精灵已有一百多岁高龄，曾是一名战士，在遥远的东南方龙海岸地区担任了多年的执法官和先驱魔斧。退休后，他回到了自己最初的家乡无冬城地区。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：达朗·埃德玛",
+        "NPC",
+        "达朗",
+        "埃德玛",
+        "玻璃杖",
+        "红标帮",
+        "凡达林",
+        "崔森德庄园"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_qelline",
+      "kind": "npc",
+      "title": "NPC：奎琳·阿德里夫",
+      "parent": "p2_adabra_farm",
+      "summary": "奎琳·阿德里夫是一位45岁的睿智女性半身人，是个务实的农民，似乎对镇上发生的一切都了如指掌。她是个好客的主人，如果角色们不想住在石丘旅馆，她愿意让他们住在她的干草棚里。 奎琳的儿子卡普是个十岁大、活泼早熟的半身人男孩。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：奎琳·阿德里夫",
+        "NPC",
+        "奎琳",
+        "阿德里夫",
+        "红标帮",
+        "克拉摩堡",
+        "回声洞",
+        "凡达林"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_toblen",
+      "kind": "npc",
+      "title": "NPC：托布伦·石丘",
+      "parent": "p2_stonehill_inn",
+      "summary": "店主是一位名叫托布伦·石丘的矮小、友好的青年人类男性。托布伦是东方三猪镇的原住民。他来到凡达林是为了勘探，但很快意识到自己对经营旅馆的了解远多于采矿。这个新兴小镇为他提供了立足的好机会。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：托布伦·石丘",
+        "NPC",
+        "托布伦",
+        "石丘",
+        "红标帮",
+        "凡达林",
+        "哈宾",
+        "奎琳"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_mirna",
+      "kind": "npc",
+      "title": "NPC：米尔娜",
+      "parent": "p2_redbrand_5_slave_pens",
+      "summary": "被囚禁在此的三名人类平民是米尔娜·登德拉尔和她的两个十几岁的孩子——十三岁的纳尔斯和十八岁的尼尔莎。几天前，红标帮因米尔娜的丈夫塞尔违抗他们而将其杀害。（他的尸体可在区域 8 找到。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：米尔娜",
+        "NPC",
+        "米尔娜",
+        "红标帮",
+        "凡达林",
+        "雷树废墟"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_carp",
+      "kind": "npc",
+      "title": "NPC：卡普",
+      "parent": "p2_adabra_farm",
+      "summary": "奎琳的儿子卡普是个十岁大、活泼早熟的半身人男孩。他对成为冒险者的想法十分着迷，并说自己在崔森德庄园附近的树林里玩耍时，发现灌木丛中有一条秘密隧道。他在那里时，两个\"又大又丑的匪徒\"从隧道里出来，与一对红标帮成员会面。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：卡普",
+        "NPC",
+        "卡普",
+        "红标帮",
+        "崔森德庄园",
+        "奎琳"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "npc_nundro",
+      "kind": "npc",
+      "title": "NPC：南卓·寻岩者",
+      "parent": "p4_cave_19_temple",
+      "summary": "刚铎和南卓·寻岩者接管了新矿井的管理工作。为了冒险者们对他们家庭的服务，他们欣然授予队伍10%的矿井利润分成。如果角色们想留在凡达林并可能修复崔森德庄园或建立自己的家园，该地区的人们会很高兴他们留下。",
+      "visibility": "public",
+      "keywords": [
+        "NPC：南卓·寻岩者",
+        "NPC",
+        "南卓",
+        "寻岩者",
+        "凡达林",
+        "崔森德庄园"
+      ],
+      "source": "scenario_pack"
+    },
+    {
+      "id": "clue_black_spider_identity",
+      "kind": "clue",
+      "title": "线索：黑蜘蛛的身份",
+      "parent": "p4_cave_19_temple",
+      "summary": "内兹纳承认自己是黑蜘蛛，并利用峭壁地精和红标帮确保回声洞仍是他的秘密。他会说或做任何事情来让角色们放松警惕，包括承诺投降或提议合作对抗阻碍他接近法术锻造厂的怪物。然而，一旦角色们失去利用价值，他就会立即背叛他们。",
+      "visibility": "hidden",
+      "keywords": [
+        "线索：黑蜘蛛的身份",
+        "线索",
+        "黑蜘蛛的身份",
+        "黑蜘蛛",
+        "内兹纳",
+        "红标帮",
+        "回声洞",
+        "凡达林"
+      ],
+      "spoiler_level": 2,
+      "reveal_when": {
+        "type": "location",
+        "id": "p4_cave_19_temple"
+      },
+      "source": "scenario_pack"
+    },
+    {
+      "id": "clue_cragmaw_castle_location",
+      "kind": "clue",
+      "title": "线索：克拉摩堡的位置",
+      "parent": "p2_phandalin",
+      "summary": "角色们可能想要寻找克拉摩堡以找到并营救刚铎·寻岩者。大多数镇民都忙于应付红标帮，小镇中没有人知道克拉摩堡的位置。奎琳·阿德里夫、修达·霍温特和哈利娅·桑顿可以提供关于队伍如何找到知情者的建议。",
+      "visibility": "hidden",
+      "keywords": [
+        "线索：克拉摩堡的位置",
+        "线索",
+        "克拉摩堡的位置",
+        "刚铎·寻岩者",
+        "修达·霍温特",
+        "黑蜘蛛",
+        "阿加莎",
+        "红标帮"
+      ],
+      "spoiler_level": 2,
+      "reveal_when": {
+        "type": "location",
+        "id": "p2_phandalin"
+      },
+      "source": "scenario_pack"
+    },
+    {
+      "id": "clue_wave_echo_location",
+      "kind": "clue",
+      "title": "线索：回声洞的位置",
+      "parent": "p3_cragmaw_castle",
+      "summary": "- 黑蜘蛛是一名卓尔（黑暗精灵）。 - 黑蜘蛛派了三只熊地精协助伊阿诺控制凡达林的居民，但红标帮在没有他们的情况下也应付得来。熊地精知道去回声洞的路，但伊阿诺不知道。 - 黑蜘蛛正在回声洞中寻找法术锻造。",
+      "visibility": "hidden",
+      "keywords": [
+        "线索：回声洞的位置",
+        "线索",
+        "回声洞的位置",
+        "刚铎·寻岩者",
+        "黑蜘蛛",
+        "内兹纳",
+        "阿加莎",
+        "伊阿诺"
+      ],
+      "spoiler_level": 2,
+      "reveal_when": {
+        "type": "location",
+        "id": "p3_cragmaw_castle"
+      },
+      "source": "scenario_pack"
+    },
+    {
+      "id": "clue_gundren_map",
+      "kind": "clue",
+      "title": "线索：刚铎的地图",
+      "parent": "p3_castle_14_king_quarters",
+      "summary": "- 寻岩者三兄弟（刚铎、塔登和南卓）最近发现了早已迷失的回声洞入口，那里是凡德林契约矿场的所在地。（此时向玩家们分享\"背景\"部分前两段的信息。） - 领导这群地精的熊地精克拉格接到命令要伏击刚铎。",
+      "visibility": "hidden",
+      "keywords": [
+        "线索：刚铎的地图",
+        "线索",
+        "刚铎的地图",
+        "刚铎·寻岩者",
+        "黑蜘蛛",
+        "克拉格",
+        "格罗尔",
+        "伊阿诺"
+      ],
+      "spoiler_level": 2,
+      "reveal_when": {
+        "type": "location",
+        "id": "p3_castle_14_king_quarters"
+      },
+      "source": "scenario_pack"
+    },
+    {
+      "id": "clue_glasstaff_identity",
+      "kind": "clue",
+      "title": "线索：玻璃杖的真面目",
+      "parent": "p2_redbrand_12_glasstaff",
+      "summary": "如果角色们通过区域 7 的秘密通道接近这个房间，他们可以突袭红标帮的首领——伊阿诺·\"玻璃杖\"·阿尔布雷克。否则，他的老鼠魔宠会警告他任何通过区域 11 过来的人，并在角色们到达前逃离。",
+      "visibility": "hidden",
+      "keywords": [
+        "线索：玻璃杖的真面目",
+        "线索",
+        "玻璃杖的真面目",
+        "黑蜘蛛",
+        "玻璃杖",
+        "伊阿诺",
+        "红标帮",
+        "凡达林"
+      ],
+      "spoiler_level": 2,
+      "reveal_when": {
+        "type": "location",
+        "id": "p2_redbrand_12_glasstaff"
+      },
+      "source": "scenario_pack"
+    },
+    {
+      "id": "clue_sildar_captured",
+      "kind": "clue",
+      "title": "线索：修达被俘",
+      "parent": "p1_hideout_6_rest",
+      "summary": "修达·霍温特，一名人类战士，被囚禁在这个房间中。他被牢牢地绑在洞窟南边的岩架上。地精们一直在殴打折磨他，因此他现在很虚弱，只剩下1点生命值。 地精首领耶米克是整个窝点的二把手。",
+      "visibility": "hidden",
+      "keywords": [
+        "线索：修达被俘",
+        "线索",
+        "修达被俘",
+        "刚铎·寻岩者",
+        "修达·霍温特",
+        "黑蜘蛛",
+        "克拉格",
+        "伊阿诺"
+      ],
+      "spoiler_level": 2,
+      "reveal_when": {
+        "type": "location",
+        "id": "p1_hideout_6_rest"
+      },
+      "source": "scenario_pack"
+    },
+    {
+      "id": "clue_redbrand_glassstaff",
+      "kind": "clue",
+      "title": "线索：红标帮与玻璃杖",
+      "parent": "p2_redbrand_hideout",
+      "summary": "在冒险者们抵达凡达林一天左右的时间内，与红标帮的对抗将变得不可避免。这种情况可能以多种不同方式发生： - 与小镇中的若干NPC交谈后，角色们决定在沉睡的巨人酒馆对抗红标帮。 - 角色们决定调查崔森德庄园。",
+      "visibility": "hidden",
+      "keywords": [
+        "线索：红标帮与玻璃杖",
+        "线索",
+        "红标帮与玻璃杖",
+        "玻璃杖",
+        "红标帮",
+        "凡达林",
+        "崔森德庄园",
+        "哈宾"
+      ],
+      "spoiler_level": 2,
+      "reveal_when": {
+        "type": "location",
+        "id": "p2_redbrand_hideout"
+      },
+      "source": "scenario_pack"
+    },
+    {
+      "id": "clue_agatha_answer",
+      "kind": "clue",
+      "title": "线索：阿加莎的答复",
+      "parent": "p3_agatha",
+      "summary": "兔莓镇多年前被野蛮人洗劫，如今只剩废墟。三猪小径径直穿过这座废弃小镇，为寻找报丧妖阿加莎的巢穴提供了容易辨识的地标。从科尼伯里废墟出发，一条古老小径向西北延伸至无冬森林。阿加莎的巢穴位于镇外数英里处。",
+      "visibility": "hidden",
+      "keywords": [
+        "线索：阿加莎的答复",
+        "线索",
+        "阿加莎的答复",
+        "黑蜘蛛",
+        "阿加莎",
+        "克拉摩堡",
+        "回声洞",
+        "三猪小径"
+      ],
+      "spoiler_level": 2,
+      "reveal_when": {
+        "type": "location",
+        "id": "p3_agatha"
+      },
+      "source": "scenario_pack"
+    },
+    {
+      "id": "clue_old_owl_well",
+      "kind": "clue",
+      "title": "线索：古枭井",
+      "parent": "p3_old_owl_well",
+      "summary": "古枭井由早已消失的帝国于数千年前建造，是一座受难者的瞭望塔，如今仅存几堵摇摇欲坠的墙壁和一座破碎的塔楼残基。在塔楼的庭院中有一口古井，至今仍能提供干净清新的饮水。古枭井位于三猪小径以南狂野崎岖的丘陵地带。",
+      "visibility": "hidden",
+      "keywords": [
+        "线索：古枭井",
+        "线索",
+        "古枭井",
+        "黑蜘蛛",
+        "阿加莎",
+        "克拉摩堡",
+        "回声洞",
+        "凡达林"
+      ],
+      "spoiler_level": 2,
+      "reveal_when": {
+        "type": "location",
+        "id": "p3_old_owl_well"
+      },
+      "source": "scenario_pack"
+    },
+    {
+      "id": "clue_venomfang",
+      "kind": "clue",
+      "title": "线索：毒牙与龙之邪教徒",
+      "parent": "p3_thundertree_7_dragons_tower",
+      "summary": "一只名为毒牙的青年绿龙最近占据了这座塔楼，它在搜寻无冬森林寻找合适巢穴时经过了桑达树。那些巨蜘蛛尸体是塔楼的前住民，被这条龙从屋顶闯入后杀死。此后，毒牙一直保持低调。",
+      "visibility": "hidden",
+      "keywords": [
+        "线索：毒牙与龙之邪教徒",
+        "线索",
+        "毒牙与龙之邪教徒",
+        "毒牙"
+      ],
+      "spoiler_level": 2,
+      "reveal_when": {
+        "type": "location",
+        "id": "p3_thundertree_7_dragons_tower"
+      },
+      "source": "scenario_pack"
+    },
+    {
+      "id": "clue_bowgentle_spellbook",
+      "kind": "clue",
+      "title": "线索：博文特尔法术书",
+      "parent": "p3_agatha",
+      "summary": "如果角色们询问关于博文特尔法术书的事，阿加莎会告诉他们，一百多年前她已将这本书交易给了来自伊里安伯城市的一位名叫策尔诺斯的死灵法师。她不知道这本书后来的下落。",
+      "visibility": "hidden",
+      "keywords": [
+        "线索：博文特尔法术书",
+        "线索",
+        "博文特尔法术书",
+        "阿加莎",
+        "加莱尔",
+        "博文特尔"
+      ],
+      "spoiler_level": 2,
+      "reveal_when": {
+        "type": "location",
+        "id": "p3_agatha"
+      },
+      "source": "scenario_pack"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_p1_ambush__p1_trail__next",
+      "from": "p1_ambush",
+      "to": "p1_trail",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_trail__p1_ambush__adjacent",
+      "from": "p1_trail",
+      "to": "p1_ambush",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_trail__p1_hideout__next",
+      "from": "p1_trail",
+      "to": "p1_hideout",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout__p1_trail__adjacent",
+      "from": "p1_hideout",
+      "to": "p1_trail",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_1_cave_mouth__p1_hideout_2_lookout__next",
+      "from": "p1_hideout_1_cave_mouth",
+      "to": "p1_hideout_2_lookout",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_2_lookout__p1_hideout_1_cave_mouth__adjacent",
+      "from": "p1_hideout_2_lookout",
+      "to": "p1_hideout_1_cave_mouth",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_2_lookout__p1_hideout_3_kennel__next",
+      "from": "p1_hideout_2_lookout",
+      "to": "p1_hideout_3_kennel",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_3_kennel__p1_hideout_2_lookout__adjacent",
+      "from": "p1_hideout_3_kennel",
+      "to": "p1_hideout_2_lookout",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_3_kennel__p1_hideout_4_passage__next",
+      "from": "p1_hideout_3_kennel",
+      "to": "p1_hideout_4_passage",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_4_passage__p1_hideout_3_kennel__adjacent",
+      "from": "p1_hideout_4_passage",
+      "to": "p1_hideout_3_kennel",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_4_passage__p1_hideout_5_bridge__next",
+      "from": "p1_hideout_4_passage",
+      "to": "p1_hideout_5_bridge",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_5_bridge__p1_hideout_4_passage__adjacent",
+      "from": "p1_hideout_5_bridge",
+      "to": "p1_hideout_4_passage",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_5_bridge__p1_hideout_6_rest__next",
+      "from": "p1_hideout_5_bridge",
+      "to": "p1_hideout_6_rest",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_6_rest__p1_hideout_5_bridge__adjacent",
+      "from": "p1_hideout_6_rest",
+      "to": "p1_hideout_5_bridge",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_6_rest__p1_hideout_7_pools__next",
+      "from": "p1_hideout_6_rest",
+      "to": "p1_hideout_7_pools",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_7_pools__p1_hideout_6_rest__adjacent",
+      "from": "p1_hideout_7_pools",
+      "to": "p1_hideout_6_rest",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_7_pools__p1_hideout_8_cave__next",
+      "from": "p1_hideout_7_pools",
+      "to": "p1_hideout_8_cave",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_8_cave__p1_hideout_7_pools__adjacent",
+      "from": "p1_hideout_8_cave",
+      "to": "p1_hideout_7_pools",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout__p1_hideout_1_cave_mouth__leads_to",
+      "from": "p1_hideout",
+      "to": "p1_hideout_1_cave_mouth",
+      "type": "leads_to",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_8_cave__p2_phandalin__next",
+      "from": "p1_hideout_8_cave",
+      "to": "p2_phandalin",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_phandalin__p2_redbrand_hideout__next",
+      "from": "p2_phandalin",
+      "to": "p2_redbrand_hideout",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_hideout__p2_phandalin__adjacent",
+      "from": "p2_redbrand_hideout",
+      "to": "p2_phandalin",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_hideout__p3_travel__next",
+      "from": "p2_redbrand_hideout",
+      "to": "p3_travel",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_travel__p2_redbrand_hideout__adjacent",
+      "from": "p3_travel",
+      "to": "p2_redbrand_hideout",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_1_cellar__p2_redbrand_2_barracks__next",
+      "from": "p2_redbrand_1_cellar",
+      "to": "p2_redbrand_2_barracks",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_2_barracks__p2_redbrand_1_cellar__adjacent",
+      "from": "p2_redbrand_2_barracks",
+      "to": "p2_redbrand_1_cellar",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_2_barracks__p2_redbrand_3_trap_corridor__next",
+      "from": "p2_redbrand_2_barracks",
+      "to": "p2_redbrand_3_trap_corridor",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_3_trap_corridor__p2_redbrand_2_barracks__adjacent",
+      "from": "p2_redbrand_3_trap_corridor",
+      "to": "p2_redbrand_2_barracks",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_3_trap_corridor__p2_redbrand_4_crypt__next",
+      "from": "p2_redbrand_3_trap_corridor",
+      "to": "p2_redbrand_4_crypt",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_4_crypt__p2_redbrand_3_trap_corridor__adjacent",
+      "from": "p2_redbrand_4_crypt",
+      "to": "p2_redbrand_3_trap_corridor",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_4_crypt__p2_redbrand_5_slave_pens__next",
+      "from": "p2_redbrand_4_crypt",
+      "to": "p2_redbrand_5_slave_pens",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_5_slave_pens__p2_redbrand_4_crypt__adjacent",
+      "from": "p2_redbrand_5_slave_pens",
+      "to": "p2_redbrand_4_crypt",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_5_slave_pens__p2_redbrand_6_armory__next",
+      "from": "p2_redbrand_5_slave_pens",
+      "to": "p2_redbrand_6_armory",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_6_armory__p2_redbrand_5_slave_pens__adjacent",
+      "from": "p2_redbrand_6_armory",
+      "to": "p2_redbrand_5_slave_pens",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_6_armory__p2_redbrand_7_storeroom__next",
+      "from": "p2_redbrand_6_armory",
+      "to": "p2_redbrand_7_storeroom",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_7_storeroom__p2_redbrand_6_armory__adjacent",
+      "from": "p2_redbrand_7_storeroom",
+      "to": "p2_redbrand_6_armory",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_7_storeroom__p2_redbrand_8_chasm__next",
+      "from": "p2_redbrand_7_storeroom",
+      "to": "p2_redbrand_8_chasm",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_8_chasm__p2_redbrand_7_storeroom__adjacent",
+      "from": "p2_redbrand_8_chasm",
+      "to": "p2_redbrand_7_storeroom",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_8_chasm__p2_redbrand_9_guard_barracks__next",
+      "from": "p2_redbrand_8_chasm",
+      "to": "p2_redbrand_9_guard_barracks",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_9_guard_barracks__p2_redbrand_8_chasm__adjacent",
+      "from": "p2_redbrand_9_guard_barracks",
+      "to": "p2_redbrand_8_chasm",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_9_guard_barracks__p2_redbrand_10_common_room__next",
+      "from": "p2_redbrand_9_guard_barracks",
+      "to": "p2_redbrand_10_common_room",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_10_common_room__p2_redbrand_9_guard_barracks__adjacent",
+      "from": "p2_redbrand_10_common_room",
+      "to": "p2_redbrand_9_guard_barracks",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_10_common_room__p2_redbrand_11_workshop__next",
+      "from": "p2_redbrand_10_common_room",
+      "to": "p2_redbrand_11_workshop",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_11_workshop__p2_redbrand_10_common_room__adjacent",
+      "from": "p2_redbrand_11_workshop",
+      "to": "p2_redbrand_10_common_room",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_11_workshop__p2_redbrand_12_glasstaff__next",
+      "from": "p2_redbrand_11_workshop",
+      "to": "p2_redbrand_12_glasstaff",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_12_glasstaff__p2_redbrand_11_workshop__adjacent",
+      "from": "p2_redbrand_12_glasstaff",
+      "to": "p2_redbrand_11_workshop",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_hideout__p2_redbrand_1_cellar__leads_to",
+      "from": "p2_redbrand_hideout",
+      "to": "p2_redbrand_1_cellar",
+      "type": "leads_to",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_phandalin__p2_stonehill_inn__adjacent",
+      "from": "p2_phandalin",
+      "to": "p2_stonehill_inn",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_stonehill_inn__p2_phandalin__adjacent",
+      "from": "p2_stonehill_inn",
+      "to": "p2_phandalin",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_phandalin__p2_barthen_supplies__adjacent",
+      "from": "p2_phandalin",
+      "to": "p2_barthen_supplies",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_barthen_supplies__p2_phandalin__adjacent",
+      "from": "p2_barthen_supplies",
+      "to": "p2_phandalin",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_phandalin__p2_edermath_orchard__adjacent",
+      "from": "p2_phandalin",
+      "to": "p2_edermath_orchard",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_edermath_orchard__p2_phandalin__adjacent",
+      "from": "p2_edermath_orchard",
+      "to": "p2_phandalin",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_phandalin__p2_lionshield_coster__adjacent",
+      "from": "p2_phandalin",
+      "to": "p2_lionshield_coster",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_lionshield_coster__p2_phandalin__adjacent",
+      "from": "p2_lionshield_coster",
+      "to": "p2_phandalin",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_phandalin__p2_miners_exchange__adjacent",
+      "from": "p2_phandalin",
+      "to": "p2_miners_exchange",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_miners_exchange__p2_phandalin__adjacent",
+      "from": "p2_miners_exchange",
+      "to": "p2_phandalin",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_phandalin__p2_adabra_farm__adjacent",
+      "from": "p2_phandalin",
+      "to": "p2_adabra_farm",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_adabra_farm__p2_phandalin__adjacent",
+      "from": "p2_adabra_farm",
+      "to": "p2_phandalin",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_phandalin__p2_shrine_luck__adjacent",
+      "from": "p2_phandalin",
+      "to": "p2_shrine_luck",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_shrine_luck__p2_phandalin__adjacent",
+      "from": "p2_shrine_luck",
+      "to": "p2_phandalin",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_phandalin__p2_sleeping_giant__adjacent",
+      "from": "p2_phandalin",
+      "to": "p2_sleeping_giant",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_sleeping_giant__p2_phandalin__adjacent",
+      "from": "p2_sleeping_giant",
+      "to": "p2_phandalin",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_phandalin__p2_townmaster_hall__adjacent",
+      "from": "p2_phandalin",
+      "to": "p2_townmaster_hall",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_townmaster_hall__p2_phandalin__adjacent",
+      "from": "p2_townmaster_hall",
+      "to": "p2_phandalin",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_phandalin__p2_tresendar_manor__adjacent",
+      "from": "p2_phandalin",
+      "to": "p2_tresendar_manor",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_tresendar_manor__p2_phandalin__adjacent",
+      "from": "p2_tresendar_manor",
+      "to": "p2_phandalin",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_phandalin__p2_redbrand_ruffians__adjacent",
+      "from": "p2_phandalin",
+      "to": "p2_redbrand_ruffians",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_ruffians__p2_phandalin__adjacent",
+      "from": "p2_redbrand_ruffians",
+      "to": "p2_phandalin",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_travel__p3_agatha__next",
+      "from": "p3_travel",
+      "to": "p3_agatha",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_agatha__p3_travel__adjacent",
+      "from": "p3_agatha",
+      "to": "p3_travel",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_travel__p3_old_owl_well__next",
+      "from": "p3_travel",
+      "to": "p3_old_owl_well",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_old_owl_well__p3_travel__adjacent",
+      "from": "p3_old_owl_well",
+      "to": "p3_travel",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_travel__p3_thundertree__next",
+      "from": "p3_travel",
+      "to": "p3_thundertree",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree__p3_travel__adjacent",
+      "from": "p3_thundertree",
+      "to": "p3_travel",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_1_cottage__p3_thundertree_2_withered_cottage__next",
+      "from": "p3_thundertree_1_cottage",
+      "to": "p3_thundertree_2_withered_cottage",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_2_withered_cottage__p3_thundertree_1_cottage__adjacent",
+      "from": "p3_thundertree_2_withered_cottage",
+      "to": "p3_thundertree_1_cottage",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_2_withered_cottage__p3_thundertree_3_brown_horse__next",
+      "from": "p3_thundertree_2_withered_cottage",
+      "to": "p3_thundertree_3_brown_horse",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_3_brown_horse__p3_thundertree_2_withered_cottage__adjacent",
+      "from": "p3_thundertree_3_brown_horse",
+      "to": "p3_thundertree_2_withered_cottage",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_3_brown_horse__p3_thundertree_4_druid_outpost__next",
+      "from": "p3_thundertree_3_brown_horse",
+      "to": "p3_thundertree_4_druid_outpost",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_4_druid_outpost__p3_thundertree_3_brown_horse__adjacent",
+      "from": "p3_thundertree_4_druid_outpost",
+      "to": "p3_thundertree_3_brown_horse",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_4_druid_outpost__p3_thundertree_5_withered_farmhouse__next",
+      "from": "p3_thundertree_4_druid_outpost",
+      "to": "p3_thundertree_5_withered_farmhouse",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_5_withered_farmhouse__p3_thundertree_4_druid_outpost__adjacent",
+      "from": "p3_thundertree_5_withered_farmhouse",
+      "to": "p3_thundertree_4_druid_outpost",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_5_withered_farmhouse__p3_thundertree_6_shop_ruins__next",
+      "from": "p3_thundertree_5_withered_farmhouse",
+      "to": "p3_thundertree_6_shop_ruins",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_6_shop_ruins__p3_thundertree_5_withered_farmhouse__adjacent",
+      "from": "p3_thundertree_6_shop_ruins",
+      "to": "p3_thundertree_5_withered_farmhouse",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_6_shop_ruins__p3_thundertree_7_dragons_tower__next",
+      "from": "p3_thundertree_6_shop_ruins",
+      "to": "p3_thundertree_7_dragons_tower",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_7_dragons_tower__p3_thundertree_6_shop_ruins__adjacent",
+      "from": "p3_thundertree_7_dragons_tower",
+      "to": "p3_thundertree_6_shop_ruins",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_7_dragons_tower__p3_thundertree_8_smithy__next",
+      "from": "p3_thundertree_7_dragons_tower",
+      "to": "p3_thundertree_8_smithy",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_8_smithy__p3_thundertree_7_dragons_tower__adjacent",
+      "from": "p3_thundertree_8_smithy",
+      "to": "p3_thundertree_7_dragons_tower",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_8_smithy__p3_thundertree_9_herbalist__next",
+      "from": "p3_thundertree_8_smithy",
+      "to": "p3_thundertree_9_herbalist",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_9_herbalist__p3_thundertree_8_smithy__adjacent",
+      "from": "p3_thundertree_9_herbalist",
+      "to": "p3_thundertree_8_smithy",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_9_herbalist__p3_thundertree_10_town_square__next",
+      "from": "p3_thundertree_9_herbalist",
+      "to": "p3_thundertree_10_town_square",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_10_town_square__p3_thundertree_9_herbalist__adjacent",
+      "from": "p3_thundertree_10_town_square",
+      "to": "p3_thundertree_9_herbalist",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_10_town_square__p3_thundertree_11_old_garrison__next",
+      "from": "p3_thundertree_10_town_square",
+      "to": "p3_thundertree_11_old_garrison",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_11_old_garrison__p3_thundertree_10_town_square__adjacent",
+      "from": "p3_thundertree_11_old_garrison",
+      "to": "p3_thundertree_10_town_square",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_11_old_garrison__p3_thundertree_12_weavers_cottage__next",
+      "from": "p3_thundertree_11_old_garrison",
+      "to": "p3_thundertree_12_weavers_cottage",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_12_weavers_cottage__p3_thundertree_11_old_garrison__adjacent",
+      "from": "p3_thundertree_12_weavers_cottage",
+      "to": "p3_thundertree_11_old_garrison",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_12_weavers_cottage__p3_thundertree_13_dragon_cultists__next",
+      "from": "p3_thundertree_12_weavers_cottage",
+      "to": "p3_thundertree_13_dragon_cultists",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_13_dragon_cultists__p3_thundertree_12_weavers_cottage__adjacent",
+      "from": "p3_thundertree_13_dragon_cultists",
+      "to": "p3_thundertree_12_weavers_cottage",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree__p3_thundertree_1_cottage__leads_to",
+      "from": "p3_thundertree",
+      "to": "p3_thundertree_1_cottage",
+      "type": "leads_to",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_travel__p3_wyvern_tor__next",
+      "from": "p3_travel",
+      "to": "p3_wyvern_tor",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_wyvern_tor__p3_travel__adjacent",
+      "from": "p3_wyvern_tor",
+      "to": "p3_travel",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_travel__p3_cragmaw_castle__next",
+      "from": "p3_travel",
+      "to": "p3_cragmaw_castle",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_cragmaw_castle__p3_travel__adjacent",
+      "from": "p3_cragmaw_castle",
+      "to": "p3_travel",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_1_entrance__p3_castle_2_trap_hall__next",
+      "from": "p3_castle_1_entrance",
+      "to": "p3_castle_2_trap_hall",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_2_trap_hall__p3_castle_1_entrance__adjacent",
+      "from": "p3_castle_2_trap_hall",
+      "to": "p3_castle_1_entrance",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_2_trap_hall__p3_castle_3_archers_post__next",
+      "from": "p3_castle_2_trap_hall",
+      "to": "p3_castle_3_archers_post",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_3_archers_post__p3_castle_2_trap_hall__adjacent",
+      "from": "p3_castle_3_archers_post",
+      "to": "p3_castle_2_trap_hall",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_3_archers_post__p3_castle_4_barracks_ruins__next",
+      "from": "p3_castle_3_archers_post",
+      "to": "p3_castle_4_barracks_ruins",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_4_barracks_ruins__p3_castle_3_archers_post__adjacent",
+      "from": "p3_castle_4_barracks_ruins",
+      "to": "p3_castle_3_archers_post",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_4_barracks_ruins__p3_castle_5_storeroom__next",
+      "from": "p3_castle_4_barracks_ruins",
+      "to": "p3_castle_5_storeroom",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_5_storeroom__p3_castle_4_barracks_ruins__adjacent",
+      "from": "p3_castle_5_storeroom",
+      "to": "p3_castle_4_barracks_ruins",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_5_storeroom__p3_castle_6_bugbear_barracks__next",
+      "from": "p3_castle_5_storeroom",
+      "to": "p3_castle_6_bugbear_barracks",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_6_bugbear_barracks__p3_castle_5_storeroom__adjacent",
+      "from": "p3_castle_6_bugbear_barracks",
+      "to": "p3_castle_5_storeroom",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_6_bugbear_barracks__p3_castle_7_banquet_hall__next",
+      "from": "p3_castle_6_bugbear_barracks",
+      "to": "p3_castle_7_banquet_hall",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_7_banquet_hall__p3_castle_6_bugbear_barracks__adjacent",
+      "from": "p3_castle_7_banquet_hall",
+      "to": "p3_castle_6_bugbear_barracks",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_7_banquet_hall__p3_castle_8_dark_hall__next",
+      "from": "p3_castle_7_banquet_hall",
+      "to": "p3_castle_8_dark_hall",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_8_dark_hall__p3_castle_7_banquet_hall__adjacent",
+      "from": "p3_castle_8_dark_hall",
+      "to": "p3_castle_7_banquet_hall",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_8_dark_hall__p3_castle_9_goblin_shrine__next",
+      "from": "p3_castle_8_dark_hall",
+      "to": "p3_castle_9_goblin_shrine",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_9_goblin_shrine__p3_castle_8_dark_hall__adjacent",
+      "from": "p3_castle_9_goblin_shrine",
+      "to": "p3_castle_8_dark_hall",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_9_goblin_shrine__p3_castle_10_back_door__next",
+      "from": "p3_castle_9_goblin_shrine",
+      "to": "p3_castle_10_back_door",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_10_back_door__p3_castle_9_goblin_shrine__adjacent",
+      "from": "p3_castle_10_back_door",
+      "to": "p3_castle_9_goblin_shrine",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_10_back_door__p3_castle_11_tower_ruins__next",
+      "from": "p3_castle_10_back_door",
+      "to": "p3_castle_11_tower_ruins",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_11_tower_ruins__p3_castle_10_back_door__adjacent",
+      "from": "p3_castle_11_tower_ruins",
+      "to": "p3_castle_10_back_door",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_11_tower_ruins__p3_castle_12_guard_barracks__next",
+      "from": "p3_castle_11_tower_ruins",
+      "to": "p3_castle_12_guard_barracks",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_12_guard_barracks__p3_castle_11_tower_ruins__adjacent",
+      "from": "p3_castle_12_guard_barracks",
+      "to": "p3_castle_11_tower_ruins",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_12_guard_barracks__p3_castle_13_owlbear_tower__next",
+      "from": "p3_castle_12_guard_barracks",
+      "to": "p3_castle_13_owlbear_tower",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_13_owlbear_tower__p3_castle_12_guard_barracks__adjacent",
+      "from": "p3_castle_13_owlbear_tower",
+      "to": "p3_castle_12_guard_barracks",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_13_owlbear_tower__p3_castle_14_king_quarters__next",
+      "from": "p3_castle_13_owlbear_tower",
+      "to": "p3_castle_14_king_quarters",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_14_king_quarters__p3_castle_13_owlbear_tower__adjacent",
+      "from": "p3_castle_14_king_quarters",
+      "to": "p3_castle_13_owlbear_tower",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_cragmaw_castle__p3_castle_1_entrance__leads_to",
+      "from": "p3_cragmaw_castle",
+      "to": "p3_castle_1_entrance",
+      "type": "leads_to",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_14_king_quarters__p4_wave_echo__next",
+      "from": "p3_castle_14_king_quarters",
+      "to": "p4_wave_echo",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_wave_echo__p4_cave_1_entrance__next",
+      "from": "p4_wave_echo",
+      "to": "p4_cave_1_entrance",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_1_entrance__p4_wave_echo__adjacent",
+      "from": "p4_cave_1_entrance",
+      "to": "p4_wave_echo",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_1_entrance__p4_cave_2_mine_tunnel__next",
+      "from": "p4_cave_1_entrance",
+      "to": "p4_cave_2_mine_tunnel",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_2_mine_tunnel__p4_cave_1_entrance__adjacent",
+      "from": "p4_cave_2_mine_tunnel",
+      "to": "p4_cave_1_entrance",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_2_mine_tunnel__p4_cave_3_old_entrance__next",
+      "from": "p4_cave_2_mine_tunnel",
+      "to": "p4_cave_3_old_entrance",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_3_old_entrance__p4_cave_2_mine_tunnel__adjacent",
+      "from": "p4_cave_3_old_entrance",
+      "to": "p4_cave_2_mine_tunnel",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_3_old_entrance__p4_cave_4_old_guardroom__next",
+      "from": "p4_cave_3_old_entrance",
+      "to": "p4_cave_4_old_guardroom",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_4_old_guardroom__p4_cave_3_old_entrance__adjacent",
+      "from": "p4_cave_4_old_guardroom",
+      "to": "p4_cave_3_old_entrance",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_4_old_guardroom__p4_cave_5_assayers_office__next",
+      "from": "p4_cave_4_old_guardroom",
+      "to": "p4_cave_5_assayers_office",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_5_assayers_office__p4_cave_4_old_guardroom__adjacent",
+      "from": "p4_cave_5_assayers_office",
+      "to": "p4_cave_4_old_guardroom",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_5_assayers_office__p4_cave_6_south_barracks__next",
+      "from": "p4_cave_5_assayers_office",
+      "to": "p4_cave_6_south_barracks",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_6_south_barracks__p4_cave_5_assayers_office__adjacent",
+      "from": "p4_cave_6_south_barracks",
+      "to": "p4_cave_5_assayers_office",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_6_south_barracks__p4_cave_7_storeroom_ruins__next",
+      "from": "p4_cave_6_south_barracks",
+      "to": "p4_cave_7_storeroom_ruins",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_7_storeroom_ruins__p4_cave_6_south_barracks__adjacent",
+      "from": "p4_cave_7_storeroom_ruins",
+      "to": "p4_cave_6_south_barracks",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_7_storeroom_ruins__p4_cave_8_fungi_cavern__next",
+      "from": "p4_cave_7_storeroom_ruins",
+      "to": "p4_cave_8_fungi_cavern",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_8_fungi_cavern__p4_cave_7_storeroom_ruins__adjacent",
+      "from": "p4_cave_8_fungi_cavern",
+      "to": "p4_cave_7_storeroom_ruins",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_8_fungi_cavern__p4_cave_9_great_cavern__next",
+      "from": "p4_cave_8_fungi_cavern",
+      "to": "p4_cave_9_great_cavern",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_9_great_cavern__p4_cave_8_fungi_cavern__adjacent",
+      "from": "p4_cave_9_great_cavern",
+      "to": "p4_cave_8_fungi_cavern",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_9_great_cavern__p4_cave_10_dark_pool__next",
+      "from": "p4_cave_9_great_cavern",
+      "to": "p4_cave_10_dark_pool",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_10_dark_pool__p4_cave_9_great_cavern__adjacent",
+      "from": "p4_cave_10_dark_pool",
+      "to": "p4_cave_9_great_cavern",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_10_dark_pool__p4_cave_11_north_barracks__next",
+      "from": "p4_cave_10_dark_pool",
+      "to": "p4_cave_11_north_barracks",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_11_north_barracks__p4_cave_10_dark_pool__adjacent",
+      "from": "p4_cave_11_north_barracks",
+      "to": "p4_cave_10_dark_pool",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_11_north_barracks__p4_cave_12_smelting_cavern__next",
+      "from": "p4_cave_11_north_barracks",
+      "to": "p4_cave_12_smelting_cavern",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_12_smelting_cavern__p4_cave_11_north_barracks__adjacent",
+      "from": "p4_cave_12_smelting_cavern",
+      "to": "p4_cave_11_north_barracks",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_12_smelting_cavern__p4_cave_13_bright_cavern__next",
+      "from": "p4_cave_12_smelting_cavern",
+      "to": "p4_cave_13_bright_cavern",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_13_bright_cavern__p4_cave_12_smelting_cavern__adjacent",
+      "from": "p4_cave_13_bright_cavern",
+      "to": "p4_cave_12_smelting_cavern",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_13_bright_cavern__p4_cave_14_mages_quarters__next",
+      "from": "p4_cave_13_bright_cavern",
+      "to": "p4_cave_14_mages_quarters",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_14_mages_quarters__p4_cave_13_bright_cavern__adjacent",
+      "from": "p4_cave_14_mages_quarters",
+      "to": "p4_cave_13_bright_cavern",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_14_mages_quarters__p4_cave_15_forge_of_spells__next",
+      "from": "p4_cave_14_mages_quarters",
+      "to": "p4_cave_15_forge_of_spells",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_15_forge_of_spells__p4_cave_14_mages_quarters__adjacent",
+      "from": "p4_cave_15_forge_of_spells",
+      "to": "p4_cave_14_mages_quarters",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_15_forge_of_spells__p4_cave_16_booming_cavern__next",
+      "from": "p4_cave_15_forge_of_spells",
+      "to": "p4_cave_16_booming_cavern",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_16_booming_cavern__p4_cave_15_forge_of_spells__adjacent",
+      "from": "p4_cave_16_booming_cavern",
+      "to": "p4_cave_15_forge_of_spells",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_16_booming_cavern__p4_cave_17_old_riverbed__next",
+      "from": "p4_cave_16_booming_cavern",
+      "to": "p4_cave_17_old_riverbed",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_17_old_riverbed__p4_cave_16_booming_cavern__adjacent",
+      "from": "p4_cave_17_old_riverbed",
+      "to": "p4_cave_16_booming_cavern",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_17_old_riverbed__p4_cave_18_collapsed_cavern__next",
+      "from": "p4_cave_17_old_riverbed",
+      "to": "p4_cave_18_collapsed_cavern",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_18_collapsed_cavern__p4_cave_17_old_riverbed__adjacent",
+      "from": "p4_cave_18_collapsed_cavern",
+      "to": "p4_cave_17_old_riverbed",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_18_collapsed_cavern__p4_cave_19_temple__next",
+      "from": "p4_cave_18_collapsed_cavern",
+      "to": "p4_cave_19_temple",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_19_temple__p4_cave_18_collapsed_cavern__adjacent",
+      "from": "p4_cave_19_temple",
+      "to": "p4_cave_18_collapsed_cavern",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_19_temple__p4_cave_20_priests_quarters__next",
+      "from": "p4_cave_19_temple",
+      "to": "p4_cave_20_priests_quarters",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_20_priests_quarters__p4_cave_19_temple__adjacent",
+      "from": "p4_cave_20_priests_quarters",
+      "to": "p4_cave_19_temple",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_20_priests_quarters__p4_ending__next",
+      "from": "p4_cave_20_priests_quarters",
+      "to": "p4_ending",
+      "type": "next",
+      "hard": true,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_ending__p4_cave_20_priests_quarters__adjacent",
+      "from": "p4_ending",
+      "to": "p4_cave_20_priests_quarters",
+      "type": "adjacent",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_14_king_quarters__npc_gundren__inhabits",
+      "from": "p3_castle_14_king_quarters",
+      "to": "npc_gundren",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_6_rest__npc_sildar__inhabits",
+      "from": "p1_hideout_6_rest",
+      "to": "npc_sildar",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_8_cave__npc_klarg__inhabits",
+      "from": "p1_hideout_8_cave",
+      "to": "npc_klarg",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_14_king_quarters__npc_king_grol__inhabits",
+      "from": "p3_castle_14_king_quarters",
+      "to": "npc_king_grol",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_agatha__npc_agatha__inhabits",
+      "from": "p3_agatha",
+      "to": "npc_agatha",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_12_glasstaff__npc_iarno__inhabits",
+      "from": "p2_redbrand_12_glasstaff",
+      "to": "npc_iarno",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_19_temple__npc_nezznar__inhabits",
+      "from": "p4_cave_19_temple",
+      "to": "npc_nezznar",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_14_mages_quarters__npc_mormesk__inhabits",
+      "from": "p4_cave_14_mages_quarters",
+      "to": "npc_mormesk",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_7_dragons_tower__npc_venomfang__inhabits",
+      "from": "p3_thundertree_7_dragons_tower",
+      "to": "npc_venomfang",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_4_druid_outpost__npc_reidoth__inhabits",
+      "from": "p3_thundertree_4_druid_outpost",
+      "to": "npc_reidoth",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_miners_exchange__npc_halia__inhabits",
+      "from": "p2_miners_exchange",
+      "to": "npc_halia",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_shrine_luck__npc_garaele__inhabits",
+      "from": "p2_shrine_luck",
+      "to": "npc_garaele",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_townmaster_hall__npc_harbin__inhabits",
+      "from": "p2_townmaster_hall",
+      "to": "npc_harbin",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_lionshield_coster__npc_linene__inhabits",
+      "from": "p2_lionshield_coster",
+      "to": "npc_linene",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_edermath_orchard__npc_daran__inhabits",
+      "from": "p2_edermath_orchard",
+      "to": "npc_daran",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_adabra_farm__npc_qelline__inhabits",
+      "from": "p2_adabra_farm",
+      "to": "npc_qelline",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_stonehill_inn__npc_toblen__inhabits",
+      "from": "p2_stonehill_inn",
+      "to": "npc_toblen",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_5_slave_pens__npc_mirna__inhabits",
+      "from": "p2_redbrand_5_slave_pens",
+      "to": "npc_mirna",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_adabra_farm__npc_carp__inhabits",
+      "from": "p2_adabra_farm",
+      "to": "npc_carp",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_19_temple__npc_nundro__inhabits",
+      "from": "p4_cave_19_temple",
+      "to": "npc_nundro",
+      "type": "inhabits",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p4_cave_19_temple__clue_black_spider_identity__reveals",
+      "from": "p4_cave_19_temple",
+      "to": "clue_black_spider_identity",
+      "type": "reveals",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_phandalin__clue_cragmaw_castle_location__reveals",
+      "from": "p2_phandalin",
+      "to": "clue_cragmaw_castle_location",
+      "type": "reveals",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_cragmaw_castle__clue_wave_echo_location__reveals",
+      "from": "p3_cragmaw_castle",
+      "to": "clue_wave_echo_location",
+      "type": "reveals",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_castle_14_king_quarters__clue_gundren_map__reveals",
+      "from": "p3_castle_14_king_quarters",
+      "to": "clue_gundren_map",
+      "type": "reveals",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_12_glasstaff__clue_glasstaff_identity__reveals",
+      "from": "p2_redbrand_12_glasstaff",
+      "to": "clue_glasstaff_identity",
+      "type": "reveals",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p1_hideout_6_rest__clue_sildar_captured__reveals",
+      "from": "p1_hideout_6_rest",
+      "to": "clue_sildar_captured",
+      "type": "reveals",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p2_redbrand_hideout__clue_redbrand_glassstaff__reveals",
+      "from": "p2_redbrand_hideout",
+      "to": "clue_redbrand_glassstaff",
+      "type": "reveals",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_agatha__clue_agatha_answer__reveals",
+      "from": "p3_agatha",
+      "to": "clue_agatha_answer",
+      "type": "reveals",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_old_owl_well__clue_old_owl_well__reveals",
+      "from": "p3_old_owl_well",
+      "to": "clue_old_owl_well",
+      "type": "reveals",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_thundertree_7_dragons_tower__clue_venomfang__reveals",
+      "from": "p3_thundertree_7_dragons_tower",
+      "to": "clue_venomfang",
+      "type": "reveals",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    },
+    {
+      "id": "edge_p3_agatha__clue_bowgentle_spellbook__reveals",
+      "from": "p3_agatha",
+      "to": "clue_bowgentle_spellbook",
+      "type": "reveals",
+      "hard": false,
+      "condition": null,
+      "label": "",
+      "visibility": "public",
+      "evidence": null,
+      "source": "scenario_pack"
+    }
+  ],
+  "triggers": [],
+  "flags": [],
+  "clocks": [],
+  "assets": [],
+  "warnings": [],
+  "meta": {
+    "generator": "lmop-scenario-pack",
+    "source": "https://5e.kiwee.top/adventure.html#lmop",
+    "map_credit": "Mike Schley"
+  }
+}

@@ -49,6 +49,9 @@ htmlcov/
 # 示例剧本随发布包分发，必须保持跟踪
 !/data/scenarios/scenario-1793438085450/
 !/data/scenarios/scenario-1793438085450/**
+# 外部模组包（LMoP）保留在仓库中便于本地识别，发布时由 package-release 排除
+!/data/scenarios/scenario-lmop-5e-001/
+!/data/scenarios/scenario-lmop-5e-001/**
 
 # User-uploaded avatars
 /data/assets/avatars/*

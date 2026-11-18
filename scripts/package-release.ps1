@@ -487,6 +487,7 @@ $forbidden = @(
     'data/users',
     'backend/data',
     'data/scenarios/scenario-demo-dnd5e-001',
+    'data/scenarios/scenario-lmop-5e-001',
     'data/assets/aiplatform',
     'data/assets/avatars',
     'data/assets/bgm'
