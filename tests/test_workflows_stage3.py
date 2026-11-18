@@ -1167,6 +1167,25 @@ def test_area_geometry_cone_line_and_cylinder(tmp_path, plugins):
     assert not area_store.contains(cylinder, 2, 2)
 
 
+def test_area_create_preserves_direction(tmp_path, plugins):
+    area = area_store.create_area(
+        tmp_path,
+        {
+            "name": "North line",
+            "shape": "line",
+            "size_ft": 15,
+            "width_ft": 5,
+            "origin": {"cell_x": 0, "cell_y": 0},
+            "grid_ft": 5,
+            "direction": "north",
+            "duration": {"unit": "round", "rounds": 2},
+        },
+    )["area"]
+    assert area["direction"] == "north"
+    assert area_store.contains(area, 0, -2)
+    assert not area_store.contains(area, 0, 2)
+
+
 def test_area_move_uses_full_token_footprint(tmp_path, plugins):
     from trpg_server.agents.tools import areas as area_tools
 
