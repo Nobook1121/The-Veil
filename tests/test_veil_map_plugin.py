@@ -65,7 +65,7 @@ def _write_room(tmp_path: Path, *, combat: dict | None = None) -> Path:
                 "room_role": "member",
                 "status": "active",
                 "is_active": True,
-                "character_card": {"name": "Bob"},
+                "character_card": {"name": "Bob", "avatar": "/data/characters/c2/avatar.png"},
             },
             {
                 "user_id": "u3",
@@ -253,6 +253,157 @@ def test_player_move_permission_switch_is_room_level(client, tmp_path):
     moved = _write(owner, "post", "/api/plugins/veil-map/rooms/room1/tokens/member-u2/move", {"x": 192, "y": 0})
     assert moved.status_code == 200
     assert _token(moved.get_json()["data"], "member-u2")["x"] == 192
+
+
+def test_member_token_exposes_character_avatar(client):
+    owner, _app = client
+    _login(owner, "u2")
+    data = _map(owner)
+    # 绑定角色卡后，棋子带上卡片的头像路径；没有头像时保持空串（前端回退色块）。
+    assert _token(data, "member-u2")["avatar"] == "/data/characters/c2/avatar.png"
+    assert _token(data, "member-u1")["avatar"] == ""
+
+
+def _write_scene_binding_scenario(tmp_path):
+    scenarios = tmp_path / "scenarios"
+    directory = scenarios / "scn-map"
+    directory.mkdir(parents=True)
+    record = {
+        "id": "scn-map",
+        "title": "地图绑定测试",
+        "ruleset_id": "dnd5e",
+        "start": {"location_id": "p1_hideout"},
+        "modules": [
+            {"id": "p1_hideout", "title": "克拉摩窝点", "module_type": "scene", "scene_id": 1},
+            {"id": "p2_phandalin", "title": "凡达林", "module_type": "scene", "scene_id": 2},
+        ],
+        "assets": [
+            {
+                "id": "asset_hideout",
+                "kind": "image",
+                "name": "窝点地图",
+                "url": "/assets/scenarios/scn-map/assets/maps/hideout.webp",
+                "width": 1200,
+                "height": 800,
+                "visibility": "public",
+            },
+            {
+                "id": "asset_hideout_dm",
+                "kind": "image",
+                "name": "窝点地图（KP）",
+                "url": "/assets/scenarios/scn-map/assets/maps/hideout-dm.webp",
+                "width": 1200,
+                "height": 800,
+                "visibility": "kp_only",
+            },
+            {
+                "id": "asset_phandalin",
+                "kind": "image",
+                "name": "凡达林地图",
+                "url": "/assets/scenarios/scn-map/assets/maps/phandalin.webp",
+                "width": 640,
+                "height": 640,
+                "visibility": "public",
+            },
+        ],
+        "triggers": [
+            {
+                "id": "trg_hideout",
+                "group": "地图",
+                "enabled": True,
+                "binding": {"kind": "enter", "location_id": "p1_hideout"},
+                "attachments": [
+                    {"asset_id": "asset_hideout", "kind": "image", "visibility": "player_visible"},
+                    {"asset_id": "asset_hideout_dm", "kind": "image", "visibility": "kp_only"},
+                ],
+            },
+            {
+                "id": "trg_phandalin",
+                "group": "地图",
+                "enabled": True,
+                "binding": {"kind": "enter", "location_id": "p2_phandalin"},
+                "attachments": [
+                    {"asset_id": "asset_phandalin", "kind": "image", "visibility": "player_visible"}
+                ],
+            },
+        ],
+    }
+    (directory / "scenario.json").write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+    return scenarios
+
+
+def _set_room_scene(tmp_path, location):
+    path = tmp_path / "rooms" / "room1" / "info.json"
+    info = json.loads(path.read_text(encoding="utf-8"))
+    info["scenario_id"] = "scn-map"
+    info["active_scene_id"] = location
+    path.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+
+
+def test_scene_map_auto_binding_uses_scenario_assets(client, tmp_path):
+    owner, app = client
+    app.config["SCENARIOS_DIR"] = str(_write_scene_binding_scenario(tmp_path))
+    _set_room_scene(tmp_path, "p1_hideout")
+    _login(owner, "u2")  # 玩家也能触发同步，但图片由模组决定
+
+    synced = owner.post(
+        "/api/plugins/veil-map/rooms/room1/map/sync-scene",
+        json={"url": "/tmp/evil.png"},
+    )
+    assert synced.status_code == 200
+    data = synced.get_json()["data"]
+    assert data["changed"] is True
+    assert data["scene_binding"]["applied"] is True
+    assert data["scene_binding"]["location_id"] == "p1_hideout"
+    assert data["map"]["background"] == "/assets/scenarios/scn-map/assets/maps/hideout.webp"
+    assert data["map"]["background"] != "/tmp/evil.png"
+    assert data["map"]["grid_size"] == 64
+    assert data["map"]["grid_offset"] == {
+        "x": int(round((-1200 / 2) % 64)),
+        "y": int(round((-800 / 2) % 64)),
+    }
+
+    revision = data["map"]["revision"]
+    again = owner.post("/api/plugins/veil-map/rooms/room1/map/sync-scene").get_json()["data"]
+    assert again["changed"] is False
+    assert again["map"]["revision"] == revision
+
+    # 进入下一场景：自动换成该场景声明的地图，网格随图片重新对齐。
+    _set_room_scene(tmp_path, "p2_phandalin")
+    moved = owner.post("/api/plugins/veil-map/rooms/room1/map/sync-scene").get_json()["data"]
+    assert moved["changed"] is True
+    assert moved["map"]["background"] == "/assets/scenarios/scn-map/assets/maps/phandalin.webp"
+    assert moved["map"]["grid_offset"] == {
+        "x": int(round((-640 / 2) % 64)),
+        "y": int(round((-640 / 2) % 64)),
+    }
+
+
+def test_scene_map_auto_binding_ignores_scenes_without_maps(client, tmp_path):
+    owner, app = client
+    scenario = {
+        "id": "scn-empty",
+        "title": "无地图剧本",
+        "start": {"location_id": "room_a"},
+        "modules": [{"id": "room_a", "title": "空房间", "module_type": "scene"}],
+    }
+    directory = tmp_path / "scenarios" / "scn-empty"
+    directory.mkdir(parents=True)
+    (directory / "scenario.json").write_text(json.dumps(scenario, ensure_ascii=False), encoding="utf-8")
+    app.config["SCENARIOS_DIR"] = str(tmp_path / "scenarios")
+    path = tmp_path / "rooms" / "room1" / "info.json"
+    info = json.loads(path.read_text(encoding="utf-8"))
+    info["scenario_id"] = "scn-empty"
+    info["active_scene_id"] = "room_a"
+    path.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+
+    _login(owner, "u1")
+    response = owner.post("/api/plugins/veil-map/rooms/room1/map/sync-scene")
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["changed"] is False
+    assert data["map"]["background"] == ""
+    assert data["scene_binding"]["applied"] is False
 
 
 def test_combat_move_uses_turn_and_movement_budget(tmp_path):

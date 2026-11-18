@@ -417,6 +417,8 @@ def _normalize_token(raw: Any, grid: int, offset_x: int, offset_y: int) -> dict[
         "owner_user_id": str(raw.get("owner_user_id") or ""),
         "kind": str(raw.get("kind") or "npc"),
         "combatant": str(raw.get("combatant") or ""),
+        # 角色卡头像（仅本地资源路径）；空字符串时前端保持旧的色块+首字表现。
+        "avatar": _token_avatar(raw.get("avatar")),
         # 0 表示跟随场景迷雾的默认视野；>0 时为该棋子的视野半径（格）。
         "vision_cells": _clamp(_as_int(raw.get("vision_cells"), 0), 0, MAX_VISION_CELLS),
         "light": _normalize_token_light(raw.get("light")),
@@ -645,6 +647,21 @@ def _normalize_recent_requests(raw: Any) -> list[dict[str, Any]]:
     return records[-RECENT_REQUEST_LIMIT:]
 
 
+def _normalize_scene_binding(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict) or not raw:
+        return {}
+    url = str(raw.get("url") or "").strip()
+    location_id = str(raw.get("location_id") or "").strip()[:128]
+    if not location_id or not url.startswith("/"):
+        return {}
+    return {
+        "location_id": location_id,
+        "title": str(raw.get("title") or "")[:80],
+        "url": url[:2048],
+        "asset_id": str(raw.get("asset_id") or "")[:64],
+    }
+
+
 def _normalize_map(raw: Any) -> dict[str, Any]:
     state = _default_map()
     if isinstance(raw, dict):
@@ -655,6 +672,8 @@ def _normalize_map(raw: Any) -> dict[str, Any]:
     state["title"] = str(state.get("title") or state["scene_id"])[:80]
     state["background"] = str(state.get("background") or "")[:2048]
     state["background_meta"] = _normalize_background_meta(state.get("background_meta"))
+    # 模组自动绑定到当前场景的记录；用于判断进入新场景时是否需要换图。
+    state["scene_binding"] = _normalize_scene_binding(state.get("scene_binding"))
     state["grid_size"] = _clamp(_as_int(state.get("grid_size"), DEFAULT_GRID), MIN_GRID, MAX_GRID)
     offset = state.get("grid_offset") if isinstance(state.get("grid_offset"), dict) else {}
     grid = int(state["grid_size"])
@@ -684,6 +703,178 @@ def _normalize_map(raw: Any) -> dict[str, Any]:
 def _load_map(room_dir) -> dict[str, Any]:
     state, _source = scene_store.load(room_dir)
     return _normalize_map(state)
+
+
+def _room_scenario(info: dict[str, Any]) -> dict[str, Any] | None:
+    """读取房间绑定的剧本；没有剧本或读取失败时返回 None。"""
+    scenario_id = (info or {}).get("scenario_id")
+    if scenario_id in (None, "", 0, "0"):
+        return None
+    try:
+        from flask import current_app
+
+        from trpg_server.scenario_store import load_scenario_by_id
+
+        scenarios_dir = current_app.config.get("SCENARIOS_DIR")
+        if not scenarios_dir:
+            return None
+        _path, scenario = load_scenario_by_id(
+            Path(scenarios_dir),
+            scenario_id,
+            (info or {}).get("scenario_version"),
+        )
+    except Exception:
+        return None
+    return scenario if isinstance(scenario, dict) else None
+
+
+def _resolve_room_scene(
+    scenario: dict[str, Any] | None, room_dir, info: dict[str, Any]
+) -> str:
+    """房间当前场景：叙事运行态优先，其次 active_scene_id，最后剧本起点。"""
+    narrative: dict[str, Any] = {}
+    try:
+        from trpg_server.agents.narrative.state_store import load_narrative_state
+
+        narrative = load_narrative_state(room_dir) or {}
+    except Exception:
+        narrative = {}
+    location = str(narrative.get("location") or narrative.get("cursor") or "").strip()
+    if location:
+        return location
+    active = str((info or {}).get("active_scene_id") or "").strip()
+    if active and isinstance(scenario, dict):
+        for module in scenario.get("modules") or []:
+            if not isinstance(module, dict):
+                continue
+            if active in {str(module.get("id") or ""), str(module.get("scene_id") or "")}:
+                return str(module.get("id") or active)
+    if active:
+        return active
+    start = scenario.get("start") if isinstance(scenario, dict) and isinstance(scenario.get("start"), dict) else {}
+    return str(start.get("location_id") or "")
+
+
+def _declared_scene_map(
+    scenario: dict[str, Any] | None, location: str
+) -> dict[str, Any] | None:
+    """模组为该场景声明的玩家可见地图（enter 触发器里的 image 附件）。
+
+    只取非 kp_only 的图片，玩家侧看到的 canvas 与触发器展示的玩家版一致。
+    """
+    if not scenario or not location:
+        return None
+    assets = {
+        str(asset.get("id")): asset
+        for asset in scenario.get("assets") or []
+        if isinstance(asset, dict) and asset.get("id")
+    }
+    title = ""
+    for module in scenario.get("modules") or []:
+        if not isinstance(module, dict):
+            continue
+        if location in {str(module.get("id") or ""), str(module.get("scene_id") or "")}:
+            title = str(module.get("title") or "")
+            break
+    candidates: list[tuple[int, dict[str, Any]]] = []
+    for trigger in scenario.get("triggers") or []:
+        if not isinstance(trigger, dict) or trigger.get("enabled") is False:
+            continue
+        binding = trigger.get("binding") if isinstance(trigger.get("binding"), dict) else {}
+        if str(binding.get("kind") or "") != "enter":
+            continue
+        if str(binding.get("location_id") or "") != location:
+            continue
+        group_rank = 0 if str(trigger.get("group") or "") == "地图" else 1
+        for order, attachment in enumerate(trigger.get("attachments") or []):
+            if not isinstance(attachment, dict):
+                continue
+            asset = assets.get(str(attachment.get("asset_id") or ""))
+            if not asset or str(asset.get("kind") or "") != "image":
+                continue
+            visibility = str(attachment.get("visibility") or asset.get("visibility") or "public")
+            if visibility == "kp_only":
+                continue
+            url = str(asset.get("url") or "").strip()
+            if not url.startswith("/") or url.startswith("//"):
+                continue
+            candidates.append(
+                (
+                    group_rank * 1000 + order,
+                    {
+                        "location_id": location,
+                        "title": title or str(asset.get("name") or ""),
+                        "url": url,
+                        "asset_id": str(asset.get("id") or ""),
+                        "width": max(0, _as_int(asset.get("width"), 0)),
+                        "height": max(0, _as_int(asset.get("height"), 0)),
+                        "grid_size": _as_int(
+                            asset.get("grid_size") or asset.get("gridSize"), 0
+                        ),
+                        "grid_offset": asset.get("grid_offset")
+                        if isinstance(asset.get("grid_offset"), dict)
+                        else asset.get("gridOffset"),
+                    },
+                )
+            )
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
+
+
+def _apply_scene_binding(state: dict[str, Any], binding: dict[str, Any]) -> None:
+    declared_grid = _as_int(binding.get("grid_size"), 0)
+    grid = _clamp(declared_grid if declared_grid > 0 else state.get("grid_size"), MIN_GRID, MAX_GRID)
+    width = _as_int(binding.get("width"), 0)
+    height = _as_int(binding.get("height"), 0)
+    offset = binding.get("grid_offset")
+    if isinstance(offset, dict):
+        raw_offset = {"x": _as_int(offset.get("x"), 0), "y": _as_int(offset.get("y"), 0)}
+    else:
+        # 背景图以世界原点为中心绘制：把图片左上角对齐到格线，图内格子就是整格。
+        raw_offset = {
+            "x": int(round((-width / 2) % grid)) if width > 0 else 0,
+            "y": int(round((-height / 2) % grid)) if height > 0 else 0,
+        }
+    state["grid_size"] = grid
+    state["grid_offset"] = {
+        "x": _clamp(_as_int(raw_offset.get("x"), 0), -grid, grid),
+        "y": _clamp(_as_int(raw_offset.get("y"), 0), -grid, grid),
+    }
+    state["background"] = str(binding["url"])
+    state["background_meta"] = _normalize_background_meta(
+        {
+            "kind": "scenario",
+            "format": "scenario",
+            "name": str(binding.get("title") or "场景地图"),
+            "url": binding["url"],
+            "width": width,
+            "height": height,
+        }
+    )
+    state["scene_binding"] = {
+        "location_id": binding["location_id"],
+        "title": str(binding.get("title") or "")[:80],
+        "url": binding["url"],
+        "asset_id": str(binding.get("asset_id") or "")[:64],
+    }
+
+
+def _scene_binding_view(
+    state: dict[str, Any], scenario: dict[str, Any] | None, location: str
+) -> dict[str, Any]:
+    binding = _declared_scene_map(scenario, location)
+    applied = bool(binding) and str(
+        (state.get("scene_binding") or {}).get("location_id") or ""
+    ) == location
+    return {
+        "managed": True,
+        "location_id": location,
+        "title": (binding or {}).get("title") or "",
+        "url": (binding or {}).get("url") or "",
+        "applied": applied,
+    }
 
 
 def _persistable(state: dict[str, Any]) -> dict[str, Any]:
@@ -744,6 +935,19 @@ def _member_name(member: dict[str, Any]) -> str:
     return name[:MAX_NAME] or "玩家"
 
 
+def _member_avatar(member: dict[str, Any]) -> str:
+    card = member.get("character_card") if isinstance(member.get("character_card"), dict) else {}
+    return _token_avatar(card.get("avatar"))
+
+
+def _token_avatar(value: Any) -> str:
+    """只接受站内资源路径；没有头像时返回空串（前端回退色块）。"""
+    avatar = str(value or "").strip()
+    if not avatar.startswith("/") or avatar.startswith("//"):
+        return ""
+    return avatar[:512]
+
+
 def _reconcile_tokens(state: dict[str, Any], info: dict[str, Any]) -> bool:
     """按活跃成员补齐 PC 棋子；已有棋子保留格坐标与尺寸。"""
     tokens = state.setdefault("tokens", [])
@@ -759,13 +963,19 @@ def _reconcile_tokens(state: dict[str, Any], info: dict[str, Any]) -> bool:
         if not user_id:
             continue
         name = _member_name(member)
+        avatar = _member_avatar(member)
         token = by_id.get(f"member-{user_id}") or by_owner.get(user_id)
         if token is not None:
-            if token.get("name") != name or token.get("owner_user_id") != user_id:
+            if (
+                token.get("name") != name
+                or token.get("owner_user_id") != user_id
+                or _token_avatar(token.get("avatar")) != avatar
+            ):
                 token["name"] = name
                 token["owner_user_id"] = user_id
                 token["kind"] = "pc"
                 token["combatant"] = name
+                token["avatar"] = avatar
                 changed = True
             continue
         token = {
@@ -781,6 +991,7 @@ def _reconcile_tokens(state: dict[str, Any], info: dict[str, Any]) -> bool:
             "owner_user_id": user_id,
             "kind": "pc",
             "combatant": name,
+            "avatar": avatar,
         }
         tokens.append(token)
         by_id[token["id"]] = token
@@ -1968,12 +2179,15 @@ def _map_payload(room_id: str, room_dir, info: dict[str, Any]) -> dict[str, Any]
     _role, manager = _room_context(info)
     user_id = str(session.get("user_id") or "")
     view, fog_payload, _visible = _observer_scope(state, room_dir, user_id, manager)
+    scenario = _room_scenario(info)
+    location = _resolve_room_scene(scenario, room_dir, info)
     return {
         "map": view,
         "fog": fog_payload,
         "combat": _combat_payload(room_dir),
         "can_manage": manager,
         "player_move_enabled": _map_permission(room_dir),
+        "scene_binding": _scene_binding_view(state, scenario, location),
         "room_id": str(room_id),
         "scene_id": view.get("scene_id") or state.get("scene_id"),
         "scenes": scenes,
@@ -2154,6 +2368,56 @@ def update_map_permissions(room_id: str):
     return success_response(
         {"player_move_enabled": enabled, "room_id": str(room_id)},
         "棋子移动权限已更新。",
+    )
+
+
+@bp.route("/rooms/<room_id>/map/sync-scene", methods=["POST"])
+def sync_scene_map(room_id: str):
+    """把模组为当前场景声明的地图同步为 canvas 背景（进入/切换场景时幂等调用）。
+
+    地图由模组决定，请求体不参与选择；玩家也可以触发同步，但无法指定图片。
+    """
+    room_dir, info, denied = _map_room_or_error(room_id)
+    if denied:
+        return denied
+    scenario = _room_scenario(info)
+    location = _resolve_room_scene(scenario, room_dir, info)
+    binding = _declared_scene_map(scenario, location)
+    if not binding:
+        with room_lock(room_dir):
+            state = _load_map(room_dir)
+        return success_response(
+            {
+                "changed": False,
+                "map": state,
+                "scene_binding": _scene_binding_view(state, scenario, location),
+            },
+            "当前场景没有声明地图。",
+        )
+    with room_lock(room_dir):
+        state = _load_map(room_dir)
+        _reconcile_tokens(state, info)
+        last_location = str((state.get("scene_binding") or {}).get("location_id") or "")
+        if last_location == location:
+            # 已经绑定过：不覆盖房主后续手动调整的背景/标定。
+            return success_response(
+                {
+                    "changed": False,
+                    "map": state,
+                    "scene_binding": _scene_binding_view(state, scenario, location),
+                },
+                "场景地图已绑定。",
+            )
+        _apply_scene_binding(state, binding)
+        state = _save_map(room_dir, state)
+    _broadcast(room_id, state)
+    return success_response(
+        {
+            "changed": True,
+            "map": state,
+            "scene_binding": _scene_binding_view(state, scenario, location),
+        },
+        "已切换到场景地图。",
     )
 
 

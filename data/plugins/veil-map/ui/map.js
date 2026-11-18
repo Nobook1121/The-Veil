@@ -656,34 +656,56 @@
             context.clearRect(0, 0, size.width, size.height);
             drawSceneLayers(camera);
             drawFog(camera);
-            // 坐标尺画在棋子之前：棋子永远在标签之上，不会被遮住。
-            drawCoordinates(camera);
             list.forEach(function (token) {
                 var rect = tokenRect(token);
                 var current = isCurrentActor(token);
+                var radius = Math.min(10, rect.width * 0.16);
                 context.save();
                 if (current) {
                     context.shadowColor = "rgba(200, 163, 90, 0.9)";
                     context.shadowBlur = 12 + 6 * camera.zoom;
                 }
-                roundRect(context, rect.x, rect.y, rect.width, rect.height, Math.min(10, rect.width * 0.16));
+                roundRect(context, rect.x, rect.y, rect.width, rect.height, radius);
                 context.fillStyle = String(token.color || "#c8a35a");
                 context.globalAlpha = 0.92;
                 context.fill();
                 context.globalAlpha = 1;
-                context.lineWidth = String(token.id) === selectedId ? Math.max(2, 2.4 * camera.zoom) : Math.max(1, 1.4 * camera.zoom);
-                context.strokeStyle = String(token.id) === selectedId ? "#f5f0e2" : "rgba(0, 0, 0, 0.5)";
-                context.stroke();
                 context.restore();
 
+                // 绑定角色卡且有头像时用头像填满棋子（等比裁剪，缩放与多格棋子都按外接矩形铺满）。
+                var avatar = avatarImage(token);
+                if (avatar) {
+                    context.save();
+                    roundRect(context, rect.x, rect.y, rect.width, rect.height, radius);
+                    context.clip();
+                    var scale = Math.max(rect.width / avatar.naturalWidth, rect.height / avatar.naturalHeight);
+                    var drawWidth = avatar.naturalWidth * scale;
+                    var drawHeight = avatar.naturalHeight * scale;
+                    context.drawImage(
+                        avatar,
+                        rect.x + (rect.width - drawWidth) / 2,
+                        rect.y + (rect.height - drawHeight) / 2,
+                        drawWidth,
+                        drawHeight
+                    );
+                    context.restore();
+                }
+
+                context.lineWidth = String(token.id) === selectedId ? Math.max(2, 2.4 * camera.zoom) : Math.max(1, 1.4 * camera.zoom);
+                context.strokeStyle = String(token.id) === selectedId ? "#f5f0e2" : "rgba(0, 0, 0, 0.5)";
+                roundRect(context, rect.x, rect.y, rect.width, rect.height, radius);
+                context.stroke();
+
                 var name = String(token.name || "?");
-                var initial = name.slice(0, 1) || "?";
-                var fontSize = clamp(rect.width * 0.42, 10, 30);
-                context.fillStyle = "rgba(16, 16, 16, 0.88)";
-                context.font = "700 " + Math.round(fontSize) + "px \"Segoe UI\", sans-serif";
-                context.textAlign = "center";
-                context.textBaseline = "middle";
-                context.fillText(initial, rect.x + rect.width / 2, rect.y + rect.height / 2);
+                if (!avatar) {
+                    var initial = name.slice(0, 1) || "?";
+                    var fontSize = clamp(rect.width * 0.42, 10, 30);
+                    context.fillStyle = "rgba(16, 16, 16, 0.88)";
+                    context.font = "700 " + Math.round(fontSize) + "px \"Segoe UI\", sans-serif";
+                    context.textAlign = "center";
+                    context.textBaseline = "middle";
+                    context.fillText(initial, rect.x + rect.width / 2, rect.y + rect.height / 2);
+                }
                 if (camera.zoom >= 0.8) {
                     var labelSize = Math.round(clamp(11 * camera.zoom, 9, 13));
                     context.font = "600 " + labelSize + "px \"Segoe UI\", sans-serif";
@@ -697,6 +719,26 @@
                     context.fillText(name, labelX, labelY);
                 }
             });
+            // 坐标尺最后画：头像/棋子不会盖住坐标，标签只在视口边缘的窄条内。
+            drawCoordinates(camera);
+        }
+
+        // 角色卡头像按 URL 缓存，加载完成后重绘；失败时回退到色块+首字。
+        var avatarCache = {};
+        function avatarImage(token) {
+            var url = String(token.avatar || "");
+            if (!url || (url.charAt(0) !== "/" && url.indexOf("data:image/") !== 0)) return null;
+            var entry = avatarCache[url];
+            if (!entry) {
+                entry = { image: new Image(), ready: false };
+                entry.image.onload = function () {
+                    entry.ready = entry.image.naturalWidth > 0;
+                    if (entry.ready) scheduleDraw();
+                };
+                entry.image.src = url;
+                avatarCache[url] = entry;
+            }
+            return entry.ready ? entry.image : null;
         }
 
         function renderTurnBar() {
@@ -839,6 +881,32 @@
             });
             renderTurnBar();
             scheduleDraw();
+            maybeSyncSceneBinding(data.scene_binding);
+        }
+
+        // 场景由模组管理：服务端声明了「当前场景有地图但还没绑定」时自动同步一次。
+        // 先触发一次，避免弹窗/poll 等待；服务端幂等，重复调用不会覆盖已绑定场景。
+        var sceneBindingKey = "";
+        function maybeSyncSceneBinding(binding) {
+            if (!binding || typeof binding !== "object" || binding.managed !== true) return;
+            if (binding.applied === true) return;
+            var key = String(binding.location_id || "") + "|" + String(binding.url || "");
+            if (!binding.url || key === sceneBindingKey) return;
+            sceneBindingKey = key;
+            window.setTimeout(syncSceneMap, 0);
+        }
+
+        function syncSceneMap() {
+            if (destroyed) return;
+            apiRequest(
+                "POST",
+                "/rooms/" + encodeURIComponent(ctx.room.id) + "/map/sync-scene"
+            ).then(function (response) {
+                if (destroyed || !response || response.success !== true || !response.data) return;
+                applyPayload(response.data);
+            }).catch(function (error) {
+                console.error("veil-map scene sync failed", error);
+            });
         }
 
         function loadMap(silent) {

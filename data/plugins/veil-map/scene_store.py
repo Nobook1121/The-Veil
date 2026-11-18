@@ -45,6 +45,8 @@ META_KEYS = (
     "grid_offset",
     "calibration",
     "bounds_cells",
+    # 模组场景自动绑定的记录（场景 id + 地图 URL），随场景持久化。
+    "scene_binding",
     "updated_at",
 )
 
