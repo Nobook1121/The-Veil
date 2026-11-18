@@ -12,6 +12,8 @@
   规则（与项目发布约束一致）：
     - 文件名前缀使用 the-veil，而不是 aibasedtrpg。
     - 排除密钥、虚拟环境、构建缓存、开发文档、changelog、开发脚本、本机用户数据。
+    - 随包附带官方插件白名单：dnd5e-srd、dnd5e、veil-map，并写入启用的 enabled.json，
+      新用户解压启动后即可选择 5e 房间；本机安装的其他第三方插件不随包分发。
     - 演示剧本 data/scenarios/scenario-demo-dnd5e-001 与预置角色卡
       （data/runtime/characters）仅本地使用，不随包分发；打包脚本用禁止清单守住这条规则。
     - 保留预构建前端 dist/public、部署指南、许可证汇总、配置模板、示例剧本与最小运行资源。
@@ -129,8 +131,8 @@ $detail
 }
 
 function Assert-ZipFirstRunReady([string]$ZipPath) {
-    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
     $problems = New-Object System.Collections.Generic.List[string]
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
     try {
         $entries = @($archive.Entries)
         foreach ($entry in $entries) {
@@ -171,6 +173,111 @@ function Assert-ZipFirstRunReady([string]$ZipPath) {
         throw "发布包首启校验失败（已删除坏包 $Name.zip）：$([Environment]::NewLine)$detail"
     }
     Write-Step '压缩包首启校验通过'
+}
+
+# 官方插件策略：三个官方插件必须随包、必须在启用列表里，且不得混入本机安装的其他插件。
+function Assert-OfficialPlugins {
+    $official = @('dnd5e-srd', 'dnd5e', 'veil-map')
+    $problems = New-Object System.Collections.Generic.List[string]
+
+    foreach ($id in $official) {
+        if (-not (Test-Path (Join-Path $App "data/plugins/$id/plugin.json"))) {
+            $problems.Add("缺少官方插件: $id")
+        }
+    }
+
+    $enabledPath = Join-Path $App 'data/plugins/enabled.json'
+    if (-not (Test-Path $enabledPath)) {
+        $problems.Add('缺少 data/plugins/enabled.json（官方插件不会默认启用）')
+    } else {
+        try {
+            $enabledDoc = Get-Content $enabledPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $enabledIds = @($enabledDoc.enabled)
+            foreach ($id in $official) {
+                if ($enabledIds -notcontains $id) {
+                    $problems.Add("官方插件不在启用列表中: $id")
+                }
+            }
+        } catch {
+            $problems.Add('data/plugins/enabled.json 不是合法 JSON')
+        }
+    }
+
+    $pluginsRoot = Join-Path $App 'data/plugins'
+    if (Test-Path $pluginsRoot) {
+        Get-ChildItem -Path $pluginsRoot -Directory -Force | Where-Object {
+            $official -notcontains $_.Name
+        } | ForEach-Object {
+            $problems.Add("混入非官方插件目录: data/plugins/$($_.Name)")
+        }
+    }
+
+    if ($problems.Count -gt 0) {
+        $detail = ($problems | ForEach-Object { "  - $_" }) -join [Environment]::NewLine
+        throw @"
+发布包官方插件校验失败，已中止打包：
+$detail
+要求：data/plugins 下必须包含 dnd5e-srd、dnd5e、veil-map 三个官方插件，
+enabled.json 必须启用它们，且不得混入本机安装的其他插件。
+"@
+    }
+    Write-Step '官方插件校验通过: dnd5e-srd、dnd5e、veil-map 已随包并默认启用'
+}
+
+function Assert-ZipOfficialPlugins([string]$ZipPath) {
+    $official = @('dnd5e-srd', 'dnd5e', 'veil-map')
+    $problems = New-Object System.Collections.Generic.List[string]
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $entries = @($archive.Entries)
+        $relatives = @($entries | ForEach-Object {
+            ($_.FullName -replace '\\', '/') -replace '^[^/]+/', ''
+        })
+
+        foreach ($id in $official) {
+            if ($relatives -notcontains "data/plugins/$id/plugin.json") {
+                $problems.Add("压缩包缺少官方插件: $id")
+            }
+        }
+
+        $enabledEntry = $entries | Where-Object {
+            (($_.FullName -replace '\\', '/') -replace '^[^/]+/', '') -eq 'data/plugins/enabled.json'
+        } | Select-Object -First 1
+        if (-not $enabledEntry) {
+            $problems.Add('压缩包缺少 data/plugins/enabled.json')
+        } else {
+            $reader = New-Object System.IO.StreamReader($enabledEntry.Open(), [System.Text.Encoding]::UTF8)
+            try {
+                $enabledDoc = $reader.ReadToEnd() | ConvertFrom-Json
+            } finally {
+                $reader.Dispose()
+            }
+            $enabledIds = @($enabledDoc.enabled)
+            foreach ($id in $official) {
+                if ($enabledIds -notcontains $id) {
+                    $problems.Add("压缩包启用列表缺少官方插件: $id")
+                }
+            }
+        }
+
+        $pluginDirs = $relatives | Where-Object { $_ -match '^data/plugins/([^/]+)/' } | ForEach-Object {
+            [regex]::Match($_, '^data/plugins/([^/]+)/').Groups[1].Value
+        } | Sort-Object -Unique
+        foreach ($dir in $pluginDirs) {
+            if ($official -notcontains $dir) {
+                $problems.Add("压缩包混入非官方插件: data/plugins/$dir")
+            }
+        }
+    } finally {
+        $archive.Dispose()
+    }
+
+    if ($problems.Count -gt 0) {
+        Remove-Item -Path $ZipPath -Force -ErrorAction SilentlyContinue
+        $detail = ($problems | ForEach-Object { "  - $_" }) -join [Environment]::NewLine
+        throw "发布包官方插件校验失败（已删除坏包 $Name.zip）：$([Environment]::NewLine)$detail"
+    }
+    Write-Step '压缩包官方插件校验通过'
 }
 
 if (Test-Path $Staging) {
@@ -244,6 +351,26 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 Copy-Relative 'data/character_skills.json'
 Copy-Relative 'scripts/build-frontend.mjs'
 Copy-Relative 'scripts/relocate-tools.mjs'
+
+# ---------------------------------------------------------------- 官方插件（白名单）
+# 只复制三个官方插件，避免把本机安装的第三方插件打进发布包；
+# 启用列表重写为确定值，保证新用户解压启动后 5e 房间可用。
+$officialPlugins = @('dnd5e-srd', 'dnd5e', 'veil-map')
+foreach ($plugin in $officialPlugins) {
+    Copy-Relative "data/plugins/$plugin"
+}
+$EnabledPath = Join-Path $App 'data/plugins/enabled.json'
+$EnabledDoc = [ordered]@{
+    version    = 1
+    enabled    = @($officialPlugins)
+    updated_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss')
+}
+[System.IO.File]::WriteAllText(
+    $EnabledPath,
+    ($EnabledDoc | ConvertTo-Json),
+    (New-Object System.Text.UTF8Encoding($false))
+)
+Write-Step "随包官方插件: $($officialPlugins -join '、') 已默认启用"
 
 # 示例剧本（包内改名为「示例剧本」，避免沿用系统测试命名）
 Copy-Relative 'data/scenarios/scenario-1793438085450'
@@ -370,6 +497,7 @@ foreach ($item in $forbidden) {
 
 # 首启防线：打包结束前直接校验暂存产物，防止打出「解压后不进入安装向导」的坏包
 Assert-FirstRunReady
+Assert-OfficialPlugins
 
 # ---------------------------------------------------------------- 生成压缩包
 if (-not (Test-Path $OutDir)) {
@@ -389,6 +517,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 # 再对最终 zip 做一次独立审计；不通过会删除坏包并非零退出
 Assert-ZipFirstRunReady $Zip
+Assert-ZipOfficialPlugins $Zip
 
 $hash = (Get-FileHash -Path $Zip -Algorithm SHA256).Hash.ToLowerInvariant()
 $zipSizeMb = [math]::Round((Get-Item $Zip).Length / 1MB, 2)

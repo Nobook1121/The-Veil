@@ -107,3 +107,18 @@ def test_package_script_excludes_local_demo_scenario_and_cards():
     assert "Copy-Relative 'data/scenarios/scenario-1793438085450'" in script
     # 预置角色卡位于 data/runtime/characters，随 data/runtime 一起排除。
     assert "'data/runtime'" in script
+
+
+def test_package_script_bundles_official_plugins_enabled():
+    """官方 5e / SRD / 地图插件随包并默认启用，且只复制白名单。"""
+    script = PACKAGE_SCRIPT.read_text(encoding="utf-8")
+
+    assert "$officialPlugins = @('dnd5e-srd', 'dnd5e', 'veil-map')" in script
+    assert 'Copy-Relative "data/plugins/$plugin"' in script
+    assert "data/plugins/enabled.json" in script
+    assert "Assert-OfficialPlugins" in script
+    assert "Assert-ZipOfficialPlugins" in script
+    # 不能整目录复制，否则会把本机安装的第三方插件一起打进包。
+    assert "Copy-Relative 'data/plugins'" not in script
+    # 演示剧本仍然排除。
+    assert "data/scenarios/scenario-demo-dnd5e-001" in script
