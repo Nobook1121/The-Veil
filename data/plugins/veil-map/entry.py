@@ -27,7 +27,7 @@ from flask import Blueprint, current_app, jsonify, request, send_from_directory,
 from trpg_server.agents.room_state import load_room_state
 from trpg_server.agents.tools.base import AgentTool
 from trpg_server.combat.scheduler import spend_budget
-from trpg_server.json_store import read_json
+from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.responses import error_response, success_response
 from trpg_server.room_access import can_access, find_room, is_elevated
 from trpg_server.room_clock import room_lock
@@ -805,6 +805,21 @@ def _room_context(info: dict[str, Any]) -> tuple[str, bool]:
     return role, bool(is_elevated() or role in _OWNER_ROLES)
 
 
+def _map_settings_path(room_dir) -> Path:
+    """房间级地图设置（不随场景分片切换）。"""
+    return Path(room_dir) / "plugins" / "veil-map" / "settings.json"
+
+
+def _load_map_settings(room_dir) -> dict[str, Any]:
+    raw = read_json(_map_settings_path(room_dir), default={})
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _map_permission(room_dir) -> bool:
+    """房间级棋子移动权限；缺省允许玩家移动自己的棋子（保持旧行为）。"""
+    return _as_bool(_load_map_settings(room_dir).get("player_move_enabled"), True)
+
+
 def _room_or_error(room_id: str):
     room_dir, info = find_room(room_id)
     if not info:
@@ -1036,7 +1051,11 @@ def _broadcast(room_id: str, state: dict[str, Any], move: dict[str, Any] | None 
     room_dir, info = find_room(room_id)
     fog = state.get("fog") or {}
     if not info or not fog.get("enabled"):
-        payload: dict[str, Any] = {"room_id": str(room_id), "map": state}
+        payload: dict[str, Any] = {
+            "room_id": str(room_id),
+            "map": state,
+            "player_move_enabled": _map_permission(room_dir) if room_dir else True,
+        }
         if isinstance(move, dict) and move:
             payload["move"] = move
         try:
@@ -1059,6 +1078,7 @@ def _broadcast(room_id: str, state: dict[str, Any], move: dict[str, Any] | None 
             "map": view,
             "fog": fog_view,
             "can_manage": manager,
+            "player_move_enabled": _map_permission(room_dir),
         }
         filtered_move = _move_for_observer(move, state, user_id, manager, visible)
         if filtered_move:
@@ -1818,13 +1838,19 @@ def _agent_actor_label(info: dict[str, Any], agent_id: Any, user_id: Any) -> str
 
 
 def _agent_can_move(
-    info: dict[str, Any], token: dict[str, Any], user_id: Any, agent_id: Any
+    info: dict[str, Any],
+    token: dict[str, Any],
+    user_id: Any,
+    agent_id: Any,
+    room_dir=None,
 ) -> tuple[bool, str]:
-    """KP 视为 DM 可移动任意棋子；其余按房间角色或棋子归属判定。"""
+    """KP 视为 DM 可移动任意棋子；其余按房间角色、房间开关或棋子归属判定。"""
     if str(agent_id or "").strip().lower() in DM_AGENT_IDS:
         return True, ""
     if _member_role(info, user_id) in _OWNER_ROLES:
         return True, ""
+    if room_dir is not None and not _map_permission(room_dir):
+        return False, "KP 已关闭「玩家可移动自己的棋子」，只有房主或房管可以移动棋子。"
     owner = str(token.get("owner_user_id") or "")
     if owner and owner == str(user_id or ""):
         return True, ""
@@ -1947,6 +1973,7 @@ def _map_payload(room_id: str, room_dir, info: dict[str, Any]) -> dict[str, Any]
         "fog": fog_payload,
         "combat": _combat_payload(room_dir),
         "can_manage": manager,
+        "player_move_enabled": _map_permission(room_dir),
         "room_id": str(room_id),
         "scene_id": view.get("scene_id") or state.get("scene_id"),
         "scenes": scenes,
@@ -2095,6 +2122,38 @@ def update_map(room_id: str):
         revision=state["revision"],
         code="map.updated",
         data={"map": state, "fog": fog_payload, "can_manage": True},
+    )
+
+
+@bp.route("/rooms/<room_id>/map/permissions", methods=["PUT"])
+def update_map_permissions(room_id: str):
+    """房间级棋子移动权限：默认允许玩家移动自己的棋子。"""
+    room_dir, info, denied = _map_room_or_error(room_id)
+    if denied:
+        return denied
+    payload = _write_payload()
+    if not isinstance(payload, dict) or "player_move_enabled" not in payload:
+        return _invalid_request(
+            "请求体缺少 player_move_enabled。",
+            "map.invalid_payload",
+        )
+    _role, manager = _room_context(info)
+    if not manager:
+        return _rejected_request(
+            "只有房主或房管可以修改棋子移动权限。",
+            "map.manager_only",
+        )
+    enabled = _as_bool(payload.get("player_move_enabled"), True)
+    with room_lock(room_dir):
+        settings = _load_map_settings(room_dir)
+        settings["player_move_enabled"] = enabled
+        write_json_atomic(_map_settings_path(room_dir), settings)
+        state = _load_map(room_dir)
+    # 让所有已打开地图的客户端立即更新可移动状态。
+    _broadcast(room_id, state)
+    return success_response(
+        {"player_move_enabled": enabled, "room_id": str(room_id)},
+        "棋子移动权限已更新。",
     )
 
 
@@ -2365,12 +2424,21 @@ def move_token(room_id: str, token_id: str):
                 http_status=404,
             )
         owner_user_id = str(token.get("owner_user_id") or "")
-        if not manager and owner_user_id != viewer_id:
-            return _rejected_request(
-                "你只能移动自己绑定的棋子。",
-                "map.not_owner",
-                revision=state["revision"],
-            )
+        if not manager:
+            # 房间级开关：KP 关闭后玩家的移动请求在服务端直接拒绝，不能只靠前端
+            # 隐藏拖拽。
+            if not _map_permission(room_dir):
+                return _rejected_request(
+                    "KP 已关闭「玩家可移动自己的棋子」，请联系房主或房管移动。",
+                    "map.player_move_disabled",
+                    revision=state["revision"],
+                )
+            if owner_user_id != viewer_id:
+                return _rejected_request(
+                    "你只能移动自己绑定的棋子。",
+                    "map.not_owner",
+                    revision=state["revision"],
+                )
         request_id, expected, error = _read_envelope(payload, state)
         if error is not None:
             return error
@@ -3179,7 +3247,7 @@ def _move_token_agent(
         token = _find_token(state, token_ref)
         if token is None:
             return {"ok": False, "error": f"没有找到棋子「{token_ref}」。"}
-        allowed, denied = _agent_can_move(info, token, user_id, agent_id)
+        allowed, denied = _agent_can_move(info, token, user_id, agent_id, room_dir)
         if not allowed:
             return {"ok": False, "error": denied}
 

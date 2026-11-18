@@ -82,6 +82,8 @@
         var mapState = null;
         var combat = { active: false };
         var serverCanManage = false;
+        // 房间级开关：默认允许玩家移动自己的棋子；KP 关闭后只有房主/房管能动。
+        var playerMoveAllowed = true;
         var selectedId = "";
         var dragging = null;
         var panning = null;
@@ -164,6 +166,10 @@
             '</select></label>',
             '<div class="vmap-note" data-vmap-fog-info hidden></div>',
             '<div class="vmap-divider"></div>',
+            '<div class="vmap-section-label">棋子权限</div>',
+            '<label class="vmap-check"><input type="checkbox" data-vmap-player-move> 玩家可移动自己的棋子</label>',
+            '<div class="vmap-note">关闭后只有房主或房管可以移动棋子；服务端会拒绝玩家的移动请求。</div>',
+            '<div class="vmap-divider"></div>',
             '<div class="vmap-section-label">场景光源</div>',
             '<div class="vmap-light-list" data-vmap-light-list></div>',
             '<div class="vmap-actions"><button type="button" data-vmap-save-lights>保存光源开关</button></div>',
@@ -217,6 +223,7 @@
         var panelFogEnabled = panel.querySelector("[data-vmap-fog-enabled]");
         var panelFogVision = panel.querySelector("[data-vmap-fog-vision]");
         var panelFogScope = panel.querySelector("[data-vmap-fog-scope]");
+        var panelPlayerMove = panel.querySelector("[data-vmap-player-move]");
         var panelFogInfo = panel.querySelector("[data-vmap-fog-info]");
         var panelLightList = panel.querySelector("[data-vmap-light-list]");
         var panelCalibration = panel.querySelector("[data-vmap-calibration]");
@@ -422,7 +429,14 @@
 
         function canMove(token) {
             if (canManage || serverCanManage) return true;
+            if (playerMoveAllowed === false) return false;
             return String(token.owner_user_id || "") === String(ctx.user.id || "");
+        }
+
+        function moveBlockedMessage() {
+            return playerMoveAllowed === false
+                ? "KP 已关闭「玩家可移动自己的棋子」，请联系房主或房管移动。"
+                : "你只能移动自己绑定的棋子。";
         }
 
         function tokenWorld(token) {
@@ -827,6 +841,7 @@
                 combat = data.combat.active ? data.combat : { active: false };
             }
             if (typeof data.can_manage === "boolean") serverCanManage = data.can_manage;
+            if (typeof data.player_move_enabled === "boolean") playerMoveAllowed = data.player_move_enabled;
             if (data.fog && typeof data.fog === "object") applyFog(data.fog);
             if (!tokens().some(function (token) { return String(token.id) === selectedId; })) selectedId = "";
             ctx.setBaseStage({
@@ -1016,6 +1031,7 @@
             }
             if (mode === "scene") {
                 renderCalibration();
+                if (panelPlayerMove) panelPlayerMove.checked = playerMoveAllowed !== false;
                 var meta = mapState && mapState.background_meta;
                 renderImportInfo(meta && meta.import ? meta : null);
                 renderSceneLights();
@@ -1094,6 +1110,36 @@
             }).catch(function (error) {
                 console.error("veil-map map settings failed", error);
                 notify("地图设置保存失败，请稍后重试。", "error");
+            });
+        }
+
+        function savePlayerMovePermission(enabled) {
+            apiRequest(
+                "PUT",
+                "/rooms/" + encodeURIComponent(ctx.room.id) + "/map/permissions",
+                { player_move_enabled: Boolean(enabled) }
+            ).then(function (response) {
+                if (destroyed) return;
+                if (!response || response.success !== true) {
+                    if (panelPlayerMove) panelPlayerMove.checked = playerMoveAllowed !== false;
+                    applyWriteFailure(response, "棋子移动权限保存失败。");
+                    return;
+                }
+                if (response.data && typeof response.data.player_move_enabled === "boolean") {
+                    playerMoveAllowed = response.data.player_move_enabled;
+                }
+                if (panelPlayerMove) panelPlayerMove.checked = playerMoveAllowed !== false;
+                scheduleDraw();
+                notify(
+                    playerMoveAllowed === false
+                        ? "已关闭玩家自行移动棋子，只有房主/房管可以移动。"
+                        : "已允许玩家移动自己的棋子。",
+                    "success"
+                );
+            }).catch(function (error) {
+                console.error("veil-map permission failed", error);
+                if (panelPlayerMove) panelPlayerMove.checked = playerMoveAllowed !== false;
+                notify("棋子移动权限保存失败，请稍后重试。", "error");
             });
         }
 
@@ -1257,7 +1303,7 @@
                 selectedId = String(token.id);
                 scheduleDraw();
                 if (!canMove(token)) {
-                    notify("你只能移动自己绑定的棋子。", "error");
+                    notify(moveBlockedMessage(), "error");
                     return;
                 }
                 if (combat && combat.active === true && combatantForToken(token) && !isCurrentActor(token)) {
@@ -1383,6 +1429,7 @@
                 fog: payload.fog,
                 combat: combat,
                 can_manage: typeof payload.can_manage === "boolean" ? payload.can_manage : serverCanManage,
+                player_move_enabled: payload.player_move_enabled,
             });
             var move = payload.move;
             if (move && move.source === "ai") {
@@ -1492,6 +1539,12 @@
             }
             if (target.closest("[data-vmap-save-calibration]")) {
                 saveCalibration();
+            }
+        });
+        panel.addEventListener("change", function (event) {
+            var target = event.target;
+            if (target instanceof HTMLElement && target.closest("[data-vmap-player-move]")) {
+                savePlayerMovePermission(Boolean(target.checked));
             }
         });
 

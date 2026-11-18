@@ -212,6 +212,49 @@ def test_player_can_only_move_own_token(client):
     assert "user:u2" in {str(item["room"]) for item in events}
 
 
+def test_player_move_permission_switch_is_room_level(client, tmp_path):
+    owner, _app = client
+    _login(owner, "u1")
+    # 默认保持旧行为：玩家可以移动自己的棋子。
+    assert _map(owner)["player_move_enabled"] is True
+
+    toggled = owner.put(
+        "/api/plugins/veil-map/rooms/room1/map/permissions",
+        json={"player_move_enabled": False},
+    )
+    assert toggled.status_code == 200
+    assert toggled.get_json()["data"]["player_move_enabled"] is False
+    # 权限是房间级设置，写进插件自己的 settings.json，而不是场景分片。
+    settings = json.loads(
+        (tmp_path / "rooms" / "room1" / "plugins" / "veil-map" / "settings.json").read_text(encoding="utf-8")
+    )
+    assert settings["player_move_enabled"] is False
+
+    # 玩家被服务端拒绝，而不是只靠前端隐藏。
+    _login(owner, "u2")
+    assert _map(owner)["player_move_enabled"] is False
+    denied = _write(owner, "post", "/api/plugins/veil-map/rooms/room1/tokens/member-u2/move", {"x": 192, "y": 0})
+    assert denied.status_code == 403
+    body = denied.get_json()
+    assert body["status"] == "rejected"
+    assert body["code"] == "map.player_move_disabled"
+    assert "玩家可移动自己的棋子" in body["message"]
+
+    # 玩家不能自己把开关改回来。
+    denied_toggle = owner.put(
+        "/api/plugins/veil-map/rooms/room1/map/permissions",
+        json={"player_move_enabled": True},
+    )
+    assert denied_toggle.status_code == 403
+    assert denied_toggle.get_json()["code"] == "map.manager_only"
+
+    # 房主仍可移动任意棋子。
+    _login(owner, "u1")
+    moved = _write(owner, "post", "/api/plugins/veil-map/rooms/room1/tokens/member-u2/move", {"x": 192, "y": 0})
+    assert moved.status_code == 200
+    assert _token(moved.get_json()["data"], "member-u2")["x"] == 192
+
+
 def test_combat_move_uses_turn_and_movement_budget(tmp_path):
     rooms = _write_room(tmp_path, combat=_combat(["Alice", "Bob"]))
     # 只保留两名成员，避免第三枚棋子占住 Alice 的移动目标格。
