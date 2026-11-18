@@ -1055,6 +1055,7 @@
                     zoom: cam.zoom,
                     gridSize: view.gridSize,
                     gridOffset: { ...view.gridOffset },
+                    gridVisible: showGrid,
                     camera: { ...cam },
                 };
             },
@@ -1469,6 +1470,8 @@
                     showGrid = !showGrid;
                     button.classList.toggle("is-active", showGrid);
                     drawStage();
+                    // 插件层（棋子/坐标）与网格可见性联动，需要主动重绘一次。
+                    emitPluginEvent("grid", { visible: showGrid });
                     return;
                 }
                 if (tool !== "select" && tool !== "measure") {

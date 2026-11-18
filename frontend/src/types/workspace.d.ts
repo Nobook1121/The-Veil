@@ -102,6 +102,7 @@ interface StagePluginViewport {
     zoom: number;
     gridSize: number;
     gridOffset: { x: number; y: number };
+    gridVisible: boolean;
     camera: StagePluginCamera;
 }
 

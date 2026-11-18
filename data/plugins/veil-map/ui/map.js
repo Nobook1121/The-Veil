@@ -571,6 +571,81 @@
             context.restore();
         }
 
+        /** 0 → A，25 → Z，26 → AA；原点左侧的 -1 → -A，-26 → -Z。 */
+        function columnLabel(index) {
+            var value = Math.floor(index);
+            if (value < 0) return "-" + columnLabel(-value - 1);
+            var text = "";
+            do {
+                text = String.fromCharCode(65 + (value % 26)) + text;
+                value = Math.floor(value / 26) - 1;
+            } while (value >= 0);
+            return text;
+        }
+
+        /** 行号以地图左上角为 1；跑到地图外时保持连续（0、-1…）。 */
+        function rowLabel(index) {
+            return String(index >= 0 ? index + 1 : index);
+        }
+
+        /** 地图边界以世界原点为中心，左上角格索引是 -half，把它平移成 0 起算。 */
+        function coordinateHalf() {
+            var bounds = asInt(mapState && mapState.bounds_cells, 0);
+            return bounds > 0 ? Math.floor(bounds / 2) : 0;
+        }
+
+        /**
+         * 视口坐标尺：上沿列字母、左沿行号，与网格标定（grid_size/grid_offset）同源。
+         * 画在棋子之前，棋子会盖住标签边缘，不会出现浮层挡住棋子。
+         * 格子太小时按固定列间隔抽样，避免标签糊成一片。
+         */
+        function drawCoordinates(camera) {
+            var viewport = ctx.getViewport();
+            if (!viewport || viewport.gridVisible === false) return;
+            var grid = gridSize();
+            var offset = gridOffset();
+            var cellPx = grid * (Number(camera && camera.zoom) || 0);
+            if (!(cellPx >= 10)) return;
+            var topLeft = ctx.screenToWorld(0, 0);
+            var bottomRight = ctx.screenToWorld(viewport.width, viewport.height);
+            if (!topLeft || !bottomRight) return;
+            var half = coordinateHalf();
+            var firstCol = Math.floor((topLeft.x - offset.x) / grid);
+            var lastCol = Math.floor((bottomRight.x - offset.x) / grid);
+            var firstRow = Math.floor((topLeft.y - offset.y) / grid);
+            var lastRow = Math.floor((bottomRight.y - offset.y) / grid);
+            var step = 1;
+            while (cellPx * step < 26) step += 1;
+
+            context.font = '700 10px "Segoe UI", sans-serif';
+            context.textAlign = "center";
+            context.textBaseline = "middle";
+
+            function paintChip(text, centerX, centerY) {
+                var chipWidth = Math.ceil(context.measureText(text).width) + 8;
+                if (centerX - chipWidth / 2 < 1 || centerX + chipWidth / 2 > viewport.width - 1) return;
+                if (centerY - 7 < 1 || centerY + 7 > viewport.height - 1) return;
+                roundRect(context, centerX - chipWidth / 2, centerY - 7, chipWidth, 14, 3);
+                context.fillStyle = "rgba(8, 11, 14, 0.68)";
+                context.fill();
+                context.fillStyle = "rgba(242, 234, 216, 0.92)";
+                context.fillText(text, centerX, centerY + 0.5);
+            }
+
+            for (var col = firstCol; col <= lastCol; col += 1) {
+                if (((col % step) + step) % step !== 0) continue;
+                var screenX = ctx.worldToScreen(offset.x + col * grid, 0).x + cellPx / 2;
+                paintChip(columnLabel(col + half), screenX, 10);
+            }
+            for (var row = firstRow; row <= lastRow; row += 1) {
+                if (((row % step) + step) % step !== 0) continue;
+                var screenY = ctx.worldToScreen(0, offset.y + row * grid).y + cellPx / 2;
+                var text = rowLabel(row + half);
+                var chipWidth = Math.ceil(context.measureText(text).width) + 8;
+                paintChip(text, 4 + chipWidth / 2, screenY);
+            }
+        }
+
         function draw() {
             if (!context || destroyed) return;
             var size = resizeCanvas();
@@ -579,6 +654,8 @@
             context.clearRect(0, 0, size.width, size.height);
             drawSceneLayers(camera);
             drawFog(camera);
+            // 坐标尺画在棋子之前：棋子永远在标签之上，不会被遮住。
+            drawCoordinates(camera);
             list.forEach(function (token) {
                 var rect = tokenRect(token);
                 var current = isCurrentActor(token);
@@ -1422,6 +1499,9 @@
             scheduleDraw();
         }));
         unsubscribers.push(ctx.events.on("resize", function () {
+            scheduleDraw();
+        }));
+        unsubscribers.push(ctx.events.on("grid", function () {
             scheduleDraw();
         }));
         unsubscribers.push(ctx.events.on("combat", function (state) {
