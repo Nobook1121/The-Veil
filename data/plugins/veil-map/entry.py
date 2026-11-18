@@ -659,6 +659,8 @@ def _normalize_scene_binding(raw: Any) -> dict[str, Any]:
         "title": str(raw.get("title") or "")[:80],
         "url": url[:2048],
         "asset_id": str(raw.get("asset_id") or "")[:64],
+        "calibrated": bool(raw.get("calibrated")),
+        "fingerprint": str(raw.get("fingerprint") or "")[:300],
     }
 
 
@@ -755,20 +757,93 @@ def _resolve_room_scene(
     return str(start.get("location_id") or "")
 
 
+def _map_marker_visibility(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return "kp" if text in {"kp", "kp_only", "dm", "dm_only"} else "public"
+
+
+def _normalize_map_marker_types(raw: Any) -> list[dict[str, Any]]:
+    """剧本编辑器写入的标记类型清单：类型 → 颜色 / 说明 / 可见性。"""
+    items: list[dict[str, Any]] = []
+    for index, item in enumerate(raw if isinstance(raw, list) else []):
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or item.get("name") or "").strip()[:40]
+        if not label:
+            continue
+        color = str(item.get("color") or "").strip()
+        items.append(
+            {
+                "id": str(item.get("id") or f"type-{index + 1}")[:40],
+                "label": label,
+                "color": color if _HEX_COLOR.match(color) else TOKEN_COLORS[0],
+                "description": str(item.get("description") or item.get("note") or "").strip()[:400],
+                "visibility": _map_marker_visibility(item.get("visibility")),
+            }
+        )
+    return items[:40]
+
+
+def _normalize_map_markers(raw: Any) -> list[dict[str, Any]]:
+    """标记矩形按底图原始像素保存；房间侧再换算到世界坐标。"""
+    items: list[dict[str, Any]] = []
+    for index, item in enumerate(raw if isinstance(raw, list) else []):
+        if not isinstance(item, dict):
+            continue
+        x = _fraction(item.get("x"))
+        y = _fraction(item.get("y"))
+        width = _fraction(item.get("w"))
+        height = _fraction(item.get("h"))
+        if width <= 0 or height <= 0:
+            continue
+        items.append(
+            {
+                "id": str(item.get("id") or f"marker-{index + 1}")[:60],
+                "type": str(item.get("type") or "")[:40],
+                "label": str(item.get("label") or item.get("name") or "").strip()[:80],
+                "x": x,
+                "y": y,
+                "w": width,
+                "h": height,
+                "visibility": _map_marker_visibility(item.get("visibility")),
+            }
+        )
+    return items[:500]
+
+
+def _scenario_map_config(scenario: dict[str, Any] | None, location: str) -> dict[str, Any]:
+    if not isinstance(scenario, dict) or not location:
+        return {}
+    config = scenario.get("map_config")
+    if not isinstance(config, dict):
+        return {}
+    scene = config.get(location)
+    return scene if isinstance(scene, dict) else {}
+
+
+def _scenario_asset_url(scenario: dict[str, Any], asset_id: str) -> str:
+    if not asset_id:
+        return ""
+    for asset in scenario.get("assets") or []:
+        if not isinstance(asset, dict) or str(asset.get("id") or "") != asset_id:
+            continue
+        url = str(asset.get("url") or "").strip()
+        if url.startswith("/") and not url.startswith("//"):
+            return url
+    return ""
+
+
 def _declared_scene_map(
     scenario: dict[str, Any] | None, location: str
 ) -> dict[str, Any] | None:
-    """模组为该场景声明的玩家可见地图（enter 触发器里的 image 附件）。
+    """模组为该场景声明的玩家可见地图。
 
-    只取非 kp_only 的图片，玩家侧看到的 canvas 与触发器展示的玩家版一致。
+    优先使用剧本地图编辑器写入的 ``map_config``（含人工标定的每格像素与
+    偏移，不再依赖图片尺寸自动推测）；没有标定配置时退回 enter 触发器里的
+    玩家可见图片。两种来源都只取非 kp_only 的底图。
     """
     if not scenario or not location:
         return None
-    assets = {
-        str(asset.get("id")): asset
-        for asset in scenario.get("assets") or []
-        if isinstance(asset, dict) and asset.get("id")
-    }
     title = ""
     for module in scenario.get("modules") or []:
         if not isinstance(module, dict):
@@ -776,6 +851,47 @@ def _declared_scene_map(
         if location in {str(module.get("id") or ""), str(module.get("scene_id") or "")}:
             title = str(module.get("title") or "")
             break
+
+    config = _scenario_map_config(scenario, location)
+    if config:
+        asset_id = str(config.get("background_asset_id") or "").strip()
+        url = str(config.get("background_url") or "").strip() or _scenario_asset_url(
+            scenario, asset_id
+        )
+        if url.startswith("/") and not url.startswith("//"):
+            width = max(0, _as_int(config.get("width"), 0))
+            height = max(0, _as_int(config.get("height"), 0))
+            cell_px = round(_fraction(config.get("cell_px")), 4)
+            offset_x = round(_fraction(config.get("offset_x")), 4)
+            offset_y = round(_fraction(config.get("offset_y")), 4)
+            calibrated = cell_px > 0 and width > 0 and height > 0
+            return {
+                "location_id": location,
+                "title": title or str(config.get("title") or ""),
+                "url": url,
+                "asset_id": asset_id,
+                "width": width,
+                "height": height,
+                "grid_size": 0,
+                "grid_offset": None,
+                "cell_px": cell_px,
+                "offset_x": offset_x,
+                "offset_y": offset_y,
+                "calibrated": calibrated,
+                "fingerprint": (
+                    f"{url}|{width}x{height}|{cell_px}|{offset_x}|{offset_y}"
+                    if calibrated
+                    else ""
+                ),
+                "marker_types": _normalize_map_marker_types(config.get("marker_types")),
+                "markers": _normalize_map_markers(config.get("markers")),
+            }
+
+    assets = {
+        str(asset.get("id")): asset
+        for asset in scenario.get("assets") or []
+        if isinstance(asset, dict) and asset.get("id")
+    }
     candidates: list[tuple[int, dict[str, Any]]] = []
     for trigger in scenario.get("triggers") or []:
         if not isinstance(trigger, dict) or trigger.get("enabled") is False:
@@ -824,23 +940,37 @@ def _declared_scene_map(
 
 
 def _apply_scene_binding(state: dict[str, Any], binding: dict[str, Any]) -> None:
-    declared_grid = _as_int(binding.get("grid_size"), 0)
-    grid = _clamp(declared_grid if declared_grid > 0 else state.get("grid_size"), MIN_GRID, MAX_GRID)
     width = _as_int(binding.get("width"), 0)
     height = _as_int(binding.get("height"), 0)
-    offset = binding.get("grid_offset")
-    if isinstance(offset, dict):
-        raw_offset = {"x": _as_int(offset.get("x"), 0), "y": _as_int(offset.get("y"), 0)}
-    else:
-        # 背景图以世界原点为中心绘制：把图片左上角对齐到格线，图内格子就是整格。
+    cell_px = _fraction(binding.get("cell_px"))
+    if cell_px > 0:
+        # 人工标定：图内每格像素直接作为画布网格；图片按原始尺寸以世界原点
+        # 居中绘制，所以图内偏移减去图片半宽/半高就是画布格线偏移。
+        grid = _clamp(int(round(cell_px)), MIN_GRID, MAX_GRID)
         raw_offset = {
-            "x": int(round((-width / 2) % grid)) if width > 0 else 0,
-            "y": int(round((-height / 2) % grid)) if height > 0 else 0,
+            "x": int(round(_fraction(binding.get("offset_x")) - width / 2)) if width > 0 else 0,
+            "y": int(round(_fraction(binding.get("offset_y")) - height / 2)) if height > 0 else 0,
         }
+    else:
+        declared_grid = _as_int(binding.get("grid_size"), 0)
+        grid = _clamp(
+            declared_grid if declared_grid > 0 else state.get("grid_size"), MIN_GRID, MAX_GRID
+        )
+        offset = binding.get("grid_offset")
+        if isinstance(offset, dict):
+            raw_offset = {"x": _as_int(offset.get("x"), 0), "y": _as_int(offset.get("y"), 0)}
+        else:
+            # 背景图以世界原点为中心绘制：把图片左上角对齐到格线，图内格子就是整格。
+            raw_offset = {
+                "x": int(round((-width / 2) % grid)) if width > 0 else 0,
+                "y": int(round((-height / 2) % grid)) if height > 0 else 0,
+            }
     state["grid_size"] = grid
+    # 格线按间隔重复，偏移只需保留一个周期内的同余值；这样大图坐标不会
+    # 被钳到边界而整体错位。
     state["grid_offset"] = {
-        "x": _clamp(_as_int(raw_offset.get("x"), 0), -grid, grid),
-        "y": _clamp(_as_int(raw_offset.get("y"), 0), -grid, grid),
+        "x": _as_int(raw_offset.get("x"), 0) % grid,
+        "y": _as_int(raw_offset.get("y"), 0) % grid,
     }
     state["background"] = str(binding["url"])
     state["background_meta"] = _normalize_background_meta(
@@ -858,22 +988,87 @@ def _apply_scene_binding(state: dict[str, Any], binding: dict[str, Any]) -> None
         "title": str(binding.get("title") or "")[:80],
         "url": binding["url"],
         "asset_id": str(binding.get("asset_id") or "")[:64],
+        "calibrated": bool(binding.get("calibrated")),
+        "fingerprint": str(binding.get("fingerprint") or "")[:300],
     }
 
 
+def _scene_binding_markers(
+    binding: dict[str, Any] | None, manager: bool
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """按观察者过滤剧本地图标记：DM 版标记与含义只发给房主/房管。
+
+    标记在剧本里以底图原始像素保存；房间画布把底图按原始大小居中绘制，
+    所以这里统一换算成世界坐标，前端只负责画。
+    """
+    if not binding:
+        return [], []
+    types = {
+        str(item.get("id") or ""): item
+        for item in binding.get("marker_types") or []
+        if isinstance(item, dict)
+    }
+    width = _as_int(binding.get("width"), 0)
+    height = _as_int(binding.get("height"), 0)
+    visible_types: list[dict[str, Any]] = []
+    for item in types.values():
+        if not manager and item.get("visibility") == "kp":
+            continue
+        visible_types.append(dict(item))
+    markers: list[dict[str, Any]] = []
+    for marker in binding.get("markers") or []:
+        if not isinstance(marker, dict):
+            continue
+        kind = types.get(str(marker.get("type") or "")) or {}
+        visibility = str(marker.get("visibility") or kind.get("visibility") or "public")
+        if not manager and visibility == "kp":
+            continue
+        # 类型本身是 DM 专属时，即使某条标记被设为玩家可见，也不下发类型
+        # 名称与说明，避免把 DM 的含义泄露给玩家。
+        kind_hidden = not manager and str(kind.get("visibility") or "") == "kp"
+        markers.append(
+            {
+                "id": str(marker.get("id") or ""),
+                "type": str(marker.get("type") or ""),
+                "type_label": "" if kind_hidden else str(kind.get("label") or ""),
+                "description": "" if kind_hidden else str(kind.get("description") or ""),
+                "label": str(marker.get("label") or ""),
+                "color": str(kind.get("color") or TOKEN_COLORS[0]),
+                "visibility": visibility,
+                "x": round(_fraction(marker.get("x")) - width / 2, 2),
+                "y": round(_fraction(marker.get("y")) - height / 2, 2),
+                "w": round(_fraction(marker.get("w")), 2),
+                "h": round(_fraction(marker.get("h")), 2),
+            }
+        )
+    return visible_types, markers
+
+
 def _scene_binding_view(
-    state: dict[str, Any], scenario: dict[str, Any] | None, location: str
+    state: dict[str, Any],
+    scenario: dict[str, Any] | None,
+    location: str,
+    manager: bool = False,
 ) -> dict[str, Any]:
     binding = _declared_scene_map(scenario, location)
-    applied = bool(binding) and str(
-        (state.get("scene_binding") or {}).get("location_id") or ""
-    ) == location
+    stored = state.get("scene_binding") or {}
+    fingerprint = str((binding or {}).get("fingerprint") or "")
+    applied = (
+        bool(binding)
+        and str(stored.get("location_id") or "") == location
+        and (not fingerprint or str(stored.get("fingerprint") or "") == fingerprint)
+    )
+    marker_types, markers = _scene_binding_markers(binding, manager)
     return {
         "managed": True,
         "location_id": location,
         "title": (binding or {}).get("title") or "",
         "url": (binding or {}).get("url") or "",
         "applied": applied,
+        "calibrated": bool((binding or {}).get("calibrated")),
+        "fingerprint": fingerprint,
+        "markers": markers,
+        "marker_types": marker_types,
     }
 
 
@@ -2187,7 +2382,7 @@ def _map_payload(room_id: str, room_dir, info: dict[str, Any]) -> dict[str, Any]
         "combat": _combat_payload(room_dir),
         "can_manage": manager,
         "player_move_enabled": _map_permission(room_dir),
-        "scene_binding": _scene_binding_view(state, scenario, location),
+        "scene_binding": _scene_binding_view(state, scenario, location, manager),
         "room_id": str(room_id),
         "scene_id": view.get("scene_id") or state.get("scene_id"),
         "scenes": scenes,
@@ -2380,6 +2575,7 @@ def sync_scene_map(room_id: str):
     room_dir, info, denied = _map_room_or_error(room_id)
     if denied:
         return denied
+    _role, manager = _room_context(info)
     scenario = _room_scenario(info)
     location = _resolve_room_scene(scenario, room_dir, info)
     binding = _declared_scene_map(scenario, location)
@@ -2390,21 +2586,25 @@ def sync_scene_map(room_id: str):
             {
                 "changed": False,
                 "map": state,
-                "scene_binding": _scene_binding_view(state, scenario, location),
+                "scene_binding": _scene_binding_view(state, scenario, location, manager),
             },
             "当前场景没有声明地图。",
         )
     with room_lock(room_dir):
         state = _load_map(room_dir)
         _reconcile_tokens(state, info)
-        last_location = str((state.get("scene_binding") or {}).get("location_id") or "")
-        if last_location == location:
-            # 已经绑定过：不覆盖房主后续手动调整的背景/标定。
+        last_binding = state.get("scene_binding") or {}
+        last_location = str(last_binding.get("location_id") or "")
+        fingerprint = str(binding.get("fingerprint") or "")
+        if last_location == location and (
+            not fingerprint or str(last_binding.get("fingerprint") or "") == fingerprint
+        ):
+            # 已经绑定过且标定没有变化：不覆盖房主后续手动调整的背景/标定。
             return success_response(
                 {
                     "changed": False,
                     "map": state,
-                    "scene_binding": _scene_binding_view(state, scenario, location),
+                    "scene_binding": _scene_binding_view(state, scenario, location, manager),
                 },
                 "场景地图已绑定。",
             )
@@ -2415,7 +2615,7 @@ def sync_scene_map(room_id: str):
         {
             "changed": True,
             "map": state,
-            "scene_binding": _scene_binding_view(state, scenario, location),
+            "scene_binding": _scene_binding_view(state, scenario, location, manager),
         },
         "已切换到场景地图。",
     )

@@ -15,6 +15,9 @@
                             <button class="nav-link" id="scenarioTabModulesBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabModules" type="button" role="tab" aria-controls="scenarioTabModules" aria-selected="false" data-i18n="scenario.tab.modules">模块</button>
                         </li>
                         <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="scenarioTabMapBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabMap" type="button" role="tab" aria-controls="scenarioTabMap" aria-selected="false">地图</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
                             <button class="nav-link" id="scenarioTabTreeBtn" data-bs-toggle="tab" data-bs-target="#scenarioTabTree" type="button" role="tab" aria-controls="scenarioTabTree" aria-selected="false" data-i18n="scenario.tab.tree">世界树</button>
                         </li>
                         <li class="nav-item" role="presentation">
@@ -146,6 +149,67 @@
                     <div id="scenarioModules" class="scenario-module-list">
                         <!-- 模块将在这里动态生成 -->
                     </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="scenarioTabMap" role="tabpanel" aria-labelledby="scenarioTabMapBtn">
+                        <div class="scenario-map-editor">
+                            <div class="scenario-map-toolbar">
+                                <label class="scenario-map-scene">
+                                    <span>场景</span>
+                                    <select class="form-select form-select-sm" id="scenarioMapSceneSelect"></select>
+                                </label>
+                                <input type="file" id="scenarioMapUpload" accept="image/png,image/jpeg,image/webp,image/bmp" hidden>
+                                <button type="button" class="btn btn-sm btn-primary" id="scenarioMapImportButton">
+                                    <i class="fa fa-upload" aria-hidden="true"></i>
+                                    <span>导入底图</span>
+                                </button>
+                                <div class="btn-group btn-group-sm" role="group" aria-label="缩放">
+                                    <button type="button" class="btn btn-outline-secondary" id="scenarioMapZoomOut">−</button>
+                                    <button type="button" class="btn btn-outline-secondary" id="scenarioMapActual">100%</button>
+                                    <button type="button" class="btn btn-outline-secondary" id="scenarioMapZoomIn">＋</button>
+                                    <button type="button" class="btn btn-outline-secondary" id="scenarioMapFit">适应窗口</button>
+                                </div>
+                                <span class="scenario-map-status" id="scenarioMapStatus" aria-live="polite"></span>
+                            </div>
+                            <div class="scenario-map-layout">
+                                <div class="scenario-map-stage">
+                                    <div class="scenario-map-viewport" id="scenarioMapViewport">
+                                        <img id="scenarioMapImage" alt="地图底图" draggable="false">
+                                        <div class="scenario-map-calibration-frame" id="scenarioMapCalibrationFrame" aria-hidden="true"></div>
+                                        <div class="scenario-map-marker-layer" id="scenarioMapMarkerLayer"></div>
+                                        <p class="scenario-map-empty" id="scenarioMapEmpty">先在「模块」里添加一个场景模块，再回到这里导入底图。</p>
+                                    </div>
+                                    <div class="scenario-map-stage-actions">
+                                        <button type="button" class="btn btn-sm btn-primary" id="scenarioMapCalibrate">记录标定</button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="scenarioMapClearCalibration">清除标定</button>
+                                        <button type="button" class="btn btn-sm btn-outline-warning" id="scenarioMapMarkerMode">放置标记</button>
+                                        <button type="button" class="btn btn-sm btn-outline-danger" id="scenarioMapDeleteMarker">删除选中标记</button>
+                                        <span class="scenario-map-calibration-summary" id="scenarioMapCalibrationSummary"></span>
+                                    </div>
+                                    <p class="scenario-map-help">
+                                        滚轮缩放、拖拽平移。把底图上的一个格子放进中间的方框，让格子边界与方框重合，再点「记录标定」；
+                                        房间会按这个每格像素和偏移对齐画布网格。点「放置标记」后在底图上拖出一个框即可添加标记。
+                                    </p>
+                                </div>
+                                <aside class="scenario-map-side">
+                                    <section class="scenario-map-side-section">
+                                        <div class="scenario-map-side-head">
+                                            <strong>标记类型与含义</strong>
+                                            <button type="button" class="btn btn-sm btn-outline-primary" id="scenarioMapAddType">添加类型</button>
+                                        </div>
+                                        <p class="scenario-map-side-hint">DM 版标记的类型与说明只发给房主/房管；玩家看不到这些含义。</p>
+                                        <div class="scenario-map-type-list" id="scenarioMapMarkerTypes"></div>
+                                    </section>
+                                    <section class="scenario-map-side-section">
+                                        <div class="scenario-map-side-head">
+                                            <strong>标记</strong>
+                                        </div>
+                                        <p class="scenario-map-side-hint">每条标记可单独设为玩家可见或仅 DM 可见。</p>
+                                        <div class="scenario-map-marker-list" id="scenarioMapMarkers"></div>
+                                    </section>
+                                </aside>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="tab-pane fade" id="scenarioTabTree" role="tabpanel" aria-labelledby="scenarioTabTreeBtn">

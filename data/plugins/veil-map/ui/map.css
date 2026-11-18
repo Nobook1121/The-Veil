@@ -306,3 +306,41 @@
     color: rgba(236, 231, 219, 0.72);
     font-size: 0.7rem;
 }
+
+.vmap-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.vmap-legend-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.vmap-legend-swatch {
+    width: 14px;
+    height: 14px;
+    margin-top: 2px;
+    border-radius: 3px;
+    flex: 0 0 auto;
+}
+
+.vmap-legend-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.vmap-legend-main strong {
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.vmap-legend-main small {
+    font-size: 11px;
+    line-height: 1.4;
+    opacity: 0.72;
+    word-break: break-word;
+}

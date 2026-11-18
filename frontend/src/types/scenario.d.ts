@@ -137,6 +137,46 @@ interface ScenarioModule {
     weapons?: ScenarioModuleWeaponRow[] | undefined;
 }
 
+type ScenarioMapMarkerVisibility = "public" | "kp";
+
+interface ScenarioMapMarkerType {
+    id: string;
+    label: string;
+    color: string;
+    description: string;
+    visibility: ScenarioMapMarkerVisibility;
+}
+
+interface ScenarioMapMarker {
+    id: string;
+    /** 标记类型 id；为空时使用标记自身的可见性与颜色。 */
+    type: string;
+    label: string;
+    /** 底图原始像素坐标（左上角）。 */
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    visibility: ScenarioMapMarkerVisibility;
+}
+
+interface ScenarioSceneMapConfig {
+    background_url: string;
+    background_asset_id?: string;
+    width: number;
+    height: number;
+    /** 人工标定：底图上一格的像素大小。0 表示未标定。 */
+    cell_px: number;
+    /** 人工标定：锚点格的左上角在底图原始像素中的位置。 */
+    offset_x: number;
+    offset_y: number;
+    marker_types: ScenarioMapMarkerType[];
+    markers: ScenarioMapMarker[];
+}
+
+/** 场景模块 id → 该场景的地图底图、标定与标记。 */
+type ScenarioMapConfig = Record<string, ScenarioSceneMapConfig>;
+
 interface Scenario {
     id: number;
     scenario_version?: string;
@@ -149,6 +189,8 @@ interface Scenario {
     allow_open_ending?: boolean;
     accept_room_images?: boolean;
     modules?: ScenarioModule[];
+    /** 剧本地图编辑器：场景底图、人工标定与 DM/玩家标记。 */
+    map_config?: ScenarioMapConfig;
     cover?: string;
     owner_id?: string | number;
     public_id?: string;

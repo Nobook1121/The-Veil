@@ -27,11 +27,14 @@ class ScenarioView {
     private rulesetOptionsPromise: Promise<void> | null = null;
     /** 当前选择的规则集 id；剧本未设置时默认 coc7。 */
     private rulesetSelection = "coc7";
+    /** 剧本地图编辑器：底图、格子标定与 DM/玩家标记。 */
+    private mapEditor: ScenarioMapEditor;
 
     constructor() {
         const scenarioList = document.getElementById("scenarioList");
         if (!scenarioList) throw new Error("missing scenarioList container");
         this.scenarioList = scenarioList;
+        this.mapEditor = new ScenarioMapEditor();
         this.saveScenarioHandler = async () => {
             await runSaveButtonCooldown(document.getElementById("saveScenario"), async () => {
                 await this.handlers?.onSaveScenario();
@@ -195,7 +198,7 @@ class ScenarioView {
     }
 
     fillDraftData(draft: ScenarioInput): void {
-        this.fillScenarioForm({ id: 0, title: draft.title || "", author: draft.author || "", playerCount: draft.playerCount || 0, notes: draft.notes || "", ...(draft.ruleset_id ? { ruleset_id: draft.ruleset_id } : {}), ...(draft.allow_open_ending === undefined ? {} : { allow_open_ending: draft.allow_open_ending }), ...(draft.accept_room_images === undefined ? {} : { accept_room_images: draft.accept_room_images }), modules: draft.modules || [], cover: draft.cover || "" });
+        this.fillScenarioForm({ id: 0, title: draft.title || "", author: draft.author || "", playerCount: draft.playerCount || 0, notes: draft.notes || "", ...(draft.ruleset_id ? { ruleset_id: draft.ruleset_id } : {}), ...(draft.allow_open_ending === undefined ? {} : { allow_open_ending: draft.allow_open_ending }), ...(draft.accept_room_images === undefined ? {} : { accept_room_images: draft.accept_room_images }), modules: draft.modules || [], ...(draft.map_config ? { map_config: draft.map_config } : {}), cover: draft.cover || "" });
         updateScenarioModalTitle("scenario.modal.create", "创建剧本");
     }
 
@@ -208,6 +211,7 @@ class ScenarioView {
         });
         document.getElementById("addModule")?.classList.toggle("d-none", readonly);
         document.getElementById("saveScenarioDraft")?.classList.toggle("d-none", readonly);
+        this.mapEditor.setReadOnly(readonly);
     }
 
     showDraftPrompt(): Promise<"continue" | "discard" | "cancel"> {
@@ -632,12 +636,13 @@ class ScenarioView {
             allow_open_ending: checkbox("scenarioAllowOpenEnding").checked,
             accept_room_images: checkbox("scenarioAcceptRoomImages").checked,
             modules,
+            map_config: this.mapEditor.collect(),
             cover: input("scenarioCoverUrl").value,
         };
     }
 
     getDraftData(): ScenarioInput {
-        return { title: input("scenarioTitle").value.trim(), author: input("scenarioAuthor").value.trim(), playerCount: Number.parseInt(input("scenarioPlayerCount").value, 10) || 0, notes: textarea("scenarioNotes").value.trim(), ruleset_id: this.currentRulesetId(), allow_open_ending: checkbox("scenarioAllowOpenEnding").checked, accept_room_images: checkbox("scenarioAcceptRoomImages").checked, modules: collectScenarioModules(), cover: input("scenarioCoverUrl").value, scenario_version: input("scenarioVersion").value.trim() };
+        return { title: input("scenarioTitle").value.trim(), author: input("scenarioAuthor").value.trim(), playerCount: Number.parseInt(input("scenarioPlayerCount").value, 10) || 0, notes: textarea("scenarioNotes").value.trim(), ruleset_id: this.currentRulesetId(), allow_open_ending: checkbox("scenarioAllowOpenEnding").checked, accept_room_images: checkbox("scenarioAcceptRoomImages").checked, modules: collectScenarioModules(), map_config: this.mapEditor.collect(), cover: input("scenarioCoverUrl").value, scenario_version: input("scenarioVersion").value.trim() };
     }
 
     showMessage(message: string, isError = false): void {
@@ -688,6 +693,7 @@ class ScenarioView {
         document.getElementById("saveScenarioDraft")?.addEventListener("click", async () => { await this.handlers?.onSaveDraft(); });
         document.getElementById("scenarioModal")?.addEventListener("keydown", (event) => { if ((event as KeyboardEvent).ctrlKey && (event as KeyboardEvent).key.toLowerCase() === "s") { event.preventDefault(); void this.handlers?.onSaveDraft(); } });
         document.getElementById("addModule")?.addEventListener("click", () => this.addModule());
+        document.getElementById("scenarioTabMapBtn")?.addEventListener("shown.bs.tab", () => this.mapEditor.onTabShown());
         document.getElementById("scenarioModal")?.addEventListener("click", (event) => this.handleScenarioEditorClick(event));
         document.getElementById("scenarioModal")?.addEventListener("change", (event) => this.handleScenarioEditorChange(event));
         const resourceDropzone = document.getElementById("scenarioResourceDropzone");
@@ -1095,6 +1101,7 @@ class ScenarioView {
             createModule("scene", 1),
             createModule("ending", 1),
         ]);
+        this.mapEditor.reset();
         (requiredElement("scenarioModuleType") as HTMLSelectElement).value = "scene";
         updateScenarioModalTitle("scenario.modal.create", "创建剧本");
         window.ScenarioNarrative?.clear();
@@ -1118,6 +1125,7 @@ class ScenarioView {
         image("coverPreview").src = safeScenarioCover(scenario.title, scenario.cover);
 
         renderModuleList(requiredElement("scenarioModules"), normalizeScenarioModules(scenario));
+        this.mapEditor.load(scenario.map_config);
         void this.loadResourceList(scenario.id);
         (requiredElement("scenarioModuleType") as HTMLSelectElement).value = "scene";
         updateScenarioModalTitle("scenario.modal.edit", "编辑剧本");

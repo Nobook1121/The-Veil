@@ -379,6 +379,100 @@ def test_scene_map_auto_binding_uses_scenario_assets(client, tmp_path):
     }
 
 
+def test_scene_map_uses_editor_calibration_and_filters_dm_markers(client, tmp_path):
+    owner, app = client
+    scenarios = _write_scene_binding_scenario(tmp_path)
+    app.config["SCENARIOS_DIR"] = str(scenarios)
+    record_path = scenarios / "scn-map" / "scenario.json"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["map_config"] = {
+        "p2_phandalin": {
+            "background_url": "/assets/scenarios/scn-map/assets/maps/calibrated.webp",
+            "width": 640,
+            "height": 480,
+            "cell_px": 80,
+            "offset_x": 20,
+            "offset_y": 30,
+            "marker_types": [
+                {
+                    "id": "trap",
+                    "label": "陷阱",
+                    "color": "#e06666",
+                    "description": "DM 才知道的伏击点",
+                    "visibility": "kp",
+                },
+                {
+                    "id": "exit",
+                    "label": "出口",
+                    "color": "#93c47d",
+                    "description": "玩家已知的出口",
+                    "visibility": "public",
+                },
+            ],
+            "markers": [
+                {
+                    "id": "m1",
+                    "type": "trap",
+                    "label": "伏击",
+                    "x": 100,
+                    "y": 120,
+                    "w": 80,
+                    "h": 80,
+                    "visibility": "kp",
+                },
+                {
+                    "id": "m2",
+                    "type": "exit",
+                    "label": "出口",
+                    "x": 200,
+                    "y": 220,
+                    "w": 80,
+                    "h": 80,
+                    "visibility": "public",
+                },
+            ],
+        }
+    }
+    record_path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+    _set_room_scene(tmp_path, "p2_phandalin")
+
+    # DM 触发的同步：使用人工标定的每格像素与偏移，而不是按图片尺寸推测。
+    _login(owner, "u1")
+    synced = owner.post("/api/plugins/veil-map/rooms/room1/map/sync-scene").get_json()["data"]
+    assert synced["changed"] is True
+    assert synced["map"]["background"].endswith("/maps/calibrated.webp")
+    assert synced["map"]["grid_size"] == 80
+    assert synced["map"]["grid_offset"] == {"x": 20, "y": 30}
+    assert synced["scene_binding"]["calibrated"] is True
+    assert {item["id"] for item in synced["scene_binding"]["markers"]} == {"m1", "m2"}
+    assert {item["id"] for item in synced["scene_binding"]["marker_types"]} == {"trap", "exit"}
+
+    # 玩家视图：DM 版标记和它的含义都不下发，坐标换算到以底图中心为原点的世界坐标。
+    _login(owner, "u2")
+    player_view = _map(owner)
+    player_markers = player_view["scene_binding"]["markers"]
+    assert [item["id"] for item in player_markers] == ["m2"]
+    assert [item["id"] for item in player_view["scene_binding"]["marker_types"]] == ["exit"]
+    assert player_markers[0]["label"] == "出口"
+    assert player_markers[0]["x"] == -120
+    assert player_markers[0]["y"] == -20
+
+    # 玩家触发同步也不会看到 DM 内容，且不会重复写入。
+    player_sync = owner.post("/api/plugins/veil-map/rooms/room1/map/sync-scene").get_json()["data"]
+    assert player_sync["changed"] is False
+    assert [item["id"] for item in player_sync["scene_binding"]["markers"]] == ["m2"]
+
+    # 作者重新标定后，房间按新标定重新对齐。
+    record["map_config"]["p2_phandalin"]["cell_px"] = 96
+    record["map_config"]["p2_phandalin"]["offset_x"] = 40
+    record_path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+    _login(owner, "u1")
+    recalibrated = owner.post("/api/plugins/veil-map/rooms/room1/map/sync-scene").get_json()["data"]
+    assert recalibrated["changed"] is True
+    assert recalibrated["map"]["grid_size"] == 96
+    assert recalibrated["map"]["grid_offset"] == {"x": (40 - 320) % 96, "y": (30 - 240) % 96}
+
+
 def test_scene_map_auto_binding_ignores_scenes_without_maps(client, tmp_path):
     owner, app = client
     scenario = {

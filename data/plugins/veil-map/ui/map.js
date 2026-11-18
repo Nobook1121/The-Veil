@@ -101,6 +101,8 @@
         var fogMaskCanvas = document.createElement("canvas");
         var fogSignature = "";
         var fogHidden = false;
+        // 剧本场景地图的标定与标记（服务端已按观察者过滤 DM 版内容）。
+        var sceneBinding = null;
 
         host.classList.add("ws-plugin-map");
 
@@ -194,6 +196,10 @@
             "</div>",
             '<div class="vmap-actions"><button type="button" data-vmap-save-calibration>保存标定</button></div>',
             "</div>",
+            '<div class="vmap-divider"></div>',
+            '<div class="vmap-section-label">地图图例（DM）</div>',
+            '<div class="vmap-note">标记含义来自剧本；DM 版标记与说明只对房主/房管显示。</div>',
+            '<div class="vmap-legend" data-vmap-marker-legend></div>',
             "</div>",
             '<div data-vmap-section="token">',
             '<div class="vmap-divider"></div>',
@@ -648,6 +654,42 @@
             }
         }
 
+        /** 剧本场景标记：底图坐标已由服务端换算到世界坐标；DM 版标记只随 DM 视图下发。 */
+        function drawSceneMarkers(camera) {
+            var markers = sceneBinding && Array.isArray(sceneBinding.markers) ? sceneBinding.markers : [];
+            if (!markers.length) return;
+            markers.forEach(function (marker) {
+                var color = String(marker.color || "#f6b26b");
+                var topLeft = ctx.worldToScreen(Number(marker.x) || 0, Number(marker.y) || 0);
+                var width = Math.max(2, (Number(marker.w) || 0) * camera.zoom);
+                var height = Math.max(2, (Number(marker.h) || 0) * camera.zoom);
+                context.save();
+                roundRect(context, topLeft.x, topLeft.y, width, height, 4);
+                context.fillStyle = hexToRgba(color, 0.18);
+                context.fill();
+                context.strokeStyle = color;
+                context.lineWidth = Math.max(1.5, 2 * camera.zoom);
+                context.setLineDash(String(marker.visibility || "") === "kp" ? [6, 4] : []);
+                context.stroke();
+                context.restore();
+                var label = String(marker.label || marker.type_label || "");
+                if (!label) return;
+                context.save();
+                context.font = '600 11px "Segoe UI", sans-serif';
+                var labelWidth = context.measureText(label).width + 8;
+                var labelX = topLeft.x;
+                var labelY = Math.max(0, topLeft.y - 18);
+                roundRect(context, labelX, labelY, labelWidth, 16, 4);
+                context.fillStyle = "rgba(10, 13, 16, 0.78)";
+                context.fill();
+                context.fillStyle = color;
+                context.textAlign = "left";
+                context.textBaseline = "middle";
+                context.fillText(label, labelX + 4, labelY + 8);
+                context.restore();
+            });
+        }
+
         function draw() {
             if (!context || destroyed) return;
             var size = resizeCanvas();
@@ -656,6 +698,7 @@
             context.clearRect(0, 0, size.width, size.height);
             drawSceneLayers(camera);
             drawFog(camera);
+            drawSceneMarkers(camera);
             list.forEach(function (token) {
                 var rect = tokenRect(token);
                 var current = isCurrentActor(token);
@@ -860,6 +903,40 @@
             if (current) panelSceneSelect.value = current;
         }
 
+        /** 地图图例：只渲染服务端下发的标记类型（DM 版类型玩家收不到）。 */
+        function renderMarkerLegend() {
+            var box = panel.querySelector("[data-vmap-marker-legend]");
+            if (!box) return;
+            box.textContent = "";
+            var types = sceneBinding && Array.isArray(sceneBinding.marker_types) ? sceneBinding.marker_types : [];
+            if (!types.length) {
+                var empty = document.createElement("div");
+                empty.className = "vmap-note";
+                empty.textContent = "当前场景没有标记图例。";
+                box.appendChild(empty);
+                return;
+            }
+            types.forEach(function (type) {
+                var row = document.createElement("div");
+                row.className = "vmap-legend-row";
+                var swatch = document.createElement("span");
+                swatch.className = "vmap-legend-swatch";
+                swatch.style.background = String(type.color || "#f6b26b");
+                var main = document.createElement("div");
+                main.className = "vmap-legend-main";
+                var title = document.createElement("strong");
+                title.textContent = String(type.label || "");
+                var description = document.createElement("small");
+                description.textContent = String(type.description || "") ||
+                    (String(type.visibility || "") === "kp" ? "仅 DM 可见" : "玩家可见");
+                main.appendChild(title);
+                main.appendChild(description);
+                row.appendChild(swatch);
+                row.appendChild(main);
+                box.appendChild(row);
+            });
+        }
+
         function applyPayload(data) {
             if (!data || !data.map) return;
             // 拖拽期间不替换地图状态：松手后用写回执（成功或冲突）统一对齐，
@@ -872,6 +949,10 @@
             }
             if (typeof data.can_manage === "boolean") serverCanManage = data.can_manage;
             if (typeof data.player_move_enabled === "boolean") playerMoveAllowed = data.player_move_enabled;
+            if (data.scene_binding && typeof data.scene_binding === "object") {
+                sceneBinding = data.scene_binding;
+                renderMarkerLegend();
+            }
             if (data.fog && typeof data.fog === "object") applyFog(data.fog);
             if (!tokens().some(function (token) { return String(token.id) === selectedId; })) selectedId = "";
             ctx.setBaseStage({
@@ -890,7 +971,7 @@
         function maybeSyncSceneBinding(binding) {
             if (!binding || typeof binding !== "object" || binding.managed !== true) return;
             if (binding.applied === true) return;
-            var key = String(binding.location_id || "") + "|" + String(binding.url || "");
+            var key = String(binding.location_id || "") + "|" + String(binding.url || "") + "|" + String(binding.fingerprint || "");
             if (!binding.url || key === sceneBindingKey) return;
             sceneBindingKey = key;
             window.setTimeout(syncSceneMap, 0);

@@ -4444,3 +4444,283 @@ body.is-guest .guest-login-hint {
     background: rgba(0, 0, 0, 0.22);
     color: inherit;
 }
+
+/* 剧本地图编辑器（场景底图 / 人工标定 / DM 标记） */
+.scenario-map-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.scenario-map-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.scenario-map-scene {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-size: 13px;
+}
+
+.scenario-map-scene select {
+    min-width: 180px;
+}
+
+.scenario-map-status {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--theme-text-muted, #9aa4ad);
+}
+
+.scenario-map-status.is-error {
+    color: #e06666;
+}
+
+.scenario-map-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+    gap: 14px;
+}
+
+.scenario-map-stage {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.scenario-map-viewport {
+    position: relative;
+    height: 460px;
+    overflow: hidden;
+    border-radius: 10px;
+    border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.14));
+    background: #0d1114;
+    cursor: grab;
+    touch-action: none;
+}
+
+.scenario-map-viewport.has-image {
+    background:
+        linear-gradient(45deg, rgba(255, 255, 255, 0.03) 25%, transparent 25%) 0 0 / 24px 24px,
+        linear-gradient(-45deg, rgba(255, 255, 255, 0.03) 25%, transparent 25%) 0 0 / 24px 24px,
+        #0d1114;
+}
+
+.scenario-map-viewport.is-placing {
+    cursor: crosshair;
+}
+
+.scenario-map-viewport img {
+    position: absolute;
+    display: none;
+    max-width: none;
+    transform-origin: 0 0;
+    user-select: none;
+    pointer-events: none;
+}
+
+.scenario-map-calibration-frame {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 96px;
+    height: 96px;
+    transform: translate(-50%, -50%);
+    border: 2px solid #f6b26b;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.65), inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+    z-index: 3;
+}
+
+.scenario-map-calibration-frame::after {
+    content: "标定框 96px";
+    position: absolute;
+    left: 50%;
+    top: -20px;
+    transform: translateX(-50%);
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: rgba(8, 11, 14, 0.82);
+    color: #f6b26b;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.scenario-map-marker-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+}
+
+.scenario-map-marker {
+    position: absolute;
+    box-sizing: border-box;
+    border: 2px solid #f6b26b;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.scenario-map-marker.is-dm {
+    border-style: dashed;
+}
+
+.scenario-map-marker.is-selected {
+    box-shadow: 0 0 0 2px rgba(245, 240, 226, 0.85);
+}
+
+.scenario-map-marker.is-draft {
+    border-style: dashed;
+    background: rgba(245, 240, 226, 0.12);
+    pointer-events: none;
+}
+
+.scenario-map-marker-label {
+    position: absolute;
+    left: 0;
+    top: -18px;
+    max-width: 180px;
+    padding: 1px 6px;
+    border-radius: 5px;
+    color: #101010;
+    font-size: 11px;
+    line-height: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+}
+
+.scenario-map-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 24px;
+    color: #9aa4ad;
+    font-size: 13px;
+    text-align: center;
+    pointer-events: none;
+}
+
+.scenario-map-stage-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.scenario-map-calibration-summary {
+    font-size: 12px;
+    color: var(--theme-text-muted, #9aa4ad);
+}
+
+.scenario-map-help {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--theme-text-muted, #9aa4ad);
+}
+
+.scenario-map-side {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+.scenario-map-side-section {
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.12));
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.scenario-map-side-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.scenario-map-side-hint {
+    margin: 4px 0 8px;
+    font-size: 11px;
+    color: var(--theme-text-muted, #9aa4ad);
+}
+
+.scenario-map-type-list,
+.scenario-map-marker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 220px;
+    overflow: auto;
+}
+
+.scenario-map-type-row {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) 88px 26px;
+    gap: 4px;
+    align-items: center;
+}
+
+.scenario-map-type-row [data-map-type-description] {
+    grid-column: 2 / 4;
+}
+
+.scenario-map-type-row input[type="color"] {
+    width: 30px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    background: none;
+}
+
+.scenario-map-marker-row {
+    display: grid;
+    grid-template-columns: 12px 28px minmax(0, 1fr) 88px 26px;
+    gap: 4px;
+    align-items: center;
+    padding: 3px;
+    border-radius: 7px;
+    cursor: pointer;
+}
+
+.scenario-map-marker-row.is-selected {
+    background: rgba(246, 178, 107, 0.14);
+}
+
+.scenario-map-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+}
+
+.scenario-map-marker-index {
+    font-size: 11px;
+    color: var(--theme-text-muted, #9aa4ad);
+}
+
+.scenario-map-empty-hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--theme-text-muted, #9aa4ad);
+}
+
+@media (max-width: 980px) {
+    .scenario-map-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .scenario-map-viewport {
+        height: 360px;
+    }
+}
