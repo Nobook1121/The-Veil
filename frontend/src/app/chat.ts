@@ -1902,6 +1902,10 @@ function renderRoomMessage(message: ChatMessage | null, animate = false): void {
 }
 
 function clearChatMessages(): void {
+    // 离开 / 房间被删除时，输入中提示与思考计时器属于房内临时态，先清掉它们。
+    thinkingTimers.forEach((timerId) => window.clearInterval(timerId));
+    thinkingTimers.clear();
+    clearTypingIndicator();
     const chatHistory = document.getElementById("chatHistory");
     if (!chatHistory) return;
     chatHistory.innerHTML = window.TrpgTemplates.render("chat-welcome");
@@ -1943,6 +1947,15 @@ function initWebSocket(): void {
         socket.on("room_members_changed", () => {
             void window.refreshCurrentRoomMembers?.();
             window.refreshRoomAiChanges?.();
+        });
+        // 房间被删除 / 被移出：其他在线成员也要立即退出并清理舞台，避免继续显示已删房间的地图。
+        socket.on("room_deleted", (data) => {
+            const payload = data as { room_id?: string };
+            window.handleRoomGone?.(String(payload?.room_id || ""), "房间已被删除，已返回房间列表。");
+        });
+        socket.on("room_evicted", (data) => {
+            const payload = data as { room_id?: string };
+            window.handleRoomGone?.(String(payload?.room_id || ""), "你已被移出该房间，房间内容已关闭。");
         });
         // 房间在线人数：后端按真实连接状态推送，房间列表卡片即时更新。
         socket.on("room_presence_changed", (data) => {

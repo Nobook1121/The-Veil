@@ -161,6 +161,8 @@ interface Window {
         toggleChatOverlay(force?: boolean): void;
         setPanel(panel: "chat" | "character" | "settings"): void;
         isCanvas(): boolean;
+        /** 房间被删除 / 被移出时清理该房间的舞台与滚动缓存。 */
+        forgetRoom(roomId: string): void;
     };
     TrpgSocket?: SocketLike | null;
     TrpgStagePlugins?: TrpgPluginsRegistry;

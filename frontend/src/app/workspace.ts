@@ -672,6 +672,21 @@
         if (roomId) stageViews.delete(roomId);
     }
 
+    /** 房间被删除或被移出：丢弃该房间的布局、镜头、舞台与滚动缓存，防止旧地图复用。 */
+    function forgetRoom(id: string): void {
+        const roomKey = String(id || "").trim();
+        if (!roomKey) return;
+        sessionLayouts.delete(roomKey);
+        cameras.delete(roomKey);
+        stageViews.delete(roomKey);
+        chatScroll.delete(roomKey);
+        try {
+            localStorage.removeItem(stageStorageKey(roomKey));
+        } catch {
+            // 隐私模式下不可写，忽略即可。
+        }
+    }
+
     function camera(): Camera {
         const key = roomId || "default";
         const existing = cameras.get(key);
@@ -1608,6 +1623,7 @@
         toggleChatOverlay,
         setPanel,
         isCanvas: () => layout === "canvas",
+        forgetRoom,
     };
 
     if (document.readyState === "loading") {

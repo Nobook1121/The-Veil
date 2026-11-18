@@ -26,6 +26,8 @@ interface RoomInviteTokenResponse {
 }
 
 let currentRoom: Room | null = null;
+/** 正在由本端发起删除的房间：服务端广播先于 HTTP 响应到达时，避免重复收尾。 */
+const roomDeletionInFlight = new Set<string>();
 let previewNodeFilename: string | null = null;
 let roomEntryCharacterModal: BootstrapModalInstance | null = null;
 let roomEntrySelectionResolver: ((result: RoomEntrySelection | null) => void) | null = null;
@@ -2616,27 +2618,28 @@ async function deleteCurrentRoom(): Promise<void> {
     });
     if (!confirmed) return;
 
+    const deletingRoomId = currentRoom.id;
+    roomDeletionInFlight.add(String(deletingRoomId));
     try {
-        const deletingRoomId = currentRoom.id;
         const data = await TrpgApi.del<ApiResponse>(`/api/rooms/${deletingRoomId}`);
         if (!data.success) {
             showNotification(`删除房间失败: ${data.message || data.error || "未知错误"}`, "error");
             return;
         }
 
-        window.leaveSocketRoom?.(deletingRoomId);
-        currentRoom = null;
-        window.currentRoom = null;
-        window.TrpgBgm?.setRoom(null);
-        window.TrpgImmersive?.setRoom(null);
-        window.TrpgCombat?.onRoomChanged();
-        window.TrpgWorldOverride?.refresh(null);
+        // 删除房间要按「离开房间」的完整路径收尾：清空房间态、派发 room-changed、
+        // 销毁地图舞台与插件、关闭房内面板，再丢弃该房间的舞台/滚动缓存。
         TrpgCookies.remove(getLastRoomStorageKey());
         window.clearChatMessages?.();
-        showRoomListView();
+        if (currentRoom && String(currentRoom.id) === String(deletingRoomId)) {
+            clearCurrentRoom();
+        }
+        window.TrpgWorkspace?.forgetRoom?.(String(deletingRoomId));
         showNotification("房间已删除", "success");
     } catch (error) {
         showNotification(`删除房间失败: ${roomErrorMessage(error)}`, "error");
+    } finally {
+        roomDeletionInFlight.delete(String(deletingRoomId));
     }
 }
 
@@ -2894,6 +2897,24 @@ function clearCurrentRoom(): void {
     setText("homeRoomOnlineCount", "在线玩家 0/0");
     renderRoomMemberList(null);
     showRoomListView();
+}
+
+/**
+ * 服务端广播「房间已删除 / 当前成员被移出」时的统一收尾。
+ * 只有事件指向当前房间才处理，避免误清用户正在浏览的其他房间。
+ */
+function handleRoomGone(roomId: string, message = "房间已不可用，已返回房间列表。"): void {
+    const targetId = String(roomId || "").trim();
+    if (!targetId || roomDeletionInFlight.has(targetId)) return;
+    // 房间已经不存在：即使当前不在房间内，也要丢掉指向它的「上次房间」记录。
+    if (String(TrpgCookies.get(getLastRoomStorageKey()) || "") === targetId) {
+        TrpgCookies.remove(getLastRoomStorageKey());
+    }
+    if (!currentRoom || String(currentRoom.id) !== targetId) return;
+    window.clearChatMessages?.();
+    clearCurrentRoom();
+    window.TrpgWorkspace?.forgetRoom?.(targetId);
+    showNotification(message, "info");
 }
 
 function previewRoomCharacter(encodedCard: string, userId = ""): void {
@@ -3300,4 +3321,5 @@ window.openCreateRoomWithScenario = async (scenarioId: number): Promise<void> =>
 };
 window.autoLoadLastRoom = autoLoadLastRoom;
 window.clearCurrentRoom = clearCurrentRoom;
+window.handleRoomGone = handleRoomGone;
 window.recordCharacterChange = recordCharacterChange;

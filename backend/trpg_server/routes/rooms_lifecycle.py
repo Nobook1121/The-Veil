@@ -804,6 +804,11 @@ def delete_room(room_id):
     if info.get("completed_at") and not info.get("archived"):
         return error_response("Please archive the completed room first", 409, "Completed rooms must be archived so their messages are preserved")
 
+    # 先通知仍在房间内的其他成员再删目录，让他们的前端退出房间并销毁地图舞台，
+    # 避免继续显示已删除房间的地图和残留面板。
+    socketio = current_app.extensions.get("socketio")
+    if socketio is not None:
+        socketio.emit("room_deleted", {"room_id": str(room_id)}, room=str(room_id))
     remove_tree(room_dir)
     log_user_action(
         logger,

@@ -75,6 +75,7 @@ interface Window {
     loadRoomsList?: () => Promise<void>;
     autoLoadLastRoom?: () => Promise<void>;
     clearCurrentRoom?: () => void;
+    handleRoomGone?: (roomId: string, message?: string) => void;
     clearCharacterManagement?: () => void;
     reloadCharacterManagement?: () => Promise<void>;
     switchMainTab?: (tabId: string, options?: { clearNav?: boolean }) => void;
