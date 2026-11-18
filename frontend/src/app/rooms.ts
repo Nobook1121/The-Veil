@@ -46,6 +46,10 @@ let roomScenarioPickerScenarios: Scenario[] = [];
 let roomScenarioPickerSelected: { id: string | number; title: string } | null = null;
 // 键盘导航当前高亮项；默认落在已选项或第一项。
 let roomScenarioActiveIndex = 0;
+// 下拉浮层已挪到 body 下，避免任何祖先的 transform/filter/contain 成为 fixed 包含块。
+let roomScenarioDropdownHosted = false;
+let roomScenarioDropdownFrame = 0;
+let roomScenarioDropdownObserver: ResizeObserver | null = null;
 
 function initRoomManagement(): void {
     window.currentRoom = currentRoom;
@@ -90,10 +94,21 @@ function initRoomManagement(): void {
     });
     document.addEventListener("click", (event) => {
         const target = event.target as HTMLElement | null;
-        if (!target?.closest(".room-scenario-combobox")) closeRoomScenarioPicker();
+        // 浮层已 portal 到 body，不再是 combobox 的子节点，需要单独排除。
+        if (!target?.closest(".room-scenario-combobox, .room-scenario-dropdown")) closeRoomScenarioPicker();
     });
-    window.addEventListener("resize", positionRoomScenarioDropdown);
-    document.addEventListener("scroll", positionRoomScenarioDropdown, true);
+    window.addEventListener("resize", scheduleRoomScenarioDropdownPosition);
+    document.addEventListener("scroll", scheduleRoomScenarioDropdownPosition, true);
+    // 浏览器缩放、移动端软键盘等只触发 visualViewport，不触发 window resize。
+    window.visualViewport?.addEventListener("resize", scheduleRoomScenarioDropdownPosition);
+    window.visualViewport?.addEventListener("scroll", scheduleRoomScenarioDropdownPosition);
+    const createSaveModalElement = document.getElementById("createSaveModal");
+    const createSaveModalContent = createSaveModalElement?.querySelector<HTMLElement>(".modal-content");
+    createSaveModalElement?.addEventListener("shown.bs.modal", scheduleRoomScenarioDropdownPosition);
+    // 弹窗入场动画（translate/scale）期间 getBoundingClientRect 是动画中的值，结束后要重算一次。
+    createSaveModalContent?.addEventListener("animationend", scheduleRoomScenarioDropdownPosition);
+    createSaveModalContent?.addEventListener("transitionend", scheduleRoomScenarioDropdownPosition);
+    createSaveModalElement?.addEventListener("hidden.bs.modal", closeRoomScenarioPicker);
     document.getElementById("confirmCreateSave")?.addEventListener("click", () => {
         void createRoom();
     });
@@ -562,7 +577,19 @@ function moveRoomScenarioActive(delta: number): void {
 /**
  * 下拉浮层用 fixed 定位并跟随输入框；创建房间的 modal-body 有 60vh 滚动容器，
  * 绝对定位会被裁掉，fixed 可以稳定地浮在弹窗内容之上。
+ *
+ * 注意：fixed 的包含块不一定是视口 —— 祖先只要带 transform / filter /
+ * backdrop-filter / contain，fixed 就会改为相对该祖先定位，而我们写入的是
+ * getBoundingClientRect() 的视口坐标，两者叠加就表现为“下拉整体飘走”。
+ * 创建房间弹窗的入场动画（abyssModalIn）正好给 .modal-content 加了
+ * transform + filter，因此这里把浮层挂到 body 下，隔离所有祖先的包含块。
  */
+function ensureRoomScenarioDropdownHost(dropdown: HTMLElement): void {
+    if (roomScenarioDropdownHosted && dropdown.parentElement === document.body) return;
+    document.body.appendChild(dropdown);
+    roomScenarioDropdownHosted = true;
+}
+
 function positionRoomScenarioDropdown(): void {
     const dropdown = document.getElementById("roomScenarioDropdown");
     const input = document.getElementById("roomScenarioSearch") as HTMLInputElement | null;
@@ -570,30 +597,51 @@ function positionRoomScenarioDropdown(): void {
     const rect = input.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
     const margin = 8;
-    const below = window.innerHeight - rect.bottom - margin;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    const below = viewportHeight - rect.bottom - margin;
     const above = rect.top - margin;
     const openUp = below < 200 && above > below;
     const available = Math.max(0, (openUp ? above : below) - 6);
+    // 视口坐标直接写死；同时显式清掉 CSS 里的 right/bottom，避免出现 over-constrained 的拉伸。
+    const left = Math.max(margin, Math.min(rect.left, viewportWidth - rect.width - margin));
     dropdown.style.position = "fixed";
-    dropdown.style.left = `${Math.round(rect.left)}px`;
+    dropdown.style.left = `${Math.round(left)}px`;
+    dropdown.style.right = "auto";
     dropdown.style.width = `${Math.round(rect.width)}px`;
     dropdown.style.maxHeight = `${Math.round(Math.min(340, Math.max(140, available)))}px`;
     if (openUp) {
         dropdown.style.top = "auto";
-        dropdown.style.bottom = `${Math.round(window.innerHeight - rect.top + 6)}px`;
+        dropdown.style.bottom = `${Math.round(viewportHeight - rect.top + 6)}px`;
     } else {
         dropdown.style.bottom = "auto";
         dropdown.style.top = `${Math.round(rect.bottom + 6)}px`;
     }
 }
 
+/** 合并同一帧内的重复请求（滚动/缩放/动画结束可能连续触发）。 */
+function scheduleRoomScenarioDropdownPosition(): void {
+    if (roomScenarioDropdownFrame) return;
+    roomScenarioDropdownFrame = window.requestAnimationFrame(() => {
+        roomScenarioDropdownFrame = 0;
+        positionRoomScenarioDropdown();
+    });
+}
+
 function openRoomScenarioPicker(): void {
     const dropdown = document.getElementById("roomScenarioDropdown");
     const input = document.getElementById("roomScenarioSearch") as HTMLInputElement | null;
     if (!dropdown) return;
+    ensureRoomScenarioDropdownHost(dropdown);
+    // 输入框宽度会随弹窗尺寸变化，监听它比自己推窗口尺寸更可靠。
+    if (!roomScenarioDropdownObserver && input && typeof ResizeObserver !== "undefined") {
+        roomScenarioDropdownObserver = new ResizeObserver(scheduleRoomScenarioDropdownPosition);
+        roomScenarioDropdownObserver.observe(input);
+    }
     dropdown.hidden = false;
     input?.setAttribute("aria-expanded", "true");
     renderRoomScenarioPicker();
+    scheduleRoomScenarioDropdownPosition();
 }
 
 function closeRoomScenarioPicker(): void {
