@@ -1022,3 +1022,210 @@ def test_area_ticks_with_noncombat_time(tmp_path, plugins):
     assert "error" not in result, result
     assert area_store.list_areas(tmp_path) == []
     assert result["areas"]["expired"]
+
+
+def _raw_area(tmp_path, **spec):
+    payload = {
+        "name": "Area",
+        "shape": "sphere",
+        "size_ft": 10,
+        "origin": {"cell_x": 0, "cell_y": 0},
+        "grid_ft": 5,
+        "duration": {"unit": "round", "rounds": 2},
+    }
+    payload.update(spec)
+    return area_store.create_area(tmp_path, payload)["area"]
+
+
+def test_area_trigger_claims_once_under_concurrency(tmp_path, plugins):
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    area = _raw_area(tmp_path)
+    calls: list[str] = []
+    barrier = threading.Barrier(4)
+
+    def apply(_area, target):
+        calls.append(target)
+        time.sleep(0.05)
+        return {"ok": True}
+
+    def run(_index):
+        barrier.wait()
+        return area_store.trigger(
+            tmp_path, area["id"], "Goblin", round_number=1, apply=apply
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(run, range(4)))
+
+    assert calls == ["Goblin"]
+    assert sum(1 for item in results if not item.get("duplicate")) == 1
+    assert sum(1 for item in results if item.get("duplicate")) == 3
+
+
+def test_area_out_of_combat_dedupes_and_clears_on_exit(tmp_path, plugins):
+    area = _raw_area(tmp_path)
+    calls: list[int] = []
+
+    def apply(_area, _target):
+        calls.append(1)
+        return {"ok": True}
+
+    first = area_store.trigger(tmp_path, area["id"], "Goblin", round_number=0, apply=apply)
+    assert not first["duplicate"]
+    second = area_store.trigger(tmp_path, area["id"], "Goblin", round_number=0, apply=apply)
+    assert second["duplicate"] is True
+    assert len(calls) == 1
+
+    assert area_store.clear_trigger(tmp_path, area["id"], "Goblin") is True
+    third = area_store.trigger(tmp_path, area["id"], "Goblin", round_number=0, apply=apply)
+    assert not third["duplicate"]
+    assert len(calls) == 2
+
+
+def test_area_trigger_apply_failure_is_audited_not_swallowed(tmp_path, plugins):
+    area = _raw_area(tmp_path)
+
+    def apply(_area, _target):
+        raise RuntimeError("damage pipeline exploded")
+
+    result = area_store.trigger(tmp_path, area["id"], "Goblin", round_number=1, apply=apply)
+    assert result["result"]["code"] == "area.apply_failed"
+    stored = area_store.list_areas(tmp_path)[0]
+    assert stored["last_trigger_error"]
+
+
+def test_area_handler_exception_returns_degraded_result(tmp_path, plugins):
+    from trpg_server.agents.tools import areas as area_tools
+
+    area_tools.install_hooks()
+    _raw_area(tmp_path)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("handler exploded")
+
+    area_store.register_trigger_handler(boom)
+    results = area_store.notify_move(
+        tmp_path, "Goblin", (9, 9), (0, 0), round_number=1
+    )
+    assert len(results) == 1
+    assert results[0]["code"] == "area.trigger_failed"
+    assert results[0]["degraded"] is True
+
+
+def test_area_geometry_cone_line_and_cylinder(tmp_path, plugins):
+    origin = {"cell_x": 0, "cell_y": 0}
+
+    cone = {
+        "shape": "cone",
+        "origin": origin,
+        "size_ft": 15,
+        "grid_ft": 5,
+        "direction": "e",
+    }
+    assert area_store.contains(cone, 1, 0)
+    assert area_store.contains(cone, 3, 0)
+    assert not area_store.contains(cone, 1, 1)
+    assert not area_store.contains(cone, -1, 0)
+
+    cone_north = {**cone, "direction": "north"}
+    assert area_store.contains(cone_north, 0, -2)
+    assert not area_store.contains(cone_north, 0, 2)
+
+    # 没有朝向时锥形退化为同尺寸圆形，而不是把整块方形都算进去。
+    cone_free = {
+        "shape": "cone",
+        "origin": origin,
+        "size_ft": 15,
+        "grid_ft": 5,
+    }
+    assert area_store.contains(cone_free, 0, 2)
+    assert area_store.contains(cone_free, 0, 3)
+
+    line = {
+        "shape": "line",
+        "origin": origin,
+        "size_ft": 15,
+        "width_ft": 5,
+        "grid_ft": 5,
+        "direction": "e",
+    }
+    assert area_store.contains(line, 1, 0)
+    assert area_store.contains(line, 3, 0)
+    assert not area_store.contains(line, 1, 1)
+    assert not area_store.contains(line, -1, 0)
+
+    cylinder = {
+        "shape": "cylinder",
+        "origin": origin,
+        "size_ft": 10,
+        "grid_ft": 5,
+    }
+    assert area_store.contains(cylinder, 0, 2)
+    assert not area_store.contains(cylinder, 2, 2)
+
+
+def test_area_move_uses_full_token_footprint(tmp_path, plugins):
+    from trpg_server.agents.tools import areas as area_tools
+
+    area_tools.install_hooks()
+    area = area_store.create_area(
+        tmp_path,
+        {
+            "name": "Edge",
+            "shape": "sphere",
+            "size_ft": 5,
+            "origin": {"cell_x": 5, "cell_y": 5},
+            "grid_ft": 5,
+            "trigger": "enter",
+            "duration": {"unit": "round", "rounds": 2},
+        },
+    )["area"]
+    seen: list[str] = []
+
+    def record(_room_dir, row, actor, _round, _hook, _context):
+        seen.append(str(row.get("id")))
+        return {"area": row.get("id")}
+
+    area_store.register_trigger_handler(record)
+    # 3x1 棋子的锚点在 (3,5)，但最右一格 (5,5) 已进入区域。
+    results = area_store.notify_move(
+        tmp_path, "Giant", (0, 5), (3, 5), round_number=1, size=(3, 1)
+    )
+    assert seen == [area["id"]]
+    assert results and results[0]["area"] == area["id"]
+
+    # footprint 仍与区域重叠时继续移动不重复触发。
+    area_store.notify_move(
+        tmp_path, "Giant", (3, 5), (3, 6), round_number=1, size=(3, 1)
+    )
+    assert seen == [area["id"]]
+
+
+def test_guard_exception_degrades_or_fails_closed():
+    from pathlib import Path
+
+    from trpg_server.workflows import guards
+
+    def boom(_payload):
+        raise RuntimeError("guard exploded")
+
+    try:
+        guards.register_action_guard(boom)
+        errors, notes = guards.validate_action_report(
+            Path("."), kind="attack", actor="Mira"
+        )
+        assert errors == []
+        assert any("降级放行" in note for note in notes)
+
+        guards.clear_action_guards()
+        guards.register_action_guard(boom, critical=True)
+        errors, notes = guards.validate_action_report(
+            Path("."), kind="attack", actor="Mira"
+        )
+        assert errors and not notes
+        assert "已阻止本次行动" in errors[0]
+    finally:
+        guards.clear_action_guards()

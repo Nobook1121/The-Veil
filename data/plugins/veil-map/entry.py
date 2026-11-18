@@ -3320,6 +3320,7 @@ def _action_line_guard(payload: dict[str, Any]) -> dict[str, Any]:
                 cell_x, cell_y, width, height, grid, (offset_x, offset_y)
             )
         except Exception:  # noqa: BLE001
+            logger.debug("veil_map_token_center_failed", exc_info=True)
             return None
 
     actor_token = find_token(payload.get("actor"))
@@ -3360,13 +3361,21 @@ def _area_position_provider(room_dir: Any, name: str) -> dict[str, Any] | None:
     try:
         state = _load_map(room_dir)
     except Exception:  # noqa: BLE001
+        logger.warning("veil_map_area_position_load_failed room=%s", room_dir, exc_info=True)
         return None
     token = _find_token(state, name)
     if token is None:
         return None
     grid, offset_x, offset_y = _grid_of(state)
     cell_x, cell_y = _cell_of(token, grid, offset_x, offset_y)
-    return {"cell_x": cell_x, "cell_y": cell_y, "grid_ft": FEET_PER_CELL}
+    width, height = _footprint(token)
+    return {
+        "cell_x": cell_x,
+        "cell_y": cell_y,
+        "w": width,
+        "h": height,
+        "grid_ft": FEET_PER_CELL,
+    }
 
 
 def _notify_area_move(
@@ -3382,7 +3391,14 @@ def _notify_area_move(
         combat = load_room_state(room_dir).get("combat")
         round_number = int((combat or {}).get("round") or 0) if isinstance(combat, dict) and combat.get("active") else 0
         actor = str(token.get("combatant") or token.get("name") or "")
-        area_store.notify_move(room_dir, actor, from_cell, to_cell, round_number)
+        area_store.notify_move(
+            room_dir,
+            actor,
+            from_cell,
+            to_cell,
+            round_number,
+            size=_footprint(token),
+        )
     except Exception:  # noqa: BLE001 - 区域触发失败不能回滚移动
         logger.warning("veil_map_area_move_trigger_failed", exc_info=True)
 
@@ -3399,7 +3415,7 @@ def _register_action_guard() -> None:
         from trpg_server.workflows.guards import register_action_guard
     except Exception:  # noqa: BLE001 - 旧核心没有工作流时静默跳过
         return
-    register_action_guard(_action_line_guard)
+    register_action_guard(_action_line_guard, critical=True)
     area_store.register_position_provider(_area_position_provider)
     _ACTION_GUARD_REGISTERED = True
 

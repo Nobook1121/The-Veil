@@ -7,17 +7,25 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Iterable, Mapping
+
+logger = logging.getLogger(__name__)
 
 ActionGuard = Callable[[Mapping[str, Any]], Iterable[str] | Mapping[str, Any]]
 
-_GUARDS: list[ActionGuard] = []
+# (guard, critical)：critical 为真表示校验器异常时必须阻止行动（fail-closed），
+# 否则只记录降级说明并放行。
+_GUARDS: list[tuple[ActionGuard, bool]] = []
 
 
-def register_action_guard(guard: ActionGuard) -> None:
-    if guard in _GUARDS:
-        return
-    _GUARDS.append(guard)
+def register_action_guard(guard: ActionGuard, *, critical: bool = False) -> None:
+    for index, (existing, existing_critical) in enumerate(_GUARDS):
+        if existing is guard:
+            if critical and not existing_critical:
+                _GUARDS[index] = (existing, True)
+            return
+    _GUARDS.append((guard, bool(critical)))
 
 
 def clear_action_guards() -> None:
@@ -49,10 +57,24 @@ def validate_action_report(
     }
     errors: list[str] = []
     notes: list[str] = []
-    for guard in list(_GUARDS):
+    for guard, critical in list(_GUARDS):
         try:
             result = guard(payload) or []
-        except Exception:  # noqa: BLE001 - 地图数据损坏不能阻断战斗结算
+        except Exception as exc:  # noqa: BLE001 - 校验器异常不能静默吞掉
+            logger.exception(
+                "行动校验器异常 kind=%s actor=%s critical=%s",
+                payload.get("kind"),
+                payload.get("actor"),
+                critical,
+            )
+            if critical:
+                errors.append(
+                    f"行动校验失败（{type(exc).__name__}），为保证规则正确性已阻止本次行动。"
+                )
+            else:
+                notes.append(
+                    f"行动校验异常（{type(exc).__name__}），本次已降级放行，请 KP 复核。"
+                )
             continue
         if isinstance(result, Mapping):
             rows = result.get("errors") or []
