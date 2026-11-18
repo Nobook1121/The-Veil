@@ -287,7 +287,25 @@ def _run_turn_locked(
         ip=ip,
         event_callback=lambda event, payload: _emit(actor.user_id, event, payload),
     )
-    specs = exposed_specs(actor, config, room_id=tool_context.room_id)
+    try:
+        from trpg_server.site_agent_tools.ruleset import (
+            resolve_current_ruleset,
+            site_agent_profile,
+        )
+
+        ruleset_plugin = resolve_current_ruleset(tool_context)
+        tool_context.ruleset_id = ruleset_plugin.id
+        tool_context.ruleset_plugin = ruleset_plugin
+        ruleset_profile = site_agent_profile(ruleset_plugin)
+    except Exception as exc:  # noqa: BLE001 - 未知/禁用规则集必须显式失败
+        raise SiteAgentError("ruleset_unavailable", f"当前规则集不可用：{exc}", 400) from exc
+    specs = exposed_specs(
+        actor,
+        config,
+        room_id=tool_context.room_id,
+        ruleset_id=tool_context.ruleset_id,
+        context=tool_context,
+    )
     registry = build_tool_registry(actor, tool_context, config)
     profile = AgentProfile(
         id="site_agent",
@@ -309,6 +327,7 @@ def _run_turn_locked(
         tools=[spec for spec in specs],
         room_context=room,
         scenario_context=scenario_context,
+        ruleset_profile=ruleset_profile,
     )
     messages = [{"role": "system", "content": system_prompt}, *_history(conversation, config.max_history_messages)]
 

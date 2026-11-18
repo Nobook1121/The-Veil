@@ -86,3 +86,10 @@ class Dnd5eTools:
             *CONCENTRATION_TOOL_NAMES,
             *REACTION_TOOL_NAMES,
         )
+
+    def site_agent_profile(self) -> dict:
+        """网站 Agent 的 5e 能力与提示词由本插件提供，核心只按规则集分派。"""
+        from dnd5e_plugin.site_agent import site_agent_profile
+
+        return site_agent_profile()
+

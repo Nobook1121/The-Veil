@@ -43,6 +43,9 @@ class ToolContext:
     attachments: list[dict[str, Any]] = field(default_factory=list)
     pending_actions: list[dict[str, Any]] = field(default_factory=list)
     event_callback: Callable[[str, dict[str, Any]], None] | None = None
+    # 当前规则集由服务端按房间/剧本上下文解析后注入；工具清单与提示词据此分派。
+    ruleset_id: str = ""
+    ruleset_plugin: Any = None
 
     def emit(self, event: str, payload: dict[str, Any]) -> None:
         if callable(self.event_callback):

@@ -24,6 +24,7 @@ from trpg_server.site_agent_tools.narrative import NARRATIVE_TOOLS
 from trpg_server.site_agent_tools.permissions import PERMISSION_TOOLS
 from trpg_server.site_agent_tools.profile import PROFILE_TOOLS
 from trpg_server.site_agent_tools.rooms import ROOM_TOOLS
+from trpg_server.site_agent_tools.ruleset import resolve_ruleset_spec, ruleset_tool_specs
 from trpg_server.site_agent_tools.scenarios import SCENARIO_TOOLS
 from trpg_server.site_agent_tools.settings import SITE_SETTING_TOOLS
 from trpg_server.site_agent_tools.users import USER_TOOLS
@@ -57,6 +58,8 @@ def exposed_specs(
     config: Any,
     *,
     room_id: str | None = None,
+    ruleset_id: str | None = None,
+    context: ToolContext | None = None,
 ) -> list[ToolSpec]:
     if not getattr(config, "enabled", False) or not actor.has("agent.use"):
         return []
@@ -67,6 +70,20 @@ def exposed_specs(
         if spec.scope == "room" and not room_id:
             continue
         result.append(spec)
+    if ruleset_id and context is not None:
+        plugin = getattr(context, "ruleset_plugin", None)
+        if plugin is None:
+            from trpg_server.site_agent_tools.ruleset import resolve_current_ruleset
+
+            plugin = resolve_current_ruleset(context, ruleset_id)
+        existing = {spec.name for spec in result}
+        for spec in ruleset_tool_specs(plugin, context):
+            if spec.name in existing:
+                continue
+            if spec.scope == "room" and not room_id:
+                continue
+            result.append(spec)
+            existing.add(spec.name)
     return result
 
 
@@ -218,7 +235,13 @@ def _make_wrapper(spec: ToolSpec, actor: Any, context: ToolContext, config: Any)
 
 def build_tool_registry(actor: Any, context: ToolContext, config: Any) -> ToolRegistry:
     registry = ToolRegistry()
-    for spec in exposed_specs(actor, config, room_id=context.room_id):
+    for spec in exposed_specs(
+        actor,
+        config,
+        room_id=context.room_id,
+        ruleset_id=context.ruleset_id or None,
+        context=context,
+    ):
         registry.register(
             spec.build_agent_tool(_make_wrapper(spec, actor, context, config))
         )
@@ -228,12 +251,19 @@ def build_tool_registry(actor: Any, context: ToolContext, config: Any) -> ToolRe
 def apply_pending_action(actor: Any, action: dict[str, Any], *, config: Any) -> ToolResult:
     """执行已确认的待确认操作；执行前重新鉴权并复用 apply 实现。"""
     spec = SPECS_BY_NAME.get(str(action.get("tool") or ""))
+    room_id = str(action.get("room_id") or "") or None
+    if spec is None:
+        spec = resolve_ruleset_spec(
+            str(action.get("tool") or ""),
+            actor=actor,
+            config=config,
+            room_id=room_id,
+        )
     if spec is None:
         return ToolResult.failure("待确认操作对应的工具不存在")
     if spec.risk not in {"write", "danger"} or spec.apply is None:
         return ToolResult.failure("该操作不是可执行的写操作")
     args = action.get("args") if isinstance(action.get("args"), dict) else {}
-    room_id = str(action.get("room_id") or "") or None
     # 重新鉴权用模型原始入参；旧版待确认操作没有 check_args 时退回执行参数。
     check_args = action.get("check_args") if isinstance(action.get("check_args"), dict) else args
     decision = authorize_tool(actor, spec, check_args, config=config, room_id=room_id)

@@ -58,3 +58,10 @@ class Coc7Tools:
 
     def role_prompt(self, role_id: str) -> str:
         return COC7_KP_PROMPT if str(role_id or "").strip().lower() == "kp" else ""
+
+    def site_agent_profile(self) -> dict:
+        """网站 Agent 的 CoC7 能力与提示词由本插件提供。"""
+        from trpg_server.ruleset.coc7.site_agent import site_agent_profile
+
+        return site_agent_profile()
+

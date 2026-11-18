@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from typing import Any
 
@@ -11,16 +12,15 @@ from trpg_server.agents.narrative.repair import repair_bundle
 from trpg_server.agents.narrative.store import has_narrative, load_bundle, save_bundle
 from trpg_server.agents.narrative.validate import validate_bundle
 from trpg_server.config.paths import BASE_DIR
+from trpg_server.ruleset import RulesetSelectionError, builtin_registry
 from trpg_server.scenario_bundle import BundleError, build_narrative, normalize_bundle
 from trpg_server.site_agent_tools.base import ToolContext, ToolResult, ToolSpec, schema
 
 _MAX_SCENARIO_JSON = 200000
 _CREATE_SKILL_DIR = BASE_DIR / "skills" / "scenario-create"
 _CREATE_GUIDE_FILES = {
-    "skill": "SKILL.md",
-    "coc7": "references/coc7-authoring.md",
+    "skill": "references/workflow.md",
     "bundle": "references/bundle-schema.md",
-    "prompts": "references/prompts.md",
 }
 
 
@@ -105,7 +105,13 @@ def validate_scenario(actor: Any, arguments: dict[str, Any], context: ToolContex
     )
 
 
-def _import_bundle(arguments: dict[str, Any]) -> Any:
+def _resolve_ruleset(context: ToolContext, explicit: Any):
+    from trpg_server.site_agent_tools.ruleset import resolve_current_ruleset
+
+    return resolve_current_ruleset(context, str(explicit or "").strip() or None)
+
+
+def _import_bundle(arguments: dict[str, Any], *, ruleset_id: str) -> Any:
     """返回 (BundleResult, narrative_bundle, repair_report, validation)。"""
     bundle = arguments.get("bundle") if isinstance(arguments.get("bundle"), dict) else None
     if bundle is None:
@@ -118,10 +124,24 @@ def _import_bundle(arguments: dict[str, Any]) -> Any:
             content,
             title=str(arguments.get("title") or "").strip(),
             request=build_ai_requester(),
+            ruleset_id=ruleset_id,
         )
+    bundle = copy.deepcopy(bundle)
+    scenario_payload = bundle.get("scenario") if isinstance(bundle.get("scenario"), dict) else {}
+    declared = str(scenario_payload.get("ruleset_id") or "").strip()
+    scenario_payload["ruleset_id"] = ruleset_id
+    bundle["scenario"] = scenario_payload
     result = normalize_bundle(bundle, fallback_title=str(arguments.get("title") or "").strip())
     if result.errors:
         raise BundleError("；".join(str(item.get("message")) for item in result.errors[:5]))
+    if declared and declared != ruleset_id:
+        result.warnings.append(
+            {
+                "code": "ruleset.override",
+                "message": f"剧本包声明 ruleset_id={declared}，本次导入已按显式选择改为 {ruleset_id}",
+            }
+        )
+    result.data["scenario"]["ruleset_id"] = ruleset_id
     narrative, repair, validation = build_narrative(result)
     return result, narrative, repair, validation
 
@@ -129,7 +149,11 @@ def _import_bundle(arguments: dict[str, Any]) -> Any:
 def preview_import_script(actor: Any, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     """AI 全链路导入剧本：预览剔除项、模块与图谱统计，确认后才创建。"""
     try:
-        result, narrative, repair, validation = _import_bundle(arguments)
+        plugin = _resolve_ruleset(context, arguments.get("ruleset_id"))
+    except RulesetSelectionError as exc:
+        return ToolResult.failure(str(exc))
+    try:
+        result, narrative, repair, validation = _import_bundle(arguments, ruleset_id=plugin.id)
     except BundleError as exc:
         return ToolResult.failure(str(exc))
     except RuntimeError as exc:
@@ -139,6 +163,7 @@ def preview_import_script(actor: Any, arguments: dict[str, Any], context: ToolCo
     scenario = dict(result.data["scenario"])
     scenario.pop("id", None)
     scenario.pop("scenario_version", None)
+    scenario["ruleset_id"] = plugin.id
     scenario["import_mode"] = "ai"
     scenario["import_exclusions"] = result.data.get("exclusions") or []
     scenario["conversion"] = {
@@ -159,6 +184,8 @@ def preview_import_script(actor: Any, arguments: dict[str, Any], context: ToolCo
         return ToolResult.failure(exc.message)
     data = {
         "summary": preview.get("summary"),
+        "ruleset_id": plugin.id,
+        "ruleset_name": getattr(plugin, "display_name", plugin.id),
         "modules": len(scenario.get("modules", [])),
         "nodes": len(narrative.nodes),
         "edges": len(narrative.edges),
@@ -175,11 +202,15 @@ def preview_import_script(actor: Any, arguments: dict[str, Any], context: ToolCo
             "scenario_id": None,
             "payload": scenario,
             "bundle": result.data,
+            "ruleset_id": plugin.id,
         },
     }
     return ToolResult.success(
         data,
-        summary=f"待确认导入：{len(scenario.get('modules', []))} 个模块、{len(narrative.nodes)} 个节点、{len(narrative.edges)} 条边",
+        summary=(
+            f"待确认导入（{getattr(plugin, 'display_name', plugin.id)}）："
+            f"{len(scenario.get('modules', []))} 个模块、{len(narrative.nodes)} 个节点、{len(narrative.edges)} 条边"
+        ),
     )
 
 
@@ -188,6 +219,12 @@ def apply_import_script(actor: Any, arguments: dict[str, Any], context: ToolCont
     bundle = arguments.get("bundle") if isinstance(arguments.get("bundle"), dict) else None
     if not payload or not isinstance(bundle, dict):
         return ToolResult.failure("导入参数缺失，请重新预览")
+    try:
+        plugin = _resolve_ruleset(context, payload.get("ruleset_id") or arguments.get("ruleset_id"))
+    except RulesetSelectionError as exc:
+        return ToolResult.failure(str(exc))
+    payload = dict(payload)
+    payload["ruleset_id"] = plugin.id
     try:
         scenario = scenario_service.apply_create(actor, payload)
     except scenario_service.ScenarioServiceError as exc:
@@ -213,43 +250,81 @@ def apply_import_script(actor: Any, arguments: dict[str, Any], context: ToolCont
             "id": scenario.get("id"),
             "title": scenario.get("title"),
             "version": scenario.get("scenario_version"),
+            "ruleset_id": scenario.get("ruleset_id") or plugin.id,
+            "ruleset_name": getattr(plugin, "display_name", plugin.id),
             "nodes": len(narrative_data.get("nodes") or []),
         },
-        summary=f"已导入剧本「{scenario.get('title')}」并写入世界树",
+        summary=f"已导入剧本「{scenario.get('title')}」（{getattr(plugin, 'display_name', plugin.id)}）并写入世界树",
     )
 
 
 def creation_guide(actor: Any, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-    """读取剧本创作 Skill，让站内 Agent 与外部 Skill 使用同一套创作规范。"""
+    """读取通用创作流程或当前规则集插件提供的创作规范。"""
     section = str(arguments.get("section") or "skill").strip().lower()
-    filename = _CREATE_GUIDE_FILES.get(section, _CREATE_GUIDE_FILES["skill"])
-    path = _CREATE_SKILL_DIR / filename
-    if not path.exists():
-        return ToolResult.failure("服务器没有安装剧本创作 Skill（skills/scenario-create），请让管理员检查部署目录")
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        return ToolResult.failure(f"读取创作规范失败：{exc}")
+        plugin = _resolve_ruleset(context, arguments.get("ruleset_id"))
+    except RulesetSelectionError as exc:
+        return ToolResult.failure(str(exc))
+    from trpg_server.site_agent_tools.ruleset import site_agent_profile
+
+    profile = site_agent_profile(plugin)
+    guide_sections = profile.get("guide_sections") if isinstance(profile.get("guide_sections"), dict) else {}
+    normalized_sections = {str(key).strip().lower(): value for key, value in guide_sections.items()}
+    plugin_guide = normalized_sections.get(section)
+    if plugin_guide is None and section == str(plugin.id).strip().lower():
+        plugin_guide = normalized_sections.get("ruleset")
+
+    if plugin_guide is not None:
+        text = str(plugin_guide)
+        filename = f"{plugin.id}-authoring.md"
+        path_text = f"plugin:{plugin.id}/site_agent_profile"
+    else:
+        if section not in _CREATE_GUIDE_FILES:
+            available = sorted({"skill", "bundle", "ruleset", *normalized_sections})
+            return ToolResult.failure(
+                f"当前规则集 {getattr(plugin, 'display_name', plugin.id)} 没有名为「{section}」的创作规范；"
+                f"可用 section：{', '.join(available)}"
+            )
+        filename = _CREATE_GUIDE_FILES[section]
+        path = _CREATE_SKILL_DIR / filename
+        if not path.exists():
+            return ToolResult.failure("服务器没有安装剧本创作 Skill（skills/scenario-create），请让管理员检查部署目录")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return ToolResult.failure(f"读取创作规范失败：{exc}")
+        path_text = str(path)
     references = sorted(
         str(item.relative_to(_CREATE_SKILL_DIR).as_posix())
         for item in _CREATE_SKILL_DIR.rglob("*")
         if item.is_file() and item.suffix in {".md", ".py", ".json"}
     )
+    data = {
+        "section": section,
+        "ruleset_id": plugin.id,
+        "ruleset_name": getattr(plugin, "display_name", plugin.id),
+        "path": path_text,
+        "guide": text[:40000],
+        "references": references,
+        "sections": sorted({"skill", "bundle", *normalized_sections}),
+    }
+    if profile.get("test_scenario"):
+        data["test_scenario"] = profile["test_scenario"]
     return ToolResult.success(
-        {
-            "section": section,
-            "path": str(path),
-            "guide": text[:40000],
-            "references": references,
-            "test_scenario": str((BASE_DIR / "docs" / "样本" / "COC7-测试剧本-裂隙回廊.veil-scenario.json").relative_to(BASE_DIR)),
-        },
-        summary=f"已读取剧本创作规范：{filename}",
+        data,
+        summary=f"已读取 {getattr(plugin, 'display_name', plugin.id)} 创作规范：{section or filename}",
     )
 
 
 def _check_import_script(actor: Any, arguments: dict[str, Any]) -> str | None:
     if not str(arguments.get("content") or "").strip() and not isinstance(arguments.get("bundle"), dict):
         return "请提供剧本原文（content）或剧本包（bundle）"
+    requested = str(arguments.get("ruleset_id") or "").strip()
+    if requested:
+        try:
+            builtin_registry().resolve(requested)
+        except RulesetSelectionError as exc:
+            return str(exc)
     if isinstance(arguments.get("bundle"), dict) and not str(arguments.get("title") or "").strip():
         scenario_title = (arguments["bundle"].get("scenario") or {}).get("title") if isinstance(arguments["bundle"].get("scenario"), dict) else ""
         if not str(scenario_title or "").strip() and not str(arguments.get("title") or "").strip():
@@ -296,7 +371,8 @@ SCENARIO_TOOLS = [
         description=(
             "把整份剧本原文或外部 Skill 生成的剧本包导入为新剧本，并同时创建世界树图谱。"
             "传 content 时由 AI 通读、剔除无关内容、按语义分模块、生成世界书与图谱；传 bundle 时只做校验修复。"
-            "调用后先生成待确认预览（含剔除项、模块、节点/边统计），用户确认后才创建。"
+            "ruleset_id 显式指定本剧本使用的规则集（如 dnd5e / coc7），不传则使用当前房间/剧本的规则集；"
+            "预览会返回实际规则集，用户确认后才创建。"
         ),
         parameters=schema(
             {
@@ -305,6 +381,7 @@ SCENARIO_TOOLS = [
                 "title": {"type": "string", "maxLength": 120},
                 "author": {"type": "string", "maxLength": 80},
                 "player_count": {"type": "integer", "minimum": 1, "maximum": 20},
+                "ruleset_id": {"type": "string", "maxLength": 40},
             }
         ),
         risk="write",
@@ -327,11 +404,16 @@ SCENARIO_TOOLS = [
     ToolSpec(
         name="scenarios.create_guide",
         description=(
-            "读取《帷幕》COC 7e 剧本创作 Skill：协作流程、调查结构、线索设计、NPC 与战斗数值、"
-            "触发器与结局写法、剧本包字段。用户想和你一起创作全新剧本时，先调用它再开始提问与写作。"
-            "section=skill 读总流程，coc7 读 COC7 创作规范，bundle 读剧本包字段，prompts 读分阶段提示词。"
+            "读取剧本创作规范。section=skill 读通用协作流程，bundle 读剧本包字段；"
+            "section=ruleset 读取当前规则集插件提供的创作规范（也可传插件 id，如 dnd5e / coc7）。"
+            "用户想和你一起创作全新剧本时，先调用它再开始提问与写作；规则口径以当前规则集为准。"
         ),
-        parameters=schema({"section": {"type": "string", "maxLength": 20}}),
+        parameters=schema(
+            {
+                "section": {"type": "string", "maxLength": 40},
+                "ruleset_id": {"type": "string", "maxLength": 40},
+            }
+        ),
         risk="read",
         required_permission="scenarios.preview",
         handler=creation_guide,
