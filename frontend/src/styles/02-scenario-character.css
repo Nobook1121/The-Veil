@@ -3542,6 +3542,236 @@ body.is-guest .guest-login-hint {
     cursor: pointer;
 }
 
+/* 创建房间：剧本选择器。下拉浮层固定高度，避免剧本多时把弹窗撑高。 */
+.room-scenario-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.room-scenario-combobox {
+    position: relative;
+    min-width: 0;
+}
+
+.room-scenario-combobox::before,
+.room-scenario-combobox::after {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-muted);
+    font-family: FontAwesome, serif;
+    font-size: 0.82rem;
+    pointer-events: none;
+}
+
+.room-scenario-combobox::before {
+    left: 12px;
+    content: "\f002";
+}
+
+.room-scenario-combobox::after {
+    right: 12px;
+    content: "\f078";
+    transition: transform 0.18s ease;
+}
+
+.room-scenario-combobox:focus-within::after {
+    transform: translateY(-50%) rotate(180deg);
+    color: var(--color-primary);
+}
+
+#roomScenarioSearch {
+    min-height: 38px;
+    padding-left: 34px;
+    padding-right: 34px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-panel);
+    color: var(--color-text);
+    text-overflow: ellipsis;
+}
+
+#roomScenarioSearch::placeholder {
+    color: var(--color-muted);
+}
+
+#roomScenarioSearch:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--theme-focus-ring);
+}
+
+.room-scenario-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    left: 0;
+    z-index: 1080;
+    max-height: min(46vh, 340px);
+    padding: 6px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-panel);
+    box-shadow: var(--shadow-md);
+}
+
+.room-scenario-dropdown[hidden] {
+    display: none;
+}
+
+.room-scenario-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.room-scenario-option {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    padding: 10px 38px 10px 12px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    appearance: none;
+}
+
+.room-scenario-option:hover,
+.room-scenario-option.is-active {
+    background: var(--color-panel-muted);
+}
+
+.room-scenario-option:focus-visible {
+    outline: none;
+    border-color: var(--color-primary);
+}
+
+.room-scenario-option.selected {
+    border-color: var(--color-primary);
+    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.room-scenario-option.selected::after {
+    position: absolute;
+    top: 50%;
+    right: 14px;
+    transform: translateY(-50%);
+    color: var(--color-primary);
+    font-family: FontAwesome, serif;
+    content: "\f00c";
+}
+
+.room-scenario-option-body {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.room-scenario-option-title {
+    overflow: hidden;
+    color: var(--color-text);
+    font-weight: 600;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.room-scenario-option-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    color: var(--color-muted);
+    font-size: 0.78rem;
+}
+
+.room-scenario-option-author {
+    overflow: hidden;
+    max-width: 100%;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.room-scenario-option-favorite {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--theme-warning);
+}
+
+.room-scenario-option-players {
+    flex: none;
+    padding: 0 7px;
+    border-radius: var(--theme-radius-pill);
+    background: var(--color-panel-muted);
+    color: var(--color-text);
+}
+
+.room-scenario-empty,
+.room-scenario-loading {
+    margin: 0;
+    padding: 18px 12px;
+    color: var(--color-muted);
+    font-size: 0.85rem;
+    text-align: center;
+}
+
+.room-scenario-empty[hidden] {
+    display: none;
+}
+
+.room-scenario-selected {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin: 0;
+    padding: 9px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--color-panel-muted);
+    color: var(--color-text);
+    font-size: 0.85rem;
+}
+
+.room-scenario-selected::before {
+    flex: none;
+    color: var(--color-primary);
+    font-family: FontAwesome, serif;
+    content: "\f00c";
+}
+
+.room-scenario-selected[hidden] {
+    display: none;
+}
+
+@media (max-width: 576px) {
+    .room-scenario-dropdown {
+        max-height: min(50vh, 300px);
+    }
+
+    .room-scenario-option {
+        padding: 9px 34px 9px 10px;
+    }
+
+    .room-scenario-option-title {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+}
+
 /* 边上的关系文字：白描边压住连线，保证在地图网格上也看得清。 */
 .scenario-graph-edge-label,
 .scenario-graph-parent-label {

@@ -42,6 +42,8 @@ const roomActionLocks = new Set<string>();
 // 创建房间弹窗的剧本选择器状态（点击后展开下拉搜索，避免结果撑高弹窗）。
 let roomScenarioPickerScenarios: Scenario[] = [];
 let roomScenarioPickerSelected: { id: number; title: string } | null = null;
+// 键盘导航当前高亮项；默认落在已选项或第一项。
+let roomScenarioActiveIndex = 0;
 
 function initRoomManagement(): void {
     window.currentRoom = currentRoom;
@@ -65,11 +67,20 @@ function initRoomManagement(): void {
             closeRoomScenarioPicker();
             return;
         }
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            const dropdown = document.getElementById("roomScenarioDropdown");
+            const wasOpen = Boolean(dropdown && !dropdown.hidden);
+            openRoomScenarioPicker();
+            if (wasOpen) moveRoomScenarioActive(event.key === "ArrowDown" ? 1 : -1);
+            return;
+        }
         if (event.key !== "Enter") return;
-        const first = document.getElementById("roomScenarioList")?.querySelector<HTMLElement>(".room-scenario-option");
-        if (!first) return;
+        const options = roomScenarioOptionElements();
+        const active = options[roomScenarioActiveIndex] ?? options[0];
+        if (!active) return;
         event.preventDefault();
-        selectRoomScenarioOption(first);
+        selectRoomScenarioOption(active);
     });
     document.getElementById("roomScenarioList")?.addEventListener("click", (event) => {
         const option = (event.target as HTMLElement).closest<HTMLElement>(".room-scenario-option");
@@ -79,6 +90,8 @@ function initRoomManagement(): void {
         const target = event.target as HTMLElement | null;
         if (!target?.closest(".room-scenario-combobox")) closeRoomScenarioPicker();
     });
+    window.addEventListener("resize", positionRoomScenarioDropdown);
+    document.addEventListener("scroll", positionRoomScenarioDropdown, true);
     document.getElementById("confirmCreateSave")?.addEventListener("click", () => {
         void createRoom();
     });
@@ -519,6 +532,59 @@ function buildRoomScenarioFilter(raw: string): RoomScenarioFilter {
     };
 }
 
+function roomScenarioOptionElements(): HTMLElement[] {
+    const list = document.getElementById("roomScenarioList");
+    if (!list) return [];
+    return Array.from(list.querySelectorAll<HTMLElement>(".room-scenario-option"));
+}
+
+function setRoomScenarioActive(index: number): void {
+    const options = roomScenarioOptionElements();
+    if (!options.length) {
+        roomScenarioActiveIndex = 0;
+        return;
+    }
+    roomScenarioActiveIndex = Math.min(Math.max(index, 0), options.length - 1);
+    options.forEach((option, optionIndex) => {
+        option.classList.toggle("is-active", optionIndex === roomScenarioActiveIndex);
+    });
+    options[roomScenarioActiveIndex]?.scrollIntoView({ block: "nearest" });
+}
+
+function moveRoomScenarioActive(delta: number): void {
+    const options = roomScenarioOptionElements();
+    if (!options.length) return;
+    setRoomScenarioActive((roomScenarioActiveIndex + delta + options.length) % options.length);
+}
+
+/**
+ * 下拉浮层用 fixed 定位并跟随输入框；创建房间的 modal-body 有 60vh 滚动容器，
+ * 绝对定位会被裁掉，fixed 可以稳定地浮在弹窗内容之上。
+ */
+function positionRoomScenarioDropdown(): void {
+    const dropdown = document.getElementById("roomScenarioDropdown");
+    const input = document.getElementById("roomScenarioSearch") as HTMLInputElement | null;
+    if (!dropdown || dropdown.hidden || !input) return;
+    const rect = input.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const margin = 8;
+    const below = window.innerHeight - rect.bottom - margin;
+    const above = rect.top - margin;
+    const openUp = below < 200 && above > below;
+    const available = Math.max(0, (openUp ? above : below) - 6);
+    dropdown.style.position = "fixed";
+    dropdown.style.left = `${Math.round(rect.left)}px`;
+    dropdown.style.width = `${Math.round(rect.width)}px`;
+    dropdown.style.maxHeight = `${Math.round(Math.min(340, Math.max(140, available)))}px`;
+    if (openUp) {
+        dropdown.style.top = "auto";
+        dropdown.style.bottom = `${Math.round(window.innerHeight - rect.top + 6)}px`;
+    } else {
+        dropdown.style.bottom = "auto";
+        dropdown.style.top = `${Math.round(rect.bottom + 6)}px`;
+    }
+}
+
 function openRoomScenarioPicker(): void {
     const dropdown = document.getElementById("roomScenarioDropdown");
     const input = document.getElementById("roomScenarioSearch") as HTMLInputElement | null;
@@ -562,8 +628,10 @@ function renderRoomScenarioPicker(): void {
         });
 
     list.innerHTML = "";
-    scenarios.forEach((scenario) => {
+    let selectedIndex = 0;
+    scenarios.forEach((scenario, index) => {
         const selected = roomScenarioPickerSelected?.id === scenario.id;
+        if (selected) selectedIndex = index;
         const option = document.createElement("button");
         option.type = "button";
         option.className = `room-scenario-option${selected ? " selected" : ""}`;
@@ -572,27 +640,43 @@ function renderRoomScenarioPicker(): void {
         option.setAttribute("role", "option");
         option.setAttribute("aria-selected", String(selected));
 
+        const body = document.createElement("span");
+        body.className = "room-scenario-option-body";
         const title = document.createElement("span");
         title.className = "room-scenario-option-title";
         title.textContent = scenario.title;
         const meta = document.createElement("span");
         meta.className = "room-scenario-option-meta";
-        meta.textContent = `${scenario.author || "未知作者"} · ${scenario.playerCount} 人`;
         if (favoriteIds.has(scenario.id)) {
+            const favorite = document.createElement("span");
+            favorite.className = "room-scenario-option-favorite";
             const star = document.createElement("i");
-            star.className = "fa fa-star room-scenario-option-star";
+            star.className = "fa fa-star";
             star.setAttribute("aria-hidden", "true");
-            option.append(star);
+            const label = document.createElement("span");
+            label.textContent = "收藏";
+            favorite.append(star, label);
+            meta.append(favorite);
         }
-        option.append(title, meta);
+        const author = document.createElement("span");
+        author.className = "room-scenario-option-author";
+        author.textContent = scenario.author || scenario.creator_username || "未知作者";
+        const players = document.createElement("span");
+        players.className = "room-scenario-option-players";
+        players.textContent = `${scenario.playerCount} 人`;
+        meta.append(author, players);
+        body.append(title, meta);
+        option.append(body);
         list.appendChild(option);
     });
+    setRoomScenarioActive(selectedIndex);
 
     if (empty) empty.hidden = scenarios.length > 0;
     if (selectedLabel) {
         selectedLabel.hidden = !roomScenarioPickerSelected;
         selectedLabel.textContent = roomScenarioPickerSelected ? `已选择：${roomScenarioPickerSelected.title}` : "";
     }
+    positionRoomScenarioDropdown();
 }
 
 async function loadRoomScenarioPicker(scenarioId?: number): Promise<void> {
