@@ -21,7 +21,12 @@
     },
     "agent_tools": {
       "module": "entry.py",
-      "tools": ["veil-map.move_token"]
+      "tools": [
+        "veil-map.move_token",
+        "veil-map.get_position",
+        "veil-map.inspect_area",
+        "veil-map.preview_move"
+      ]
     },
     "ui": {
       "api_version": 1,

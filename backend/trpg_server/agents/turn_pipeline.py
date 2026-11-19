@@ -46,6 +46,7 @@ from trpg_server.agents.narrative.metrics import bump as bump_narrative_metrics
 from trpg_server.agents.narrative.metrics import observe as observe_narrative_metrics
 from trpg_server.agents.narrative.prompt_v2 import render_state_summary
 from trpg_server.agents.narrative.prejudge import prepare_turn, render_contract, retrieval_candidates
+from trpg_server.agents.narrative.redaction import redact_map_text
 from trpg_server.agents.narrative.runtime import NarrativeRuntime, NarrativeRuntimeError, narrative_available
 from trpg_server.agents.narrative.runtime_settings import log_bypass_once, resolve_narrative_settings
 from trpg_server.immersive.service import on_narrative_turn
@@ -960,6 +961,7 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
         # 先做确定性预判，再用候选集约束检索；预判失败只降级、不阻断请求。
         narrative = None
         narrative_summary = ""
+        map_area_brief = ""
         narrative_bundle = None
         narrative_runtime = None
         turn_contract = None
@@ -997,7 +999,51 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
                             narrative_runtime, turn_contract, content
                         )
             if graph_enabled:
-                narrative_summary = render_state_summary(narrative, narrative_bundle)
+                map_area = None
+                map_poi = None
+                map_area_brief = ""
+                map_nearby: tuple[str, ...] = ()
+                if narrative_runtime is not None:
+                    map_area = narrative_runtime.area_id or None
+                    location_node = narrative_runtime.location_node()
+                    map_poi = (
+                        location_node.id
+                        if location_node is not None and location_node.is_poi
+                        else None
+                    )
+                    if map_area and narrative_bundle is not None:
+                        try:
+                            from trpg_server.agents.narrative import mapgraph
+                            from trpg_server.plugins.runtime import get_service
+
+                            map_area_brief = mapgraph.render_area_brief(
+                                narrative_bundle, narrative_runtime.narrative, map_area
+                            )
+                            service = get_service("veil-map", "map_service")
+                            position = service.current_position(str(agent_context.room_dir)) if service else None
+                            cell = (position or {}).get("cell") or {}
+                            if cell:
+                                map_nearby = tuple(
+                                    node.id
+                                    for node in mapgraph.pois_within(
+                                        narrative_bundle,
+                                        map_area,
+                                        (int(cell.get("x", 0)), int(cell.get("y", 0))),
+                                        radius=2,
+                                    )
+                                    if node.id != map_poi
+                                    and mapgraph.poi_discovered(narrative_runtime.narrative, node)
+                                    and narrative_runtime.node_visible(node.id)
+                                )
+                        except Exception:  # noqa: BLE001 - 摘要增强失败不影响对话
+                            logger.debug("map state summary skipped", exc_info=True)
+                narrative_summary = render_state_summary(
+                    narrative,
+                    narrative_bundle,
+                    area=map_area,
+                    poi=map_poi,
+                    nearby=map_nearby,
+                )
                 if turn_contract is not None:
                     contract_text = render_contract(turn_contract)
                     narrative_summary = (
@@ -1196,6 +1242,15 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
                     )
                 except Exception:  # noqa: BLE001 - 规则检索失败不阻断回合
                     logger.warning("Ruleset retrieval failed for room %s", room_id, exc_info=True)
+        # 地图剧本的历史只保留文本：触发器发出的底图/附件图片不进入模型上下文。
+        # 无地图层的旧剧本（含 CoC7）保持原样。
+        if narrative_runtime is not None and narrative_runtime.map_layer_available():
+            prompt_history = [
+                {**item, "content": redact_map_text(item.get("content"))}
+                if isinstance(item, dict)
+                else item
+                for item in prompt_history
+            ]
         prompt_layers = build_prompt_layers(
             global_rules=system_prompt,
             scenario=(room_snapshot or {}).get("scenario") if isinstance(room_snapshot, dict) else None,
@@ -1209,6 +1264,7 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
             retrieval_full=direct_import,
             room_snapshot_message=room_snapshot_message,
             narrative_summary=narrative_summary,
+            area_brief=map_area_brief,
             opening_pack=opening_prompt,
             system_directive=system_directive,
             props_directive=props_directive,

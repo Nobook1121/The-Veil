@@ -19,6 +19,7 @@ from typing import Any, Iterable, Mapping
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.scenario_store import load_scenario_by_id
 from trpg_server.agents.narrative.model import VISIBILITY_KP_ONLY
+from trpg_server.agents.narrative.redaction import strip_map_fields, strip_trigger_asset_fields
 from trpg_server.agents.narrative.visibility import is_visible_to_player, keyword_is_spoiler, normalize_visibility
 
 logger = logging.getLogger(__name__)
@@ -162,8 +163,16 @@ def build_knowledge_chunks(scenario: Mapping[str, Any] | None) -> list[Knowledge
                 chunk_id=chunk_id,
                 embedding=module.get("embedding") if isinstance(module.get("embedding"), list) else None,
                 source_ref=module.get("source_ref") if isinstance(module.get("source_ref"), dict) else None,
-                metadata=module.get("metadata") if isinstance(module.get("metadata"), dict) else None,
-                attachments=module.get("attachments") if isinstance(module.get("attachments"), list) else None,
+                metadata=(
+                    strip_map_fields(module.get("metadata"))
+                    if isinstance(module.get("metadata"), dict)
+                    else None
+                ),
+                attachments=(
+                    strip_trigger_asset_fields(module.get("attachments"))
+                    if isinstance(module.get("attachments"), list)
+                    else None
+                ),
                 # 世界书字段可由模块/知识索引携带；缺失时用 dataclass 默认值。
                 keywords=module.get("keywords") if isinstance(module.get("keywords"), list) else None,
                 secondary_keywords=(

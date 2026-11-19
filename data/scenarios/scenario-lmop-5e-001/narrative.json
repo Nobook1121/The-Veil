@@ -86,7 +86,8 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p1_ambush"
-      }
+      },
+      "node_role": "site"
     },
     {
       "id": "p1_trail",
@@ -110,7 +111,8 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p1_trail"
-      }
+      },
+      "node_role": "site"
     },
     {
       "id": "p1_hideout",
@@ -139,6 +141,36 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p1_hideout"
+      },
+      "node_role": "map",
+      "map": {
+        "scene_id": "p1_hideout",
+        "grid_ft": 5,
+        "bounds_cells": 64,
+        "entry_pois": [
+          "p1_hideout_1_cave_mouth"
+        ],
+        "environment": {
+          "lighting": "洞口有微光，洞内无光；无黑暗视觉需要光源",
+          "temperature": "阴冷潮湿",
+          "smell": "湿苔、地精与狼群的气味",
+          "sound": "溪流声、水滴声与远处的犬吠",
+          "terrain": [
+            "岩石地面",
+            "碎石",
+            "浅水溪流",
+            "陡坡"
+          ]
+        },
+        "brief": "碎颅部落把一处天然洞穴改造成窝点，入口藏在三猪小径北侧的灌木后。洞内有溪流、陡坡与狭窄天桥，地精在各个区域设岗，狼群被关在入口附近训练。",
+        "dm_brief": "整张图共 8 个区域，沿溪流由入口向深处推进；区域之间以狭窄通道相连，适合用墙体与地形卡位。首领克拉格在区域 8。",
+        "exits": [
+          {
+            "to_area": "p1_trail",
+            "label": "退回三猪小径",
+            "direction": "two_way"
+          }
+        ]
       }
     },
     {
@@ -165,6 +197,24 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p1_hideout_1_cave_mouth"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p1_hideout",
+        "code": "1",
+        "trigger": {
+          "mode": "enter",
+          "radius_cells": 0
+        },
+        "geometry": {
+          "rect_cells": {
+            "x": 16,
+            "y": 24,
+            "w": 6,
+            "h": 5
+          },
+          "provisional": true
+        }
       }
     },
     {
@@ -190,6 +240,33 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p1_hideout_2_lookout"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p1_hideout",
+        "code": "2",
+        "trigger": {
+          "mode": "enter",
+          "radius_cells": 0
+        },
+        "geometry": {
+          "rect_cells": {
+            "x": 8,
+            "y": 16,
+            "w": 5,
+            "h": 5
+          },
+          "provisional": true
+        },
+        "encounter": {
+          "id": "enc_p1_lookout",
+          "monster_ids": [
+            "goblin"
+          ],
+          "count": 2,
+          "trigger": "on_enter",
+          "auto_start": false
+        }
       }
     },
     {
@@ -217,6 +294,33 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p1_hideout_3_kennel"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p1_hideout",
+        "code": "3",
+        "trigger": {
+          "mode": "enter",
+          "radius_cells": 0
+        },
+        "geometry": {
+          "rect_cells": {
+            "x": 1,
+            "y": 10,
+            "w": 6,
+            "h": 5
+          },
+          "provisional": true
+        },
+        "encounter": {
+          "id": "enc_p1_kennel",
+          "monster_ids": [
+            "wolf"
+          ],
+          "count": 3,
+          "trigger": "on_enter",
+          "auto_start": false
+        }
       }
     },
     {
@@ -242,6 +346,24 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p1_hideout_4_passage"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p1_hideout",
+        "code": "4",
+        "trigger": {
+          "mode": "enter",
+          "radius_cells": 0
+        },
+        "geometry": {
+          "rect_cells": {
+            "x": -7,
+            "y": 6,
+            "w": 6,
+            "h": 4
+          },
+          "provisional": true
+        }
       }
     },
     {
@@ -267,6 +389,24 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p1_hideout_5_bridge"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p1_hideout",
+        "code": "5",
+        "trigger": {
+          "mode": "enter",
+          "radius_cells": 0
+        },
+        "geometry": {
+          "rect_cells": {
+            "x": -15,
+            "y": 3,
+            "w": 6,
+            "h": 4
+          },
+          "provisional": true
+        }
       }
     },
     {
@@ -296,6 +436,33 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p1_hideout_6_rest"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p1_hideout",
+        "code": "6",
+        "trigger": {
+          "mode": "enter",
+          "radius_cells": 0
+        },
+        "geometry": {
+          "rect_cells": {
+            "x": -19,
+            "y": -4,
+            "w": 6,
+            "h": 5
+          },
+          "provisional": true
+        },
+        "encounter": {
+          "id": "enc_p1_rest",
+          "monster_ids": [
+            "goblin"
+          ],
+          "count": 2,
+          "trigger": "on_enter",
+          "auto_start": false
+        }
       }
     },
     {
@@ -322,6 +489,24 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p1_hideout_7_pools"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p1_hideout",
+        "code": "7",
+        "trigger": {
+          "mode": "enter",
+          "radius_cells": 0
+        },
+        "geometry": {
+          "rect_cells": {
+            "x": -9,
+            "y": -11,
+            "w": 6,
+            "h": 5
+          },
+          "provisional": true
+        }
       }
     },
     {
@@ -351,6 +536,25 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p1_hideout_8_cave"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p1_hideout",
+        "code": "8",
+        "trigger": {
+          "mode": "enter",
+          "radius_cells": 0
+        },
+        "geometry": {
+          "rect_cells": {
+            "x": 2,
+            "y": -17,
+            "w": 8,
+            "h": 7
+          },
+          "provisional": true
+        },
+        "dm_notes": "TODO: 首领 Klarg 是 bugbear，dnd5e-srd 当前数据包没有 bugbear 条目，本轮不配置 encounter；补齐怪物数据后再开战。"
       }
     },
     {
@@ -3103,13 +3307,22 @@
       "id": "edge_p1_trail__p1_hideout__next",
       "from": "p1_trail",
       "to": "p1_hideout",
-      "type": "next",
+      "type": "portal",
       "hard": true,
       "condition": null,
-      "label": "",
+      "label": "进入克拉摩窝点",
       "visibility": "public",
       "evidence": null,
-      "source": "scenario_pack"
+      "source": "scenario_pack",
+      "bidirectional": true,
+      "transition": {
+        "from_area": "p1_trail",
+        "to_area": "p1_hideout",
+        "entry_poi": "p1_hideout_1_cave_mouth",
+        "direction": "two_way",
+        "label": "三猪小径（洞口）",
+        "text": "小径尽头，灌木后露出一个被溪流浸湿的洞口。"
+      }
     },
     {
       "id": "edge_p1_hideout__p1_trail__adjacent",

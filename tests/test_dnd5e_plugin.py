@@ -169,7 +169,7 @@ def test_dnd5e_declares_prompt_fragments_for_noncombat_casting(plugins):
     assert fragments
     assert any("scene.advance" in item for item in fragments)
     assert any("spell.concentration" in item for item in fragments)
-    assert plugin.tools.tool_names() == ("dnd5e.roll_check",)
+    assert plugin.tools.tool_names() == ("dnd5e.roll_check", "dnd5e.start_encounter")
 
 
 def test_coc7_prompt_fragments_stay_empty(plugins):

@@ -68,10 +68,30 @@
         visit_count: number;
     }
 
+    interface NarrativeArea {
+        area_id: string;
+        title: string;
+        brief?: string;
+        environment?: Record<string, unknown>;
+        exits?: Array<{ label?: string; to_area?: string; direction?: string; blocked?: boolean }>;
+        discovered_pois?: Array<{ poi_id: string; label: string; status: string }>;
+        hidden_poi_count?: number;
+    }
+
+    interface NarrativePoi {
+        poi_id: string;
+        label: string;
+        status: string;
+        discovered: boolean;
+        code?: string;
+    }
+
     interface NarrativeSnapshot {
         room_id: string;
         scenario_id: number | string | null;
         location: NarrativeLocation;
+        area?: NarrativeArea | null;
+        pois?: NarrativePoi[];
         party: NarrativeParty;
         status: NarrativeStatus;
         permissions: { can_manage: boolean };
@@ -128,6 +148,52 @@
         }
         const kpPanel = byId("roomNarrativeKpOnly");
         if (kpPanel) kpPanel.hidden = !(canManageRoom && location && location.id && !location.visible);
+    }
+
+    function renderArea(area: NarrativeArea | null | undefined, pois: NarrativePoi[]): void {
+        const host = byId("roomNarrativeArea");
+        const poiHost = byId("roomNarrativePois");
+        if (host) {
+            if (!area || !area.area_id) {
+                host.innerHTML = `<p class="text-muted mb-0">${escapeHtml(t("room.narrative.no_area", "当前地点不属于任何地图。"))}</p>`;
+            } else {
+                const environment = area.environment && typeof area.environment === "object" ? area.environment : {};
+                const traits = ["lighting", "smell", "sound"]
+                    .map((key) => String(environment[key] || "").trim())
+                    .filter(Boolean);
+                const exits = Array.isArray(area.exits) ? area.exits : [];
+                const discovered = Array.isArray(area.discovered_pois) ? area.discovered_pois : [];
+                const hidden = Math.max(0, Number(area.hidden_poi_count) || 0);
+                const lines = [
+                    `<div class="fw-semibold">${escapeHtml(area.title || area.area_id)}</div>`,
+                    area.brief ? `<div class="text-muted mb-1">${escapeHtml(area.brief)}</div>` : "",
+                    traits.length ? `<div>${escapeHtml(t("room.narrative.environment", "环境"))}：${escapeHtml(traits.join("；"))}</div>` : "",
+                    exits.length
+                        ? `<div>${escapeHtml(t("room.narrative.exits", "出口"))}：${escapeHtml(exits.slice(0, 4).map((item) => item.label || item.to_area || "").filter(Boolean).join("、"))}</div>`
+                        : "",
+                    discovered.length
+                        ? `<div>${escapeHtml(t("room.narrative.discovered_pois", "已发现"))}：${escapeHtml(discovered.map((item) => item.label).join("、"))}</div>`
+                        : "",
+                    hidden
+                        ? `<div class="text-muted">${escapeHtml(t("room.narrative.hidden_pois", "未发现"))}：${hidden}</div>`
+                        : "",
+                ];
+                host.innerHTML = lines.filter(Boolean).join("");
+            }
+        }
+        if (!poiHost) return;
+        const items = Array.isArray(pois) ? pois.filter((item) => item && item.poi_id) : [];
+        if (!items.length) {
+            poiHost.innerHTML = `<p class="text-muted mb-0">${escapeHtml(t("room.narrative.no_pois", "尚未发现兴趣点。"))}</p>`;
+            return;
+        }
+        poiHost.innerHTML = items.map((item) => {
+            const code = item.code ? `<span class="badge bg-light text-dark me-1">${escapeHtml(item.code)}</span>` : "";
+            const status = item.discovered
+                ? `<span class="badge bg-primary">${escapeHtml(t("room.narrative.visited", "已访问"))}</span>`
+                : `<span class="badge bg-light text-dark">${escapeHtml(t("room.narrative.unvisited", "未发现"))}</span>`;
+            return `<div class="d-flex justify-content-between align-items-center mb-1">${code}<span>${escapeHtml(item.label || item.poi_id)}</span>${status}</div>`;
+        }).join("");
     }
 
     function renderParty(party: NarrativeParty): void {
@@ -255,6 +321,7 @@
             const snapshot = data.data;
             canManage = Boolean(snapshot.permissions?.can_manage);
             renderLocation(snapshot.location, canManage);
+            renderArea(snapshot.area, Array.isArray(snapshot.pois) ? snapshot.pois : []);
             renderParty(snapshot.party);
             renderStatus(snapshot.status);
             renderClocks(snapshot.status);
@@ -343,7 +410,7 @@
         canManage = false;
         loading = false;
         triggerSignature = "";
-        for (const id of ["roomNarrativeLocation", "roomNarrativeParty", "roomNarrativeStatus", "roomNarrativeClocks", "roomNarrativeTriggers"]) {
+        for (const id of ["roomNarrativeLocation", "roomNarrativeArea", "roomNarrativePois", "roomNarrativeParty", "roomNarrativeStatus", "roomNarrativeClocks", "roomNarrativeTriggers"]) {
             const host = byId(id);
             if (host) host.innerHTML = "";
         }

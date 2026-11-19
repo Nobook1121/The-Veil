@@ -707,11 +707,11 @@ def _load_map(room_dir) -> dict[str, Any]:
     return _normalize_map(state)
 
 
-def _room_scenario(info: dict[str, Any]) -> dict[str, Any] | None:
-    """读取房间绑定的剧本；没有剧本或读取失败时返回 None。"""
+def _load_room_scenario(info: dict[str, Any]) -> tuple[dict[str, Any] | None, Path | None]:
+    """读取房间绑定的剧本及其目录；没有剧本或读取失败时返回 (None, None)。"""
     scenario_id = (info or {}).get("scenario_id")
     if scenario_id in (None, "", 0, "0"):
-        return None
+        return None, None
     try:
         from flask import current_app
 
@@ -719,15 +719,84 @@ def _room_scenario(info: dict[str, Any]) -> dict[str, Any] | None:
 
         scenarios_dir = current_app.config.get("SCENARIOS_DIR")
         if not scenarios_dir:
-            return None
-        _path, scenario = load_scenario_by_id(
+            return None, None
+        path, scenario = load_scenario_by_id(
             Path(scenarios_dir),
             scenario_id,
             (info or {}).get("scenario_version"),
         )
     except Exception:
+        return None, None
+    if not isinstance(scenario, dict):
+        return None, None
+    return scenario, (Path(path).parent if path else None)
+
+
+def _room_scenario(info: dict[str, Any]) -> dict[str, Any] | None:
+    scenario, _directory = _load_room_scenario(info)
+    return scenario
+
+
+def _narrative_bundle(info: dict[str, Any]):
+    """房间剧本的叙事图；没有图谱或读取失败时返回 None（地图照常可用）。"""
+    _scenario, directory = _load_room_scenario(info)
+    if directory is None:
         return None
-    return scenario if isinstance(scenario, dict) else None
+    try:
+        from trpg_server.agents.narrative.store import load_bundle
+
+        return load_bundle(directory)
+    except Exception:  # noqa: BLE001 - 图谱不可用不阻断地图
+        logger.warning("veil_map_narrative_bundle_failed", exc_info=True)
+        return None
+
+
+def _resolve_scene_area(info: dict[str, Any], scenario: dict[str, Any] | None, location: str) -> str:
+    """叙事位置 → 所属大节点；没有图谱标注时退回位置本身。
+
+    地图轮询（``/map``）会高频调用，因此按 ``narrative.json`` 的 mtime 缓存
+    位置→区域映射，避免每次请求都解析整张图谱。
+    """
+    if not location:
+        return ""
+    _scenario, directory = _load_room_scenario(info)
+    if directory is None:
+        return location
+    mapping = _area_lookup(directory)
+    if not mapping:
+        return location
+    return mapping.get(location) or location
+
+
+_AREA_CACHE: dict[tuple[str, float], dict[str, str]] = {}
+_AREA_CACHE_LIMIT = 8
+
+
+def _area_lookup(directory: Path) -> dict[str, str]:
+    narrative_path = Path(directory) / "narrative.json"
+    try:
+        mtime = narrative_path.stat().st_mtime
+    except OSError:
+        return {}
+    key = (str(directory), mtime)
+    cached = _AREA_CACHE.get(key)
+    if cached is not None:
+        return cached
+    try:
+        from trpg_server.agents.narrative.mapgraph import area_id_of
+        from trpg_server.agents.narrative.store import load_bundle
+
+        bundle = load_bundle(Path(directory))
+        mapping = {
+            node.id: area_id_of(bundle, node.id) or node.id for node in bundle.nodes
+        }
+    except Exception:  # noqa: BLE001 - 图谱不可用时退回位置本身
+        logger.warning("veil_map_area_lookup_failed", exc_info=True)
+        return {}
+    if len(_AREA_CACHE) >= _AREA_CACHE_LIMIT:
+        _AREA_CACHE.pop(next(iter(_AREA_CACHE)))
+    _AREA_CACHE[key] = mapping
+    return mapping
 
 
 def _resolve_room_scene(
@@ -834,25 +903,29 @@ def _scenario_asset_url(scenario: dict[str, Any], asset_id: str) -> str:
 
 
 def _declared_scene_map(
-    scenario: dict[str, Any] | None, location: str
+    scenario: dict[str, Any] | None, location: str, area_id: str = ""
 ) -> dict[str, Any] | None:
     """模组为该场景声明的玩家可见地图。
 
     优先使用剧本地图编辑器写入的 ``map_config``（含人工标定的每格像素与
     偏移，不再依赖图片尺寸自动推测）；没有标定配置时退回 enter 触发器里的
     玩家可见图片。两种来源都只取非 kp_only 的底图。
+
+    ``area_id`` 是叙事图里的大节点：地图按大节点声明，兴趣点位置仍要能
+    找到所属地图的底图（修复 POI id 查不到地图的问题）。
     """
-    if not scenario or not location:
+    target = area_id or location
+    if not scenario or not target:
         return None
     title = ""
     for module in scenario.get("modules") or []:
         if not isinstance(module, dict):
             continue
-        if location in {str(module.get("id") or ""), str(module.get("scene_id") or "")}:
+        if target in {str(module.get("id") or ""), str(module.get("scene_id") or "")}:
             title = str(module.get("title") or "")
             break
 
-    config = _scenario_map_config(scenario, location)
+    config = _scenario_map_config(scenario, target)
     if config:
         asset_id = str(config.get("background_asset_id") or "").strip()
         url = str(config.get("background_url") or "").strip() or _scenario_asset_url(
@@ -866,7 +939,7 @@ def _declared_scene_map(
             offset_y = round(_fraction(config.get("offset_y")), 4)
             calibrated = cell_px > 0 and width > 0 and height > 0
             return {
-                "location_id": location,
+                "location_id": target,
                 "title": title or str(config.get("title") or ""),
                 "url": url,
                 "asset_id": asset_id,
@@ -899,7 +972,7 @@ def _declared_scene_map(
         binding = trigger.get("binding") if isinstance(trigger.get("binding"), dict) else {}
         if str(binding.get("kind") or "") != "enter":
             continue
-        if str(binding.get("location_id") or "") != location:
+        if str(binding.get("location_id") or "") != target:
             continue
         group_rank = 0 if str(trigger.get("group") or "") == "地图" else 1
         for order, attachment in enumerate(trigger.get("attachments") or []):
@@ -918,7 +991,7 @@ def _declared_scene_map(
                 (
                     group_rank * 1000 + order,
                     {
-                        "location_id": location,
+                        "location_id": target,
                         "title": title or str(asset.get("name") or ""),
                         "url": url,
                         "asset_id": str(asset.get("id") or ""),
@@ -1049,19 +1122,22 @@ def _scene_binding_view(
     scenario: dict[str, Any] | None,
     location: str,
     manager: bool = False,
+    area_id: str = "",
 ) -> dict[str, Any]:
-    binding = _declared_scene_map(scenario, location)
+    target = area_id or location
+    binding = _declared_scene_map(scenario, location, area_id=area_id)
     stored = state.get("scene_binding") or {}
     fingerprint = str((binding or {}).get("fingerprint") or "")
     applied = (
         bool(binding)
-        and str(stored.get("location_id") or "") == location
+        and str(stored.get("location_id") or "") == target
         and (not fingerprint or str(stored.get("fingerprint") or "") == fingerprint)
     )
     marker_types, markers = _scene_binding_markers(binding, manager)
     return {
         "managed": True,
-        "location_id": location,
+        "location_id": target,
+        "area_id": area_id or location,
         "title": (binding or {}).get("title") or "",
         "url": (binding or {}).get("url") or "",
         "applied": applied,
@@ -1069,6 +1145,180 @@ def _scene_binding_view(
         "fingerprint": fingerprint,
         "markers": markers,
         "marker_types": marker_types,
+    }
+
+
+def _placement_offsets() -> list[tuple[int, int]]:
+    """入口附近的落点顺序：先入口格，再按环向外扩散。"""
+    offsets = [(0, 0)]
+    for radius in range(1, 5):
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                if max(abs(dx), abs(dy)) == radius:
+                    offsets.append((dx, dy))
+    return offsets
+
+
+def _entry_anchor_cell(bundle: Any, entry_poi: str, state: dict[str, Any]) -> tuple[int, int]:
+    """入口兴趣点的中心格；没有几何信息时落在画布原点。"""
+    bounds = _clamp(_as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS)
+    half = bounds // 2
+    cell_x, cell_y = 0, 0
+    if bundle is not None and entry_poi:
+        try:
+            from trpg_server.agents.narrative.mapgraph import poi_center
+
+            center = poi_center(bundle.node(entry_poi))
+            if center is not None:
+                cell_x, cell_y = int(round(center[0])), int(round(center[1]))
+        except Exception:  # noqa: BLE001 - 几何缺失时用原点
+            pass
+    return (max(-half + 1, min(half - 1, cell_x)), max(-half + 1, min(half - 1, cell_y)))
+
+
+def _place_party_tokens(
+    state: dict[str, Any],
+    info: dict[str, Any],
+    anchor: tuple[int, int],
+    bundle: Any = None,
+) -> list[dict[str, Any]]:
+    """按活跃成员在新场景入口附近放 PC 棋子；墙与旧图棋子不跟过来。"""
+    tokens = state.setdefault("tokens", [])
+    grid, offset_x, offset_y = _grid_of(state)
+    offsets = _placement_offsets()
+    placed: list[dict[str, Any]] = []
+    for index, member in enumerate(_active_members(info)):
+        user_id = str(member.get("user_id") or "").strip()
+        if not user_id:
+            continue
+        name = _member_name(member)
+        avatar = _member_avatar(member)
+        token = _find_token(state, f"member-{user_id}")
+        if token is None:
+            token = {
+                "id": f"member-{user_id}",
+                "name": name,
+                "cell_x": 0,
+                "cell_y": 0,
+                "offset_x": 0.0,
+                "offset_y": 0.0,
+                "w": 1,
+                "h": 1,
+                "color": TOKEN_COLORS[index % len(TOKEN_COLORS)],
+                "owner_user_id": user_id,
+                "kind": "pc",
+                "combatant": name,
+                "avatar": avatar,
+            }
+            tokens.append(token)
+        else:
+            token["name"] = name
+            token["owner_user_id"] = user_id
+            token["kind"] = "pc"
+            token["combatant"] = name
+            token["avatar"] = avatar
+        target = None
+        for dx, dy in offsets:
+            cell_x, cell_y = anchor[0] + dx, anchor[1] + dy
+            if not _within_bounds(state, token, cell_x, cell_y):
+                continue
+            if _occupancy_conflict(state, token, cell_x, cell_y) is not None:
+                continue
+            target = (cell_x, cell_y)
+            break
+        if target is None:
+            continue
+        _set_token_cell(token, target[0], target[1], 0.0, 0.0, grid, offset_x, offset_y)
+        placed.append(
+            {
+                "token_id": str(token.get("id") or ""),
+                "name": str(token.get("name") or ""),
+                "cell_x": target[0],
+                "cell_y": target[1],
+            }
+        )
+    return placed
+
+
+def _activate_area_scene(
+    room_dir: Any,
+    info: dict[str, Any],
+    area_id: str,
+    entry_poi: str = "",
+    scenario: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """按大节点新建/切换场景：``scene_id == area_id``，切图不丢旧图棋子与墙。"""
+    key = str(area_id or "").strip()
+    if not key:
+        return {"ok": False, "code": "map.scene_unavailable", "error": "缺少目标区域 id。"}
+    scenario = scenario if scenario is not None else _room_scenario(info)
+    scene_id = scene_store.safe_scene_id(key)
+    exists = scene_store.has_scene(room_dir, scene_id)
+    binding = _declared_scene_map(scenario, key, area_id=key)
+    if not exists and not binding:
+        return {
+            "ok": False,
+            "code": "map.scene_unavailable",
+            "error": f"区域「{key}」没有声明地图。",
+        }
+    bundle = _narrative_bundle(info) if not exists else None
+    if not entry_poi and bundle is not None:
+        try:
+            from trpg_server.agents.narrative.mapgraph import entry_pois
+
+            entries = entry_pois(bundle, bundle.node(key))
+            entry_poi = entries[0] if entries else ""
+        except Exception:  # noqa: BLE001 - 入口缺失时退回原点
+            entry_poi = ""
+    with room_lock(room_dir):
+        created = False
+        binding_changed = False
+        placements: list[dict[str, Any]] = []
+        if not exists:
+            state = _default_map()
+            state["scene_id"] = scene_id
+            state["title"] = str((binding or {}).get("title") or key)[:80]
+            if bundle is not None:
+                area_node = bundle.node(key)
+                declared_bounds = _as_int(
+                    (area_node.map_block if area_node is not None else {}).get("bounds_cells"),
+                    0,
+                )
+                if declared_bounds:
+                    state["bounds_cells"] = _clamp(
+                        declared_bounds, MIN_BOUNDS, MAX_BOUNDS
+                    )
+            _apply_scene_binding(state, binding or {})
+            placements = _place_party_tokens(
+                state, info, _entry_anchor_cell(bundle, entry_poi, state), bundle
+            )
+            state = _save_map(room_dir, state)
+            created = True
+            previous = ""
+        else:
+            previous = scene_store.active_scene_id(room_dir)
+            scene_store.activate(room_dir, scene_id)
+            state, _source = scene_store.load(room_dir)
+            state = _normalize_map(state)
+            stored = state.get("scene_binding") or {}
+            fingerprint = str((binding or {}).get("fingerprint") or "")
+            stale = bool(binding) and (
+                str(stored.get("location_id") or "") != key
+                or (fingerprint and str(stored.get("fingerprint") or "") != fingerprint)
+            )
+            if stale:
+                _apply_scene_binding(state, binding or {})
+                state = _save_map(room_dir, state)
+                binding_changed = True
+        state["scene_id"] = scene_id
+    return {
+        "ok": True,
+        "scene_id": scene_id,
+        "area_id": key,
+        "created": created,
+        "changed": created or previous != scene_id or binding_changed,
+        "placements": placements,
+        "state": state,
     }
 
 
@@ -2376,13 +2626,15 @@ def _map_payload(room_id: str, room_dir, info: dict[str, Any]) -> dict[str, Any]
     view, fog_payload, _visible = _observer_scope(state, room_dir, user_id, manager)
     scenario = _room_scenario(info)
     location = _resolve_room_scene(scenario, room_dir, info)
+    area_id = _resolve_scene_area(info, scenario, location)
     return {
         "map": view,
         "fog": fog_payload,
         "combat": _combat_payload(room_dir),
         "can_manage": manager,
         "player_move_enabled": _map_permission(room_dir),
-        "scene_binding": _scene_binding_view(state, scenario, location, manager),
+        "scene_binding": _scene_binding_view(state, scenario, location, manager, area_id),
+        "area_id": area_id,
         "room_id": str(room_id),
         "scene_id": view.get("scene_id") or state.get("scene_id"),
         "scenes": scenes,
@@ -2568,7 +2820,10 @@ def update_map_permissions(room_id: str):
 
 @bp.route("/rooms/<room_id>/map/sync-scene", methods=["POST"])
 def sync_scene_map(room_id: str):
-    """把模组为当前场景声明的地图同步为 canvas 背景（进入/切换场景时幂等调用）。
+    """把模组为当前区域声明的地图同步为 canvas 背景（进入/切换场景时幂等调用）。
+
+    地图按大节点（area）声明：叙事位置是 POI 时也会落到所属地图；第一次
+    进入某张图会新建独立场景并切换过去，棋盘不再沿用上一张图的棋子与墙。
 
     地图由模组决定，请求体不参与选择；玩家也可以触发同步，但无法指定图片。
     """
@@ -2578,7 +2833,8 @@ def sync_scene_map(room_id: str):
     _role, manager = _room_context(info)
     scenario = _room_scenario(info)
     location = _resolve_room_scene(scenario, room_dir, info)
-    binding = _declared_scene_map(scenario, location)
+    area_id = _resolve_scene_area(info, scenario, location)
+    binding = _declared_scene_map(scenario, location, area_id=area_id)
     if not binding:
         with room_lock(room_dir):
             state = _load_map(room_dir)
@@ -2586,38 +2842,33 @@ def sync_scene_map(room_id: str):
             {
                 "changed": False,
                 "map": state,
-                "scene_binding": _scene_binding_view(state, scenario, location, manager),
+                "area_id": area_id,
+                "scene_binding": _scene_binding_view(
+                    state, scenario, location, manager, area_id
+                ),
             },
             "当前场景没有声明地图。",
         )
-    with room_lock(room_dir):
-        state = _load_map(room_dir)
-        _reconcile_tokens(state, info)
-        last_binding = state.get("scene_binding") or {}
-        last_location = str(last_binding.get("location_id") or "")
-        fingerprint = str(binding.get("fingerprint") or "")
-        if last_location == location and (
-            not fingerprint or str(last_binding.get("fingerprint") or "") == fingerprint
-        ):
-            # 已经绑定过且标定没有变化：不覆盖房主后续手动调整的背景/标定。
-            return success_response(
-                {
-                    "changed": False,
-                    "map": state,
-                    "scene_binding": _scene_binding_view(state, scenario, location, manager),
-                },
-                "场景地图已绑定。",
-            )
-        _apply_scene_binding(state, binding)
-        state = _save_map(room_dir, state)
-    _broadcast(room_id, state)
+    result = _activate_area_scene(room_dir, info, area_id, scenario=scenario)
+    if not result.get("ok"):
+        return _rejected_request(
+            str(result.get("error") or "目标地图场景不可用。"),
+            str(result.get("code") or "map.scene_unavailable"),
+        )
+    state = result["state"]
+    if result.get("changed"):
+        _broadcast(room_id, state)
     return success_response(
         {
-            "changed": True,
+            "changed": bool(result.get("changed")),
+            "created": bool(result.get("created")),
             "map": state,
-            "scene_binding": _scene_binding_view(state, scenario, location, manager),
+            "area_id": area_id,
+            "scene_id": result.get("scene_id"),
+            "placements": result.get("placements") or [],
+            "scene_binding": _scene_binding_view(state, scenario, location, manager, area_id),
         },
-        "已切换到场景地图。",
+        "已切换到场景地图。" if result.get("changed") else "场景地图已绑定。",
     )
 
 
@@ -3687,6 +3938,98 @@ def spatial_line(room_id: str):
     return success_response(data, "Line resolved")
 
 
+def _path_cells(
+    from_cell: tuple[int, int], to_cell: tuple[int, int]
+) -> list[tuple[int, int]]:
+    """起终点之间的直线格序列（不含起点、含终点）。"""
+    dx = int(to_cell[0]) - int(from_cell[0])
+    dy = int(to_cell[1]) - int(from_cell[1])
+    steps = max(abs(dx), abs(dy))
+    if steps <= 0:
+        return []
+    return [
+        (
+            int(round(from_cell[0] + dx * index / steps)),
+            int(round(from_cell[1] + dy * index / steps)),
+        )
+        for index in range(1, steps + 1)
+    ]
+
+
+_DIRECTIONS = {
+    "north": (0, -1),
+    "south": (0, 1),
+    "east": (1, 0),
+    "west": (-1, 0),
+    "northeast": (1, -1),
+    "northwest": (-1, -1),
+    "southeast": (1, 1),
+    "southwest": (-1, 1),
+}
+
+
+def _direction_target(
+    room_dir: Any, token_ref: str, direction: str, steps: int
+) -> tuple[int, int] | None:
+    delta = _DIRECTIONS.get(str(direction or "").strip().lower())
+    if delta is None or steps <= 0:
+        return None
+    try:
+        state = _load_map(room_dir)
+    except Exception:  # noqa: BLE001
+        return None
+    token = _find_token(state, token_ref)
+    if token is None:
+        return None
+    grid, offset_x, offset_y = _grid_of(state)
+    cell_x, cell_y = _cell_of(token, grid, offset_x, offset_y)
+    return (cell_x + delta[0] * steps, cell_y + delta[1] * steps)
+
+
+def _scenarios_dir(value: Any) -> Any:
+    if value:
+        return value
+    try:
+        from flask import current_app
+
+        return current_app.config.get("SCENARIOS_DIR")
+    except Exception:  # noqa: BLE001 - 无应用上下文
+        return None
+
+
+def _resolve_poi_after_move(
+    room_dir: Any,
+    info: dict[str, Any],
+    area_id: str,
+    token: dict[str, Any],
+    from_cell: tuple[int, int],
+    to_cell: tuple[int, int],
+    scenarios_dir: Any,
+) -> dict[str, Any]:
+    """把格子移动折算成兴趣点事件；旧剧本没有 POI 层时返回空结果。"""
+    if not area_id:
+        return {}
+    scenarios_dir = _scenarios_dir(scenarios_dir)
+    if not scenarios_dir:
+        return {}
+    try:
+        from trpg_server.agents.narrative.poi_runtime import resolve_after_move
+
+        return resolve_after_move(
+            room_dir,
+            area_id=area_id,
+            token=token,
+            from_cell=from_cell,
+            to_cell=to_cell,
+            path_cells=_path_cells(from_cell, to_cell),
+            room_info=info,
+            scenarios_dir=scenarios_dir,
+        )
+    except Exception:  # noqa: BLE001 - 兴趣点解析失败不能回滚棋子移动
+        logger.warning("veil_map_poi_resolve_failed", exc_info=True)
+        return {}
+
+
 def _move_token_agent(
     room_dir,
     info: dict[str, Any],
@@ -3699,6 +4042,7 @@ def _move_token_agent(
     cell_y: int,
     reason: str = "",
     scenarios_dir: Any = None,
+    request_id: str = "",
 ) -> dict[str, Any]:
     """KP/AI 移动棋子：权限、边界、占位与战斗预算都走同一套插件规则。"""
     if not str(room_id or "").strip() or room_dir is None:
@@ -3708,6 +4052,16 @@ def _move_token_agent(
     with room_lock(room_dir):
         state = _load_map(room_dir)
         _reconcile_tokens(state, info)
+        duplicate = _duplicate_record(state, request_id) if request_id else None
+        if duplicate is not None:
+            return {
+                "ok": True,
+                "duplicate": True,
+                "request_id": request_id,
+                "revision": state.get("revision"),
+                "record": duplicate,
+                "message": "同一移动请求已执行过，本次不重复扣预算。",
+            }
         token = _find_token(state, token_ref)
         if token is None:
             return {"ok": False, "error": f"没有找到棋子「{token_ref}」。"}
@@ -3751,10 +4105,32 @@ def _move_token_agent(
         distance = max(abs(to_cell_x - from_cell_x), abs(to_cell_y - from_cell_y))
         cost_ft = distance * FEET_PER_CELL if combat_active else 0
         _set_token_cell(token, to_cell_x, to_cell_y, 0.0, 0.0, grid, offset_x, offset_y)
-        state = _save_map(room_dir, state)
+        state = _save_map(
+            room_dir,
+            state,
+            (
+                {
+                    "request_id": request_id,
+                    "action": "token.move",
+                    "token_id": str(token.get("id") or ""),
+                }
+                if request_id
+                else None
+            ),
+        )
+        area_id = str(state.get("scene_id") or "")
 
     _notify_area_move(
         room_dir, token, (from_cell_x, from_cell_y), (to_cell_x, to_cell_y)
+    )
+    poi_result = _resolve_poi_after_move(
+        room_dir,
+        info,
+        area_id,
+        token,
+        (from_cell_x, from_cell_y),
+        (to_cell_x, to_cell_y),
+        scenarios_dir,
     )
     move: dict[str, Any] = {
         "source": "ai",
@@ -3766,6 +4142,9 @@ def _move_token_agent(
         "to": {"cell_x": to_cell_x, "cell_y": to_cell_y},
         "cost_ft": cost_ft,
         "combat_active": combat_active,
+        "area_id": area_id,
+        "poi_events": poi_result.get("events") or [],
+        "encounter_ready": bool(poi_result.get("encounter_ready")),
     }
     if reason:
         move["reason"] = reason
@@ -3778,25 +4157,54 @@ def _move_token_agent(
         "to": move["to"],
         "cost_ft": cost_ft,
         "combat_active": combat_active,
+        "area_id": area_id,
+        "poi_events": move["poi_events"],
+        "encounter_ready": move["encounter_ready"],
+        "request_id": request_id or None,
     }
+
+
+def _tool_context(context: Any) -> tuple[Any, str, dict[str, Any]]:
+    room_dir = getattr(context, "room_dir", None)
+    room_id = str(getattr(context, "room_id", "") or "")
+    info_fn = getattr(context, "room_info", None)
+    info = info_fn() if callable(info_fn) else {}
+    if not isinstance(info, dict) or not info:
+        info = read_json(room_dir / "info.json", default={}) if room_dir else {}
+    return room_dir, room_id, info
+
+
+def _target_from_arguments(
+    arguments: dict[str, Any], room_dir: Any, token_ref: str
+) -> tuple[int, int] | None:
+    if arguments.get("cell_x") is not None or arguments.get("cell_y") is not None:
+        try:
+            return (int(arguments.get("cell_x")), int(arguments.get("cell_y")))
+        except (TypeError, ValueError):
+            return None
+    direction = str(arguments.get("direction") or "").strip()
+    if direction:
+        try:
+            steps = max(1, min(20, int(arguments.get("steps") or 1)))
+        except (TypeError, ValueError):
+            steps = 1
+        return _direction_target(room_dir, token_ref, direction, steps)
+    return None
 
 
 def _move_token_tool(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     try:
-        room_dir = getattr(context, "room_dir", None)
-        room_id = str(getattr(context, "room_id", "") or "")
-        info_fn = getattr(context, "room_info", None)
-        info = info_fn() if callable(info_fn) else {}
-        if not isinstance(info, dict) or not info:
-            info = read_json(room_dir / "info.json", default={}) if room_dir else {}
+        room_dir, room_id, info = _tool_context(context)
         token_ref = str(arguments.get("token") or "").strip()
         if not token_ref:
             return {"ok": False, "error": "请提供要移动的棋子 id 或名称。"}
-        try:
-            cell_x = int(arguments.get("cell_x"))
-            cell_y = int(arguments.get("cell_y"))
-        except (TypeError, ValueError):
-            return {"ok": False, "error": "目标格坐标必须是整数（cell_x / cell_y）。"}
+        target = _target_from_arguments(arguments, room_dir, token_ref)
+        if target is None:
+            return {
+                "ok": False,
+                "error": "请提供目标格坐标（cell_x / cell_y），或方向 direction + steps。",
+                "code": "map.invalid_target",
+            }
         return _move_token_agent(
             room_dir,
             info,
@@ -3804,23 +4212,213 @@ def _move_token_tool(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             user_id=str(getattr(context, "user_id", "") or ""),
             agent_id=str(getattr(context, "agent_id", "") or ""),
             token_ref=token_ref,
-            cell_x=cell_x,
-            cell_y=cell_y,
+            cell_x=target[0],
+            cell_y=target[1],
             reason=str(arguments.get("reason") or "").strip()[:MAX_REASON],
             scenarios_dir=getattr(context, "scenarios_dir", None),
+            request_id=str(arguments.get("request_id") or "").strip()[:64],
         )
     except Exception:  # noqa: BLE001 - 工具异常只影响本次调用
         logger.warning("veil_map_agent_move_failed", exc_info=True)
         return {"ok": False, "error": "地图移动失败，请稍后重试。"}
 
 
+def _get_position_tool(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    try:
+        room_dir, _room_id, info = _tool_context(context)
+        state = _load_map(room_dir)
+        user_id = str(getattr(context, "user_id", "") or "")
+        token = _find_token(
+            state,
+            arguments.get("token")
+            or (f"member-{user_id}" if user_id else "")
+            or next(
+                (
+                    item.get("id")
+                    for item in state.get("tokens") or []
+                    if str(item.get("kind") or "") == "pc"
+                ),
+                "",
+            ),
+        )
+        if token is None:
+            return {"ok": False, "error": "地图上没有可用的棋子。", "code": "map.token_missing"}
+        grid, offset_x, offset_y = _grid_of(state)
+        cell_x, cell_y = _cell_of(token, grid, offset_x, offset_y)
+        area_id = scene_store.active_scene_id(room_dir) or str(state.get("scene_id") or "")
+        poi_id, poi_label = "", ""
+        bundle = _narrative_bundle(info)
+        if bundle is not None:
+            from trpg_server.agents.narrative.mapgraph import (
+                poi_contains_cell,
+                poi_label as _poi_label,
+                poi_nodes,
+            )
+
+            for node in poi_nodes(bundle, area_id):
+                if poi_contains_cell(node, (cell_x, cell_y)):
+                    poi_id, poi_label = node.id, _poi_label(node)
+                    break
+        party = []
+        for item in state.get("tokens") or []:
+            if str(item.get("kind") or "") != "pc":
+                continue
+            item_x, item_y = _cell_of(item, grid, offset_x, offset_y)
+            party.append(
+                {
+                    "token_id": str(item.get("id") or ""),
+                    "name": str(item.get("name") or ""),
+                    "cell_x": item_x,
+                    "cell_y": item_y,
+                }
+            )
+        return {
+            "ok": True,
+            "area_id": area_id,
+            "scene_id": area_id,
+            "cell": {"x": cell_x, "y": cell_y},
+            "position": {
+                "kind": "poi" if poi_id else "open",
+                "poi_id": poi_id,
+                "label": poi_label,
+            },
+            "token": {
+                "token_id": str(token.get("id") or ""),
+                "name": str(token.get("name") or ""),
+            },
+            "party": party,
+            "bounds_cells": _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT),
+            "grid_ft": FEET_PER_CELL,
+        }
+    except Exception:  # noqa: BLE001
+        logger.warning("veil_map_get_position_failed", exc_info=True)
+        return {"ok": False, "error": "读取地图位置失败，请稍后重试。"}
+
+
+def _inspect_area_tool(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    try:
+        room_dir, _room_id, info = _tool_context(context)
+        state = _load_map(room_dir)
+        user_id = str(getattr(context, "user_id", "") or "")
+        token = _find_token(state, arguments.get("token") or f"member-{user_id}")
+        if token is None:
+            return {"ok": False, "error": "地图上没有可用的棋子。", "code": "map.token_missing"}
+        grid, offset_x, offset_y = _grid_of(state)
+        cell = _cell_of(token, grid, offset_x, offset_y)
+        area_id = scene_store.active_scene_id(room_dir) or str(state.get("scene_id") or "")
+        bundle = _narrative_bundle(info)
+        if bundle is None:
+            return {"ok": False, "error": "当前房间没有叙事图。", "code": "map.no_bundle"}
+        try:
+            radius = max(0, min(12, int(arguments.get("radius_cells") or 3)))
+        except (TypeError, ValueError):
+            radius = 3
+        from trpg_server.agents.narrative import mapgraph
+
+        try:
+            from trpg_server.agents.narrative.state_store import load_narrative_state
+
+            narrative = load_narrative_state(room_dir)
+        except Exception:  # noqa: BLE001
+            narrative = {}
+        brief = mapgraph.area_brief(bundle, narrative, area_id)
+        if not brief:
+            return {"ok": False, "error": "当前位置没有所属地图。", "code": "map.area_missing"}
+        is_manager = str(getattr(context, "agent_id", "") or "").strip().lower() in DM_AGENT_IDS
+        nearby = []
+        for node in mapgraph.pois_within(bundle, area_id, cell, radius):
+            distance = mapgraph.poi_distance_cells(node, cell)
+            discovered = mapgraph.poi_discovered(narrative, node)
+            if not is_manager and not discovered:
+                continue
+            nearby.append(
+                {
+                    "poi_id": node.id,
+                    "label": mapgraph.poi_label(node),
+                    "distance_cells": distance,
+                    "discovered": discovered,
+                }
+            )
+        nearby.sort(key=lambda item: item.get("distance_cells") or 0)
+        return {
+            "ok": True,
+            "area_id": area_id,
+            "cell": {"x": cell[0], "y": cell[1]},
+            "environment": brief.get("environment") or {},
+            "exits": brief.get("exits") or [],
+            "nearby_pois": nearby,
+            "warnings": [],
+        }
+    except Exception:  # noqa: BLE001
+        logger.warning("veil_map_inspect_area_failed", exc_info=True)
+        return {"ok": False, "error": "读取区域信息失败，请稍后重试。"}
+
+
+def _preview_move_tool(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    try:
+        room_dir, _room_id, info = _tool_context(context)
+        token_ref = str(arguments.get("token") or "").strip()
+        if not token_ref:
+            return {"ok": False, "error": "请提供要试探移动的棋子。"}
+        target = _target_from_arguments(arguments, room_dir, token_ref)
+        if target is None:
+            return {"ok": False, "error": "请提供目标格或方向。", "code": "map.invalid_target"}
+        state = _load_map(room_dir)
+        token = _find_token(state, token_ref)
+        if token is None:
+            return {"ok": False, "error": f"没有找到棋子「{token_ref}」。"}
+        grid, offset_x, offset_y = _grid_of(state)
+        from_cell = _cell_of(token, grid, offset_x, offset_y)
+        rejection = _move_target_rejection(state, token, target[0], target[1])
+        distance = max(abs(target[0] - from_cell[0]), abs(target[1] - from_cell[1]))
+        payload: dict[str, Any] = {
+            "ok": True,
+            "allowed": rejection is None,
+            "from": {"cell_x": from_cell[0], "cell_y": from_cell[1]},
+            "to": {"cell_x": target[0], "cell_y": target[1]},
+            "distance_cells": distance,
+            "distance_ft": spatial.cells_to_feet(distance, FEET_PER_CELL),
+            "area_id": scene_store.active_scene_id(room_dir) or str(state.get("scene_id") or ""),
+            "poi_on_path": [],
+            "encounter_ready": False,
+        }
+        if rejection is not None:
+            payload["code"], payload["error"] = rejection
+        bundle = _narrative_bundle(info)
+        if bundle is not None:
+            try:
+                from trpg_server.agents.narrative.poi_runtime import pois_on_path
+
+                poi_ids = pois_on_path(
+                    room_dir,
+                    info,
+                    _scenarios_dir(getattr(context, "scenarios_dir", None)),
+                    cells=_path_cells(from_cell, target),
+                    to_cell=target,
+                    from_cell=from_cell,
+                )
+            except Exception:  # noqa: BLE001
+                poi_ids = []
+            payload["poi_on_path"] = [
+                {"poi_id": node.id, "label": node.title or node.id}
+                for node in (bundle.node(poi_id) for poi_id in poi_ids)
+                if node is not None
+            ]
+        return payload
+    except Exception:  # noqa: BLE001
+        logger.warning("veil_map_preview_move_failed", exc_info=True)
+        return {"ok": False, "error": "试探移动失败，请稍后重试。"}
+
+
 MOVE_TOKEN_TOOL = AgentTool(
     name="veil-map.move_token",
     description=(
         "移动地图上的一枚棋子。战斗中必须由当前行动者发起，并按移动距离消耗 movement "
-        "预算；探索阶段不消耗行动经济，但仍受地图边界与占位限制。KP 可以移动任意棋子，"
-        "AI 玩家只能移动自己绑定的棋子。cell_x / cell_y 是格子坐标（可为负），服务端会"
-        "按网格吸附；reason 用一句短语说明移动意图。"
+        "预算；探索阶段不消耗行动经济，但仍受地图边界、占位与墙体限制。KP 可以移动任意"
+        "棋子，AI 玩家只能移动自己绑定的棋子。可用 cell_x / cell_y 指定目标格（可为负），"
+        "或用 direction（north/south/east/west 及斜向）+ steps 相对移动；reason 用一句短语"
+        "说明意图。移动成功会返回 poi_events（碰到兴趣点时的事件摘要），需要内容时再调用"
+        "narrative.get_poi。request_id 相同则幂等返回，不重复扣预算。"
     ),
     parameters={
         "type": "object",
@@ -3828,11 +4426,74 @@ MOVE_TOKEN_TOOL = AgentTool(
             "token": {"type": "string", "description": "棋子 id 或名称"},
             "cell_x": {"type": "integer", "description": "目标格列坐标（可为负）"},
             "cell_y": {"type": "integer", "description": "目标格行坐标（可为负）"},
+            "direction": {
+                "type": "string",
+                "enum": sorted(_DIRECTIONS),
+                "description": "相对方向（与 steps 配合，可替代绝对坐标）",
+            },
+            "steps": {"type": "integer", "minimum": 1, "maximum": 20, "description": "按方向移动的格数"},
             "reason": {"type": "string", "description": "给玩家的简短移动说明（可选）"},
+            "request_id": {"type": "string", "description": "可选：幂等键"},
         },
-        "required": ["token", "cell_x", "cell_y"],
+        "required": ["token"],
     },
     handler=_move_token_tool,
+    rulesets=("dnd5e",),
+)
+
+GET_POSITION_TOOL = AgentTool(
+    name="veil-map.get_position",
+    description=(
+        "读取当前棋子所在的格坐标与所属地图，以及队伍各棋子的位置。"
+        "位置是否落在兴趣点里由服务端判定；不要根据地图图片自行推测坐标。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "token": {"type": "string", "description": "可选：棋子 id 或名称，默认发起者自己的棋子。"},
+        },
+        "required": [],
+    },
+    handler=_get_position_tool,
+    rulesets=("dnd5e",),
+)
+
+INSPECT_AREA_TOOL = AgentTool(
+    name="veil-map.inspect_area",
+    description=(
+        "按当前棋子位置探测周围环境：光照/地形等区域特征、出口、半径内可达的兴趣点。"
+        "只返回观察者已看到或 DM 可见的兴趣点；不要向玩家描述未发现区域。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "token": {"type": "string", "description": "可选：以哪个棋子为观察者。"},
+            "radius_cells": {"type": "integer", "minimum": 0, "maximum": 12, "description": "探测半径（格），默认 3。"},
+        },
+        "required": [],
+    },
+    handler=_inspect_area_tool,
+    rulesets=("dnd5e",),
+)
+
+PREVIEW_MOVE_TOOL = AgentTool(
+    name="veil-map.preview_move",
+    description=(
+        "试探性移动：只做边界、占位与墙体校验并返回路径上的兴趣点，不改变任何状态。"
+        "返回 allowed=false 时必须换路线或放弃，不得假装已经移动。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "token": {"type": "string", "description": "棋子 id 或名称"},
+            "cell_x": {"type": "integer", "description": "目标格列坐标"},
+            "cell_y": {"type": "integer", "description": "目标格行坐标"},
+            "direction": {"type": "string", "enum": sorted(_DIRECTIONS)},
+            "steps": {"type": "integer", "minimum": 1, "maximum": 20},
+        },
+        "required": ["token"],
+    },
+    handler=_preview_move_tool,
     rulesets=("dnd5e",),
 )
 
@@ -3970,6 +4631,58 @@ def _notify_area_move(
         logger.warning("veil_map_area_move_trigger_failed", exc_info=True)
 
 
+class _MapService:
+    """给核心叙事层用的地图能力（避免核心 import 插件包）。"""
+
+    def activate_for_area(
+        self,
+        room_dir: Any,
+        info: dict[str, Any],
+        area_id: str,
+        entry_poi: str = "",
+    ) -> dict[str, Any]:
+        try:
+            if not _ruleset_enabled(info or {}):
+                return {
+                    "ok": False,
+                    "code": "map.ruleset_disabled",
+                    "error": "当前房间的规则集未启用地图。",
+                }
+            return _activate_area_scene(Path(room_dir), info or {}, area_id, entry_poi)
+        except Exception:  # noqa: BLE001
+            logger.warning("veil_map_activate_area_failed", exc_info=True)
+            return {
+                "ok": False,
+                "code": "map.scene_unavailable",
+                "error": "切换地图场景失败。",
+            }
+
+    def current_position(self, room_dir: Any) -> dict[str, Any] | None:
+        try:
+            state = _load_map(room_dir)
+        except Exception:  # noqa: BLE001
+            return None
+        token = next(
+            (
+                item
+                for item in state.get("tokens") or []
+                if str(item.get("kind") or "") == "pc"
+            ),
+            None,
+        )
+        if token is None:
+            return None
+        grid, offset_x, offset_y = _grid_of(state)
+        cell_x, cell_y = _cell_of(token, grid, offset_x, offset_y)
+        return {
+            "scene_id": scene_store.active_scene_id(room_dir) or str(state.get("scene_id") or ""),
+            "cell": {"x": cell_x, "y": cell_y},
+            "token_id": str(token.get("id") or ""),
+            "name": str(token.get("name") or ""),
+        }
+
+
+_MAP_SERVICE = _MapService()
 _ACTION_GUARD_REGISTERED = False
 
 
@@ -3978,6 +4691,7 @@ def _register_action_guard() -> None:
     if _ACTION_GUARD_REGISTERED:
         return
     try:
+        from trpg_server.plugins.runtime import register_service
         from trpg_server.workflows import areas as area_store
         from trpg_server.workflows.guards import register_action_guard
     except Exception:  # noqa: BLE001 - 旧核心没有工作流时静默跳过
@@ -3985,13 +4699,21 @@ def _register_action_guard() -> None:
     register_action_guard(_action_line_guard, critical=True)
     area_store.register_position_provider(_area_position_provider)
     area_store.register_scene_id_provider(_area_scene_provider)
+    register_service("veil-map", "map_service", _MAP_SERVICE)
     _ACTION_GUARD_REGISTERED = True
 
 
 def create_tools() -> list[AgentTool]:
     _register_action_guard()
-    return [MOVE_TOKEN_TOOL]
+    return [MOVE_TOKEN_TOOL, GET_POSITION_TOOL, INSPECT_AREA_TOOL, PREVIEW_MOVE_TOOL]
 
 
-__all__ = ["bp", "create_tools", "MOVE_TOKEN_TOOL"]
+__all__ = [
+    "bp",
+    "create_tools",
+    "MOVE_TOKEN_TOOL",
+    "GET_POSITION_TOOL",
+    "INSPECT_AREA_TOOL",
+    "PREVIEW_MOVE_TOOL",
+]
 

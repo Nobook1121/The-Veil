@@ -23,6 +23,10 @@
       "module": "entry.py",
       "blueprints": ["bp"]
     },
+    "agent_tools": {
+      "module": "entry.py",
+      "tools": ["dnd5e.start_encounter"]
+    },
     "ui": {
       "api_version": 1,
       "workspace": {

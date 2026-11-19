@@ -16,6 +16,21 @@ from trpg_server.agents.narrative.coerce import as_bool as _as_bool, as_str_list
 from trpg_server.agents.narrative.conditions import ConditionResult, evaluate_condition
 from trpg_server.agents.narrative.ledger import append_ledger_event, read_ledger_events
 from trpg_server.agents.narrative.logger import log_event, log_warning
+from trpg_server.agents.narrative.mapgraph import (
+    area_brief,
+    area_id_of,
+    area_of,
+    entry_pois,
+    has_poi_layer,
+    poi_card,
+    poi_code,
+    poi_discovered,
+    poi_label,
+    poi_nodes,
+    portal_edges_from,
+    render_area_brief,
+    scene_id_of,
+)
 from trpg_server.agents.narrative.model import (
     VISIBILITY_KP_ONLY,
     VISIBILITY_PUBLIC,
@@ -47,6 +62,11 @@ logger = logging.getLogger(__name__)
 
 class NarrativeRuntimeError(RuntimeError):
     """运行态不可用或动作被引擎拒绝；消息可以直接回给模型。"""
+
+    def __init__(self, message: str, *, code: str = "") -> None:
+        super().__init__(message)
+        # 失败码供模型分支（如 narrative.use_map_movement）；为空时沿用旧行为。
+        self.code = str(code or "")
 
 
 def _text(value: Any) -> str:
@@ -112,6 +132,7 @@ class NarrativeRuntime:
     room_id: str | None = None
     room_dir: Path | None = None
     scenario: dict[str, Any] = field(default_factory=dict)
+    room_info: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def load(cls, context: Any) -> "NarrativeRuntime":
@@ -143,6 +164,7 @@ class NarrativeRuntime:
             room_id=getattr(context, "room_id", None),
             room_dir=Path(room_dir),
             scenario=scenario if isinstance(scenario, Mapping) else {},
+            room_info=room_info,
         )
 
     # ---- 基础查询 ---------------------------------------------------------
@@ -182,6 +204,256 @@ class NarrativeRuntime:
         if isinstance(status, Mapping) and str(status.get(key) or "") in {"visited", "active", "completed"}:
             return True
         return key in {str(item) for item in self.narrative.get("visit_log") or []}
+
+    # ---- 地图图谱层（map / poi / portal） ---------------------------------
+    @property
+    def area_id(self) -> str:
+        return area_id_of(self.bundle, self.location_id)
+
+    def area_node(self) -> NarrativeNode | None:
+        return area_of(self.bundle, self.location_id)
+
+    def in_map_room(self) -> bool:
+        """当前位置属于一张已标注的地图（含地图 POI）。"""
+        return self.area_node() is not None
+
+    def map_layer_available(self) -> bool:
+        return has_poi_layer(self.bundle)
+
+    def _module_content(self, module_id: str) -> str:
+        key = _text(module_id)
+        if not key:
+            return ""
+        for module in self.scenario.get("modules") or []:
+            if isinstance(module, Mapping) and _text(module.get("id")) == key:
+                return str(module.get("content") or "")
+        return ""
+
+    def get_area(self, area_id: Any = None, *, include_dm: bool = False) -> dict[str, Any]:
+        """`AreaBrief`：当前图的背景、环境、出口与兴趣点索引。"""
+        key = _text(area_id) or self.area_id
+        if not key:
+            raise NarrativeRuntimeError(
+                "当前位置不属于任何地图；没有可读取的区域简报。",
+                code="narrative.area_not_found",
+            )
+        brief = area_brief(self.bundle, self.narrative, key, include_dm=include_dm)
+        if not brief:
+            raise NarrativeRuntimeError(
+                f"找不到地图区域：{key}", code="narrative.area_not_found"
+            )
+        brief["poi_index"] = [
+            {
+                "poi_id": node.id,
+                "code": poi_code(node),
+                "label": poi_label(node),
+                "discovered": poi_discovered(self.narrative, node),
+            }
+            for node in poi_nodes(self.bundle, key)
+        ]
+        brief["area_brief_text"] = render_area_brief(self.bundle, self.narrative, key)
+        return {"ok": True, **brief}
+
+    def get_poi(
+        self, reference: Any, *, viewer: str = "kp", reveal_hidden: bool = False
+    ) -> dict[str, Any]:
+        """`PoiCard`：兴趣点结构化内容；玩家侧未发现时拒绝。"""
+        node = self.resolve_node(reference, kinds=("location",))
+        if node is None or not node.is_poi:
+            raise NarrativeRuntimeError(
+                f"找不到兴趣点：{reference}", code="narrative.poi_not_found"
+            )
+        is_kp = str(viewer or "kp").strip().lower() != "player"
+        if not is_kp and not poi_discovered(self.narrative, node):
+            raise NarrativeRuntimeError(
+                "该兴趣点尚未被发现。", code="narrative.poi_hidden"
+            )
+        module_id = _text((node.body_ref or {}).get("module_id"))
+        card = poi_card(
+            self.bundle,
+            self.narrative,
+            node.id,
+            module_content=self._module_content(module_id),
+        )
+        if not card:
+            raise NarrativeRuntimeError(
+                f"找不到兴趣点：{reference}", code="narrative.poi_not_found"
+            )
+        if not is_kp:
+            card.pop("dm_notes", None)
+        return {"ok": True, **card}
+
+    def _travel_candidates(
+        self, origin: str, dest_area_id: str
+    ) -> list[tuple[NarrativeEdge, str]]:
+        """返回 (portal 边, 目标节点 id)：先看当前坐标，再看所属大节点。"""
+        origins: list[str] = [origin]
+        area = area_of(self.bundle, origin)
+        if area is not None and area.id != origin:
+            origins.append(area.id)
+        result: list[tuple[NarrativeEdge, str]] = []
+        for edge in portal_edges_from(self.bundle, origin):
+            other = edge.from_id if edge.to_id == origin else edge.to_id
+            candidates = {other, area_id_of(self.bundle, other)}
+            if dest_area_id in candidates:
+                result.append((edge, other))
+        for area_id in origins[1:]:
+            for edge in portal_edges_from(self.bundle, area_id):
+                other = edge.from_id if edge.to_id == area_id else edge.to_id
+                if dest_area_id in {other, area_id_of(self.bundle, other)}:
+                    result.append((edge, other))
+        return result
+
+    def travel_to(
+        self,
+        to_area: Any,
+        *,
+        from_poi: Any = None,
+        entry_poi: Any = None,
+        actor: str | None = None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """跨图唯一入口：校验 portal、切叙事位置，再切地图场景。"""
+        target = self.resolve_node(to_area, kinds=("location", "ending"))
+        if target is None:
+            raise NarrativeRuntimeError(
+                f"找不到目标区域：{to_area}", code="narrative.area_not_found"
+            )
+        dest_area = target if target.is_map else area_of(self.bundle, target.id)
+        dest_area_id = dest_area.id if dest_area is not None else target.id
+        origin = _text(from_poi) or _text(self.location_id)
+
+        receipt_key = _text(request_id)
+        receipts = self.narrative.get("travel_receipts")
+        if receipt_key and isinstance(receipts, Mapping):
+            cached = receipts.get(receipt_key)
+            if isinstance(cached, Mapping):
+                return dict(cached)
+
+        candidates = self._travel_candidates(origin, dest_area_id)
+        if not candidates:
+            raise NarrativeRuntimeError(
+                "没有满足条件的跨图路线；请先确认当前位置的出口。",
+                code="narrative.no_route",
+            )
+        usable: list[tuple[NarrativeEdge, str]] = []
+        missing: list[str] = []
+        for edge, other in candidates:
+            condition = self._edge_condition(edge, self.narrative)
+            if condition.ok:
+                usable.append((edge, other))
+            else:
+                missing.extend(str(item) for item in condition.missing)
+        if not usable:
+            raise NarrativeRuntimeError(
+                "跨图条件未满足，缺少：" + "；".join(dict.fromkeys(missing)),
+                code="narrative.condition_missing",
+            )
+        edge, other = usable[0]
+        transition = edge.transition
+
+        forward = edge.from_id == origin
+        dest_entry = _text(entry_poi)
+        if not dest_entry and forward:
+            dest_entry = _text(transition.get("entry_poi"))
+        if not dest_entry and dest_area is not None:
+            entries = entry_pois(self.bundle, dest_area)
+            dest_entry = entries[0] if entries else ""
+        if not dest_entry:
+            dest_entry = other if self.bundle.node(other) else dest_area_id
+
+        if dest_area is not None:
+            entry_node = self.bundle.node(dest_entry)
+            if entry_node is None or area_id_of(self.bundle, entry_node.id) != dest_area.id:
+                # 入口不在目标图内时退回目标图的入口点，避免落点错图。
+                entries = entry_pois(self.bundle, dest_area)
+                dest_entry = entries[0] if entries else dest_area.id
+
+        scene_switched = False
+        token_placement: list[dict[str, Any]] = []
+        if dest_area is not None:
+            service = _map_service()
+            if service is not None:
+                result = service.activate_for_area(
+                    str(self.room_dir), self.room_info, dest_area.id, dest_entry
+                )
+                if not result.get("ok"):
+                    raise NarrativeRuntimeError(
+                        str(result.get("error") or "目标地图场景不可用。"),
+                        code=str(result.get("code") or "map.scene_unavailable"),
+                    )
+                scene_switched = bool(result.get("scene_id"))
+                token_placement = list(result.get("placements") or [])
+
+        from_area = self.area_id
+        transition_text = _text(transition.get("text")) or edge.label
+        event = self.record(
+            {
+                "kind": "move",
+                "to": dest_entry,
+                "from": origin or None,
+                "actor": _text(actor) or None,
+                "transition": {"from_area": from_area, "to_area": dest_area_id},
+            },
+            summary=(
+                f"跨图到 {self.title(dest_entry)}"
+                if dest_entry else f"跨图到 {dest_area_id}"
+            ),
+        )
+        brief = (
+            area_brief(self.bundle, self.narrative, dest_area.id)
+            if dest_area is not None
+            else {}
+        )
+        if brief:
+            brief["poi_index"] = [
+                {
+                    "poi_id": node.id,
+                    "code": poi_code(node),
+                    "label": poi_label(node),
+                    "discovered": poi_discovered(self.narrative, node),
+                }
+                for node in poi_nodes(self.bundle, dest_area.id)
+            ]
+        payload: dict[str, Any] = {
+            "ok": True,
+            "from_area": from_area or None,
+            "to_area": dest_area_id,
+            "entry_poi": dest_entry,
+            "transition_text": transition_text,
+            "area_brief": brief,
+            "area_brief_text": (
+                render_area_brief(self.bundle, self.narrative, dest_area.id)
+                if dest_area is not None
+                else ""
+            ),
+            "token_placement": token_placement,
+            "scene_switched": scene_switched,
+            "event_id": event["id"],
+            "warnings": [],
+        }
+        if receipt_key:
+            stored = dict(receipts) if isinstance(receipts, Mapping) else {}
+            stored[receipt_key] = payload
+            self.record(
+                {"kind": "state_patch", "patch": {"travel_receipts": stored}},
+                summary="记录跨图回执",
+            )
+        if dest_area is not None and dest_entry:
+            self.record(
+                {"kind": "poi", "poi_id": dest_entry, "triggered": False},
+                summary=f"进入入口兴趣点 {self.title(dest_entry)}",
+            )
+        log_event(
+            "narrative.travel",
+            room_id=self.room_id or "",
+            turn=self._turn(),
+            from_area=from_area,
+            to_area=dest_area_id,
+            entry_poi=dest_entry,
+            scene_switched=scene_switched,
+        )
+        return payload
 
     def _ending_ready(self, node: NarrativeNode | None) -> bool:
         """结局天然是 kp_only；completion 满足（或无 completion）时才对玩家开放。"""
@@ -650,6 +922,21 @@ class NarrativeRuntime:
         if target.id == self.location_id:
             return {"moved": False, "already_here": True, "location_id": target.id, "title": self.title(target.id)}
 
+        # 地图房间里位置由 veil-map 判定；跨界只走 travel_to，避免双写分叉。
+        if self.in_map_room():
+            _deny("use_map_movement", to=target.id)
+            raise NarrativeRuntimeError(
+                "当前在地图中，请用地图移动工具改变位置；跨图请调用 narrative.travel_to。",
+                code="narrative.use_map_movement",
+            )
+        target_area = area_of(self.bundle, target.id)
+        if target_area is not None and target_area.id != self.area_id:
+            _deny("use_travel_to", to=target.id)
+            raise NarrativeRuntimeError(
+                "跨图移动必须调用 narrative.travel_to，不能直接改叙事位置。",
+                code="narrative.use_travel_to",
+            )
+
         adjacent = [
             (edge, condition)
             for edge, condition in ((edge, self._edge_condition(edge, self.narrative)) for edge, target_id in self._movement_edges_from(self.location_id or "") if target_id == target.id)
@@ -1067,6 +1354,16 @@ def _effect_payloads(effects: Mapping[str, Any]) -> list[dict[str, Any]]:
     for object_id in _str_list(effects.get("reveals")):
         payloads.append({"kind": "reveal", "object_id": object_id, "reason": "interaction"})
     return payloads
+
+
+def _map_service() -> Any | None:
+    """地图插件的内部服务；插件未加载时返回 None，跨图退化为纯叙事切换。"""
+    try:
+        from trpg_server.plugins.runtime import get_service
+
+        return get_service("veil-map", "map_service")
+    except Exception:  # noqa: BLE001 - 核心不依赖插件是否可用
+        return None
 
 
 def narrative_available(context: Any) -> bool:

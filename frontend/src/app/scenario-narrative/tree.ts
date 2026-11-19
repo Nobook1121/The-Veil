@@ -10,11 +10,17 @@
     function nodeRow(node: GraphNode): string {
         const meta = kindMeta(node.kind);
         const hidden = node.visibility === "kp_only";
+        const role = node.node_role === "map"
+            ? `<span class="badge bg-info text-dark ms-1">${escapeHtml(t("scenario.tree.map", "地图"))}</span>`
+            : node.node_role === "poi"
+                ? `<span class="badge bg-secondary ms-1">${escapeHtml(t("scenario.tree.poi", "兴趣点"))}</span>`
+                : "";
         return `
             <div class="scenario-tree-node${state.selectedId === node.id ? " active" : ""}" data-node-id="${escapeHtml(node.id)}" role="treeitem" tabindex="0" draggable="true">
                 <button type="button" class="scenario-tree-node-button">
                     <i class="fa ${meta.icon}" aria-hidden="true" style="color:${meta.color}"></i>
                     <span class="scenario-tree-node-title">${escapeHtml(node.title || node.id)}</span>
+                    ${role}
                     <span class="scenario-tree-node-kind">${escapeHtml(meta.label)}</span>
                     ${hidden ? `<i class="fa fa-eye-slash" title="${escapeHtml(t("scenario.tree.kp_only", "仅 KP 可见"))}" aria-hidden="true"></i>` : ""}
                 </button>

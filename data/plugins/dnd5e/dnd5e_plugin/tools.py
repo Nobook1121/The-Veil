@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 # 5e 的检定工具复用核心实现，但以独立工具名下发，避免 KP 被 COC7 的百分制口径误导。
-DND5E_TOOL_NAMES: tuple[str, ...] = ("dnd5e.roll_check",)
+DND5E_TOOL_NAMES: tuple[str, ...] = ("dnd5e.roll_check", "dnd5e.start_encounter")
 
 # KP 主持口径：由核心拼在通用 KP 提示词之后。
 DND5E_KP_PROMPT = """
@@ -36,6 +36,18 @@ DND5E_KP_PROMPT = """
 - 需要非成员或临时目标的 d20 检定时，可用 `dice.roll` 掷 1d20 后自行加调整值；
   但角色卡相关的检定必须优先走 `dnd5e.roll_check`。
 - 不得编造骰点、检定结果、伤害或豁免结果；没有工具结果时不要声称已经完成投骰。
+
+### 地图、位置与遭遇
+
+- 不要根据地图图片自行判断位置、距离或能否通行；地图房间里的位置一律以工具返回为准。
+- 读取位置用 `veil-map.get_position`，探测周围环境与出口用 `veil-map.inspect_area`；
+  确认某条路线是否可走先用 `veil-map.preview_move`，被拒绝时换路线，不要假设已移动。
+- 移动棋子用 `veil-map.move_token`（`cell_x/cell_y` 或 `direction` + `steps`）。
+  地图房间内不要用 `narrative.move_to_location` 改变位置。
+- 移动成功后若返回 `poi_events`，需要内容时再调用 `narrative.get_poi`；
+  进入新地图用 `narrative.travel_to`，它会同时切换叙事位置与地图场景。
+- 兴趣点配置了遭遇且 KP/剧本决定开战时，调用 `dnd5e.start_encounter`；
+  遭遇默认不自动开战，未调用工具就不得描述战斗已经发生。
 
 ### 战斗、法术与效果
 

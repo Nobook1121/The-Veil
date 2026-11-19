@@ -1,8 +1,32 @@
 from typing import Any
 
+from trpg_server.agents.narrative.redaction import (
+    redact_map_text,
+    scenario_has_map_layer,
+    strip_trigger_asset_fields,
+)
 from trpg_server.agents.tools.base import AgentTool
 from trpg_server.agents.trigger_system import find_trigger_definition, validate_trigger
 from trpg_server.scenario_store import build_trigger_message, find_trigger_by_id, load_scenario_by_id
+
+
+def _map_layer(context: Any) -> bool:
+    room_info = context.room_info() if callable(getattr(context, "room_info", None)) else {}
+    room_info = room_info if isinstance(room_info, dict) else {}
+    return scenario_has_map_layer(
+        getattr(context, "scenarios_dir", None),
+        room_info.get("scenario_id"),
+        room_info.get("scenario_version"),
+    )
+
+
+def _sanitize_message(message: Any, map_layer: bool) -> Any:
+    """地图剧本的触发器消息只留文本；底图/附件地址不进模型工具结果。"""
+    if not map_layer or not isinstance(message, dict):
+        return message
+    result = strip_trigger_asset_fields(dict(message))
+    result["content"] = redact_map_text(result.get("content"))
+    return result
 
 
 def _condition_requires_check(condition: str) -> bool:
@@ -56,17 +80,20 @@ def _reveal_library_trigger(
     if not contents:
         return {"error": f"trigger {trigger_id} has no revealable content", "trigger_id": trigger_id}
 
-    message = {
-        "type": "trigger",
-        "sender_name": str(approved.get("text") or f"触发器{trigger_id}"),
-        "avatar": "",
-        "content": "\n\n".join(contents),
-        "metadata": {
-            "trigger_id": str(trigger_id),
-            "content_mode": "attachment",
-            "scene_id": approved.get("sceneId"),
+    message = _sanitize_message(
+        {
+            "type": "trigger",
+            "sender_name": str(approved.get("text") or f"触发器{trigger_id}"),
+            "avatar": "",
+            "content": "\n\n".join(contents),
+            "metadata": {
+                "trigger_id": str(trigger_id),
+                "content_mode": "attachment",
+                "scene_id": approved.get("sceneId"),
+            },
         },
-    }
+        _map_layer(context),
+    )
     return {
         "triggered": True,
         "trigger_id": str(trigger_id),
@@ -151,6 +178,7 @@ def reveal_scenario_trigger(arguments: dict[str, Any], context: Any) -> dict[str
     message = build_trigger_message(scenario, trigger_id)
     if not message:
         return {"error": f"trigger {trigger_id} was not found"}
+    message = _sanitize_message(message, _map_layer(context))
 
     return {
         "triggered": True,

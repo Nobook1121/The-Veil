@@ -525,6 +525,27 @@ def _apply_trigger_fire(narrative: dict[str, Any], event: Mapping[str, Any], tur
     narrative["trigger_fires"] = fires
 
 
+def _apply_poi(narrative: dict[str, Any], event: Mapping[str, Any], turn: int) -> None:
+    """兴趣点发现/触发记录：按 poi id 记录首次回合，重复触发只累加次数。"""
+    poi_id = str(event.get("poi_id") or "").strip()
+    if not poi_id:
+        return
+    discovered = narrative.get("poi_discovered")
+    discovered = dict(discovered) if isinstance(discovered, Mapping) else {}
+    discovered.setdefault(poi_id, turn)
+    narrative["poi_discovered"] = discovered
+    if event.get("triggered"):
+        triggered = narrative.get("poi_triggered")
+        triggered = dict(triggered) if isinstance(triggered, Mapping) else {}
+        entry = triggered.get(poi_id)
+        entry = dict(entry) if isinstance(entry, Mapping) else {}
+        entry["first_turn"] = _as_int(entry.get("first_turn"), turn)
+        entry["last_turn"] = turn
+        entry["count"] = _as_int(entry.get("count"), 0) + 1
+        triggered[poi_id] = entry
+        narrative["poi_triggered"] = triggered
+
+
 def apply_to_narrative(narrative: Mapping[str, Any], event: Mapping[str, Any]) -> dict[str, Any]:
     """纯函数版本：不读写磁盘，供重放与测试使用。"""
     state = normalize_narrative_state(narrative)
@@ -611,6 +632,12 @@ def apply_to_narrative(narrative: Mapping[str, Any], event: Mapping[str, Any]) -
             revealed = _dict_list(state.get("revealed"))
             revealed.append(entry)
             state["revealed"] = revealed
+    elif kind == "poi":
+        _apply_poi(state, event, turn)
+    elif kind == "state_patch":
+        patch = event.get("patch")
+        if isinstance(patch, Mapping):
+            state.update({str(key): value for key, value in patch.items()})
     return state
 
 

@@ -16,6 +16,7 @@ from typing import Any, Mapping
 
 from trpg_server.agents.narrative.logger import log_event, log_warning
 from trpg_server.agents.narrative.model import NarrativeNode
+from trpg_server.agents.narrative import mapgraph
 from trpg_server.agents.narrative.visibility import forbidden_names
 
 logger = logging.getLogger(__name__)
@@ -218,6 +219,48 @@ def _unresolved_hook(runtime: Any, node: NarrativeNode) -> bool:
     return False
 
 
+def _map_scope(runtime: Any) -> set[str] | None:
+    """地图房间的检索白名单；非地图房间返回 None（保持旧候选集）。
+
+    白名单 = 当前地点 + 当前 area 内已发现且可见的 POI + 已揭示线索
+    + 这些锚点一跳内的资产（inhabits/reveals/contains/...）。
+    大节点本身不进入候选集，区域信息只由 `AreaBrief` 注入。
+    """
+    try:
+        area = runtime.area_node()
+    except Exception:  # noqa: BLE001 - 旧运行态没有地图方法
+        return None
+    if area is None:
+        return None
+    scope: set[str] = set()
+    current = _text(getattr(runtime, "location_id", ""))
+    if current:
+        scope.add(current)
+    for node in mapgraph.poi_nodes(runtime.bundle, area.id):
+        if mapgraph.poi_discovered(runtime.narrative, node) and runtime.node_visible(node.id):
+            scope.add(node.id)
+    for clue_id in runtime.narrative.get("revealed_clues") or []:
+        value = _text(clue_id)
+        if value:
+            scope.add(value)
+    anchors = set(scope)
+    asset_edges = {"contains", "mentions", "reveals", "knows", "uses", "inhabits"}
+    for edge in runtime.bundle.edges:
+        if edge.type not in asset_edges:
+            continue
+        if edge.from_id in anchors:
+            scope.add(edge.to_id)
+        elif edge.to_id in anchors:
+            scope.add(edge.from_id)
+    return scope
+
+
+def _map_allowed(runtime: Any, scope: set[str] | None, node: NarrativeNode | None) -> bool:
+    if scope is None or node is None:
+        return True
+    return node.id in scope
+
+
 def candidate_locations(
     runtime: Any,
     message: str,
@@ -236,8 +279,11 @@ def candidate_locations(
     folded = _text(message).casefold()
     target_ids = {str(item.get("id")) for item in targets}
     weights = TOPOLOGY_WEIGHTS.get(runtime.bundle.topology, TOPOLOGY_WEIGHTS["hybrid"])
+    map_scope = _map_scope(runtime)
     ranked: list[dict[str, Any]] = []
     for node in runtime.bundle.location_nodes:
+        if not _map_allowed(runtime, map_scope, node):
+            continue
         if node.visibility != "public" and not runtime.node_visible(node.id):
             continue
         keyword_hit = 1.0 if _node_keyword_hit(node, folded) else 0.0
@@ -274,18 +320,29 @@ def candidate_locations(
 
 
 def _candidate_ids(runtime: Any, contract: "TurnContract", folded: str) -> tuple[set[str], set[str]]:
-    """§5.4 候选集：先图过滤，再只在子集内检索。"""
+    """§5.4 候选集：先图过滤，再只在子集内检索。
+
+    地图房间额外按 `area_id + discovered` 收窄：未发现 POI 与大节点正文
+    都不进入候选集，避免把未来房间塞进上下文。
+    """
     ids: set[str] = set()
     titles: set[str] = set()
+    map_scope = _map_scope(runtime)
 
     def _add(node_id: Any) -> None:
         node = runtime.node(node_id)
         if node is None:
             return
+        if not _map_allowed(runtime, map_scope, node):
+            return
         ids.add(node.id)
         if node.title:
             titles.add(node.title)
 
+    # 地图房间：已发现 POI 与其直属资产属于安全候选集，避免关键词漏召回。
+    if map_scope is not None:
+        for node_id in map_scope:
+            _add(node_id)
     if contract.location:
         _add(contract.location)
     for item in contract.candidate_locations:
@@ -341,7 +398,10 @@ def _verify(runtime: Any, contract: "TurnContract") -> tuple[list[dict[str, Any]
                     {"action": "resolve_interaction", "id": interaction_id, "object": object_id}
                 )
     exits = runtime.exits(include_blocked=True, include_hidden=False)
+    map_scope = _map_scope(runtime)
     for item in exits:
+        if not _map_allowed(runtime, map_scope, runtime.node(item.get("target_id"))):
+            continue
         if item.get("blocked"):
             forbidden.append(f"enter:{item['target_id']}")
             continue
@@ -503,6 +563,7 @@ def prepare_turn(runtime: Any, message: str) -> TurnContract | None:
         )
         targets = link_targets(runtime, text)
         locations = candidate_locations(runtime, text, targets, intent)
+        map_scope = _map_scope(runtime)
         exits = [
             {
                 "to": item["target_id"],
@@ -515,6 +576,7 @@ def prepare_turn(runtime: Any, message: str) -> TurnContract | None:
                 "visited": bool(item.get("visited")),
             }
             for item in runtime.exits(include_blocked=True, include_hidden=False)
+            if _map_allowed(runtime, map_scope, runtime.node(item.get("target_id")))
         ]
         contract = TurnContract(
             intent=intent,

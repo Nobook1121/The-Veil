@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 from trpg_server.agents.narrative.model import NarrativeBundle, NarrativeEdge, NarrativeNode
+from trpg_server.agents.narrative.state_store import save_narrative_state
 from trpg_server.agents.narrative.store import save_bundle
 from trpg_server.app_factory import create_app
 
@@ -193,3 +194,83 @@ def test_room_narrative_loads_non_versioned_scenario(tmp_path):
 
     assert response.status_code == 200
     assert response.get_json()["data"]["location"]["id"] == "room_hall"
+
+
+def _write_map_scenario(tmp_path, *, room_role="owner", user_id=1):
+    storage = tmp_path / "scenarios" / "scenario-s1"
+    storage.mkdir(parents=True, exist_ok=True)
+    (storage / "scenario.json").write_text(
+        json.dumps({"id": "s1", "title": "地图剧本", "version": "1.0.0", "modules": []}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    save_bundle(
+        storage,
+        NarrativeBundle(
+            scenario_id="s1",
+            nodes=[
+                NarrativeNode(
+                    id="area_map",
+                    kind="location",
+                    title="矿坑",
+                    extra={
+                        "node_role": "map",
+                        "map": {
+                            "scene_id": "area_map",
+                            "brief": "废弃矿坑，潮湿阴冷。",
+                            "environment": {"lighting": "昏暗", "smell": "潮湿"},
+                            "entry_pois": ["poi_entry"],
+                        },
+                    },
+                ),
+                NarrativeNode(
+                    id="poi_entry",
+                    kind="location",
+                    title="1. 入口",
+                    parent="area_map",
+                    extra={"node_role": "poi", "poi": {"area_id": "area_map", "code": "1"}},
+                ),
+                NarrativeNode(
+                    id="poi_lair",
+                    kind="location",
+                    title="2. 巢穴",
+                    parent="area_map",
+                    extra={"node_role": "poi", "poi": {"area_id": "area_map", "code": "2"}},
+                ),
+            ],
+            edges=[],
+            start={"location_id": "poi_entry"},
+        ),
+    )
+    save_narrative_state(tmp_path / "rooms" / "r-1", {"location": "poi_entry"})
+    return storage
+
+
+def test_room_narrative_layers_map_and_pois_for_manager(tmp_path):
+    _write_room(tmp_path)
+    _write_map_scenario(tmp_path)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    data = client.get("/api/rooms/r-1/narrative").get_json()["data"]
+
+    assert data["area"]["area_id"] == "area_map"
+    assert data["area"]["title"] == "矿坑"
+    assert data["area"]["hidden_poi_count"] == 1
+    assert [item["poi_id"] for item in data["area"]["discovered_pois"]] == ["poi_entry"]
+    pois = {item["poi_id"]: item for item in data["pois"]}
+    assert set(pois) == {"poi_entry", "poi_lair"}
+    assert pois["poi_lair"]["code"] == "2"
+
+
+def test_room_narrative_hides_undiscovered_pois_from_player(tmp_path):
+    _write_room(tmp_path, room_role="player", user_id=2, creator_id=1)
+    _write_map_scenario(tmp_path)
+    client = _app(tmp_path).test_client()
+    _login(client, user_id=2)
+
+    data = client.get("/api/rooms/r-1/narrative").get_json()["data"]
+
+    assert data["permissions"]["can_manage"] is False
+    assert [item["poi_id"] for item in data["pois"]] == ["poi_entry"]
+    assert "code" not in data["pois"][0]
+    assert [item["poi_id"] for item in data["area"]["discovered_pois"]] == ["poi_entry"]

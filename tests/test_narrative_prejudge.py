@@ -271,3 +271,92 @@ def test_move_and_clock_events_are_logged(tmp_path, caplog) -> None:
     assert "narrative.move.free" in caplog.text
     assert "narrative.clock.advance" in caplog.text
     assert "narrative.clock.reach" in caplog.text
+
+
+def _map_runtime(tmp_path: Path, *, discovered: bool = False) -> NarrativeRuntime:
+    bundle = NarrativeBundle(
+        scenario_id="s-map",
+        topology="hybrid",
+        nodes=[
+            NarrativeNode(
+                id="area_map",
+                kind="location",
+                title="矿坑",
+                extra={"node_role": "map", "map": {"scene_id": "area_map"}},
+            ),
+            NarrativeNode(
+                id="poi_entry",
+                kind="location",
+                title="1. 入口",
+                parent="area_map",
+                extra={"node_role": "poi", "poi": {"area_id": "area_map", "code": "1"}},
+            ),
+            NarrativeNode(
+                id="poi_lair",
+                kind="location",
+                title="2. 巢穴",
+                parent="area_map",
+                summary="巢穴深处堆着战利品。",
+                keywords=["巢穴", "战利品"],
+                extra={"node_role": "poi", "poi": {"area_id": "area_map", "code": "2"}},
+            ),
+            NarrativeNode(
+                id="area_far",
+                kind="location",
+                title="远处地图",
+                extra={"node_role": "map", "map": {"scene_id": "area_far"}},
+            ),
+            NarrativeNode(
+                id="poi_far",
+                kind="location",
+                title="远处的巢穴",
+                parent="area_far",
+                keywords=["巢穴"],
+                extra={"node_role": "poi", "poi": {"area_id": "area_far", "code": "1"}},
+            ),
+            NarrativeNode(id="npc_lair", kind="npc", title="地精头目"),
+        ],
+        edges=[
+            NarrativeEdge(id="e_entry_lair", from_id="poi_entry", to_id="poi_lair", type="adjacent"),
+            NarrativeEdge(id="e_lair_npc", from_id="poi_lair", to_id="npc_lair", type="inhabits"),
+        ],
+    )
+    state = {"location": "poi_entry"}
+    if discovered:
+        state["poi_discovered"] = {"poi_lair": {"at": "poi_entry"}}
+    save_narrative_state(tmp_path, state)
+    return NarrativeRuntime(
+        bundle=bundle,
+        narrative=load_narrative_state(tmp_path),
+        index=build_index(bundle),
+        room_id="room-map",
+        room_dir=tmp_path,
+    )
+
+
+def test_map_retrieval_scope_hides_undiscovered_poi(tmp_path) -> None:
+    clear_cache()
+    runtime = _map_runtime(tmp_path)
+    text = "我查看巢穴里的战利品"
+    contract = prepare_turn(runtime, text)
+    ids, titles = retrieval_candidates(runtime, contract, text)
+
+    assert "poi_lair" not in ids
+    assert "2. 巢穴" not in titles
+    assert "npc_lair" not in ids
+    # 未发现兴趣点也不能出现在可达出口与移动允许里。
+    assert all(item["to"] != "poi_lair" for item in contract.reachable_exits)
+    assert "poi_far" not in ids
+
+
+def test_map_retrieval_scope_includes_discovered_poi_and_assets(tmp_path) -> None:
+    clear_cache()
+    runtime = _map_runtime(tmp_path, discovered=True)
+    text = "我查看巢穴里的战利品"
+    contract = prepare_turn(runtime, text)
+    ids, titles = retrieval_candidates(runtime, contract, text)
+
+    assert "poi_lair" in ids
+    assert "2. 巢穴" in titles
+    assert "npc_lair" in ids
+    assert "poi_far" not in ids

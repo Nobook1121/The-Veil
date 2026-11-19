@@ -2,6 +2,13 @@ import json
 from typing import Any
 
 from trpg_server.agents.memory import read_room_memory, remember_room_fact
+from trpg_server.agents.narrative.redaction import (
+    public_trigger_item,
+    redact_map_text,
+    scenario_has_map_layer,
+    strip_map_fields,
+    strip_trigger_asset_fields,
+)
 from trpg_server.agents.room_state import load_room_state, save_room_state
 from trpg_server.agents.tools.base import AgentTool
 from trpg_server.scenario_store import build_trigger_message, iter_scenario_trigger_catalog, load_scenario_by_id
@@ -156,6 +163,9 @@ def get_room_scenario_context(arguments: dict[str, Any], context: Any) -> dict[s
     scene_id = str(arguments.get("scene_id") or "").strip()
     module_type = str(arguments.get("module_type") or "").strip().lower()
     max_items = max(1, min(20, int(arguments.get("max_items") or 5)))
+    map_layer = scenario_has_map_layer(
+        context.scenarios_dir, info.get("scenario_id"), info.get("scenario_version")
+    )
 
     candidates = []
     for module in _scenario_modules(scenario):
@@ -189,7 +199,11 @@ def get_room_scenario_context(arguments: dict[str, Any], context: Any) -> dict[s
             "entity_manifest": _entity_manifest(scenario),
         },
         "matches": candidates[:max_items],
-        "triggers": iter_scenario_trigger_catalog(scenario, scene_id=scene_id or None),
+        "triggers": [
+            public_trigger_item(item) if map_layer else item
+            for item in iter_scenario_trigger_catalog(scenario, scene_id=scene_id or None)
+            if isinstance(item, dict)
+        ],
     }
 
 
@@ -211,8 +225,14 @@ def get_room_scenario_module(arguments: dict[str, Any], context: Any) -> dict[st
     # Provide a bounded, pageable excerpt while retaining all structured fields.
     offset = max(0, int(arguments.get("offset") or 0))
     max_chars = max(1000, min(8000, int(arguments.get("max_chars") or 5000)))
-    content = str(module.get("content") or "")
-    module_payload = {key: value for key, value in module.items() if key != "content"}
+    map_layer = scenario_has_map_layer(
+        context.scenarios_dir, info.get("scenario_id"), info.get("scenario_version")
+    )
+    content = redact_map_text(str(module.get("content") or "")) if map_layer else str(module.get("content") or "")
+    payload_source = {key: value for key, value in module.items() if key != "content"}
+    if map_layer:
+        payload_source = strip_trigger_asset_fields(strip_map_fields(payload_source))
+    module_payload = payload_source
     module_payload["content"] = content[offset : offset + max_chars]
     module_payload["content_offset"] = offset
     module_payload["content_length"] = len(content)

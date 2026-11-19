@@ -161,8 +161,15 @@ def render_state_summary(
     bundle: NarrativeBundle | None = None,
     *,
     max_chars: int = MAX_SUMMARY_CHARS,
+    area: str | None = None,
+    poi: str | None = None,
+    nearby: tuple[str, ...] | list[str] = (),
 ) -> str:
-    """渲染每轮注入的状态摘要；无位置且无回合时返回空串。"""
+    """渲染每轮注入的状态摘要；无位置且无回合时返回空串。
+
+    `area` / `poi` / `nearby` 仅在地图房间由调用方显式传入；
+    不传时输出与旧版本逐字一致。
+    """
     state = normalize_narrative_state(narrative)
     location = _text(state.get("location"))
     clock = state.get("clock") if isinstance(state.get("clock"), Mapping) else {}
@@ -232,6 +239,22 @@ def render_state_summary(
 
     if bundle is not None and location:
         exits = _exit_entries(bundle, state, location)
+        if area:
+            from trpg_server.agents.narrative import mapgraph
+
+            # 地图房间里未发现的 POI 不能以出口名进入提示词。
+            exits = [
+                entry
+                for entry in exits
+                if not (node := bundle.node(entry.get("to")))
+                or not node.is_poi
+                or node.id == poi
+                or mapgraph.poi_discovered(state, node)
+            ]
+            for entry in exits:
+                node = bundle.node(entry.get("to"))
+                if node is not None and node.is_poi:
+                    entry["label"] = mapgraph.poi_label(node) or entry["label"]
         if exits:
             parts: list[str] = []
             for entry in exits[:4]:
@@ -244,6 +267,60 @@ def render_state_summary(
                 else:
                     parts.append(f"{entry['label']}（{'已访问' if entry['visited'] else '可达'}）")
             lines.append("出口：" + "、".join(parts))
+
+    if area and bundle is not None:
+        from trpg_server.agents.narrative import mapgraph
+
+        brief = mapgraph.area_brief(bundle, state, area)
+        if brief:
+            environment = brief.get("environment") or {}
+            traits = [
+                _text(environment.get("lighting")),
+                _text(environment.get("smell")),
+                _text(environment.get("sound")),
+            ]
+            traits = [item for item in traits if item]
+            map_line = f"地图：{brief['title']}（{brief['area_id']}）"
+            if traits:
+                map_line += "，" + "；".join(traits)
+            poi_node = bundle.node(poi) if poi else None
+            if poi_node is not None and poi_node.is_poi:
+                map_line += f" / 位置：{mapgraph.poi_label(poi_node)}"
+            lines.append(map_line)
+            if nearby:
+                labels: list[str] = []
+                for node_id in list(nearby)[:4]:
+                    node = bundle.node(node_id)
+                    if node is None or not mapgraph.poi_discovered(state, node):
+                        continue
+                    labels.append(
+                        mapgraph.poi_label(node) if node.is_poi else _node_title(bundle, node_id)
+                    )
+                if labels:
+                    lines.append("附近：" + "、".join(labels))
+            # 地图房间未分队时也给出「同在此处」，让 KP 知道队友仍在当前图。
+            if party_locations and not party_split:
+                names: list[str] = []
+                for pc_id in list(party_locations)[:4]:
+                    name = _pc_name(str(pc_id), pc_state.get(pc_id))
+                    if name and name not in names:
+                        names.append(name)
+                if names:
+                    lines.append("队伍：" + "、".join(names) + "同在此处")
+            triggered = state.get("poi_triggered")
+            if isinstance(triggered, Mapping):
+                triggered_labels: list[str] = []
+                for poi_id in triggered:
+                    node = bundle.node(str(poi_id))
+                    if node is None or not node.is_poi:
+                        continue
+                    if mapgraph.poi_area_id(node) != area:
+                        continue
+                    label = mapgraph.poi_label(node)
+                    if label and label not in triggered_labels:
+                        triggered_labels.append(label)
+                if triggered_labels:
+                    lines.append("已触发：" + "、".join(triggered_labels[:6]))
 
     clocks = state.get("clocks") if isinstance(state.get("clocks"), Mapping) else {}
     clock_parts: list[str] = []

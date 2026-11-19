@@ -724,8 +724,13 @@ def registered_plugin_tools():
 
 def test_agent_tool_is_scoped_to_dnd5e(registered_plugin_tools, monkeypatch):
     tools = veil_map.create_tools()
-    assert [tool.name for tool in tools] == ["veil-map.move_token"]
-    assert tools[0].rulesets == ("dnd5e",)
+    assert [tool.name for tool in tools] == [
+        "veil-map.move_token",
+        "veil-map.get_position",
+        "veil-map.inspect_area",
+        "veil-map.preview_move",
+    ]
+    assert all(tool.rulesets == ("dnd5e",) for tool in tools)
 
     assert "veil-map.move_token" in profiles.plugin_tool_names("dnd5e")
     assert "veil-map.move_token" not in profiles.plugin_tool_names("coc7")

@@ -118,6 +118,41 @@ def test_prompt_layers_inject_narrative_summary_before_room_snapshot():
     assert "【当前状态】" not in result.cache_key
 
 
+def test_prompt_layers_place_area_brief_before_state_summary():
+    result = build_prompt_layers(
+        global_rules="GLOBAL",
+        scenario={"id": "scenario-1", "version": "3", "core": "CORE"},
+        scene={"id": "scene-2", "version": "5", "content": "SCENE"},
+        room_state={"room_id": "room-a"},
+        history=[],
+        user_input="look",
+        rules_version="7",
+        area_brief="当前地图：克拉摩窝点\n环境：潮湿",
+        narrative_summary="状态：第 1 轮",
+    )
+
+    contents = [message["content"] for message in result.messages]
+    area_index = contents.index("当前地图：克拉摩窝点\n环境：潮湿")
+    summary_index = contents.index("状态：第 1 轮")
+    assert area_index < summary_index
+    assert result.segments[area_index] == "narrative_area"
+    assert "当前地图" not in result.cache_key
+
+
+def test_prompt_layers_skip_empty_area_brief():
+    result = build_prompt_layers(
+        global_rules="GLOBAL",
+        scenario={"id": "scenario-1", "version": "3", "core": "CORE"},
+        scene={"id": "scene-2", "version": "5", "content": "SCENE"},
+        room_state={"room_id": "room-a"},
+        history=[],
+        user_input="look",
+        rules_version="7",
+        area_brief="",
+    )
+    assert "narrative_area" not in result.segments
+
+
 def test_prompt_layers_place_retrieval_after_static_layers():
     result = build_prompt_layers(
         global_rules="GLOBAL",

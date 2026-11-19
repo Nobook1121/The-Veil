@@ -20,6 +20,7 @@ _LOCK = threading.RLock()
 _EXTRA_TOOLS: dict[str, tuple[Any, ...]] = {}
 _EXTRA_RULESETS: dict[str, Any] = {}
 _CONTENT_PACKS: dict[str, Any] = {}
+_SERVICES: dict[str, dict[str, Any]] = {}
 
 
 def register_agent_tools(plugin_id: str, tools: list[Any]) -> None:
@@ -67,12 +68,25 @@ def content_pack_ids() -> list[str]:
         return sorted(_CONTENT_PACKS)
 
 
+def register_service(plugin_id: str, name: str, service: Any) -> None:
+    """注册插件内部能力（如地图服务），核心按名字探测，不 import 插件包。"""
+    with _LOCK:
+        bucket = _SERVICES.setdefault(str(plugin_id), {})
+        bucket[str(name)] = service
+
+
+def get_service(plugin_id: str, name: str) -> Any | None:
+    with _LOCK:
+        return (_SERVICES.get(str(plugin_id)) or {}).get(str(name))
+
+
 def clear_plugin_runtime() -> None:
     """卸载/重载时清空扩展项（已注册的 Flask 蓝图无法撤销，需重启）。"""
     with _LOCK:
         _EXTRA_TOOLS.clear()
         _EXTRA_RULESETS.clear()
         _CONTENT_PACKS.clear()
+        _SERVICES.clear()
     try:
         from trpg_server.workflows import areas
         from trpg_server.workflows.guards import clear_action_guards
@@ -91,6 +105,7 @@ def unregister_plugin(plugin_id: str) -> None:
         _EXTRA_TOOLS.pop(str(plugin_id), None)
         _EXTRA_RULESETS.pop(str(plugin_id), None)
         _CONTENT_PACKS.pop(str(plugin_id), None)
+        _SERVICES.pop(str(plugin_id), None)
 
 
 def runtime_snapshot() -> dict[str, Any]:
@@ -108,9 +123,11 @@ __all__ = [
     "content_packs_for",
     "extra_agent_tools",
     "extra_ruleset_plugins",
+    "get_service",
     "register_agent_tools",
     "register_content_packs",
     "register_ruleset_plugin",
+    "register_service",
     "runtime_snapshot",
     "unregister_plugin",
 ]

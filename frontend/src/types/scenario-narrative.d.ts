@@ -9,6 +9,9 @@ interface GraphNode {
     id: string;
     kind: string;
     title: string;
+    node_role?: string;
+    map?: unknown;
+    poi?: unknown;
     summary?: string;
     body?: string;
     scene_role?: string;

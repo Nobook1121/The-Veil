@@ -115,3 +115,11 @@ class Dnd5ePlugin:
 
 
 PLUGIN = Dnd5ePlugin()
+
+
+def create_tools():
+    """插件级 Agent 工具：5e 专属的开战入口（核心不认识具体规则集）。"""
+    from dnd5e_plugin.encounter import create_tools as _encounter_tools
+
+    return _encounter_tools()
+

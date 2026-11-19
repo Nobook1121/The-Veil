@@ -97,6 +97,7 @@ def build_prompt_layers(
     memory_context: str | None = None,
     ruleset_fragments: list[str] | None = None,
     cache_variant: str = "",
+    area_brief: str | None = None,
 ) -> PromptLayers:
     scenario_static = _scenario_static_content(scenario)
     scene_static = _scene_static_content(scene)
@@ -176,6 +177,11 @@ def build_prompt_layers(
         # 开场包只在开局回合注入；确定性内容，不随历史增长。
         dynamic_messages.append({"role": "system", "content": str(opening_pack)})
         dynamic_segments.append("opening_pack")
+    if area_brief:
+        # 区域简报（≤600 字）先于状态摘要：进入地图后稳定注入，
+        # 只含环境/出口/已发现兴趣点索引，不含兴趣点正文。
+        dynamic_messages.append({"role": "system", "content": str(area_brief)})
+        dynamic_segments.append("narrative_area")
     if narrative_summary:
         dynamic_messages.append({"role": "system", "content": str(narrative_summary)})
         dynamic_segments.append("narrative_state")

@@ -11,6 +11,7 @@ from typing import Any
 from flask import Blueprint, current_app, session
 
 from trpg_server.agents.context import build_agent_context
+from trpg_server.agents.narrative import mapgraph
 from trpg_server.agents.narrative.logger import log_event
 from trpg_server.agents.narrative.runtime import NarrativeRuntime, NarrativeRuntimeError
 from trpg_server.logging_config import log_user_action, user_action_text
@@ -102,6 +103,58 @@ def _status_payload(runtime: NarrativeRuntime) -> dict[str, Any]:
     }
 
 
+def _area_payload(runtime: NarrativeRuntime, can_manage: bool) -> dict[str, Any] | None:
+    """当前地图的玩家安全视图：只列已发现且可见的兴趣点，不含正文与编号。"""
+    area = runtime.area_node()
+    if area is None:
+        return None
+    brief = mapgraph.area_brief(runtime.bundle, runtime.narrative, area.id)
+    if not brief:
+        return None
+    pois = mapgraph.poi_nodes(runtime.bundle, area.id)
+    discovered = [
+        node
+        for node in pois
+        if mapgraph.poi_discovered(runtime.narrative, node) and runtime.node_visible(node.id)
+    ]
+    payload = {
+        key: brief.get(key)
+        for key in ("area_id", "scene_id", "title", "brief", "environment", "exits")
+    }
+    payload["discovered_pois"] = [
+        {
+            "poi_id": node.id,
+            "label": mapgraph.poi_label(node),
+            "status": mapgraph.poi_status(runtime.narrative, node),
+        }
+        for node in discovered
+    ]
+    payload["hidden_poi_count"] = max(0, len(pois) - len(discovered))
+    return payload
+
+
+def _poi_index_payload(runtime: NarrativeRuntime, can_manage: bool) -> list[dict[str, Any]]:
+    """世界树兴趣点层：管理员可见全部（含 DM 编号），普通玩家只见已发现项。"""
+    area = runtime.area_node()
+    if area is None:
+        return []
+    result: list[dict[str, Any]] = []
+    for node in mapgraph.poi_nodes(runtime.bundle, area.id):
+        discovered = mapgraph.poi_discovered(runtime.narrative, node) and runtime.node_visible(node.id)
+        if not can_manage and not discovered:
+            continue
+        item = {
+            "poi_id": node.id,
+            "label": mapgraph.poi_label(node),
+            "status": mapgraph.poi_status(runtime.narrative, node),
+            "discovered": discovered,
+        }
+        if can_manage:
+            item["code"] = mapgraph.poi_code(node)
+        result.append(item)
+    return result
+
+
 @bp.route("/api/rooms/<room_id>/narrative", methods=["GET"])
 def get_room_narrative(room_id: str):
     if (error := _require_login()) is not None:
@@ -114,14 +167,17 @@ def get_room_narrative(room_id: str):
     runtime, failure = _open_runtime(room_id)
     if failure is not None:
         return failure
+    can_manage = _can_manage(info)
     return success_response(
         {
             "room_id": room_id,
             "scenario_id": info.get("scenario_id"),
             "location": _location_payload(runtime, runtime.location_id),
+            "area": _area_payload(runtime, can_manage),
+            "pois": _poi_index_payload(runtime, can_manage),
             "party": _party_payload(runtime, info),
             "status": _status_payload(runtime),
-            "permissions": {"can_manage": _can_manage(info)},
+            "permissions": {"can_manage": can_manage},
         },
         "Room narrative loaded",
     )

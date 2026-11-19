@@ -55,6 +55,13 @@ TREE_KINDS = ("act", "area", "location", "ending")
 ASSET_KINDS = ("npc", "item", "clue", "concept", "interactable", "flag", "clock")
 NODE_KINDS = TREE_KINDS + ASSET_KINDS
 
+# 图谱分层：大节点（一张地图/场景）、兴趣点小节点、无地图叙事地点。
+# 旧剧本没有 `node_role`，一律按 `site` 处理，行为与迁移前一致。
+NODE_ROLE_MAP = "map"
+NODE_ROLE_POI = "poi"
+NODE_ROLE_SITE = "site"
+NODE_ROLES = (NODE_ROLE_MAP, NODE_ROLE_POI, NODE_ROLE_SITE)
+
 EDGE_TYPES = (
     "adjacent",
     "portal",
@@ -225,6 +232,32 @@ class NarrativeNode:
         payload.update(self.extra)
         return payload
 
+    @property
+    def node_role(self) -> str:
+        """`map` / `poi` / `site`；未知值安全降级为 `site`。"""
+        value = str(self.extra.get("node_role") or "").strip().lower()
+        if value in NODE_ROLES:
+            return value
+        return NODE_ROLE_SITE if self.kind in ("location", "area") else ""
+
+    @property
+    def map_block(self) -> dict[str, Any]:
+        raw = self.extra.get("map")
+        return dict(raw) if isinstance(raw, Mapping) else {}
+
+    @property
+    def poi_block(self) -> dict[str, Any]:
+        raw = self.extra.get("poi")
+        return dict(raw) if isinstance(raw, Mapping) else {}
+
+    @property
+    def is_map(self) -> bool:
+        return self.kind == "location" and self.node_role == NODE_ROLE_MAP
+
+    @property
+    def is_poi(self) -> bool:
+        return self.kind == "location" and self.node_role == NODE_ROLE_POI
+
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "NarrativeNode":
         known = {
@@ -337,6 +370,12 @@ class NarrativeEdge:
         }
         payload.update(self.extra)
         return payload
+
+    @property
+    def transition(self) -> dict[str, Any]:
+        """跨图过场字段：`portal` 边上的 `transition` 块。"""
+        raw = self.extra.get("transition")
+        return dict(raw) if isinstance(raw, Mapping) else {}
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "NarrativeEdge | None":
