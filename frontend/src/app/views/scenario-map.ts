@@ -112,6 +112,7 @@ function normalizeScenarioMapConfig(raw: unknown): ScenarioMapConfig {
                 visibility: scenarioMapMarkerTypeVisibility(
                     marker.visibility || (fallback ? fallback.visibility : "public"),
                 ),
+                ...(marker.poi_id ? { poi_id: String(marker.poi_id).slice(0, 80) } : {}),
             });
         });
         result[sceneId] = {
@@ -145,13 +146,15 @@ class ScenarioMapEditor {
     private selectedMarker = "";
     private bound = false;
     private pendingFit = false;
+    private rulesetId = "coc7";
+    private graphStyle: "mesh" | "map" = "mesh";
     private graph: ScenarioMapGraphBundle | null = null;
     private graphScenarioId = 0;
     private graphRevision = 0;
     private graphReadonly = false;
     private graphLoading = false;
-    private selectedMapId = "";
-    private selectedPoiId = "";
+    private batchSnapshot: { bundle: ScenarioMapGraphBundle; revision: number } | null = null;
+    private batchRevision = 0;
 
     constructor() {
         this.bind();
@@ -171,28 +174,39 @@ class ScenarioMapEditor {
         this.selectedMarker = "";
         this.drag = null;
         this.pendingFit = false;
+        this.rulesetId = "coc7";
+        this.graphStyle = "mesh";
         this.graph = null;
         this.graphScenarioId = 0;
         this.graphRevision = 0;
         this.graphReadonly = false;
         this.graphLoading = false;
-        this.selectedMapId = "";
-        this.selectedPoiId = "";
+        this.batchSnapshot = null;
+        this.batchRevision = 0;
         this.refreshScenes();
     }
 
-    load(mapConfig: ScenarioMapConfig | undefined): void {
+    load(mapConfig: ScenarioMapConfig | undefined, rulesetId = "coc7"): void {
         this.config = normalizeScenarioMapConfig(mapConfig);
+        this.rulesetId = String(rulesetId || "coc7").trim().toLowerCase() || "coc7";
+        this.graphStyle = this.rulesetId === "dnd5e" ? "map" : "mesh";
+        this.graph = null;
+        this.graphScenarioId = 0;
+        this.graphRevision = 0;
+        this.batchSnapshot = null;
+        this.batchRevision = 0;
         this.sceneId = "";
         this.imageUrl = "";
         this.imageReady = false;
         this.selectedMarker = "";
         this.pendingFit = false;
         this.refreshScenes();
+        this.renderBatchState();
     }
 
     collect(): ScenarioMapConfig {
-        const existingScenes = new Set(this.sceneOptions().map((scene) => scene.id));
+        const existingScenes = new Set(this.domSceneOptions().map((scene) => scene.id));
+        this.graphNodes().filter((node) => this.isMapNode(node)).forEach((node) => existingScenes.add(node.id));
         const result: ScenarioMapConfig = {};
         Object.entries(this.config).forEach(([sceneId, config]) => {
             if (existingScenes.size > 0 && !existingScenes.has(sceneId)) return;
@@ -226,7 +240,11 @@ class ScenarioMapEditor {
             else this.renderImage();
             this.renderMarkers();
         }, 30);
-        void this.loadGraph();
+        void this.loadGraph().then(() => {
+            if (this.graphStyle === "map") this.refreshScenes(true);
+            this.renderPoiOverlay(scenarioMapEl("scenarioMapMarkerLayer"));
+            this.renderBatchState();
+        });
     }
 
     private bind(): void {
@@ -256,39 +274,8 @@ class ScenarioMapEditor {
         scenarioMapEl("scenarioMapDeleteMarker")?.addEventListener("click", () => this.deleteSelectedMarker());
         scenarioMapEl("scenarioMapAddType")?.addEventListener("click", () => this.addMarkerType());
         scenarioMapEl("scenarioMapClearCalibration")?.addEventListener("click", () => this.clearCalibration());
-        scenarioMapEl<HTMLSelectElement>("scenarioMapGraphMapSelect")?.addEventListener("change", (event) => {
-            this.selectedMapId = (event.target as HTMLSelectElement).value;
-            this.selectedPoiId = this.poiNodes(this.selectedMapId)[0]?.id || "";
-            const map = this.selectedMapNode();
-            const sceneId = String(map?.map?.scene_id || map?.id || "");
-            if (sceneId && this.config[sceneId]) {
-                this.sceneId = sceneId;
-                const sceneSelect = scenarioMapEl<HTMLSelectElement>("scenarioMapSceneSelect");
-                if (sceneSelect) sceneSelect.value = sceneId;
-                this.selectedMarker = "";
-                this.applyInitialView();
-            }
-            this.renderGraph();
-        });
-        scenarioMapEl<HTMLSelectElement>("scenarioMapGraphPoiSelect")?.addEventListener("change", (event) => {
-            this.selectedPoiId = (event.target as HTMLSelectElement).value;
-            this.renderGraph();
-        });
-        scenarioMapEl("scenarioMapGraphSection")?.addEventListener("click", (event) => {
-            const target = event.target as HTMLElement;
-            if (target.closest("[data-graph-save-map]")) {
-                void this.saveGraphMap();
-                return;
-            }
-            if (target.closest("[data-graph-save-poi]")) {
-                void this.saveGraphPoi();
-                return;
-            }
-            const edgeButton = target.closest<HTMLElement>("[data-graph-save-edge]");
-            if (edgeButton?.dataset.graphSaveEdge) {
-                void this.saveGraphEdge(edgeButton.dataset.graphSaveEdge);
-            }
-        });
+        scenarioMapEl("scenarioMapBatchWriteback")?.addEventListener("click", () => void this.batchWriteback());
+        scenarioMapEl("scenarioMapBatchUndo")?.addEventListener("click", () => void this.undoBatchWriteback());
 
         const viewport = scenarioMapEl("scenarioMapViewport");
         viewport?.addEventListener("pointerdown", (event) => this.onPointerDown(event));
@@ -302,13 +289,6 @@ class ScenarioMapEditor {
 
         scenarioMapEl("scenarioMapMarkerLayer")?.addEventListener("pointerdown", (event) => {
             const target = event.target as HTMLElement;
-            const poi = target.closest<HTMLElement>("[data-map-poi-id]");
-            if (poi) {
-                event.stopPropagation();
-                this.selectedPoiId = poi.dataset.mapPoiId || "";
-                this.renderGraph();
-                return;
-            }
             const marker = target.closest<HTMLElement>("[data-map-marker-id]");
             if (!marker) return;
             event.stopPropagation();
@@ -370,6 +350,10 @@ class ScenarioMapEditor {
                 marker.label = (target as HTMLInputElement).value.slice(0, 80);
             } else if (target.matches("[data-map-marker-visibility]")) {
                 marker.visibility = scenarioMapMarkerTypeVisibility((target as HTMLSelectElement).value);
+            } else if (target.matches("[data-map-marker-poi]")) {
+                const poiId = (target as HTMLSelectElement).value;
+                if (poiId) marker.poi_id = poiId;
+                else delete marker.poi_id;
             } else {
                 return;
             }
@@ -396,7 +380,7 @@ class ScenarioMapEditor {
         });
     }
 
-    private sceneOptions(): ScenarioMapSceneOption[] {
+    private domSceneOptions(): ScenarioMapSceneOption[] {
         const options: ScenarioMapSceneOption[] = [];
         document.querySelectorAll<HTMLElement>(".scenario-module-item").forEach((card) => {
             const type = card.querySelector<HTMLSelectElement>("[data-module-type]")?.value || "scene";
@@ -411,9 +395,22 @@ class ScenarioMapEditor {
         return options;
     }
 
+    /** dnd 地图页按地图标定：下拉只列世界树里的地图大节点；未加载世界树时回退场景模块。 */
+    private sceneOptions(): ScenarioMapSceneOption[] {
+        if (this.graphStyle === "map") {
+            const maps = this.graphNodes()
+                .filter((node) => this.isMapNode(node))
+                .map((node) => ({ id: node.id, title: String(node.title || node.id) }));
+            if (maps.length) return maps;
+        }
+        return this.domSceneOptions();
+    }
+
     private refreshScenes(keepScene = false): void {
         const select = scenarioMapEl<HTMLSelectElement>("scenarioMapSceneSelect");
         if (!select) return;
+        const pane = document.getElementById("scenarioTabMap");
+        if (pane) pane.dataset.graphStyle = this.graphStyle;
         const scenes = this.sceneOptions();
         const previous = keepScene ? this.sceneId : "";
         select.innerHTML = scenes.map((scene) => `<option value="${scenarioMapEscape(scene.id)}">${scenarioMapEscape(scene.title)}</option>`).join("");
@@ -665,6 +662,7 @@ class ScenarioMapEditor {
     private renderMarkers(): void {
         this.renderMarkerLayer();
         this.renderMarkerRows();
+        this.renderPoiOverlay(scenarioMapEl("scenarioMapMarkerLayer"));
     }
 
     private renderMarkerLayer(): void {
@@ -713,6 +711,17 @@ class ScenarioMapEditor {
             const linkedLabel = linked
                 ? `<span class="scenario-map-marker-poi">已关联：${scenarioMapEscape(String(linked.poi?.code || "") ? String(linked.poi?.code) + ". " : "")}${scenarioMapEscape(linked.title || linked.id)}</span>`
                 : '<span class="scenario-map-marker-poi is-empty">未关联兴趣点</span>';
+            const linkedId = marker.poi_id || linked?.id || "";
+            const poiSelect = this.graphStyle === "map"
+                ? `<select class="form-select form-select-sm scenario-map-marker-poi-select" data-map-marker-poi aria-label="关联兴趣点">
+                        <option value="">未关联</option>
+                        ${this.poiNodes(this.currentMapId()).map((node) => {
+                            const code = String(node.poi?.code || "").trim();
+                            const label = code ? `${code}. ${node.title || node.id}` : (node.title || node.id);
+                            return `<option value="${scenarioMapEscape(node.id)}"${node.id === linkedId ? " selected" : ""}>${scenarioMapEscape(label)}</option>`;
+                        }).join("")}
+                    </select>`
+                : linkedLabel;
             return `
                 <div class="scenario-map-marker-row${marker.id === this.selectedMarker ? " is-selected" : ""}" data-map-marker-row="${scenarioMapEscape(marker.id)}">
                     <span class="scenario-map-swatch" style="background:${scenarioMapEscape(type?.color || "#f6b26b")}"></span>
@@ -722,7 +731,7 @@ class ScenarioMapEditor {
                         <option value="public"${marker.visibility === "public" ? " selected" : ""}>玩家可见</option>
                         <option value="kp"${marker.visibility === "kp" ? " selected" : ""}>仅 DM</option>
                     </select>
-                    ${linkedLabel}
+                    ${poiSelect}
                     <button type="button" class="btn btn-sm btn-outline-danger" data-map-marker-remove aria-label="删除标记">×</button>
                 </div>
             `;
@@ -753,6 +762,8 @@ class ScenarioMapEditor {
         this.renderCalibration();
         this.renderStatus();
         this.renderStatus("标定已记录：保存剧本后，房间会按这个格子大小与偏移对齐画布网格。");
+        this.renderPoiOverlay(scenarioMapEl("scenarioMapMarkerLayer"));
+        this.renderBatchState();
     }
 
     private clearCalibration(): void {
@@ -763,6 +774,8 @@ class ScenarioMapEditor {
         config.offset_y = 0;
         this.renderCalibration();
         this.renderStatus();
+        this.renderPoiOverlay(scenarioMapEl("scenarioMapMarkerLayer"));
+        this.renderBatchState();
     }
 
     private togglePlacing(): void {
@@ -873,7 +886,7 @@ class ScenarioMapEditor {
             height = cell;
         }
         const type = config.marker_types[0];
-        config.markers.push({
+        const marker: ScenarioMapMarker = {
             id: `marker-${Date.now().toString(36)}`,
             type: type?.id || "",
             label: "",
@@ -882,11 +895,22 @@ class ScenarioMapEditor {
             w: scenarioMapRound(width),
             h: scenarioMapRound(height),
             visibility: type?.visibility || "kp",
-        });
+        };
+        config.markers.push(marker);
+        // dnd 地图层：按兴趣点顺序把新标记关联到下一个未关联的 POI，省去逐条手填。
+        if (this.graphStyle === "map") {
+            const poi = this.nextUnlinkedPoi();
+            if (poi) {
+                marker.poi_id = poi.id;
+                const code = String(poi.poi?.code || "").trim();
+                marker.label = code ? `${code}. ${poi.title || poi.id}` : (poi.title || poi.id);
+            }
+        }
         this.placing = false;
         scenarioMapEl("scenarioMapViewport")?.classList.remove("is-placing");
         this.renderCalibration();
         this.renderMarkers();
+        this.renderBatchState();
         this.renderStatus("已放置标记。保存剧本后，房间会沿用这些标记。");
     }
 
@@ -904,7 +928,7 @@ class ScenarioMapEditor {
     }
 
     // ------------------------------------------------------------------
-    // 地图图谱（叙事层）：node_role / map / poi / transition
+    // 地图图层只读侧载与标定回写
     // ------------------------------------------------------------------
 
     private scenarioIdValue(): number {
@@ -914,10 +938,6 @@ class ScenarioMapEditor {
 
     private graphNodes(): ScenarioMapGraphNode[] {
         return Array.isArray(this.graph?.nodes) ? this.graph!.nodes : [];
-    }
-
-    private graphEdges(): ScenarioMapGraphEdge[] {
-        return Array.isArray(this.graph?.edges) ? this.graph!.edges : [];
     }
 
     private isMapNode(node: ScenarioMapGraphNode): boolean {
@@ -932,31 +952,6 @@ class ScenarioMapEditor {
         );
     }
 
-    private selectedMapNode(): ScenarioMapGraphNode | null {
-        return this.graphNodes().find((node) => node.id === this.selectedMapId && this.isMapNode(node)) || null;
-    }
-
-    private selectedPoiNode(): ScenarioMapGraphNode | null {
-        return this.poiNodes(this.selectedMapId).find((node) => node.id === this.selectedPoiId) || null;
-    }
-
-    private areaOfNode(nodeId: string): string {
-        const node = this.graphNodes().find((item) => item.id === nodeId);
-        if (!node) return "";
-        if (this.isMapNode(node)) return node.id;
-        return String(node.poi?.area_id || node.parent || "");
-    }
-
-    private portalEdgesFor(areaId: string): ScenarioMapGraphEdge[] {
-        if (!areaId) return [];
-        return this.graphEdges().filter((edge) => {
-            if (edge.type !== "portal" && edge.transition) return false;
-            if (edge.type !== "portal") return false;
-            return this.areaOfNode(edge.from) === areaId || this.areaOfNode(edge.to) === areaId
-                || edge.from === areaId || edge.to === areaId;
-        });
-    }
-
     private poiByMarker(markerId: string): ScenarioMapGraphNode | null {
         if (!markerId) return null;
         return this.graphNodes().find(
@@ -965,26 +960,44 @@ class ScenarioMapEditor {
         ) || null;
     }
 
+    /** 当前场景 id 解析成世界树里的地图 id（兼容 scene_id 与地图 id 不一致的情况）。 */
+    private currentMapId(): string {
+        if (!this.sceneId) return "";
+        for (const node of this.graphNodes()) {
+            if (!this.isMapNode(node)) continue;
+            if (node.id === this.sceneId) return node.id;
+            if (String(node.map?.scene_id || "") === this.sceneId) return node.id;
+        }
+        return this.sceneId;
+    }
+
+    /** 按兴趣点列表顺序找下一个还没有被任何标记关联的 POI。 */
+    private nextUnlinkedPoi(): ScenarioMapGraphNode | null {
+        const config = this.current();
+        const mapId = this.currentMapId();
+        if (!config || !mapId) return null;
+        const used = new Set(config.markers.map((marker) => marker.poi_id).filter((id): id is string => Boolean(id)));
+        return this.poiNodes(mapId).find((node) => !used.has(node.id)) || null;
+    }
+
     private async loadGraph(force = false): Promise<void> {
         const scenarioId = this.scenarioIdValue();
         if (!scenarioId) {
-            this.clearGraph("请先保存剧本，再编辑地图图谱。");
+            this.clearGraph();
             return;
         }
-        if (!force && this.graph && this.graphScenarioId === scenarioId) {
-            this.renderGraph();
-            return;
-        }
+        if (!force && this.graph && this.graphScenarioId === scenarioId) return;
         if (this.graphLoading) return;
         this.graphLoading = true;
         try {
             const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{
                 bundle: ScenarioMapGraphBundle;
                 revision: number;
+                graph_style?: string;
                 permissions?: { readonly?: boolean; can_edit?: boolean };
             }>>(`/api/scenarios/${scenarioId}/narrative`);
             if (response.status === 404) {
-                this.clearGraph("该剧本还没有世界树；可先在「世界树」页签自动建图。");
+                this.clearGraph();
                 return;
             }
             if (!response.ok || !data?.success || !data.data) {
@@ -993,490 +1006,228 @@ class ScenarioMapEditor {
             this.graph = data.data.bundle;
             this.graphScenarioId = scenarioId;
             this.graphRevision = Number(data.data.revision) || 0;
+            if (data.data.graph_style === "map" || data.data.graph_style === "mesh") {
+                this.graphStyle = data.data.graph_style;
+            }
             this.graphReadonly = Boolean(data.data.permissions?.readonly) || data.data.permissions?.can_edit === false;
-            const maps = this.graphNodes().filter((node) => this.isMapNode(node));
-            if (!maps.some((node) => node.id === this.selectedMapId)) {
-                this.selectedMapId = maps[0]?.id || "";
-            }
-            if (!this.poiNodes(this.selectedMapId).some((node) => node.id === this.selectedPoiId)) {
-                this.selectedPoiId = this.poiNodes(this.selectedMapId)[0]?.id || "";
-            }
-            this.renderGraph();
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            this.clearGraph(`地图图谱加载失败：${message}`);
+        } catch {
+            this.clearGraph();
         } finally {
             this.graphLoading = false;
+            this.renderBatchState();
         }
     }
 
-    private clearGraph(message: string): void {
+    private clearGraph(): void {
         this.graph = null;
         this.graphRevision = 0;
         this.graphReadonly = false;
-        this.selectedMapId = "";
-        this.selectedPoiId = "";
-        const select = scenarioMapEl<HTMLSelectElement>("scenarioMapGraphMapSelect");
-        if (select) select.innerHTML = "";
-        const poiSelect = scenarioMapEl<HTMLSelectElement>("scenarioMapGraphPoiSelect");
-        if (poiSelect) poiSelect.innerHTML = "";
-        const mapForm = scenarioMapEl("scenarioMapGraphMapForm");
-        if (mapForm) mapForm.innerHTML = `<p class="scenario-map-empty-hint">${scenarioMapEscape(message)}</p>`;
-        const poiForm = scenarioMapEl("scenarioMapGraphPoiForm");
-        if (poiForm) poiForm.innerHTML = "";
-        const transitions = scenarioMapEl("scenarioMapGraphTransitions");
-        if (transitions) transitions.innerHTML = "";
-        const validation = scenarioMapEl("scenarioMapGraphValidation");
-        if (validation) validation.innerHTML = "";
-    }
-
-    private renderGraph(): void {
-        const mapSelect = scenarioMapEl<HTMLSelectElement>("scenarioMapGraphMapSelect");
-        const poiSelect = scenarioMapEl<HTMLSelectElement>("scenarioMapGraphPoiSelect");
-        const mapForm = scenarioMapEl("scenarioMapGraphMapForm");
-        const poiForm = scenarioMapEl("scenarioMapGraphPoiForm");
-        const transitionHost = scenarioMapEl("scenarioMapGraphTransitions");
-        const validationHost = scenarioMapEl("scenarioMapGraphValidation");
-        if (!mapSelect || !poiSelect || !mapForm || !poiForm) return;
-
-        if (!this.graph) {
-            mapSelect.innerHTML = "";
-            mapSelect.disabled = true;
-            poiSelect.innerHTML = "";
-            poiSelect.disabled = true;
-            return;
-        }
-        const maps = this.graphNodes().filter((node) => this.isMapNode(node));
-        mapSelect.disabled = this.graphReadonly || maps.length === 0;
-        mapSelect.innerHTML = maps.map((node) => (
-            `<option value="${scenarioMapEscape(node.id)}"${node.id === this.selectedMapId ? " selected" : ""}>`
-            + `${scenarioMapEscape(node.title || node.id)}</option>`
-        )).join("");
-
-        const map = this.selectedMapNode();
-        if (!map) {
-            mapForm.innerHTML = '<p class="scenario-map-empty-hint">还没有标注为地图的大节点。</p>';
-        } else {
-            mapForm.innerHTML = this.renderMapForm(map);
-        }
-
-        const pois = this.poiNodes(this.selectedMapId);
-        poiSelect.disabled = this.graphReadonly || pois.length === 0;
-        poiSelect.innerHTML = pois.map((node) => {
-            const code = String(node.poi?.code || "").trim();
-            const label = code ? `${code}. ${node.title || node.id}` : (node.title || node.id);
-            return `<option value="${scenarioMapEscape(node.id)}"${node.id === this.selectedPoiId ? " selected" : ""}>${scenarioMapEscape(label)}</option>`;
-        }).join("");
-        const poi = this.selectedPoiNode();
-        poiForm.innerHTML = poi
-            ? this.renderPoiForm(poi)
-            : `<p class="scenario-map-empty-hint">${this.selectedMapId ? "该地图还没有兴趣点。" : "请先选择一张地图。"}</p>`;
-
-        if (transitionHost) {
-            transitionHost.innerHTML = map ? this.renderTransitions(map) : "";
-        }
-        if (validationHost) {
-            validationHost.innerHTML = this.renderValidation();
-        }
+        this.batchSnapshot = null;
+        this.batchRevision = 0;
+        this.renderBatchState();
         this.renderPoiOverlay(scenarioMapEl("scenarioMapMarkerLayer"));
     }
 
-    private renderMapForm(node: ScenarioMapGraphNode): string {
-        const map = (node.map || {}) as Record<string, unknown>;
-        const environment = (map.environment && typeof map.environment === "object")
-            ? map.environment as Record<string, unknown>
-            : {};
-        const terrain = Array.isArray(environment.terrain) ? environment.terrain.join("、") : String(environment.terrain || "");
-        const entry = Array.isArray(map.entry_pois) ? map.entry_pois.join(", ") : String(map.entry_pois || "");
-        const readonly = this.graphReadonly ? " disabled" : "";
-        return `
-            <div class="scenario-map-graph-grid">
-                <label>标题<input class="form-control form-control-sm" data-graph-map-title value="${scenarioMapEscape(node.title || "")}"${readonly}></label>
-                <label>scene_id<input class="form-control form-control-sm" data-graph-map-scene value="${scenarioMapEscape(map.scene_id || node.id)}"${readonly}></label>
-                <label>格边长(ft)<input class="form-control form-control-sm" type="number" min="1" data-graph-map-grid value="${scenarioMapEscape(map.grid_ft ?? 5)}"${readonly}></label>
-                <label>边界(格)<input class="form-control form-control-sm" type="number" min="0" data-graph-map-bounds value="${scenarioMapEscape(map.bounds_cells ?? 0)}"${readonly}></label>
-                <label>父地图<input class="form-control form-control-sm" data-graph-map-parent value="${scenarioMapEscape(map.parent_area || "")}" placeholder="嵌套地图填写父 area_id"${readonly}></label>
-                <label>入口 POI<input class="form-control form-control-sm" data-graph-map-entry value="${scenarioMapEscape(entry)}" placeholder="逗号分隔"${readonly}></label>
-            </div>
-            <label>玩家可见简报<textarea class="form-control form-control-sm" rows="2" data-graph-map-brief${readonly}>${scenarioMapEscape(map.brief || "")}</textarea></label>
-            <label>DM 备注<textarea class="form-control form-control-sm" rows="2" data-graph-map-dm-brief${readonly}>${scenarioMapEscape(map.dm_brief || "")}</textarea></label>
-            <div class="scenario-map-graph-grid">
-                <label>光照<input class="form-control form-control-sm" data-graph-map-lighting value="${scenarioMapEscape(environment.lighting || "")}"${readonly}></label>
-                <label>温度<input class="form-control form-control-sm" data-graph-map-temperature value="${scenarioMapEscape(environment.temperature || "")}"${readonly}></label>
-                <label>气味<input class="form-control form-control-sm" data-graph-map-smell value="${scenarioMapEscape(environment.smell || "")}"${readonly}></label>
-                <label>声音<input class="form-control form-control-sm" data-graph-map-sound value="${scenarioMapEscape(environment.sound || "")}"${readonly}></label>
-            </div>
-            <label>地形<input class="form-control form-control-sm" data-graph-map-terrain value="${scenarioMapEscape(terrain)}" placeholder="逗号分隔"${readonly}></label>
-            <button type="button" class="btn btn-sm btn-primary" data-graph-save-map${readonly}>保存地图节点</button>
-        `;
+    private cloneBundle(bundle: ScenarioMapGraphBundle): ScenarioMapGraphBundle {
+        return JSON.parse(JSON.stringify(bundle)) as ScenarioMapGraphBundle;
     }
 
-    private renderPoiForm(node: ScenarioMapGraphNode): string {
-        const poi = (node.poi || {}) as Record<string, unknown>;
-        const trigger = (poi.trigger && typeof poi.trigger === "object") ? poi.trigger as Record<string, unknown> : {};
-        const geometry = (poi.geometry && typeof poi.geometry === "object") ? poi.geometry as Record<string, unknown> : {};
-        const rect = (geometry.rect_cells && typeof geometry.rect_cells === "object")
-            ? geometry.rect_cells as Record<string, unknown>
-            : {};
-        const sceneConfig = this.config[this.selectedMapId];
-        const markerId = String(geometry.marker_id || "");
-        const markers = sceneConfig?.markers || [];
-        const markerOptions = ['<option value="">不关联</option>']
-            .concat(markers.map((marker) => (
-                `<option value="${scenarioMapEscape(marker.id)}"${marker.id === markerId ? " selected" : ""}>`
-                + `${scenarioMapEscape(marker.label || marker.id)}</option>`
-            ))).join("");
-        const readonly = this.graphReadonly ? " disabled" : "";
-        const mode = String(trigger.mode || "manual");
-        const modeOptions = ["enter", "adjacent", "inspect", "manual"].map((value) => (
-            `<option value="${value}"${value === mode ? " selected" : ""}>${value}</option>`
-        )).join("");
-        return `
-            <div class="scenario-map-graph-grid">
-                <label>标题<input class="form-control form-control-sm" data-graph-poi-title value="${scenarioMapEscape(node.title || "")}"${readonly}></label>
-                <label>编号<input class="form-control form-control-sm" data-graph-poi-code value="${scenarioMapEscape(poi.code || "")}" placeholder="DM 地图编号"${readonly}></label>
-                <label>area_id<input class="form-control form-control-sm" data-graph-poi-area value="${scenarioMapEscape(poi.area_id || node.parent || "")}"${readonly}></label>
-                <label>触发<select class="form-select form-select-sm" data-graph-poi-mode${readonly}>${modeOptions}</select></label>
-                <label>半径(格)<input class="form-control form-control-sm" type="number" min="0" data-graph-poi-radius value="${scenarioMapEscape(trigger.radius_cells ?? 0)}"${readonly}></label>
-                <label class="scenario-map-graph-check"><input type="checkbox" data-graph-poi-once${trigger.once ? " checked" : ""}${readonly}> 只触发一次</label>
-            </div>
-            <div class="scenario-map-graph-grid">
-                <label>x<input class="form-control form-control-sm" type="number" data-graph-poi-x value="${scenarioMapEscape(rect.x ?? 0)}"${readonly}></label>
-                <label>y<input class="form-control form-control-sm" type="number" data-graph-poi-y value="${scenarioMapEscape(rect.y ?? 0)}"${readonly}></label>
-                <label>w<input class="form-control form-control-sm" type="number" min="0" data-graph-poi-w value="${scenarioMapEscape(rect.w ?? 0)}"${readonly}></label>
-                <label>h<input class="form-control form-control-sm" type="number" min="0" data-graph-poi-h value="${scenarioMapEscape(rect.h ?? 0)}"${readonly}></label>
-            </div>
-            <label class="scenario-map-graph-check"><input type="checkbox" data-graph-poi-provisional${geometry.provisional ? " checked" : ""}${readonly}> 几何推算（provisional）</label>
-            <label>推算原因<input class="form-control form-control-sm" data-graph-poi-note value="${scenarioMapEscape(geometry.note || "")}" placeholder="例如：底图未标定"${readonly}></label>
-            <label>关联 DM 标记<select class="form-select form-select-sm" data-graph-poi-marker${readonly}>${markerOptions}</select></label>
-            <label>入口摘要<textarea class="form-control form-control-sm" rows="2" data-graph-poi-entry-brief${readonly}>${scenarioMapEscape(poi.entry_brief || "")}</textarea></label>
-            <button type="button" class="btn btn-sm btn-primary" data-graph-save-poi${readonly}>保存兴趣点</button>
-        `;
+    private normalizeMatch(value: unknown): string {
+        return String(value ?? "")
+            .toLowerCase()
+            .replace(/[\s_\-—·.,，。:：;；'"“”‘’()（）\[\]【】]/g, "");
     }
 
-    private renderTransitions(map: ScenarioMapGraphNode): string {
-        const edges = this.portalEdgesFor(map.id);
-        if (!edges.length) {
-            return '<p class="scenario-map-empty-hint">该地图还没有 portal 过场。可在世界树里把跨图边改成「通道」。</p>';
-        }
-        const readonly = this.graphReadonly ? " disabled" : "";
-        return `<div class="scenario-map-graph-edge-head">跨图过场</div>` + edges.map((edge) => {
-            const transition = (edge.transition || {}) as Record<string, unknown>;
-            const direction = String(transition.direction || (edge.bidirectional ? "two_way" : "one_way"));
-            const options = ["one_way", "two_way"].map((value) => (
-                `<option value="${value}"${value === direction ? " selected" : ""}>${value}</option>`
-            )).join("");
-            return `
-                <div class="scenario-map-graph-edge" data-graph-edge-row="${scenarioMapEscape(edge.id)}">
-                    <strong>${scenarioMapEscape(edge.from)} → ${scenarioMapEscape(edge.to)}</strong>
-                    <label>标签<input class="form-control form-control-sm" data-graph-edge-label value="${scenarioMapEscape(transition.label || edge.label || "")}"${readonly}></label>
-                    <label>过场文本<textarea class="form-control form-control-sm" rows="2" data-graph-edge-text${readonly}>${scenarioMapEscape(transition.text || "")}</textarea></label>
-                    <div class="scenario-map-graph-grid">
-                        <label>from_area<input class="form-control form-control-sm" data-graph-edge-from-area value="${scenarioMapEscape(transition.from_area || "")}"${readonly}></label>
-                        <label>to_area<input class="form-control form-control-sm" data-graph-edge-to-area value="${scenarioMapEscape(transition.to_area || "")}"${readonly}></label>
-                        <label>from_poi<input class="form-control form-control-sm" data-graph-edge-from-poi value="${scenarioMapEscape(transition.from_poi || "")}"${readonly}></label>
-                        <label>entry_poi<input class="form-control form-control-sm" data-graph-edge-entry-poi value="${scenarioMapEscape(transition.entry_poi || "")}"${readonly}></label>
-                        <label>方向<select class="form-select form-select-sm" data-graph-edge-direction${readonly}>${options}</select></label>
-                        <label>耗时(分)<input class="form-control form-control-sm" type="number" min="0" data-graph-edge-time value="${scenarioMapEscape(transition.time_cost_minutes ?? 0)}"${readonly}></label>
-                    </div>
-                    <button type="button" class="btn btn-sm btn-outline-primary" data-graph-save-edge="${scenarioMapEscape(edge.id)}"${readonly}>保存过场</button>
-                </div>
-            `;
-        }).join("");
+    private stripCode(value: unknown): string {
+        return String(value ?? "").replace(/^\s*\d+\s*[.、:：)\]]?\s*/, "");
     }
 
-    private graphIssues(): Array<{ level: "error" | "warn"; text: string; nodeId?: string; edgeId?: string }> {
-        const issues: Array<{ level: "error" | "warn"; text: string; nodeId?: string; edgeId?: string }> = [];
-        const maps = new Map<string, ScenarioMapGraphNode>();
-        this.graphNodes().filter((node) => this.isMapNode(node)).forEach((node) => maps.set(node.id, node));
-        const codes = new Map<string, Set<string>>();
-
-        maps.forEach((map) => {
-            const block = (map.map || {}) as Record<string, unknown>;
-            const sceneId = String(block.scene_id || "").trim();
-            if (!sceneId) {
-                issues.push({ level: "error", text: `地图「${map.title || map.id}」缺少 scene_id。`, nodeId: map.id });
-            } else if (sceneId !== map.id) {
-                issues.push({ level: "warn", text: `地图「${map.id}」的 scene_id 与 area_id 不一致（${sceneId}）。`, nodeId: map.id });
-            }
-            if (!Number(block.bounds_cells || 0)) {
-                issues.push({ level: "warn", text: `地图「${map.id}」未填写 bounds_cells，房间将按默认边界。`, nodeId: map.id });
-            }
-            if (!String(block.brief || "").trim()) {
-                issues.push({ level: "warn", text: `地图「${map.id}」缺少 AreaBrief 简报。`, nodeId: map.id });
-            }
-            if (!this.config[map.id]?.cell_px) {
-                issues.push({ level: "warn", text: `地图「${map.id}」底图未标定，POI 无法在缩略图上定位。`, nodeId: map.id });
-            }
-        });
-
-        this.graphNodes().filter((node) => node.node_role === "poi").forEach((node) => {
-            const poi = (node.poi || {}) as Record<string, unknown>;
-            const areaId = String(poi.area_id || node.parent || "");
-            if (!areaId || !maps.has(areaId)) {
-                issues.push({ level: "error", text: `兴趣点「${node.title || node.id}」的 area_id 不是地图节点。`, nodeId: node.id });
-            }
-            const code = String(poi.code || "").trim();
-            if (code && areaId) {
-                const bucket = codes.get(areaId) || new Set<string>();
-                if (bucket.has(code)) {
-                    issues.push({ level: "error", text: `地图「${areaId}」的编号 ${code} 重复。`, nodeId: node.id });
-                }
-                bucket.add(code);
-                codes.set(areaId, bucket);
-            }
-            const trigger = (poi.trigger || {}) as Record<string, unknown>;
-            const mode = String(trigger.mode || "manual");
-            const geometry = (poi.geometry || {}) as Record<string, unknown>;
-            const rect = (geometry.rect_cells || {}) as Record<string, unknown>;
-            if ((mode === "enter" || mode === "adjacent") && !(Number(rect.w) > 0 && Number(rect.h) > 0)) {
-                issues.push({ level: "error", text: `兴趣点「${node.title || node.id}」是 ${mode} 触发，但缺少格几何。`, nodeId: node.id });
-            }
-            if (geometry.provisional && !String(geometry.note || "").trim()) {
-                issues.push({ level: "warn", text: `兴趣点「${node.title || node.id}」标记为 provisional，但没有写明原因。`, nodeId: node.id });
-            }
-            const markerId = String(geometry.marker_id || "");
-            if (markerId && !(this.config[areaId]?.markers || []).some((marker) => marker.id === markerId)) {
-                issues.push({ level: "error", text: `兴趣点「${node.title || node.id}」关联的标记 ${markerId} 不存在。`, nodeId: node.id });
-            }
-        });
-
-        this.graphEdges().filter((edge) => edge.type === "portal").forEach((edge) => {
-            const transition = edge.transition as Record<string, unknown> | null | undefined;
-            if (!transition) {
-                issues.push({ level: "error", text: `通道 ${edge.id} 缺少 transition 过场。`, edgeId: edge.id });
-                return;
-            }
-            const toArea = String(transition.to_area || "");
-            if (toArea && !maps.has(toArea)) {
-                issues.push({ level: "error", text: `通道 ${edge.id} 的 to_area「${toArea}」不是地图节点。`, edgeId: edge.id });
-            }
-            const entryPoi = String(transition.entry_poi || "");
-            if (entryPoi) {
-                const entry = this.graphNodes().find((node) => node.id === entryPoi);
-                if (!entry || this.areaOfNode(entryPoi) !== toArea) {
-                    issues.push({ level: "error", text: `通道 ${edge.id} 的 entry_poi「${entryPoi}」不在目标地图内。`, edgeId: edge.id });
-                }
-            }
-        });
-        return issues;
+    /** 标记的底图像素框 → 兴趣点的格几何。 */
+    private markerToRect(marker: ScenarioMapMarker, config: ScenarioSceneMapConfig): Record<string, number> {
+        const cell = config.cell_px > 0 ? config.cell_px : 1;
+        return {
+            x: scenarioMapRound((marker.x - config.offset_x) / cell, 2),
+            y: scenarioMapRound((marker.y - config.offset_y) / cell, 2),
+            w: Math.max(1, scenarioMapRound(marker.w / cell, 2)),
+            h: Math.max(1, scenarioMapRound(marker.h / cell, 2)),
+        };
     }
 
-    private renderValidation(): string {
-        const issues = this.graphIssues();
-        if (!issues.length) {
-            return '<p class="scenario-map-graph-ok">校验通过。</p>';
-        }
-        return '<ul class="scenario-map-graph-issues">' + issues.map((issue) => (
-            `<li class="${issue.level === "error" ? "is-error" : "is-warn"}">`
-            + `${issue.level === "error" ? "错误" : "提示"}：${scenarioMapEscape(issue.text)}</li>`
-        )).join("") + "</ul>";
-    }
-
-    private mapField(name: string): HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null {
-        return document.querySelector(`#scenarioMapGraphMapForm [data-graph-map-${name}]`);
-    }
-
-    private poiField(name: string): HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null {
-        return document.querySelector(`#scenarioMapGraphPoiForm [data-graph-poi-${name}]`);
-    }
-
-    private fieldText(element: Element | null): string {
-        return element ? String((element as HTMLInputElement).value || "").trim() : "";
-    }
-
-    private fieldNumber(element: Element | null): number {
-        const value = Number((element as HTMLInputElement | null)?.value);
-        return Number.isFinite(value) ? value : 0;
-    }
-
-    private fieldChecked(element: Element | null): boolean {
-        return Boolean((element as HTMLInputElement | null)?.checked);
-    }
-
-    private async patchGraph(path: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    private async saveBundle(bundle: ScenarioMapGraphBundle, baseRevision: number): Promise<boolean> {
         const scenarioId = this.scenarioIdValue();
-        if (!scenarioId) throw new Error("请先保存剧本。");
-        const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<Record<string, unknown>>>(
-            `/api/scenarios/${scenarioId}/narrative/${path}`,
-            { method: "PATCH", body: { base_revision: this.graphRevision, ...payload } },
+        if (!scenarioId) return false;
+        const { response, data } = await TrpgApi.requestWithResponse<ApiResponse<{
+            bundle: ScenarioMapGraphBundle;
+            revision: number;
+        }>>(
+            `/api/scenarios/${scenarioId}/narrative`,
+            { method: "PUT", body: { base_revision: baseRevision, bundle } },
         );
         if (response.status === 409) {
-            throw new Error("世界树已被其他编辑保存，请重新打开地图页签后再改。");
+            await this.loadGraph(true);
+            this.renderStatus("世界树已被其他编辑保存，已刷新；本次没有写入，请重新回写。", true);
+            return false;
         }
         if (!response.ok || !data?.success || !data.data) {
-            throw new Error(data?.message || `HTTP ${response.status}`);
+            this.renderStatus(data?.message || `回写失败：HTTP ${response.status}`, true);
+            return false;
         }
-        return data.data;
+        this.graph = data.data.bundle;
+        this.graphRevision = Number(data.data.revision) || this.graphRevision + 1;
+        this.renderMarkers();
+        this.renderPoiOverlay(scenarioMapEl("scenarioMapMarkerLayer"));
+        this.renderBatchState();
+        this.syncNarrativeEditor();
+        return true;
     }
 
-    private async saveGraphMap(): Promise<void> {
-        const node = this.selectedMapNode();
-        if (!node || this.graphReadonly) return;
-        const related = this.graphIssues().filter((issue) => issue.level === "error" && issue.nodeId === node.id);
-        if (related.length) {
-            showNotification(related[0]?.text || "存在校验错误", "error");
+    private renderBatchState(): void {
+        const pane = document.getElementById("scenarioTabMap");
+        if (pane) pane.dataset.graphStyle = this.graphStyle;
+        const summary = scenarioMapEl("scenarioMapBatchSummary");
+        const undo = scenarioMapEl<HTMLButtonElement>("scenarioMapBatchUndo");
+        const write = scenarioMapEl<HTMLButtonElement>("scenarioMapBatchWriteback");
+        if (undo) undo.disabled = !this.batchSnapshot || this.graphRevision !== this.batchRevision;
+        if (write) write.disabled = this.readOnly || this.graphReadonly || this.graphStyle !== "map";
+        if (!summary) return;
+        if (this.graphStyle !== "map") {
+            summary.textContent = "";
             return;
         }
-        const existing = (node.map || {}) as Record<string, unknown>;
-        const environment = {
-            ...((existing.environment && typeof existing.environment === "object") ? existing.environment as Record<string, unknown> : {}),
-            lighting: this.fieldText(this.mapField("lighting")),
-            temperature: this.fieldText(this.mapField("temperature")),
-            smell: this.fieldText(this.mapField("smell")),
-            sound: this.fieldText(this.mapField("sound")),
-            terrain: this.fieldText(this.mapField("terrain")).split(/[、,，]/).map((item) => item.trim()).filter(Boolean),
-        };
-        const entry = this.fieldText(this.mapField("entry")).split(",").map((item) => item.trim()).filter(Boolean);
-        const nextMap = {
-            ...existing,
-            scene_id: this.fieldText(this.mapField("scene")) || node.id,
-            grid_ft: this.fieldNumber(this.mapField("grid")) || 5,
-            bounds_cells: this.fieldNumber(this.mapField("bounds")),
-            environment,
-            brief: this.fieldText(this.mapField("brief")),
-            dm_brief: this.fieldText(this.mapField("dm-brief")),
-            entry_pois: entry,
-        };
-        const parent = this.fieldText(this.mapField("parent"));
-        if (parent) (nextMap as Record<string, unknown>).parent_area = parent;
-        else delete (nextMap as Record<string, unknown>).parent_area;
-        try {
-            const result = await this.patchGraph(`nodes/${encodeURIComponent(node.id)}`, {
-                title: this.fieldText(this.mapField("title")) || node.id,
-                node_role: "map",
-                map: nextMap,
-            });
-            this.applyNodeResult(result);
-            this.notifyGraphSaved("地图节点已保存。");
-        } catch (error) {
-            showNotification(error instanceof Error ? error.message : String(error), "error");
-        }
-    }
-
-    private async saveGraphPoi(): Promise<void> {
-        const node = this.selectedPoiNode();
-        if (!node || this.graphReadonly) return;
-        const related = this.graphIssues().filter((issue) => issue.level === "error" && issue.nodeId === node.id);
-        if (related.length) {
-            showNotification(related[0]?.text || "存在校验错误", "error");
+        const mapId = this.currentMapId();
+        if (!mapId) {
+            summary.textContent = "";
             return;
         }
-        const existing = (node.poi || {}) as Record<string, unknown>;
-        const existingTrigger = (existing.trigger && typeof existing.trigger === "object") ? existing.trigger as Record<string, unknown> : {};
-        const existingGeometry = (existing.geometry && typeof existing.geometry === "object") ? existing.geometry as Record<string, unknown> : {};
-        const width = this.fieldNumber(this.poiField("w"));
-        const height = this.fieldNumber(this.poiField("h"));
-        const geometry: Record<string, unknown> = {
-            ...existingGeometry,
-            provisional: this.fieldChecked(this.poiField("provisional")),
-        };
-        const note = this.fieldText(this.poiField("note"));
-        if (note) geometry.note = note;
-        else delete geometry.note;
-        const markerId = this.fieldText(this.poiField("marker"));
-        if (markerId) geometry.marker_id = markerId;
-        else delete geometry.marker_id;
-        if (width > 0 && height > 0) {
-            geometry.rect_cells = {
-                x: this.fieldNumber(this.poiField("x")),
-                y: this.fieldNumber(this.poiField("y")),
-                w: width,
-                h: height,
-            };
-        } else {
-            delete geometry.rect_cells;
-        }
-        const areaId = this.fieldText(this.poiField("area")) || this.selectedMapId;
-        const nextPoi = {
-            ...existing,
-            area_id: areaId,
-            code: this.fieldText(this.poiField("code")) || null,
-            trigger: {
-                ...existingTrigger,
-                mode: this.fieldText(this.poiField("mode")) || "manual",
-                radius_cells: this.fieldNumber(this.poiField("radius")),
-                once: this.fieldChecked(this.poiField("once")),
-            },
-            geometry,
-            entry_brief: this.fieldText(this.poiField("entry-brief")),
-        };
-        try {
-            const result = await this.patchGraph(`nodes/${encodeURIComponent(node.id)}`, {
-                title: this.fieldText(this.poiField("title")) || node.id,
-                node_role: "poi",
-                poi: nextPoi,
-            });
-            this.applyNodeResult(result);
-            this.notifyGraphSaved("兴趣点已保存。");
-        } catch (error) {
-            showNotification(error instanceof Error ? error.message : String(error), "error");
-        }
+        const pois = this.poiNodes(mapId);
+        const provisional = pois.filter((node) => {
+            const geometry = (node.poi?.geometry || {}) as Record<string, unknown>;
+            return geometry.provisional === true;
+        }).length;
+        const config = this.current();
+        const linked = config
+            ? config.markers.filter((marker) => Boolean(marker.poi_id) || Boolean(this.poiByMarker(marker.id))).length
+            : 0;
+        summary.textContent = `${pois.length} 个兴趣点 · ${provisional} 个 provisional · ${linked} 个标记已关联`;
     }
 
-    private async saveGraphEdge(edgeId: string): Promise<void> {
-        if (this.graphReadonly) return;
-        const row = document.querySelector<HTMLElement>(`#scenarioMapGraphTransitions [data-graph-edge-row="${CSS.escape(edgeId)}"]`);
-        if (!row) return;
-        const read = (name: string) => row.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(`[data-graph-edge-${name}]`);
-        const edge = this.graphEdges().find((item) => item.id === edgeId);
-        if (!edge) return;
-        const direction = this.fieldText(read("direction")) || "one_way";
-        const transition = {
-            ...((edge.transition || {}) as Record<string, unknown>),
-            from_area: this.fieldText(read("from-area")),
-            to_area: this.fieldText(read("to-area")),
-            from_poi: this.fieldText(read("from-poi")) || null,
-            entry_poi: this.fieldText(read("entry-poi")) || null,
-            direction,
-            label: this.fieldText(read("label")),
-            text: this.fieldText(read("text")),
-            time_cost_minutes: this.fieldNumber(read("time")),
-            handoff: {
-                inject_area_brief: true,
-                inject_entry_poi: true,
-                time_cost_minutes: this.fieldNumber(read("time")),
-            },
-        };
-        try {
-            const result = await this.patchGraph(`edges/${encodeURIComponent(edgeId)}`, {
-                type: "portal",
-                label: transition.label,
-                bidirectional: direction === "two_way",
-                transition,
-            });
-            const updated = result.edge as ScenarioMapGraphEdge | undefined;
-            if (updated) {
-                this.graph!.edges = this.graphEdges().map((item) => (item.id === edgeId ? updated : item));
+    /**
+     * 把当前地图的 DM 标记与兴趣点关联，一次性回写格几何。
+     *
+     * 匹配顺序：标记的 poi_id → 兴趣点已有的 marker_id → 编号/标题精确匹配。
+     * 没有任何匹配的 POI 保持原样，仍为 provisional。
+     */
+    private async batchWriteback(): Promise<void> {
+        if (this.readOnly || this.graphReadonly || this.graphStyle !== "map") return;
+        const config = this.current();
+        const mapId = this.currentMapId();
+        if (!config || !mapId) {
+            this.renderStatus("请先选择一张地图。", true);
+            return;
+        }
+        if (!(config.cell_px > 0)) {
+            this.renderStatus("请先在底图上对齐一格并点「记录标定」，再批量回写。", true);
+            return;
+        }
+        if (!config.markers.length) {
+            this.renderStatus("这张图还没有 DM 标记：先放置标记并关联兴趣点，再批量回写。", true);
+            return;
+        }
+        await this.loadGraph(true);
+        if (!this.graph) {
+            this.renderStatus("世界树尚未加载，无法回写。", true);
+            return;
+        }
+        const confirmed = await window.TrpgDialog?.confirm({
+            title: "批量回写兴趣点",
+            message: "将使用当前页面的标定与 DM 标记，把匹配到的兴趣点写入正式格几何；没有匹配的仍保持 provisional。\n如果刚修改过标定，请先保存剧本，否则回写的坐标会与底图不一致。",
+            confirmText: "开始回写",
+        });
+        if (!confirmed) return;
+
+        const usedMarkers = new Set<string>();
+        const pairs: Array<{ poi: ScenarioMapGraphNode; marker: ScenarioMapMarker }> = [];
+        for (const poi of this.poiNodes(mapId)) {
+            const geometry = (poi.poi?.geometry || {}) as Record<string, unknown>;
+            const existingMarkerId = String(geometry.marker_id || "");
+            let marker = config.markers.find((item) => item.id === existingMarkerId && !usedMarkers.has(item.id))
+                || config.markers.find((item) => item.poi_id === poi.id && !usedMarkers.has(item.id));
+            if (!marker) {
+                const code = String(poi.poi?.code || "").trim();
+                const title = String(poi.title || poi.id);
+                const aliases = new Set<string>();
+                [code, title, this.stripCode(title)].forEach((value) => {
+                    const normalized = this.normalizeMatch(value);
+                    if (normalized) aliases.add(normalized);
+                });
+                marker = config.markers.find((item) => !usedMarkers.has(item.id) && aliases.has(this.normalizeMatch(item.label)));
             }
-            this.graphRevision = Number(result.revision) || this.graphRevision;
-            this.renderGraph();
-            this.notifyGraphSaved("过场已保存。");
-        } catch (error) {
-            showNotification(error instanceof Error ? error.message : String(error), "error");
+            if (!marker) continue;
+            usedMarkers.add(marker.id);
+            pairs.push({ poi, marker });
         }
+        if (!pairs.length) {
+            this.renderStatus("没有可回写的兴趣点：请把标记名称写成编号或标题，或在标记行选择「关联兴趣点」。", true);
+            return;
+        }
+
+        const promote = scenarioMapEl<HTMLInputElement>("scenarioMapPromoteTrigger")?.checked === true;
+        const before = this.cloneBundle(this.graph);
+        const bundle = this.cloneBundle(this.graph);
+        const byId = new Map(bundle.nodes.map((node) => [node.id, node]));
+        for (const pair of pairs) {
+            const node = byId.get(pair.poi.id);
+            if (!node) continue;
+            const poi = { ...(node.poi || {}) } as Record<string, unknown>;
+            const geometry = { ...((poi.geometry || {}) as Record<string, unknown>) };
+            geometry.rect_cells = this.markerToRect(pair.marker, config);
+            geometry.marker_id = pair.marker.id;
+            geometry.provisional = false;
+            delete geometry.note;
+            poi.geometry = geometry;
+            const trigger = { ...((poi.trigger || {}) as Record<string, unknown>) };
+            if (promote && String(trigger.mode || "manual") === "manual") trigger.mode = "enter";
+            poi.trigger = trigger;
+            node.poi = poi;
+        }
+
+        this.renderStatus("正在回写兴趣点…");
+        const saved = await this.saveBundle(bundle, this.graphRevision);
+        if (!saved) return;
+        this.batchSnapshot = { bundle: before, revision: this.graphRevision };
+        this.batchRevision = this.graphRevision;
+        const total = this.poiNodes(mapId).length;
+        const remaining = this.poiNodes(mapId).filter((node) => {
+            const geometry = (node.poi?.geometry || {}) as Record<string, unknown>;
+            return geometry.provisional === true;
+        }).length;
+        const skipped = total - pairs.length;
+        this.renderBatchState();
+        this.renderStatus(`已回写 ${pairs.length} 个兴趣点，跳过 ${skipped} 个（无匹配标记），仍有 ${remaining} 个 provisional。`);
+        showNotification(`已回写 ${pairs.length} 个兴趣点。`, "success");
     }
 
-    private applyNodeResult(result: Record<string, unknown>): void {
-        const node = result.node as ScenarioMapGraphNode | undefined;
-        if (node && this.graph) {
-            this.graph.nodes = this.graphNodes().map((item) => (item.id === node.id ? node : item));
+    /** 撤销最近一次批量回写；世界树 revision 已变化时拒绝，避免覆盖别人的编辑。 */
+    private async undoBatchWriteback(): Promise<void> {
+        if (this.readOnly || this.graphReadonly || !this.batchSnapshot) return;
+        if (this.graphRevision !== this.batchRevision) {
+            this.renderStatus("世界树已发生变化，不能撤销这批回写，请手动调整。", true);
+            return;
         }
-        this.graphRevision = Number(result.revision) || this.graphRevision;
-        this.renderGraph();
-        this.syncNarrativeEditor();
-    }
-
-    private notifyGraphSaved(message: string): void {
-        showNotification(message, "success");
-        const status = scenarioMapEl("scenarioMapGraphStatus");
-        if (status) status.textContent = `已保存（revision ${this.graphRevision}）`;
-        this.syncNarrativeEditor();
+        const snapshot = this.batchSnapshot;
+        this.renderStatus("正在撤销回写…");
+        const saved = await this.saveBundle(this.cloneBundle(snapshot.bundle), snapshot.revision);
+        if (!saved) return;
+        this.batchSnapshot = null;
+        this.batchRevision = 0;
+        this.renderBatchState();
+        this.renderStatus("已撤销最近一次回写。");
+        showNotification("已撤销最近一次回写。", "success");
     }
 
     /** 保存后刷新世界树；若世界树有未保存改动则不覆盖。 */
     private syncNarrativeEditor(): void {
-        const narrative = (window as unknown as { TrpgNarrative?: { runtime?: { dirty?: boolean } }; ScenarioNarrative?: { load?: (id: number) => Promise<void> } }).TrpgNarrative;
+        const narrative = (window as unknown as { TrpgNarrative?: { runtime?: { dirty?: boolean } } }).TrpgNarrative;
         const editor = (window as unknown as { ScenarioNarrative?: { load?: (id: number) => Promise<void> } }).ScenarioNarrative;
         if (narrative?.runtime?.dirty || !editor?.load) return;
         const scenarioId = this.scenarioIdValue();
@@ -1486,8 +1237,8 @@ class ScenarioMapEditor {
     private renderPoiOverlay(layer: HTMLElement | null): void {
         if (!layer || !this.graph) return;
         layer.querySelectorAll("[data-map-poi-id]").forEach((item) => item.remove());
-        const areaId = this.selectedMapId;
-        const config = this.config[areaId];
+        const areaId = this.currentMapId();
+        const config = this.current();
         if (!areaId || !config || !(config.cell_px > 0)) return;
         this.poiNodes(areaId).forEach((node) => {
             const geometry = (node.poi?.geometry || {}) as Record<string, unknown>;
@@ -1496,7 +1247,7 @@ class ScenarioMapEditor {
             const height = Number(rect.h || 0);
             if (!(width > 0 && height > 0)) return;
             const element = document.createElement("div");
-            element.className = `scenario-map-poi${node.id === this.selectedPoiId ? " is-selected" : ""}`;
+            element.className = "scenario-map-poi";
             element.dataset.mapPoiId = node.id;
             element.style.left = `${this.panX + (config.offset_x + Number(rect.x || 0) * config.cell_px) * this.scale}px`;
             element.style.top = `${this.panY + (config.offset_y + Number(rect.y || 0) * config.cell_px) * this.scale}px`;

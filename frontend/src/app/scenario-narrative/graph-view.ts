@@ -124,6 +124,10 @@
 
     /** 图谱页签的「说明 / 图例」：用途、节点类型、每种边的含义与线型约定。 */
     function renderGraphGuide(): void {
+        if (state.graphStyle === "map") {
+            api.renderMapGuide();
+            return;
+        }
         const host = byId("scenarioGraphGuideBody");
         if (!host) return;
         const kinds = Object.values(N.KIND_META)
@@ -195,6 +199,14 @@
     function renderGraph(): void {
         const canvas = byId("scenarioGraphCanvas");
         if (!canvas) return;
+        const mapStyle = state.graphStyle === "map";
+        canvas.classList.toggle("is-map-graph", mapStyle);
+        byId("scenarioTabGraph")?.classList.toggle("is-map-graph", mapStyle);
+        renderGraphGuide();
+        if (mapStyle) {
+            api.renderMapGraph();
+            return;
+        }
         const bundle = state.bundle;
         if (!bundle || bundle.nodes.length === 0) {
             setEmpty(t("scenario.tree.empty", "保存剧本并生成世界树后，可在此查看章节、地点与结局。"));
@@ -235,6 +247,10 @@
     function renderEdgeActions(): void {
         const container = byId("scenarioGraphEdgeActions");
         if (!container) return;
+        if (state.graphStyle === "map") {
+            container.innerHTML = "";
+            return;
+        }
         const edge = edgeById(state.selectedEdgeId);
         if (!edge || !editable()) {
             container.innerHTML = "";
@@ -335,6 +351,7 @@
     }
 
     function setMode(mode: GraphMode): void {
+        if (state.graphStyle === "map") return;
         state.mode = mode;
         state.connectSource = "";
         document.querySelectorAll<HTMLElement>("[data-graph-mode]").forEach((button) => {

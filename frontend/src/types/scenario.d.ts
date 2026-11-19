@@ -158,6 +158,8 @@ interface ScenarioMapMarker {
     w: number;
     h: number;
     visibility: ScenarioMapMarkerVisibility;
+    /** 关联的兴趣点节点 id；批量回写时写入 poi.geometry.marker_id。 */
+    poi_id?: string;
 }
 
 interface ScenarioSceneMapConfig {

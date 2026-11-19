@@ -46,6 +46,7 @@
     }
 
     function fitView(): void {
+        if (state.graphStyle === "map") return;
         if (state.positions.size === 0) return;
         const values = [...state.positions.values()];
         const minX = Math.min(...values.map((item) => item.x));
@@ -144,6 +145,10 @@
     }
 
     async function autoLayout(): Promise<void> {
+        if (state.graphStyle === "map") {
+            setGraphHint(t("scenario.graph.map_layout_hint", "地图层图谱按地图层级排布，无需自动布局。"));
+            return;
+        }
         const bundle = state.bundle;
         if (!bundle || !editable() || !state.scenarioId) return;
         const button = byId<HTMLButtonElement>("scenarioGraphAutoLayout");

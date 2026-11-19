@@ -53,6 +53,7 @@ interface GraphEdge {
     kp_notes?: string;
     condition?: unknown;
     reveal_when?: unknown;
+    transition?: unknown;
 }
 
 interface GraphBundle {
@@ -70,6 +71,8 @@ interface NarrativePayload {
     summary: { counts?: Record<string, number>; warnings?: number };
     revision: number;
     permissions: { can_view: boolean; can_edit: boolean; readonly: boolean };
+    ruleset_id?: string;
+    graph_style?: "mesh" | "map";
 }
 
 interface ValidationIssue {
@@ -203,6 +206,8 @@ interface NarrativeState {
     revision: number;
     readonly: boolean;
     canEdit: boolean;
+    rulesetId: string;
+    graphStyle: "mesh" | "map";
     selectedId: string;
     selectedEdgeId: string;
     search: string;
@@ -262,6 +267,8 @@ interface NarrativeApi {
     renderTree: () => void;
     renderInspector: () => void;
     renderGraph: () => void;
+    renderMapGraph: () => void;
+    renderMapGuide: () => void;
     renderGraphEditor: () => void;
     renderAll: () => void;
     renderEdgeActions: () => void;

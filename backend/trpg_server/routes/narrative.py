@@ -121,6 +121,22 @@ def _permissions(descriptor: Mapping[str, Any]) -> dict[str, Any]:
     return {"can_view": True, "can_edit": can_edit and not readonly, "readonly": readonly}
 
 
+# 图谱画法由规则集能力决定，核心渲染逻辑只认 `graph_style`，不直接判断规则集。
+_GRAPH_STYLE_BY_RULESET = {"dnd5e": "map"}
+
+
+def _graph_style(descriptor: Mapping[str, Any]) -> str:
+    ruleset_id = str(descriptor.get("ruleset_id") or "").strip().lower()
+    return _GRAPH_STYLE_BY_RULESET.get(ruleset_id, "mesh")
+
+
+def _ruleset_meta(descriptor: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "ruleset_id": str(descriptor.get("ruleset_id") or ""),
+        "graph_style": _graph_style(descriptor),
+    }
+
+
 def _open_bundle(scenario_id: int) -> tuple[Path | None, dict[str, Any], NarrativeBundle | None, Any]:
     _, storage = _resolve(scenario_id)
     if storage is None:
@@ -222,6 +238,7 @@ def get_narrative(scenario_id: int):
             "revision": _revision(bundle),
             "permissions": _permissions(descriptor),
             "storage": str(storage),
+            **_ruleset_meta(descriptor),
         },
         "Narrative loaded",
     )
@@ -276,6 +293,7 @@ def build_narrative(scenario_id: int):
             "revision": _revision(bundle),
             "permissions": _permissions(descriptor),
             "storage": str(storage),
+            **_ruleset_meta(descriptor),
         },
         "Narrative built",
     )

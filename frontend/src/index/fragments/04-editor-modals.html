@@ -184,7 +184,16 @@
                                         <button type="button" class="btn btn-sm btn-outline-secondary" id="scenarioMapClearCalibration">清除标定</button>
                                         <button type="button" class="btn btn-sm btn-outline-warning" id="scenarioMapMarkerMode">放置标记</button>
                                         <button type="button" class="btn btn-sm btn-outline-danger" id="scenarioMapDeleteMarker">删除选中标记</button>
+                                        <span class="scenario-map-dnd-only">
+                                            <button type="button" class="btn btn-sm btn-outline-success" id="scenarioMapBatchWriteback">批量回写兴趣点</button>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" id="scenarioMapBatchUndo" disabled>撤销回写</button>
+                                            <label class="scenario-map-batch-promote">
+                                                <input type="checkbox" id="scenarioMapPromoteTrigger" checked>
+                                                <span>同时把 manual 触发改为 enter</span>
+                                            </label>
+                                        </span>
                                         <span class="scenario-map-calibration-summary" id="scenarioMapCalibrationSummary"></span>
+                                        <span class="scenario-map-batch-summary" id="scenarioMapBatchSummary"></span>
                                     </div>
                                     <p class="scenario-map-help">
                                         滚轮缩放、拖拽平移。把底图上的一个格子放进中间的方框，让格子边界与方框重合，再点「记录标定」；
@@ -192,24 +201,7 @@
                                     </p>
                                 </div>
                                 <aside class="scenario-map-side">
-                                    <section class="scenario-map-side-section" id="scenarioMapGraphSection">
-                                        <div class="scenario-map-side-head">
-                                            <strong>地图图谱</strong>
-                                            <span class="scenario-map-graph-status" id="scenarioMapGraphStatus"></span>
-                                        </div>
-                                        <p class="scenario-map-side-hint">编辑大节点、兴趣点和跨图过场；保存写入世界树，不改底图像素。</p>
-                                        <label class="scenario-map-graph-label">大节点
-                                            <select class="form-select form-select-sm" id="scenarioMapGraphMapSelect"></select>
-                                        </label>
-                                        <div class="scenario-map-graph-form" id="scenarioMapGraphMapForm"></div>
-                                        <label class="scenario-map-graph-label">兴趣点
-                                            <select class="form-select form-select-sm" id="scenarioMapGraphPoiSelect"></select>
-                                        </label>
-                                        <div class="scenario-map-graph-form" id="scenarioMapGraphPoiForm"></div>
-                                        <div id="scenarioMapGraphTransitions"></div>
-                                        <div class="scenario-map-graph-validation-head">校验</div>
-                                        <div id="scenarioMapGraphValidation"></div>
-                                    </section>                                    <section class="scenario-map-side-section">
+                                    <section class="scenario-map-side-section">
                                         <div class="scenario-map-side-head">
                                             <strong>标记类型与含义</strong>
                                             <button type="button" class="btn btn-sm btn-outline-primary" id="scenarioMapAddType">添加类型</button>

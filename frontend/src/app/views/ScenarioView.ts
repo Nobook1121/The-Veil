@@ -1125,7 +1125,7 @@ class ScenarioView {
         image("coverPreview").src = safeScenarioCover(scenario.title, scenario.cover);
 
         renderModuleList(requiredElement("scenarioModules"), normalizeScenarioModules(scenario));
-        this.mapEditor.load(scenario.map_config);
+        this.mapEditor.load(scenario.map_config, scenario.ruleset_id || "coc7");
         void this.loadResourceList(scenario.id);
         (requiredElement("scenarioModuleType") as HTMLSelectElement).value = "scene";
         updateScenarioModalTitle("scenario.modal.edit", "编辑剧本");

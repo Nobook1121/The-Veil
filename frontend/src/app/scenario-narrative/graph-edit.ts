@@ -423,6 +423,11 @@
     const PAN_THRESHOLD = 4;
     let panMoved = false;
 
+    /** 地图层画法是可滚动的 HTML 层级，不参与 SVG 的拖拽、平移、滚轮缩放与连线。 */
+    function mapGraphStyle(): boolean {
+        return state.graphStyle === "map";
+    }
+
     function bindGraphEvents(): void {
         const canvas = byId("scenarioGraphCanvas");
         if (!canvas) return;
@@ -442,6 +447,7 @@
         };
 
         canvas.addEventListener("pointerdown", (event) => {
+            if (mapGraphStyle()) return;
             const pointer = event as PointerEvent;
             // 中键在任意位置都能平移，和常见图编辑器保持一致。
             if (pointer.button === 1) {
@@ -483,6 +489,7 @@
         });
 
         canvas.addEventListener("pointermove", (event) => {
+            if (mapGraphStyle()) return;
             const pointer = event as PointerEvent;
             if (state.drag && pointer.pointerId === state.drag.pointerId) {
                 const world = clientToWorld(pointer.clientX, pointer.clientY);
@@ -507,6 +514,7 @@
         });
 
         const finishPointer = (event: PointerEvent): void => {
+            if (mapGraphStyle()) return;
             if (state.drag && event.pointerId === state.drag.pointerId) {
                 const drag = state.drag;
                 state.drag = null;
@@ -529,6 +537,7 @@
         canvas.addEventListener("pointercancel", finishPointer);
 
         canvas.addEventListener("wheel", (event) => {
+            if (mapGraphStyle()) return;
             const wheel = event as WheelEvent;
             wheel.preventDefault();
             const before = clientToWorld(wheel.clientX, wheel.clientY);
@@ -545,6 +554,7 @@
         }, { passive: false });
 
         canvas.addEventListener("click", (event) => {
+            if (mapGraphStyle()) return;
             // 刚刚拖动过画布：这次 click 是平移的收尾，不应触发选中。
             if (panMoved) {
                 panMoved = false;

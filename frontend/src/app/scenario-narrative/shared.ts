@@ -93,6 +93,8 @@
         revision: 0,
         readonly: false,
         canEdit: false,
+        rulesetId: "",
+        graphStyle: "mesh",
         selectedId: "",
         selectedEdgeId: "",
         search: "",

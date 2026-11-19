@@ -56,7 +56,7 @@ def _bundle(revision=2):
     }
 
 
-def _write_scenario(tmp_path, *, import_mode="edit", owner_id=1, bundle=None, modules=None):
+def _write_scenario(tmp_path, *, import_mode="edit", owner_id=1, bundle=None, modules=None, ruleset_id=None):
     storage = tmp_path / "scenarios" / "scenario-7"
     storage.mkdir(parents=True, exist_ok=True)
     descriptor = {
@@ -66,6 +66,8 @@ def _write_scenario(tmp_path, *, import_mode="edit", owner_id=1, bundle=None, mo
         "import_mode": import_mode,
         "modules": modules if modules is not None else [],
     }
+    if ruleset_id is not None:
+        descriptor["ruleset_id"] = ruleset_id
     (storage / "scenario.json").write_text(json.dumps(descriptor, ensure_ascii=False), encoding="utf-8")
     if bundle is not None:
         (storage / "narrative.json").write_text(json.dumps(bundle, ensure_ascii=False), encoding="utf-8")
@@ -119,6 +121,35 @@ def test_get_narrative_returns_bundle_and_permissions(tmp_path):
     assert [node["id"] for node in data["bundle"]["nodes"]] == ["hall", "room"]
     assert data["revision"] == 2
     assert data["permissions"] == {"can_view": True, "can_edit": True, "readonly": False}
+    # 老剧本没有 ruleset_id：按 mesh 画法展示，不影响 coc7 的既有图谱。
+    assert data["ruleset_id"] == ""
+    assert data["graph_style"] == "mesh"
+
+
+def test_get_narrative_reports_dnd_map_graph_style(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle(), ruleset_id="dnd5e")
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _get(client)
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["ruleset_id"] == "dnd5e"
+    assert data["graph_style"] == "map"
+
+
+def test_get_narrative_keeps_coc_mesh_style(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle(), ruleset_id="coc7")
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _get(client)
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["ruleset_id"] == "coc7"
+    assert data["graph_style"] == "mesh"
     assert data["summary"]["counts"]["nodes"] == 2
 
 
@@ -276,6 +307,33 @@ def test_put_narrative_replaces_bundle(tmp_path):
     _login(client)
     bundle = _bundle()
     bundle["nodes"].append({"id": "ending_a", "kind": "ending", "title": "结局 A"})
+    bundle["nodes"].append({
+        "id": "map_a",
+        "kind": "location",
+        "title": "地图 A",
+        "node_role": "map",
+        "map": {"scene_id": "map_a", "grid_ft": 5, "bounds_cells": 24, "brief": "入口"},
+    })
+    bundle["nodes"].append({
+        "id": "poi_a",
+        "kind": "location",
+        "title": "1. 洞口",
+        "parent": "map_a",
+        "node_role": "poi",
+        "poi": {
+            "area_id": "map_a",
+            "code": "1",
+            "trigger": {"mode": "manual"},
+            "geometry": {"provisional": True, "note": "底图未标定"},
+        },
+    })
+    bundle["edges"].append({
+        "id": "edge_portal",
+        "from": "map_a",
+        "to": "room",
+        "type": "portal",
+        "transition": {"from_area": "map_a", "to_area": "room", "direction": "two_way", "text": "穿过门"},
+    })
 
     response = client.put(
         "/api/scenarios/7/narrative",
@@ -288,6 +346,12 @@ def test_put_narrative_replaces_bundle(tmp_path):
     assert data["revision"] == 3
     assert any(node["id"] == "ending_a" for node in data["bundle"]["nodes"])
     assert data["bundle"]["scenario_id"] == "7"
+    nodes = {node["id"]: node for node in data["bundle"]["nodes"]}
+    assert nodes["map_a"]["node_role"] == "map"
+    assert nodes["map_a"]["map"]["scene_id"] == "map_a"
+    assert nodes["poi_a"]["poi"]["geometry"]["provisional"] is True
+    portal = next(edge for edge in data["bundle"]["edges"] if edge["id"] == "edge_portal")
+    assert portal["transition"]["text"] == "穿过门"
 
 
 def test_put_narrative_rejects_empty_nodes(tmp_path):
