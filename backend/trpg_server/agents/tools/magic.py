@@ -13,13 +13,25 @@ from typing import Any
 
 from trpg_server import room_magic, room_rules
 from trpg_server.agents.tools.base import AgentTool
-from trpg_server.ruleset.coc7 import magic_content
 
 
 def _options(context: Any):
-    from trpg_server.ruleset.coc7.options import resolve_options
+    """读 CoC7 房规开关；coc7 不在注册表时按全部关闭处理（本组工具也不会挂载）。"""
+    from trpg_server.ruleset import builtin_registry
+    from trpg_server.ruleset.capabilities import NEUTRAL_RULE_OPTIONS, options_of
 
-    return resolve_options(context.room_info())
+    resolve = getattr(options_of(builtin_registry().get("coc7")), "resolve_options", None)
+    if resolve is None:
+        return NEUTRAL_RULE_OPTIONS
+    return resolve(context.room_info())
+
+
+def _magic_content():
+    """法术 / 典籍内容表；经注册表取 coc7 插件能力，不直接 import 规则包。"""
+    from trpg_server.ruleset import builtin_registry
+    from trpg_server.ruleset.capabilities import magic_content_of
+
+    return magic_content_of(builtin_registry().get("coc7"))
 
 
 def _disabled() -> dict[str, Any]:
@@ -99,7 +111,8 @@ def execute_magic_cast(arguments: dict[str, Any], context: Any) -> dict[str, Any
     pow_cost = arguments.get("pow_cost") or 0
     catalog: dict[str, Any] | None = None
     if arguments.get("use_catalog"):
-        stats = magic_content.spell_costs(arguments.get("spell"))
+        content = _magic_content()
+        stats = content.spell_costs(arguments.get("spell")) if content is not None else None
         if stats is None:
             catalog = {"found": False, "note": "内容表里没有这个法术，按显式参数结算"}
         else:
@@ -170,7 +183,12 @@ def execute_magic_grimoire(arguments: dict[str, Any], context: Any) -> dict[str,
     spells = arguments.get("spells") or []
     catalog: dict[str, Any] | None = None
     if arguments.get("use_catalog"):
-        stats = magic_content.grimoire_stats(arguments.get("title"), arguments.get("language"))
+        content = _magic_content()
+        stats = (
+            content.grimoire_stats(arguments.get("title"), arguments.get("language"))
+            if content is not None
+            else None
+        )
         if stats is None:
             catalog = {"found": False, "note": "内容表里没有这本典籍，按显式参数结算"}
         else:
@@ -237,12 +255,16 @@ def execute_magic_lookup(arguments: dict[str, Any], context: Any) -> dict[str, A
     except (TypeError, ValueError):
         limit = 6
 
+    content = _magic_content()
+    if content is None:
+        return _catalog_disabled()
+
     if kind in {"spell", "法术"}:
         if detail and query:
-            found = magic_content.describe_spell(query)
+            found = content.describe_spell(query)
             if found:
                 return {"ok": True, "spell": found}
-        results = magic_content.find_spells(
+        results = content.find_spells(
             query,
             group=arguments.get("group"),
             max_san=arguments.get("max_san"),
@@ -253,10 +275,10 @@ def execute_magic_lookup(arguments: dict[str, Any], context: Any) -> dict[str, A
 
     if kind in {"grimoire", "book", "典籍"}:
         if detail and query:
-            found = magic_content.describe_grimoire(query)
+            found = content.describe_grimoire(query)
             if found:
                 return {"ok": True, "grimoire": found}
-        results = magic_content.find_grimoires(
+        results = content.find_grimoires(
             query,
             language=arguments.get("language"),
             max_san=arguments.get("max_san"),
@@ -265,14 +287,14 @@ def execute_magic_lookup(arguments: dict[str, Any], context: Any) -> dict[str, A
         return {"ok": True, "kind": "grimoire", "count": len(results), "results": results}
 
     if detail and query:
-        found = magic_content.describe_spell(query) or magic_content.describe_grimoire(query)
+        found = content.describe_spell(query) or content.describe_grimoire(query)
         if found:
             key = "spell" if found.get("casting_time") is not None else "grimoire"
             return {"ok": True, key: found}
-    spells_found = magic_content.find_spells(
+    spells_found = content.find_spells(
         query, max_san=arguments.get("max_san"), max_mp=arguments.get("max_mp"), limit=limit
     )
-    books_found = magic_content.find_grimoires(
+    books_found = content.find_grimoires(
         query,
         language=arguments.get("language"),
         max_san=arguments.get("max_san"),

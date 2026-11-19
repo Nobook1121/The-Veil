@@ -18,6 +18,8 @@ from trpg_server.ruleset.coc7.catalogs import Coc7Catalogs
 from trpg_server.ruleset.coc7.checks import Coc7Checks
 from trpg_server.ruleset.coc7 import growth as coc7_growth
 from trpg_server.ruleset.coc7 import combat_rules as coc7_combat_rules
+from trpg_server.ruleset.coc7 import magic_content as coc7_magic_content
+from trpg_server.ruleset.coc7 import options as coc7_options
 from trpg_server.ruleset.coc7 import training as coc7_training
 from trpg_server.ruleset.coc7.sanity import SANITY
 from trpg_server.ruleset.coc7.schema import Coc7CharacterSchema
@@ -58,6 +60,11 @@ class Coc7Plugin:
         self.growth = coc7_growth
         # 幕间训练（批次 2 可选规则）：同样是纯计算模块。
         self.training = coc7_training
+        # 房间级房规开关解析（Coc7RuleOptions）：工具层经能力层取用，
+        # 核心 agents/tools 不再直接 import 本包内部模块（阶段 4 P0）。
+        self.options = coc7_options
+        # 法术 / 典籍内容表（批次 6 按需查询）：同样作为能力暴露。
+        self.magic_content = coc7_magic_content
         # 本规则集使用的骰子策略：核心只调抽象接口，不认识十位/个位。
         self.roll_policy = PercentileRollPolicy()
         # 骰型声明：前端骰桌据此保持百分骰，不因规则集切换显示 d20。

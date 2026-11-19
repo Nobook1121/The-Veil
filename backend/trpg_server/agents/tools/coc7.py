@@ -13,9 +13,14 @@ from trpg_server.agents.tools.base import AgentTool
 
 
 def _options(context: Any):
-    from trpg_server.ruleset.coc7.options import resolve_options
+    """读 CoC7 房规开关；coc7 不在注册表时按全部关闭处理（本组工具也不会挂载）。"""
+    from trpg_server.ruleset import builtin_registry
+    from trpg_server.ruleset.capabilities import NEUTRAL_RULE_OPTIONS, options_of
 
-    return resolve_options(context.room_info())
+    resolve = getattr(options_of(builtin_registry().get("coc7")), "resolve_options", None)
+    if resolve is None:
+        return NEUTRAL_RULE_OPTIONS
+    return resolve(context.room_info())
 
 
 def _common(context: Any) -> dict[str, Any]:

@@ -82,6 +82,31 @@ def combat_rules_of(plugin: Any) -> Any | None:
     return getattr(plugin, "combat_rules", None)
 
 
+def options_of(plugin: Any) -> Any | None:
+    """插件的房间级房规开关模块（提供 ``resolve_options``）；未声明时返回 None。"""
+    return getattr(plugin, "options", None)
+
+
+def magic_content_of(plugin: Any) -> Any | None:
+    """插件的法术 / 典籍内容表模块；未声明时返回 None。"""
+    return getattr(plugin, "magic_content", None)
+
+
+class _NeutralRuleOptions:
+    """规则集缺席时的中性房规开关：任何开关读取都按关闭处理。
+
+    CoC 命名工具在 coc7 缺席时整组不挂载；本对象只保证防御性直呼路径
+    （调用方绕过工具注册表直接调用处理器）不会因规则包缺席而
+    ``AttributeError``，与能力层「缺失就用中性值」的降级原则一致。
+    """
+
+    def __getattr__(self, _name: str) -> bool:
+        return False
+
+
+NEUTRAL_RULE_OPTIONS = _NeutralRuleOptions()
+
+
 def catalogs_of(plugin: Any) -> Any | None:
     return getattr(plugin, "catalogs", None)
 

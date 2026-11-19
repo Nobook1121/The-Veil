@@ -179,13 +179,17 @@ def _combat_settings(context: Any, info: dict[str, Any] | None = None) -> Combat
 
 
 def _coc7_room_options(context: Any, info: dict[str, Any] | None = None):
-    """读取 CoC7 房规开关；旧房间或读取失败时按全部关闭处理（核心只搬运）。"""
+    """读取 CoC7 房规开关；旧房间、规则集缺席或读取失败时按全部关闭处理。"""
     if info is None:
         info = context.room_info() if hasattr(context, "room_info") else None
     try:
-        from trpg_server.ruleset.coc7.options import resolve_options
+        from trpg_server.ruleset import builtin_registry
+        from trpg_server.ruleset.capabilities import options_of
 
-        return resolve_options(info)
+        resolve = getattr(options_of(builtin_registry().get("coc7")), "resolve_options", None)
+        if resolve is None:
+            return None
+        return resolve(info)
     except Exception:  # pragma: no cover - 仅在规则包损坏时触发
         return None
 

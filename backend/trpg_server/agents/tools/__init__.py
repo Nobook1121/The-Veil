@@ -52,6 +52,11 @@ from trpg_server.agents.tools.props import PROPS_TOOL_NAMES, PROPS_TOOLS
 
 
 def _core_tools() -> list[AgentTool]:
+    """与具体规则集无关的核心工具。
+
+    CoC 命名工具不再无条件混入这里：是否挂载由 :func:`_coc7_tools` 按
+    注册表可用性组装（阶段 4 P0）。
+    """
     return [
         GET_ROOM_SNAPSHOT_TOOL,
         GET_SCENARIO_CONTEXT_TOOL,
@@ -60,13 +65,7 @@ def _core_tools() -> list[AgentTool]:
         GET_CHARACTER_CARDS_TOOL,
         GET_MEMORY_TOOL,
         REMEMBER_FACT_TOOL,
-        ROLL_COC_CHECK_TOOL,
-        ROLL_ROOM_CHECK_TOOL,
         DND5E_ROLL_CHECK_TOOL,
-        ROLL_SANITY_CHECK_TOOL,
-        ROLL_SANITY_CHECK_ALIAS_TOOL,
-        ROLL_MADNESS_TOOL,
-        ROLL_MADNESS_ALIAS_TOOL,
         ROLL_DICE_TOOL,
         ROLL_DICE_FUNCTION_TOOL,
         REVEAL_SCENARIO_TRIGGER_TOOL,
@@ -86,11 +85,6 @@ def _core_tools() -> list[AgentTool]:
         *REACTION_TOOLS,
         *NARRATIVE_TOOLS,
         *TRIGGER_RUNTIME_TOOLS,
-        *COC7_EXTRA_TOOLS,
-        *CHASE_TOOLS,
-        *MAGIC_TOOLS,
-        *MAGIC_CATALOG_TOOLS,
-        *SANITY_TOOLS,
         *INTERLUDE_TOOLS,
         *GAME_CLOCK_TOOLS,
         *PROPS_TOOLS,
@@ -98,13 +92,47 @@ def _core_tools() -> list[AgentTool]:
     ]
 
 
+def _coc7_tools() -> list[AgentTool]:
+    """CoC 命名工具：coc7 在注册表里可用才挂载（阶段 4 P0 组装点）。
+
+    工具实现仍在核心模块（dice / coc7 / chase / magic / sanity），这里只决定
+    「这一组要不要进默认注册表」。coc7 在场时集合与旧实现逐项一致；缺席时
+    整组不挂载，同名工具可以让给第三方插件。把这组工具搬进插件包、改为
+    插件声明（ToolBundle）是后续批次的事，本批只解除注册耦合。
+    """
+    try:
+        from trpg_server.ruleset import builtin_registry
+
+        if builtin_registry().get("coc7") is None:
+            return []
+    except Exception:  # noqa: BLE001 - 注册表构建异常不阻断核心工具
+        return []
+    return [
+        ROLL_COC_CHECK_TOOL,
+        ROLL_ROOM_CHECK_TOOL,
+        ROLL_SANITY_CHECK_TOOL,
+        ROLL_SANITY_CHECK_ALIAS_TOOL,
+        ROLL_MADNESS_TOOL,
+        ROLL_MADNESS_ALIAS_TOOL,
+        *COC7_EXTRA_TOOLS,
+        *CHASE_TOOLS,
+        *MAGIC_TOOLS,
+        *MAGIC_CATALOG_TOOLS,
+        *SANITY_TOOLS,
+    ]
+
+
 def core_agent_tool_names() -> set[str]:
-    """核心 Agent 工具名集合；插件激活时用来拒绝同名覆盖。"""
-    return {str(getattr(tool, "name", "") or "") for tool in _core_tools()}
+    """核心 Agent 工具名集合；插件激活时用来拒绝同名覆盖。
+
+    coc7 可用时 CoC 命名工具一体受核心命名保护（与旧实现同集合）；
+    缺席时它们不在注册表里，名字自然让出。
+    """
+    return {str(getattr(tool, "name", "") or "") for tool in _core_tools() + _coc7_tools()}
 
 
 def default_tool_registry() -> ToolRegistry:
-    tools = _core_tools()
+    tools = _core_tools() + _coc7_tools()
     # 第三方插件注册的 Agent 工具（插件未启用时为空列表）。
     try:
         from trpg_server.plugins.runtime import extra_agent_tools
