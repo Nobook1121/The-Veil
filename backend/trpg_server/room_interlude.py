@@ -22,7 +22,6 @@ from trpg_server import room_clock, room_magic, room_rules, room_sanity
 from trpg_server.console_args import ConsoleArgSpec, first_positional, parse_console_args
 from trpg_server.json_store import read_json
 from trpg_server.room_log import load_room_log, log_room_event
-from trpg_server.ruleset.coc7 import treatment
 
 INTERLUDE_KEY = "interlude"
 MAX_REVIEWS = 20
@@ -86,6 +85,32 @@ def _now() -> str:
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{int(time.time() * 1000)}-{random.randint(100, 999)}"
+
+
+def _treatment_for(info: dict[str, Any]) -> Any:
+    """按房间规则集解析疗养 / 心理治疗纯规则能力（阶段 4 P1）。
+
+    CoC7 即 :mod:`trpg_server.ruleset.coc7.treatment`；本模块不再直接
+    import 规则包。规则集未声明该能力时按幕间既有的「不支持」风格报错。
+    """
+    from trpg_server.ruleset import get_plugin
+    from trpg_server.ruleset.capabilities import sanity_treatment_of
+
+    treatment = sanity_treatment_of(get_plugin(room_rules.resolve_rule_id(info)))
+    if treatment is None:
+        raise InterludeError("当前规则集不支持幕间疗养 / 心理治疗", code="unsupported", status=409)
+    return treatment
+
+
+def _economy_for(info: dict[str, Any]) -> Any:
+    """按房间规则集解析信用评级 / 开支纯规则能力（阶段 4 P1）。"""
+    from trpg_server.ruleset import get_plugin
+    from trpg_server.ruleset.capabilities import economy_of
+
+    economy = economy_of(get_plugin(room_rules.resolve_rule_id(info)))
+    if economy is None:
+        raise InterludeError("当前规则集不支持信用评级结算", code="unsupported", status=409)
+    return economy
 
 
 def interlude_state(info: dict[str, Any] | None) -> dict[str, Any]:
@@ -267,7 +292,7 @@ def _apply_credit_events(
     ``settlement["credit_batches"]``。同一批次重试只处理尚未应用的事件，全部重复
     时直接跳过，避免重复加钱，同时保留上一次的结算明细。
     """
-    from trpg_server.ruleset.coc7 import economy
+    economy = _economy_for(info)
 
     entries = [entry for entry in (events or []) if isinstance(entry, dict)]
     keys = _credit_event_keys(entries)
@@ -604,6 +629,7 @@ def apply_monthly_care(
     settlement = state.get("settlement") if isinstance(state.get("settlement"), dict) else {}
     state["settlement"] = settlement
     clock = room_clock.read_clock(info)
+    treatment = _treatment_for(info)
     explicit = months is not None
     if months is None:
         marker = settlement.get("careGameTime") or state.get("startedGameTime")
@@ -695,6 +721,7 @@ def apply_therapy(
         member_state = {}
         member["character_state"] = member_state
     clock = room_clock.read_clock(info)
+    treatment = _treatment_for(info)
 
     if indefinite:
         months = treatment.indefinite_months(d6 if d6 is not None else rng(6))
@@ -922,9 +949,7 @@ def train_skill(
     记录写入 ``extensions.training.records``；技能变化走 ``apply_skill_change``，
     与幕间成长共用同一条写回 / 留痕链路。
     """
-    from trpg_server.ruleset.coc7.options import resolve_options
-
-    if not resolve_options(info).growth_training:
+    if not room_rules.room_rule_options(info).growth_training:
         raise InterludeError(
             "幕间训练房规未开启（coc7_growth_training）", code="training_disabled", status=403
         )

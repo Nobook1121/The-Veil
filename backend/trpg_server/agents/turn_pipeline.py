@@ -909,9 +909,24 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
             pass
         if room_ruleset_id == "coc7":
             # 批次 1 房规：开关关闭时对应工具不存在，与旧行为完全一致。
-            from trpg_server.ruleset.coc7.options import resolve_options as resolve_coc7_options
+            # 经注册表 + 能力层取用（P1 边界收敛）：coc7 在场时与直连 import
+            # 逐位一致；插件缺席时退中性全关开关，对应工具自然整组不出现。
+            from trpg_server.ruleset import builtin_registry as _builtin_registry
+            from trpg_server.ruleset.capabilities import (
+                NEUTRAL_RULE_OPTIONS as _NEUTRAL_RULE_OPTIONS,
+                options_of as _options_of,
+            )
 
-            coc7_options = resolve_coc7_options(room_info_for_mode)
+            _resolve = getattr(
+                _options_of(_builtin_registry().get(room_ruleset_id)),
+                "resolve_options",
+                None,
+            )
+            coc7_options = (
+                _resolve(room_info_for_mode)
+                if callable(_resolve)
+                else _NEUTRAL_RULE_OPTIONS
+            )
             for enabled, tool_name in (
                 (coc7_options.social_difficulty, "coc7.social_check"),
                 (coc7_options.combined_checks, "coc7.combined_check"),

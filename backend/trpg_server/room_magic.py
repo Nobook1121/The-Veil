@@ -1,6 +1,8 @@
 """房间级法术与典籍：卡面扩展字段、MP/SAN/POW 结算与留痕。
 
-规则数学在 :mod:`trpg_server.ruleset.coc7.magic`；本模块只做状态搬运：
+规则数学由当前房间规则集插件的 ``magic_rules`` 能力提供（CoC7 即
+:mod:`trpg_server.ruleset.coc7.magic`）；本模块只做状态搬运，不直接
+import 任何规则包（阶段 4 P1）：
 - 卡面扩展写在 ``card["extensions"]["magic"]``，旧卡没有该字段时按空结构补上；
 - MP/HP/SAN/POW 复用角色卡既有字段与资源槽位，不改 ``sheet`` 原有结构。
 - 不内置法术表 / 典籍表：法术名、MP/SAN 消耗、典籍神话等级与收益均由 KP 传入。
@@ -11,11 +13,46 @@ import time
 from typing import Any
 
 from trpg_server import room_clock, room_rules
-from trpg_server.ruleset.coc7 import magic as magic_rules
 
 
 def _error(message: str, code: str = "magic_error") -> room_rules.RuleOperationError:
     return room_rules.RuleOperationError(message, code=code)
+
+
+def _magic_rules_for(info: dict[str, Any] | None) -> Any:
+    """按当前房间的规则集解析施法 / 典籍结算纯规则能力（阶段 4 P1）。
+
+    规则集未声明该能力时给出可读错误（控制台 / AI 工具层已先按房规开关
+    拦截，这里是防御性兜底）。
+    """
+    from trpg_server.ruleset import get_plugin
+    from trpg_server.ruleset.capabilities import magic_rules_of
+
+    rules = magic_rules_of(get_plugin(room_rules.resolve_rule_id(info)))
+    if rules is None:
+        raise _error("当前规则集不支持法术与典籍", code="magic_unsupported")
+    return rules
+
+
+def _member_magic_rules(member: dict[str, Any]) -> Any:
+    """按成员卡规则集解析施法纯规则能力；无房间上下文的读路径用这里。
+
+    与 :mod:`trpg_server.room_sanity` 的 ``_sanity_for`` 同一口径：卡片自带
+    ``rulesetId``，按卡解析而不是按全局默认。
+    """
+    card = room_rules.member_card(member)
+    plugin = None
+    try:
+        from trpg_server.ruleset import get_plugin
+        from trpg_server.ruleset.capabilities import magic_rules_of
+
+        plugin = get_plugin(card.get("rulesetId"))
+        rules = magic_rules_of(plugin)
+    except Exception:  # noqa: BLE001 - 插件缺失按无能力处理
+        rules = None
+    if rules is None:
+        raise _error("当前规则集不支持法术与典籍", code="magic_unsupported")
+    return rules
 
 
 def _as_int(value: Any, fallback: int = 0) -> int:
@@ -48,6 +85,7 @@ def magic_snapshot(member: dict[str, Any]) -> dict[str, Any]:
     state = member.get("character_state") if isinstance(member.get("character_state"), dict) else {}
     attributes = card.get("attributes") if isinstance(card.get("attributes"), dict) else {}
     power = _as_int(attributes.get("pow"), 0)
+    magic_rules = _member_magic_rules(member)
     return {
         "spells": [str(item.get("name") if isinstance(item, dict) else item) for item in block["spells"]],
         "grimoires": sorted(block["grimoires"].keys()),
@@ -120,7 +158,7 @@ def _apply_mp(room_dir: Any, info: dict[str, Any], member: dict[str, Any], delta
     card = room_rules.member_card(member)
     state = member.setdefault("character_state", {})
     attributes = card.get("attributes") if isinstance(card.get("attributes"), dict) else {}
-    max_mp = _as_int(state.get("max_mp"), magic_rules.max_mp(attributes.get("pow")))
+    max_mp = _as_int(state.get("max_mp"), _magic_rules_for(info).max_mp(attributes.get("pow")))
     before = _as_int(state.get("current_mp", card.get("currentMp")), max_mp)
     after = max(0, min(max_mp, before + _as_int(delta)))
     state["max_mp"] = max_mp
@@ -144,6 +182,7 @@ def recover_mp(
     card = room_rules.member_card(member)
     state = member.setdefault("character_state", {})
     attributes = card.get("attributes") if isinstance(card.get("attributes"), dict) else {}
+    magic_rules = _magic_rules_for(info)
     max_mp = _as_int(state.get("max_mp"), magic_rules.max_mp(attributes.get("pow")))
     before = _as_int(state.get("current_mp", card.get("currentMp")), max_mp)
     gain = magic_rules.mp_recovery(days_value * 24, attributes.get("pow"))
@@ -224,6 +263,7 @@ def cast_spell(
     if known is None:
         raise _error(f"角色尚未学会「{spell}」，请先用 rule spell learn 登记", code="spell_not_known")
 
+    magic_rules = _magic_rules_for(info)
     need_check = bool(first_cast or not known.get("first_cast_done"))
     level = str(success_level or "").lower()
     if need_check and not level:
@@ -349,6 +389,7 @@ def read_grimoire(
         record = {"reads": 0, "weeks": 0, "mythos_gain": 0, "san_loss": 0}
         block["grimoires"][book] = record
 
+    magic_rules = _magic_rules_for(info)
     if skim:
         if not magic_rules.is_success(success_level):
             return {

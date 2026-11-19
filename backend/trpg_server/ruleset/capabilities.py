@@ -92,6 +92,36 @@ def magic_content_of(plugin: Any) -> Any | None:
     return getattr(plugin, "magic_content", None)
 
 
+def chase_rules_of(plugin: Any) -> Any | None:
+    """插件的追逐细节纯规则模块（行动点 / 险境 / 障碍耐久）；未声明时返回 None。"""
+    return getattr(plugin, "chase_rules", None)
+
+
+def magic_rules_of(plugin: Any) -> Any | None:
+    """插件的施法 / 典籍阅读结算纯规则模块；未声明时返回 None。"""
+    return getattr(plugin, "magic_rules", None)
+
+
+def sanity_state_of(plugin: Any) -> Any | None:
+    """插件的理智状态模块（发作计时 / 习惯恐惧 / 留痕结构）；未声明时返回 None。"""
+    return getattr(plugin, "sanity_state", None)
+
+
+def sanity_traits_of(plugin: Any) -> Any | None:
+    """插件的恐惧 / 躁狂表模块；未声明时返回 None。"""
+    return getattr(plugin, "sanity_traits", None)
+
+
+def sanity_treatment_of(plugin: Any) -> Any | None:
+    """插件的心理治疗 / 疗养折算纯规则模块；未声明时返回 None。"""
+    return getattr(plugin, "sanity_treatment", None)
+
+
+def economy_of(plugin: Any) -> Any | None:
+    """插件的信用评级 / 开支纯规则模块；未声明时返回 None。"""
+    return getattr(plugin, "economy", None)
+
+
 class _NeutralRuleOptions:
     """规则集缺席时的中性房规开关：任何开关读取都按关闭处理。
 

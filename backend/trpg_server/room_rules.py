@@ -167,6 +167,28 @@ def room_rule_label(info: dict[str, Any] | None, *, scenarios_dir: Any = None) -
     return f"{plugin.display_name}（{plugin.id}）"
 
 
+def room_rule_options(info: dict[str, Any] | None) -> Any:
+    """按房间规则集解析房规开关集合（阶段 4 P1）。
+
+    规则集未声明 ``options`` 能力、或房间规则集本身不可解析（插件被移除 /
+    未启用）时返回全关闭的中性开关：房规入口的既有语义就是「开关关闭时
+    入口不存在」，调用方自然落到「未启用 / 未知命令」分支，而不是
+    ``AttributeError`` 裸崩。coc7 在场时结果与直接调用其
+    ``resolve_options`` 逐位一致。
+    """
+    from trpg_server.ruleset import RulesetSelectionError, get_plugin
+    from trpg_server.ruleset.capabilities import NEUTRAL_RULE_OPTIONS, options_of
+
+    try:
+        plugin = get_plugin(resolve_rule_id(info))
+    except RulesetSelectionError:
+        return NEUTRAL_RULE_OPTIONS
+    resolve = getattr(options_of(plugin), "resolve_options", None)
+    if not callable(resolve):
+        return NEUTRAL_RULE_OPTIONS
+    return resolve(info)
+
+
 def _actor_rank_value(rank: Any) -> int:
     if isinstance(rank, (int, float)) and not isinstance(rank, bool):
         return int(rank)

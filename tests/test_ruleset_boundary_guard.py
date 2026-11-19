@@ -7,9 +7,8 @@ import 同样算——AST 扫描覆盖 Import / ImportFrom 节点、
 清单）。docstring 里的 ``:mod:`` 引用不算耦合，不会被误报。
 
 白名单 = 按设计持有模块清单的 composition root（bootstrap）+ coc7 自身的
-战斗实现与惰性 re-export + 六个显式登记的 P1 债务模块。白名单外出现任何
-import 期耦合直接失败，防止解耦回潮；本批（P0）禁止修债务模块，也禁止
-让任何新文件加入耦合。
+战斗实现与惰性 re-export。白名单外出现任何 import 期耦合直接失败，防止
+解耦回潮；如确属新债务，先在 KNOWN_DEBT_FILES 登记并注明批次归属。
 
 仿照 ``tests/test_plugin_kernel.py`` 的零依赖守卫手法：不 mock、不启动
 服务，只做静态结构断言。
@@ -33,25 +32,19 @@ PLUGIN_PACKAGE_DIRS = (
     BACKEND_ROOT / "ruleset" / "coc7",
 )
 
-# 显式登记的已知债务（P1 批次清理；清理完成后必须同步删除对应条目）：
+# 显式登记的允许耦合位置（P1 批次后债务清零）：
 # - ruleset/bootstrap.py：composition root，按设计持有插件模块清单
 #   （``DEFAULT_PLUGIN_MODULES`` / ``TRPG_RULESET_PLUGINS``），这是全后端
 #   唯一允许写出具体插件模块路径的位置。
 # - combat/rulesets/coc7.py：coc7 的战斗实现本体。
 # - combat/rulesets/__init__.py：惰性 re-export（``__getattr__`` 按需加载）。
-# - 六个债务模块：room_chase / room_magic / room_sanity / room_interlude 的
-#   模块级规则数学 import，room_rule_commands / room_interlude /
-#   agents/turn_pipeline 的函数内延迟 import。P1 归属，本批禁止修改它们。
+# P1 清偿记录（2026-11-19）：room_chase / room_interlude / room_magic /
+# room_rule_commands / room_sanity / agents/turn_pipeline 的 15 处
+# （模块级 5 + 函数内 10）已全部改走注册表 + 能力层，条目随之删除。
 KNOWN_DEBT_FILES = {
     "ruleset/bootstrap.py",
     "combat/rulesets/coc7.py",
     "combat/rulesets/__init__.py",
-    "room_chase.py",
-    "room_interlude.py",
-    "room_magic.py",
-    "room_rule_commands.py",
-    "room_sanity.py",
-    "agents/turn_pipeline.py",
 }
 
 

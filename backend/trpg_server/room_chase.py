@@ -1,7 +1,9 @@
 """房间级追逐会话：位置、行动点与阻碍的状态存取。
 
-规则数学全部在 :mod:`trpg_server.ruleset.coc7.chase`；本模块只负责：
-读取房间信息、维护 ``info["chase"]`` 会话段、搬运成员卡数值、留痕与落盘。
+规则数学由当前房间规则集插件的 ``chase_rules`` 能力提供（CoC7 即
+:mod:`trpg_server.ruleset.coc7.chase`）；本模块只负责：读取房间信息、
+维护 ``info["chase"]`` 会话段、搬运成员卡数值、留痕与落盘，不直接
+import 任何规则包（阶段 4 P1）。
 
 会话结构（只增字段，旧房间没有该段时视为没有追逐）::
 
@@ -26,7 +28,6 @@ from typing import Any
 
 from trpg_server import room_rules
 from trpg_server.room_log import log_room_event
-from trpg_server.ruleset.coc7 import chase as chase_rules
 
 CHASE_KEY = "chase"
 DEFAULT_LOCATION_COUNT = 6
@@ -35,6 +36,21 @@ MAX_LOG = 40
 
 def _error(message: str, code: str = "chase_error") -> room_rules.RuleOperationError:
     return room_rules.RuleOperationError(message, code=code)
+
+
+def _chase_rules_for(info: dict[str, Any] | None) -> Any:
+    """按当前房间的规则集解析追逐纯规则能力（阶段 4 P1）。
+
+    数值与行为仍全部来自插件的 ``chase_rules`` 模块；规则集未声明该能力时
+    给出可读错误（控制台 / AI 工具层已先按房规开关拦截，这里是防御性兜底）。
+    """
+    from trpg_server.ruleset import get_plugin
+    from trpg_server.ruleset.capabilities import chase_rules_of
+
+    rules = chase_rules_of(get_plugin(room_rules.resolve_rule_id(info)))
+    if rules is None:
+        raise _error("当前规则集不支持追逐", code="chase_unsupported")
+    return rules
 
 
 def get_chase(info: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -132,15 +148,15 @@ def _log(chase: dict[str, Any], text: str, *, room_dir: Any = None, actor: Any =
             pass
 
 
-def _lowest_mov(chase: dict[str, Any]) -> int:
-    return chase_rules.lowest_mov(chase.get("participants") or [])
+def _lowest_mov(chase: dict[str, Any], rules: Any) -> int:
+    return rules.lowest_mov(chase.get("participants") or [])
 
 
-def _refresh_ap(chase: dict[str, Any]) -> None:
+def _refresh_ap(chase: dict[str, Any], rules: Any) -> None:
     """按本轮最低 MOV 重算行动点，并扣除上一轮欠下的延迟消耗。"""
-    lowest = _lowest_mov(chase)
+    lowest = _lowest_mov(chase, rules)
     for item in chase.get("participants") or []:
-        base = chase_rules.action_points(item.get("mov"), lowest)
+        base = rules.action_points(item.get("mov"), lowest)
         debt = max(0, int(item.get("ap_debt") or 0))
         item["ap"] = max(0, base - debt)
         item["ap_debt"] = max(0, debt - base)
@@ -173,6 +189,7 @@ def start_chase(
     if not quarries:
         cleaned[0]["role"] = "quarry"
         quarries = [cleaned[0]]
+    chase_rules = _chase_rules_for(info)
     for item in cleaned:
         item["position"] = 0
         item["ap"] = 1
@@ -191,7 +208,7 @@ def start_chase(
         "outcome": "",
         "log": [],
     }
-    _refresh_ap(chase)
+    _refresh_ap(chase, chase_rules)
     _log(
         chase,
         f"追逐开始：{'、'.join(names)}；共 {len(track)} 个地点，初始距离 {chase_rules.INITIAL_DISTANCE}。",
@@ -206,8 +223,9 @@ def start_round(room_dir: Any, info: dict[str, Any], *, actor: Any = None) -> di
     chase = get_chase(info)
     if not chase:
         raise _error("当前没有进行中的追逐", code="chase_missing")
+    chase_rules = _chase_rules_for(info)
     chase["round"] = int(chase.get("round") or 1) + 1
-    _refresh_ap(chase)
+    _refresh_ap(chase, chase_rules)
     _log(chase, f"第 {chase['round']} 轮开始，行动点已重置。", room_dir=room_dir, actor=actor)
     save_chase(room_dir, info, chase)
     return chase
@@ -241,14 +259,14 @@ def _spend_ap(item: dict[str, Any], amount: int) -> None:
     item["ap_debt"] = max(0, int(item.get("ap_debt") or 0)) + (cost - available)
 
 
-def _resolve_escape(chase: dict[str, Any]) -> None:
+def _resolve_escape(chase: dict[str, Any], rules: Any) -> None:
     """逃离者抵达轨道末端且与所有追逐者相距 ≥2 时脱身。"""
     track_end = len(chase.get("locations") or []) - 1
     for quarry in (item for item in chase.get("participants") or [] if item.get("role") == "quarry"):
         if int(quarry.get("position") or 0) < track_end:
             continue
         pursuers = [item for item in chase.get("participants") or [] if item.get("role") != "quarry"]
-        if pursuers and all(track_end - int(item.get("position") or 0) >= chase_rules.INITIAL_DISTANCE for item in pursuers):
+        if pursuers and all(track_end - int(item.get("position") or 0) >= rules.INITIAL_DISTANCE for item in pursuers):
             chase["active"] = False
             chase["outcome"] = "escaped"
             _log(chase, f"{quarry.get('name')} 抵达轨道末端并甩开了追逐者，追逐结束。")
@@ -272,6 +290,7 @@ def move_participant(
     if item.get("status") not in (None, "active"):
         raise _error(f"{item.get('name')} 当前无法行动（{item.get('status')}）", code="chase_inactive")
 
+    chase_rules = _chase_rules_for(info)
     if accelerate:
         if not item.get("vehicle"):
             raise _error("只有载具可以加速移动", code="not_vehicle")
@@ -308,7 +327,7 @@ def move_participant(
         actor=actor,
     )
     _check_contact(chase)
-    _resolve_escape(chase)
+    _resolve_escape(chase, chase_rules)
     save_chase(room_dir, info, chase)
     return chase
 
@@ -340,6 +359,7 @@ def attempt_hazard(
     if not chase:
         raise _error("当前没有进行中的追逐", code="chase_missing")
     item = _participant(chase, name)
+    chase_rules = _chase_rules_for(info)
     spent = chase_rules.hazard_bonus_dice(ap_spent)
     if int(item.get("ap") or 0) < spent:
         raise _error("行动点不足以换取奖励骰", code="chase_no_ap")
@@ -374,7 +394,7 @@ def attempt_hazard(
         actor=actor,
     )
     _check_contact(chase)
-    _resolve_escape(chase)
+    _resolve_escape(chase, chase_rules)
     save_chase(room_dir, info, chase)
     return payload
 
@@ -402,7 +422,7 @@ def add_obstacle(
     track_end = len(chase.get("locations") or []) - 1
     if index < 0 or index >= track_end:
         raise _error(f"障碍序号必须在 0-{track_end - 1} 之间", code="invalid_obstacle")
-    value = chase_rules.obstacle_durability(kind, durability)
+    value = _chase_rules_for(info).obstacle_durability(kind, durability)
     obstacle = {
         "from": index,
         "name": str(name or "障碍")[:40],
@@ -448,6 +468,7 @@ def attempt_obstacle(
         raise _error("该位置没有需要翻越的障碍", code="no_obstacle")
     if int(item.get("ap") or 0) < 1:
         raise _error(f"{item.get('name')} 行动点不足", code="chase_no_ap")
+    chase_rules = _chase_rules_for(info)
     _spend_ap(item, 1)
     level = str(success_level or "").lower()
     success = level in {"regular", "hard", "extreme", "critical"}
@@ -464,7 +485,7 @@ def attempt_obstacle(
         actor=actor,
     )
     _check_contact(chase)
-    _resolve_escape(chase)
+    _resolve_escape(chase, chase_rules)
     save_chase(room_dir, info, chase)
     return {"obstacle": obstacle, "success": success, "position": item.get("position")}
 
@@ -503,7 +524,7 @@ def damage_obstacle(
         actor=actor,
     )
     save_chase(room_dir, info, chase)
-    return {"obstacle": obstacle, "recoil": chase_rules.vehicle_recoil_damage(before)}
+    return {"obstacle": obstacle, "recoil": _chase_rules_for(info).vehicle_recoil_damage(before)}
 
 
 def resolve_conflict(
@@ -526,6 +547,7 @@ def resolve_conflict(
     victim = _participant(chase, target)
     if source is victim:
         raise _error("攻击者与目标不能是同一人", code="invalid_target")
+    chase_rules = _chase_rules_for(info)
     same = int(source.get("position") or 0) == int(victim.get("position") or 0)
     if not chase_rules.can_attack(same, has_firearm):
         raise _error("除火器外，只能攻击同一地点的目标", code="chase_out_of_range")

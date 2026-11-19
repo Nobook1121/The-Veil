@@ -1,6 +1,9 @@
-"""批次 3：房间理智状态层（状态存取与调度，规则数学在 ruleset/coc7）。
+"""批次 3：房间理智状态层（状态存取与调度，规则数学在规则集插件内）。
 
-这里不做规则计算，只负责：
+理智状态 / 治疗 / 恐惧躁狂表的规则数学由当前房间规则集插件的
+``sanity_state`` / ``sanity_treatment`` / ``sanity_traits`` 能力提供
+（CoC7 即 :mod:`trpg_server.ruleset.coc7` 下的同名模块）；本模块不直接
+import 任何规则包（阶段 4 P1）。这里不做规则计算，只负责：
 - 把插件给出的结构化精神状态写入 ``character_state["mental"]`` 与
   ``character_card["extensions"]["mental"]``，并登记 ``extensions`` 持久化变更；
 - 提供控制台 / AI 工具共用的查询、发作结束、习惯恐惧、现实认知与查表入口；
@@ -22,8 +25,6 @@ from typing import Any, Callable, Iterable
 from trpg_server import room_clock, room_rules
 from trpg_server.ruleset import get_plugin
 from trpg_server.ruleset.capabilities import checks_of, sanity_of
-from trpg_server.ruleset.coc7 import sanity_state, traits, treatment
-from trpg_server.ruleset.coc7.options import resolve_options
 from trpg_server.ruleset.contracts import CheckRequest
 
 SAN_COMMAND_SUBS = {"bout", "habituation", "habits", "reality", "trait", "traits", "treat"}
@@ -38,19 +39,64 @@ FEATURE_LABELS = {
 
 
 def options_for(info: dict[str, Any] | None) -> Any:
-    return resolve_options(info)
+    """房间房规开关：经房间规则集注册表 + 能力层取用（阶段 4 P1）。
+
+    规则集不可解析 / 未声明 ``options`` 能力时返回全关闭中性开关，
+    调用方会落到「房规未启用」分支，而不是 ``AttributeError``。
+    """
+    return room_rules.room_rule_options(info)
+
+
+def _plugin_for(member: dict[str, Any]) -> Any:
+    """按成员卡规则集解析插件；失败时按无能力处理（既有口径）。"""
+    card = room_rules.member_card(member)
+    try:
+        return get_plugin(card.get("rulesetId"))
+    except Exception:  # noqa: BLE001 - 插件缺失按无能力处理
+        return None
 
 
 def _sanity_for(member: dict[str, Any]) -> Any:
-    card = room_rules.member_card(member)
-    plugin = None
-    try:
-        from trpg_server.ruleset import get_plugin
+    return sanity_of(_plugin_for(member))
 
-        plugin = get_plugin(card.get("rulesetId"))
-    except Exception:  # noqa: BLE001 - 插件缺失按无能力处理
-        plugin = None
-    return sanity_of(plugin)
+
+def _room_plugin(info: dict[str, Any] | None) -> Any:
+    """按当前房间的规则集解析插件；调用方保证房间规则集可用。"""
+    return get_plugin(room_rules.resolve_rule_id(info))
+
+
+def _sanity_state_for(info: dict[str, Any] | None) -> Any:
+    """按房间规则集解析理智状态模块（发作 / 习惯恐惧 / 留痕结构）。
+
+    CoC7 即 :mod:`trpg_server.ruleset.coc7.sanity_state`；本模块不再直接
+    import 规则包（阶段 4 P1）。
+    """
+    from trpg_server.ruleset.capabilities import sanity_state_of
+
+    state = sanity_state_of(_room_plugin(info))
+    if state is None:
+        raise room_rules.RuleOperationError("当前规则集不支持理智状态", code="mental_unsupported")
+    return state
+
+
+def _treatment_for(info: dict[str, Any] | None) -> Any:
+    """按房间规则集解析心理治疗纯规则模块（月度精神分析 / 疗养折算）。"""
+    from trpg_server.ruleset.capabilities import sanity_treatment_of
+
+    treatment = sanity_treatment_of(_room_plugin(info))
+    if treatment is None:
+        raise room_rules.RuleOperationError("当前规则集不支持心理治疗", code="treatment_unsupported")
+    return treatment
+
+
+def _traits_for(info: dict[str, Any] | None) -> Any:
+    """按房间规则集解析恐惧 / 躁狂表模块（100 条表按需查询）。"""
+    from trpg_server.ruleset.capabilities import sanity_traits_of
+
+    traits = sanity_traits_of(_room_plugin(info))
+    if traits is None:
+        raise room_rules.RuleOperationError("当前规则集不支持恐惧 / 躁狂表", code="traits_unsupported")
+    return traits
 
 
 def _require(member: dict[str, Any]) -> Any:
@@ -100,7 +146,7 @@ def describe(member: dict[str, Any], info: dict[str, Any] | None = None) -> str:
     if not options.sanity_state:
         raise _disabled("sanity_state")
     now_ts, _, _ = room_clock.san_now(info)
-    return sanity_state.describe(
+    return _sanity_state_for(info).describe(
         mental_snapshot(member, info),
         timestamp=now_ts,
         safety_minutes=options.sanity_bout_safety_minutes,
@@ -124,7 +170,7 @@ def end_bout(room_dir: Any, info: dict[str, Any], member: dict[str, Any], *, act
     if not options.sanity_state:
         raise _disabled("sanity_state")
     block = mental_block(member)
-    bout = sanity_state.clear_bout(block)
+    bout = _sanity_state_for(info).clear_bout(block)
     if not bout:
         return {"player_name": _member_label(member), "bout": {}, "summary": "当前没有进行中的发作。"}
     state = _state(member)
@@ -144,7 +190,7 @@ def active_bout_text(member: dict[str, Any], info: dict[str, Any] | None = None)
         return f"{_member_label(member)}：无疯狂发作记录。"
     # 插件快照已按房规算出 activeBout（含安全阀为 0 时关闭兜底的口径）。
     status = "进行中" if block.get("activeBout") else "已结束"
-    return f"{_member_label(member)}：{status}；{sanity_state.bout_summary(bout)}"
+    return f"{_member_label(member)}：{status}；{_sanity_state_for(info).bout_summary(bout)}"
 
 
 # ---------------------------------------------------------------- 习惯恐惧
@@ -175,7 +221,7 @@ def record_habituation(
     if not key:
         raise room_rules.RuleOperationError("请提供恐惧来源名称", code="bad_arguments")
     block = mental_block(member)
-    result = sanity_state.note_habituation(block, key, int(loss or 0), max_loss=cap)
+    result = _sanity_state_for(info).note_habituation(block, key, int(loss or 0), max_loss=cap)
     room_rules._add_pending_change(_state(member), _pending(block, "习惯恐惧"))
     _save(room_dir, info)
     total = result["previous_total"] + result["applied"]
@@ -221,6 +267,8 @@ def treatment_session(
     month_count = max(1, min(12, int(months or 1)))
     rng = rng or (lambda sides: random.randint(1, sides))
     block = mental_block(member)
+    treatment = _treatment_for(info)
+    sanity_state = _sanity_state_for(info)
     total = 0
     for _ in range(month_count):
         total += treatment.monthly_san_delta(
@@ -295,6 +343,7 @@ def interlude_decay(
     options = options_for(info)
     if not options.sanity_state or not options.sanity_habituation:
         return {"members": [], "summary": "未启用习惯恐惧房规，跳过幕间衰减。"}
+    sanity_state = _sanity_state_for(info)
     targets: Iterable[dict[str, Any]] = [member] if member else [
         item for item in (info.get("members") or []) if isinstance(item, dict)
     ]
@@ -362,6 +411,7 @@ def expire_bouts(
     options = options_for(info)
     if not options.sanity_state:
         return {"expired": [], "insanity_ended": [], "messages": [], "summary": "未启用理智结构化房规，跳过到期检查。"}
+    sanity_state = _sanity_state_for(info)
     game_now, _, clock_kind = room_clock.san_now(info)
     moment = now if now is not None else timestamp
     if moment is None:
@@ -434,6 +484,7 @@ def reanchor_bouts(room_dir: Any, info: dict[str, Any] | None, delta_seconds: fl
     options = options_for(info)
     if not options.sanity_state:
         return {"shifted": [], "summary": "未启用理智结构化房规，跳过计时平移。"}
+    sanity_state = _sanity_state_for(info)
     try:
         delta = int(round(float(delta_seconds or 0)))
     except (TypeError, ValueError):
@@ -540,6 +591,7 @@ def reality_check(
             "summary": checks.format_room_check_summary("理智", "regular", resolution.roll, resolution.target, success),
         }
 
+    sanity_state = _sanity_state_for(info)
     block = mental_block(member)
     state = _state(member)
     entry = {
@@ -609,8 +661,22 @@ def reality_check(
 # ---------------------------------------------------------------- 表查询
 
 
-def trait_query(kind: Any = None, keyword: Any = None, *, limit: int = 10, roll: bool = False, rng: Any = None) -> dict[str, Any]:
-    """按需查询恐惧症 / 躁狂症表；``roll=True`` 时随机抽一条。"""
+def trait_query(
+    kind: Any = None,
+    keyword: Any = None,
+    *,
+    limit: int = 10,
+    roll: bool = False,
+    rng: Any = None,
+    info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """按需查询恐惧症 / 躁狂症表；``roll=True`` 时随机抽一条。
+
+    表内容由房间规则集的 ``sanity_traits`` 能力提供；调用方有房间上下文时
+    传 ``info`` 以按房间解析（控制台与 AI 工具都已传入），未传时按默认
+    规则集解析。
+    """
+    traits = _traits_for(info)
     if roll:
         picker = rng or (lambda sides: int(time.time() * 1000) % sides + 1)
         kinds = [str(kind).strip().lower()] if kind else ["phobia", "mania"]
@@ -688,13 +754,14 @@ def handle_command(
             " ".join(args[2:]) if len(args) > 2 else None,
             limit=10,
             roll=len(args) > 1 and str(args[1]).lower() in {"roll", "random", "随机"},
+            info=info,
         )
         if payload.get("rolled"):
             return True, "随机抽取：" + "；".join(f"[{item['label']}] {item['text']}" for item in payload["picks"])
         lines = []
         for group in payload.get("results") or []:
             lines.append(f"{group['label']}（共 {group['total']} 条，显示 {len(group['entries'])} 条）：")
-            lines.extend(f"  #{row['id']} {traits.format_entry(row)}" for row in group["entries"])
+            lines.extend(f"  #{row['id']} {_traits_for(info).format_entry(row)}" for row in group["entries"])
         return True, "\n".join(lines) if lines else "没有匹配的条目。"
 
     if sub in {"reality"}:

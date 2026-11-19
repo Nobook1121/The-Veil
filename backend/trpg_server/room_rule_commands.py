@@ -265,15 +265,13 @@ def handle_room_rule_command(
     # `rule heal mp <玩家> [天数]`，避免玩家名被当成 mp 的值吞掉。
     raw_args = [str(item) for item in args]
     if len(raw_args) >= 2 and raw_args[0].lower() == "heal" and raw_args[1].lower() == "mp":
-        from trpg_server.ruleset.coc7.options import resolve_options
-
         if not _require_operator(actor_rank):
             return False, "只有房主 / 房间管理员可以执行该规则命令"
         return _mp_heal_command(
             room_dir,
             info,
             ["mp", *raw_args[2:]],
-            coc7_options=resolve_options(info),
+            coc7_options=room_rules.room_rule_options(info),
             actor_id=actor_id,
             actor_rank=actor_rank,
         )
@@ -288,9 +286,9 @@ def handle_room_rule_command(
         return False, f"未知的规则命令：rule {sub}\n{ROOM_RULE_HELP}"
 
     # 批次 1 房规：开关关闭时这些入口等同于不存在，行为与旧版本一致。
-    from trpg_server.ruleset.coc7.options import resolve_options
-
-    coc7_options = resolve_options(info)
+    # 开关经房间规则集注册表 + 能力层取用（阶段 4 P1）：规则集不可解析 /
+    # 未声明 options 能力时按全关闭处理，等价于「房规未开启」。
+    coc7_options = room_rules.room_rule_options(info)
     optional_subs = {
         "social": coc7_options.social_difficulty,
         "combined": coc7_options.combined_checks,
@@ -866,9 +864,24 @@ def _mp_heal_command(
     )
 
 
-def _format_spell_detail(entry: dict[str, Any]) -> str:
-    from trpg_server.ruleset.coc7 import magic_content
+def _magic_content_for(info: dict[str, Any]) -> Any:
+    """按当前房间的规则集解析法术 / 典籍内容表能力（阶段 4 P1）。
 
+    CoC7 即 :mod:`trpg_server.ruleset.coc7.magic_content`；控制台命令只在
+    房规开关放行后才走到这里，能力缺失时给可读错误而不是裸崩。
+    """
+    from trpg_server.ruleset import get_plugin
+    from trpg_server.ruleset.capabilities import magic_content_of
+
+    content = magic_content_of(get_plugin(room_rules.resolve_rule_id(info)))
+    if content is None:
+        raise room_rules.RuleOperationError(
+            "当前规则集不支持法术 / 典籍内容表", code="magic_content_unsupported"
+        )
+    return content
+
+
+def _format_spell_detail(entry: dict[str, Any], content: Any) -> str:
     head = f"{entry.get('name')}（p{entry.get('page')}）"
     if entry.get("group"):
         head += f" · 所属 {entry['group']}"
@@ -897,13 +910,11 @@ def _format_spell_detail(entry: dict[str, Any]) -> str:
         lines.append(f"  原文：{entry['text']}")
         if entry.get("text_truncated"):
             lines.append("  （原文过长，已截断；需要更多请查规则书）")
-    lines.append(f"  来源：{magic_content.SOURCE_SPELL}")
+    lines.append(f"  来源：{content.SOURCE_SPELL}")
     return "\n".join(lines)
 
 
-def _format_grimoire_detail(book: dict[str, Any]) -> str:
-    from trpg_server.ruleset.coc7 import magic_content
-
+def _format_grimoire_detail(book: dict[str, Any], content: Any) -> str:
     lines = [f"《{book.get('title')}》（p{book.get('page')}）"]
     for edition in book.get("editions") or []:
         bits = [str(edition.get("language") or "?")]
@@ -935,24 +946,25 @@ def _format_grimoire_detail(book: dict[str, Any]) -> str:
         lines.append(f"  原文：{book['text']}")
         if book.get("text_truncated"):
             lines.append("  （原文过长，已截断；需要更多请查规则书）")
-    lines.append(f"  来源：{magic_content.SOURCE_GRIMOIRE}")
+    lines.append(f"  来源：{content.SOURCE_GRIMOIRE}")
     return "\n".join(lines)
 
 
-def _spell_lookup(action: str, args: list[str], options: dict[str, str]) -> tuple[bool, str]:
-    """按需查询规则书法术 / 典籍：返回精简列表或单条完整条目。"""
-    from trpg_server.ruleset.coc7 import magic_content
+def _spell_lookup(action: str, args: list[str], options: dict[str, str], content: Any) -> tuple[bool, str]:
+    """按需查询规则书法术 / 典籍：返回精简列表或单条完整条目。
 
+    ``content`` 是房间规则集的 ``magic_content`` 能力模块（调用方解析后传入）。
+    """
     query = " ".join(args).strip()
     if action == "show":
         if not query:
             return False, "用法：rule spell show <法术或典籍名称>"
-        spell = magic_content.describe_spell(query)
+        spell = content.describe_spell(query)
         if spell:
-            return True, _format_spell_detail(spell)
-        book = magic_content.describe_grimoire(query)
+            return True, _format_spell_detail(spell, content)
+        book = content.describe_grimoire(query)
         if book:
-            return True, _format_grimoire_detail(book)
+            return True, _format_grimoire_detail(book, content)
         return False, f"内容表里没有「{query}」。用 rule spell find 关键词 先搜一下。"
 
     kind = str(options.get("kind") or "any").strip().lower()
@@ -963,29 +975,29 @@ def _spell_lookup(action: str, args: list[str], options: dict[str, str]) -> tupl
     max_mp = options.get("max-mp")
     lines: list[str] = []
     if kind in {"spell", "法术"}:
-        results = magic_content.find_spells(
+        results = content.find_spells(
             query, group=group, max_san=max_san, max_mp=max_mp, limit=limit
         )
-        lines.extend(magic_content.format_spell_line(item) for item in results)
+        lines.extend(content.format_spell_line(item) for item in results)
     elif kind in {"grimoire", "book", "典籍"}:
-        results = magic_content.find_grimoires(
+        results = content.find_grimoires(
             query, language=language, max_san=max_san, limit=limit
         )
-        lines.extend(magic_content.format_grimoire_line(item) for item in results)
+        lines.extend(content.format_grimoire_line(item) for item in results)
     else:
-        spells_found = magic_content.find_spells(
+        spells_found = content.find_spells(
             query, group=group, max_san=max_san, max_mp=max_mp, limit=limit
         )
-        books_found = magic_content.find_grimoires(
+        books_found = content.find_grimoires(
             query, language=language, max_san=max_san, limit=limit
         )
         if spells_found:
             lines.append("【法术】")
-            lines.extend("  " + magic_content.format_spell_line(item) for item in spells_found)
+            lines.extend("  " + content.format_spell_line(item) for item in spells_found)
         if books_found:
             lines.append("【典籍】")
             lines.extend(
-                "  " + magic_content.format_grimoire_line(item) for item in books_found
+                "  " + content.format_grimoire_line(item) for item in books_found
             )
     if not lines:
         return False, f"内容表里没有匹配「{query}」的条目。"
@@ -1007,10 +1019,7 @@ def _spell_command(
     room_id: Any,
 ) -> tuple[bool, str]:
     """房规：法术与典籍（施法消耗 / 首次施法 / 典籍阅读），规则数学在插件内。"""
-    from trpg_server.ruleset.coc7 import magic_content
-    from trpg_server.ruleset.coc7.options import resolve_options
-
-    coc7_options = resolve_options(info)
+    coc7_options = room_rules.room_rule_options(info)
     settlement = coc7_options.magic_enabled
     catalog = coc7_options.magic_catalog_enabled
     verbs = {"status", "list", "learn", "cast", "grimoire", "find", "show"}
@@ -1024,7 +1033,11 @@ def _spell_command(
     if action in {"find", "show"}:
         if not catalog:
             return False, f"未知的规则命令：rule spell {action}\n{ROOM_RULE_HELP}"
-        return _spell_lookup(action, args, options)
+        try:
+            content = _magic_content_for(info)
+        except room_rules.RuleOperationError as exc:
+            return False, exc.message
+        return _spell_lookup(action, args, options, content)
     if not settlement:
         return False, f"未知的规则命令：rule spell {action}\n{ROOM_RULE_HELP}"
 
@@ -1074,7 +1087,7 @@ def _spell_command(
             }
             note = ""
             if "--catalog" in flags and catalog:
-                stats = magic_content.spell_costs(spell_name)
+                stats = _magic_content_for(info).spell_costs(spell_name)
                 if stats is None:
                     note = "内容表未收录该法术，按显式参数结算。\n"
                 else:
@@ -1163,7 +1176,7 @@ def _spell_command(
             rating = _as_int(options.get("rating"), 0)
             note = ""
             if "--catalog" in flags and catalog:
-                stats = magic_content.grimoire_stats(title, options.get("language"))
+                stats = _magic_content_for(info).grimoire_stats(title, options.get("language"))
                 if stats is None:
                     note = "内容表未收录该典籍，按显式参数结算。\n"
                 else:

@@ -16,11 +16,17 @@ from trpg_server.ruleset.session import ActionBudgetSlot, TurnModel
 from trpg_server.ruleset.ui import LeftRailSpec, SidebarSpec, TopbarSpec, WorkspaceSpec
 from trpg_server.ruleset.coc7.catalogs import Coc7Catalogs
 from trpg_server.ruleset.coc7.checks import Coc7Checks
+from trpg_server.ruleset.coc7 import chase as coc7_chase
+from trpg_server.ruleset.coc7 import economy as coc7_economy
 from trpg_server.ruleset.coc7 import growth as coc7_growth
 from trpg_server.ruleset.coc7 import combat_rules as coc7_combat_rules
+from trpg_server.ruleset.coc7 import magic as coc7_magic_rules
 from trpg_server.ruleset.coc7 import magic_content as coc7_magic_content
 from trpg_server.ruleset.coc7 import options as coc7_options
+from trpg_server.ruleset.coc7 import sanity_state as coc7_sanity_state
 from trpg_server.ruleset.coc7 import training as coc7_training
+from trpg_server.ruleset.coc7 import traits as coc7_traits
+from trpg_server.ruleset.coc7 import treatment as coc7_treatment
 from trpg_server.ruleset.coc7.sanity import SANITY
 from trpg_server.ruleset.coc7.schema import Coc7CharacterSchema
 from trpg_server.ruleset.coc7.tools import Coc7Tools
@@ -65,6 +71,21 @@ class Coc7Plugin:
         self.options = coc7_options
         # 法术 / 典籍内容表（批次 6 按需查询）：同样作为能力暴露。
         self.magic_content = coc7_magic_content
+        # 追逐细节（批次 5）：行动点 / 险境 / 障碍耐久的纯规则模块，
+        # 房间状态层（room_chase）经能力层取用（阶段 4 P1）。
+        self.chase_rules = coc7_chase
+        # 施法 / 典籍阅读结算的纯规则模块：内容表见 ``magic_content``，
+        # 结算数学在这里；房间状态层（room_magic）经能力层取用（阶段 4 P1）。
+        self.magic_rules = coc7_magic_rules
+        # 理智状态结构化模块（发作计时 / 习惯恐惧 / 现实认知留痕）：
+        # ``sanity`` 是能力对象，本属性是同族的纯函数模块（阶段 4 P1）。
+        self.sanity_state = coc7_sanity_state
+        # 恐惧 / 躁狂症 100 条表：疯狂表现按需查表（阶段 4 P1 能力入口）。
+        self.sanity_traits = coc7_traits
+        # 心理治疗（月度精神分析 / 疗养月份折算）纯规则模块（阶段 4 P1）。
+        self.sanity_treatment = coc7_treatment
+        # 信用评级 / 开支纯规则模块：幕间信用事件结算经能力层取用（阶段 4 P1）。
+        self.economy = coc7_economy
         # 本规则集使用的骰子策略：核心只调抽象接口，不认识十位/个位。
         self.roll_policy = PercentileRollPolicy()
         # 骰型声明：前端骰桌据此保持百分骰，不因规则集切换显示 d20。

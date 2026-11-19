@@ -162,5 +162,5 @@ Flask 蓝图注册不可撤销是平台事实，两条路线：
 - ✅ 阶段 2：registry effect 撤销链 + 增量启停 + fiber 透出；`tests/test_plugin_incremental_lifecycle.py`（100 次往返对拍）
 - ✅ 阶段 3（spike + 正式接线）：spike 差分对拍判定路线 A 成立后已接线——`app_factory` 在核心蓝图之后注册代理总蓝图一次，插件蓝图经 `route_proxy.mount` 挂在各自效果链上，禁用即摘表、路由立即 404；`restart_required` / `pending_restart` 恒为 `false`（API 兼容保留），蓝图不可逆的历史限制废除
 - ✅ 阶段 5：module 字段可选 + 工具名解析期强校验（fiber 透出已在阶段 2 落地）
-- ▶ 阶段 4（2026-11-19 启动，P0 批次完成）：ruleset 去硬依赖收敛。优先级拍板为「边界先于内容」。**P0 已落地**——启动路径注册表解耦：coc7 缺席时进程可启动（4 断言机测）、CoC 命名工具按注册表组装、`tests/test_ruleset_boundary_guard.py` AST 守卫锁定白名单外零新增耦合（P1 六模块 15 处既有 import 进白名单登记）。后续批次：P1 函数内 import 清偿、DEFAULT_RULESET_ID 参数化、ToolBundle / RollPolicy / CheckPolicy、前端 SchemaDescriptor
+- ▶ 阶段 4（2026-11-19 启动，P0 批次完成）：ruleset 去硬依赖收敛。优先级拍板为「边界先于内容」。**P0 已落地**——启动路径注册表解耦：coc7 缺席时进程可启动（4 断言机测）、CoC 命名工具按注册表组装、`tests/test_ruleset_boundary_guard.py` AST 守卫锁定白名单外零新增耦合（P1 六模块 15 处既有 import 进白名单登记）。**P1 已落地（同日）**——六模块 15 处函数内 import 全部改走注册表 + 能力层，守卫白名单收窄到设计内持有者，缺席场景优雅降级有机测锚定。后续批次：DEFAULT_RULESET_ID 参数化、ToolBundle / RollPolicy / CheckPolicy、前端 SchemaDescriptor
 - 全量验证：`.\scripts\verify.ps1` 通过（阶段 2 收尾时全绿；阶段 3/5 后由全量 pytest 2244 passed 复核）

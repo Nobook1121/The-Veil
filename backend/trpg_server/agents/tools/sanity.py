@@ -126,6 +126,7 @@ def execute_san_traits(arguments: dict[str, Any], context: Any) -> dict[str, Any
         arguments.get("keyword"),
         limit=int(arguments.get("limit") or 10),
         roll=bool(arguments.get("roll")),
+        info=context.room_info(),
     )
     return {"ok": True, **payload}
 
