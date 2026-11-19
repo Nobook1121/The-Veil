@@ -166,9 +166,9 @@
         "dm_brief": "整张图共 8 个区域，沿溪流由入口向深处推进；区域之间以狭窄通道相连，适合用墙体与地形卡位。首领克拉格在区域 8。",
         "exits": [
           {
-            "to_area": "p1_trail",
-            "label": "退回三猪小径",
-            "direction": "two_way"
+            "to_area": "p2_phandalin",
+            "label": "前往凡达林：总述",
+            "direction": "one_way"
           }
         ]
       }
@@ -213,7 +213,16 @@
             "w": 6,
             "h": 5
           },
-          "provisional": true
+          "provisional": true,
+          "note": "M0 目测格坐标，未按底图标定；待 M9 标定后替换为真实格坐标。"
+        },
+        "content_ref": {
+          "module_id": "p1_hideout_1_cave_mouth"
+        },
+        "entry_brief": "从地精伏击地点的小径通向克拉摩窝点的入口。 朗读文本 跟随地精的踪迹，你们在距离伏击地点五英里的山坡上发现了一个大型洞穴。一条浅浅的溪流从洞口流出，洞口被茂密的荆棘灌木丛遮蔽。在溪流右侧有一条狭窄的干燥路径通向洞穴。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
         }
       }
     },
@@ -256,7 +265,8 @@
             "w": 5,
             "h": 5
           },
-          "provisional": true
+          "provisional": true,
+          "note": "M0 目测格坐标，未按底图标定；待 M9 标定后替换为真实格坐标。"
         },
         "encounter": {
           "id": "enc_p1_lookout",
@@ -266,6 +276,14 @@
           "count": 2,
           "trigger": "on_enter",
           "auto_start": false
+        },
+        "content_ref": {
+          "module_id": "p1_hideout_2_lookout"
+        },
+        "entry_brief": "当角色们穿过溪流东侧时，他们可以透过遮蔽的灌木丛看到区域 2 。这是一个地精哨站，不过这里的地精们百无聊赖且心不在焉。 朗读文本 在从洞口流出的溪流东侧，灌木丛中的一小块区域被挖空形成了一个瞭望点或隐蔽处。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
         }
       }
     },
@@ -310,7 +328,8 @@
             "w": 6,
             "h": 5
           },
-          "provisional": true
+          "provisional": true,
+          "note": "M0 目测格坐标，未按底图标定；待 M9 标定后替换为真实格坐标。"
         },
         "encounter": {
           "id": "enc_p1_kennel",
@@ -320,6 +339,14 @@
           "count": 3,
           "trigger": "on_enter",
           "auto_start": false
+        },
+        "content_ref": {
+          "module_id": "p1_hideout_3_kennel"
+        },
+        "entry_brief": "克拉摩窝点饲养着一群脾气暴躁的狼，他们正在对这些狼进行战斗训练。 朗读文本 就在洞穴入口处，几级不平整的石阶通向通道东侧一个潮湿的小型洞室。洞穴在远端尽头收窄成陡峭的岩缝，空气中弥漫着动物的恶臭。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
         }
       }
     },
@@ -362,7 +389,16 @@
             "w": 6,
             "h": 4
           },
-          "provisional": true
+          "provisional": true,
+          "note": "M0 目测格坐标，未按底图标定；待 M9 标定后替换为真实格坐标。"
+        },
+        "content_ref": {
+          "module_id": "p1_hideout_4_passage"
+        },
+        "entry_brief": "从此刻起，没有黑暗视觉的角色将需要光亮来观察周围环境。 朗读文本 从洞口的主通道陡峭向上延伸，溪流在其西侧倾泻而下。在阴影中，一条侧道向西穿过溪流的另一侧。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
         }
       }
     },
@@ -405,7 +441,16 @@
             "w": 6,
             "h": 4
           },
-          "provisional": true
+          "provisional": true,
+          "note": "M0 目测格坐标，未按底图标定；待 M9 标定后替换为真实格坐标。"
+        },
+        "content_ref": {
+          "module_id": "p1_hideout_5_bridge"
+        },
+        "entry_brief": "在一条较高的隧道穿过下方较大的洞窟处，地精们设立了一个桥梁警卫岗哨。 朗读文本 溪流通道继续向上延伸，经过前方另一组不平整的台阶，向东弯曲延伸。前方某处更大的洞窟传来瀑布的声响。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
         }
       }
     },
@@ -452,7 +497,8 @@
             "w": 6,
             "h": 5
           },
-          "provisional": true
+          "provisional": true,
+          "note": "M0 目测格坐标，未按底图标定；待 M9 标定后替换为真实格坐标。"
         },
         "encounter": {
           "id": "enc_p1_rest",
@@ -462,6 +508,14 @@
           "count": 2,
           "trigger": "on_enter",
           "auto_start": false
+        },
+        "content_ref": {
+          "module_id": "p1_hideout_6_rest"
+        },
+        "entry_brief": "驻扎在窝点的克拉摩掠夺者将这个区域用作公共休息室和营房。 朗读文本 这个大型洞穴被一道十英尺高的陡坡一分为二。一道陡峭的天然阶梯从下层通往上方岩架。空气中弥漫着炊火的浓烟，还有未鞣制好的兽皮和未洗澡的地精散发的刺鼻气味。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
         }
       }
     },
@@ -505,7 +559,16 @@
             "w": 6,
             "h": 5
           },
-          "provisional": true
+          "provisional": true,
+          "note": "M0 目测格坐标，未按底图标定；待 M9 标定后替换为真实格坐标。"
+        },
+        "content_ref": {
+          "module_id": "p1_hideout_7_pools"
+        },
+        "entry_brief": "如果地精已经排空任一水池使通道上涨，请相应调整以下方框内的文本。 朗读文本 这个洞窟半满着两个大型水池。东侧墙壁高处的一道狭窄瀑布注入水池，水从洞窟西端排出形成下方洞穴口流出的溪流。低矮的毛石墙作为水坝拦住水流。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
         }
       }
     },
@@ -552,9 +615,18 @@
             "w": 8,
             "h": 7
           },
-          "provisional": true
+          "provisional": true,
+          "note": "M0 目测格坐标，未按底图标定；待 M9 标定后替换为真实格坐标。"
         },
-        "dm_notes": "TODO: 首领 Klarg 是 bugbear，dnd5e-srd 当前数据包没有 bugbear 条目，本轮不配置 encounter；补齐怪物数据后再开战。"
+        "dm_notes": "TODO: 首领 Klarg 是 bugbear，dnd5e-srd 当前数据包没有 bugbear 条目，本轮不配置 encounter；补齐怪物数据后再开战。",
+        "content_ref": {
+          "module_id": "p1_hideout_8_cave"
+        },
+        "entry_brief": "类地精的首领坚持将掠夺者的大部分赃物留在自己的巢穴中。克拉摩帮派上个月袭击和伏击商队所得的掠夺品都在这里。 朗读文本 掠夺来的物资袋子和板条箱堆积在这个大型洞穴的南端。向西，地面向一个狭窄的开口倾斜，通向黑暗。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -584,6 +656,22 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_phandalin"
+      },
+      "node_role": "map",
+      "map": {
+        "scene_id": "p2_phandalin",
+        "grid_ft": 5,
+        "bounds_cells": null,
+        "entry_pois": [],
+        "environment": {},
+        "brief": "崎岖的小径从树木繁茂的山坡延伸而出，你第一次瞥见了凡达林。这个小镇由四五十座简易的原木建筑组成，有些建在古老的田野石地基上。",
+        "exits": [
+          {
+            "to_area": "p2_redbrand_hideout",
+            "label": "前往红标帮窝点：总述",
+            "direction": "two_way"
+          }
+        ]
       }
     },
     {
@@ -613,6 +701,27 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_stonehill_inn"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_phandalin",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_stonehill_inn"
+        },
+        "entry_brief": "在小镇中心矗立着一座新建成的大型路屋，由原石和粗凿木材建造。公共休息室里挤满了当地人，他们手捧麦芽酒或苹果酒，全都用好奇的目光打量着你。 这家俭朴的旅店有六间可供出租的房间（修达·霍温特占用了一间）。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -641,6 +750,27 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_barthen_supplies"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_phandalin",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_barthen_supplies"
+        },
+        "entry_brief": "巴森商行是凡达林最大的贸易站。其货架上备有大多数普通商品和补给品，包括背包、铺盖卷、绳索和口粮。该地点从日出营业到日落。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -669,6 +799,27 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_edermath_orchard"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_phandalin",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_edermath_orchard"
+        },
+        "entry_brief": "达朗·埃德玛是一位退休的冒险者，住在苹果园旁一间整洁的小屋里。这位体格健壮、银发的半精灵已有一百多岁高龄，曾是一名战士，在遥远的东南方龙海岸地区担任了多年的执法官和先驱魔斧。退休后，他回到了自己最初的家乡无冬城地区。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -696,6 +847,27 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_lionshield_coster"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_phandalin",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_lionshield_coster"
+        },
+        "entry_brief": "这家俭朴的贸易站前门上方悬挂着一个标志，形状是一个绘有蓝色狮子的木制盾牌。 这座建筑由狮盾公司所有，这是一家总部位于东方一百多英里外的雅塔尔城的商行。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -725,6 +897,27 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_miners_exchange"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_phandalin",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_miners_exchange"
+        },
+        "entry_brief": "矿工交易所是一个贸易站，当地矿工在此称重、测量并领取他们发现的贵重物品报酬。在缺乏任何地方领主或权威的情况下，该交易所还充当非官方的记录办公室，登记对该地区各处溪流和矿坑的开采权。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -754,6 +947,27 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_adabra_farm"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_phandalin",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_adabra_farm"
+        },
+        "entry_brief": "奎琳·阿德里夫是一位45岁的睿智女性半身人，是个务实的农民，似乎对镇上发生的一切都了如指掌。她是个好客的主人，如果角色们不想住在石丘旅馆，她愿意让他们住在她的干草棚里。 奎琳的儿子卡普是个十岁大、活泼早熟的半身人男孩。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -780,6 +994,27 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_shrine_luck"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_phandalin",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_shrine_luck"
+        },
+        "entry_brief": "凡达林唯一的庙宇是一座用附近遗迹的石头建造的小型神龛。它供奉着吉兆与好运女神泰摩拉。 这座神殿由一位名叫加莱尔修女的学者侍僧照料，她是一位热情的青年精灵，对永远无法清除凡达林的红标帮感到绝望。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -804,6 +1039,27 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_sleeping_giant"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_phandalin",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_sleeping_giant"
+        },
+        "entry_brief": "这家破旧的酒馆位于凡达林主街的尽头，是一个肮脏而危险的饮酒场所。这里经常有红标帮恶霸光顾，由一位名叫格莉斯塔的暴躁女性矮人经营。如果角色选择造访该地点，则触发\"红标帮恶霸\"遭遇。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -833,6 +1089,27 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_townmaster_hall"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_phandalin",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_townmaster_hall"
+        },
+        "entry_brief": "有着坚固的岩石墙壁、倾斜的木制屋顶，以及后方的铃铛塔楼。前门旁的公告板上贴着一张用通用语写的告示，上面写着：\"奖励——飞龙突岩附近的兽人！有意对抗兽人威胁者可入内询问。\"告示上盖有小镇印章和一个难以辨认的签名。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -856,6 +1133,27 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_tresendar_manor"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_phandalin",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_tresendar_manor"
+        },
+        "entry_brief": "更像是一座城堡而非住宅，它坐落在小镇东侧低矮的山坡上，周围环绕着树林和灌木丛。这座远古庄园早已被废弃，但其地下室已被改造成红标帮的要塞。如果角色们调查这个地点，他们会发现红标帮窝点的入口。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -882,6 +1180,27 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_redbrand_ruffians"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_phandalin",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_redbrand_ruffians"
+        },
+        "entry_brief": "在冒险者们抵达凡达林一天左右的时间内，与红标帮的对抗将变得不可避免。这种情况可能以多种不同方式发生： - 与小镇中的若干NPC交谈后，角色们决定在沉睡的巨人酒馆对抗红标帮。 - 角色们决定调查崔森德庄园。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -911,6 +1230,30 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_redbrand_hideout"
+      },
+      "node_role": "map",
+      "map": {
+        "scene_id": "p2_redbrand_hideout",
+        "grid_ft": 5,
+        "bounds_cells": null,
+        "entry_pois": [
+          "p2_redbrand_1_cellar"
+        ],
+        "environment": {},
+        "brief": "红标帮在凡达林的基地是崔森德庄园下的一个地牢复合体。在庄园被毁之前，其地窖作为粮食与水的安全储藏室，以防庄园遭受攻击，而相邻的墓穴则为崔森德家族的逝者提供了安息之所。",
+        "parent_area": "p2_phandalin",
+        "exits": [
+          {
+            "to_area": "p2_phandalin",
+            "label": "前往红标帮窝点：总述",
+            "direction": "two_way"
+          },
+          {
+            "to_area": "p3_travel",
+            "label": "前往三猪小径与大地图",
+            "direction": "two_way"
+          }
+        ]
       }
     },
     {
@@ -937,6 +1280,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_redbrand_1_cellar"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_redbrand_hideout",
+        "code": "1",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_redbrand_1_cellar"
+        },
+        "entry_brief": "对庄园地面的任何探索都会发现这里空无一人，但有许多踪迹通向大型厨房废墟旁的一个岩石楼梯。楼梯底部有一扇未上锁的门，门后是一个地窖。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -963,6 +1328,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_redbrand_2_barracks"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_redbrand_hideout",
+        "code": "2",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_redbrand_2_barracks"
+        },
+        "entry_brief": "红标帮的大多数人类成员在凡达林有住所。这个营房是在敲诈当地矿工和毛皮商人后躲藏的好地方。 朗读文本 这里似乎是一个被临时用作生活区的储藏室。两张双层床靠墙立在门边，而桶和板条箱则占据了房间的南半部分。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -989,6 +1376,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_redbrand_3_trap_corridor"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_redbrand_hideout",
+        "code": "3",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_redbrand_3_trap_corridor"
+        },
+        "entry_brief": "该区域曾是崔森德庄园原始地窖的一部分。红标帮挖空了石质地板下的泥土，制造了一个隐藏陷坑陷阱。 朗读文本 厚厚的灰尘覆盖着这条昏暗走廊的石板。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1014,6 +1423,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_redbrand_4_crypt"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_redbrand_hideout",
+        "code": "4",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_redbrand_4_crypt"
+        },
+        "entry_brief": "早已消逝的崔森德家族的长者们曾安葬于这座陵墓中。 朗读文本 三具大型石棺矗立在这座布满灰尘的墓穴中，每具石棺旁都倚靠着一具穿着锈蚀锁子甲碎片的人类骷髅。墙壁上的假柱雕刻着蔓延橡树形象的浮雕。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1043,6 +1474,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_redbrand_5_slave_pens"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_redbrand_hideout",
+        "code": "5",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_redbrand_5_slave_pens"
+        },
+        "entry_brief": "过去两个月里，红标帮一直在该区域抓捕旅人，将他们关在这些围栏中，直到能被卖为奴隶。 朗读文本 这个长房间被分隔成三个区域，铁栏杆将南北两侧隔开。肮脏的稻草铺在那些牢房的地板上，铰链门由链条和挂锁固定。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1068,6 +1521,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_redbrand_6_armory"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_redbrand_hideout",
+        "code": "6",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_redbrand_6_armory"
+        },
+        "entry_brief": "这个房间的门从外面锁上了。锁着的门对面有一扇通往区域 7 的暗门。有关锁着的门和暗门的更多信息，请参阅\"通用特性\"部分（第20页）。 朗读文本 武器架排列在这个房间的墙壁上，包括三叉枪、剑、弩和弩矢。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1094,6 +1569,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_redbrand_7_storeroom"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_redbrand_hideout",
+        "code": "7",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_redbrand_7_storeroom"
+        },
+        "entry_brief": "在这个房间里，红标帮清点他们偷来的货物，要么通过南边的洞窟运出，要么打包准备储存在要塞中。 朗读文本 这个区域是一个大型天然洞穴的北端，但已经用修整过的石砖墙和石板地面进行了修整。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1122,6 +1619,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_redbrand_8_chasm"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_redbrand_hideout",
+        "code": "8",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_redbrand_8_chasm"
+        },
+        "entry_brief": "角色们可以通过三条路线之一到达这里：来自区域 1 的隧道、区域 7 的储藏室，或是向南延伸的粗凿通道，这条通道在地图上继续延伸约一百英尺，从崔森德庄园南面树林中的一个隧道出现。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1151,6 +1670,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_redbrand_9_guard_barracks"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_redbrand_hideout",
+        "code": "9",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_redbrand_9_guard_barracks"
+        },
+        "entry_brief": "一个角色若在此门前通过DC 10的感知（察觉）检定成功聆听，会听到几个粗哑的声音用地精语发出侮辱性命令。示例包括\"舔地板！\"和\"像狗一样打滚！\"这里的熊地精正在欺凌他们的地精奴隶。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1176,6 +1717,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_redbrand_10_common_room"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_redbrand_hideout",
+        "code": "10",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_redbrand_10_common_room"
+        },
+        "entry_brief": "该区域作为红标帮的总部和会议室使用。当没有正式事务需要讨论时，这里会兼作警卫们下岗时休息的公共休息室。 一个角色若成功通过DC 10感知（察觉）检定在门边聆听，会听到里面的受害者正在玩骰子游戏。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1203,6 +1766,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_redbrand_11_workshop"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_redbrand_hideout",
+        "code": "11",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_redbrand_11_workshop"
+        },
+        "entry_brief": "通过成功的DC 15感知（察觉）检定，可以听到这个房间的任一扇门外传来微弱的气泡声和滴水声。 朗读文本 这个房间看起来像是一个法师的工坊。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1232,6 +1817,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p2_redbrand_12_glasstaff"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p2_redbrand_hideout",
+        "code": "12",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p2_redbrand_12_glasstaff"
+        },
+        "entry_brief": "如果角色们通过区域 7 的秘密通道接近这个房间，他们可以突袭红标帮的首领——伊阿诺·\"玻璃杖\"·阿尔布雷克。否则，他的老鼠魔宠会警告他任何通过区域 11 过来的人，并在角色们到达前逃离。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1261,6 +1868,32 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_travel"
+      },
+      "node_role": "map",
+      "map": {
+        "scene_id": "p3_travel",
+        "grid_ft": 5,
+        "bounds_cells": null,
+        "entry_pois": [],
+        "environment": {},
+        "brief": "凡达林位于北地一个被称为\"三猪小径\"、\"三猪岔路\"或\"科尼峡口\"的地区。这片连绵起伏的丘陵与稀疏林地平原向南延伸至宝剑山脉，向北延伸至无冬森林。",
+        "exits": [
+          {
+            "to_area": "p2_redbrand_hideout",
+            "label": "前往三猪小径与大地图",
+            "direction": "two_way"
+          },
+          {
+            "to_area": "p3_thundertree",
+            "label": "前往雷树废墟：总述",
+            "direction": "two_way"
+          },
+          {
+            "to_area": "p3_cragmaw_castle",
+            "label": "前往克拉摩堡：总述",
+            "direction": "two_way"
+          }
+        ]
       }
     },
     {
@@ -1290,6 +1923,27 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_agatha"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_travel",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_agatha"
+        },
+        "entry_brief": "兔莓镇多年前被野蛮人洗劫，如今只剩废墟。三猪小径径直穿过这座废弃小镇，为寻找报丧妖阿加莎的巢穴提供了容易辨识的地标。从科尼伯里废墟出发，一条古老小径向西北延伸至无冬森林。阿加莎的巢穴位于镇外数英里处。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1317,6 +1971,27 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_old_owl_well"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_travel",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_old_owl_well"
+        },
+        "entry_brief": "由早已消失的帝国于数千年前建造，是一座受难者的瞭望塔，如今仅存几堵摇摇欲坠的墙壁和一座破碎的塔楼残基。在塔楼的庭院中有一口古井，至今仍能提供干净清新的饮水。古枭井位于三猪小径以南狂野崎岖的丘陵地带。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1341,6 +2016,24 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_thundertree"
+      },
+      "node_role": "map",
+      "map": {
+        "scene_id": "p3_thundertree",
+        "grid_ft": 5,
+        "bounds_cells": null,
+        "entry_pois": [
+          "p3_thundertree_1_cottage"
+        ],
+        "environment": {},
+        "brief": "在无冬城河从无冬森林流出的地点附近，矗立着被遗弃的Thundertree村庄。这里曾经是森林边缘一个繁荣的团队，靠伐木工和捕兽者的工作而富裕。三十年前，北方的Hotenow山天灾爆发摧毁了Thundertree。",
+        "exits": [
+          {
+            "to_area": "p3_travel",
+            "label": "前往雷树废墟：总述",
+            "direction": "two_way"
+          }
+        ]
       }
     },
     {
@@ -1365,6 +2058,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_thundertree_1_cottage"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_thundertree",
+        "code": "1",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_thundertree_1_cottage"
+        },
+        "entry_brief": "这小屋已经破旧不堪。 朗读文本 一棵老树的幽影下蜷缩着一座没有屋顶的破败岩石小屋。这里杂草丛生。 两只枯枝怪躲藏在敞开的小屋门道两侧的杂草中。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1389,6 +2104,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_thundertree_2_withered_cottage"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_thundertree",
+        "code": "2",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_thundertree_2_withered_cottage"
+        },
+        "entry_brief": "风势和天气已在此完成了它们的工作，这些房屋或其昔日内容所剩无几。 朗读文本 这些受难者并排的小屋看起来可能是曾经富裕店主或小康农民的家园。如今只剩下倒塌的墙壁和成堆的瓦砾。几棵青年树木在废墟中生长起来。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1413,6 +2150,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_thundertree_3_brown_horse"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_thundertree",
+        "code": "3",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_thundertree_3_brown_horse"
+        },
+        "entry_brief": "这里曾是棕马酒馆，一家以优质麦芽酒闻名的酒馆。 朗读文本 这座大型建筑门旁的一块风化招牌上，显示着一匹驮马叼着麦芽酒壶的褪色图像。建筑已经倾斜破败，但比起旅路对面的遗迹要完整些。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1441,6 +2200,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_thundertree_4_druid_outpost"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_thundertree",
+        "code": "4",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_thundertree_4_druid_outpost"
+        },
+        "entry_brief": "当雷多斯造访雷鸣镇时，他就在此处扎营。 朗读文本 这间小型房屋看起来比附近破败的建筑状况要好。门用重型铁条加固，厚实的百叶窗保护着窗户。 雷多斯是一个瘦削、白胡子的人类，能用一词绝不用两词。尽管访客稀少，他仍相当好客。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1465,6 +2246,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_thundertree_5_withered_farmhouse"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_thundertree",
+        "code": "5",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_thundertree_5_withered_farmhouse"
+        },
+        "entry_brief": "这片农场南面毗邻一片长满茂密荆豆和荆棘丛的田地。 朗读文本 这片废墟看起来可能曾是一座农舍。现在它被茂密的灌木丛吞没了一半，树木从它受难的地基中生长出来。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1489,6 +2292,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_thundertree_6_shop_ruins"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_thundertree",
+        "code": "6",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_thundertree_6_shop_ruins"
+        },
+        "entry_brief": "这家昔日的杂货店尚未完全成为废墟，其瓦片屋顶的部分结构仍然完好。 朗读文本 在村庄中部附近的一个交叉路口，一条狭窄的小径蜿蜒通向北面陡峭的山坡。正南方是一座可能曾是商店或工坊的受难者建筑。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1514,6 +2339,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_thundertree_7_dragons_tower"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_thundertree",
+        "code": "7",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_thundertree_7_dragons_tower"
+        },
+        "entry_brief": "这座塔楼曾是一位人类法师的家园，他在三十年前与席卷雷霆树的灰烬僵尸战斗中丧生。 朗读文本 在丘陵顶部矗立着一座圆形塔楼，旁边附有一间小屋。两者都状态良好，尽管塔楼的一半屋顶已经消失。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1538,6 +2385,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_thundertree_8_smithy"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_thundertree",
+        "code": "8",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_thundertree_8_smithy"
+        },
+        "entry_brief": "这间铁匠铺早已被废弃。 朗读文本 一个宽阔的烟囱和腐烂的柴火堆杂乱地堆在这座倾斜建筑的外墙边，暗示着这里昔日曾是铁匠铺。 两只灰烬丧尸（见\"灰烬僵尸\"边栏）瘫倒在地板上。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1565,6 +2434,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_thundertree_9_herbalist"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_thundertree",
+        "code": "9",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_thundertree_9_herbalist"
+        },
+        "entry_brief": "这里曾是米尔娜·丹德拉尔家族的草药和炼金商店，她现在居住在凡达林（见\"区域 红标帮窝点 \"部分的区域 遭遇5 ）。 朗读文本 这个受难者店铺里堆满了倾斜的储藏室货架和破碎的家具。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1589,6 +2480,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_thundertree_10_town_square"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_thundertree",
+        "code": "10",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_thundertree_10_town_square"
+        },
+        "entry_brief": "蔓延的灌木丛尚未吞没这个方格。 朗读文本 在小镇的东侧，小巷延伸形成一个小型广场。几座破败的建筑物环绕在广场南侧，而北侧一座较大的完好建筑看起来像是兵营。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1613,6 +2526,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_thundertree_11_old_garrison"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_thundertree",
+        "code": "11",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_thundertree_11_old_garrison"
+        },
+        "entry_brief": "对于桑达树的居民来说，生活在如此靠近无冬森林的地方需要时刻保持警惕。 朗读文本 这座兵营似乎比小镇上大多数建筑物更能经受岁月的洗礼。它的屋顶设有简易的城垛，箭缝窗户证实了它是为在紧急事件发生时充当小型要塞而建造的。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1637,6 +2572,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_thundertree_12_weavers_cottage"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_thundertree",
+        "code": "12",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_thundertree_12_weavers_cottage"
+        },
+        "entry_brief": "这座堕落小屋是附近巢穴生物的诱饵。 朗读文本 成堆的残骸散落在这座废墟内部。角落里立着一台破碎的织布机。 六只枯枝怪潜伏在这片废墟南方的灌木丛中。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1661,6 +2618,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_thundertree_13_dragon_cultists"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_thundertree",
+        "code": "13",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_thundertree_13_dragon_cultists"
+        },
+        "entry_brief": "一个自称龙之邪教的团体试图与剑湾的强大龙类建立联盟。为此，四名邪教徒最近追踪一条绿龙来到桑达巴（见区域 7 ），正在等待合适的时机接近这条龙并促成联盟。他们一直在远处监视这条龙，试图评估它的性情和需求。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1687,6 +2666,27 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_wyvern_tor"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_travel",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_wyvern_tor"
+        },
+        "entry_brief": "这座突岩是宝剑山脉东北部崎岖丘陵中显著的地标，从二十英里外就能轻易看到。沿着三猪小径旅行的人们在兔莓镇附近行进时，会瞥见南方的飞龙突岩。这里曾是一大群危险飞龙的巢穴，但多年前一队勇敢的冒险者解决了这些怪物。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1714,6 +2714,29 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_cragmaw_castle"
+      },
+      "node_role": "map",
+      "map": {
+        "scene_id": "p3_cragmaw_castle",
+        "grid_ft": 5,
+        "bounds_cells": null,
+        "entry_pois": [
+          "p3_castle_1_entrance"
+        ],
+        "environment": {},
+        "brief": "克拉摩部落由劫掠团伙和竞争对手的哥布林据点组成，散布在三猪小径和无冬森林区域。然而，有一位首领被其他所有成员勉强承认为至高无上的：克拉摩堡的君王格罗尔。 克拉摩堡并非地精所建，也非该建筑原名。",
+        "exits": [
+          {
+            "to_area": "p3_travel",
+            "label": "前往克拉摩堡：总述",
+            "direction": "two_way"
+          },
+          {
+            "to_area": "p4_wave_echo",
+            "label": "前往回声洞：总述",
+            "direction": "one_way"
+          }
+        ]
       }
     },
     {
@@ -1743,6 +2766,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_castle_1_entrance"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_cragmaw_castle",
+        "code": "1",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_castle_1_entrance"
+        },
+        "entry_brief": "区域区域 1 和区域区域 2 之间的主大门由青铜覆盖的木材制成，但它们已经腐蚀倒塌。 朗读文本 这座城堡由七座不同大小和高度的摇摇欲坠的塔楼组成，但上层建筑都处于不同程度的坍塌状态。一段短台阶通向主入口前的一个露台。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1769,6 +2814,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_castle_2_trap_hall"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_cragmaw_castle",
+        "code": "2",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_castle_2_trap_hall"
+        },
+        "entry_brief": "这座宽阔的大厅曾是城堡的门厅，如今成为了危险的战场。 朗读文本 北面和南面的门紧闭着，一堆摇摇欲坠的瓦砾部分遮挡了南面的走廊。东面，一条宽阔的走廊尽头有两扇门分别通向南方和东方。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1795,6 +2862,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_castle_3_archers_post"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_cragmaw_castle",
+        "code": "3",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_castle_3_archers_post"
+        },
+        "entry_brief": "克拉摩堡的主要防御是其秘密位置和看似已被废弃的外貌。此外，国王短刃会布置哨兵驱赶过于接近的入侵者。 朗读文本 这个小型房间散落着碎片。门对面的箭缝提供了对城堡大门前露台的绝佳火焰射界。 两个地精分别占据这两个房间。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1820,6 +2909,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_castle_4_barracks_ruins"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_cragmaw_castle",
+        "code": "4",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_castle_4_barracks_ruins"
+        },
+        "entry_brief": "峭壁地精们充分利用了城堡中的每一寸可用空间。 朗读文本 城堡的西南塔楼几乎只剩下一堆瓦砾。几张破旧的铺盖卷散落在剩余的地面空间上，一条狭窄曲折的通道向东穿过废墟。 三只地精在此驻扎。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1847,6 +2958,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_castle_5_storeroom"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_cragmaw_castle",
+        "code": "5",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_castle_5_storeroom"
+        },
+        "entry_brief": "沿大公路和三猪小径行进的商队遭裂颅部落袭击，为城堡提供了补给物资。 朗读文本 这个储藏区域堆满了陈旧的腌肉桶和腐烂的谷物袋。在补给品中，你看到一件血迹斑斑的链甲、一把重弩和一柄未入鞘的长剑，剑柄上刻着无冬城的徽章。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1874,6 +3007,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_castle_6_bugbear_barracks"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_cragmaw_castle",
+        "code": "6",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_castle_6_bugbear_barracks"
+        },
+        "entry_brief": "峭壁行者是一个混合类地精部落，少数熊地精统治着大量悲惨的地精和少数大地精。大地精们计划有朝一日除掉熊地精并接管部落，但目前熊地精的威胁仍然太强。 朗读文本 四个简陋的草垫和铺盖卷在这间营房的地板上排成一列。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1899,6 +3054,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_castle_7_banquet_hall"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_cragmaw_castle",
+        "code": "7",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_castle_7_banquet_hall"
+        },
+        "entry_brief": "城堡领主曾在此招待宾客，举办奢华宴会和舞会。如今这地点成了污秽的地精餐厅。 朗读文本 这个大型大厅的西部尽头是一堵瓦砾墙，但其余部分仍然完好无损。这里曾经一定是城堡的宴会厅，有着高达二十五英尺的挑高天花板。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1924,6 +3101,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_castle_8_dark_hall"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_cragmaw_castle",
+        "code": "8",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_castle_8_dark_hall"
+        },
+        "entry_brief": "即使在白昼，这个区域也没有外部光照。方框文本假设角色拥有黑暗视觉或光源。 朗读文本 这个高而狭窄的大厅看起来曾经可能是小教堂或神殿的一部分。天使般的雕像雕刻在房间的上部，俯视着下方的地板。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1950,6 +3149,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_castle_9_goblin_shrine"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_cragmaw_castle",
+        "code": "9",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_castle_9_goblin_shrine"
+        },
+        "entry_brief": "地精对人类的神明毫无兴趣，因此裂颅部落将此地重新献给了地精与大地精之神马格鲁比耶。 朗读文本 这个房间占据了城堡的北塔楼。一座岩石祭坛矗立在房间中央，上面覆盖着血迹斑斑的黑布。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1975,6 +3196,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_castle_10_back_door"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_cragmaw_castle",
+        "code": "10",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_castle_10_back_door"
+        },
+        "entry_brief": "城堡的这个配菜入口已上锁但无人看守。 朗读文本 在古堡南侧的配菜处，一条杂草丛生的路径通向一条爬入墙内的通行道。一扇大型铁门矗立于此，免受外界直接攻击。地面十英尺高的箭垛俯瞰着这条路径。 这扇铁门被锁上了。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -1999,6 +3242,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_castle_11_tower_ruins"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_cragmaw_castle",
+        "code": "11",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_castle_11_tower_ruins"
+        },
+        "entry_brief": "布满灰尘的帆布（在地图上标有\"C\"）隐藏了这个区域的北入口，与周围的石工和瓦砾融为一体。一个成功通过DC 15感知（察觉）检定的角色会发现一条通往隐藏入口的小径。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2026,6 +3291,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_castle_12_guard_barracks"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_cragmaw_castle",
+        "code": "12",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_castle_12_guard_barracks"
+        },
+        "entry_brief": "这里的生物从箭缝处守卫，所以任何在城堡东侧潜行的角色都可能被发现并遭到攻击。 朗读文本 一个装满煤炭的石制火盆在这个小型营房中央发光。四张草垫沿着东墙排列。南面的墙已经倒塌，但那个方向上一扇上了闩的木门仍然清晰可见。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2051,6 +3338,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_castle_13_owlbear_tower"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_cragmaw_castle",
+        "code": "13",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_castle_13_owlbear_tower"
+        },
+        "entry_brief": "这个房间的门被一根重型木闩牢牢锁住——这是一个微妙的警告，暗示着门后潜藏着危险。当木闩被抬起时，房间里的生物会苏醒并发出可怕的咆哮。 这里的箭垛被关闭，使房间陷入黑暗。方框文本假设角色拥有黑暗视觉或光源。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2080,6 +3389,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p3_castle_14_king_quarters"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p3_cragmaw_castle",
+        "code": "14",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p3_castle_14_king_quarters"
+        },
+        "entry_brief": "任何在门边聆听的角色都会听到两个声音在激烈讨论——一个响亮、咆哮的声音要求为某事支付报酬，以及一个柔软平滑的回应。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2107,6 +3438,18 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_wave_echo"
+      },
+      "node_role": "map",
+      "map": {
+        "scene_id": "p4_wave_echo",
+        "grid_ft": 5,
+        "bounds_cells": null,
+        "entry_pois": [
+          "p4_cave_1_entrance"
+        ],
+        "environment": {},
+        "brief": "这部分冒险是为至少4级的角色设计的，并假设每个角色已获得至少2,700点经验值。如果冒险者跳过了第三部分中过多的可选调查和遭遇，他们可能未达到4级，那么本节中的许多遭遇对他们来说可能会很困难。",
+        "exits": []
       }
     },
     {
@@ -2135,6 +3478,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_1_entrance"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "1",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_1_entrance"
+        },
+        "entry_brief": "无论角色们是跟随刚铎的地图还是从其他来源获得回声洞的指引，他们最初的接近路线会引导他们来到一个狭窄的隧道，其入口隐藏在剑山山麓中。 朗读文本 入口隧道通向一个由天然石柱支撑的大型洞窟，洞内有三根石笋。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2160,6 +3525,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_2_mine_tunnel"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "2",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_2_mine_tunnel"
+        },
+        "entry_brief": "这个通道迷宫是回声洞原始矿井遗址的一个古老区域。 朗读文本 该区域由众多交叉通道组成。此处天花板仅有六尺高，部分通道尽头是半挖掘的岩面。 这些死胡同通道是矿工们放弃并决定转移到其他地点的地方。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2185,6 +3572,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_3_old_entrance"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "3",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_3_old_entrance"
+        },
+        "entry_brief": "向南延伸的隧道曾是回声洞的原始入口，但在数个世纪前被摧毁矿山的灾难所掩埋。当兽人突袭矿山时，这里曾发生过一场激烈的战斗。死者仍躺在他们倒下的地方。 朗读文本 许多隧道在这个天然的三十尺高洞窟中交错。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2209,6 +3618,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_4_old_guardroom"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "4",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_4_old_guardroom"
+        },
+        "entry_brief": "这个警卫室曾经保护着附近矿井的入口，但在兽人进攻时，战斗初期就被强冲了。 朗读文本 部分坍塌的天花板散落的碎裂岩石长凳和成堆的瓦砾填满了这个房间。在受损的岩石床铺和倾倒的武器架之间，散落着几名矮人和兽人的骸骨。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2233,6 +3664,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_5_assayers_office"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "5",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_5_assayers_office"
+        },
+        "entry_brief": "矿山的试金师们曾在此工作，负责称重和评估矿石样本，并为矿工们的劳动支付报酬。 朗读文本 这个房间曾经是某种办公室或储藏室。一个大型岩石柜台将房间一分为二，上面摆放着三个布满灰尘的铁制平衡秤。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2259,6 +3712,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_6_south_barracks"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "6",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_6_south_barracks"
+        },
+        "entry_brief": "这里曾是矿工的营房，在回声洞中工作的熟练矿工们在此轮班休息。任何角色若在部分开启的门边倾听，并通过DC 10的感知（察觉）检定，就能听到微弱的嘎吱碎裂声。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2283,6 +3758,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_7_storeroom_ruins"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "7",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_7_storeroom_ruins"
+        },
+        "entry_brief": "尽管周围一片毁灭景象，这个储藏区域的北部却完好无损地保存了下来。 朗读文本 这个房间的东侧墙壁已经坍塌成一堆瓦砾。北面有一扇半开的门，通向一个大小适中的储藏室。布满灰尘的木桶整齐地靠墙摆放，全都因年代久远而开裂破损。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2308,6 +3805,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_8_fungi_cavern"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "8",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_8_fungi_cavern"
+        },
+        "entry_brief": "这个洞穴阻碍了内兹纳的探索。卓尔怀疑矿井的魔法工坊就在附近，但他不愿冒险对付这里的怪物。 朗读文本 怪异的真菌在这座洞窟的地面上形成了密集的覆盖层。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2333,6 +3852,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_9_great_cavern"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "9",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_9_great_cavern"
+        },
+        "entry_brief": "这个洞穴曾是矿工的宴会厅、会议区域和蜜酒大厅。 朗读文本 陡峭的悬崖将这个大型洞窟分成三个部分——两端的高台和中间的低洼区域。雕刻的石制楼梯攀爬通向高台。中间区域摆放着两张大型桌子和一对旧火盆。东侧高台上有一张小桌子。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2358,6 +3899,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_10_dark_pool"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "10",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_10_dark_pool"
+        },
+        "entry_brief": "宝藏隐匿在这个充满水的洞穴中。 朗读文本 一个静止的水池占据了这洞窟的大部分空间。水色幽暗，难以窥见其中可能藏有何物。池岸由一层薄薄的奇异苍白贻贝的破碎贝壳组成，空气中弥漫着鱼腥味。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2387,6 +3950,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_11_north_barracks"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "11",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_11_north_barracks"
+        },
+        "entry_brief": "东边的门从房间内部被堵住了，需要成功通过DC 20的力量检定才能强行打开。一个角色若在任一扇门边倾听并通过DC 10的感知（察觉）检定，会听到粗哑的声音说着地精语，谈论他们有多饿。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2413,6 +3998,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_12_smelting_cavern"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "12",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_12_smelting_cavern"
+        },
+        "entry_brief": "如同区域 8 的真菌洞窟，这个房间构成了严重障碍，阻止内兹纳尔抵达他的目标——法术锻造厂（区域 15 ）。这名卓尔仍在制定计划以通过该区域的不死生物守卫。 朗读文本 一座高炉和一个由水车驱动的机械风箱占据了这个大型洞室。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2437,6 +4044,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_13_bright_cavern"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "13",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_13_bright_cavern"
+        },
+        "entry_brief": "此处的结构损坏和骸骨残骸，是数个世纪前兽人及其雇佣的法师突袭矿场时，在此地爆发的毁灭性法术战斗的证据。 朗读文本 这个大型洞窟顶部的闪亮矿物捕获光线并反射回来，创造出繁星点点的夜空印象。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2463,6 +4092,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_14_mages_quarters"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "14",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_14_mages_quarters"
+        },
+        "entry_brief": "通往这个区域的门已经开裂，铁铰链部分熔化。强行撬开或砸开这些门需要通过一个DC 15的力量检定。 朗读文本 灰尘、灰烬、被火焰熏黑的墙壁以及下垂天花板下的成堆碎片表明这个房间曾遭到破坏性爆炸的损坏。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2490,6 +4141,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_15_forge_of_spells"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "15",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_15_forge_of_spells"
+        },
+        "entry_brief": "这里是法师们与法德尔契约的矮人和侏儒结盟的地方，他们引导这些洞穴的魔法来为矮人武器和侏儒装置附魔。最北边的门被烧焦并裂开，其铁铰链部分熔化；强行打开它需要通过一个DC 15的力量检定。西边的双开门同样受损，但微微敞开。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2515,6 +4188,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_16_booming_cavern"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "16",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_16_booming_cavern"
+        },
+        "entry_brief": "赋予回声洞其名的澎湃波涛声源自这个充满水的洞窟。 朗读文本 一条狭窄的岩架俯瞰着一个容纳着汹涌翻腾水体的大型洞窟。矿井中回荡的有节奏轰鸣声在此处更为响亮。每隔一段时间，一股新的水流涌入这个洞室，猛烈撞击岩架下方的墙壁。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2540,6 +4235,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_17_old_riverbed"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "17",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_17_old_riverbed"
+        },
+        "entry_brief": "从区域 10 流向区域 18 的溪流曾流经这条低矮通道，最终注入区域 16 。 朗读文本 这条通道仅有四英尺高，被圆形的巨石和鹅卵石所阻碍。它可能曾是一条河床，尽管现在这里没有水流。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2568,6 +4285,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_18_collapsed_cavern"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "18",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_18_collapsed_cavern"
+        },
+        "entry_brief": "涅兹纳的仆人占据着这个洞窟，防范不死生物的入侵并仔细筛检瓦砾。黑蜘蛛的预言显示，一些有价值的宝藏隐藏在这个区域被摧毁时形成的裂谷底部。 朗读文本 一个宽阔的裂谷占据了这洞窟的东半部。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2597,6 +4336,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_19_temple"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "19",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_19_temple"
+        },
+        "entry_brief": "涅兹纳在探索矿井并寻找法术锻造间时将此房间作为他的总部。 朗读文本 六根开裂的大理石柱排列在这个大厅的墙壁旁，北端矗立着一座九英尺高的矮人雕像，坐在王座上，一把巨大的岩石战锤横放在他的膝上。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -2624,6 +4385,28 @@
       "source": "scenario_pack",
       "body_ref": {
         "module_id": "p4_cave_20_priests_quarters"
+      },
+      "node_role": "poi",
+      "poi": {
+        "area_id": "p4_wave_echo",
+        "code": "20",
+        "trigger": {
+          "mode": "manual",
+          "radius_cells": 0,
+          "once": false
+        },
+        "geometry": {
+          "provisional": true,
+          "note": "底图未标定：M8 回填没有可用的格坐标，暂按 manual 触发；待 M9 在底图上标定后改为 enter/adjacent 并补 rect_cells。"
+        },
+        "content_ref": {
+          "module_id": "p4_cave_20_priests_quarters"
+        },
+        "entry_brief": "这个房间的门被锁上了，需要使用盗贼工具并通过一个DC 15的敏捷检定才能打开。内兹纳（区域 19 ）携带着钥匙。",
+        "repeatable": true,
+        "discovery": {
+          "visibility": "public"
+        }
       }
     },
     {
@@ -3316,12 +5099,18 @@
       "source": "scenario_pack",
       "bidirectional": true,
       "transition": {
-        "from_area": "p1_trail",
+        "from_area": null,
         "to_area": "p1_hideout",
         "entry_poi": "p1_hideout_1_cave_mouth",
         "direction": "two_way",
         "label": "三猪小径（洞口）",
-        "text": "小径尽头，灌木后露出一个被溪流浸湿的洞口。"
+        "text": "小径尽头，灌木后露出一个被溪流浸湿的洞口。",
+        "from_poi": "p1_trail",
+        "handoff": {
+          "inject_area_brief": true,
+          "inject_entry_poi": true,
+          "time_cost_minutes": 0
+        }
       }
     },
     {
@@ -3520,25 +5309,55 @@
       "id": "edge_p1_hideout_8_cave__p2_phandalin__next",
       "from": "p1_hideout_8_cave",
       "to": "p2_phandalin",
-      "type": "next",
+      "type": "portal",
       "hard": true,
       "condition": null,
       "label": "",
       "visibility": "public",
       "evidence": null,
-      "source": "scenario_pack"
+      "source": "scenario_pack",
+      "bidirectional": false,
+      "transition": {
+        "from_area": "p1_hideout",
+        "to_area": "p2_phandalin",
+        "from_poi": "p1_hideout_8_cave",
+        "entry_poi": null,
+        "direction": "one_way",
+        "label": "前往凡达林：总述",
+        "text": "前往凡达林：总述",
+        "handoff": {
+          "inject_area_brief": true,
+          "inject_entry_poi": true,
+          "time_cost_minutes": 0
+        }
+      }
     },
     {
       "id": "edge_p2_phandalin__p2_redbrand_hideout__next",
       "from": "p2_phandalin",
       "to": "p2_redbrand_hideout",
-      "type": "next",
+      "type": "portal",
       "hard": true,
       "condition": null,
       "label": "",
       "visibility": "public",
       "evidence": null,
-      "source": "scenario_pack"
+      "source": "scenario_pack",
+      "bidirectional": true,
+      "transition": {
+        "from_area": "p2_phandalin",
+        "to_area": "p2_redbrand_hideout",
+        "from_poi": null,
+        "entry_poi": "p2_redbrand_1_cellar",
+        "direction": "two_way",
+        "label": "前往红标帮窝点：总述",
+        "text": "前往红标帮窝点：总述",
+        "handoff": {
+          "inject_area_brief": true,
+          "inject_entry_poi": true,
+          "time_cost_minutes": 0
+        }
+      }
     },
     {
       "id": "edge_p2_redbrand_hideout__p2_phandalin__adjacent",
@@ -3556,13 +5375,28 @@
       "id": "edge_p2_redbrand_hideout__p3_travel__next",
       "from": "p2_redbrand_hideout",
       "to": "p3_travel",
-      "type": "next",
+      "type": "portal",
       "hard": true,
       "condition": null,
       "label": "",
       "visibility": "public",
       "evidence": null,
-      "source": "scenario_pack"
+      "source": "scenario_pack",
+      "bidirectional": true,
+      "transition": {
+        "from_area": "p2_redbrand_hideout",
+        "to_area": "p3_travel",
+        "from_poi": null,
+        "entry_poi": null,
+        "direction": "two_way",
+        "label": "前往三猪小径与大地图",
+        "text": "前往三猪小径与大地图",
+        "handoff": {
+          "inject_area_brief": true,
+          "inject_entry_poi": true,
+          "time_cost_minutes": 0
+        }
+      }
     },
     {
       "id": "edge_p3_travel__p2_redbrand_hideout__adjacent",
@@ -4120,13 +5954,28 @@
       "id": "edge_p3_travel__p3_agatha__next",
       "from": "p3_travel",
       "to": "p3_agatha",
-      "type": "next",
+      "type": "portal",
       "hard": true,
       "condition": null,
       "label": "",
       "visibility": "public",
       "evidence": null,
-      "source": "scenario_pack"
+      "source": "scenario_pack",
+      "bidirectional": true,
+      "transition": {
+        "from_area": "p3_travel",
+        "to_area": "p3_travel",
+        "from_poi": null,
+        "entry_poi": "p3_agatha",
+        "direction": "two_way",
+        "label": "前往兔莓与阿加莎的巢穴",
+        "text": "前往兔莓与阿加莎的巢穴",
+        "handoff": {
+          "inject_area_brief": true,
+          "inject_entry_poi": true,
+          "time_cost_minutes": 0
+        }
+      }
     },
     {
       "id": "edge_p3_agatha__p3_travel__adjacent",
@@ -4144,13 +5993,28 @@
       "id": "edge_p3_travel__p3_old_owl_well__next",
       "from": "p3_travel",
       "to": "p3_old_owl_well",
-      "type": "next",
+      "type": "portal",
       "hard": true,
       "condition": null,
       "label": "",
       "visibility": "public",
       "evidence": null,
-      "source": "scenario_pack"
+      "source": "scenario_pack",
+      "bidirectional": true,
+      "transition": {
+        "from_area": "p3_travel",
+        "to_area": "p3_travel",
+        "from_poi": null,
+        "entry_poi": "p3_old_owl_well",
+        "direction": "two_way",
+        "label": "前往古枭井",
+        "text": "前往古枭井",
+        "handoff": {
+          "inject_area_brief": true,
+          "inject_entry_poi": true,
+          "time_cost_minutes": 0
+        }
+      }
     },
     {
       "id": "edge_p3_old_owl_well__p3_travel__adjacent",
@@ -4168,13 +6032,28 @@
       "id": "edge_p3_travel__p3_thundertree__next",
       "from": "p3_travel",
       "to": "p3_thundertree",
-      "type": "next",
+      "type": "portal",
       "hard": true,
       "condition": null,
       "label": "",
       "visibility": "public",
       "evidence": null,
-      "source": "scenario_pack"
+      "source": "scenario_pack",
+      "bidirectional": true,
+      "transition": {
+        "from_area": "p3_travel",
+        "to_area": "p3_thundertree",
+        "from_poi": null,
+        "entry_poi": "p3_thundertree_1_cottage",
+        "direction": "two_way",
+        "label": "前往雷树废墟：总述",
+        "text": "前往雷树废墟：总述",
+        "handoff": {
+          "inject_area_brief": true,
+          "inject_entry_poi": true,
+          "time_cost_minutes": 0
+        }
+      }
     },
     {
       "id": "edge_p3_thundertree__p3_travel__adjacent",
@@ -4492,13 +6371,28 @@
       "id": "edge_p3_travel__p3_wyvern_tor__next",
       "from": "p3_travel",
       "to": "p3_wyvern_tor",
-      "type": "next",
+      "type": "portal",
       "hard": true,
       "condition": null,
       "label": "",
       "visibility": "public",
       "evidence": null,
-      "source": "scenario_pack"
+      "source": "scenario_pack",
+      "bidirectional": true,
+      "transition": {
+        "from_area": "p3_travel",
+        "to_area": "p3_travel",
+        "from_poi": null,
+        "entry_poi": "p3_wyvern_tor",
+        "direction": "two_way",
+        "label": "前往飞龙突岩",
+        "text": "前往飞龙突岩",
+        "handoff": {
+          "inject_area_brief": true,
+          "inject_entry_poi": true,
+          "time_cost_minutes": 0
+        }
+      }
     },
     {
       "id": "edge_p3_wyvern_tor__p3_travel__adjacent",
@@ -4516,13 +6410,28 @@
       "id": "edge_p3_travel__p3_cragmaw_castle__next",
       "from": "p3_travel",
       "to": "p3_cragmaw_castle",
-      "type": "next",
+      "type": "portal",
       "hard": true,
       "condition": null,
       "label": "",
       "visibility": "public",
       "evidence": null,
-      "source": "scenario_pack"
+      "source": "scenario_pack",
+      "bidirectional": true,
+      "transition": {
+        "from_area": "p3_travel",
+        "to_area": "p3_cragmaw_castle",
+        "from_poi": null,
+        "entry_poi": "p3_castle_1_entrance",
+        "direction": "two_way",
+        "label": "前往克拉摩堡：总述",
+        "text": "前往克拉摩堡：总述",
+        "handoff": {
+          "inject_area_brief": true,
+          "inject_entry_poi": true,
+          "time_cost_minutes": 0
+        }
+      }
     },
     {
       "id": "edge_p3_cragmaw_castle__p3_travel__adjacent",
@@ -4864,13 +6773,28 @@
       "id": "edge_p3_castle_14_king_quarters__p4_wave_echo__next",
       "from": "p3_castle_14_king_quarters",
       "to": "p4_wave_echo",
-      "type": "next",
+      "type": "portal",
       "hard": true,
       "condition": null,
       "label": "",
       "visibility": "public",
       "evidence": null,
-      "source": "scenario_pack"
+      "source": "scenario_pack",
+      "bidirectional": false,
+      "transition": {
+        "from_area": "p3_cragmaw_castle",
+        "to_area": "p4_wave_echo",
+        "from_poi": "p3_castle_14_king_quarters",
+        "entry_poi": "p4_cave_1_entrance",
+        "direction": "one_way",
+        "label": "前往回声洞：总述",
+        "text": "前往回声洞：总述",
+        "handoff": {
+          "inject_area_brief": true,
+          "inject_entry_poi": true,
+          "time_cost_minutes": 0
+        }
+      }
     },
     {
       "id": "edge_p4_wave_echo__p4_cave_1_entrance__next",

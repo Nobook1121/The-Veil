@@ -5375,5 +5375,217 @@
       ],
       "triggers": []
     }
-  ]
+  ],
+  "map_config": {
+    "p1_hideout": {
+      "background_url": "/assets/scenarios/scenario-lmop-5e-001/assets/maps/cragmaw-hideout-player.webp",
+      "background_asset_id": "asset_map_cragmaw_hideout_player",
+      "width": 2400,
+      "height": 1673,
+      "cell_px": 0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "marker_types": [
+        {
+          "id": "poi",
+          "label": "兴趣点",
+          "color": "#4c8bf5",
+          "description": "DM 地图编号"
+        },
+        {
+          "id": "danger",
+          "label": "危险",
+          "color": "#e06666",
+          "description": ""
+        },
+        {
+          "id": "clue",
+          "label": "线索",
+          "color": "#f6b26b",
+          "description": ""
+        }
+      ],
+      "markers": []
+    },
+    "p2_phandalin": {
+      "background_url": "/assets/scenarios/scenario-lmop-5e-001/assets/maps/phandalin-player.webp",
+      "background_asset_id": "asset_map_phandalin_player",
+      "width": 2400,
+      "height": 1673,
+      "cell_px": 0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "marker_types": [
+        {
+          "id": "poi",
+          "label": "兴趣点",
+          "color": "#4c8bf5",
+          "description": "DM 地图编号"
+        },
+        {
+          "id": "danger",
+          "label": "危险",
+          "color": "#e06666",
+          "description": ""
+        },
+        {
+          "id": "clue",
+          "label": "线索",
+          "color": "#f6b26b",
+          "description": ""
+        }
+      ],
+      "markers": []
+    },
+    "p2_redbrand_hideout": {
+      "background_url": "/assets/scenarios/scenario-lmop-5e-001/assets/maps/redbrand-hideout-player.webp",
+      "background_asset_id": "asset_map_redbrand_hideout_player",
+      "width": 2400,
+      "height": 1673,
+      "cell_px": 0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "marker_types": [
+        {
+          "id": "poi",
+          "label": "兴趣点",
+          "color": "#4c8bf5",
+          "description": "DM 地图编号"
+        },
+        {
+          "id": "danger",
+          "label": "危险",
+          "color": "#e06666",
+          "description": ""
+        },
+        {
+          "id": "clue",
+          "label": "线索",
+          "color": "#f6b26b",
+          "description": ""
+        }
+      ],
+      "markers": []
+    },
+    "p3_travel": {
+      "background_url": "/assets/scenarios/scenario-lmop-5e-001/assets/maps/sword-coast-player.webp",
+      "background_asset_id": "asset_map_sword_coast_player",
+      "width": 2400,
+      "height": 3285,
+      "cell_px": 0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "marker_types": [
+        {
+          "id": "poi",
+          "label": "兴趣点",
+          "color": "#4c8bf5",
+          "description": "DM 地图编号"
+        },
+        {
+          "id": "danger",
+          "label": "危险",
+          "color": "#e06666",
+          "description": ""
+        },
+        {
+          "id": "clue",
+          "label": "线索",
+          "color": "#f6b26b",
+          "description": ""
+        }
+      ],
+      "markers": []
+    },
+    "p3_thundertree": {
+      "background_url": "/assets/scenarios/scenario-lmop-5e-001/assets/maps/thundertree-player.webp",
+      "background_asset_id": "asset_map_thundertree_player",
+      "width": 2400,
+      "height": 1673,
+      "cell_px": 0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "marker_types": [
+        {
+          "id": "poi",
+          "label": "兴趣点",
+          "color": "#4c8bf5",
+          "description": "DM 地图编号"
+        },
+        {
+          "id": "danger",
+          "label": "危险",
+          "color": "#e06666",
+          "description": ""
+        },
+        {
+          "id": "clue",
+          "label": "线索",
+          "color": "#f6b26b",
+          "description": ""
+        }
+      ],
+      "markers": []
+    },
+    "p3_cragmaw_castle": {
+      "background_url": "/assets/scenarios/scenario-lmop-5e-001/assets/maps/cragmaw-castle-player.webp",
+      "background_asset_id": "asset_map_cragmaw_castle_player",
+      "width": 2400,
+      "height": 1673,
+      "cell_px": 0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "marker_types": [
+        {
+          "id": "poi",
+          "label": "兴趣点",
+          "color": "#4c8bf5",
+          "description": "DM 地图编号"
+        },
+        {
+          "id": "danger",
+          "label": "危险",
+          "color": "#e06666",
+          "description": ""
+        },
+        {
+          "id": "clue",
+          "label": "线索",
+          "color": "#f6b26b",
+          "description": ""
+        }
+      ],
+      "markers": []
+    },
+    "p4_wave_echo": {
+      "background_url": "/assets/scenarios/scenario-lmop-5e-001/assets/maps/wave-echo-cave-player.webp",
+      "background_asset_id": "asset_map_wave_echo_cave_player",
+      "width": 2400,
+      "height": 3273,
+      "cell_px": 0,
+      "offset_x": 0,
+      "offset_y": 0,
+      "marker_types": [
+        {
+          "id": "poi",
+          "label": "兴趣点",
+          "color": "#4c8bf5",
+          "description": "DM 地图编号"
+        },
+        {
+          "id": "danger",
+          "label": "危险",
+          "color": "#e06666",
+          "description": ""
+        },
+        {
+          "id": "clue",
+          "label": "线索",
+          "color": "#f6b26b",
+          "description": ""
+        }
+      ],
+      "markers": []
+    }
+  }
 }

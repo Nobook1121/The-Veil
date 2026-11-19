@@ -262,6 +262,27 @@ def test_state_summary_lists_triggered_and_hides_undiscovered_nearby(tmp_path) -
     assert "2. 巢穴" not in extended
 
 
+def test_travel_to_site_closes_map_scene(tmp_path, monkeypatch) -> None:
+    context = _context(tmp_path, location="poi_entry")
+    runtime = NarrativeRuntime.load(context)
+    calls: list[tuple[str, dict]] = []
+
+    class FakeService:
+        def deactivate_for_site(self, room_dir, info):
+            calls.append((str(room_dir), dict(info)))
+            return {"ok": True, "closed": True}
+
+    monkeypatch.setattr(
+        "trpg_server.plugins.runtime.get_service",
+        lambda plugin, name: FakeService(),
+    )
+    result = runtime.travel_to("site_trail")
+
+    assert result["area_brief"] == {}
+    assert result["area_brief_text"] == ""
+    assert calls and calls[0][0] == str(context.room_dir)
+
+
 def test_get_area_tool_returns_code_on_missing_area(tmp_path) -> None:
     context = _context(tmp_path, location="site_trail")
     result = get_area({}, context)

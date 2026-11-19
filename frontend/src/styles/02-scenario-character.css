@@ -4724,3 +4724,26 @@ body.is-guest .guest-login-hint {
         height: 360px;
     }
 }
+
+/* 地图图谱（叙事层）编辑 */
+.scenario-map-graph-label { display:flex; flex-direction:column; gap:.25rem; margin-top:.5rem; font-size:.8125rem; color:var(--bs-secondary-color); }
+.scenario-map-graph-form { display:flex; flex-direction:column; gap:.35rem; margin-top:.35rem; }
+.scenario-map-graph-form label { display:flex; flex-direction:column; gap:.2rem; font-size:.8125rem; }
+.scenario-map-graph-grid { display:grid; grid-template-columns:1fr 1fr; gap:.4rem; }
+.scenario-map-graph-check { flex-direction:row !important; align-items:center; gap:.35rem !important; }
+.scenario-map-graph-form button { align-self:flex-start; margin-top:.25rem; }
+.scenario-map-graph-edge { border-top:1px solid var(--bs-border-color); padding-top:.5rem; margin-top:.5rem; display:flex; flex-direction:column; gap:.3rem; }
+.scenario-map-graph-edge-head { margin-top:.75rem; font-weight:600; font-size:.85rem; }
+.scenario-map-graph-edge strong { font-size:.78rem; color:var(--bs-secondary-color); font-weight:500; }
+.scenario-map-graph-status { font-size:.72rem; color:var(--bs-secondary-color); }
+.scenario-map-graph-validation-head { margin-top:.75rem; font-weight:600; font-size:.85rem; }
+.scenario-map-graph-issues { list-style:none; padding-left:0; margin:.35rem 0 0; font-size:.78rem; }
+.scenario-map-graph-issues li { margin-bottom:.2rem; }
+.scenario-map-graph-issues li.is-error { color:var(--bs-danger); }
+.scenario-map-graph-issues li.is-warn { color:var(--bs-warning-text-emphasis); }
+.scenario-map-graph-ok { font-size:.78rem; color:var(--bs-success); margin:.35rem 0 0; }
+.scenario-map-poi { position:absolute; z-index:3; border:2px solid #4c8bf5; background:rgba(76,139,245,.16); pointer-events:auto; cursor:pointer; }
+.scenario-map-poi.is-selected { border-color:#f6b26b; box-shadow:0 0 0 2px rgba(246,178,107,.5); }
+.scenario-map-poi-label { position:absolute; left:0; top:-1.1rem; white-space:nowrap; font-size:.68rem; padding:0 .25rem; background:rgba(0,0,0,.7); color:#fff; border-radius:.2rem; }
+.scenario-map-marker-poi { font-size:.7rem; color:var(--bs-secondary-color); grid-column:1 / -1; }
+.scenario-map-marker-poi.is-empty { opacity:.6; }

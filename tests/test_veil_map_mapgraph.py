@@ -10,6 +10,7 @@ import pytest
 from flask import Flask
 
 from trpg_server.agents.narrative.model import NarrativeBundle, NarrativeEdge, NarrativeNode
+from trpg_server.agents.narrative.runtime import NarrativeRuntime
 from trpg_server.agents.narrative.state_store import save_narrative_state
 from trpg_server.agents.narrative.store import save_bundle
 
@@ -188,6 +189,89 @@ def _context(room: Path, info: dict, *, user_id: str = "u1", agent_id: str = "kp
         agent_id=agent_id,
         room_info=lambda: info,
     )
+
+
+def test_scene_store_deactivate_preserves_tokens(tmp_path) -> None:
+    room, _info = _room(tmp_path, location="poi_entry")
+    store = veil_map.scene_store
+    store.save(
+        room,
+        {
+            "scene_id": "area_map",
+            "title": "矿坑",
+            "revision": 1,
+            "tokens": [{"id": "pc1", "kind": "pc", "x": 2, "y": 2}],
+            "walls": [],
+            "lights": [],
+            "fog": {},
+            "recent_requests": [],
+        },
+    )
+    assert store.activate(room, "area_map") is True
+    assert store.active_scene_id(room) == "area_map"
+
+    store.deactivate(room)
+
+    assert store.active_scene_id(room) == ""
+    state, source = store.load(room)
+    assert state == {}
+    assert source == "closed"
+    assert store.activate(room, "area_map") is True
+    state, source = store.load(room)
+    assert source == "scene"
+    assert state["tokens"][0]["id"] == "pc1"
+
+
+def test_multi_map_round_trip_closes_and_restores_tokens(tmp_path) -> None:
+    scenarios = Path(__file__).resolve().parent.parent / "data" / "scenarios"
+    room = tmp_path / "rooms" / "room1"
+    room.mkdir(parents=True)
+    info = {
+        "id": "room1",
+        "name": "LMoP 多图",
+        "room_code": "ROOM1",
+        "creator_id": "u1",
+        "ruleset_id": "dnd5e",
+        "scenario_id": "1795010280000",
+        "members": [
+            {
+                "user_id": "u1",
+                "username": "alice",
+                "room_role": "owner",
+                "status": "active",
+                "is_active": True,
+                "character_card": {"name": "Alice"},
+            }
+        ],
+    }
+    (room / "info.json").write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+    save_narrative_state(room, {"location": "p1_hideout_1_cave_mouth"})
+    app = _app(tmp_path, tmp_path / "rooms", scenarios)
+    veil_map._register_action_guard()
+    store = veil_map.scene_store
+
+    with app.app_context():
+        context = SimpleNamespace(
+            room_id="room1",
+            room_dir=room,
+            scenarios_dir=scenarios,
+            user_id="u1",
+            agent_id="kp",
+            room_info=lambda: info,
+        )
+        runtime = NarrativeRuntime.load(context)
+
+        runtime.travel_to("p1_trail")
+        assert store.active_scene_id(room) == ""
+        _state, source = store.load(room)
+        assert source == "closed"
+
+        result = runtime.travel_to("p1_hideout")
+        assert result["ok"] is True
+        assert store.active_scene_id(room) == "p1_hideout"
+        state, source = store.load(room)
+        assert source == "scene"
+        assert any(str(token.get("kind")) == "pc" for token in state.get("tokens") or [])
 
 
 def test_area_resolution_and_declared_map_use_area(tmp_path) -> None:

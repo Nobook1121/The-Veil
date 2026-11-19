@@ -4657,6 +4657,17 @@ class _MapService:
                 "error": "切换地图场景失败。",
             }
 
+    def deactivate_for_site(self, room_dir: Any, info: dict[str, Any]) -> dict[str, Any]:
+        """离开地图进入无地图地点：关闭当前地图场景，棋子保留在原场景。"""
+        try:
+            if not _ruleset_enabled(info or {}):
+                return {"ok": False, "code": "map.ruleset_disabled"}
+            scene_store.deactivate(room_dir)
+            return {"ok": True, "closed": True}
+        except Exception:  # noqa: BLE001
+            logger.warning("veil_map_deactivate_failed", exc_info=True)
+            return {"ok": False, "code": "map.scene_unavailable"}
+
     def current_position(self, room_dir: Any) -> dict[str, Any] | None:
         try:
             state = _load_map(room_dir)

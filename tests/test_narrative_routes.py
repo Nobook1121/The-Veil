@@ -956,6 +956,79 @@ def test_suggest_node_keywords_extracts_from_body(tmp_path):
     assert 0 < candidate["confidence"] <= 1
 
 
+def test_patch_node_persists_map_block(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _patch_node(
+        client,
+        node_id="room",
+        node_role="map",
+        map={
+            "scene_id": "room",
+            "grid_ft": 5,
+            "bounds_cells": 32,
+            "environment": {"lighting": "dim"},
+            "brief": "石砌大厅。",
+            "entry_pois": ["hall"],
+        },
+    )
+
+    assert response.status_code == 200
+    node = response.get_json()["data"]["node"]
+    assert node["node_role"] == "map"
+    assert node["map"]["scene_id"] == "room"
+    assert node["map"]["bounds_cells"] == 32
+
+
+def test_patch_node_persists_poi_and_transition(tmp_path):
+    bundle = _bundle()
+    bundle["nodes"][0]["parent"] = "room"
+    _write_scenario(tmp_path, bundle=bundle)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _patch_node(
+        client,
+        node_id="hall",
+        node_role="poi",
+        poi={
+            "area_id": "room",
+            "code": "1",
+            "trigger": {"mode": "manual", "radius_cells": 0, "once": False},
+            "geometry": {"provisional": True, "note": "底图未标定"},
+            "entry_brief": "大厅入口。",
+        },
+    )
+    assert response.status_code == 200
+    node = response.get_json()["data"]["node"]
+    assert node["poi"]["area_id"] == "room"
+    assert node["poi"]["geometry"]["provisional"] is True
+
+    revision = response.get_json()["data"]["revision"]
+    edge_response = client.patch(
+        "/api/scenarios/7/narrative/edges/edge_hall_room",
+        json={
+            "base_revision": revision,
+            "type": "portal",
+            "bidirectional": True,
+            "transition": {
+                "from_area": "room",
+                "to_area": "room",
+                "entry_poi": "hall",
+                "direction": "two_way",
+                "label": "进入大厅",
+            },
+        },
+        headers=CSRF,
+    )
+    assert edge_response.status_code == 200
+    edge = edge_response.get_json()["data"]["edge"]
+    assert edge["type"] == "portal"
+    assert edge["transition"]["entry_poi"] == "hall"
+
+
 def test_patch_node_persists_keywords_and_scope(tmp_path):
     _write_scenario(tmp_path, bundle=_bundle())
     client = _app(tmp_path).test_client()

@@ -384,6 +384,11 @@ class NarrativeRuntime:
                     )
                 scene_switched = bool(result.get("scene_id"))
                 token_placement = list(result.get("placements") or [])
+        else:
+            # 目标是 site：关闭当前地图场景，但不删除场景，棋子留在原图。
+            service = _map_service()
+            if service is not None and hasattr(service, "deactivate_for_site"):
+                service.deactivate_for_site(str(self.room_dir), self.room_info)
 
         from_area = self.area_id
         transition_text = _text(transition.get("text")) or edge.label
