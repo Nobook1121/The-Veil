@@ -80,6 +80,23 @@ def get_service(plugin_id: str, name: str) -> Any | None:
         return (_SERVICES.get(str(plugin_id)) or {}).get(str(name))
 
 
+def services_snapshot() -> dict[str, tuple[str, ...]]:
+    """全部已注册服务的只读快照（插件激活窗口前后对拍用）。"""
+    with _LOCK:
+        return {plugin_id: tuple(sorted(bucket)) for plugin_id, bucket in _SERVICES.items()}
+
+
+def unregister_service(plugin_id: str, name: str) -> None:
+    """只摘除一个具名服务（效果撤销回执用）。"""
+    with _LOCK:
+        bucket = _SERVICES.get(str(plugin_id))
+        if bucket is None:
+            return
+        bucket.pop(str(name), None)
+        if not bucket:
+            _SERVICES.pop(str(plugin_id), None)
+
+
 def clear_plugin_runtime() -> None:
     """卸载/重载时清空扩展项（已注册的 Flask 蓝图无法撤销，需重启）。"""
     with _LOCK:
@@ -100,12 +117,32 @@ def clear_plugin_runtime() -> None:
 
 
 def unregister_plugin(plugin_id: str) -> None:
-    """只移除某个插件注册的扩展项（单个插件回滚用）。"""
+    """只移除某个插件注册的扩展项（单个插件整体回滚用）。"""
     with _LOCK:
         _EXTRA_TOOLS.pop(str(plugin_id), None)
         _EXTRA_RULESETS.pop(str(plugin_id), None)
         _CONTENT_PACKS.pop(str(plugin_id), None)
         _SERVICES.pop(str(plugin_id), None)
+
+
+# 按能力粒度的撤销：阶段 2 的效果撤销链（ctx.dispose 的 disposer）需要
+# 「谁注册的谁撤销」，不能用整体 unregister_plugin 把别的能力一并带走。
+def unregister_agent_tools(plugin_id: str) -> None:
+    """只摘除某插件注册的 Agent 工具（效果撤销回执用）。"""
+    with _LOCK:
+        _EXTRA_TOOLS.pop(str(plugin_id), None)
+
+
+def unregister_ruleset_plugin(plugin_id: str) -> None:
+    """只摘除某插件注册的规则集（效果撤销回执用）。"""
+    with _LOCK:
+        _EXTRA_RULESETS.pop(str(plugin_id), None)
+
+
+def unregister_content_packs(plugin_id: str) -> None:
+    """只摘除某插件装载的内容数据包（效果撤销回执用）。"""
+    with _LOCK:
+        _CONTENT_PACKS.pop(str(plugin_id), None)
 
 
 def runtime_snapshot() -> dict[str, Any]:
@@ -129,5 +166,10 @@ __all__ = [
     "register_ruleset_plugin",
     "register_service",
     "runtime_snapshot",
+    "services_snapshot",
+    "unregister_agent_tools",
+    "unregister_content_packs",
     "unregister_plugin",
+    "unregister_ruleset_plugin",
+    "unregister_service",
 ]

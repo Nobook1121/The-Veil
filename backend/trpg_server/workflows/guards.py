@@ -32,6 +32,25 @@ def clear_action_guards() -> None:
     _GUARDS.clear()
 
 
+def registered_guards() -> tuple[ActionGuard, ...]:
+    """当前已注册的 guard 只读快照（插件激活窗口前后对拍用）。"""
+    return tuple(guard for guard, _critical in _GUARDS)
+
+
+def unregister_action_guard(guard: ActionGuard) -> bool:
+    """按身份移除一个 guard（插件运行期回滚用）；返回是否真的移除。
+
+    插件代码在 ``create_tools()`` 等工厂调用里直接调 ``register_action_guard``，
+    宿主无法逐调用包装；启停的撤销回执靠「激活前后对拍 + 定点摘除」实现，
+    因此这里必须支持按身份定点摘除，而不是只能全清。
+    """
+    for index, (existing, _critical) in enumerate(_GUARDS):
+        if existing is guard:
+            _GUARDS.pop(index)
+            return True
+    return False
+
+
 def validate_action_report(
     room_dir: Any,
     *,
@@ -118,6 +137,8 @@ __all__ = [
     "ActionGuard",
     "clear_action_guards",
     "register_action_guard",
+    "registered_guards",
+    "unregister_action_guard",
     "validate_action",
     "validate_action_report",
 ]

@@ -104,16 +104,13 @@
         },
         "rulesets": {
           "type": "object",
-          "required": [
-            "module"
-          ],
           "properties": {
             "module": {
               "type": "string",
               "minLength": 1,
               "maxLength": 200,
               "pattern": "^[A-Za-z0-9._\\-/]+$",
-              "description": "插件内的相对路径；不允许绝对路径、盘符或 .."
+              "description": "可选；未填时默认复用 code.entry（能力代码统一从 code.entry 导入）"
             },
             "ids": {
               "type": "array",
@@ -128,7 +125,6 @@
         "agent_tools": {
           "type": "object",
           "required": [
-            "module",
             "tools"
           ],
           "properties": {
@@ -137,7 +133,7 @@
               "minLength": 1,
               "maxLength": 200,
               "pattern": "^[A-Za-z0-9._\\-/]+$",
-              "description": "插件内的相对路径；不允许绝对路径、盘符或 .."
+              "description": "可选；未填时默认复用 code.entry（能力代码统一从 code.entry 导入）"
             },
             "tools": {
               "type": "array",
@@ -153,7 +149,6 @@
         "http_blueprints": {
           "type": "object",
           "required": [
-            "module",
             "blueprints"
           ],
           "properties": {
@@ -162,7 +157,7 @@
               "minLength": 1,
               "maxLength": 200,
               "pattern": "^[A-Za-z0-9._\\-/]+$",
-              "description": "插件内的相对路径；不允许绝对路径、盘符或 .."
+              "description": "可选；未填时默认复用 code.entry（能力代码统一从 code.entry 导入）"
             },
             "blueprints": {
               "type": "array",

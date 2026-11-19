@@ -25,6 +25,7 @@ from trpg_server.plugins.contracts import (
     REASON_DEPENDENCY_CYCLE,
     REASON_DEPENDENCY_MISSING,
     REASON_DEPENDENCY_VERSION,
+    REASON_MANIFEST_INVALID,
     REASON_RESOURCE_LIMIT,
     REASON_UNSAFE_PATH,
     STATE_DISABLED,
@@ -120,6 +121,58 @@ def test_manifest_schema_file_is_in_sync():
     assert json.loads(path.read_text(encoding="utf-8")) == plugin_manifest.manifest_json_schema()
 
 
+def test_capability_module_is_optional_and_defaults_to_code_entry():
+    """cordis-paradigm 阶段 5：能力段 module 可选，未填时默认复用 code.entry。"""
+    data = {
+        "schema_version": 1,
+        "id": "demo",
+        "name": "demo",
+        "version": "1.0.0",
+        "api_version": 1,
+        "code": {"entry": "entry.py"},
+        "capabilities": {
+            "rulesets": {"ids": ["my-rules"]},
+            "agent_tools": {"tools": ["demo.ping"]},
+            "http_blueprints": {"blueprints": ["bp"]},
+        },
+    }
+    manifest = plugin_manifest.parse_manifest(data, Path("demo"))
+    for name in ("rulesets", "agent_tools", "http_blueprints"):
+        assert manifest.capabilities[name]["module"] == "entry.py"
+
+    # 显式填写的 module 保持作者原值，不被 code.entry 覆盖。
+    data["capabilities"]["agent_tools"] = {"module": "custom.py", "tools": ["demo.ping"]}
+    manifest = plugin_manifest.parse_manifest(data, Path("demo"))
+    assert manifest.capabilities["agent_tools"]["module"] == "custom.py"
+    assert manifest.capabilities["rulesets"]["module"] == "entry.py"
+
+
+def test_capability_module_without_code_entry_still_rejected(tmp_path):
+    """module 降级为可选不等于 code.entry 降级：三个代码能力段仍必须给 code.entry。"""
+    base = {
+        "schema_version": 1,
+        "id": "demo",
+        "name": "demo",
+        "version": "1.0.0",
+        "api_version": 1,
+    }
+    # 旧形态（module 填了但没 code.entry）与新增形态（module 也没填）同样拒绝。
+    with_module = {**base, "capabilities": {"agent_tools": {"module": "entry.py", "tools": ["demo.ping"]}}}
+    without_module = {**base, "capabilities": {"agent_tools": {"tools": ["demo.ping"]}}}
+    for data in (with_module, without_module):
+        with pytest.raises(plugin_manifest.ManifestError) as excinfo:
+            plugin_manifest.parse_manifest(data, tmp_path / "demo")
+        assert "code.entry" in str(excinfo.value)
+
+
+def test_manifest_schema_makes_capability_module_optional():
+    """schema 视图同步：三个能力段的 required 不再包含 module。"""
+    caps = plugin_manifest.manifest_json_schema()["properties"]["capabilities"]["properties"]
+    assert "required" not in caps["rulesets"]
+    assert caps["agent_tools"]["required"] == ["tools"]
+    assert caps["http_blueprints"]["required"] == ["blueprints"]
+
+
 def test_version_range_satisfies():
     assert plugin_manifest.satisfies_version("1.0.4", "")
     assert plugin_manifest.satisfies_version("1.0.4", ">=1.0.0 <2.0.0")
@@ -141,6 +194,20 @@ def test_version_range_satisfies():
         (
             lambda data: data.update(
                 capabilities={"agent_tools": {"module": "entry.py", "tools": ["other.tool"]}}
+            ),
+            "命名空间",
+        ),
+        # 多级命名空间：mangle 后 _resolve_tool 只还原首个 _，必然解析错（阶段 5 强校验）。
+        (
+            lambda data: data.update(
+                capabilities={"agent_tools": {"module": "entry.py", "tools": ["demo.sub.tool"]}}
+            ),
+            "命名空间",
+        ),
+        # 空段：demo. 点后为空。
+        (
+            lambda data: data.update(
+                capabilities={"agent_tools": {"module": "entry.py", "tools": ["demo."]}}
             ),
             "命名空间",
         ),
@@ -269,8 +336,12 @@ def test_reserved_plugin_id_is_rejected(tmp_path):
         plugin_manifest.parse_manifest(payload, tmp_path / "props")
 
 
-def test_disabled_code_plugin_prunes_module_and_keeps_restart_flag(tmp_path):
-    """禁用代码插件后模块要从 sys.modules 移除，并保留「需重启」标记。"""
+def test_disabled_code_plugin_prunes_module_without_restart_flag(tmp_path):
+    """禁用代码插件后模块要从 sys.modules 移除；无蓝图则不再要求重启。
+
+    生命周期 v2（cordis-paradigm 阶段 2）：agent_tools 等内存注册类能力运行期
+    精确撤销，``restart_required`` 收窄为仅含 ``http_blueprints`` 的插件为 true。
+    """
     root = tmp_path / "plugins"
     _write_plugin(
         root,
@@ -292,16 +363,20 @@ def test_disabled_code_plugin_prunes_module_and_keeps_restart_flag(tmp_path):
     registry = _load(root)
     module_name = "trpg_plugin_toolbox_entry"
     assert module_name in sys.modules
+    assert default_tool_registry().get("toolbox.ping") is not None
 
     result = registry.disable("toolbox")
-    assert result["restart_required"] is True
-    assert result["plugin"]["pending_restart"] is True
+    # 无 http_blueprints：不需要重启，能力已即时撤销。
+    assert result["restart_required"] is False
+    assert result["plugin"]["pending_restart"] is False
     assert module_name not in sys.modules
-    assert registry.get("toolbox").pending_restart is True
+    assert registry.get("toolbox").pending_restart is False
+    assert registry.get("toolbox").state == STATE_DISABLED
+    assert default_tool_registry().get("toolbox.ping") is None
 
-    # 重新加载（例如刷新设置页触发的 rescan）后标记仍在条目上。
+    # 重新加载（例如刷新设置页触发的 rescan）后语义一致：不背重启标记。
     registry.load()
-    assert registry.get("toolbox").pending_restart is True
+    assert registry.get("toolbox").pending_restart is False
 
 
 def test_disabled_all_skips_enabled_plugins(tmp_path):
@@ -549,6 +624,67 @@ def test_agent_tool_hook_registers_plugin_tools(tmp_path):
     _enable(root, ["toolbox"])
     _load(root)
     assert default_tool_registry().get("toolbox.ping") is not None
+
+
+def test_agent_tools_activate_without_module_field(tmp_path):
+    """module 缺省的清单可正常激活：能力默认复用 code.entry，工具照常注册。"""
+    root = tmp_path / "plugins"
+    _write_plugin(
+        root,
+        "toolbox",
+        entry=(
+            "from trpg_server.agents.tools.base import AgentTool\n"
+            "def handler(args, ctx):\n"
+            "    return {'ok': True}\n"
+            "def create_tools():\n"
+            "    return [AgentTool(name='toolbox.ping', description='demo', parameters={}, handler=handler)]\n"
+        ),
+        manifest={"capabilities": {"agent_tools": {"tools": ["toolbox.ping"]}}},
+    )
+    _enable(root, ["toolbox"])
+    registry = _load(root)
+    record = registry.get("toolbox")
+    assert record.state == STATE_LOADED
+    assert "agent_tools" in record.loaded_capabilities
+    assert record.manifest.capabilities["agent_tools"]["module"] == "entry.py"
+    assert default_tool_registry().get("toolbox.ping") is not None
+
+
+def test_multi_level_tool_name_is_rejected_before_activation(tmp_path):
+    """多级工具命名必须在加载期（清单解析）拒绝，不允许带病激活。
+
+    ``_resolve_tool`` 只把模型侧名称的首个 ``_`` 还原成 ``.``，多级命名 mangle
+    后无法还原；清单解析是能拒绝的最早位置——插件代码一行都不该被执行。
+    """
+    root = tmp_path / "plugins"
+    sentinel = tmp_path / "imported.marker"
+    _write_plugin(
+        root,
+        "mangled",
+        entry=(
+            "from pathlib import Path\n"
+            f"Path({str(sentinel)!r}).write_text('x')\n"
+            "from trpg_server.agents.tools.base import AgentTool\n"
+            "def handler(args, ctx):\n"
+            "    return {'ok': True}\n"
+            "def create_tools():\n"
+            "    return [AgentTool(name='mangled.deep.tool', description='demo', parameters={}, handler=handler)]\n"
+        ),
+        manifest={
+            "capabilities": {
+                "agent_tools": {"module": "entry.py", "tools": ["mangled.deep.tool"]}
+            }
+        },
+    )
+    _enable(root, ["mangled"])
+    registry = _load(root)
+    record = registry.get("mangled")
+    assert record.state == STATE_FAILED
+    assert record.reason_code == REASON_MANIFEST_INVALID
+    assert "命名空间" in record.reason
+    # 清单在发现期即被判死：入口模块从未被 import，工具也从未注册。
+    assert not sentinel.exists()
+    assert default_tool_registry().get("mangled.deep.tool") is None
 
 
 def test_cli_no_plugins_flag():

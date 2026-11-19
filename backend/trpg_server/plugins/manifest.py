@@ -122,6 +122,38 @@ def _require_str_list(value: Any, label: str) -> list[str]:
     return result
 
 
+def _optional_module(value: Any, label: str) -> str:
+    """能力段 ``module``（cordis-paradigm 阶段 5 起可选）：未填时回填 ``code.entry``。
+
+    填写时仍须是插件内的 ``.py`` 相对路径；缺省与显式 ``null`` 都视为未填，
+    先返回空串，由 :func:`parse_manifest` 在 ``code.entry`` 校验通过后统一回填
+    （声明这三个能力段时 ``code.entry`` 本就是硬性要求，回填不会落空）。
+    """
+    if value is None:
+        return ""
+    module = _normalize_rel_path(value, label)
+    if not module.endswith(_MODULE_SUFFIXES):
+        raise ManifestError(f"capabilities.{label} 必须是 .py 文件")
+    return module
+
+
+def _validate_agent_tool_name(tool: str, plugin_id: str) -> None:
+    """Agent 工具名必须是 ``<插件id>.<单级名>``（cordis-paradigm 阶段 5 强校验）。
+
+    模型侧名称只做一层还原：``to_api_tool_name`` 把 ``.`` 换成 ``_`` 下发，
+    ``agents.runtime._resolve_tool`` 只把**首个** ``_`` 还原回 ``.``。多级命名
+    空间（如 ``my-plugin.sanity.roll``）mangle 后无法还原，运行期会解析成
+    错误的工具名。因此在清单解析期直接拒绝——这是能拒绝的最早位置：未启用
+    插件的坏清单同样会在发现阶段标 ``failed``，插件代码一行都不会被执行。
+    """
+    prefix = f"{plugin_id}."
+    if not tool.startswith(prefix):
+        raise ManifestError(f"Agent 工具名必须以插件 id 为命名空间：{tool}（应为 {prefix}<name>）")
+    tail = tool[len(prefix) :]
+    if not tail or "." in tail:
+        raise ManifestError(f"Agent 工具名必须是 {prefix}<单级名>，不允许多级命名空间或空段：{tool}")
+
+
 # ---------------------------------------------------------------- 清单解析
 
 
@@ -207,6 +239,14 @@ def parse_manifest(
         if needs_code:
             raise ManifestError("声明了需要代码的能力（rulesets/agent_tools/http_blueprints），必须同时给出 code.entry")
 
+    # capabilities.*.module 可选（cordis-paradigm 阶段 5 契约清理）：未填时默认
+    # 复用 code.entry。上面的 needs_code 检查已保证这三个能力段存在时
+    # code_entry 非空，回填不会落空；显式填写的 module 保持作者原值不覆盖。
+    for name in ("rulesets", "agent_tools", "http_blueprints"):
+        section = capabilities.get(name)
+        if section is not None and not section.get("module"):
+            section["module"] = code_entry
+
     return PluginManifest(
         id=plugin_id,
         name=_require_str(data, "name") or plugin_id,
@@ -257,28 +297,21 @@ def _parse_capabilities(raw: Mapping[str, Any], plugin_id: str) -> dict[str, Any
 
     if "rulesets" in raw:
         section = _require_mapping(raw["rulesets"], "capabilities.rulesets")
-        module = _normalize_rel_path(section.get("module"), "rulesets.module")
-        if not module.endswith(_MODULE_SUFFIXES):
-            raise ManifestError("capabilities.rulesets.module 必须是 .py 文件")
+        module = _optional_module(section.get("module"), "rulesets.module")
         ids = _optional_str_list(section.get("ids"), "capabilities.rulesets.ids")
         result["rulesets"] = {"module": module, "ids": ids}
 
     if "agent_tools" in raw:
         section = _require_mapping(raw["agent_tools"], "capabilities.agent_tools")
-        module = _normalize_rel_path(section.get("module"), "agent_tools.module")
-        if not module.endswith(_MODULE_SUFFIXES):
-            raise ManifestError("capabilities.agent_tools.module 必须是 .py 文件")
+        module = _optional_module(section.get("module"), "agent_tools.module")
         tools = _require_str_list(section.get("tools"), "capabilities.agent_tools.tools")
         for tool in tools:
-            if not tool.startswith(f"{plugin_id}."):
-                raise ManifestError(f"Agent 工具名必须以插件 id 为命名空间：{plugin_id}.<name>")
+            _validate_agent_tool_name(tool, plugin_id)
         result["agent_tools"] = {"module": module, "tools": tools}
 
     if "http_blueprints" in raw:
         section = _require_mapping(raw["http_blueprints"], "capabilities.http_blueprints")
-        module = _normalize_rel_path(section.get("module"), "http_blueprints.module")
-        if not module.endswith(_MODULE_SUFFIXES):
-            raise ManifestError("capabilities.http_blueprints.module 必须是 .py 文件")
+        module = _optional_module(section.get("module"), "http_blueprints.module")
         blueprints = _require_str_list(section.get("blueprints"), "capabilities.http_blueprints.blueprints")
         result["http_blueprints"] = {"module": module, "blueprints": blueprints}
 
@@ -368,6 +401,12 @@ def manifest_json_schema() -> dict[str, Any]:
         "pattern": r"^[A-Za-z0-9._\-/]+$",
         "description": "插件内的相对路径；不允许绝对路径、盘符或 ..",
     }
+    # 能力段 module（rulesets / agent_tools / http_blueprints）为可选：
+    # 未填时默认复用 code.entry（能力代码统一从 code.entry 导入）。
+    capability_module = {
+        **relative_path,
+        "description": "可选；未填时默认复用 code.entry（能力代码统一从 code.entry 导入）",
+    }
     plugin_id = {
         "type": "string",
         "pattern": PLUGIN_ID_RE.pattern,
@@ -429,18 +468,17 @@ def manifest_json_schema() -> dict[str, Any]:
                     },
                     "rulesets": {
                         "type": "object",
-                        "required": ["module"],
                         "properties": {
-                            "module": relative_path,
+                            "module": capability_module,
                             "ids": {"type": "array", "items": plugin_id},
                         },
                         "additionalProperties": False,
                     },
                     "agent_tools": {
                         "type": "object",
-                        "required": ["module", "tools"],
+                        "required": ["tools"],
                         "properties": {
-                            "module": relative_path,
+                            "module": capability_module,
                             "tools": {
                                 "type": "array",
                                 "minItems": 1,
@@ -451,9 +489,9 @@ def manifest_json_schema() -> dict[str, Any]:
                     },
                     "http_blueprints": {
                         "type": "object",
-                        "required": ["module", "blueprints"],
+                        "required": ["blueprints"],
                         "properties": {
-                            "module": relative_path,
+                            "module": capability_module,
                             "blueprints": {
                                 "type": "array",
                                 "minItems": 1,

@@ -152,3 +152,4 @@ tmp_doc_utf16.txt
 # Local-only artifacts (screenshots / share packages)
 /.screenshots/
 /.trae-html-share-packages/
+.alma-snapshots

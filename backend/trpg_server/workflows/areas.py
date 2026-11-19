@@ -83,6 +83,16 @@ def register_scene_id_provider(provider: Callable[[Any], str]) -> None:
     _SCENE_ID_PROVIDER = provider
 
 
+def current_position_provider() -> Callable[[Any, str], Mapping[str, Any] | None] | None:
+    """当前注册的位置查询（插件激活窗口前后对拍用）。"""
+    return _POSITION_PROVIDER
+
+
+def current_scene_id_provider() -> Callable[[Any], str] | None:
+    """当前注册的场景查询（插件激活窗口前后对拍用）。"""
+    return _SCENE_ID_PROVIDER
+
+
 def clear_scene_id_provider() -> None:
     global _SCENE_ID_PROVIDER
     _SCENE_ID_PROVIDER = None
@@ -706,6 +716,8 @@ __all__ = [
     "clear_trigger",
     "contains",
     "create_area",
+    "current_position_provider",
+    "current_scene_id_provider",
     "list_areas",
     "load",
     "lookup_position",

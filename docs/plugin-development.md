@@ -107,7 +107,7 @@ JSON Schema：[docs/schemas/plugin-manifest.schema.json](schemas/plugin-manifest
 
 所有路径字段都必须是**插件内相对路径**：不能是绝对路径、不能带盘符、不能含 `..`。
 
-`code.entry` 是插件**唯一会被 import 的模块**。`capabilities.*.module` 仍被 schema 要求填写，但当前实现里只要 `code.entry` 存在就复用它，能力段里的 `module` 不参与导入。
+`code.entry` 是插件**唯一会被 import 的模块**。能力段（`rulesets` / `agent_tools` / `http_blueprints`）的 `module` 为**可选**：未填时默认复用 `code.entry`；当前实现里能力代码也统一从 `code.entry` 导入，能力段里的 `module` 不参与导入，仅为兼容既有清单保留。
 
 ### 保留 id
 
@@ -171,10 +171,10 @@ templates/hello-note/
 
 入口模块（`code.entry`）提供 `create_tools() -> list[AgentTool]`（或 `TOOLS` 列表）。约束：
 
-- 工具名必须以 `<插件 id>.` 开头，且必须与 `tools` 声明完全一致；schema 还要求整体匹配 `^[a-z][a-z0-9-]*\.[a-z0-9_]+$`，加载时后端只强制前缀与声明，请自行遵守该正则；
-- 工具会合并进 `default_tool_registry()`；下发给模型时只把 `.` 换成 `_`，`-` 保留，所以 `my-plugin.roll_special` 的模型侧名称是 `my-plugin_roll_special`（不是 `my_plugin_roll_special`）；
+- 工具名必须以 `<插件 id>.` 开头，且必须与 `tools` 声明完全一致；清单解析期即强制**单级命名**：`<插件 id>.<name>` 恰好一个点、点后非空且不含点，多级（`my-plugin.sanity.roll`）、空段（`my-plugin.`）、id 不匹配（`other.roll`）都直接判 `manifest_invalid`；schema 的整体正则 `^[a-z][a-z0-9-]*\.[a-z0-9_]+$` 仍约束大小写与字符集，请自行遵守；
+- 工具会合并进 `default_tool_registry()`；下发给模型时只把 `.` 换成 `_`，`-` 保留，所以 `my-plugin.roll_special` 的模型侧名称是 `my-plugin_roll_special`（不是 `my_plugin_roll_special`）；模型调用回传时 `_resolve_tool` 只把**首个** `_` 还原成 `.`，多级命名因此无法正确还原——这是上一条在加载期强制单级命名的机器原因；
 - 激活时会与真实核心工具表比对，工具名与核心重名会被拒绝（`manifest_invalid`）；
-- 插件只用一次命名空间（`my-plugin.roll_special` 可以，`my-plugin.sanity.roll` 不行）。
+- 插件只用一次命名空间：`my-plugin.roll_special` 可以，`my-plugin.sanity.roll` 会在加载期直接拒绝（不再是仅文档约定）。
 
 ### 4.4 `http_blueprints`（代码）
 
@@ -254,6 +254,17 @@ templates/hello-note/
 > **当前限制**：Flask 的蓝图注册不可撤销，代码插件被禁用后其路由在本次进程内仍然可访问。`restart_required: true` 就是提示必须重启才能彻底回滚；对安全敏感的回滚请直接用 `--no-plugins` 重启。
 
 卸载：先 `disable`，再 `DELETE /api/plugins/<id>` 且 body 里 `confirm` 填插件 id。宿主只删除插件目录本身；符号链接插件只删链接。
+
+### 生命周期 v2（阶段 2 已实施：内存能力增量启停）
+
+「注册即副作用 + 撤销链」的运行时语义（参考 Cordis 范式，设计文档见 `docs/plans/cordis-paradigm-adoption-plan.md`）已对内存注册类能力落地，对插件作者的可见变化：
+
+- 代码插件的 `rulesets` / `agent_tools` / `content_packs` / `prop_templates` 等内存注册类能力，`enable` / `disable` 是**增量操作**：精确撤销/重挂、即时生效，不再全量重载（`POST /api/plugins/rescan` 仍是全量语义；模块重导与清单变更也请走 rescan）；
+- 插件代码在 `create_tools()` 等工厂调用里直接注册的行动 guard、位置/场景提供方与 `register_service`，会被宿主在同一撤销链上自动兜住——插件作者不写 disposer 也获得可卸载性；
+- 依赖提供方被禁用时，消费方**运行期连带回滚**并进入等待态，等待不静默：`GET /api/plugins` 每条启用中插件带 `fiber_state`（`active` / `failed` / `waiting`），等待中的插件在 `fiber_waiting_for` 里点名在等谁；依赖恢复后重新 `enable` 提供方即可让整条链自动复活；
+- `http_blueprints` 挂进 Flask 后进程内不可逆（代理路由层评审前维持现状）：`disable` 仅对**含 `http_blueprints` 的插件**返回 `restart_required=true` 并标记 `pending_restart`，其余能力照常即时撤销。
+
+对插件作者无破坏性变更：manifest 契约与现有 HTTP 接口保持兼容；上一节的 v1 描述中「任何启停都触发全量重载」「凡代码插件禁用即要求重启」两点已被本节取代。
 
 ---
 

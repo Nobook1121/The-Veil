@@ -18,7 +18,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
+
+if TYPE_CHECKING:  # 仅类型标注用；契约模块运行期不依赖内核。
+    from .kernel import Fiber
 
 # 清单结构版本：字段发生不兼容变化时递增。
 PLUGIN_MANIFEST_VERSION = 1
@@ -210,13 +213,17 @@ class PluginRecord:
     pending_restart: bool = False
     # 发现位置：当前只会是 ``plugin_dir``；模板包进清单后另加值。
     source: str = PLUGIN_SOURCE_DIR
+    # 内核 fiber（cordis-paradigm-adoption-plan 阶段 2 挂进 PluginRecord）：
+    # 插件激活后的可观测生命周期（active / failed / waiting + waiting_for）。
+    # 不破坏任何既有字段；``to_dict`` 只在插件实际处于启用列表时透出。
+    fiber: "Fiber | None" = None
 
     @property
     def loaded(self) -> bool:
         return self.state == STATE_LOADED
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "id": self.id,
             "state": self.state,
             "enabled": self.enabled,
@@ -228,6 +235,15 @@ class PluginRecord:
             "pending_restart": self.pending_restart,
             "manifest": self.manifest.to_dict() if self.manifest else None,
         }
+        fiber = self.fiber
+        if self.enabled and fiber is not None:
+            # 阶段 2 的 fiber 状态透出：只给实际启用中的插件；WAITING 必须点名
+            # 在等谁（静默等待是插件体系的一号调试疑难，禁止）。
+            payload["fiber_state"] = str(fiber.state)
+            waiting_for = [str(item) for item in (getattr(fiber, "waiting_for", None) or ())]
+            if waiting_for:
+                payload["fiber_waiting_for"] = waiting_for
+        return payload
 
 
 __all__ = [
