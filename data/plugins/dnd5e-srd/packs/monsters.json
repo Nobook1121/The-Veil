@@ -30,6 +30,37 @@
     "source": "SRD 5.1"
   },
   {
+    "id": "bugbear",
+    "name": "Bugbear",
+    "size": "medium",
+    "type": "humanoid",
+    "subtype": "goblinoid",
+    "alignment": "chaotic evil",
+    "ac": [{ "value": 16, "note": "hide armor, shield" }],
+    "hp": { "average": 27, "formula": "5d8+5" },
+    "speed": { "walk": 30 },
+    "abilities": { "str": 15, "dex": 14, "con": 13, "int": 8, "wis": 11, "cha": 9 },
+    "saving_throws": {},
+    "skills": { "stealth": 6, "survival": 2 },
+    "senses": { "darkvision_ft": 60, "passive_perception": 10 },
+    "languages": ["Common", "Goblin"],
+    "cr": "1",
+    "xp": 200,
+    "traits": [
+      { "name": "Brute", "text": "A melee weapon deals one extra die of its damage when the bugbear hits with it (included in the attack)." },
+      { "name": "Surprise Attack", "text": "If the bugbear surprises a creature and hits it with an attack during the first round of combat, the target takes an extra 7 (2d6) damage from the attack." }
+    ],
+    "actions": [
+      { "name": "Morningstar", "type": "melee_weapon", "attack_bonus": 4, "reach_ft": 5, "damage": [{ "dice": "2d8+2", "type": "piercing" }], "text": "Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 11 (2d8 + 2) piercing damage." },
+      { "name": "Javelin", "type": "melee_or_ranged_weapon", "attack_bonus": 4, "reach_ft": 5, "range": { "normal_ft": 30, "long_ft": 120 }, "damage": [{ "dice": "2d6+2", "type": "piercing" }], "text": "Melee or Ranged Weapon Attack: +4 to hit, reach 5 ft. or range 30/120 ft., one target. Hit: 9 (2d6 + 2) piercing damage in melee or 5 (1d6 + 2) piercing damage at range." }
+    ],
+    "reactions": [],
+    "legendary_actions": [],
+    "spellcasting": null,
+    "locales": { "zh-CN": { "name": "熊地精" } },
+    "source": "SRD 5.1"
+  },
+  {
     "id": "wolf",
     "name": "Wolf",
     "size": "medium",

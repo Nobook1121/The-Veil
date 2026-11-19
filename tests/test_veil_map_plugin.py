@@ -746,6 +746,9 @@ def test_agent_tool_is_scoped_to_dnd5e(registered_plugin_tools, monkeypatch):
         "workflow_tool_names",
     ):
         monkeypatch.setattr(profiles, name, lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        profiles, "ruleset_kp_tool_policy", lambda *_args, **_kwargs: (frozenset(), ())
+    )
     assert "veil-map.move_token" in profiles.build_kp_tool_names("dnd5e")
     assert "veil-map.move_token" not in profiles.build_kp_tool_names("coc7")
 

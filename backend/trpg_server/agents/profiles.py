@@ -126,6 +126,31 @@ def workflow_tool_names(ruleset_id: str | None = None) -> list[str]:
     return [str(name) for name in getter() if str(name).strip()]
 
 
+def ruleset_kp_tool_policy(ruleset_id: str | None = None) -> tuple[frozenset[str], tuple[str, ...]]:
+    """规则集对 KP 工具清单的 allow/deny 声明；未声明时不做任何裁剪。
+
+    返回值 ``(deny, allow)``：``deny`` 从最终清单移除，``allow`` 补充到清单末尾。
+    核心只执行声明，不解释任何规则集语义，也不写死规则集 id。
+    """
+    plugin = _resolve_plugin(ruleset_id)
+    provider = getattr(plugin, "tools", None) if plugin is not None else None
+    getter = getattr(provider, "kp_tool_policy", None)
+    if not callable(getter):
+        return frozenset(), ()
+    policy = getter() or {}
+    deny = frozenset(
+        str(name).strip()
+        for name in (policy.get("deny") or ())
+        if str(name).strip()
+    )
+    allow = tuple(
+        str(name).strip()
+        for name in (policy.get("allow") or ())
+        if str(name).strip()
+    )
+    return deny, allow
+
+
 def plugin_tool_names(ruleset_id: str | None = None) -> list[str]:
     """插件注册的 Agent 工具；按工具声明的 ``rulesets`` 过滤。
 
@@ -155,7 +180,7 @@ def plugin_tool_names(ruleset_id: str | None = None) -> list[str]:
 
 
 def build_kp_tool_names(ruleset_id: str | None = None) -> list[str]:
-    """按规则集组装 KP 工具：核心工具 + 插件声明的规则专属工具。"""
+    """按规则集组装 KP 工具：核心工具 + 插件声明 + 规则的 allow/deny 裁剪。"""
     names = list(CORE_KP_TOOL_NAMES)
     index = names.index("room.remember_fact") + 1
     extra = [
@@ -172,6 +197,12 @@ def build_kp_tool_names(ruleset_id: str | None = None) -> list[str]:
         if name not in names
     ]
     names[index:index] = extra
+    deny, allow = ruleset_kp_tool_policy(ruleset_id)
+    if deny:
+        names = [name for name in names if name not in deny]
+    for name in allow:
+        if name not in names:
+            names.append(name)
     return names
 
 

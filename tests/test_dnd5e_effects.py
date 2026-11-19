@@ -224,6 +224,28 @@ def test_tool_gating_by_capability(plugins):
     assert "effect.apply" not in coc7_tools
 
 
+def test_kp_tool_policy_trims_tools_per_ruleset(plugins):
+    from trpg_server.agents.profiles import build_kp_tool_names
+
+    removed = {
+        "combat.shoot",
+        "combat.treat",
+        "character.set_attribute",
+        "character.set_skill",
+        "character.add_item",
+        "room.request_interlude",
+    }
+    dnd5e_tools = set(build_kp_tool_names("dnd5e"))
+    assert {"combat.heal", "combat.join"} <= dnd5e_tools
+    assert not (removed & dnd5e_tools)
+
+    # coc7 没有声明裁剪，工具清单保持原样。
+    coc7_tools = set(build_kp_tool_names("coc7"))
+    assert removed <= coc7_tools
+    assert "combat.heal" not in coc7_tools
+    assert "combat.join" not in coc7_tools
+
+
 # ---------------------------------------------------------------------------
 # 条件影响攻击
 # ---------------------------------------------------------------------------

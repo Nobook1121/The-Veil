@@ -131,3 +131,51 @@ def test_create_scenario_defaults_to_coc7_and_rejects_development_ruleset(tmp_pa
             {"ruleset_id": "coc7"},
         )
         assert updated["ruleset_id"] == "coc7"
+
+
+def _login(client) -> None:
+    with client.session_transaction() as sess:
+        sess.update(
+            user_id=1,
+            username="tester",
+            role="ADMIN",
+            session_token="token",
+            csrf_token="csrf",
+        )
+
+
+def test_scenario_import_accepts_explicit_ruleset(tmp_path: Path):
+    client = _make_app(tmp_path).test_client()
+    _login(client)
+
+    response = client.post(
+        "/api/scenarios/import",
+        json={"text": "# 场景\n洞穴深处传来低吼。", "title": "5e 剧本", "ruleset_id": "dnd5e"},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()["data"]["ruleset_id"] == "dnd5e"
+
+    # 未指定规则集时保持旧输出：不写 ruleset_id，由创建接口补默认值（coc7）。
+    default_response = client.post(
+        "/api/scenarios/import",
+        json={"text": "# 场景\n洞穴深处传来低吼。", "title": "默认规则剧本"},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert default_response.status_code == 200, default_response.get_json()
+    assert "ruleset_id" not in default_response.get_json()["data"]
+
+
+def test_scenario_import_rejects_unknown_ruleset(tmp_path: Path):
+    client = _make_app(tmp_path).test_client()
+    _login(client)
+
+    response = client.post(
+        "/api/scenarios/import",
+        json={"text": "# 场景\n洞穴深处传来低吼。", "ruleset_id": "not-a-ruleset"},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["error"] == "ruleset_unknown"
+    assert "not-a-ruleset" in body["message"]

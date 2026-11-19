@@ -89,13 +89,13 @@ def test_real_srd_pack_minimal_coverage_counts():
         "equipment": 37,
         "condition": 15,
         "spell": 11,
-        "monster": 6,
+        "monster": 7,
         "class": 2,
     }
     assert library.types("dnd5e") == tuple(expected)
     for type_name, count in expected.items():
         assert len(library.entries("dnd5e", type_name)) == count, type_name
-    assert sum(expected.values()) == 115
+    assert sum(expected.values()) == 116
 
 
 def test_real_srd_pack_shapes_are_ready_for_engine_consumption():
@@ -123,6 +123,14 @@ def test_real_srd_pack_shapes_are_ready_for_engine_consumption():
     assert goblin["abilities"]["dex"] == 14
     assert goblin["actions"][0]["attack_bonus"] == 4
     assert goblin["actions"][0]["damage"][0] == {"dice": "1d6+2", "type": "slashing"}
+
+    bugbear = library.get("dnd5e", "monster", "bugbear")
+    assert bugbear is not None
+    assert bugbear["ac"] == [{"value": 16, "note": "hide armor, shield"}]
+    assert bugbear["hp"] == {"average": 27, "formula": "5d8+5"}
+    assert bugbear["cr"] == "1" and bugbear["xp"] == 200
+    assert bugbear["actions"][0]["name"] == "Morningstar"
+    assert bugbear["actions"][0]["damage"][0] == {"dice": "2d8+2", "type": "piercing"}
 
     prone = library.get("dnd5e", "condition", "prone")
     assert prone["effects"]["stand_cost_half_movement"] is True

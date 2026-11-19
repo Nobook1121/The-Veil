@@ -9,6 +9,19 @@ from __future__ import annotations
 # 5e 的检定工具复用核心实现，但以独立工具名下发，避免 KP 被 COC7 的百分制口径误导。
 DND5E_TOOL_NAMES: tuple[str, ...] = ("dnd5e.roll_check", "dnd5e.start_encounter")
 
+# KP 工具裁剪：百分制/克苏鲁专用工具与 5e 下不应出现的直接改卡入口不下发；
+# combat.heal / combat.join 属于通用战斗工具，但对 5e 房间有实际用途，显式补回。
+# 注：核心的技能调整工具 id 是 ``character.set_skill``。
+DND5E_KP_TOOL_DENY: tuple[str, ...] = (
+    "combat.shoot",
+    "combat.treat",
+    "character.set_attribute",
+    "character.set_skill",
+    "character.add_item",
+    "room.request_interlude",
+)
+DND5E_KP_TOOL_ALLOW: tuple[str, ...] = ("combat.heal", "combat.join")
+
 # KP 主持口径：由核心拼在通用 KP 提示词之后。
 DND5E_KP_PROMPT = """
 ## 规则集主持口径：D&D 5e（SRD 5.1）
@@ -78,6 +91,10 @@ class Dnd5eTools:
 
     def tool_names(self) -> tuple[str, ...]:
         return DND5E_TOOL_NAMES
+
+    def kp_tool_policy(self) -> dict[str, tuple[str, ...]]:
+        """KP 工具 allow/deny；核心只执行声明，不写 5e 分支。"""
+        return {"deny": DND5E_KP_TOOL_DENY, "allow": DND5E_KP_TOOL_ALLOW}
 
     def prompt_fragments(self) -> list[str]:
         return list(PROMPT_FRAGMENTS)

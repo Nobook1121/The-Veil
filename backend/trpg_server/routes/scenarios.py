@@ -8,7 +8,7 @@ import requests
 from flask import Blueprint, current_app, request, session
 
 from trpg_server.json_store import read_json
-from trpg_server.ruleset import default_ruleset_id
+from trpg_server.ruleset import RulesetSelectionError, builtin_registry, default_ruleset_id
 from trpg_server import scenario_service
 from trpg_server.media_defaults import normalize_cover
 from trpg_server.logging_config import log_user_action, redact_sensitive, user_action_text
@@ -390,6 +390,17 @@ def import_script():
         if not (_can_use_permission("scenarios.create") or _can_use_permission("scenarios.edit")):
             return error_response("Permission denied", 403, "Permission denied")
         payload = request.get_json(silent=True) if request.is_json else None
+        # 显式指定导入目标规则集：非法/未知/不可用时直接失败，不静默回退默认规则集。
+        requested_ruleset = ""
+        if isinstance(payload, dict):
+            requested_ruleset = str(payload.get("ruleset_id") or payload.get("rulesetId") or "").strip()
+        if not requested_ruleset:
+            requested_ruleset = str(request.form.get("ruleset_id") or "").strip()
+        if requested_ruleset:
+            try:
+                requested_ruleset = builtin_registry().resolve(requested_ruleset).id
+            except RulesetSelectionError as exc:
+                return error_response(exc.message, 400, exc.reason_code)
         metadata = ({k: payload[k] for k in ("title", "description") if k in payload}
                     if isinstance(payload, dict) else {})
         if isinstance(payload, dict) and payload.get("text"):
@@ -406,6 +417,9 @@ def import_script():
                         "source_filename": uploaded.filename or ""}
         else:
             return error_response("Please provide script text or file", 400, "No script")
+        # 只有显式指定时才写入 ruleset_id；缺省输出与旧行为一致，由创建接口补默认值。
+        if requested_ruleset:
+            metadata["ruleset_id"] = requested_ruleset
         logger.info("scenario_import.start user=%s filename=%s chars=%d", session.get("user_id"), metadata.get("source_filename", "text"), len(text))
         logger.debug("scenario_import.source_preview=%s", text[:2000].replace("\n", "\\n"))
         # Record the deterministic boundaries supplied to the AI.  This makes
