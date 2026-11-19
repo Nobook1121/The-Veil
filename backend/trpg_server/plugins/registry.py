@@ -12,10 +12,11 @@
   （:class:`_SideEffectCapture`）补进同一条撤销链；
 - ``enable`` / ``disable`` 是增量操作：只重建目标插件 fiber 及其依赖子图，
   不重跑全量 ``load``；``rescan`` 仍走全量语义（管理员显式全刷新）；
-- 蓝图挂载进 Flask 后不可撤销（阶段三前的平台事实）：蓝图记录本身仍走
-  效果链（摘出宿主的挂载清单），真正不可逆的「已注册路由」用
-  ``pending_restart`` 表达；HTTP 契约的 ``restart_required`` 收窄为仅含
-  ``http_blueprints`` 的插件为 true。
+- 蓝图挂载走插件代理路由层（阶段 3 已接线）：``_activate`` 把
+  ``http_blueprints`` 经 :func:`route_proxy.mount` 入表（挂在插件自己的
+  效果链上），``ctx.dispose()`` 时 unmount——禁用后路由**立即** 404，
+  蓝图能力与其余内存注册类能力一样即时可逆；``restart_required`` 与
+  ``PluginRecord.pending_restart`` 字段保留但恒为 ``false``（API 兼容）。
 
 插件根目录默认 ``data/plugins``：
 
@@ -65,7 +66,6 @@ from .contracts import (
     REASON_MANIFEST_INVALID,
     REASON_MISSING,
     REASON_NOT_ENABLED,
-    REASON_RESTART,
     REASON_UNSAFE_PATH,
     STATE_DISABLED,
     STATE_FAILED,
@@ -78,6 +78,7 @@ from .contracts import (
 )
 from .kernel import FIBER_FAILED, FIBER_WAITING, Fiber, PluginContext
 from .manifest import load_manifest, satisfies_version
+from .route_proxy import route_proxy
 from .security import (
     assert_file_size,
     assert_plugin_resources,
@@ -294,12 +295,9 @@ class PluginRegistry:
         # 每插件一条效果链（阶段 2）：激活窗口内的一切注册带回执挂在这里，
         # ctx.dispose() 即该插件的全部回滚；键随激活建立、随回滚/全量重载消亡。
         self._contexts: dict[str, PluginContext] = {}
-        self._blueprints: list[tuple[str, Any]] = []
         self._app: Any = None
         self._lock = threading.RLock()
         self._loaded_at = ""
-        # 代码插件禁用后其蓝图仍存活到进程重启；记录在条目的 pending_restart 上。
-        self._pending_restart: set[str] = set()
 
     # -- 只读视图 ---------------------------------------------------------
     @property
@@ -343,7 +341,6 @@ class PluginRegistry:
             self._prune_modules(enabled_ids)
             self._records = {}
             self._order = []
-            self._blueprints = []
             runtime.clear_plugin_runtime()
             props_registry.reset_template_sources()
 
@@ -355,12 +352,6 @@ class PluginRegistry:
                 self._activate(self._records[plugin_id])
             # 依赖了失败插件的插件一并标记失败（在 _resolve_order 之后才失败的情况）
             self._mark_failed_dependents()
-            for plugin_id in self._pending_restart:
-                record = self._records.get(plugin_id)
-                if record is not None and not record.loaded:
-                    record.pending_restart = True
-                    record.reason_code = REASON_RESTART
-                    record.reason = "已禁用，但已注册的 HTTP 路由仍在当前进程中，需重启服务才能完全回滚"
 
             if self._records:
                 props_registry.rescan()
@@ -387,31 +378,20 @@ class PluginRegistry:
         return self.load(app)
 
     def attach_app(self, app: Any) -> None:
-        """记录宿主 app；之后 :meth:`enable` 触发的重载才可能补注册蓝图。"""
-        self._app = app
+        """记录宿主 app：蓝图 mount 时继承其 ``url_map`` 自定义转换器。
 
-    def register_blueprints(self, app: Any) -> list[str]:
-        """把已加载插件的蓝图注册进 Flask（同名蓝图只注册一次）。"""
-        registered: list[str] = []
-        for plugin_id, blueprint in self._blueprints:
-            name = str(getattr(blueprint, "name", "") or "")
-            if not name or name in app.blueprints:
-                continue
-            try:
-                app.register_blueprint(blueprint)
-                registered.append(name)
-            except Exception:  # noqa: BLE001 - 单个插件蓝图失败不影响其它
-                logger.warning(
-                    "plugin_blueprint_failed plugin=%s blueprint=%s", plugin_id, name, exc_info=True
-                )
-        return registered
+        阶段 3 接线后启停不再有「补挂蓝图」路径——插件路由表是
+        :data:`route_proxy` 的模块级单例，宿主 app 只注册总蓝图一次；
+        enable/disable 全部经 mount/unmount 增量生效。
+        """
+        self._app = app
 
     def enable(self, plugin_id: str) -> dict[str, Any]:
         """增量启用：只激活目标 + 因缺它而回滚/落失败的依赖方。
 
         全量重跑只留给 :meth:`load`（rescan）；模块重导、清单变更也走 rescan。
-        运行期启用的蓝图经 :meth:`register_blueprints` 补挂，因此响应的
-        ``restart_required`` 恒为 False（HTTP 契约不变）。
+        运行期启用的蓝图经 :func:`route_proxy.mount` 即时入表（挂在该插件
+        的效果链上），因此响应的 ``restart_required`` 恒为 False。
         """
         key = str(plugin_id or "").strip()
         record = self._records.get(key)
@@ -436,7 +416,6 @@ class PluginRegistry:
                     "enabled_ids": self._store.enabled_ids(),
                 }
             record.enabled = True
-            self._pending_restart.discard(key)
             record.pending_restart = False
             if record.loaded:
                 # 已在运行：幂等确认，不重导模块（文件变更请走 rescan）。
@@ -472,9 +451,8 @@ class PluginRegistry:
                     loaded_now.add(pid)
                     activated[pid] = tuple(target.loaded_capabilities)
             self._invalidate_global_caches(activated)
-            if self._app is not None:
-                # 运行期启用的插件可能带蓝图；核心蓝图已注册，插件只能补自己的命名空间。
-                self.register_blueprints(self._app)
+            # 蓝图挂载发生在 _activate 的效果链里（route_proxy.mount 即生效），
+            # 运行期启用没有也不需要任何补挂路径。
             record = self._records.get(key)
         return {
             "plugin": record.to_dict() if record else None,
@@ -485,9 +463,9 @@ class PluginRegistry:
     def disable(self, plugin_id: str) -> dict[str, Any]:
         """增量禁用：只回滚目标 + 连带依赖它的已加载插件（依赖方先撤）。
 
-        内存注册类能力精确撤销、即时生效；``restart_required`` 仅对含
-        ``http_blueprints``（进程内不可逆）的插件为 true（HTTP 契约不变，
-        语义收窄见 docs/plans/cordis-paradigm-adoption-plan.md 阶段 2）。
+        内存注册类能力与 ``http_blueprints`` 蓝图（经代理路由层摘表）都精确
+        撤销、即时生效；``restart_required`` 字段保留但恒为 False（API 兼容，
+        见 docs/plans/cordis-paradigm-adoption-plan.md 阶段 3 契约收口）。
         """
         key = str(plugin_id or "").strip()
         record = self._records.get(key)
@@ -507,6 +485,8 @@ class PluginRegistry:
                 was_loaded = target.loaded
                 if was_loaded:
                     touched[pid] = tuple(target.loaded_capabilities)
+                    # dispose 效果链（LIFO）：蓝图表 unmount、runtime 注册、
+                    # 插件直写全局槽位的差集全部在这条链上撤销。
                     self._deactivate(target, forget_module=(pid == key))
                 if pid == key:
                     target.state = STATE_DISABLED
@@ -514,10 +494,6 @@ class PluginRegistry:
                     target.reason = "未在 enabled.json 的启用列表中"
                     target.loaded_capabilities = ()
                     target.fiber = None
-                    if "http_blueprints" in touched.get(pid, ()):
-                        # 蓝图已挂进 Flask、进程内不可逆：显式标记等待重启。
-                        target.pending_restart = True
-                        self._pending_restart.add(pid)
                 elif was_loaded:
                     missing = [
                         dep
@@ -530,13 +506,12 @@ class PluginRegistry:
                         REASON_DEPENDENCY_MISSING,
                         "依赖已禁用，已运行期回滚：" + ", ".join(sorted(missing)),
                     )
-                    if "http_blueprints" in touched.get(pid, ()):
-                        target.pending_restart = True
-                        self._pending_restart.add(pid)
             self._invalidate_global_caches(touched)
         return {
             "plugin": record.to_dict(),
-            "restart_required": "http_blueprints" in touched.get(key, ()),
+            # 阶段 3 契约：蓝图经 route_proxy 摘表，禁用后路由立即 404，
+            # 不再有任何「需重启才能回滚」的能力；字段保留仅为 API 兼容。
+            "restart_required": False,
             "enabled_ids": self._store.enabled_ids(),
         }
 
@@ -562,7 +537,6 @@ class PluginRegistry:
             removed = remove_tree(directory)
         ids = [item for item in self._store.enabled_ids() if item != key]
         self._store.set_enabled(ids)
-        self._pending_restart.discard(key)
         self.load()
         return {"id": key, "removed": removed, "enabled_ids": ids}
 
@@ -856,16 +830,23 @@ class PluginRegistry:
     def _register_blueprint_entries(
         self, record: PluginRecord, blueprints: list[Any], ctx: PluginContext
     ) -> None:
-        """蓝图记录入册（挂进 Flask 的动作本身进程内不可逆，由 pending_restart 表达）。"""
-        entries = tuple((record.id, blueprint) for blueprint in blueprints)
+        """插件蓝图经代理路由层入表（阶段 3 接线，挂到插件自己的效果链上）。
+
+        ``route_proxy.mount`` 在一次性 scratch app 上走 Flask 原生注册路径
+        解析蓝图规则，入本插件的路由表——宿主 ``url_map`` 不进不退，摘表才
+        可逆。``ctx.dispose()`` 时 unmount，路由立即 404，与阶段 2 的撤销链
+        合流；蓝图本身非法（坏规则、重复 endpoint 等）在这里抛 ``ManifestError``，
+        只废该插件，不拖累兄弟。
+        """
+        plugin_id = record.id
+        app = self._app
 
         def _register() -> Callable[[], None]:
-            self._blueprints.extend(entries)
-
-            def _dispose() -> None:
-                self._blueprints = [item for item in self._blueprints if item not in entries]
-
-            return _dispose
+            try:
+                route_proxy.mount(app, blueprints, plugin_id)
+            except Exception as exc:  # noqa: BLE001 - 坏蓝图只废该插件
+                raise ManifestError(f"插件蓝图挂载失败：{exc}") from exc
+            return lambda: route_proxy.unmount(plugin_id)
 
         ctx.effect(_register)
 
@@ -979,10 +960,11 @@ class PluginRegistry:
     def _deactivate(self, record: PluginRecord, *, forget_module: bool) -> None:
         """运行期整体撤销：dispose 效果链 + ctx 覆盖不到的部分兜底。
 
-        蓝图记录、runtime 注册、插件直写全局槽位的差集都在 ctx 的撤销链上；
-        ctx 覆盖不到的只有模块缓存——``forget_module`` 为真时半坏/已禁用的
-        插件模块从 ``_modules`` 与 ``sys.modules`` 一起移除，下次重新导入。
-        等待依赖的插件（仍在启用列表里）保留模块缓存，恢复激活零重导。
+        蓝图表（route_proxy.unmount）、runtime 注册、插件直写全局槽位的差集
+        都在 ctx 的撤销链上；ctx 覆盖不到的只有模块缓存——``forget_module``
+        为真时半坏/已禁用的插件模块从 ``_modules`` 与 ``sys.modules`` 一起
+        移除，下次重新导入。等待依赖的插件（仍在启用列表里）保留模块缓存，
+        恢复激活零重导。
         """
         ctx = self._contexts.pop(record.id, None)
         if ctx is not None:
@@ -990,7 +972,6 @@ class PluginRegistry:
         else:
             # 没有效果链（异常/历史路径）：沿用旧式手工清理，保证幂等。
             props_registry.unregister_template_source(f"plugin:{record.id}")
-            self._blueprints = [item for item in self._blueprints if item[0] != record.id]
             runtime.unregister_plugin(record.id)
         if forget_module:
             for cache_key in [key for key in self._modules if key[0] == record.id]:
@@ -1217,6 +1198,12 @@ def set_plugin_registry(registry: PluginRegistry | None) -> None:
     global _REGISTRY
     with _REGISTRY_LOCK:
         _REGISTRY = registry
+        if registry is None:
+            # 撤下进程级注册表时一并摘空代理路由表：``route_proxy`` 是模块级
+            # 单例，测试反复构造/丢弃 registry 时若不摘表，前一个用例挂上的
+            # 插件路由会残留到下一个用例的宿主 app 上（生产单进程单注册表，
+            # 只有测试的 reset 路径会走到这里）。
+            route_proxy.unmount_all()
 
 
 def reset_plugin_registry() -> None:

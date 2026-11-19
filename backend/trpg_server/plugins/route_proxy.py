@@ -1,9 +1,16 @@
-"""HTTP 蓝图可逆化 · 路线 A 技术验证 spike（cordis-paradigm-adoption-plan.md §4 阶段 3）。
+"""HTTP 蓝图可逆化 · 插件代理路由层（cordis-paradigm-adoption-plan.md §4 阶段 3）。
 
-**本模块是 spike，未接线**：不改 ``app_factory.py``、不改
-``registry.register_blueprints`` 的现有行为、不进任何 app 启动路径
-（§7 决策记录：spike 通过并评审后才把 ``register_blueprints`` 切到本层）。
-生产接线形态（届时宿主只做两件事）::
+**已接线（阶段 3 正式接线完成）**：宿主只注册本模块的总蓝图
+:data:`bp` 一次，插件蓝图全部经 :meth:`PluginRouteProxy.mount` 进路由表——
+含 ``http_blueprints`` 的插件禁用后路由**立即** 404，``pending_restart`` /
+``restart_required`` 成为历史。接线点：
+
+- ``app_factory.create_app``：核心蓝图全部注册**之后**经
+  ``bootstrap.register_plugin_blueprints(app)`` 注册总蓝图（顺序硬约束，
+  见下方「接线顺序约束」）；
+- ``registry._register_blueprint_entries``：蓝图入册改为 mount 进本表，
+  挂在插件自己的效果链上——``ctx.dispose()`` 时 unmount，与阶段 2 的
+  撤销链合流；``enable`` mount 即生效，``disable`` / ``uninstall`` 摘表。
 
     app.register_blueprint(route_proxy.bp)              # 总蓝图，注册一次
     route_proxy.mount(app, plugin_bp, plugin_id)        # 每个插件入表
@@ -60,16 +67,19 @@ Flask 蓝图注册不可撤销是平台事实：规则进了宿主 ``url_map`` �
   可用。蓝图 ``static_folder`` 路由反而**可用**（``send_static_file`` 只依赖
   蓝图自身属性，随表代理）。现役插件未用模板。
 - 接线顺序约束：同一路径 pattern 上「先注册者赢」（Werkzeug state 的 rules
-  按注册顺序匹配）。**总蓝图必须注册在核心蓝图之后**——与今天
-  ``app_factory`` 里 ``register_blueprints(app)`` → ``register_plugin_blueprints(app)``
-  的顺序天然一致；反例见 tests 的顺序钉住用例（总蓝图先注册会吞掉
-  ``DELETE /api/plugins/<id>``）。
+  按注册顺序匹配）。**总蓝图必须注册在核心蓝图之后**——``app_factory`` 的
+  ``register_blueprints(app)`` → ``register_plugin_blueprints(app)`` 调用顺序
+  就是这个约束的保障（管理面 ``DELETE /api/plugins/<id>``、
+  ``POST /api/plugins/<id>/enable|disable``、``GET /api/plugins/<id>/assets/...``
+  等核心静态段路由因此永远优先）；反例见 tests 的顺序钉住用例
+  （``tests/test_plugin_route_wiring.py`` 在真实启动路径上钉住同一约束，
+  总蓝图先注册会吞掉 ``DELETE /api/plugins/<id>``）。
 - 超出 :data:`PROXY_METHODS` 的 exotic 方法（TRACE / CONNECT…）到不了插件表，
   外层 405 的 Allow 头列总蓝图方法集。现役插件未使用。
 - ``websocket=True`` 的规则不在代理面（插件 HTTP 契约本就是普通 WSGI 路由）。
 
-评审注记（阶段 3 spike 结论）
-------------------------------
+评审注记（阶段 3 spike 结论，已按接线评审清单逐条落地）
+------------------------------------------------------
 1. 可行性：路线 A 可**无损**承接现有插件形态——dnd5e ``http.py`` 与
    veil-map ``entry.py`` 的 ``Blueprint(url_prefix="/api/plugins/<id>")`` +
    ``@bp.route`` 用法零改动；匹配/分发语义与原生注册差分对拍一致（status /
@@ -77,13 +87,22 @@ Flask 蓝图注册不可撤销是平台事实：规则进了宿主 ``url_map`` �
 2. 兼容性风险（现役 3 插件）：无。不用 url_for / 钩子 / errorhandler / 模板 /
    ``request.blueprint``；veil-map 的 ``send_from_directory``、
    ``current_app.config``、``session`` 全部经真实请求上下文。第三方插件风险
-   集中在上面的「不支持面」，接线时写进插件开发文档即可。
-3. 接线时额外工作：总蓝图注册顺序（核心之后）；auth 短路——管理面路由
-   （``/api/plugins/<id>/enable|disable`` 等）是核心静态路由、不经过本层，
-   插件路由的鉴权维持「插件 view 自带」（dnd5e/veil-map 现状），总入口可另加
-   全局短路评审项；CSP / 安全头由宿主 after_request 照常覆盖代理响应；性能
-   ——每请求一次 dict 查表 + ``MapAdapter.bind`` 常数开销（规则已在 mount 时
-   编译并预热排序），远小于一次视图执行的量级。
+   集中在上面的「不支持面」，已写进插件开发文档的「当前限制」。
+3. 接线落地清单（逐条照办）：
+   - 总蓝图注册顺序（核心之后）：``app_factory`` 调用顺序即约束，
+     ``tests/test_plugin_route_wiring.py`` 双重钉住（url_map 注册顺序 +
+     管理面路由行为）；
+   - 插件蓝图不再直接 ``app.register_blueprint``：``registry`` 的
+     ``_register_blueprint_entries`` 改为 ``mount`` 入表、挂插件自己的
+     效果链，``enable`` mount 即生效、不再需要补挂路径；
+   - auth 短路维持「插件 view 自带」（dnd5e/veil-map 现状）；管理面路由是
+     核心静态路由、不经过本层；
+   - CSP / 安全头由宿主 after_request 照常覆盖代理响应；性能——每请求一次
+     dict 查表 + ``MapAdapter.bind`` 常数开销（规则已在 mount 时编译并预热
+     排序），远小于一次视图执行的量级；
+   - 契约收口：``restart_required`` 与 ``PluginRecord.pending_restart`` 字段
+     **保留但恒为 false**（API 兼容），``REASON_RESTART`` 不再产生；
+     ``docs/plugin-development.md`` 生命周期节同步改写。
 4. 路线 B 反证：未发现。路线 A 的全部缺口都有「插件需规避」或「接线补钩」的
    明确出路，且现役插件已天然规避；维持「路线 A 推进、路线 B 保底」结论。
 """
@@ -171,7 +190,9 @@ class PluginRouteProxy:
     def mount(self, app: Any, blueprint: Any, plugin_id: str) -> None:
         """把插件蓝图解析进路由表（幂等：同 id 重挂 = 摘旧表换新表）。
 
-        ``app`` 只用来继承 ``url_map.converters`` 里的自定义转换器；本方法
+        ``app`` 只用来继承 ``url_map.converters`` 里的自定义转换器，可为
+        ``None``（registry 独立于宿主 app 使用时，scratch app 用 Werkzeug
+        默认转换器，平台宿主未注册自定义转换器所以语义等同）；本方法
         **绝不**在宿主 app 上 ``register_blueprint``——插件路由对宿主
         ``url_map`` 不可见，摘除才可逆。``blueprint`` 可传单个 Blueprint 或
         其列表/元组：manifest ``http_blueprints.blueprints`` 声明多蓝图时一次

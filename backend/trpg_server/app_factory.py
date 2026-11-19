@@ -106,12 +106,16 @@ def create_app(config=None):
     app.extensions["socketio"] = socketio
     register_session_guard(app)
     # 插件体系：默认不启用任何第三方插件；加载失败只影响该插件本身。
-    # 必须在蓝图注册之前完成，插件声明的模板来源才能在首次扫描时生效。
+    # 必须在蓝图注册之前完成，插件声明的模板来源才能在首次扫描时生效；
+    # 含 http_blueprints 的插件在这里就经 route_proxy.mount 进路由表。
     from trpg_server.plugins.bootstrap import init_plugins, register_plugin_blueprints
 
     init_plugins(app)
     register_blueprints(app)
-    # 插件蓝图最后注册：与核心冲突的路径仍由核心优先匹配。
+    # 插件代理总蓝图最后注册（cordis-paradigm 阶段 3 接线）：同 pattern 同
+    # method 先注册者赢，核心管理面（DELETE /api/plugins/<id>、enable|disable
+    # 等）因此永远优先于 catch-all；插件蓝图本身不进宿主 url_map，启停即时
+    # 生效（mount/unmount 查表分发），不再有 pending_restart。
     register_plugin_blueprints(app)
     app.extensions["scenario_import_store"] = ImportJobStore(app.config["SCENARIO_IMPORTS_DIR"])
     app.extensions["scenario_import_store"].recover_interrupted()

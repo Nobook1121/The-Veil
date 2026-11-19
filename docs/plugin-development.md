@@ -239,30 +239,30 @@ templates/hello-note/
 | `dir` | 插件目录的绝对路径（仅管理员接口可见）。 |
 | `source` | 发现位置：`plugin_dir`（第三方目录）；`template_pack` 为预留值。 |
 | `capabilities` | 实际加载成功的能力名列表（`loaded` 时才有意义）。 |
-| `pending_restart` | 代码插件被禁用后为 `true`：蓝图仍存活到重启。 |
+| `pending_restart` | **恒为 `false`**（阶段 3 接线后蓝图路由可逆，字段仅为 API 兼容保留）。 |
 | `manifest` | 清单位图（`id` / `name` / `version` / `author` / `capabilities` / `has_code` 等），不含绝对路径。 |
 
-> `pending_restart` 记录在条目上并跨请求保留；`restart_required` 是**启用/禁用接口响应顶层**的一次性布尔值，两者不要混用。
+> `pending_restart` 记录在条目上（现恒为 `false`，见下节）；`restart_required` 是**启用/禁用接口响应顶层**的一次性布尔值（现同样恒为 `false`），两者不要混用。
 >
 > `system_plugins[]` 是只读的系统内置插件（`system=true`、`source=system`），字段结构相同，但不计入 `counts`，也不支持启用/禁用/卸载。
 
-启用/禁用的即时性：
+启用/禁用的即时性（阶段 2+3 全部落地后）：
 
 - **纯数据插件**（只有 `prop_templates` / `settings_sections` / `frontend_assets`）：立即生效，模板来源会重新扫描；
-- **代码插件**（`rulesets` / `agent_tools` / `http_blueprints`）：启用/禁用会立即更新状态与模板来源；入口模块按文件签名缓存，**禁用后已注册的 HTTP 路由仍在**，完整回滚请重启服务（接口返回 `restart_required`）。
+- **代码插件**（`rulesets` / `agent_tools` / `http_blueprints`）：全部能力——**含 HTTP 路由**——启用/禁用均即时生效。蓝图经宿主的插件代理路由层（`route_proxy`）分发：禁用即从路由表摘除、路径立即 404，启用即恢复；不再需要重启，`restart_required` 恒为 `false`。
 
-> **当前限制**：Flask 的蓝图注册不可撤销，代码插件被禁用后其路由在本次进程内仍然可访问。`restart_required: true` 就是提示必须重启才能彻底回滚；对安全敏感的回滚请直接用 `--no-plugins` 重启。
+> **阶段 3 前的历史限制（已废除）**：旧版本 Flask 蓝图注册不可撤销，代码插件被禁用后路由存活到进程重启，需要 `--no-plugins` 重启才能彻底回滚——代理路由层接入后此限制不复存在。插件作者需知悉代理层的边界面：蓝图内不要使用 `url_for`（反查报 `BuildError`）、蓝图级 `before_request` / `errorhandler`、`request.blueprint` 等上下文值（模块头 `route_proxy.py` 有完整清单）；现役插件均未使用这些面。
 
 卸载：先 `disable`，再 `DELETE /api/plugins/<id>` 且 body 里 `confirm` 填插件 id。宿主只删除插件目录本身；符号链接插件只删链接。
 
-### 生命周期 v2（阶段 2 已实施：内存能力增量启停）
+### 生命周期 v2（阶段 2+3 已实施：增量启停 + 蓝图路由可逆）
 
 「注册即副作用 + 撤销链」的运行时语义（参考 Cordis 范式，设计文档见 `docs/plans/cordis-paradigm-adoption-plan.md`）已对内存注册类能力落地，对插件作者的可见变化：
 
 - 代码插件的 `rulesets` / `agent_tools` / `content_packs` / `prop_templates` 等内存注册类能力，`enable` / `disable` 是**增量操作**：精确撤销/重挂、即时生效，不再全量重载（`POST /api/plugins/rescan` 仍是全量语义；模块重导与清单变更也请走 rescan）；
 - 插件代码在 `create_tools()` 等工厂调用里直接注册的行动 guard、位置/场景提供方与 `register_service`，会被宿主在同一撤销链上自动兜住——插件作者不写 disposer 也获得可卸载性；
 - 依赖提供方被禁用时，消费方**运行期连带回滚**并进入等待态，等待不静默：`GET /api/plugins` 每条启用中插件带 `fiber_state`（`active` / `failed` / `waiting`），等待中的插件在 `fiber_waiting_for` 里点名在等谁；依赖恢复后重新 `enable` 提供方即可让整条链自动复活；
-- `http_blueprints` 挂进 Flask 后进程内不可逆（代理路由层评审前维持现状）：`disable` 仅对**含 `http_blueprints` 的插件**返回 `restart_required=true` 并标记 `pending_restart`，其余能力照常即时撤销。
+- `http_blueprints` 经插件代理路由层（`route_proxy`）分发：插件蓝图不进宿主 `url_map`，`enable` / `disable` 即 mount / unmount 路由表——**蓝图路由与内存能力一样即时可逆**，`restart_required` 与 `pending_restart` 字段保留但恒为 `false`（API 兼容）。
 
 对插件作者无破坏性变更：manifest 契约与现有 HTTP 接口保持兼容；上一节的 v1 描述中「任何启停都触发全量重载」「凡代码插件禁用即要求重启」两点已被本节取代。
 
@@ -289,7 +289,7 @@ templates/hello-note/
 | `resource_limit` | 超过文件数/体积上限。 |
 | `capability_failed` | 资源审计过程本身抛异常（非预期错误）。 |
 | `code_load_failed` | 插件代码导入/激活抛出异常（含 `SystemExit`）。 |
-| `restart_required` | 代码插件已禁用，但蓝图仍存活到进程重启。 |
+| `restart_required` | 历史值，代理路由层接入后不再产生；常量保留仅为兼容已归档条目。 |
 
 补充说明：
 

@@ -9,8 +9,9 @@
   初始一致（零残留），工具可解析性随启停切换；
 - **依赖连带回滚**：disable 依赖提供方 → 消费方运行期回滚并显式 WAITING
   （点名在等谁），enable 提供方 → 自动恢复；
-- **HTTP 契约**：仅含 ``http_blueprints`` 的插件 disable 才要求重启，其余
-  能力即时撤销。
+- **HTTP 契约（阶段 3 接线后）**：``http_blueprints`` 经代理路由层挂摘，
+  disable 即摘表 404、enable 即恢复；``restart_required`` 与
+  ``pending_restart`` 字段保留但恒为 False。
 
 测试纪律对齐 ``tests/test_plugins.py``：全部走临时目录 + autouse 清理，
 不碰真实用户数据。
@@ -34,6 +35,7 @@ from trpg_server.plugins.contracts import (
     STATE_LOADED,
 )
 from trpg_server.plugins.registry import PluginRegistry, reset_plugin_registry
+from trpg_server.plugins.route_proxy import bp as route_proxy_blueprint, route_proxy
 from trpg_server.props import registry as props_registry
 from trpg_server.workflows import areas, guards
 
@@ -445,8 +447,8 @@ def test_enable_missing_dependency_marks_waiting_without_activation(tmp_path):
 # ---------------------------------------------------------------- HTTP 契约
 
 
-def test_blueprint_plugin_disable_flags_restart_and_revokes_rest(tmp_path):
-    """含 http_blueprints 的插件 disable：restart_required=true，其余能力已撤销。"""
+def test_blueprint_plugin_disable_revokes_routes_immediately(tmp_path):
+    """含 http_blueprints 的插件 disable：路由立即 404，restart_required 恒 False。"""
     root = tmp_path / "plugins"
     _write_route(root)
     _enable(root, ["route-addon"])
@@ -454,28 +456,32 @@ def test_blueprint_plugin_disable_flags_restart_and_revokes_rest(tmp_path):
     app = Flask(__name__)
     registry = PluginRegistry(root)
     registry.load(app)
-    registry.register_blueprints(app)
+    # 模拟 app_factory 的注册顺序：核心蓝图（此处为空）之后才注册插件代理总蓝图。
+    app.register_blueprint(route_proxy_blueprint)
     client = app.test_client()
     assert client.get("/api/plugins/route-addon/ping").status_code == 200
     assert default_tool_registry().get("route-addon.ping") is not None
 
     result = registry.disable("route-addon")
-    # HTTP 契约收窄：只有含 http_blueprints 的插件才要求重启。
-    assert result["restart_required"] is True
-    assert result["plugin"]["pending_restart"] is True
-    # 其余能力即时撤销：工具摘除、模块出缓存。
+    # 阶段 3 契约：代理层摘表，蓝图路由即时消失，重启要求成为历史。
+    assert result["restart_required"] is False
+    assert result["plugin"]["pending_restart"] is False
+    # 全部能力即时撤销：工具摘除、模块出缓存、路由 404。
     assert default_tool_registry().get("route-addon.ping") is None
     assert "trpg_plugin_route_addon_entry" not in sys.modules
     assert registry.get("route-addon").state == STATE_DISABLED
-    assert registry.get("route-addon").pending_restart is True
-    # 蓝图已挂进 Flask、进程内不可逆：路由仍活着（pending_restart 的现实）。
-    assert client.get("/api/plugins/route-addon/ping").status_code == 200
+    assert registry.get("route-addon").pending_restart is False
+    assert client.get("/api/plugins/route-addon/ping").status_code == 404
 
-    # 重新启用：能力恢复、蓝图记录回到挂载清单；同名蓝图去重，不重复挂载。
+    # 重新启用：mount 即时生效，无需任何「补挂 Flask 蓝图」步骤。
     enabled = registry.enable("route-addon")
     assert enabled["restart_required"] is False
     assert default_tool_registry().get("route-addon.ping") is not None
     assert client.get("/api/plugins/route-addon/ping").status_code == 200
+    # 新宿主实例只注册总蓝图一次即可接管同一张模块级路由表。
     fresh_app = Flask(__name__)
-    registry.register_blueprints(fresh_app)
+    fresh_app.register_blueprint(route_proxy_blueprint)
     assert fresh_app.test_client().get("/api/plugins/route-addon/ping").status_code == 200
+    # 管理面示例：总蓝图是 catch-all，路径相同也不会吞掉宿主静态路由——
+    # 这里用「未挂任何插件的路径」验证代理兜底 404 而不是 5xx。
+    assert fresh_app.test_client().get("/api/plugins/never-mounted/ping").status_code == 404

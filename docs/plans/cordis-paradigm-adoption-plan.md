@@ -160,7 +160,7 @@ Flask 蓝图注册不可撤销是平台事实，两条路线：
 - ✅ 阶段 0：决策落档（§7 上方）、`docs/plugin-development.md` 预告已改写为「已实施」
 - ✅ 阶段 1：`plugins/kernel/` 468 行 + `tests/test_plugin_kernel.py`（12 用例，含零依赖守卫）
 - ✅ 阶段 2：registry effect 撤销链 + 增量启停 + fiber 透出；`tests/test_plugin_incremental_lifecycle.py`（100 次往返对拍）
-- ✅ 阶段 3（仅 spike）：`plugins/route_proxy.py` + 14 用例差分对拍，路线 A 判定成立；**未接线**，接线评审清单见模块头注记
+- ✅ 阶段 3（spike + 正式接线）：spike 差分对拍判定路线 A 成立后已接线——`app_factory` 在核心蓝图之后注册代理总蓝图一次，插件蓝图经 `route_proxy.mount` 挂在各自效果链上，禁用即摘表、路由立即 404；`restart_required` / `pending_restart` 恒为 `false`（API 兼容保留），蓝图不可逆的历史限制废除
 - ✅ 阶段 5：module 字段可选 + 工具名解析期强校验（fiber 透出已在阶段 2 落地）
 - ⏸ 阶段 4：ruleset 去硬依赖收敛，待与 `coc7-rules-roadmap.md` 协调排期（§7 第 2 条）
 - 全量验证：`.\scripts\verify.ps1` 通过（阶段 2 收尾时全绿；阶段 3/5 后由全量 pytest 2244 passed 复核）
