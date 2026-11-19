@@ -240,8 +240,9 @@ class ScenarioMapEditor {
             else this.renderImage();
             this.renderMarkers();
         }, 30);
+        if (this.graphStyle !== "map") return;
         void this.loadGraph().then(() => {
-            if (this.graphStyle === "map") this.refreshScenes(true);
+            this.refreshScenes(true);
             this.renderPoiOverlay(scenarioMapEl("scenarioMapMarkerLayer"));
             this.renderBatchState();
         });
@@ -351,14 +352,18 @@ class ScenarioMapEditor {
             } else if (target.matches("[data-map-marker-visibility]")) {
                 marker.visibility = scenarioMapMarkerTypeVisibility((target as HTMLSelectElement).value);
             } else if (target.matches("[data-map-marker-poi]")) {
+                const markerId = marker.id;
+                const oldPoiId = marker.poi_id || this.poiByMarker(markerId)?.id || "";
                 const poiId = (target as HTMLSelectElement).value;
                 if (poiId) marker.poi_id = poiId;
                 else delete marker.poi_id;
+                void this.syncMarkerAssociation(markerId, oldPoiId, poiId);
             } else {
                 return;
             }
             // 只重画底图上的框，避免输入时重建列表导致光标丢失。
             this.renderMarkerLayer();
+            if (event.type === "change" && this.graphStyle === "map") this.syncMapConfigToNarrative();
         };
         markerList?.addEventListener("input", updateMarker);
         markerList?.addEventListener("change", updateMarker);
@@ -368,9 +373,12 @@ class ScenarioMapEditor {
             const markerId = button.closest<HTMLElement>("[data-map-marker-row]")?.dataset.mapMarkerRow || "";
             const config = this.current();
             if (!config) return;
+            const removed = config.markers.find((marker) => marker.id === markerId);
+            const oldPoiId = removed?.poi_id || this.poiByMarker(markerId)?.id || "";
             config.markers = config.markers.filter((marker) => marker.id !== markerId);
             if (this.selectedMarker === markerId) this.selectedMarker = "";
             this.renderMarkers();
+            if (oldPoiId) void this.syncMarkerAssociation(markerId, oldPoiId, "");
         });
         markerList?.addEventListener("click", (event) => {
             const row = (event.target as HTMLElement).closest<HTMLElement>("[data-map-marker-row]");
@@ -663,6 +671,20 @@ class ScenarioMapEditor {
         this.renderMarkerLayer();
         this.renderMarkerRows();
         this.renderPoiOverlay(scenarioMapEl("scenarioMapMarkerLayer"));
+        if (this.graphStyle === "map") this.syncMapConfigToNarrative();
+    }
+
+    /** 把地图页正在编辑的 map_config 同步给图谱页，保证未保存的标记关联也能立即显示。 */
+    private syncMapConfigToNarrative(): void {
+        const narrative = (window as unknown as {
+            TrpgNarrative?: {
+                state?: { mapConfig?: ScenarioMapConfig };
+                renderGraph?: () => void;
+            };
+        }).TrpgNarrative;
+        if (!narrative?.state) return;
+        narrative.state.mapConfig = JSON.parse(JSON.stringify(this.config)) as ScenarioMapConfig;
+        narrative.renderGraph?.();
     }
 
     private renderMarkerLayer(): void {
@@ -712,10 +734,14 @@ class ScenarioMapEditor {
                 ? `<span class="scenario-map-marker-poi">已关联：${scenarioMapEscape(String(linked.poi?.code || "") ? String(linked.poi?.code) + ". " : "")}${scenarioMapEscape(linked.title || linked.id)}</span>`
                 : '<span class="scenario-map-marker-poi is-empty">未关联兴趣点</span>';
             const linkedId = marker.poi_id || linked?.id || "";
+            const mapPois = this.poiNodes(this.currentMapId());
+            const mapPoiIds = new Set(mapPois.map((node) => node.id));
+            const invalidLinked = Boolean(linkedId) && !mapPoiIds.has(linkedId);
             const poiSelect = this.graphStyle === "map"
-                ? `<select class="form-select form-select-sm scenario-map-marker-poi-select" data-map-marker-poi aria-label="关联兴趣点">
+                ? `<select class="form-select form-select-sm scenario-map-marker-poi-select${invalidLinked ? " is-invalid" : ""}" data-map-marker-poi aria-label="关联兴趣点">
                         <option value="">未关联</option>
-                        ${this.poiNodes(this.currentMapId()).map((node) => {
+                        ${invalidLinked ? `<option value="${scenarioMapEscape(linkedId)}" selected>无效关联：${scenarioMapEscape(linkedId)}</option>` : ""}
+                        ${mapPois.map((node) => {
                             const code = String(node.poi?.code || "").trim();
                             const label = code ? `${code}. ${node.title || node.id}` : (node.title || node.id);
                             return `<option value="${scenarioMapEscape(node.id)}"${node.id === linkedId ? " selected" : ""}>${scenarioMapEscape(label)}</option>`;
@@ -811,9 +837,13 @@ class ScenarioMapEditor {
         if (this.readOnly || !this.selectedMarker) return;
         const config = this.current();
         if (!config) return;
-        config.markers = config.markers.filter((marker) => marker.id !== this.selectedMarker);
+        const markerId = this.selectedMarker;
+        const removed = config.markers.find((marker) => marker.id === markerId);
+        const oldPoiId = removed?.poi_id || this.poiByMarker(markerId)?.id || "";
+        config.markers = config.markers.filter((marker) => marker.id !== markerId);
         this.selectedMarker = "";
         this.renderMarkers();
+        if (oldPoiId) void this.syncMarkerAssociation(markerId, oldPoiId, "");
     }
 
     private onPointerDown(event: PointerEvent): void {
@@ -1105,10 +1135,86 @@ class ScenarioMapEditor {
             return geometry.provisional === true;
         }).length;
         const config = this.current();
+        const poiIds = new Set(pois.map((node) => node.id));
         const linked = config
-            ? config.markers.filter((marker) => Boolean(marker.poi_id) || Boolean(this.poiByMarker(marker.id))).length
+            ? config.markers.filter((marker) => {
+                const target = marker.poi_id || this.poiByMarker(marker.id)?.id || "";
+                return Boolean(target) && poiIds.has(target);
+            }).length
             : 0;
-        summary.textContent = `${pois.length} 个兴趣点 · ${provisional} 个 provisional · ${linked} 个标记已关联`;
+        const invalid = config
+            ? config.markers.filter((marker) => Boolean(marker.poi_id) && !poiIds.has(String(marker.poi_id))).length
+            : 0;
+        summary.textContent = `${pois.length} 个兴趣点 · ${provisional} 个 provisional · ${linked} 个标记已关联${invalid ? ` · ${invalid} 条关联失效` : ""}`;
+    }
+
+    /**
+     * 把标记关联写回世界树：只改 `poi.geometry.marker_id`，不动标记坐标与 POI 的格几何。
+     * 清除关联时同步删掉旧 POI 上的 marker_id。
+     */
+    private async syncMarkerAssociation(markerId: string, oldPoiId: string, newPoiId: string): Promise<void> {
+        if (this.readOnly || !markerId) return;
+        const config = this.current();
+        const marker = config?.markers.find((item) => item.id === markerId);
+        const revert = (): void => {
+            if (!marker) return;
+            if (oldPoiId) marker.poi_id = oldPoiId;
+            else delete marker.poi_id;
+            this.renderMarkers();
+        };
+        if (this.graphReadonly) {
+            revert();
+            this.renderStatus("世界树只读，标记关联未写入。", true);
+            return;
+        }
+        await this.loadGraph(true);
+        if (!this.graph) {
+            revert();
+            this.renderStatus("世界树尚未加载，标记关联未写入。", true);
+            return;
+        }
+        const mapPoiIds = new Set(this.poiNodes(this.currentMapId()).map((node) => node.id));
+        if (newPoiId && !mapPoiIds.has(newPoiId)) {
+            revert();
+            this.renderStatus(`兴趣点 ${newPoiId} 不存在或不属于当前地图，关联未写入。`, true);
+            return;
+        }
+
+        const bundle = this.cloneBundle(this.graph);
+        const byId = new Map(bundle.nodes.map((node) => [node.id, node]));
+        if (oldPoiId && oldPoiId !== newPoiId) {
+            const oldNode = byId.get(oldPoiId);
+            if (oldNode) {
+                const poi = { ...(oldNode.poi || {}) } as Record<string, unknown>;
+                const geometry = { ...((poi.geometry || {}) as Record<string, unknown>) };
+                if (String(geometry.marker_id || "") === markerId) {
+                    delete geometry.marker_id;
+                    poi.geometry = geometry;
+                    oldNode.poi = poi;
+                }
+            }
+        }
+        if (newPoiId) {
+            const newNode = byId.get(newPoiId);
+            if (!newNode) {
+                revert();
+                this.renderStatus(`兴趣点 ${newPoiId} 不存在，关联未写入。`, true);
+                return;
+            }
+            const poi = { ...(newNode.poi || {}) } as Record<string, unknown>;
+            const geometry = { ...((poi.geometry || {}) as Record<string, unknown>) };
+            geometry.marker_id = markerId;
+            poi.geometry = geometry;
+            newNode.poi = poi;
+        }
+
+        const saved = await this.saveBundle(bundle, this.graphRevision);
+        if (!saved) {
+            revert();
+            this.renderStatus("标记关联写入失败，已恢复原关联。", true);
+            return;
+        }
+        this.renderStatus(newPoiId ? "标记关联已更新。" : "已清除标记关联。");
     }
 
     /**
@@ -1138,6 +1244,21 @@ class ScenarioMapEditor {
             this.renderStatus("世界树尚未加载，无法回写。", true);
             return;
         }
+        const mapPois = this.poiNodes(mapId);
+        const mapPoiIds = new Set(mapPois.map((node) => node.id));
+        const invalidAssociations = config.markers.filter(
+            (marker) => Boolean(marker.poi_id) && !mapPoiIds.has(String(marker.poi_id)),
+        );
+        if (invalidAssociations.length) {
+            const detail = invalidAssociations.slice(0, 5)
+                .map((marker) => `「${marker.label || marker.id}」→ ${marker.poi_id}`)
+                .join("、");
+            this.renderStatus(
+                `有 ${invalidAssociations.length} 条标记关联了不存在或不属于该地图的兴趣点：${detail}${invalidAssociations.length > 5 ? " 等" : ""}。请先修正关联再回写。`,
+                true,
+            );
+            return;
+        }
         const confirmed = await window.TrpgDialog?.confirm({
             title: "批量回写兴趣点",
             message: "将使用当前页面的标定与 DM 标记，把匹配到的兴趣点写入正式格几何；没有匹配的仍保持 provisional。\n如果刚修改过标定，请先保存剧本，否则回写的坐标会与底图不一致。",
@@ -1147,11 +1268,12 @@ class ScenarioMapEditor {
 
         const usedMarkers = new Set<string>();
         const pairs: Array<{ poi: ScenarioMapGraphNode; marker: ScenarioMapMarker }> = [];
-        for (const poi of this.poiNodes(mapId)) {
+        for (const poi of mapPois) {
             const geometry = (poi.poi?.geometry || {}) as Record<string, unknown>;
             const existingMarkerId = String(geometry.marker_id || "");
-            let marker = config.markers.find((item) => item.id === existingMarkerId && !usedMarkers.has(item.id))
-                || config.markers.find((item) => item.poi_id === poi.id && !usedMarkers.has(item.id));
+            // 优先级：标记的 poi_id → 兴趣点已有的 marker_id → 名称/编号精确匹配。
+            let marker = config.markers.find((item) => item.poi_id === poi.id && !usedMarkers.has(item.id))
+                || config.markers.find((item) => item.id === existingMarkerId && !usedMarkers.has(item.id));
             if (!marker) {
                 const code = String(poi.poi?.code || "").trim();
                 const title = String(poi.title || poi.id);
@@ -1227,14 +1349,26 @@ class ScenarioMapEditor {
 
     /** 保存后刷新世界树；若世界树有未保存改动则不覆盖。 */
     private syncNarrativeEditor(): void {
-        const narrative = (window as unknown as { TrpgNarrative?: { runtime?: { dirty?: boolean } } }).TrpgNarrative;
+        const narrative = (window as unknown as {
+            TrpgNarrative?: {
+                runtime?: { dirty?: boolean };
+                state?: { mapConfig?: ScenarioMapConfig };
+            };
+        }).TrpgNarrative;
         const editor = (window as unknown as { ScenarioNarrative?: { load?: (id: number) => Promise<void> } }).ScenarioNarrative;
+        const snapshot = JSON.parse(JSON.stringify(this.config)) as ScenarioMapConfig;
+        // 地图页是 map_config 的编辑源：已保存或未保存的标记关联都以这里为准。
+        if (narrative?.state) narrative.state.mapConfig = snapshot;
         if (narrative?.runtime?.dirty || !editor?.load) return;
         const scenarioId = this.scenarioIdValue();
-        if (scenarioId) void editor.load(scenarioId);
+        if (!scenarioId) return;
+        void editor.load(scenarioId).then(() => {
+            if (narrative?.state) narrative.state.mapConfig = snapshot;
+        });
     }
 
     private renderPoiOverlay(layer: HTMLElement | null): void {
+        if (this.graphStyle !== "map") return;
         if (!layer || !this.graph) return;
         layer.querySelectorAll("[data-map-poi-id]").forEach((item) => item.remove());
         const areaId = this.currentMapId();

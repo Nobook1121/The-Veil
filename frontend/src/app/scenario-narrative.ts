@@ -29,6 +29,7 @@
         state.canEdit = false;
         state.rulesetId = "";
         state.graphStyle = "mesh";
+        state.mapConfig = {};
         state.selectedId = "";
         state.selectedEdgeId = "";
         state.connectSource = "";
@@ -73,6 +74,9 @@
             state.revision = data.data.revision;
             state.rulesetId = String(data.data.ruleset_id || "");
             state.graphStyle = data.data.graph_style === "map" ? "map" : "mesh";
+            state.mapConfig = data.data.map_config && typeof data.data.map_config === "object"
+                ? data.data.map_config as Record<string, unknown>
+                : {};
             state.readonly = Boolean(data.data.permissions?.readonly);
             state.canEdit = Boolean(data.data.permissions?.can_edit);
             updateStatusBadge();
@@ -155,6 +159,7 @@
         state.canEdit = false;
         state.rulesetId = "";
         state.graphStyle = "mesh";
+        state.mapConfig = {};
         state.selectedId = "";
         state.selectedEdgeId = "";
         state.connectSource = "";

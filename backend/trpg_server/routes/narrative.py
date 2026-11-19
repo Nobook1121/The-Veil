@@ -137,6 +137,16 @@ def _ruleset_meta(descriptor: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _map_config(descriptor: Mapping[str, Any]) -> dict[str, Any]:
+    """把 scenario.json 的地图配置原样带给剧本编辑器。
+
+    图谱页需要用它展示标记与兴趣点的关联（`markers[].poi_id`），但不改写
+    narrative.json 的数据结构；没有 map_config 的旧剧本返回空对象。
+    """
+    payload = descriptor.get("map_config")
+    return dict(payload) if isinstance(payload, Mapping) else {}
+
+
 def _open_bundle(scenario_id: int) -> tuple[Path | None, dict[str, Any], NarrativeBundle | None, Any]:
     _, storage = _resolve(scenario_id)
     if storage is None:
@@ -239,6 +249,7 @@ def get_narrative(scenario_id: int):
             "permissions": _permissions(descriptor),
             "storage": str(storage),
             **_ruleset_meta(descriptor),
+            "map_config": _map_config(descriptor),
         },
         "Narrative loaded",
     )
@@ -294,6 +305,7 @@ def build_narrative(scenario_id: int):
             "permissions": _permissions(descriptor),
             "storage": str(storage),
             **_ruleset_meta(descriptor),
+            "map_config": _map_config(descriptor),
         },
         "Narrative built",
     )

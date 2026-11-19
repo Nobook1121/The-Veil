@@ -56,7 +56,7 @@ def _bundle(revision=2):
     }
 
 
-def _write_scenario(tmp_path, *, import_mode="edit", owner_id=1, bundle=None, modules=None, ruleset_id=None):
+def _write_scenario(tmp_path, *, import_mode="edit", owner_id=1, bundle=None, modules=None, ruleset_id=None, map_config=None):
     storage = tmp_path / "scenarios" / "scenario-7"
     storage.mkdir(parents=True, exist_ok=True)
     descriptor = {
@@ -68,6 +68,8 @@ def _write_scenario(tmp_path, *, import_mode="edit", owner_id=1, bundle=None, mo
     }
     if ruleset_id is not None:
         descriptor["ruleset_id"] = ruleset_id
+    if map_config is not None:
+        descriptor["map_config"] = map_config
     (storage / "scenario.json").write_text(json.dumps(descriptor, ensure_ascii=False), encoding="utf-8")
     if bundle is not None:
         (storage / "narrative.json").write_text(json.dumps(bundle, ensure_ascii=False), encoding="utf-8")
@@ -151,6 +153,40 @@ def test_get_narrative_keeps_coc_mesh_style(tmp_path):
     assert data["ruleset_id"] == "coc7"
     assert data["graph_style"] == "mesh"
     assert data["summary"]["counts"]["nodes"] == 2
+
+
+def test_get_narrative_returns_map_config_marker_associations(tmp_path):
+    map_config = {
+        "map_a": {
+            "cell_px": 48,
+            "offset_x": 10,
+            "offset_y": 12,
+            "markers": [
+                {"id": "m1", "label": "1. 洞口", "x": 20, "y": 30, "w": 40, "h": 40, "poi_id": "poi_a"},
+            ],
+        },
+    }
+    _write_scenario(tmp_path, bundle=_bundle(), ruleset_id="dnd5e", map_config=map_config)
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _get(client)
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["map_config"]["map_a"]["markers"][0]["poi_id"] == "poi_a"
+    assert data["map_config"]["map_a"]["cell_px"] == 48
+
+
+def test_get_narrative_returns_empty_map_config_for_old_scenarios(tmp_path):
+    _write_scenario(tmp_path, bundle=_bundle())
+    client = _app(tmp_path).test_client()
+    _login(client)
+
+    response = _get(client)
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["map_config"] == {}
 
 
 def test_get_narrative_requires_generated_bundle(tmp_path):

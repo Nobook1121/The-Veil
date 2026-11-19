@@ -4883,6 +4883,14 @@ body.is-guest .guest-login-hint {
 }
 .scenario-map-poi-title { flex: 1 1 auto; }
 .scenario-map-poi-body { padding: 0 0.6rem 0.6rem; }
+.scenario-map-poi-marker {
+    margin: 0 0 0.45rem;
+    font-size: 0.78rem;
+    color: var(--bs-secondary-color, #6c757d);
+}
+.scenario-map-poi-marker code { font-size: 0.72rem; }
+.scenario-map-poi-marker.is-invalid { color: var(--bs-danger, #dc3545); }
+.scenario-map-poi-marker.is-empty { opacity: 0.65; }
 
 .scenario-map-channel-list {
     border-top: 1px dashed var(--bs-border-color, #dee2e6);

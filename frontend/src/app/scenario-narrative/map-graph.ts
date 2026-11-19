@@ -78,6 +78,60 @@
         return node.parent || "";
     }
 
+    interface MapMarkerInfo {
+        id: string;
+        label: string;
+        poi_id: string;
+        visibility: string;
+    }
+
+    /** 地图配置里的 DM 标记（scenario.json.map_config[scene_id].markers）。 */
+    function mapMarkers(map: GraphNode): MapMarkerInfo[] {
+        const sceneId = text(dict(map.map).scene_id) || map.id;
+        const config = dict(state.mapConfig[sceneId]);
+        const raw = config.markers;
+        if (!Array.isArray(raw)) return [];
+        return raw.map((item, index) => {
+            const marker = dict(item);
+            return {
+                id: text(marker.id) || `marker-${index + 1}`,
+                label: text(marker.label),
+                poi_id: text(marker.poi_id),
+                visibility: text(marker.visibility) || "public",
+            };
+        });
+    }
+
+    function markerForPoi(map: GraphNode, poi: GraphNode): { marker: MapMarkerInfo; byPoiId: boolean } | null {
+        const markers = mapMarkers(map);
+        const geometry = dict(dict(poi.poi).geometry);
+        const markerId = text(geometry.marker_id);
+        if (markerId) {
+            const marker = markers.find((item) => item.id === markerId);
+            if (marker) return { marker, byPoiId: false };
+        }
+        const marker = markers.find((item) => item.poi_id === poi.id);
+        return marker ? { marker, byPoiId: true } : null;
+    }
+
+    /** 兴趣点卡片上的标记关联提示；玩家视图不展示 DM 标记。 */
+    function markerAssociationMarkup(map: GraphNode, poi: GraphNode): string {
+        if (state.viewMode === "player") return "";
+        const geometry = dict(dict(poi.poi).geometry);
+        const markerId = text(geometry.marker_id);
+        if (!mapMarkers(map).length && !markerId) return "";
+        const linked = markerForPoi(map, poi);
+        if (linked) {
+            const marker = linked.marker;
+            const pending = linked.byPoiId && markerId !== marker.id ? "（待回写 marker_id）" : "";
+            return `<p class="scenario-map-poi-marker">已关联标记：${escapeHtml(marker.label || marker.id)} <code>${escapeHtml(marker.id)}</code>${pending}</p>`;
+        }
+        if (markerId) {
+            return `<p class="scenario-map-poi-marker is-invalid">关联标记失效：<code>${escapeHtml(markerId)}</code> 不在这张地图的标记里。</p>`;
+        }
+        return `<p class="scenario-map-poi-marker is-empty">未关联 DM 标记</p>`;
+    }
+
     function isVisible(node: GraphNode): boolean {
         return state.viewMode !== "player" || (node.visibility || "public") !== "kp_only";
     }
@@ -207,7 +261,7 @@
                     </details>`}
                     <div class="scenario-map-poi-list">
                         ${pois.length
-                            ? pois.map((poi) => poiCard(poi, readonly)).join("")
+                            ? pois.map((poi) => poiCard(poi, readonly, map)).join("")
                             : `<p class="scenario-map-empty-hint">${hidden && state.viewMode === "player" ? "未揭示的地图没有可展示的兴趣点。" : "该地图还没有兴趣点。"}</p>`}
                     </div>
                     ${rows.length ? `
@@ -219,7 +273,7 @@
             </details>`;
     }
 
-    function poiCard(poi: GraphNode, readonly: boolean): string {
+    function poiCard(poi: GraphNode, readonly: boolean, map: GraphNode): string {
         const block = dict(poi.poi);
         const trigger = dict(block.trigger);
         const geometry = dict(block.geometry);
@@ -227,6 +281,15 @@
         const mode = text(trigger.mode || "manual");
         const provisional = geometry.provisional === true;
         const hidden = isHidden(poi);
+        const markerId = text(geometry.marker_id);
+        const markerInfo = markerForPoi(map, poi);
+        const markerBadge = state.viewMode === "player"
+            ? ""
+            : markerInfo
+                ? '<span class="badge bg-success">已关联标记</span>'
+                : markerId
+                    ? '<span class="badge bg-danger">标记失效</span>'
+                    : "";
         const open = matchesSearch([poi.id, poi.title || "", text(block.code)]);
         const code = text(block.code).trim();
         return `
@@ -236,9 +299,11 @@
                     <span class="scenario-map-poi-title">${escapeHtml(hidden && state.viewMode === "player" ? "未揭示的兴趣点" : (poi.title || poi.id))}</span>
                     <span class="badge bg-light text-dark">${escapeHtml(mode)}</span>
                     ${provisional ? '<span class="badge bg-warning text-dark">provisional</span>' : ""}
+                    ${markerBadge}
                     ${visibilityBadge(poi)}
                 </summary>
                 <div class="scenario-map-poi-body">
+                    ${markerAssociationMarkup(map, poi)}
                     <div class="scenario-map-form-grid">
                         <label>标题<input class="form-control form-control-sm" data-poi-field="title" value="${escapeHtml(poi.title || "")}"${readonly ? " disabled" : ""}></label>
                         <label>编号<input class="form-control form-control-sm" data-poi-field="code" value="${escapeHtml(code)}" placeholder="DM 地图编号"${readonly ? " disabled" : ""}></label>
@@ -325,6 +390,29 @@
             }
             if (!text(block.brief).trim()) {
                 issues.push({ level: "warn", text: `地图「${map.id}」缺少 AreaBrief 简报。` });
+            }
+            const poiIds = new Set(poiNodes(map.id).map((node) => node.id));
+            const markers = mapMarkers(map);
+            if (markers.length) {
+                markers.forEach((marker) => {
+                    if (!marker.poi_id) return;
+                    if (!poiIds.has(marker.poi_id)) {
+                        issues.push({
+                            level: "error",
+                            text: `地图「${map.id}」的标记「${marker.label || marker.id}」关联的兴趣点 ${marker.poi_id} 不存在或不属于该地图。`,
+                        });
+                    }
+                });
+                const markerIds = new Set(markers.map((marker) => marker.id));
+                poiNodes(map.id).forEach((node) => {
+                    const markerId = text(dict(dict(node.poi).geometry).marker_id);
+                    if (markerId && !markerIds.has(markerId)) {
+                        issues.push({
+                            level: "warn",
+                            text: `兴趣点「${node.title || node.id}」关联的标记 ${markerId} 不在这张地图的标记里。`,
+                        });
+                    }
+                });
             }
         });
 

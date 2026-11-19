@@ -73,6 +73,7 @@ interface NarrativePayload {
     permissions: { can_view: boolean; can_edit: boolean; readonly: boolean };
     ruleset_id?: string;
     graph_style?: "mesh" | "map";
+    map_config?: Record<string, unknown>;
 }
 
 interface ValidationIssue {
@@ -208,6 +209,7 @@ interface NarrativeState {
     canEdit: boolean;
     rulesetId: string;
     graphStyle: "mesh" | "map";
+    mapConfig: Record<string, unknown>;
     selectedId: string;
     selectedEdgeId: string;
     search: string;

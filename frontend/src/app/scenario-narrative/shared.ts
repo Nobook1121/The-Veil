@@ -95,6 +95,7 @@
         canEdit: false,
         rulesetId: "",
         graphStyle: "mesh",
+        mapConfig: {},
         selectedId: "",
         selectedEdgeId: "",
         search: "",
