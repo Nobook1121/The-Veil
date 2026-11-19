@@ -4525,6 +4525,22 @@ body.is-guest .guest-login-hint {
     pointer-events: none;
 }
 
+/* dnd 地图标定网格：与底图同位置同尺寸，格宽由 cell_px * scale 决定。 */
+.scenario-map-grid {
+    position: absolute;
+    z-index: 1;
+    pointer-events: none;
+    background-image:
+        linear-gradient(to right, rgba(246, 178, 107, 0.45) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(246, 178, 107, 0.45) 1px, transparent 1px);
+    background-repeat: repeat;
+    box-shadow: inset 0 0 0 1px rgba(246, 178, 107, 0.6);
+}
+
+.scenario-map-grid[hidden] {
+    display: none;
+}
+
 .scenario-map-calibration-frame {
     position: absolute;
     left: 50%;

@@ -146,6 +146,8 @@ class ScenarioMapEditor {
     private selectedMarker = "";
     private bound = false;
     private pendingFit = false;
+    /** dnd 地图页：true 表示用户点了「重新标定」，暂时解除锁定并显示标定框。 */
+    private recalibrating = false;
     private rulesetId = "coc7";
     private graphStyle: "mesh" | "map" = "mesh";
     private graph: ScenarioMapGraphBundle | null = null;
@@ -174,6 +176,7 @@ class ScenarioMapEditor {
         this.selectedMarker = "";
         this.drag = null;
         this.pendingFit = false;
+        this.recalibrating = false;
         this.rulesetId = "coc7";
         this.graphStyle = "mesh";
         this.graph = null;
@@ -200,6 +203,7 @@ class ScenarioMapEditor {
         this.imageReady = false;
         this.selectedMarker = "";
         this.pendingFit = false;
+        this.recalibrating = false;
         this.refreshScenes();
         this.renderBatchState();
     }
@@ -227,6 +231,8 @@ class ScenarioMapEditor {
         pane?.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input, select, button").forEach((field) => {
             field.disabled = readonly;
         });
+        // 只读开关会重置按钮的 disabled，这里重新按锁定态收敛缩放按钮。
+        this.renderCalibration();
     }
 
     onTabShown(): void {
@@ -236,8 +242,13 @@ class ScenarioMapEditor {
             pane?.classList.add("is-readonly");
         }
         window.setTimeout(() => {
-            if (this.pendingFit) this.fit();
-            else this.renderImage();
+            if (this.pendingFit) {
+                // 已锁定的 dnd 地图不能再「适应窗口」，否则会破坏标定后的固定缩放。
+                if (this.isCalibrationLocked()) this.applyInitialView();
+                else this.fit();
+            } else {
+                this.renderImage();
+            }
             this.renderMarkers();
         }, 30);
         if (this.graphStyle !== "map") return;
@@ -254,6 +265,7 @@ class ScenarioMapEditor {
         scenarioMapEl<HTMLSelectElement>("scenarioMapSceneSelect")?.addEventListener("change", (event) => {
             this.sceneId = (event.target as HTMLSelectElement).value;
             this.selectedMarker = "";
+            this.recalibrating = false;
             this.applyInitialView();
         });
         scenarioMapEl<HTMLInputElement>("scenarioMapUpload")?.addEventListener("change", (event) => {
@@ -271,6 +283,7 @@ class ScenarioMapEditor {
         scenarioMapEl("scenarioMapFit")?.addEventListener("click", () => this.fit());
         scenarioMapEl("scenarioMapActual")?.addEventListener("click", () => this.actualSize());
         scenarioMapEl("scenarioMapCalibrate")?.addEventListener("click", () => this.calibrate());
+        scenarioMapEl("scenarioMapRecalibrate")?.addEventListener("click", () => this.recalibrate());
         scenarioMapEl("scenarioMapMarkerMode")?.addEventListener("click", () => this.togglePlacing());
         scenarioMapEl("scenarioMapDeleteMarker")?.addEventListener("click", () => this.deleteSelectedMarker());
         scenarioMapEl("scenarioMapAddType")?.addEventListener("click", () => this.addMarkerType());
@@ -419,6 +432,7 @@ class ScenarioMapEditor {
         if (!select) return;
         const pane = document.getElementById("scenarioTabMap");
         if (pane) pane.dataset.graphStyle = this.graphStyle;
+        this.recalibrating = false;
         const scenes = this.sceneOptions();
         const previous = keepScene ? this.sceneId : "";
         select.innerHTML = scenes.map((scene) => `<option value="${scenarioMapEscape(scene.id)}">${scenarioMapEscape(scene.title)}</option>`).join("");
@@ -434,6 +448,50 @@ class ScenarioMapEditor {
     private current(): ScenarioSceneMapConfig | null {
         if (!this.sceneId) return null;
         return this.config[this.sceneId] || null;
+    }
+
+    /** dnd 地图页才使用「标定后锁定 + 覆盖网格」的交互；coc7 保持原行为。 */
+    private isMapCalibration(): boolean {
+        return this.graphStyle === "map";
+    }
+
+    /** 已标定且未进入重新标定：固定缩放，只保留网格供放置标记。 */
+    private isCalibrationLocked(): boolean {
+        const config = this.current();
+        return this.isMapCalibration()
+            && Boolean(config && config.background_url && config.cell_px > 0)
+            && !this.recalibrating;
+    }
+
+    /**
+     * 标定框的实际外框（CSS 像素，相对视口 padding box 原点）。
+     *
+     * 标定框没有设置 box-sizing: border-box，getBoundingClientRect 得到的是
+     * 「96px 内容 + 左右各 2px 边框」的真实外框，正是「框住一格」的边宽。
+     * 直接用常量 96 会让量出的格子偏小，这也是之前网格比例不符的根因。
+     * 该链路只涉及显示尺寸（CSS 像素）与图片原始像素，devicePixelRatio 不参与。
+     */
+    private calibrationFrameBox(): { left: number; top: number; width: number; height: number } {
+        const size = this.viewportSize();
+        const fallback = {
+            left: (size.width - SCENARIO_MAP_FRAME_SIZE) / 2,
+            top: (size.height - SCENARIO_MAP_FRAME_SIZE) / 2,
+            width: SCENARIO_MAP_FRAME_SIZE,
+            height: SCENARIO_MAP_FRAME_SIZE,
+        };
+        if (!this.isMapCalibration()) return fallback;
+        const viewport = scenarioMapEl("scenarioMapViewport");
+        const frame = scenarioMapEl("scenarioMapCalibrationFrame");
+        if (!viewport || !frame) return fallback;
+        const viewportRect = viewport.getBoundingClientRect();
+        const frameRect = frame.getBoundingClientRect();
+        if (!(frameRect.width > 0 && frameRect.height > 0)) return fallback;
+        return {
+            left: frameRect.left - viewportRect.left - viewport.clientLeft,
+            top: frameRect.top - viewportRect.top - viewport.clientTop,
+            width: frameRect.width,
+            height: frameRect.height,
+        };
     }
 
     private ensureCurrent(): ScenarioSceneMapConfig {
@@ -536,6 +594,7 @@ class ScenarioMapEditor {
     }
 
     private fit(render = true): void {
+        if (this.isCalibrationLocked()) return;
         const config = this.current();
         const size = this.viewportSize();
         if (!config || !config.background_url || !this.naturalWidth || !this.naturalHeight) return;
@@ -555,6 +614,7 @@ class ScenarioMapEditor {
     }
 
     private actualSize(): void {
+        if (this.isCalibrationLocked()) return;
         const size = this.viewportSize();
         this.scale = 1;
         this.panX = (size.width - this.naturalWidth) / 2;
@@ -569,6 +629,7 @@ class ScenarioMapEditor {
     }
 
     private applyZoom(factor: number, anchorX: number, anchorY: number): void {
+        if (this.isCalibrationLocked()) return;
         if (!this.naturalWidth || !this.naturalHeight) return;
         const imageX = (anchorX - this.panX) / this.scale;
         const imageY = (anchorY - this.panY) / this.scale;
@@ -583,6 +644,8 @@ class ScenarioMapEditor {
         const config = this.current();
         if (!config || !config.background_url) return;
         event.preventDefault();
+        // 锁定态吞掉滚轮，避免页面跟着滚动，但不再改变缩放。
+        if (this.isCalibrationLocked()) return;
         const rect = scenarioMapEl("scenarioMapViewport")?.getBoundingClientRect();
         if (!rect) return;
         this.applyZoom(event.deltaY < 0 ? 1.12 : 1 / 1.12, event.clientX - rect.left, event.clientY - rect.top);
@@ -602,6 +665,7 @@ class ScenarioMapEditor {
         const viewport = scenarioMapEl("scenarioMapViewport");
         if (!image || !viewport || !this.naturalWidth || !this.naturalHeight) {
             if (image) image.style.display = "none";
+            this.renderGrid();
             return;
         }
         image.style.display = "block";
@@ -610,6 +674,35 @@ class ScenarioMapEditor {
         image.style.left = `${this.panX}px`;
         image.style.top = `${this.panY}px`;
         viewport.classList.toggle("has-image", Boolean(this.imageUrl));
+        // 网格与图片共用同一套位置/尺寸，拖动或缩放时不会各走各的。
+        this.renderGrid();
+    }
+
+    /**
+     * 覆盖在底图上的标定网格：格宽 = cell_px * scale，起点 = offset * scale。
+     * 由于与图片使用相同的 left/top/width/height，平移时两者作为一个整体移动。
+     */
+    private renderGrid(): void {
+        const grid = scenarioMapEl("scenarioMapGrid");
+        const config = this.current();
+        if (!grid) return;
+        if (!this.isCalibrationLocked() || !config || !(config.cell_px > 0)
+            || !(this.naturalWidth > 0) || !(this.naturalHeight > 0)) {
+            grid.hidden = true;
+            return;
+        }
+        const cellCss = config.cell_px * this.scale;
+        if (!(cellCss > 0.5)) {
+            grid.hidden = true;
+            return;
+        }
+        grid.hidden = false;
+        grid.style.left = `${this.panX}px`;
+        grid.style.top = `${this.panY}px`;
+        grid.style.width = `${this.naturalWidth * this.scale}px`;
+        grid.style.height = `${this.naturalHeight * this.scale}px`;
+        grid.style.backgroundSize = `${cellCss}px ${cellCss}px`;
+        grid.style.backgroundPosition = `${config.offset_x * this.scale}px ${config.offset_y * this.scale}px`;
     }
 
     private renderCalibration(): void {
@@ -623,7 +716,23 @@ class ScenarioMapEditor {
         const markerMode = scenarioMapEl<HTMLButtonElement>("scenarioMapMarkerMode");
         if (markerMode) markerMode.classList.toggle("active", this.placing);
         const frame = scenarioMapEl("scenarioMapCalibrationFrame");
-        if (frame) frame.hidden = this.placing || !config || !config.background_url;
+        const locked = this.isCalibrationLocked();
+        if (frame) {
+            frame.hidden = this.placing || !config || !config.background_url
+                || (this.isMapCalibration() && !this.recalibrating && config.cell_px > 0);
+        }
+        // 「重新标定」是解除锁定的唯一入口，锁定态必须保持可点。
+        const recalibrate = scenarioMapEl<HTMLButtonElement>("scenarioMapRecalibrate");
+        if (recalibrate) recalibrate.disabled = this.readOnly;
+        // 锁定后「记录标定」不可用，必须先点「重新标定」。
+        const calibrateButton = scenarioMapEl<HTMLButtonElement>("scenarioMapCalibrate");
+        if (calibrateButton) calibrateButton.disabled = this.readOnly || locked;
+        // 锁定后缩放按钮必须停用，避免绕过滚轮限制。
+        ["scenarioMapZoomIn", "scenarioMapZoomOut", "scenarioMapActual", "scenarioMapFit"].forEach((id) => {
+            const button = scenarioMapEl<HTMLButtonElement>(id);
+            if (button) button.disabled = this.readOnly || locked;
+        });
+        this.renderGrid();
     }
 
     private renderStatus(message?: string, isError = false): void {
@@ -632,7 +741,7 @@ class ScenarioMapEditor {
         if (message === undefined) {
             const config = this.current();
             status.textContent = config && config.background_url
-                ? `底图 ${config.width || this.naturalWidth} × ${config.height || this.naturalHeight} px，缩放 ${Math.round(this.scale * 100)}%`
+                ? `底图 ${config.width || this.naturalWidth} × ${config.height || this.naturalHeight} px，缩放 ${Math.round(this.scale * 100)}%${this.isCalibrationLocked() ? "（已锁定）" : ""}`
                 : "请先选择场景并导入底图。";
             status.classList.remove("is-error");
             return;
@@ -768,6 +877,10 @@ class ScenarioMapEditor {
     }
 
     private calibrate(): void {
+        if (this.isCalibrationLocked()) {
+            this.renderStatus("标定已锁定，请先点「重新标定」再记录。", true);
+            return;
+        }
         const config = this.current();
         if (!config || !config.background_url) {
             this.renderStatus("请先导入底图。", true);
@@ -777,19 +890,46 @@ class ScenarioMapEditor {
             this.renderStatus("底图尚未加载完成，请稍后再试。", true);
             return;
         }
-        const size = this.viewportSize();
-        const frameLeft = (size.width - SCENARIO_MAP_FRAME_SIZE) / 2;
-        const frameTop = (size.height - SCENARIO_MAP_FRAME_SIZE) / 2;
+        // 唯一标准「框住一格 = 网格一格」：用标定框的实测外框宽除以当前缩放，
+        // 得到每格对应的图片原始像素；偏移同样按实测框左上角换算。
+        const box = this.calibrationFrameBox();
         config.width = this.naturalWidth;
         config.height = this.naturalHeight;
-        config.cell_px = scenarioMapRound(SCENARIO_MAP_FRAME_SIZE / this.scale);
-        config.offset_x = scenarioMapRound((frameLeft - this.panX) / this.scale);
-        config.offset_y = scenarioMapRound((frameTop - this.panY) / this.scale);
-        this.renderCalibration();
-        this.renderStatus();
-        this.renderStatus("标定已记录：保存剧本后，房间会按这个格子大小与偏移对齐画布网格。");
+        config.cell_px = scenarioMapRound(box.width / this.scale);
+        config.offset_x = scenarioMapRound((box.left - this.panX) / this.scale);
+        config.offset_y = scenarioMapRound((box.top - this.panY) / this.scale);
+        // 记录后立即回到锁定态：隐藏标定框、显示网格、停用缩放。
+        this.recalibrating = false;
+        this.renderAll();
+        this.renderStatus("标定已记录：缩放已锁定，网格已对齐；保存剧本后房间会沿用这个格子大小与偏移。");
         this.renderPoiOverlay(scenarioMapEl("scenarioMapMarkerLayer"));
         this.renderBatchState();
+    }
+
+    /** 显式解除锁定并重新显示标定框；确认标定后会覆盖原有 cell_px 与偏移。 */
+    private recalibrate(): void {
+        if (this.readOnly) return;
+        const config = this.current();
+        if (!config || !config.background_url) {
+            this.renderStatus("请先导入底图。", true);
+            return;
+        }
+        this.recalibrating = true;
+        this.placing = false;
+        scenarioMapEl("scenarioMapViewport")?.classList.remove("is-placing");
+        // 先切到可标定态，让标定框参与布局后再实测尺寸。
+        this.renderCalibration();
+        if (config.cell_px > 0) {
+            // 把原有锚点格对到标定框上，便于在此基础上微调。
+            const box = this.calibrationFrameBox();
+            this.scale = scenarioMapClamp(box.width / config.cell_px, 0.02, 12);
+            this.panX = box.left - config.offset_x * this.scale;
+            this.panY = box.top - config.offset_y * this.scale;
+        }
+        this.renderImage();
+        this.renderCalibration();
+        this.renderMarkers();
+        this.renderStatus("重新标定：缩放已解锁，把底图上的一个格子对齐中间方框后点「记录标定」。");
     }
 
     private clearCalibration(): void {
@@ -1425,6 +1565,7 @@ class ScenarioMapEditor {
             config.cell_px = 0;
             config.offset_x = 0;
             config.offset_y = 0;
+            this.recalibrating = false;
             this.imageUrl = "";
             this.naturalWidth = config.width;
             this.naturalHeight = config.height;
