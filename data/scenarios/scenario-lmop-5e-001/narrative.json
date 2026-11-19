@@ -618,7 +618,21 @@
           "provisional": true,
           "note": "M0 目测格坐标，未按底图标定；待 M9 标定后替换为真实格坐标。"
         },
-        "dm_notes": "TODO: 首领 Klarg 是 bugbear，dnd5e-srd 当前数据包没有 bugbear 条目，本轮不配置 encounter；补齐怪物数据后再开战。",
+        "dm_notes": "首领 Klarg 以剧本 NPC 出场：npc_klarg 绑定 dnd5e-srd 的 bugbear，开战时会放置到玩家所在场景并绑定棋子。",
+        "encounter": {
+          "id": "enc_p1_hideout_8_cave",
+          "npc_ids": [
+            "npc_klarg"
+          ],
+          "monster_ids": [
+            "wolf",
+            "goblin",
+            "goblin"
+          ],
+          "count": 3,
+          "auto_start": false,
+          "note": "克拉格与宠物狼、两只地精；是否突袭由进入方式与剧情判定决定。"
+        },
         "content_ref": {
           "module_id": "p1_hideout_8_cave"
         },

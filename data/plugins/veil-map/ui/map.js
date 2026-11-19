@@ -417,12 +417,20 @@
         function combatantForToken(token) {
             if (!combat || combat.active !== true) return null;
             var order = Array.isArray(combat.order) ? combat.order : [];
-            var candidates = [String(token.combatant || "").toLowerCase(), String(token.name || "").toLowerCase()];
+            var rawBinding = String(token.combatant || "").toLowerCase();
+            var candidates = [
+                rawBinding,
+                String(token.combatant_name || "").toLowerCase(),
+                String(token.name || "").toLowerCase()
+            ];
+            if (rawBinding.indexOf("npc:") === 0) candidates.push(rawBinding.slice(4));
+            var boundId = String((token.combat && token.combat.combatant_id) || "").toLowerCase();
             var owner = String(token.owner_user_id || "");
             for (var i = 0; i < order.length; i += 1) {
                 var item = order[i] || {};
                 var name = String(item.name || "").toLowerCase();
                 if (candidates.indexOf(name) >= 0) return item;
+                if (boundId && String(item.combatant_id || "").toLowerCase() === boundId) return item;
                 if (owner && String(item.user_id || "") === owner) return item;
             }
             return null;
@@ -739,6 +747,19 @@
                 roundRect(context, rect.x, rect.y, rect.width, rect.height, radius);
                 context.stroke();
 
+                // 战斗棋子的 HP 条：数据来自服务端 combat 快照，地图只负责展示。
+                var block = token.combat && typeof token.combat === "object" ? token.combat : null;
+                var maxHp = block ? asInt(block.max_hp, 0) : 0;
+                if (maxHp > 0) {
+                    var hpRatio = clamp(asInt(block.hp, 0) / maxHp, 0, 1);
+                    var barHeight = clamp(rect.height * 0.11, 3, 7);
+                    var barY = rect.y + rect.height - barHeight - 2;
+                    context.fillStyle = "rgba(0, 0, 0, 0.6)";
+                    context.fillRect(rect.x + 2, barY, rect.width - 4, barHeight);
+                    context.fillStyle = hpRatio > 0.5 ? "#6fbf73" : hpRatio > 0.25 ? "#d9a74a" : "#c85a5a";
+                    context.fillRect(rect.x + 2, barY, (rect.width - 4) * hpRatio, barHeight);
+                }
+
                 var name = String(token.name || "?");
                 if (!avatar) {
                     var initial = name.slice(0, 1) || "?";
@@ -802,6 +823,13 @@
                 chip.className = "vmap-turn-item" + (name === String(combat.current || "") ? " is-current" : "");
                 chip.textContent = name;
                 if (name === String(combat.current || "")) {
+                    var initiative = item && typeof item.initiative === "number" ? item.initiative : null;
+                    if (initiative !== null) {
+                        var orderTag = document.createElement("span");
+                        orderTag.className = "vmap-turn-budget";
+                        orderTag.textContent = "· 先攻 " + initiative;
+                        chip.appendChild(orderTag);
+                    }
                     var budget = item && item.budget && typeof item.budget.movement === "number" ? item.budget.movement : null;
                     if (budget !== null) {
                         var tag = document.createElement("span");

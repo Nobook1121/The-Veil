@@ -11,7 +11,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 import logging
 import math
 import re
@@ -363,6 +365,31 @@ def _normalize_token_light(raw: Any) -> dict[str, Any] | None:
     }
 
 
+def _normalize_token_combat(raw: Any) -> dict[str, Any] | None:
+    """棋子上的战斗快照（HP / 先攻 / 当前行动者）；非战斗棋子为 ``None``。"""
+    if not isinstance(raw, dict):
+        return None
+    combat_id = str(raw.get("combat_id") or "").strip()[:64]
+    combatant_id = str(raw.get("combatant_id") or "").strip()[:96]
+    if not combat_id and not combatant_id:
+        return None
+    name = str(raw.get("combatant_name") or raw.get("name") or "").strip()[:MAX_NAME]
+    return {
+        "combat_id": combat_id,
+        "combatant_id": combatant_id,
+        "combatant_name": name,
+        "hp": max(0, _as_int(raw.get("hp"), 0)),
+        "max_hp": max(0, _as_int(raw.get("max_hp"), 0)),
+        "temp_hp": max(0, _as_int(raw.get("temp_hp"), 0)),
+        "initiative": _as_int(raw.get("initiative"), 0),
+        "status": str(raw.get("status") or "")[:24],
+        "side": str(raw.get("side") or "")[:24],
+        "round": max(1, _as_int(raw.get("round"), 1)),
+        "current": bool(raw.get("current")),
+        "active": bool(raw.get("active", True)),
+    }
+
+
 def _normalize_token(raw: Any, grid: int, offset_x: int, offset_y: int) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -417,6 +444,10 @@ def _normalize_token(raw: Any, grid: int, offset_x: int, offset_y: int) -> dict[
         "owner_user_id": str(raw.get("owner_user_id") or ""),
         "kind": str(raw.get("kind") or "npc"),
         "combatant": str(raw.get("combatant") or ""),
+        # 战斗绑定：``combatant`` 存绑定串（NPC 为 ``npc:<combatant_id>``），
+        # ``combatant_name`` 保留可读名字，``combat`` 是战斗状态快照。
+        "combatant_name": str(raw.get("combatant_name") or "")[:MAX_NAME],
+        "combat": _normalize_token_combat(raw.get("combat")),
         # 角色卡头像（仅本地资源路径）；空字符串时前端保持旧的色块+首字表现。
         "avatar": _token_avatar(raw.get("avatar")),
         # 0 表示跟随场景迷雾的默认视野；>0 时为该棋子的视野半径（格）。
@@ -1337,6 +1368,8 @@ def _save_map(
     room_dir,
     state: dict[str, Any],
     request_record: dict[str, Any] | None = None,
+    *,
+    activate: bool = True,
 ) -> dict[str, Any]:
     """写入场景并推进 revision；成功的写请求会留下幂等记录。
 
@@ -1359,7 +1392,7 @@ def _save_map(
         normalized["recent_requests"] = records[-RECENT_REQUEST_LIMIT:]
     # 探索记录跟着场景一起落盘：写操作发生时，队伍视野覆盖的格子并入掩码。
     _update_explored(room_dir, normalized)
-    scene_store.save(room_dir, _persistable(normalized))
+    scene_store.save(room_dir, _persistable(normalized), activate=activate)
     return normalized
 
 
@@ -1766,6 +1799,12 @@ def _combat_payload(room_dir) -> dict[str, Any]:
             {
                 "name": name,
                 "user_id": combatant.get("user_id"),
+                "combatant_id": str(combatant.get("combatant_id") or ""),
+                "side": str(combatant.get("side") or ""),
+                "hp": max(0, _as_int(combatant.get("hp"), 0)),
+                "max_hp": max(0, _as_int(combatant.get("max_hp"), 0)),
+                "initiative": _as_int(combatant.get("initiative"), 0),
+                "status": str(combatant.get("status") or ""),
                 "budget": dict(combatant.get("budget") or {}),
             }
         )
@@ -1783,16 +1822,463 @@ def _combatant_for_token(combat: dict[str, Any], token: dict[str, Any]) -> tuple
     candidates = {
         str(token.get("combatant") or "").strip().casefold(),
         str(token.get("name") or "").strip().casefold(),
+        str(token.get("combatant_name") or "").strip().casefold(),
     }
+    combatant_raw = str(token.get("combatant") or "").strip()
+    if combatant_raw.lower().startswith("npc:"):
+        candidates.add(combatant_raw[4:].casefold())
+    block = token.get("combat") if isinstance(token.get("combat"), dict) else {}
+    bound_id = str(block.get("combatant_id") or "").strip()
     owner = str(token.get("owner_user_id") or "")
     for name, combatant in combatants.items():
         if not isinstance(combatant, dict):
             continue
+        if bound_id and _combatant_binding_id(combatant) == bound_id:
+            return str(name), combatant
         if str(name).strip().casefold() in candidates:
             return str(name), combatant
         if owner and str(combatant.get("user_id") or "") == owner:
             return str(name), combatant
     return "", None
+
+
+def _combatant_binding_id(combatant: dict[str, Any]) -> str:
+    combatant_id = str(combatant.get("combatant_id") or "").strip()
+    if combatant_id:
+        return combatant_id[:96]
+    return str(combatant.get("name") or "").strip()[:96]
+
+
+def _combat_binding(combatant: dict[str, Any]) -> str:
+    return f"npc:{_combatant_binding_id(combatant)}"
+
+
+def _combat_token_id(binding: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "-", binding).strip("-").lower()[:40]
+    if not safe:
+        safe = hashlib.sha1(binding.encode("utf-8")).hexdigest()[:10]
+    return f"combat-{safe}"
+
+
+def _combat_token_summary(
+    combat: dict[str, Any], name: str, combatant: dict[str, Any]
+) -> dict[str, Any]:
+    order = [str(item) for item in combat.get("order") or []]
+    turn = _as_int(combat.get("turn"), 0)
+    current = order[turn] if 0 <= turn < len(order) else ""
+    return {
+        "combat_id": str(combat.get("id") or "")[:64],
+        "combatant_id": _combatant_binding_id(combatant),
+        "combatant_name": str(combatant.get("display_name") or name)[:MAX_NAME],
+        "hp": max(0, _as_int(combatant.get("hp"), 0)),
+        "max_hp": max(0, _as_int(combatant.get("max_hp"), 0)),
+        "temp_hp": max(0, _as_int(combatant.get("temp_hp"), 0)),
+        "initiative": _as_int(combatant.get("initiative"), 0),
+        "status": str(combatant.get("status") or "")[:24],
+        "side": str(combatant.get("side") or "")[:24],
+        "round": max(1, _as_int(combat.get("round"), 1)),
+        "current": name == current,
+        "active": True,
+    }
+
+
+def _find_combat_token(state: dict[str, Any], combatant_id: str) -> dict[str, Any] | None:
+    binding = f"npc:{combatant_id}"
+    for token in state.get("tokens") or []:
+        block = token.get("combat") if isinstance(token.get("combat"), dict) else None
+        if block and str(block.get("combatant_id") or "") == combatant_id:
+            return token
+    for token in state.get("tokens") or []:
+        if str(token.get("combatant") or "") == binding:
+            return token
+    return None
+
+
+def _find_player_token(state: dict[str, Any], combatant: dict[str, Any]) -> dict[str, Any] | None:
+    user_id = str(combatant.get("user_id") or "")
+    name = str(combatant.get("name") or "").strip().casefold()
+    for token in state.get("tokens") or []:
+        if str(token.get("kind") or "") != "pc":
+            continue
+        if user_id and str(token.get("owner_user_id") or "") == user_id:
+            return token
+        for candidate in (token.get("combatant"), token.get("name")):
+            if name and str(candidate or "").strip().casefold() == name:
+                return token
+    return None
+
+
+def _combat_position(combatant: dict[str, Any], state: dict[str, Any]) -> tuple[int, int] | None:
+    position = combatant.get("position")
+    if not isinstance(position, dict):
+        return None
+    scene_id = str(position.get("scene_id") or "")
+    if scene_id and scene_id != str(state.get("scene_id") or ""):
+        return None
+    cell = position.get("cell") if isinstance(position.get("cell"), dict) else position
+    x, y = cell.get("x"), cell.get("y")
+    if x in (None, "") or y in (None, ""):
+        return None
+    return _clamp(_as_int(x, 0), -1000, 1000), _clamp(_as_int(y, 0), -1000, 1000)
+
+
+def _combat_anchor(state: dict[str, Any]) -> tuple[int, int]:
+    grid, offset_x, offset_y = _grid_of(state)
+    cells = [
+        _cell_of(token, grid, offset_x, offset_y)
+        for token in state.get("tokens") or []
+        if str(token.get("kind") or "") == "pc"
+    ]
+    if not cells:
+        return 0, 0
+    return (
+        int(round(sum(cell[0] for cell in cells) / len(cells))),
+        int(round(sum(cell[1] for cell in cells) / len(cells))),
+    )
+
+
+def _combat_token_color(combatant_id: str) -> str:
+    digest = hashlib.sha1(combatant_id.encode("utf-8")).hexdigest()
+    return TOKEN_COLORS[int(digest[:8], 16) % len(TOKEN_COLORS)]
+
+
+def _new_combat_token(
+    state: dict[str, Any], combatant: dict[str, Any], summary: dict[str, Any]
+) -> dict[str, Any] | None:
+    if len(state.get("tokens") or []) >= MAX_TOKENS:
+        return None
+    binding = _combat_binding(combatant)
+    token_id = _combat_token_id(binding)
+    existing_ids = {str(token.get("id") or "") for token in state.get("tokens") or []}
+    if token_id in existing_ids:
+        token_id = f"{token_id[:48]}-{hashlib.sha1(binding.encode('utf-8')).hexdigest()[:6]}"
+    return {
+        "id": token_id[:64],
+        "name": summary["combatant_name"],
+        "kind": "npc",
+        "combatant": binding[:96],
+        "combatant_name": summary["combatant_name"],
+        "combat": dict(summary),
+        "cell_x": 0,
+        "cell_y": 0,
+        "x": 0.0,
+        "y": 0.0,
+        "w": 1,
+        "h": 1,
+        "color": _combat_token_color(summary["combatant_id"]),
+        "owner_user_id": "",
+        "avatar": "",
+        "vision_cells": 0,
+    }
+
+
+def _place_combat_token(
+    state: dict[str, Any],
+    token: dict[str, Any],
+    anchor: tuple[int, int],
+    preferred: tuple[int, int] | None = None,
+) -> tuple[int, int] | None:
+    grid, offset_x, offset_y = _grid_of(state)
+    candidates: list[tuple[int, int]] = []
+    if preferred is not None:
+        candidates.append(preferred)
+    candidates.extend(
+        (anchor[0] + dx, anchor[1] + dy) for dx, dy in _placement_offsets()
+    )
+    seen: set[tuple[int, int]] = set()
+    for cell_x, cell_y in candidates:
+        if (cell_x, cell_y) in seen:
+            continue
+        seen.add((cell_x, cell_y))
+        if not _within_bounds(state, token, cell_x, cell_y):
+            continue
+        if _occupancy_conflict(state, token, cell_x, cell_y) is not None:
+            continue
+        _set_token_cell(token, cell_x, cell_y, 0.0, 0.0, grid, offset_x, offset_y)
+        return cell_x, cell_y
+    return None
+
+
+def _move_bound_token(
+    state: dict[str, Any], token: dict[str, Any], position: tuple[int, int] | None
+) -> bool:
+    """战斗状态里的位置变化回写到棋子；目标格被占/越界时保留原位置。"""
+    if position is None:
+        return False
+    grid, offset_x, offset_y = _grid_of(state)
+    current = _cell_of(token, grid, offset_x, offset_y)
+    if current == position:
+        return False
+    cell_x, cell_y = position
+    if not _within_bounds(state, token, cell_x, cell_y):
+        return False
+    if _occupancy_conflict(state, token, cell_x, cell_y) is not None:
+        return False
+    _set_token_cell(token, cell_x, cell_y, 0.0, 0.0, grid, offset_x, offset_y)
+    return True
+
+
+def _apply_combat_block(token: dict[str, Any], summary: dict[str, Any]) -> bool:
+    desired = dict(summary)
+    if token.get("combat") == desired and token.get("combatant_name") == desired["combatant_name"]:
+        return False
+    token["combat"] = desired
+    token["combatant_name"] = desired["combatant_name"]
+    return True
+
+
+def _clear_combat_tokens(state: dict[str, Any], combat_id: str) -> int:
+    removed = 0
+    kept: list[dict[str, Any]] = []
+    for token in state.get("tokens") or []:
+        block = token.get("combat") if isinstance(token.get("combat"), dict) else None
+        if not block or str(block.get("combat_id") or "") != combat_id:
+            kept.append(token)
+            continue
+        if str(token.get("kind") or "") == "npc":
+            removed += 1
+            continue
+        token.pop("combat", None)
+        token["combatant_name"] = ""
+        kept.append(token)
+    state["tokens"] = kept
+    return removed
+
+
+def _sync_scene_combat_tokens(
+    state: dict[str, Any],
+    combat: dict[str, Any],
+    active: bool,
+    active_ids: set[str],
+) -> tuple[bool, dict[str, Any]]:
+    """同步当前场景；返回 ``(changed, stats)``。"""
+    combat_id = str(combat.get("id") or "")
+    changed = False
+    stats: dict[str, Any] = {"placed": [], "updated": 0, "removed": 0, "warnings": []}
+    if not active:
+        removed = _clear_combat_tokens(state, combat_id)
+        return removed > 0, {**stats, "removed": removed}
+    combatants = combat.get("combatants") if isinstance(combat.get("combatants"), dict) else {}
+    anchor = _combat_anchor(state)
+    retired_status = {"fled", "retreated", "escaped", "撤退", "脱离"}
+    for name in combat.get("order") or []:
+        combatant = combatants.get(str(name))
+        if not isinstance(combatant, dict):
+            continue
+        combatant_id = _combatant_binding_id(combatant)
+        if not combatant_id:
+            continue
+        summary = _combat_token_summary(combat, str(name), combatant)
+        if combatant.get("is_player"):
+            token = _find_player_token(state, combatant)
+            if token is not None and _apply_combat_block(token, summary):
+                changed = True
+                stats["updated"] += 1
+            continue
+        token = _find_combat_token(state, combatant_id)
+        if str(combatant.get("status") or "").strip().casefold() in retired_status:
+            if token is not None:
+                state["tokens"].remove(token)
+                changed = True
+                stats["removed"] += 1
+            continue
+        if token is None:
+            token = _new_combat_token(state, combatant, summary)
+            if token is None:
+                stats["warnings"].append(
+                    {"code": "map.token_limit", "message": "地图棋子数量已达上限，未放置 NPC 棋子。"}
+                )
+                continue
+            state.setdefault("tokens", []).append(token)
+            cell = _place_combat_token(state, token, anchor, _combat_position(combatant, state))
+            if cell is None:
+                state["tokens"].remove(token)
+                stats["warnings"].append(
+                    {
+                        "code": "map.placement_failed",
+                        "message": f"地图上没有空位，未放置 {summary['combatant_name']} 的棋子。",
+                    }
+                )
+                continue
+            stats["placed"].append(
+                {
+                    "token_id": token["id"],
+                    "combatant_id": combatant_id,
+                    "name": summary["combatant_name"],
+                    "cell_x": cell[0],
+                    "cell_y": cell[1],
+                }
+            )
+            changed = True
+        elif _move_bound_token(state, token, _combat_position(combatant, state)):
+            changed = True
+        if _apply_combat_block(token, summary):
+            changed = True
+            stats["updated"] += 1
+    # 战斗中从行动顺序里被移除的单位：删掉它在这场战斗里的棋子。
+    for token in list(state.get("tokens") or []):
+        block = token.get("combat") if isinstance(token.get("combat"), dict) else None
+        if not block or str(block.get("combat_id") or "") != combat_id:
+            continue
+        if str(token.get("kind") or "") != "npc":
+            if str(block.get("combatant_id") or "") in active_ids:
+                continue
+            # PC 棋子不因退出战斗而删除，只清掉已失效的战斗快照。
+            token.pop("combat", None)
+            token["combatant_name"] = ""
+            changed = True
+            stats["updated"] += 1
+            continue
+        if str(block.get("combatant_id") or "") in active_ids:
+            continue
+        state["tokens"].remove(token)
+        changed = True
+        stats["removed"] += 1
+    return changed, stats
+
+
+def _active_combat_ids(combat: dict[str, Any]) -> set[str]:
+    combatants = combat.get("combatants") if isinstance(combat.get("combatants"), dict) else {}
+    ids: set[str] = set()
+    for combatant in combatants.values():
+        if isinstance(combatant, dict):
+            combatant_id = _combatant_binding_id(combatant)
+            if combatant_id:
+                ids.add(combatant_id)
+    return ids
+
+
+def _combat_scene_fingerprint(combat: dict[str, Any], state: dict[str, Any]) -> str:
+    payload = {
+        "combat_id": str(combat.get("id") or ""),
+        "active": bool(combat.get("active")),
+        "round": _as_int(combat.get("round"), 1),
+        "turn": _as_int(combat.get("turn"), 0),
+        "tokens": [
+            {
+                "id": token.get("id"),
+                "cell_x": token.get("cell_x"),
+                "cell_y": token.get("cell_y"),
+                "combat": token.get("combat"),
+            }
+            for token in state.get("tokens") or []
+            if isinstance(token.get("combat"), dict)
+        ],
+    }
+    return hashlib.sha1(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _sync_combat_tokens(room_dir, info: dict[str, Any], combat: dict[str, Any]) -> dict[str, Any]:
+    """按战斗状态维护当前场景与其它场景里的绑定棋子。
+
+    没有地图/场景关闭时直接降级（``status=skipped``），不创建任何地图文件；
+    放置失败只记 warning，战斗本身不受影响。
+    """
+    combat_id = str(combat.get("id") or "")
+    active = bool(combat.get("active"))
+    result: dict[str, Any] = {
+        "ok": True,
+        "status": "skipped",
+        "reason": "no_scene",
+        "combat_id": combat_id,
+        "changed": False,
+        "placed": [],
+        "updated": 0,
+        "removed": 0,
+        "warnings": [],
+    }
+    with room_lock(room_dir):
+        raw_state, source = scene_store.load(room_dir)
+        if source not in {"scene", "legacy"} or not isinstance(raw_state, dict) or not raw_state:
+            logger.info(
+                "veil_map_combat_sync_skipped room=%s combat=%s reason=no_scene",
+                info.get("id") or info.get("room_id") or "",
+                combat_id,
+            )
+            return result
+        state = _normalize_map(raw_state)
+        _reconcile_tokens(state, info)
+        active_ids = _active_combat_ids(combat)
+        changed, stats = _sync_scene_combat_tokens(state, combat, active, active_ids)
+        if changed:
+            fingerprint = _combat_scene_fingerprint(combat, state)
+            request_id = f"combat:{combat_id[:32]}:{fingerprint[:24]}"
+            if _duplicate_record(state, request_id) is None:
+                state = _save_map(
+                    room_dir,
+                    state,
+                    {
+                        "request_id": request_id,
+                        "action": "token.combat_sync",
+                        "ok": True,
+                        "revision": state.get("revision") or 0,
+                    },
+                )
+            _broadcast_combat_sync(info, state)
+        result.update(
+            status="synced",
+            reason="",
+            scene_id=str(state.get("scene_id") or ""),
+            changed=changed,
+            placed=stats["placed"],
+            updated=stats["updated"],
+            removed=stats["removed"],
+            warnings=stats["warnings"],
+        )
+        if not active:
+            removed = _cleanup_combat_scenes(
+                room_dir, str(state.get("scene_id") or ""), combat_id
+            )
+            result["removed"] += removed
+            if removed:
+                result["changed"] = True
+        for warning in result["warnings"]:
+            logger.warning(
+                "veil_map_combat_token_warning room=%s combat=%s code=%s",
+                info.get("id") or "",
+                combat_id,
+                warning.get("code"),
+            )
+        return result
+
+
+def _cleanup_combat_scenes(room_dir, active_scene: str, combat_id: str) -> int:
+    """战斗结束后清理其它场景里遗留的本场棋子，避免切场景留下孤儿。"""
+    removed = 0
+    for scene in scene_store.list_scenes(room_dir):
+        scene_id = str(scene.get("scene_id") or "")
+        if not scene_id or scene_id == active_scene:
+            continue
+        raw = scene_store.load_scene(room_dir, scene_id)
+        if not isinstance(raw, dict) or not raw:
+            continue
+        state = _normalize_map(raw)
+        count = _clear_combat_tokens(state, combat_id)
+        if not count:
+            continue
+        _save_map(
+            room_dir,
+            state,
+            {
+                "request_id": f"combat-clean:{combat_id[:24]}:{scene_id[:24]}",
+                "action": "token.combat_cleanup",
+                "ok": True,
+                "revision": state.get("revision") or 0,
+            },
+            activate=False,
+        )
+        removed += count
+    return removed
+
+
+def _broadcast_combat_sync(info: dict[str, Any], state: dict[str, Any]) -> None:
+    room_id = str(info.get("id") or info.get("room_id") or "")
+    if not room_id:
+        return
+    try:
+        _broadcast(room_id, state)
+    except Exception:  # noqa: BLE001 - 后台/测试环境没有 Flask 上下文时忽略广播
+        logger.debug("veil_map_combat_sync_broadcast_skipped room=%s", room_id)
 
 
 def _grid_of(state: dict[str, Any]) -> tuple[int, int, int]:
@@ -2592,7 +3078,20 @@ def _apply_combat_cost(
     try:
         from trpg_server.agents.tools.combat import save_combat
 
-        save_combat(SimpleNamespace(room_dir=room_dir, room_id=room_id), combat)
+        combatant["position"] = {
+            "scene_id": str(scene_store.active_scene_id(room_dir) or map_state.get("scene_id") or ""),
+            "cell": {"x": int(target_cell_x), "y": int(target_cell_y)},
+        }
+        save_combat(
+            SimpleNamespace(
+                room_dir=room_dir,
+                room_id=room_id,
+                # 地图是这次移动的写入方，棋子位置已经随地图落盘；
+                # 跳过插件钩子，避免钩子回写地图造成同一把锁内的旧状态覆盖。
+                skip_combat_map_sync=True,
+            ),
+            combat,
+        )
     except Exception:  # noqa: BLE001 - 预算回滚后按服务端错误返回
         budget["movement"] = budget_before
         logger.warning("veil_map_combat_save_failed room=%s", room_id, exc_info=True)
@@ -4667,6 +5166,20 @@ class _MapService:
         except Exception:  # noqa: BLE001
             logger.warning("veil_map_deactivate_failed", exc_info=True)
             return {"ok": False, "code": "map.scene_unavailable"}
+
+    def sync_combat_tokens(
+        self, room_dir: Any, info: dict[str, Any], combat: Any
+    ) -> dict[str, Any]:
+        """供 dnd5e 插件在战斗落盘后同步棋子；无地图时返回降级状态。"""
+        try:
+            if not _ruleset_enabled(info or {}):
+                return {"ok": True, "status": "skipped", "reason": "map_unavailable"}
+            if not isinstance(combat, dict) or not combat.get("id"):
+                return {"ok": True, "status": "skipped", "reason": "no_combat"}
+            return _sync_combat_tokens(Path(room_dir), info or {}, combat)
+        except Exception:  # noqa: BLE001 - 棋子同步失败不能影响战斗成立
+            logger.warning("veil_map_combat_sync_failed", exc_info=True)
+            return {"ok": False, "status": "error", "error": "地图棋子同步失败。"}
 
     def current_position(self, room_dir: Any) -> dict[str, Any] | None:
         try:

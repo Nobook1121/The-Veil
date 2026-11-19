@@ -89,6 +89,10 @@ class CombatRuleset(Protocol):
     - ``resolve_attack_action``：``attack_mode="d20"`` 时整次攻击（命中、伤害、
       暴击、抗性）都由插件结算，核心只负责日志、保存与行动预算。
     - ``start_turn`` / ``end_turn``：回合开始/结束的规则钩子（如死亡豁免）。
+    - ``prepare_combatant_from_module``：参与者来自剧本 NPC/怪物模块时，由规则集
+      读取模块原文并映射成自己的战斗者；核心只转交模块，不解释字段。
+    - ``on_combat_saved``：战斗状态每次落盘后的可选外设同步钩子（如地图棋子），
+      失败必须由插件自行降级，不能影响战斗成立。
     """
 
     ruleset_id: str

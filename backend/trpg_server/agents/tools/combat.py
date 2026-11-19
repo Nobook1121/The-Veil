@@ -262,6 +262,14 @@ def _save_combat(context: Any, combat: dict[str, Any]) -> None:
     mutate_room_state(room_dir, _apply)
     combat["room_id"] = str(getattr(context, "room_id", "") or "")
     _broadcast_state(combat)
+    # 可选规则集钩子：战斗状态每次落盘后由插件决定是否同步地图棋子等外设。
+    # 钩子失败只记日志，绝不回滚已经成立的战斗。
+    try:
+        hook = getattr(_combat_ruleset(combat, _combat_settings(context)), "on_combat_saved", None)
+        if callable(hook):
+            hook(combat, context=context)
+    except Exception:  # noqa: BLE001 - 外设同步失败不能影响战斗状态
+        logger.warning("combat saved hook failed ruleset=%s", combat.get("ruleset"), exc_info=True)
     if isinstance(pending_turns, list) and pending_turns and _areas_enabled(context):
         try:
             from trpg_server.workflows import areas as area_store
@@ -505,6 +513,8 @@ def _combatant_from_spec(spec: dict[str, Any]) -> dict[str, Any]:
         "is_player": False,
         "side": _as_text(spec.get("side"), "enemy") or "enemy",
         "monster_id": _as_text(spec.get("monster_id") or spec.get("ref_id")),
+        "module_id": _as_text(spec.get("module_id")),
+        "combatant_id": _as_text(spec.get("combatant_id")),
         "dex": dex,
         "initiative": dex,
         "str": strength,
@@ -1021,12 +1031,20 @@ def _prepare_combatant(
     context: Any,
     settings: CombatSettings,
     ruleset: Any,
+    *,
+    module: dict[str, Any] | None = None,
 ) -> None:
     """让规则集把角色卡/数据包映射成自己的战斗者字段。
 
-    插件未声明 ``prepare_combatant`` 时保留历史 CoC 技能解析；核心不解释
-    插件写入的任何字段。
+    来自剧本模块的参与者优先走规则集的可选
+    ``prepare_combatant_from_module``；未声明该钩子的规则集（如 CoC7）继续
+    走原有准备逻辑。核心只转交模块原文，不解释任何规则字段。
     """
+    if module is not None:
+        prepare_module = getattr(ruleset, "prepare_combatant_from_module", None)
+        if callable(prepare_module):
+            prepare_module(combatant, module, settings=settings)
+            return
     prepare = getattr(ruleset, "prepare_combatant", None)
     if callable(prepare):
         prepare(
@@ -1049,6 +1067,8 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     raw = arguments.get("participants")
     entries = raw if isinstance(raw, list) else []
     combatants: dict[str, Any] = {}
+    # 剧本模块原文只转交给声明了对应钩子的规则集，不写入战斗状态。
+    combatant_modules: dict[str, dict[str, Any]] = {}
     try:
         module_refs = arguments.get("module_ids")
         refs = [str(item).strip() for item in module_refs] if isinstance(module_refs, list) else []
@@ -1065,6 +1085,7 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             key = _unique_name(combatants, combatant["name"])
             combatant["name"] = key
             combatants[key] = combatant
+            combatant_modules[key] = module
         if entries:
             for entry in entries:
                 module_id = _as_text(entry.get("module_id")) if isinstance(entry, dict) else ""
@@ -1083,6 +1104,7 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                     key = _unique_name(combatants, combatant["name"])
                     combatant["name"] = key
                     combatants[key] = combatant
+                    combatant_modules[key] = module
                 elif isinstance(entry, dict) and _is_npc_entry(entry):
                     combatant = _combatant_from_spec(entry)
                     key = _unique_name(combatants, combatant["name"])
@@ -1120,7 +1142,13 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     for combatant in combatants.values():
         combatant["ruleset"] = ruleset.ruleset_id
         try:
-            _prepare_combatant(combatant, context, settings, ruleset)
+            _prepare_combatant(
+                combatant,
+                context,
+                settings,
+                ruleset,
+                module=combatant_modules.get(str(combatant.get("name") or "")),
+            )
         except ValueError as exc:
             return {"error": str(exc)}
         # 先攻掷骰期间把「被突袭」作为中性标记交给规则集，掷完立刻移除，
@@ -1202,6 +1230,7 @@ def join_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
     settings = _combat_settings(context)
     ruleset = _combat_ruleset(combat, settings)
+    source_module: dict[str, Any] | None = None
     try:
         module_id = _as_text(arguments.get("module_id"))
         raw = arguments.get("participant")
@@ -1213,6 +1242,7 @@ def join_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             if not spec["module_id"]:
                 spec["module_id"] = module_id
             combatant = _combatant_from_spec(spec)
+            source_module = module
         elif isinstance(raw, dict) and (_is_npc_entry(raw) or raw.get("dex") or raw.get("hp")):
             combatant = _combatant_from_spec(raw)
         else:
@@ -1238,7 +1268,7 @@ def join_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     combatant["name"] = key
     combatant["ruleset"] = ruleset.ruleset_id
     try:
-        _prepare_combatant(combatant, context, settings, ruleset)
+        _prepare_combatant(combatant, context, settings, ruleset, module=source_module)
     except ValueError as exc:
         return {"error": str(exc)}
     combatant["initiative"] = ruleset.roll_initiative(combatant, _roller, settings)

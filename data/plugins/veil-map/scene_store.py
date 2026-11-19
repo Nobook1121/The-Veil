@@ -203,6 +203,15 @@ def has_scene(room_dir, scene_id: str) -> bool:
     return bool(sid) and _load_scene(root, sid) is not None
 
 
+def load_scene(room_dir, scene_id: str) -> dict[str, Any] | None:
+    """读取指定场景（不改变房间当前场景）；场景不存在返回 ``None``。"""
+    root = scenes_root(room_dir)
+    sid = safe_scene_id(scene_id)
+    if not sid or sid == CLOSED_SCENE_ID:
+        return None
+    return _load_scene(root, sid)
+
+
 def activate(room_dir, scene_id: str) -> bool:
     """切换房间当前场景；场景不存在或没有完整代时返回 ``False``。"""
     root = scenes_root(room_dir)
@@ -257,8 +266,12 @@ def _prune(scene_dir: Path) -> None:
             shutil.rmtree(path, ignore_errors=True)
 
 
-def save(room_dir, state: dict[str, Any]) -> None:
-    """把完整状态写成新一代分片，最后原子提交 active.json。"""
+def save(room_dir, state: dict[str, Any], *, activate: bool = True) -> None:
+    """把完整状态写成新一代分片，最后原子提交 active.json。
+
+    ``activate=False`` 只更新该场景自己的代与场景指针，不切换房间当前场景；
+    供战斗结束后清理非当前场景的孤儿棋子使用。
+    """
     root = scenes_root(room_dir)
     scene_id = safe_scene_id(state.get("scene_id"))
     try:
@@ -287,5 +300,6 @@ def save(room_dir, state: dict[str, Any]) -> None:
         scene_dir / "active.json",
         {"schema": SCENE_SCHEMA, "scene_id": scene_id, "generation": generation, "revision": revision},
     )
-    write_json_atomic(root / "active.json", {"schema": SCENE_SCHEMA, "scene_id": scene_id})
+    if activate:
+        write_json_atomic(root / "active.json", {"schema": SCENE_SCHEMA, "scene_id": scene_id})
     _prune(scene_dir)

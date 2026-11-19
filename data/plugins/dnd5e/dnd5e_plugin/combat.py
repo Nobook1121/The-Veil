@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import random
 import re
 from typing import Any, Callable, Mapping
@@ -39,6 +40,17 @@ DEFAULT_UNARMED = {
 
 _DICE_RE = re.compile(r"^\s*(\d*)d(\d+)\s*([+-]\s*\d+)?\s*$", re.IGNORECASE)
 _FLAT_RE = re.compile(r"^\s*([+-]?\d+)\s*$")
+_COMBATANT_ID_UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
+
+
+def combatant_id_for(name: Any) -> str:
+    """战斗者的稳定 id：纯 ASCII 名字归一化，含中文等非 ASCII 时用短哈希兜底。"""
+    text = _text(name)
+    slug = _COMBATANT_ID_UNSAFE.sub("-", text).strip("-").lower()[:40]
+    if slug and text.isascii():
+        return slug
+    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:10]
+    return f"npc-{digest}"
 
 
 def _as_int(value: Any, fallback: int = 0) -> int:
@@ -423,12 +435,61 @@ class Dnd5eCombatRules:
             if monster is None:
                 raise ValueError(f"数据包 dnd5e-srd 中没有怪物“{monster_id}”")
             self._apply_monster(combatant, monster)
+            combatant.setdefault("combatant_id", combatant_id_for(combatant.get("name")))
             return
         combatant.setdefault("abilities", self._ability_scores_from_flat(combatant))
         combatant.setdefault("armorClass", _as_int(combatant.get("ac"), 10 + self._dex_mod(combatant)))
         combatant.setdefault("attacks", [dict(DEFAULT_UNARMED)])
         combatant.setdefault("speed_ft", 30)
         combatant.setdefault("temp_hp", 0)
+        combatant.setdefault("combatant_id", combatant_id_for(combatant.get("name")))
+
+    def prepare_combatant_from_module(
+        self,
+        combatant: dict[str, Any],
+        module: Mapping[str, Any],
+        *,
+        settings: Any = None,
+    ) -> None:
+        """把剧本 NPC 模块映射成 5e 战斗者；核心只负责转交模块原文。"""
+        from dnd5e_plugin.statblock import combatant_from_module
+
+        spec = combatant_from_module(module)
+        name = _text(combatant.get("name")) or spec["name"]
+        side = _text(combatant.get("side")) or spec.get("side") or "enemy"
+        abilities = dict(spec["abilities"])
+        combatant.update(
+            {
+                "is_player": False,
+                "is_npc": True,
+                "side": side,
+                "combatant_id": combatant_id_for(name),
+                "module_id": spec.get("module_id") or _text(module.get("id")),
+                "monster_id": spec.get("monster_id") or "",
+                "monster_name": spec.get("monster_name") or spec.get("display_name") or name,
+                "display_name": spec.get("display_name") or name,
+                "abilities": abilities,
+                "dex": abilities.get("dex", 10),
+                "str": abilities.get("str", 10),
+                "con": abilities.get("con", 10),
+                "armorClass": _as_int(spec.get("armorClass"), 10),
+                "max_hp": max(1, _as_int(spec.get("max_hp"), 1)),
+                "hp": max(0, _as_int(spec.get("hp"), 1)),
+                "temp_hp": max(0, _as_int(spec.get("temp_hp"), 0)),
+                "speed_ft": max(0, _as_int(spec.get("speed_ft"), 30)),
+                "attacks": [dict(row) for row in spec.get("attacks") or []],
+                "creature_type": _text(spec.get("creature_type")).casefold() or "humanoid",
+                "size": _text(spec.get("size")),
+                "cr": spec.get("cr") or "",
+                "xp": _as_int(spec.get("xp"), 0),
+                "damage_resistances": list(spec.get("damage_resistances") or []),
+                "damage_vulnerabilities": list(spec.get("damage_vulnerabilities") or []),
+                "damage_immunities": list(spec.get("damage_immunities") or []),
+                "statblock_source": spec.get("source") or "",
+            }
+        )
+        if combatant["hp"] > combatant["max_hp"]:
+            combatant["hp"] = combatant["max_hp"]
 
     def _prepare_player(
         self,
@@ -1124,6 +1185,14 @@ class Dnd5eCombatRules:
         from dnd5e_plugin.spells import persist_spellcasting
 
         persist_spellcasting(card, combatant)
+
+    def on_combat_saved(self, combat: Mapping[str, Any], *, context: Any = None) -> None:
+        """战斗状态每次落盘后同步地图棋子；地图不可用时静默降级。"""
+        if context is None or getattr(context, "skip_combat_map_sync", False):
+            return
+        from dnd5e_plugin.map_link import sync_combat_tokens
+
+        sync_combat_tokens(context, combat)
 
     # -- 内部工具 ---------------------------------------------------------
     def _dex_mod(self, combatant: Mapping[str, Any]) -> int:
