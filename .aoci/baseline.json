@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-19T12:06:21Z",
-  "updated_at": "2026-11-20T14:46:20Z",
+  "updated_at": "2026-11-20T16:04:56Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -941,9 +941,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "5b1cfbb72e100caacc7ab44517f45d6c3acc88f156c49a2871f0975476eb9941",
-      "size": 225703,
-      "normalized_sha256": "5b1cfbb72e100caacc7ab44517f45d6c3acc88f156c49a2871f0975476eb9941"
+      "sha256": "029831318a2905980f1e3c11c3d4e20b5f2258d9d98dc8b02dba37ff4b145ff0",
+      "size": 225827,
+      "normalized_sha256": "029831318a2905980f1e3c11c3d4e20b5f2258d9d98dc8b02dba37ff4b145ff0"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -1589,9 +1589,9 @@
     },
     "backend/trpg_server/character_service.py": {
       "role": "index",
-      "sha256": "dd8ea1214e5db607131b3dd682d311863fc4f1c04756200ee3834845d090b82f",
-      "size": 27419,
-      "normalized_sha256": "bc76542be72fc21cab885af804d17b6e9ed6447b08c250951d9747c3fff3e8d8"
+      "sha256": "d5aa0a606b44caa1023158d08d815e292f084a7af01a6430498caf16e7bc91f2",
+      "size": 28106,
+      "normalized_sha256": "04d018ef4214070a93dce17b2af54bc3a9a80de486a4bd17d5fc24f1c3033be6"
     },
     "backend/trpg_server/check_service.py": {
       "role": "index",
@@ -5382,9 +5382,9 @@
     },
     "docs/plans/cordis-paradigm-adoption-plan.md": {
       "role": "index",
-      "sha256": "c0de0b747f5552b178c7d21d1fb7aff59aad23336bc1ee58681f7b1cf0e854ba",
-      "size": 21987,
-      "normalized_sha256": "96e6ce5701adf5d99f0615d86047e3e7c5f58e47cf3fa7a8c81d2ba01f33879e"
+      "sha256": "343494a2a18db84991407f722bc1811946f5e1ce9c6a00102188f7639be2fe7e",
+      "size": 22727,
+      "normalized_sha256": "4d21e83260cbf4bb4022a653bf973ad97f02cd2bd39ab112b248f95682769a3c"
     },
     "docs/plans/dnd5e-ruleset-plugin-design.md": {
       "role": "index",
@@ -6913,9 +6913,9 @@
     },
     "release/changelog/v1.0.7.md": {
       "role": "index",
-      "sha256": "accd5bf226c7a099ac308d4fe340ab1801061497f5759f11bff1e49cc427f965",
-      "size": 41605,
-      "normalized_sha256": "accd5bf226c7a099ac308d4fe340ab1801061497f5759f11bff1e49cc427f965"
+      "sha256": "39b1cde78b4c8531a65b305045b55bcee4e7134a79ea3ef0198796824baf3d68",
+      "size": 49377,
+      "normalized_sha256": "39b1cde78b4c8531a65b305045b55bcee4e7134a79ea3ef0198796824baf3d68"
     },
     "requirements-ocr.txt": {
       "role": "index",
@@ -8350,6 +8350,12 @@
       "sha256": "ff546be7f465f2db90c77bfa9899270a2da0c6b055ba735e74c4f319dc26ab77",
       "size": 6296,
       "normalized_sha256": "ff546be7f465f2db90c77bfa9899270a2da0c6b055ba735e74c4f319dc26ab77"
+    },
+    "tests/test_ruleset_f1_pending_types.py": {
+      "role": "observe",
+      "sha256": "07b0fa2052b2f74e3d595bc11283929869964d6b1922e6fd785e5abb6cc7b7e7",
+      "size": 17108,
+      "normalized_sha256": "07b0fa2052b2f74e3d595bc11283929869964d6b1922e6fd785e5abb6cc7b7e7"
     },
     "tests/test_ruleset_knowledge.py": {
       "role": "observe",

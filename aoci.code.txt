@@ -85,7 +85,7 @@ app_info.py[OU3M]: F:关于页数据：版本、构建、仓库、运行时与�
 backup_admin.py[OB2T]: F:数据备份（控制台专用）：把 config、scenarios、rooms、知识库、用户库与日志打包为 zip；不触碰向量库等可重建产物，避免备份体积失控 | R:- | A:_BACKUP_SOURCES 为备份清单权威，目录缺失时跳过 | S:-
 character_ai.py[IB5L]: F:角色卡 AI 生成：平台接入、提示词拼装与模型输出解析高内聚；生成 JSON 交前端 createCharacterCard 归一化复用角色卡框架（属性上限、技能点、职业武器目录），后端不重复实现规则 | R:code:backend/trpg_server/agents/ai_request.py | A:- | S:-
 character_card_io.py[DD6L]: F:角色卡导入导出共用结构：核心 ENVELOPE_FIELD_SPECS（12 信封字段），卡面规格按卡 rulesetId 取插件 card_field_specs，插件未声明走信封+原样兼容；导出与导入同一份组合规格防两边字段漂移 | R:code:backend/trpg_server/character_service.py,code:backend/trpg_server/ruleset/coc7/schema.py | A:信封与卡面组合顺序为历史键序（ENVELOPE_EXPORT_LEADING/TRAILING），旧导出逐字节兼容 | S:-
-character_service.py[DB7L]: F:角色卡领域服务：路由与网站 Agent 从同一套保存逻辑进入避免两条写路径不同结果；不依赖 Flask 全局 session，身份全部来自 Actor；旧卡形状检测复用 routes 信封外壳（C1 删核心副本），预设武器经默认插件 catalogs（D2） | R:code:backend/trpg_server/character_card_io.py,code:backend/trpg_server/routes/characters.py | A:Actor 为身份抽象 | S:-
+character_service.py[DB7L]: F:角色卡领域服务：路由与网站 Agent 从同一套保存逻辑进入避免两条写路径不同结果；不依赖 Flask 全局 session，身份全部来自 Actor；apply_room_changes 资源类 type 按规则集槽位声明分派（F1） | R:code:backend/trpg_server/character_card_io.py,code:backend/trpg_server/ruleset/capabilities.py | A:Actor 为身份抽象 | S:armor 为派生镜像非资源槽位（两套规则集均未声明，强补声明会改房间快照形状），勿按直觉归槽
 check_service.py[DB7L]: F:规则无关的检定调度：REST 路由、房间控制台与 AI 工具统一经此结算；具体判定由规则集插件的 checks 能力提供，本模块只管输入校验、难度与房规阈值、结果格式 | R:code:backend/trpg_server/ruleset/capabilities.py,code:backend/trpg_server/ruleset/__init__.py | A:CheckServiceError 消息可直接返回调用方 | S:-
 config_admin.py[OC3S]: F:配置查看与遗留文件迁移（控制台专用）：复用 config 分层加载与注释保留写入，不依赖 Flask 请求上下文，依赖由调用方注入 | R:code:backend/trpg_server/config/__init__.py | A:- | S:-
 console_args.py[CC4S]: F:控制台参数解析共享实现：纯词参数（开关直写词、带值 key value），旧写法兼容，负数始终按位置参数；各域只声明词表，分词与兼容逻辑集中一处 | R:code:backend/trpg_server/console_commands.py | A:ConsoleArgSpec | S:-
@@ -838,7 +838,7 @@ pattern_cyber_2.md[SD2M]: F:赛博主题 pattern_cyber_2 设计文档 | R:code:d
 ===/<repository>/docs/plans/===
 coc7-rules-audit.md[SD3M]: F:CoC7 规则审计计划：规则书口径与实现的对照清单 | R:- | A:- | S:-
 coc7-rules-roadmap.md[SD2S]: F:CoC7 规则路线图 | R:code:docs/plans/coc7-rules-audit.md | A:- | S:-
-cordis-paradigm-adoption-plan.md[SD3S]: F:Cordis 范式采纳计划：插件 mini 内核、注册耦合解除、路由可逆化与规则集边界收敛的阶段计划与实施状态记录（P0/P1/默认参数化/B1/D1/D2/D3/C1/E1 已落地） | R:code:backend/trpg_server/plugins/kernel/__init__.py | A:- | S:-
+cordis-paradigm-adoption-plan.md[SD3S]: F:Cordis 范式采纳计划：插件 mini 内核、注册耦合解除、路由可逆化与规则集边界收敛的阶段计划与实施状态记录（P0/P1/默认参数化/B1/D1/D2/D3/C1/E1/F1 全部落地，计划完成） | R:code:backend/trpg_server/plugins/kernel/__init__.py | A:- | S:-
 dnd5e-ruleset-plugin-design.md[SD3L]: F:dnd5e 规则集插件化设计：从内置模块到 data/plugins 插件的迁移设计 | R:- | A:- | S:-
 dnd5e-ruleset-subsystem-survey.md[SD2L]: F:dnd5e 子系统调研：判定壳、会话、资源与效果等契约的现状梳理 | R:code:docs/plans/ruleset-core-generalization-survey.md | A:- | S:-
 prop-workshop-design.md[SD3L]: F:道具工坊设计稿：模板、存储、渲染与 AI 起草通道 | R:code:backend/trpg_server/props/__init__.py | A:- | S:-
@@ -1132,7 +1132,7 @@ v1.0.3.md[SV1T]: F:v1.0.3 版本变更日志 | R:code:release/RELEASE_MANIFEST.m
 v1.0.4.md[SV1T]: F:v1.0.4 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
 v1.0.5.md[SV1T]: F:v1.0.5 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
 v1.0.6.md[SV1T]: F:v1.0.6 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
-v1.0.7.md[SV2M]: F:v1.0.7 当前版本变更日志：插件生命周期 v2、地图与工作流、规则集边界收敛各批次（P0 至 E1）变更 | R:code:release/RELEASE_MANIFEST.md | A:当前 APP_VERSION 1.0.7 | S:-
+v1.0.7.md[SV2M]: F:v1.0.7 当前版本变更日志：插件生命周期 v2、地图与工作流、规则集边界收敛全部批次（P0 至 F1，已收官）变更 | R:code:release/RELEASE_MANIFEST.md | A:当前 APP_VERSION 1.0.7 | S:-
 
 ===/<repository>/research/cordis/===
 Cordis-调研报告.md[SA3L]: F:Cordis 插件框架调研报告：Shigma 的 Cordis v4 与 deepseek-harness 的采纳分析，得出插件化可借鉴结论 | R:code:docs/plans/cordis-paradigm-adoption-plan.md | A:- | S:-
