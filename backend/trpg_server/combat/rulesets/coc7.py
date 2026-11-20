@@ -12,6 +12,24 @@ from ..contracts import DamageOutcome, RoundEndOutcome
 
 LEVEL_RANK = {"fumble": -1, "failure": 0, "regular": 1, "hard": 2, "extreme": 3, "critical": 4}
 SKIPPED_STATUS = {"unconscious", "dying", "dead"}
+# 徒手武器目录条目（格斗（斗殴）专精、1D3、无贯穿/卡壳）。
+# 核心攻击/反击链路只向 ``unarmed_weapon()`` 查询该条目，不再自持 CoC 武器表。
+UNARMED_WEAPON = {
+    "name": "徒手",
+    "skill": "格斗（斗殴）",
+    "skillKey": "fighting",
+    "specialtyKey": "brawl",
+    "damage": "1D3",
+    "range": "接触",
+    "impale": False,
+    "attacks": "1",
+    "ammo": "N/A",
+    "malfunction": "N/A",
+}
+
+
+def _max_roll(terms) -> int:
+    return sum(max(0, int(count)) * max(1, int(sides)) for count, sides in terms)
 
 
 def _success_level(roll: int, target: int, critical: int = 1, fumble: int = 96) -> str:
@@ -62,6 +80,59 @@ class Coc7Ruleset:
     def build_and_damage_bonus(self, str_value: Any, siz_value: Any):
         """伤害加值/体格：这是本规则集的伤害模型，由插件提供。"""
         return build_and_damage_bonus(str_value, siz_value)
+
+    def unarmed_weapon(self) -> dict[str, Any]:
+        """徒手攻击/反击的武器目录条目（格斗（斗殴）、1D3）。"""
+        return dict(UNARMED_WEAPON)
+
+    def extreme_damage(
+        self,
+        terms,
+        fixed: int,
+        db,
+        *,
+        raw: str = "",
+        impale: bool = False,
+        allow_impale: bool = True,
+        roll_damage=None,
+    ) -> tuple[int, str]:
+        """极限成功的伤害合成：满骰面；贯穿武器追加一次武器伤害骰（p97）。"""
+        db_terms = [tuple(term) for term in db or []]
+        if not (impale and allow_impale):
+            total = _max_roll(terms) + int(fixed) + _max_roll(db_terms)
+            return max(0, total), f"极限成功·满伤害（{raw}{' +DB' if db_terms else ''}）"
+        extra, _ = roll_damage(terms)
+        total = _max_roll(terms) + int(fixed) + extra + _max_roll(db_terms)
+        return max(0, total), f"极限成功·贯穿满伤害并追加一次武器伤害骰 {terms}"
+
+    def weapon_malfunction(self, roll: Any, threshold: Any) -> bool:
+        """射击卡壳判定：骰值不低于武器故障值即故障（p97-98）。
+
+        故障值本身是武器表数据（由核心转交），「达到阈值即卡壳」是本规则集
+        的判定；``threshold`` 缺省（N/A 解析为 ``None``）恒不卡壳。
+        """
+        try:
+            value = int(threshold)
+        except (TypeError, ValueError):
+            return False
+        return bool(value) and int(roll) >= value
+
+    def auto_fire_composition(
+        self, bullets: Any, extreme: Any, difficulty_rank: Any
+    ) -> tuple[int, int]:
+        """全自动配比：常规成功一半命中；极难全中且前半贯穿（p97-98）。"""
+        usable = max(0, int(bullets))
+        hits = usable if extreme else max(1, usable // 2)
+        impale_count = usable // 2 if extreme and int(difficulty_rank) < 2 else 0
+        return hits, impale_count
+
+    def initiative_score(self, level: str, dex: Any) -> int:
+        """可选先攻检定的排序键：成功等级 ×1000 + DEX（p105）。"""
+        return LEVEL_RANK.get(level, 0) * 1000 + int(dex or 0)
+
+    def initial_sanity(self, power: Any) -> int:
+        """无卡参与者未显式给出理智时的起始值：SAN 起始 = POW。"""
+        return max(0, int(power or 0))
 
     # -- 先攻与行动经济 ---------------------------------------------------
     def roll_initiative(

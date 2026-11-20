@@ -17,6 +17,7 @@ from trpg_server import weapon_catalog
 from trpg_server.agents import player_roll
 from trpg_server.agents.tools import combat
 from trpg_server.agents.tools.dice import _percentile_from_faces, _plan_percentile
+from trpg_server.combat.registry import unarmed_weapon
 from trpg_server.json_store import read_json
 from trpg_server.responses import error_response, success_response
 from trpg_server.settings import CONFIG_DIR, SCENARIOS_DIR
@@ -177,7 +178,16 @@ def _weapon_options(combat_state_data: dict[str, Any] | None, name: str, info: d
             }
         )
     if not options:
-        options.append({"name": combat.UNARMED_WEAPON["name"], "skill": combat.UNARMED_WEAPON["skill"], "damage": "1D3", "ranged": False})
+        # 徒手条目按本场战斗的规则集解析（coc7：格斗（斗殴）/1D3）；缺席退中性徒手。
+        unarmed = unarmed_weapon(str((combat_state_data or {}).get("ruleset") or ""))
+        options.append(
+            {
+                "name": unarmed["name"],
+                "skill": unarmed["skill"],
+                "damage": str(unarmed.get("damage") or "1D3"),
+                "ranged": False,
+            }
+        )
     return options
 
 
@@ -215,7 +225,7 @@ def _prepare_check(
     if weapon_name and weapon is None:
         return {"error": f"角色卡上没有武器“{weapon_name}”"}
     if weapon is None:
-        weapon = combat.UNARMED_WEAPON
+        weapon = unarmed_weapon(str((combat_state_data or {}).get("ruleset") or ""))
     if action == "shoot":
         skill_value, skill_label = combat._resolve_skill_value(
             attacker, card, requested=str(payload.get("skill") or ""),

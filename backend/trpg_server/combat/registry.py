@@ -141,3 +141,111 @@ def build_and_damage_bonus(
         except Exception:  # noqa: BLE001 - 规则实现异常不应击穿战斗主循环
             logger.warning("build_and_damage_bonus failed", exc_info=True)
     return 0, "", []
+
+
+def unarmed_weapon(ruleset_id: str | None = None) -> dict[str, Any]:
+    """徒手武器目录条目；插件可用 ``unarmed_weapon()`` 提供，缺省退中性徒手。
+
+    中性条目不带任何规则集的专精键 / 贯穿 / 卡壳语义，只保证攻击链路可用。
+    """
+    from trpg_server.combat.contracts import DEFAULT_UNARMED_WEAPON
+
+    value = _capability("unarmed_weapon", ruleset_id)
+    weapon = value() if callable(value) else value
+    if isinstance(weapon, Mapping) and weapon:
+        return dict(weapon)
+    return dict(DEFAULT_UNARMED_WEAPON)
+
+
+def _max_total(terms: Any) -> int:
+    return sum(max(0, int(count)) * max(1, int(sides)) for count, sides in terms or [])
+
+
+def extreme_damage(
+    terms: Any,
+    fixed: int,
+    db: Any,
+    *,
+    raw: str = "",
+    impale: bool = False,
+    allow_impale: bool = True,
+    roll_damage: Any = None,
+    ruleset_id: str | None = None,
+) -> tuple[int, str]:
+    """极限成功的伤害合成；插件可用 ``extreme_damage()`` 覆盖。
+
+    核心只转交武器解析结果（骰项 / 固定值 / 伤害加值骰项 / 原始表达式），
+    缺省按「取满骰面、无贯穿追加」的中性合成。
+    """
+    handler = _capability("extreme_damage", ruleset_id)
+    if callable(handler):
+        try:
+            total, detail = handler(
+                terms,
+                int(fixed),
+                db,
+                raw=raw,
+                impale=impale,
+                allow_impale=allow_impale,
+                roll_damage=roll_damage,
+            )
+            return int(total), str(detail)
+        except Exception:  # noqa: BLE001 - 规则实现异常不应击穿战斗主循环
+            logger.warning("extreme_damage failed", exc_info=True)
+    total = _max_total(terms) + int(fixed) + _max_total(db)
+    return max(0, total), f"极限成功·满伤害（{raw}{' +DB' if db else ''}）"
+
+
+def weapon_malfunction(roll: Any, threshold: Any, ruleset_id: str | None = None) -> bool:
+    """射击卡壳判定；插件可用 ``weapon_malfunction()`` 提供，缺省恒不卡壳。"""
+    handler = _capability("weapon_malfunction", ruleset_id)
+    if callable(handler):
+        try:
+            return bool(handler(roll, threshold))
+        except Exception:  # noqa: BLE001 - 规则实现异常不应击穿战斗主循环
+            logger.warning("weapon_malfunction failed", exc_info=True)
+    return False
+
+
+def auto_fire_composition(
+    bullets: Any, extreme: Any, difficulty_rank: Any, ruleset_id: str | None = None
+) -> tuple[int, int]:
+    """全自动的（命中数, 贯穿数）配比；插件可覆盖，缺省全中且不贯穿。"""
+    handler = _capability("auto_fire_composition", ruleset_id)
+    if callable(handler):
+        try:
+            hits, impale_count = handler(bullets, extreme, difficulty_rank)
+            return int(hits), int(impale_count)
+        except Exception:  # noqa: BLE001 - 规则实现异常不应击穿战斗主循环
+            logger.warning("auto_fire_composition failed", exc_info=True)
+    return max(1, int(bullets or 1)), 0
+
+
+def initiative_score(level: Any, dex: Any, ruleset_id: str | None = None) -> int:
+    """可选先攻检定的数值合成；插件可用 ``initiative_score()`` 覆盖。
+
+    缺省按「等级排序 ×1000 + DEX」合成：等级名与排序仍由 ``level_rank()``
+    提供，本缺省只保证占位规则集也能给出确定顺序。
+    """
+    handler = _capability("initiative_score", ruleset_id)
+    if callable(handler):
+        try:
+            return int(handler(level, dex))
+        except Exception:  # noqa: BLE001 - 规则实现异常不应击穿战斗主循环
+            logger.warning("initiative_score failed", exc_info=True)
+    return level_rank(ruleset_id).get(level, 0) * 1000 + int(dex or 0)
+
+
+def initial_sanity(power: Any, ruleset_id: str | None = None) -> int:
+    """无卡参与者未显式给出理智时的起始值；插件可覆盖，缺省 0。
+
+    该钩子只在规则集声明了 ``san`` 资源槽位（战斗侧理智字段存在）时被调用，
+    因此缺省值不会给无关规则集的战斗者凭空造出理智字段。
+    """
+    handler = _capability("initial_sanity", ruleset_id)
+    if callable(handler):
+        try:
+            return max(0, int(handler(power)))
+        except Exception:  # noqa: BLE001 - 规则实现异常不应击穿战斗主循环
+            logger.warning("initial_sanity failed", exc_info=True)
+    return 0

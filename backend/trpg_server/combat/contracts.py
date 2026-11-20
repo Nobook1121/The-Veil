@@ -24,6 +24,21 @@ DEFAULT_LEVEL_RANK: dict[str, int] = {
 }
 # 默认「已失去行动能力」的状态集合，插件可用 ``skipped_statuses()`` 覆盖。
 DEFAULT_SKIPPED_STATUSES = frozenset({"unconscious", "dying", "dead"})
+# 默认徒手武器条目（中性）：规则集未声明 ``unarmed_weapon()`` 时使用。
+# 只保证攻击链路可用（可解析的小伤害 + 近战），不带任何规则集的专精键、
+# 贯穿或卡壳语义。
+DEFAULT_UNARMED_WEAPON: dict[str, Any] = {
+    "name": "徒手",
+    "skill": "徒手",
+    "skillKey": "",
+    "specialtyKey": "",
+    "damage": "1D3",
+    "range": "接触",
+    "impale": False,
+    "attacks": "1",
+    "ammo": "N/A",
+    "malfunction": "N/A",
+}
 
 
 def level_rank_of(level: str, rank: Mapping[str, int] | None = None) -> int:
@@ -48,17 +63,24 @@ class CheckOutcome:
 
 @dataclass
 class DamageOutcome:
-    """伤害结算结果。字段是“事实”，不是规则书术语。"""
+    """伤害结算结果。字段是“事实”，不是规则书术语。
+
+    ``major_wound`` / ``dying`` / ``unconscious`` / ``dead`` 是 CoC7 的伤势
+    状态集，对其他伤害模型并非天然存在：规则集没有对应概念时置 ``None``
+    （含义是「不适用」，由 :func:`trpg_server.combat.registry` 之外的唯一
+    消费方 ``agents/tools/combat._apply_damage`` 按 ``False`` 呈现），不强制
+    其他伤害模型塞假布尔值。
+    """
 
     damage: int = 0
     armor: int = 0
     effective: int = 0
     hp_before: int = 0
     hp_after: int = 0
-    major_wound: bool = False
-    dying: bool = False
-    unconscious: bool = False
-    dead: bool = False
+    major_wound: bool | None = None
+    dying: bool | None = None
+    unconscious: bool | None = None
+    dead: bool | None = None
     note: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -93,6 +115,18 @@ class CombatRuleset(Protocol):
       读取模块原文并映射成自己的战斗者；核心只转交模块，不解释字段。
     - ``on_combat_saved``：战斗状态每次落盘后的可选外设同步钩子（如地图棋子），
       失败必须由插件自行降级，不能影响战斗成立。
+    - ``unarmed_weapon()``：未持械攻击/反击时使用的徒手武器目录条目；未声明时
+      核心退中性徒手（无专精键、无贯穿/卡壳语义）。
+    - ``extreme_damage(...)``：极限成功的伤害合成（满骰面 / 贯穿追加）；核心只
+      转交武器解析结果，未声明时退「满骰面、不贯穿」。
+    - ``weapon_malfunction(roll, threshold)``：射击卡壳判定；未声明时恒不卡壳。
+    - ``auto_fire_composition(...)``：全自动的命中数 / 贯穿数配比；未声明时全中
+      且不贯穿。
+    - ``initiative_score(level, dex)``：可选先攻检定的数值合成；未声明时核心按
+      「等级排序 ×1000 + DEX」合成。
+    - ``initial_sanity(power)``：无卡参与者未显式给出理智时的起始值约定；战斗
+      侧理智字段的存在性由插件 schema 的 ``san`` 资源槽位声明，未声明该槽位的
+      规则集在战斗中整体跳过理智读写。
     """
 
     ruleset_id: str

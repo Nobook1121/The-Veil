@@ -35,15 +35,21 @@ from trpg_server.agents.tools.dice import (
 )
 from trpg_server.combat.contracts import DEFAULT_SKIPPED_STATUSES
 from trpg_server.combat.registry import (
+    auto_fire_composition,
     build_and_damage_bonus,
+    extreme_damage,
     get_ruleset,
+    initiative_score,
+    initial_sanity,
     level_rank,
+    unarmed_weapon,
+    weapon_malfunction,
 )
 from trpg_server.combat.scheduler import TurnScheduler
 from trpg_server.combat.settings import CombatSettings, resolve_settings
 from trpg_server.json_store import write_json_atomic
 from trpg_server.room_log import log_room_event
-from trpg_server.ruleset.capabilities import combat_rules_of
+from trpg_server.ruleset.capabilities import combat_rules_of, resource_slot
 from trpg_server.ruleset.registry import get_plugin
 
 logger = logging.getLogger(__name__)
@@ -52,19 +58,6 @@ logger = logging.getLogger(__name__)
 SKIPPED_STATUS = DEFAULT_SKIPPED_STATUSES
 
 MAX_BURST = 10
-
-UNARMED_WEAPON = {
-    "name": "徒手",
-    "skill": "格斗（斗殴）",
-    "skillKey": "fighting",
-    "specialtyKey": "brawl",
-    "damage": "1D3",
-    "range": "接触",
-    "impale": False,
-    "attacks": "1",
-    "ammo": "N/A",
-    "malfunction": "N/A",
-}
 
 
 def _as_int(value: Any, fallback: int = 0) -> int:
@@ -206,6 +199,41 @@ def _combat_detail_rules(settings: CombatSettings):
         return combat_rules_of(get_plugin(settings.ruleset_id))
     except Exception:  # pragma: no cover - 仅在注册表为空时触发
         return None
+
+
+def _sanity_slot(ruleset_id: str | None) -> dict[str, Any] | None:
+    """当前规则集的理智资源槽位声明；未声明时返回 ``None``。
+
+    战斗侧的理智字段（战斗者 ``san``、房间状态 ``current_san``、卡面镜像与
+    待写回 ``san`` 条目）全部以该槽位为准：规则集不声明理智资源（如 dnd5e
+    只有 hp 槽位）时，战斗中的理智读写分支整体跳过，不再写 CoC 键。
+    """
+    # 空 id 与本文件既有解析口径一致（get_ruleset("")）：回落进程默认插件，
+    # 裸调用（无战斗上下文的历史用例与工具路径）按默认规则集取槽位。
+    try:
+        return resource_slot(get_plugin(str(ruleset_id or "").strip() or None), "san")
+    except Exception:  # noqa: BLE001 - 规则集壳缺失时按无理智能力处理
+        return None
+
+
+def _slot_state_value(state: dict[str, Any], card: dict[str, Any], slot: dict[str, Any]) -> int:
+    """按插件声明的槽位键读当前值：房间状态优先，缺省回落卡面镜像。
+
+    镜像读取顺序沿用既有口径：主镜像键存在即取值（含 ``None``），再走
+    历史别名；数值解析失败逐级回落，最终为 0。
+    """
+    card_value = None
+    for key in _slot_mirror_keys(slot):
+        if key in card:
+            card_value = card[key]
+            break
+    return _as_int(state.get(str(slot.get("state"))), _as_int(card_value, 0))
+
+
+def _slot_mirror_keys(slot: dict[str, Any]) -> list[str]:
+    keys = [str(slot.get("mirror") or "")]
+    keys.extend(str(alias) for alias in slot.get("mirror_aliases") or ())
+    return [key for key in keys if key]
 
 
 def _combat_ruleset(combat: dict[str, Any], settings: CombatSettings):
@@ -427,6 +455,8 @@ def _combatant_from_member(member: dict[str, Any], ruleset_id: str | None = None
     build, damage_bonus, db_terms = build_and_damage_bonus(strength, size, ruleset_id)
     state = member.get("character_state") if isinstance(member.get("character_state"), dict) else {}
     hp, max_hp = _card_hp(card, state)
+    # 理智字段的存在性由规则集的 san 资源槽位声明：未声明的规则集不读写理智。
+    san_slot = _sanity_slot(ruleset_id)
     names = [str(member.get("username") or ""), str(card.get("name") or "")]
     canonical = str(card.get("name") or member.get("username") or member.get("user_id") or "调查员").strip()
     status = "active"
@@ -436,7 +466,7 @@ def _combatant_from_member(member: dict[str, Any], ruleset_id: str | None = None
         status = "dying"
     elif state.get("unconscious") or (card.get("status") or {}).get("unconscious"):
         status = "unconscious"
-    return {
+    combatant = {
         "name": canonical,
         "aliases": [name for name in names if name],
         "user_id": member.get("user_id"),
@@ -451,8 +481,6 @@ def _combatant_from_member(member: dict[str, Any], ruleset_id: str | None = None
         "luck": luck,
         "mp": max(0, _as_int(state.get("current_mp", state.get("magic_points", state.get("mp"))), _as_int(card.get("currentMp", card.get("maxMp")), power // 5))),
         "max_mp": max(0, _as_int(state.get("max_mp"), _as_int(card.get("maxMp"), power // 5))),
-        # 房间快照里的当前理智字段是 current_san；旧代码读 sanity/san 导致战斗中恒为 0。
-        "san": max(0, _as_int(state.get("current_san"), _as_int(card.get("currentSan", card.get("current_san")), 0))),
         "armor": max(0, min(99, _as_int(card.get("armor"), 0))),
         "build": build,
         "damage_bonus": damage_bonus,
@@ -476,6 +504,9 @@ def _combatant_from_member(member: dict[str, Any], ruleset_id: str | None = None
         "ammo": {},
         "conditions": [],
     }
+    if san_slot is not None:
+        combatant["san"] = max(0, _slot_state_value(state, card, san_slot))
+    return combatant
 
 
 def _spec_actions_base(spec: dict[str, Any], weapons: list[dict[str, Any]]) -> int:
@@ -517,7 +548,10 @@ def _combatant_from_spec(spec: dict[str, Any], ruleset_id: str | None = None) ->
         status = "active"
     skills = _skill_map(spec.get("skills"))
     weapons = weapon_catalog.sanitize_character_weapons(spec.get("weapons"))
-    return {
+    # 理智字段的存在性由规则集的 san 资源槽位声明；「未显式给出时取 POW」
+    # 的起始值约定由规则集提供（coc7：SAN 起始 = POW）。
+    san_slot = _sanity_slot(ruleset_id)
+    combatant = {
         "name": name,
         "aliases": [name],
         "user_id": None,
@@ -534,7 +568,6 @@ def _combatant_from_spec(spec: dict[str, Any], ruleset_id: str | None = None) ->
         "pow": power,
         "luck": max(0, _as_int(spec.get("luck"), 50)),
         "mp": max(0, _as_int(spec.get("mp"), power // 5)),
-        "san": max(0, _as_int(spec.get("san"), power)),
         "build": build,
         "damage_bonus": damage_bonus,
         "db_terms": [list(term) for term in db_terms],
@@ -561,6 +594,9 @@ def _combatant_from_spec(spec: dict[str, Any], ruleset_id: str | None = None) ->
         "skills": skills,
         "weapons": weapons,
     }
+    if san_slot is not None:
+        combatant["san"] = max(0, _as_int(spec.get("san"), initial_sanity(power, ruleset_id)))
+    return combatant
 
 
 def _unique_name(combatants: dict[str, Any], name: str) -> str:
@@ -806,10 +842,6 @@ def _damage_roller(terms: list[tuple[int, int]]) -> tuple[int, list[dict[str, An
     return total, detail
 
 
-def _max_roll(terms: list[tuple[int, int]]) -> int:
-    return sum(max(0, int(count)) * max(1, int(sides)) for count, sides in terms)
-
-
 def _compute_damage(
     weapon: dict[str, Any],
     db_terms: list[list[int]],
@@ -818,8 +850,14 @@ def _compute_damage(
     melee: bool,
     segment_index: int = 0,
     allow_impale: bool = True,
+    ruleset_id: str | None = None,
 ) -> tuple[int, str]:
-    """按武器伤害、伤害加值与极限成功/贯穿规则计算伤害。"""
+    """按武器伤害、伤害加值与规则集的极限成功规则计算伤害。
+
+    武器骰项 / 固定值 / 伤害加值的拆解是数据层（``weapon_catalog``）职责；
+    极限成功时的伤害合成（满骰面 / 贯贯穿追加）是规则集语义，经
+    ``combat.registry.extreme_damage`` 查询，缺省退「满骰面、无贯穿」。
+    """
     rules = weapon_catalog.weapon_rules(weapon)
     parsed = rules["damage"]
     segments = parsed.get("segments") or [{"terms": [(1, 3)], "fixed": 0}]
@@ -836,13 +874,17 @@ def _compute_damage(
     if not add_db and not half_db:
         db = []
 
-    if extreme and not (impale and allow_impale):
-        total = _max_roll(terms) + fixed + _max_roll(db)
-        return max(0, total), f"极限成功·满伤害（{parsed.get('raw')}{' +DB' if db else ''}）"
-    if extreme and impale and allow_impale:
-        extra, _ = _damage_roller(terms)
-        total = _max_roll(terms) + fixed + extra + _max_roll(db)
-        return max(0, total), f"极限成功·贯穿满伤害并追加一次武器伤害骰 {terms}"
+    if extreme:
+        return extreme_damage(
+            terms,
+            fixed,
+            db,
+            raw=parsed.get("raw"),
+            impale=impale,
+            allow_impale=allow_impale,
+            roll_damage=_damage_roller,
+            ruleset_id=ruleset_id,
+        )
     rolled, detail = _damage_roller(terms)
     db_rolled, _ = _damage_roller(db)
     total = rolled + fixed + db_rolled
@@ -867,16 +909,24 @@ def _persist_player_state(context: Any, combatant: dict[str, Any]) -> None:
         if not isinstance(state, dict):
             state = {}
             member["character_state"] = state
+        # 理智回写按规则集的 san 资源槽位：战斗者快照优先，缺省回退房间战斗
+        # 配置；规则集未声明理智资源时（如 dnd5e）整段跳过，不再写 CoC 键。
+        san_slot = _sanity_slot(
+            str(combatant.get("ruleset") or _combat_settings(context, info).ruleset_id or "")
+        )
+        san_key = str((san_slot or {}).get("state") or "")
         before = {
             "hp": state.get("current_hp"),
             "mp": state.get("current_mp"),
-            "san": state.get("current_san"),
         }
+        if san_slot is not None:
+            before["san"] = state.get(san_key)
         state["max_hp"] = combatant.get("max_hp")
         state["current_hp"] = max(0, _as_int(combatant.get("hp"), 0))
         state["max_mp"] = max(0, _as_int(combatant.get("max_mp"), _as_int(state.get("max_mp"), 0)))
         state["current_mp"] = max(0, min(state["max_mp"], _as_int(combatant.get("mp"), state["max_mp"])))
-        state["current_san"] = max(0, _as_int(combatant.get("san"), _as_int(state.get("current_san"), 0)))
+        if san_slot is not None:
+            state[san_key] = max(0, _as_int(combatant.get("san"), _as_int(state.get(san_key), 0)))
         state["major_wound"] = bool(combatant.get("major_wound"))
         state["dying"] = bool(combatant.get("dying"))
         state["unconscious"] = bool(combatant.get("unconscious"))
@@ -890,8 +940,9 @@ def _persist_player_state(context: Any, combatant: dict[str, Any]) -> None:
             card["currentMp"] = state["current_mp"]
             card["maxMp"] = state["max_mp"]
             card["magicPoints"] = state["current_mp"]
-            card["currentSan"] = state["current_san"]
-            card["current_san"] = state["current_san"]
+            if san_slot is not None:
+                for mirror_key in _slot_mirror_keys(san_slot):
+                    card[mirror_key] = state[san_key]
             status = card.get("status") if isinstance(card.get("status"), dict) else {}
             status["majorWound"] = bool(combatant.get("major_wound"))
             status["unconscious"] = bool(combatant.get("unconscious"))
@@ -914,8 +965,10 @@ def _persist_player_state(context: Any, combatant: dict[str, Any]) -> None:
         for kind, value in (("hp", state["current_hp"]), ("mp", state["current_mp"])):
             if before.get(kind) != value:
                 pending.append({"type": kind, "value": value, "source": "combat", "reason": "战斗结算"})
-        if before.get("san") != state["current_san"]:
-            pending.append({"type": "san", "value": state["current_san"], "source": "combat", "reason": "战斗结算"})
+        if san_slot is not None and before.get("san") != state[san_key]:
+            pending.append(
+                {"type": str(san_slot.get("kind")), "value": state[san_key], "source": "combat", "reason": "战斗结算"}
+            )
         armor = max(0, min(99, _as_int(combatant.get("armor"), 0)))
         if isinstance(card, dict) and _as_int(card.get("armor"), 0) != armor:
             card["armor"] = armor
@@ -968,10 +1021,11 @@ def _apply_damage(
         "effective": outcome.effective,
         "hp_before": outcome.hp_before,
         "hp_after": outcome.hp_after,
-        "major_wound": outcome.major_wound,
-        "dying": outcome.dying,
-        "unconscious": outcome.unconscious,
-        "dead": outcome.dead,
+        # 伤势状态来自插件的伤害模型；插件没有该概念时置 None，核心按 False 呈现。
+        "major_wound": bool(outcome.major_wound),
+        "dying": bool(outcome.dying),
+        "unconscious": bool(outcome.unconscious),
+        "dead": bool(outcome.dead),
         "note": outcome.note,
         "con_check": outcome.extra.get("con_check"),
     }
@@ -1190,9 +1244,10 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                 fumble,
                 ruleset_id=combat_ruleset_id,
             )
-            combatant["initiative"] = (
-                level_rank(combat_ruleset_id).get(level, 0) * 1000
-                + int(combatant.get("dex") or 0)
+            # 先攻检定的数值合成是规则集语义（等级带排序如何折叠进先攻值），
+            # 经 ``combat.registry.initiative_score`` 查询；缺省退「等级×1000+DEX」。
+            combatant["initiative"] = initiative_score(
+                level, int(combatant.get("dex") or 0), combat_ruleset_id
             )
             combatant["initiative_roll"] = roll
             if level == "critical":
@@ -1311,8 +1366,8 @@ def join_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             fumble,
             ruleset_id=combat_ruleset_id,
         )
-        combatant["initiative"] = level_rank(combat_ruleset_id).get(level, 0) * 1000 + int(
-            combatant.get("dex") or 0
+        combatant["initiative"] = initiative_score(
+            level, int(combatant.get("dex") or 0), combat_ruleset_id
         )
         combatant["initiative_roll"] = roll
         if level == "critical":
@@ -1614,8 +1669,11 @@ def cast_spell(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
 
     # 先付费：即使被打断，MP 与 SAN 也不退（p206）。资源扣除交给插件，
     # 这样换规则书时法术位/职业资源可以按各自的语义处理。
+    # 理智是规则集声明的资源（san 槽位）：规则集没有理智概念的房间跳过这笔
+    # SAN 扣除，不凭空给战斗者造出 CoC 的 san 字段。
     mp_result = ruleset.spend_resource(caster, "mp", mp_cost)
-    ruleset.spend_resource(caster, "san", san_cost)
+    if _sanity_slot(str(combat.get("ruleset") or settings.ruleset_id or "")) is not None:
+        ruleset.spend_resource(caster, "san", san_cost)
     # 法术消耗（MP/SAN）同样要进入房间快照与统一写回链，不能只改战斗内对象。
     _persist_player_state(context, caster)
     overflow = int(mp_result.get("overflow") or 0)
@@ -2246,7 +2304,8 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     if weapon_name and weapon is None:
         return {"error": f"{attacker.get('name')} 的角色卡上没有武器“{weapon_name}”"}
     if weapon is None:
-        weapon = UNARMED_WEAPON
+        # 徒手武器条目由规则集提供（coc7：格斗（斗殴）/1D3）；缺席退中性徒手。
+        weapon = unarmed_weapon(combat_ruleset_id)
     rules = weapon_catalog.weapon_rules(weapon)
     range_yards = rules.get("rangeYards")
     melee = range_yards is None or range_yards <= 0
@@ -2400,7 +2459,13 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             value, detail = detail_rules.KNOCKOUT_DAMAGE, "击晕攻击（钝器战技）"
             knockout_applied = detail_rules.knockout_result(_roller(10))
         else:
-            value, detail = _compute_damage(weapon, attacker.get("db_terms") or [], extreme=extreme, melee=melee)
+            value, detail = _compute_damage(
+                weapon,
+                attacker.get("db_terms") or [],
+                extreme=extreme,
+                melee=melee,
+                ruleset_id=combat_ruleset_id,
+            )
         damage_result = _apply_damage(
             context,
             target,
@@ -2426,9 +2491,16 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                 if effect:
                     damage_result["major_wound_effect"] = effect
     elif counter_hit:
-        counter_weapon = _first_melee_weapon(target, target_card) or UNARMED_WEAPON
+        # 反击未持械时同样向规则集查询徒手条目。
+        counter_weapon = (
+            _first_melee_weapon(target, target_card) or unarmed_weapon(combat_ruleset_id)
+        )
         value, detail = _compute_damage(
-            counter_weapon, target.get("db_terms") or [], extreme=False, melee=True
+            counter_weapon,
+            target.get("db_terms") or [],
+            extreme=False,
+            melee=True,
+            ruleset_id=combat_ruleset_id,
         )
         damage_result = _apply_damage(
             context,
@@ -2744,7 +2816,9 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         }
         if group_no is not None:
             record["group"] = group_no
-        if malfunction and roll >= malfunction:
+        # 卡壳判定由规则集提供（coc7：骰值 ≥ 故障值即故障）；缺席规则集恒不卡壳。
+        # ``malfunction`` 只是武器表数据（故障值），核心不做比较。
+        if weapon_malfunction(roll, malfunction, combat_ruleset_id):
             record["malfunction"] = True
             malfunctioned = True
             return record, []
@@ -2764,6 +2838,7 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                     extreme=False,
                     melee=False,
                     segment_index=diff_rank,
+                    ruleset_id=combat_ruleset_id,
                 )
                 applied = _apply_damage(
                     context,
@@ -2786,9 +2861,9 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             hits = 1
             impale_count = 0
         else:
-            # 全自动：常规成功一半命中，极难成功全中且前半贯穿（p97-98）。
-            hits = usable if extreme else max(1, usable // 2)
-            impale_count = usable // 2 if extreme and diff_rank < 2 else 0
+            # 全自动的（命中数, 贯穿数）配比是规则集语义（CoC：常规半数命中，
+            # 极难全中且前半贯穿，p97-98）；缺席规则集全中且不贯穿。
+            hits, impale_count = auto_fire_composition(usable, extreme, diff_rank, combat_ruleset_id)
         record["hits"] = hits
         applied_list: list[dict[str, Any]] = []
         detail = ""
@@ -2800,6 +2875,7 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                 melee=False,
                 segment_index=diff_rank,
                 allow_impale=(group_no is None) or bullet_index < impale_count,
+                ruleset_id=combat_ruleset_id,
             )
             applied = _apply_damage(
                 context,
