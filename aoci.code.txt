@@ -85,7 +85,7 @@ app_info.py[OU3M]: F:关于页数据：版本、构建、仓库、运行时与�
 backup_admin.py[OB2T]: F:数据备份（控制台专用）：把 config、scenarios、rooms、知识库、用户库与日志打包为 zip；不触碰向量库等可重建产物，避免备份体积失控 | R:- | A:_BACKUP_SOURCES 为备份清单权威，目录缺失时跳过 | S:-
 character_ai.py[IB5L]: F:角色卡 AI 生成：平台接入、提示词拼装与模型输出解析高内聚；生成 JSON 交前端 createCharacterCard 归一化复用角色卡框架（属性上限、技能点、职业武器目录），后端不重复实现规则 | R:code:backend/trpg_server/agents/ai_request.py | A:- | S:-
 character_card_io.py[DD6L]: F:角色卡导入导出共用结构：导出与导入同一份 CARD_FIELD_SPECS 防两边字段漂移——导出按 spec 取值附头像 data URI，导入逐字段校验类型补默认值拒绝非法数据 | R:code:backend/trpg_server/character_service.py | A:- | S:-
-character_service.py[DB7L]: F:角色卡领域服务：路由与网站 Agent 从同一套保存逻辑进入避免两条写路径不同结果；不依赖 Flask 全局 session，身份全部来自 Actor | R:code:backend/trpg_server/character_card_io.py,code:backend/trpg_server/weapon_catalog.py | A:Actor 为身份抽象 | S:-
+character_service.py[DB7L]: F:角色卡领域服务：路由与网站 Agent 从同一套保存逻辑进入避免两条写路径不同结果；不依赖 Flask 全局 session，身份全部来自 Actor；预设武器目录经默认插件 catalogs 能力读取（D2） | R:code:backend/trpg_server/character_card_io.py,code:backend/trpg_server/weapon_catalog.py | A:Actor 为身份抽象 | S:-
 check_service.py[DB7L]: F:规则无关的检定调度：REST 路由、房间控制台与 AI 工具统一经此结算；具体判定由规则集插件的 checks 能力提供，本模块只管输入校验、难度与房规阈值、结果格式 | R:code:backend/trpg_server/ruleset/capabilities.py,code:backend/trpg_server/ruleset/__init__.py | A:CheckServiceError 消息可直接返回调用方 | S:-
 config_admin.py[OC3S]: F:配置查看与遗留文件迁移（控制台专用）：复用 config 分层加载与注释保留写入，不依赖 Flask 请求上下文，依赖由调用方注入 | R:code:backend/trpg_server/config/__init__.py | A:- | S:-
 console_args.py[CC4S]: F:控制台参数解析共享实现：纯词参数（开关直写词、带值 key value），旧写法兼容，负数始终按位置参数；各域只声明词表，分词与兼容逻辑集中一处 | R:code:backend/trpg_server/console_commands.py | A:ConsoleArgSpec | S:-
@@ -139,7 +139,7 @@ scenario_service.py[DD5M]: F:剧本领域服务：网站 Agent 写操作与管�
 scenario_store.py[DD7L]: F:剧本存储唯一落盘实现：scenario.json 读写、版本与 public_id、触发器目录与知识索引；Web 路由、控制台与网站 Agent 共用 | R:code:backend/trpg_server/json_store.py,code:backend/trpg_server/agents/versioning.py,code:backend/trpg_server/agents/trigger_system.py | A:- | S:-
 security.py[SS7M]: F:安全基座：safe_join 防路径穿越、normalize_filename、会话守卫与权限节点装饰器 | R:- | A:safe_join 为全项目路径拼接入口 | S:-
 server_admin.py[OC3S]: F:服务器巡检与诊断（控制台专用）：汇总向量库、embedding、OCR、AI 平台与用户库状态并读日志尾部，全部只读 | R:code:backend/trpg_server/agents/vector_store.py | A:- | S:-
-settings.py[RC6S]: F:路径与运行时常量再导出：权威定义在 config.paths 与 config.schema，保持既有 settings.CONFIG_DIR 等引用不变 | R:code:backend/trpg_server/config/paths.py,code:backend/trpg_server/config/schema.py | A:- | S:-
+settings.py[RC6S]: F:路径与运行时常量再导出：权威定义在 config.paths 与 config.schema，保持既有 settings.CONFIG_DIR 等引用不变；WEAPONS_DIR 仅作武器数据旧位置回退（清理期限 v1.1.0） | R:code:backend/trpg_server/config/paths.py,code:backend/trpg_server/config/schema.py | A:- | S:-
 setup_embedding.py[AB4M]: F:首次部署 Embedding 模型配置：后台线程自动下载模型并暴露进度、上传 zip 落盘与云端 embedding 启用 | R:code:backend/trpg_server/agents/embedding_provider.py,code:backend/trpg_server/routes/setup.py | A:- | S:-
 site_agent.py[AB6L]: F:网站 Agent 编排层：单轮对话、工具执行、写操作两段式确认与审计；不暴露 Flask 路由，只接收已构建的 Actor | R:code:backend/trpg_server/site_agent_auth.py,code:backend/trpg_server/site_agent_tools/__init__.py,code:backend/trpg_server/routes/site_agent.py | A:- | S:-
 site_agent_auth.py[IS5S]: F:网站 Agent 统一鉴权：身份只来自服务端会话与用户库，模型传入的身份字段一律不读；authorize_tool 是纯检查函数便于审计 | R:code:backend/trpg_server/site_agent.py | A:- | S:-
@@ -152,7 +152,7 @@ user_admin.py[OC4S]: F:用户运维（控制台专用）：列出、封禁解封
 vector_admin.py[OC3T]: F:向量库巡检与孤儿向量清理（控制台专用）：扫描指向已删剧本的向量条目并按条件删除，只读扫描不依赖 Flask | R:code:backend/trpg_server/agents/vector_store.py,code:backend/trpg_server/scenario_admin.py | A:- | S:-
 version.py[FC3T]: F:应用版本唯一真源：APP_VERSION 1.0.7 与产品名；trpg_server.__version__ 再导出保持兼容 | R:code:backend/trpg_server/__init__.py,code:backend/trpg_server/app_info.py | A:APP_VERSION 为版本权威 | S:-
 voice_admin.py[OC4L]: F:站点控制台 voice 命令：配置读取与写入走 tomlkit 保留注释，会改状态的操作支持预演与 --yes；依赖目录注入不依赖 Flask | R:code:backend/trpg_server/voice/config.py,code:backend/trpg_server/voice/local_models.py | A:- | S:-
-weapon_catalog.py[DD4M]: F:预设武器目录与角色卡自定义武器库读写：预设按分类存 data/weapons/builtin，自定义存角色卡目录 weapons.json | R:- | A:- | S:-
+weapon_catalog.py[DD4M]: F:武器通用结构层：normalize/合并/每卡自定义武器库读写与伤害/射程/攻击数/装弹解析，weapon_rules 仅留四通用键；malfunction 与 impale 语义不再在此文件，经 combat registry weapon_field_rules 按规则集取用（D2） | R:code:backend/trpg_server/combat/registry.py,code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:parse_damage 对「1/2DB」按半 DB 归一且不计固定加值，\bDB\b 在数字与 D 间无词边界，勿按直觉改回
 world_override.py[DB4M]: F:世界意志执行：接受后写入房间 state 的既定事实，后续每回合注入系统提示；执行回合禁用战斗检定工具避免模型把拍定结果重新掷骰；带留痕与频率限制 | R:code:backend/trpg_server/agents/room_state.py | A:- | S:-
 
 ===/<repository>/backend/trpg_server/agents/===
@@ -234,7 +234,7 @@ character_items.py[DB4S]: F:KP 物品工具：向房间快照追加物品或武�
 character_stats.py[DB4S]: F:KP 属性技能工具：修改房间快照技能值与基础属性，与控制台 rule skill、rule attr 共用 room_rules并登记统一待写回队列；持久卡仅归档时合并，能力钳制走 ruleset.capabilities | R:code:backend/trpg_server/room_rules.py | A:- | S:-
 chase.py[DB5M]: F:CoC7 追逐工具：会话、移动、险境与冲突；规则数学在 ruleset 插件 chase 模块、状态在 room_chase；房规开关经注册表能力读取，coc7 缺席时按全部关闭且本组不挂载 | R:code:backend/trpg_server/room_chase.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
 coc7.py[DB5L]: F:CoC7 房规 AI 工具：社交、组合、团体幸运、熟人、经济五个工具只做参数搬运，判定统一走 check_service；房规开关经注册表能力读取，coc7 缺席按全部关闭且不挂载 | R:code:backend/trpg_server/check_service.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
-combat.py[DB8L]: F:战斗轮工具：DEX 先攻、近战对抗、战技、射击难度与故障、护甲、重伤濒死死亡与急救医学；贯穿/卡壳/徒手/先攻合成经规则集钩子查询（D1），战斗 SAN 走资源槽位（无 san 槽位整体跳过）；状态原子写；房规经 room_rules 共享解析点，规则集缺席按全部关闭 | R:code:backend/trpg_server/agents/tools/dice.py,code:backend/trpg_server/agents/room_state.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:dnd5e 房间 shoot/treat 仍走 CoC 流程，B1 探针用例固化现状，分派重构属后续批次
+combat.py[DB8L]: F:战斗轮工具：DEX 先攻、近战对抗、战技、射击难度与故障、护甲、重伤濒死死亡与急救医学；贯穿/卡壳/徒手/先攻合成经规则集钩子（D1），武器字段值与近战射击闪避技能名表经 registry 取用（D2），战斗 SAN 走资源槽位；房规经 room_rules 共享解析点，规则集缺席按全部关闭 | R:code:backend/trpg_server/agents/tools/dice.py,code:backend/trpg_server/agents/room_state.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:dnd5e 房间 shoot/treat 仍走 CoC 流程，B1 探针用例固化现状，分派重构属后续批次
 concentration.py[DB4S]: F:专注注册表工具（仅 dnd5e）：concentration.list 刷新并列出房间级专注索引，concentration.break 走插件 end_concentration 清理关联效果并同步注册表 | R:code:backend/trpg_server/workflows/concentration.py | A:- | S:-
 content.py[IB5T]: F:通用内容检索工具：核心不认识法术、怪物、装备字段；插件通过 content_search 能力提供 types 与 search，ambiguous 时绝不自行取第一条必须交调用方确认 | R:- | A:不传 type 时返回该规则集支持的内容类型 | S:-
 dice.py[DB8L]: F:骰娘工具族：COC 检定、房间检定（读角色卡真实技能值）、疯狂、理智、自由掷骰与 dnd5e 检定；阈值与难度经规则集 checks 能力并按传入 ruleset_id 解析（B1 显式携带），检定成功可同轮揭示触发器，骰面策略走 dice_policy | R:code:backend/trpg_server/dice_policy.py,code:backend/trpg_server/agents/tools/trigger.py | A:- | S:-
@@ -259,13 +259,13 @@ workflow.py[DW5M]: F:工作流查询与决策工具（仅 dnd5e 下发）：跨�
 ===/<repository>/backend/trpg_server/combat/===
 __init__.py[CD7T]: F:可插拔战斗核心包入口：核心只管事件流与结算时序（谁先行动、行动余额、轮末触发），掷骰、成功等级、伤害与死亡判定全由 ruleset 插件提供 | R:code:backend/trpg_server/combat/registry.py,code:backend/trpg_server/combat/settings.py | A:- | S:-
 contracts.py[CD6S]: F:战斗规则书插件的公共契约：刻意弱语义，只描述一次结算的输入输出，不出现 HP/SAN/DB 等专属字段；等级与顺序可插件覆盖，默认值有中性占位；DamageOutcome 重伤濒死昏迷死亡四字段可空（None 表示该伤害模型无此概念） | R:code:backend/trpg_server/combat/registry.py | A:- | S:-
-registry.py[CD6M]: F:战斗规则注册表：插件经 combat 能力注册、按规则集 id 取实现；不静态 import 任何具体战斗实现，运维兜底表只剩显式 TRPG_RULESET_COMBAT_FALLBACKS 声明；贯穿/卡壳/徒手/先攻合成/初始理智等取用一律中性降级 | R:code:backend/trpg_server/ruleset/__init__.py | A:- | S:-
+registry.py[CD6M]: F:战斗规则注册表：插件经 combat 能力注册、按规则集 id 取实现；不静态 import 任何具体战斗实现，运维兜底表只剩显式 TRPG_RULESET_COMBAT_FALLBACKS 声明；贯穿/卡壳/徒手/先攻合成/初始理智/武器字段/技能名表取用一律中性降级 | R:code:backend/trpg_server/ruleset/__init__.py | A:- | S:-
 scheduler.py[CD7M]: F:规则书无关的回合调度器：轮与回合推进、行动余额、跳过无法行动者、轮末钩子；先攻、伤害、濒死判定是插件的事；插件声明 TurnModel 时维护多槽 budget 并按 refresh 重置，未声明时只维护 actions_remaining 行为不变 | R:code:backend/trpg_server/combat/contracts.py | A:- | S:-
 settings.py[FC5S]: F:战斗房规配置：规则书留白项（拔枪耗时、施法打断、重伤影响、盾牌格挡）统一放这里由房规覆盖，默认取最保守解释；SURPRISE_MODES 等为字面量权威 | R:code:backend/trpg_server/house_rules_store.py | A:- | S:-
 
 ===/<repository>/backend/trpg_server/combat/rulesets/===
 __init__.py[RD3T]: F:内置战斗实现包：包导入不加载具体规则包，经 __getattr__ 惰性解析；删除某实现后仅真正引用它的调用点失败 | R:code:backend/trpg_server/combat/rulesets/coc7.py | A:- | S:-
-coc7.py[CD6M]: F:CoC7 战斗规则书插件：判定、伤害、濒死与行动经济语义收在这里；极限伤害合成、全自动贯穿配比、卡壳、徒手武器、先攻合成、初始理智六钩子（D1）供核心查询；成功等级统一复用骰子模块判定数学 | R:code:backend/trpg_server/combat/contracts.py,code:backend/trpg_server/combat/scheduler.py | A:LEVEL_RANK 为成功等级排序权威 | S:-
+coc7.py[CD6M]: F:CoC7 战斗规则书插件：判定、伤害、濒死与行动经济语义收在这里；六钩子（D1）加武器字段取值与三张技能名表（D2）供核心查询；成功等级统一复用骰子模块判定数学 | R:code:backend/trpg_server/combat/contracts.py,code:backend/trpg_server/combat/scheduler.py | A:LEVEL_RANK 为成功等级排序权威 | S:-
 
 ===/<repository>/backend/trpg_server/config/===
 __init__.py[CC7T]: F:统一配置加载包入口：四层优先级代码默认、模板、用户配置、环境变量与 CLI；模块内聚 paths、fields、schema、sources、merge、writer、bootstrap | R:code:backend/trpg_server/config/schema.py,code:backend/trpg_server/config/merge.py | A:load_settings、update_sections 为公共 API | S:-
@@ -447,7 +447,7 @@ character_ai.py[EU3T]: F:角色卡 AI 生成接口：只做鉴权与 HTTP 映射
 characters.py[EU6L]: F:角色卡 REST API：角色卡 CRUD、头像上传与角色卡域编排 | R:code:backend/trpg_server/character_service.py,code:backend/trpg_server/character_card_io.py | A:- | S:-
 chat.py[AB6M]: F:聊天路由入口：/api/chat、/api/messages 与剧本模消息入口；回合流水线在 turn_pipeline，本模块只做请求解析与响应映射并保留历史符号 re-export | R:code:backend/trpg_server/agents/turn_pipeline.py,code:backend/trpg_server/routes/chat_helpers.py | A:- | S:-
 chat_helpers.py[AB6L]: F:聊天请求的纯辅助逻辑：历史压缩、提示词与房间快照组装、剧本知识检索、结构化响应落库；不依赖 Flask 请求生命周期可单测 | R:code:backend/trpg_server/agents/knowledge_base.py,code:backend/trpg_server/agents/structured_output.py | A:- | S:-
-combat.py[EU5L]: F:战斗轮 REST API：战斗规则在 combat 工具，本模块接房间前端：面板数据、当轮操作、校验与玩家动作拦截，徒手武器选项按战斗状态规则集解析 | R:code:backend/trpg_server/agents/tools/combat.py,code:backend/trpg_server/agents/player_roll.py | A:- | S:-
+combat.py[EU5L]: F:战斗轮 REST API：战斗规则在 combat 工具，本模块接房间前端：面板数据、当轮操作、校验与玩家动作拦截；徒手武器选项与技能名表按战斗状态规则集解析 | R:code:backend/trpg_server/agents/tools/combat.py,code:backend/trpg_server/agents/player_roll.py | A:- | S:-
 config.py[EU5L]: F:站点配置 REST API：general.toml 读写、密钥打码与遗留配置迁移 | R:code:backend/trpg_server/config/__init__.py,code:backend/trpg_server/config/secret_keys.py | A:- | S:-
 dice_rolls.py[EU4M]: F:玩家投掷 REST 接口与动画降级日志：resolve、reroll、confirm、complete 推进状态机 | R:code:backend/trpg_server/agents/player_roll.py | A:- | S:-
 dice_textures.py[EU3S]: F:骰子贴图库 REST 接口：管理员上传、所有登录用户读取 | R:code:backend/trpg_server/dice_textures.py | A:- | S:-
@@ -503,7 +503,7 @@ ui.py[CD4L]: F:插件 UI 声明壳：workspace 声明主视图归属、slots 只
 
 ===/<repository>/backend/trpg_server/ruleset/coc7/===
 __init__.py[CD5S]: F:CoC7 规则书插件入口：schema、目录、判定、战斗与工具独立组装；options、magic_content、chase_rules、magic_rules、sanity_state、sanity_traits、sanity_treatment、economy 全部作为插件能力属性暴露，核心经注册表能力访问 | R:code:backend/trpg_server/ruleset/bootstrap.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
-catalogs.py[CD4S]: F:CoC7 技能、武器与职业目录：优先读 data/rulesets/coc7/catalogs/，不存在时回退项目原有位置 | R:- | A:- | S:-
+catalogs.py[CD4S]: F:CoC7 技能、武器与职业目录：优先读 data/rulesets/coc7/catalogs/（含 builtin 武器九类），不存在时回退项目原有位置；武器经本插件 weapons 模块读取，不再依赖核心 weapon_catalog | R:code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:-
 chase.py[KD5S]: F:CoC7 追逐纯规则（规则书第七章）：抽象地点、行动点、险境与障碍数学，不读写房间状态不掷骰不落盘 | R:code:backend/trpg_server/room_chase.py,code:backend/trpg_server/agents/tools/chase.py | A:- | S:-
 checks.py[CD7L]: F:CoC7 判定纯规则入口：数学仍来自 dice.py，插件只提供稳定接口避免复制两份；REST、控制台与 AI 工具都经 check_service 调用这里 | R:code:backend/trpg_server/check_service.py,code:backend/trpg_server/agents/tools/dice.py | A:- | S:-
 combat_rules.py[KD5M]: F:CoC7 战斗细节纯规则（批次 4）：瞄准、掩体、射击入近战等把房规开关与输入状态映射成修正值，不读写房间文件不掷骰 | R:code:backend/trpg_server/combat/rulesets/coc7.py | A:- | S:-
@@ -528,6 +528,7 @@ tools.py[CD4T]: F:CoC7 专属 AI 工具声明：只声明哪些工具属于本�
 training.py[KD3S]: F:CoC7 幕间训练纯计算：每 WEEKS_PER_GAIN 周获得一次成长检定机会，公式与幕间成长一致受 SKILL_MAX 上限；房规开关默认关闭，不读写房间 | R:code:backend/trpg_server/ruleset/coc7/growth.py,code:backend/trpg_server/room_interlude.py | A:- | S:-
 traits.py[KD3S]: F:CoC7 恐惧症躁狂症表：按需读取的内容数据不进提示词；文件缺失损坏回落内置最小样本表，疯狂结算永不中断 | R:code:backend/trpg_server/agents/tools/sanity.py | A:- | S:-
 treatment.py[KD2T]: F:CoC7 幕间疗养与心理治疗纯规则数学（p.129、p.167）：只放数字与判定换算，编排在 room_interlude，时间来自 room_clock | R:code:backend/trpg_server/room_interlude.py,code:backend/trpg_server/room_clock.py | A:- | S:-
+weapons.py[DD4T]: F:CoC7 预设武器目录读取器：按分类读 data/rulesets/coc7/catalogs/weapons/builtin/，输出行规范与核心 normalize_weapon 对齐可直接喂合并层；旧路径与 app 配置回退兼容 | R:code:backend/trpg_server/weapon_catalog.py | A:- | S:-
 
 ===/<repository>/backend/trpg_server/ruleset/coc7/content/===
 grimoires.json[FC4L]: F:CoC7 典籍内容表（规则书第十一章）：书名、版本、SAN 损失、CMI 与 CMF 与所含法术，惰性加载按需查询单条 | R:code:backend/trpg_server/ruleset/coc7/magic_content.py | A:- | S:-
@@ -536,7 +537,7 @@ spells.json[FC4L]: F:CoC7 法术内容表（规则书第十二章）：法术名
 ===/<repository>/backend/trpg_server/site_agent_tools/===
 __init__.py[IS6M]: F:网站 Agent 工具注册表：按当前身份过滤能力并包统一鉴权、审计与两段式确认；模型永远看不到未授权工具，伪造调用名在服务端被拒绝 | R:code:backend/trpg_server/site_agent_auth.py,code:backend/trpg_server/site_agent_tools/base.py | A:- | S:-
 base.py[IS5S]: F:网站 Agent 工具规格与参数校验：规格是能力白名单，参数进业务逻辑前按 JSON Schema 白名单校验，未声明身份字段一律丢弃 | R:code:backend/trpg_server/site_agent_tools/__init__.py | A:- | S:-
-characters.py[IB4M]: F:角色卡工具：列表、读取、武器目录与保存（两段式确认） | R:code:backend/trpg_server/character_service.py | A:- | S:-
+characters.py[IB4M]: F:角色卡工具：列表、读取、武器目录与保存（两段式确认）；武器目录经默认插件 catalogs 能力读取（D2） | R:code:backend/trpg_server/character_service.py | A:- | S:-
 narrative.py[ID6L]: F:剧本世界树节点工具：粒度降到节点边关键词，读工具返回裁剪上下文，写工具走 preview confirm apply 两段式并校验版本；Agent 不能发布剧本也不能把 kp_only 放开为 public | R:code:backend/trpg_server/agents/narrative/store.py,code:backend/trpg_server/site_agent_tools/base.py | A:- | S:-
 permissions.py[IP4S]: F:权限矩阵工具：只允许在自身权限范围内改动 | R:code:backend/trpg_server/permission_config.py | A:- | S:-
 profile.py[IP3S]: F:个人设置工具：只允许修改当前登录用户自己的昵称与邮箱 | R:code:backend/trpg_server/security.py | A:- | S:-
@@ -803,17 +804,6 @@ assets.json[FC3S]: F:LMoP 模组资产清单：地图底图与图片资源 | R:c
 narrative.json[FC4L]: F:LMoP 世界树：126 节点 205 边，含 map 与 poi 分层 | R:code:backend/trpg_server/agents/narrative/mapgraph.py | A:- | S:-
 scenario.json[FC4L]: F:LMoP 剧本数据：128 模块、四部分主线与凡达林地点，dnd5e 规则集 | R:code:backend/trpg_server/scenario_store.py | A:- | S:-
 
-===/<repository>/data/weapons/builtin/===
-common.json[FC4M]: F:CoC7 预设武器目录（通用近战与基础武器） | R:code:backend/trpg_server/weapon_catalog.py | A:- | S:-
-fullAutoRifles.json[FC3S]: F:CoC7 预设武器目录（全自动步枪） | R:code:backend/trpg_server/weapon_catalog.py | A:- | S:-
-handguns.json[FC4M]: F:CoC7 预设武器目录（手枪） | R:code:backend/trpg_server/weapon_catalog.py | A:- | S:-
-machineGuns.json[FC3T]: F:CoC7 预设武器目录（机枪） | R:code:backend/trpg_server/weapon_catalog.py | A:- | S:-
-other.json[FC4M]: F:CoC7 预设武器目录（其他武器） | R:code:backend/trpg_server/weapon_catalog.py | A:- | S:-
-semiAutoRifles.json[FC3S]: F:CoC7 预设武器目录（半自动步枪） | R:code:backend/trpg_server/weapon_catalog.py | A:- | S:-
-shotguns.json[FC3S]: F:CoC7 预设武器目录（霞弹枪） | R:code:backend/trpg_server/weapon_catalog.py | A:- | S:-
-sniperRifles.json[FC2T]: F:CoC7 预设武器目录（狙击步枪） | R:code:backend/trpg_server/weapon_catalog.py | A:- | S:-
-submachineGuns.json[FC3T]: F:CoC7 预设武器目录（冲锋枪） | R:code:backend/trpg_server/weapon_catalog.py | A:- | S:-
-
 ===/<repository>/docs/===
 COC_THEME_FINAL.md[SD2S]: F:COC 主题设计定稿文档 | R:- | A:- | S:-
 COC_THEME_ULTIMATE.md[SD2S]: F:COC 主题设计最终版文档 | R:code:docs/COC_THEME_FINAL.md | A:- | S:-
@@ -845,7 +835,7 @@ pattern_cyber_2.md[SD2M]: F:赛博主题 pattern_cyber_2 设计文档 | R:code:d
 ===/<repository>/docs/plans/===
 coc7-rules-audit.md[SD3M]: F:CoC7 规则审计计划：规则书口径与实现的对照清单 | R:- | A:- | S:-
 coc7-rules-roadmap.md[SD2S]: F:CoC7 规则路线图 | R:code:docs/plans/coc7-rules-audit.md | A:- | S:-
-cordis-paradigm-adoption-plan.md[SD3S]: F:Cordis 范式采纳计划：插件 mini 内核、注册耦合解除、路由可逆化与规则集边界收敛的阶段计划与实施状态记录（P0/P1/默认规则集参数化/B1/D1 已落地） | R:code:backend/trpg_server/plugins/kernel/__init__.py | A:- | S:-
+cordis-paradigm-adoption-plan.md[SD3S]: F:Cordis 范式采纳计划：插件 mini 内核、注册耦合解除、路由可逆化与规则集边界收敛的阶段计划与实施状态记录（P0/P1/默认参数化/B1/D1/D2 已落地） | R:code:backend/trpg_server/plugins/kernel/__init__.py | A:- | S:-
 dnd5e-ruleset-plugin-design.md[SD3L]: F:dnd5e 规则集插件化设计：从内置模块到 data/plugins 插件的迁移设计 | R:- | A:- | S:-
 dnd5e-ruleset-subsystem-survey.md[SD2L]: F:dnd5e 子系统调研：判定壳、会话、资源与效果等契约的现状梳理 | R:code:docs/plans/ruleset-core-generalization-survey.md | A:- | S:-
 prop-workshop-design.md[SD3L]: F:道具工坊设计稿：模板、存储、渲染与 AI 起草通道 | R:code:backend/trpg_server/props/__init__.py | A:- | S:-
@@ -1137,7 +1127,7 @@ v1.0.3.md[SV1T]: F:v1.0.3 版本变更日志 | R:code:release/RELEASE_MANIFEST.m
 v1.0.4.md[SV1T]: F:v1.0.4 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
 v1.0.5.md[SV1T]: F:v1.0.5 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
 v1.0.6.md[SV1T]: F:v1.0.6 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
-v1.0.7.md[SV2M]: F:v1.0.7 当前版本变更日志：插件生命周期 v2、地图与工作流、规则集边界收敛各批次变更 | R:code:release/RELEASE_MANIFEST.md | A:当前 APP_VERSION 1.0.7 | S:-
+v1.0.7.md[SV2M]: F:v1.0.7 当前版本变更日志：插件生命周期 v2、地图与工作流、规则集边界收敛各批次（P0 至 D2）变更 | R:code:release/RELEASE_MANIFEST.md | A:当前 APP_VERSION 1.0.7 | S:-
 
 ===/<repository>/research/cordis/===
 Cordis-调研报告.md[SA3L]: F:Cordis 插件框架调研报告：Shigma 的 Cordis v4 与 deepseek-harness 的采纳分析，得出插件化可借鉴结论 | R:code:docs/plans/cordis-paradigm-adoption-plan.md | A:- | S:-
@@ -1238,3 +1228,14 @@ prompts.md[SG3S]: F:剧本导入 AI 提示词参考 | R:code:skills/scenario-imp
 
 ===/<repository>/skills/scenario-import/scripts/===
 validate_bundle.py[XV3S]: F:剧本导入 bundle 校验脚本 | R:code:backend/trpg_server/scenario_bundle.py,code:skills/scenario-import/SKILL.md | A:- | S:-
+
+===/<repository>/data/rulesets/coc7/catalogs/weapons/builtin/===
+common.json[FD3M]: F:CoC7 内置武器目录·通用：近战、早期火器与杂项按分类的预设武器条目（D2 自 data/weapons/builtin 迁入） | R:code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:-
+fullAutoRifles.json[FD3S]: F:CoC7 内置武器目录·全自动步枪：预设条目含故障值与贯穿标记（D2 迁入） | R:code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:-
+handguns.json[FD3M]: F:CoC7 内置武器目录·手枪：预设条目含故障值与贯穿标记（D2 迁入） | R:code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:-
+machineGuns.json[FD3T]: F:CoC7 内置武器目录·机枪：预设条目（D2 迁入） | R:code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:-
+other.json[FD3M]: F:CoC7 内置武器目录·其他：特殊与自制参考条目（D2 迁入） | R:code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:-
+semiAutoRifles.json[FD3S]: F:CoC7 内置武器目录·半自动步枪：预设条目含故障值与贯穿标记（D2 迁入） | R:code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:-
+shotguns.json[FD3S]: F:CoC7 内置武器目录·霰弹枪：含距离分段伤害条目（D2 迁入） | R:code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:-
+sniperRifles.json[FD3T]: F:CoC7 内置武器目录·狙击步枪：预设条目（D2 迁入） | R:code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:-
+submachineGuns.json[FD3T]: F:CoC7 内置武器目录·冲锋枪：预设条目（D2 迁入） | R:code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:-

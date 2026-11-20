@@ -332,19 +332,21 @@ def test_dnd5e_room_rejects_coc7_room_rule_tools(tmp_path, dnd5e_default_process
 def test_dnd5e_room_shoot_and_treat_probe(tmp_path, dnd5e_default_process, monkeypatch):
     """R2 事实探针：dnd5e 房间的 shoot / treat 走 CoC 流程 + 中性二值带。
 
-    本用例固化**现状**作为 D1 的行为证据（B1 范围不修复这两条链路）：
+    D2 更新（CoC 技能名表下沉后改写第一段断言，其余 tripwire 保留）：
+    「格斗 / 射击 / 闪避」名称回退表已迁入 coc7 插件，dnd5e 房间不再借 CoC
+    英文别名兜底——本探针固化**名称表不跨规则集泄漏**的边界事实：
 
-    - ``combat.shoot`` 在 dnd5e 房间仍按 CoC 射击结算（射程难度 / 弹药 /
-      故障表全是 CoC 语义），掷百分骰、等级带塌缩为中性二值
-      （``regular`` / ``failure``）；伤害仍走 dnd5e 的 ``resolve_damage``
-      （armorClass / dying 语义）。**不崩**。
+    - ``combat.shoot`` 在 dnd5e 房间仍按 CoC 射击结算（百分骰 / 射程难度 /
+      弹药流程），技能值不套用 CoC 名称表（``Firearms`` 不再被别名
+      ``firearms`` 命中，落到射击缺省 20；D2 之前是 50 命中 → regular），
+      等级带中性二值 → roll 30 失败。伤害仍走 dnd5e 的 ``resolve_damage``。
+      **不崩**。
     - 没有远程武器时落到既有报错「Knife 不是远程武器」，不是 dnd5e 语义。
     - ``combat.treat`` 在 dnd5e 房间仍跑 CoC 急救（急救技能缺省 30、
       成功回 1 HP），等级带中性二值。**不崩**。
 
-    D1 落地（shoot / treat 按房间规则集分派或显式拒绝）时应**改写**本用例
-    的断言为 dnd5e 语义——在那之前它作为 tripwire 保持绿：任何让现状漂移
-    的改动都会在这里先红。
+    shoot / treat 的规则集分派仍未落地（属后续批次）；本用例继续作
+    tripwire：任何让这两条链路再漂移的改动都会在这里先红。
     """
     context = FakeContext(tmp_path, "dnd5e")
     rng = SeqRng([30, 6])
@@ -364,16 +366,16 @@ def test_dnd5e_room_shoot_and_treat_probe(tmp_path, dnd5e_default_process, monke
         {"attacker": "Shooter", "target": "Target", "weapon": "Rifle"}, context
     )
     assert "error" not in shot, shot
-    # CoC 射击流程：百分骰掷骰 + 中性二值带（进程默认 dnd5e 未声明
-    # success_level，规则集 id 传的是本场战斗的 dnd5e）。
+    # CoC 射击流程 + 中性二值带；技能名表缺席 → 不再命中 ``Firearms``，
+    # 技能值落到射击缺省 20，roll 30 失败、不掷伤害骰。
     assert shot["roll"] == 30
     assert shot["success_level"] in {"regular", "failure"}
-    assert shot["success_level"] == "regular"
-    assert shot["success"] is True
-    assert shot["total_damage"] == 6
+    assert shot["success_level"] == "failure"
+    assert shot["success"] is False
+    assert shot["total_damage"] == 0
     assert "d100=30" in shot["summary"]
-    # 序列：两名 d20 先攻 + 一颗射击 d100 + 一颗 1D10 伤害骰。
-    assert rng.calls == [(20, 30), (20, 6), (100, 30), (10, 6)]
+    # 序列：两名 d20 先攻 + 一颗射击 d100（未命中，无伤害骰）。
+    assert rng.calls == [(20, 30), (20, 6), (100, 30)]
 
     # 无远程武器：既有报错路径，不崩。
     bare = FakeContext(tmp_path / "bare", "dnd5e")
