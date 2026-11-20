@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-19T12:06:21Z",
-  "updated_at": "2026-11-20T10:11:32Z",
+  "updated_at": "2026-11-20T11:16:19Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -941,9 +941,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "ccdd4b8412ec9ded2bdf13f9358f945933849a4779dd444aab5bdcf38dfb2e34",
-      "size": 223929,
-      "normalized_sha256": "ccdd4b8412ec9ded2bdf13f9358f945933849a4779dd444aab5bdcf38dfb2e34"
+      "sha256": "941728c5b523fc262191285aeee1ac2829490d675b9acc78b72a71ff8db8461d",
+      "size": 224744,
+      "normalized_sha256": "941728c5b523fc262191285aeee1ac2829490d675b9acc78b72a71ff8db8461d"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -1583,15 +1583,15 @@
     },
     "backend/trpg_server/character_card_io.py": {
       "role": "index",
-      "sha256": "487a9398b82fceacc545a188fbbf073d58e7bb1a41d323dcd5e19e88addcfff0",
-      "size": 24928,
-      "normalized_sha256": "487a9398b82fceacc545a188fbbf073d58e7bb1a41d323dcd5e19e88addcfff0"
+      "sha256": "5a152e773315882fcf35a46c4e414d88e568c7d982af89fd1b757ebe42fa76ef",
+      "size": 28943,
+      "normalized_sha256": "5a152e773315882fcf35a46c4e414d88e568c7d982af89fd1b757ebe42fa76ef"
     },
     "backend/trpg_server/character_service.py": {
       "role": "index",
-      "sha256": "50b26bf44d92d5c91f1f1fa9a27d601e8a41b93339f2ee570a564e2f9bc992d3",
-      "size": 27573,
-      "normalized_sha256": "b2693ce5707d7ded32a80d51a14846b490dc439b6b7cf08f48463b6748379a93"
+      "sha256": "dd8ea1214e5db607131b3dd682d311863fc4f1c04756200ee3834845d090b82f",
+      "size": 27419,
+      "normalized_sha256": "bc76542be72fc21cab885af804d17b6e9ed6447b08c250951d9747c3fff3e8d8"
     },
     "backend/trpg_server/check_service.py": {
       "role": "index",
@@ -1673,9 +1673,9 @@
     },
     "backend/trpg_server/config/schema.py": {
       "role": "index",
-      "sha256": "36b754ce000dbde6c93bd410fa9bbda74e0613cabbd921c06c4c6149136c7a69",
-      "size": 40731,
-      "normalized_sha256": "82c85c94b75648c28d930777ef7b96fdc921aab301bfda417d41c8793094298a"
+      "sha256": "3771a99594be043038bdc8eaca051abe895dfae6e76ead029caa33200f3d2929",
+      "size": 41539,
+      "normalized_sha256": "c127468f4ed5e481019c6e5de3d2e105da575b29dfc52ab729b439ffcaf33dcd"
     },
     "backend/trpg_server/config/secret_keys.py": {
       "role": "index",
@@ -2710,9 +2710,9 @@
     },
     "backend/trpg_server/routes/characters.py": {
       "role": "index",
-      "sha256": "5f965b8c4bd1f3e81683e964b520675cf160a4a241c449d803967cc4c633d703",
-      "size": 55476,
-      "normalized_sha256": "76552d41922b9936d79b4f214f251cfa9f361f6eb13a9fe7140972eceacff397"
+      "sha256": "02978f01df3f313b012356413a2eea4f630bd6d2fdd8dcde479ba3b4d9a86787",
+      "size": 37534,
+      "normalized_sha256": "2d261324af8c8383ee0fe76ab93706e5a3533a21df48e95051b8b2f429fcd49d"
     },
     "backend/trpg_server/routes/chat.py": {
       "role": "index",
@@ -2956,9 +2956,9 @@
     },
     "backend/trpg_server/ruleset/capabilities.py": {
       "role": "index",
-      "sha256": "5c2e75f95dcba57cd786fd452ef7507779be4b1cb68d941d5fdc7b290b4e30fd",
-      "size": 15854,
-      "normalized_sha256": "c4faf44c51b3dcc58bc23006afb11001cc7e15840a7383ebc435c99d94d74f2e"
+      "sha256": "c57f82da602b765434825c89437d65f812af4c25625e7db2087a637712789b07",
+      "size": 17812,
+      "normalized_sha256": "8bc4935f9e1e65fd5f265471edd8a0367eeeac804be866431748f88361e4a646"
     },
     "backend/trpg_server/ruleset/check_outcome.py": {
       "role": "index",
@@ -2971,6 +2971,12 @@
       "sha256": "57c899d09d3e67ac38e58d8638c84c3b4e14ccfceeca74df8143d6eb28c4697e",
       "size": 6981,
       "normalized_sha256": "236593ccbc1386fb0933e06ff8a57fa3ec5ab957e577d90fa0915e6559e4098b"
+    },
+    "backend/trpg_server/ruleset/coc7/card_shape.py": {
+      "role": "index",
+      "sha256": "db9511b08d5cc8da20c9db475f841211aaa4c9c6d042f74de20ffd027b33d459",
+      "size": 21939,
+      "normalized_sha256": "db9511b08d5cc8da20c9db475f841211aaa4c9c6d042f74de20ffd027b33d459"
     },
     "backend/trpg_server/ruleset/coc7/catalogs.py": {
       "role": "index",
@@ -3094,9 +3100,9 @@
     },
     "backend/trpg_server/ruleset/coc7/schema.py": {
       "role": "index",
-      "sha256": "3a3d2aff49fa205b154b193a8304a1b51af1f8c5267f9df0bc9588a645805b4f",
-      "size": 8365,
-      "normalized_sha256": "afa79fae59dbaf377733e6d48a91a8c9672a27a58554bbcee10be02623932a19"
+      "sha256": "f46b5492d488a4283b7a49faea62d9c3ce99c9ef256ac6962102593f37417408",
+      "size": 11674,
+      "normalized_sha256": "ec23a4d76ecf06d3255809e806c9c042defbb096d16dd67c910d8cdc79eddad3"
     },
     "backend/trpg_server/ruleset/coc7/site_agent.py": {
       "role": "index",
@@ -5364,9 +5370,9 @@
     },
     "docs/plans/cordis-paradigm-adoption-plan.md": {
       "role": "index",
-      "sha256": "241af34d27d9eb89442bc63cb21c6049891b1edbd77bf1f5ba3faa4e6a30135e",
-      "size": 21136,
-      "normalized_sha256": "f739eaec7c5f1c5d2165d76e00fe3e2287c525c868cd137c94805e495b5113ae"
+      "sha256": "85cb3b6fc54d2cb22c9d564f7051cdc1898ccea8f68ee9b70f66e9b5da2501a0",
+      "size": 21620,
+      "normalized_sha256": "7453e4e6640ad52a5daa0761d70471102863d0f57507957bc65d1bfa0115a470"
     },
     "docs/plans/dnd5e-ruleset-plugin-design.md": {
       "role": "index",
@@ -6877,9 +6883,9 @@
     },
     "release/changelog/v1.0.7.md": {
       "role": "index",
-      "sha256": "9a233a0c5bb92715131669f4df1b2973e2079bcc1630d42d78a345bae97e8470",
-      "size": 35778,
-      "normalized_sha256": "9a233a0c5bb92715131669f4df1b2973e2079bcc1630d42d78a345bae97e8470"
+      "sha256": "87d823bc8ba23079c1799d3c8b4a71c15d73244e91e6b7d3c7ba5a2169a0bce2",
+      "size": 38443,
+      "normalized_sha256": "87d823bc8ba23079c1799d3c8b4a71c15d73244e91e6b7d3c7ba5a2169a0bce2"
     },
     "requirements-ocr.txt": {
       "role": "index",
@@ -8266,6 +8272,12 @@
       "sha256": "b3e5f9d4f3133ba78f318b9b44ecc9ce47e338539c588c44a9abdf973afa4c28",
       "size": 7167,
       "normalized_sha256": "b3e5f9d4f3133ba78f318b9b44ecc9ce47e338539c588c44a9abdf973afa4c28"
+    },
+    "tests/test_ruleset_c1_card_shape.py": {
+      "role": "observe",
+      "sha256": "004c1d5d22cd16e402eae6612c5d40491e3b2330451a05666c0f05cb190c7e13",
+      "size": 16287,
+      "normalized_sha256": "004c1d5d22cd16e402eae6612c5d40491e3b2330451a05666c0f05cb190c7e13"
     },
     "tests/test_ruleset_d1_combat_semantics.py": {
       "role": "observe",
