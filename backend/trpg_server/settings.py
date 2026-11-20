@@ -30,6 +30,8 @@ ROOM_ARCHIVES_DIR = RUNTIME_DIR / "room_archives"
 DEBUG_KP_PROMPT_FILE = CONFIG_DIR / "roles" / "debug-kp.md"
 AI_PLATFORM_SECRET_DIR = RUNTIME_DIR / "config" / "aiplatform"
 OCCUPATIONS_DIR = DATA_DIR / "occupations"
+# 旧武器目录位置：D2 已把 CoC 武器表迁到 data/rulesets/coc7/catalogs/weapons/，
+# 本路径只作老安装的兼容回退（coc7/catalogs 读取），保留至 v1.1.0 后删除。
 WEAPONS_DIR = DATA_DIR / "weapons"
 # COC7 技能目录是随包发布的规则参考数据（不是用户配置），与职业/武器目录同级。
 CHARACTER_SKILLS_FILE = DATA_DIR / "character_skills.json"

@@ -1,8 +1,15 @@
-"""预设武器目录与角色卡自定义武器库的读写工具。
+"""角色卡武器行与自定义武器库的通用读写工具（规则集边界收敛 D2 后的归属）。
 
-预设武器按分类存放在 ``data/weapons/builtin/<分类>.json``。每个文件包含
-``category``/``order`` 元数据以及 ``weapons`` 数组；角色卡的自定义武器则
-存放在该角色卡自己的目录里（``<角色卡目录>/weapons.json``）。
+本模块只保留跨规则集的通用层：武器行结构规范（``normalize_weapon``）、
+角色卡武器行裁剪（``sanitize_character_weapons``）、每张角色卡自己的自定义
+武器库（``<角色卡目录>/weapons.json``）以及战斗轮可用的通用文本解析
+（伤害骰表达式 / 射程 / 每轮攻击数 / 装弹量）。
+
+CoC 专属部分已下沉 coc7 插件：预设武器目录（``data/rulesets/coc7/catalogs/
+weapons/``，旧安装仍可用 ``data/weapons/`` 回退）的读取器在
+``ruleset/coc7/weapons.py``；武器行的故障值（malfunction）与贯穿标记
+（impale）两列的数据语义由 ``combat/rulesets/coc7.py`` 的
+``weapon_field_rules`` 钩子解读，核心缺省恒不卡壳 / 恒不贯穿。
 """
 
 from __future__ import annotations
@@ -80,35 +87,6 @@ def normalize_weapon(raw: Any, *, category: str = DEFAULT_CATEGORY, weapon_id: s
         "eras": [_as_text(era) for era in _as_list(weapon.get("eras")) if _as_text(era)],
         "price": _as_text(weapon.get("price"), "N/A") or "N/A",
     }
-
-
-def load_preset_weapons(weapons_dir: Path) -> list[dict[str, Any]]:
-    """读取全部预设武器，旧版“单武器一个文件”的格式也兼容。"""
-    builtin_dir = weapons_dir / "builtin"
-    if not builtin_dir.exists():
-        return []
-    weapons: list[dict[str, Any]] = []
-    for path in sorted(builtin_dir.glob("*.json")):
-        payload = read_json(path, default=None)
-        if not isinstance(payload, dict):
-            continue
-        category = _as_text(payload.get("category"), DEFAULT_CATEGORY) or DEFAULT_CATEGORY
-        order = payload.get("order")
-        try:
-            order_value = int(order) if order is not None else category_order(category)
-        except (TypeError, ValueError):
-            order_value = category_order(category)
-        entries = payload.get("weapons")
-        if isinstance(entries, list):
-            for entry in entries:
-                if isinstance(entry, dict):
-                    weapons.append(normalize_weapon(entry, category=category, order=order_value))
-            continue
-        # 旧格式：文件本身就是一把武器
-        fallback_id = path.stem
-        weapons.append(normalize_weapon(payload, category=category, weapon_id=fallback_id, order=order_value))
-    weapons.sort(key=lambda item: (int(item.get("categoryOrder") or 0), str(item.get("name") or "")))
-    return weapons
 
 
 def find_preset_weapon(weapons: list[dict[str, Any]], weapon_id_or_name: str) -> dict[str, Any] | None:
@@ -221,9 +199,12 @@ def custom_weapon_id(name: str, index: int = 0) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 战斗轮使用的武器字段解析
-# 规则书表 XVII 的伤害/射程/每轮/装弹量/故障值都是自由文本，这里统一解析成
+# 战斗轮使用的武器字段解析（通用层）
+# 武器行的伤害 / 射程 / 每轮攻击数 / 装弹量都是自由文本，这里统一解析成
 # 战斗工具可直接使用的结构。解析失败时返回安全默认值，绝不抛异常。
+# 规则集专属的两列——CoC 表 XVII 的故障值（malfunction）与贯穿标记
+# （impale）——不在这里解读：那是 ``combat/rulesets/coc7.py`` 的
+# ``weapon_field_rules`` 钩子职责，其他规则集没有这两列的语义（D2）。
 # ---------------------------------------------------------------------------
 _DICE_TERM_PATTERN = re.compile(r"(\d+)[dD](\d+)")
 _RANGE_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*(码|米|英尺|尺|yd|yard|yards|m|ft)?", re.IGNORECASE)
@@ -283,15 +264,6 @@ def parse_range_yards(value: Any) -> float | None:
     return round(number * _RANGE_UNIT_YARDS.get(unit, 1.0), 3)
 
 
-def parse_malfunction(value: Any) -> int | None:
-    """把故障值解析成整数（``N/A`` 返回 ``None``）。"""
-    text = _as_text(value).upper()
-    if not text or text in {"N/A", "NA", "-", "—", "NONE"}:
-        return None
-    match = re.search(r"\d+", text)
-    return int(match.group(0)) if match else None
-
-
 def parse_attacks(value: Any) -> dict[str, Any]:
     """解析每轮攻击次数，``1(3)`` 表示每轮 1 次攻击、可 3 发点射。"""
     text = _as_text(value, "1") or "1"
@@ -316,16 +288,19 @@ def parse_ammo(value: Any) -> int | None:
 
 
 def weapon_rules(weapon: Any) -> dict[str, Any]:
-    """汇总一把武器在战斗轮中需要的全部解析字段。"""
+    """汇总一把武器在战斗轮中需要的跨规则集解析字段。
+
+    只含通用四列（伤害 / 射程 / 每轮攻击数 / 装弹量）；``malfunction`` 与
+    ``impale`` 是 CoC 表数据语义，经 ``combat/registry.weapon_field_rules``
+    按规则集解读（coc7 插件提供，缺席恒 ``None`` / ``False``），不在本层。
+    """
     row = weapon if isinstance(weapon, dict) else {}
     damage = parse_damage(row.get("damage"))
     return {
         "damage": damage,
         "rangeYards": parse_range_yards(row.get("range")),
-        "malfunction": parse_malfunction(row.get("malfunction")),
         "attacks": parse_attacks(row.get("attacks")),
         "ammoCapacity": parse_ammo(row.get("ammo")),
-        "impale": _as_bool(row.get("impale")),
     }
 
 

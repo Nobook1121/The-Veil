@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
-from flask import current_app
-
-from trpg_server import character_service, weapon_catalog
+from trpg_server import character_service
 from trpg_server.site_agent_tools.base import ToolContext, ToolResult, ToolSpec, schema
-from trpg_server.settings import WEAPONS_DIR
 
 _MAX_CARD_JSON = 40000
 
@@ -81,8 +77,16 @@ def get_character(actor: Any, arguments: dict[str, Any], context: ToolContext) -
 
 
 def list_weapons(actor: Any, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-    weapons_dir = Path(current_app.config.get("WEAPONS_DIR", WEAPONS_DIR))
-    weapons = weapon_catalog.load_preset_weapons(weapons_dir)
+    # 预设武器目录经默认规则集插件的 catalogs 能力读取（D2）：CoC 武器表
+    # 数据归插件所有，核心工具不再直接读武器数据路径；插件缺席时为空目录。
+    from trpg_server.ruleset import builtin_registry
+    from trpg_server.ruleset.capabilities import catalog_items
+
+    try:
+        plugin = builtin_registry().resolve("")
+        weapons = list(catalog_items(plugin, "weapons")) if plugin is not None else []
+    except Exception:  # noqa: BLE001 - 插件层故障按空目录处理，工具仍可用
+        weapons = []
     categories: list[dict[str, Any]] = []
     for weapon in weapons:
         category = str(weapon.get("category") or "")

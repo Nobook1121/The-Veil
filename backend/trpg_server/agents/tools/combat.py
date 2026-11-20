@@ -42,7 +42,9 @@ from trpg_server.combat.registry import (
     initiative_score,
     initial_sanity,
     level_rank,
+    skill_names,
     unarmed_weapon,
+    weapon_field_rules,
     weapon_malfunction,
 )
 from trpg_server.combat.scheduler import TurnScheduler
@@ -789,9 +791,9 @@ def _resolve_skill_value(
     return default, requested or (names[0] if names else "格斗")
 
 
-MELEE_SKILL_NAMES = ("格斗（斗殴）", "格斗（斗殴技能）", "斗殴", "格斗", "fencing", "brawl", "fighting")
-RANGED_SKILL_NAMES = ("射击（手枪）", "射击（步枪）", "射击（霰弹枪）", "射击", "枪械", "firearms")
-DODGE_SKILL_NAMES = ("闪避", "dodge")
+# CoC 技能名回退表（格斗/射击/闪避）已迁入 coc7 插件（D2）：
+# ``combat/rulesets/coc7.py`` 的三张名称表经 ``combat.registry.skill_names``
+# 按本场战斗的规则集取用；缺席规则集退空表，不再套用 CoC 名称。
 
 
 def _weapon_rows(combatant: dict[str, Any], card: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -857,6 +859,8 @@ def _compute_damage(
     武器骰项 / 固定值 / 伤害加值的拆解是数据层（``weapon_catalog``）职责；
     极限成功时的伤害合成（满骰面 / 贯贯穿追加）是规则集语义，经
     ``combat.registry.extreme_damage`` 查询，缺省退「满骰面、无贯穿」。
+    武器行的 ``impale`` 标记（贯穿武器）同属规则集数据语义，经
+    ``combat.registry.weapon_field_rules`` 按本场规则集解读，缺席恒不贯穿。
     """
     rules = weapon_catalog.weapon_rules(weapon)
     parsed = rules["damage"]
@@ -864,7 +868,7 @@ def _compute_damage(
     segment = segments[min(max(0, segment_index), len(segments) - 1)]
     terms = [tuple(term) for term in segment.get("terms") or []]
     fixed = _as_int(segment.get("fixed"), 0)
-    impale = bool(rules.get("impale"))
+    impale = bool(weapon_field_rules(weapon, ruleset_id)["impale"])
 
     add_db = (melee or bool(parsed.get("db"))) and not bool(parsed.get("half_db"))
     half_db = bool(parsed.get("half_db"))
@@ -1124,7 +1128,7 @@ def _prepare_combatant(
     combatant["fighting"] = _resolve_skill_value(
         combatant,
         _player_card(combatant, context),
-        names=MELEE_SKILL_NAMES,
+        names=skill_names("melee", settings.ruleset_id),
         default=25,
     )[0]
 
@@ -2318,7 +2322,7 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         requested=_as_text(arguments.get("skill")),
         skill_key=_as_text(weapon.get("skillKey")),
         specialty_key=_as_text(weapon.get("specialtyKey")),
-        names=MELEE_SKILL_NAMES if melee else RANGED_SKILL_NAMES,
+        names=skill_names("melee" if melee else "ranged", combat_ruleset_id),
         default=25 if melee else 20,
     )
     if not melee:
@@ -2376,11 +2380,11 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     target_card = _player_card(target, context)
     if defense == "counter":
         defense_value, defense_label = _resolve_skill_value(
-            target, target_card, names=MELEE_SKILL_NAMES, default=25
+            target, target_card, names=skill_names("melee", combat_ruleset_id), default=25
         )
     elif defense == "dodge":
         defense_value, defense_label = _resolve_skill_value(
-            target, target_card, names=DODGE_SKILL_NAMES, default=max(1, int(target.get("dex") or 0) // 2)
+            target, target_card, names=skill_names("dodge", combat_ruleset_id), default=max(1, int(target.get("dex") or 0) // 2)
         )
     else:
         defense_value, defense_label = 0, "不防御"
@@ -2689,7 +2693,7 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         requested=_as_text(arguments.get("skill")),
         skill_key=_as_text(weapon.get("skillKey")),
         specialty_key=_as_text(weapon.get("specialtyKey")),
-        names=RANGED_SKILL_NAMES,
+        names=skill_names("ranged", combat_ruleset_id),
         default=20,
     )
     bonus = _dice_count(arguments, "bonus_dice", "bonus")
@@ -2737,7 +2741,7 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         dodge_value, dodge_label = _resolve_skill_value(
             target,
             target_card,
-            names=DODGE_SKILL_NAMES,
+            names=skill_names("dodge", combat_ruleset_id),
             default=max(1, int(target.get("dex") or 0) // 2),
         )
         dodge_roll, _ = _percentile_roll(_roller, ruleset_id=combat_ruleset_id)
@@ -2754,7 +2758,9 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             cover_dodge_note = (
                 f"{target.get('name')} 借掩体闪避失败（{dodge_label} d100={dodge_roll} / {dodge_value}，{dodge_level}）"
             )
-    malfunction = rules.get("malfunction")
+    # 故障值是 CoC 武器表数据语义（D2）：解读归本场战斗的规则集钩子，
+    # 缺席规则集恒得 ``None``（不卡壳）；核心不再解析该列。
+    malfunction = weapon_field_rules(weapon, combat_ruleset_id)["malfunction"]
     ammo_tracker = attacker.get("ammo") if isinstance(attacker.get("ammo"), dict) else {}
     ammo_key = str(weapon.get("name") or "")
     capacity = rules.get("ammoCapacity")

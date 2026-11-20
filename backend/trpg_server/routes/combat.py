@@ -17,7 +17,7 @@ from trpg_server import weapon_catalog
 from trpg_server.agents import player_roll
 from trpg_server.agents.tools import combat
 from trpg_server.agents.tools.dice import _percentile_from_faces, _plan_percentile
-from trpg_server.combat.registry import unarmed_weapon
+from trpg_server.combat.registry import skill_names, unarmed_weapon
 from trpg_server.json_store import read_json
 from trpg_server.responses import error_response, success_response
 from trpg_server.settings import CONFIG_DIR, SCENARIOS_DIR
@@ -226,19 +226,21 @@ def _prepare_check(
         return {"error": f"角色卡上没有武器“{weapon_name}”"}
     if weapon is None:
         weapon = unarmed_weapon(str((combat_state_data or {}).get("ruleset") or ""))
+    # CoC 技能名回退表由规则集提供（D2）：按本场战斗的规则集解析，缺席退空表。
+    ruleset_id = str((combat_state_data or {}).get("ruleset") or "")
     if action == "shoot":
         skill_value, skill_label = combat._resolve_skill_value(
             attacker, card, requested=str(payload.get("skill") or ""),
             skill_key=str(weapon.get("skillKey") or ""),
             specialty_key=str(weapon.get("specialtyKey") or ""),
-            names=combat.RANGED_SKILL_NAMES, default=20,
+            names=skill_names("ranged", ruleset_id), default=20,
         )
     else:
         skill_value, skill_label = combat._resolve_skill_value(
             attacker, card, requested=str(payload.get("skill") or ""),
             skill_key=str(weapon.get("skillKey") or ""),
             specialty_key=str(weapon.get("specialtyKey") or ""),
-            names=combat.MELEE_SKILL_NAMES, default=25,
+            names=skill_names("melee", ruleset_id), default=25,
         )
     bonus = combat._dice_count(payload, "bonus_dice", "bonus")
     penalty = combat._dice_count(payload, "penalty_dice", "penalty")

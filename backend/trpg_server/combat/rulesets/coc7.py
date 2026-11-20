@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping
 
 from ..contracts import DamageOutcome, RoundEndOutcome
@@ -26,6 +27,36 @@ UNARMED_WEAPON = {
     "ammo": "N/A",
     "malfunction": "N/A",
 }
+# 战斗技能名回退表：角色卡技能行缺失或未声明专精键时，按这些 CoC 技能名兜底
+# 取值（D2：原硬编码在 ``agents/tools/combat.py`` 的三张表，逐字迁移）。
+# 核心链路只经 ``combat/registry.skill_names`` 按本场战斗规则集查询，缺席退空表。
+MELEE_SKILL_NAMES = ("格斗（斗殴）", "格斗（斗殴技能）", "斗殴", "格斗", "fencing", "brawl", "fighting")
+RANGED_SKILL_NAMES = ("射击（手枪）", "射击（步枪）", "射击（霰弹枪）", "射击", "枪械", "firearms")
+DODGE_SKILL_NAMES = ("闪避", "dodge")
+
+
+def _as_text(value: Any, fallback: str = "") -> str:
+    """与核心武器行层同语义的文本清洗（插件自持，不 import 核心私有助手）。"""
+    if value is None:
+        return fallback
+    return str(value).strip()
+
+
+def _as_bool(value: Any) -> bool:
+    return value is True or str(value).strip().lower() in {"1", "true", "yes"}
+
+
+def parse_malfunction(value: Any) -> int | None:
+    """把 CoC 武器表的故障值解析成整数（``N/A`` 返回 ``None``，p97-98）。
+
+    故障值是 CoC 规则书武器表（表 XVII）的专有列；其他规则集的武器行没有
+    「骰值达到阈值即卡壳」的数据语义，解析归本插件所有。
+    """
+    text = _as_text(value).upper()
+    if not text or text in {"N/A", "NA", "-", "—", "NONE"}:
+        return None
+    match = re.search(r"\d+", text)
+    return int(match.group(0)) if match else None
 
 
 def _max_roll(terms) -> int:
@@ -116,6 +147,31 @@ class Coc7Ruleset:
         except (TypeError, ValueError):
             return False
         return bool(value) and int(roll) >= value
+
+    def weapon_field_rules(self, weapon: Any) -> dict[str, Any]:
+        """CoC 武器行的规则集数据语义：故障值整数化、贯穿标记取行内 impale。
+
+        「故障值 95 表示骰到 95+ 卡壳」「impale=True 的武器极限成功追加一次
+        伤害骰」都是 CoC7 的表数据语义；其他规则集的武器行没有这两列的含义，
+        由本钩子集中解读，核心只转交结果，缺席退中性（不卡壳、不贯穿）。
+        """
+        row = weapon if isinstance(weapon, dict) else {}
+        return {
+            "malfunction": parse_malfunction(row.get("malfunction")),
+            "impale": _as_bool(row.get("impale")),
+        }
+
+    def melee_skill_names(self) -> tuple[str, ...]:
+        """近战技能名回退表（格斗系）；核心链路经 ``skill_names`` 取用。"""
+        return MELEE_SKILL_NAMES
+
+    def ranged_skill_names(self) -> tuple[str, ...]:
+        """射击技能名回退表；核心链路经 ``skill_names`` 取用。"""
+        return RANGED_SKILL_NAMES
+
+    def dodge_skill_names(self) -> tuple[str, ...]:
+        """闪避技能名回退表；核心链路经 ``skill_names`` 取用。"""
+        return DODGE_SKILL_NAMES
 
     def auto_fire_composition(
         self, bullets: Any, extreme: Any, difficulty_rank: Any

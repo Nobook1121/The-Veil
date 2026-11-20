@@ -2,6 +2,9 @@
 
 优先读 ``data/rulesets/coc7/catalogs/``；不存在时回退到项目原有位置，
 保证不搬迁数据也能正常工作。路由层的 app.config 覆盖仍然生效（测试会注入临时路径）。
+
+D2 起 CoC 预设武器的读取器归本包所有（``ruleset/coc7/weapons.py``），
+不再借核心 ``weapon_catalog`` 读 CoC 数据；本模块只声明路径与目录结构。
 """
 
 from __future__ import annotations
@@ -10,8 +13,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from trpg_server import weapon_catalog
 from trpg_server.json_store import read_json
+from trpg_server.ruleset.coc7 import weapons as coc7_weapons
 from trpg_server.settings import (
     CHARACTER_SKILLS_FILE,
     DATA_DIR,
@@ -22,6 +25,11 @@ from trpg_server.settings import (
 logger = logging.getLogger(__name__)
 
 RULESET_CATALOG_DIR = DATA_DIR / "rulesets" / "coc7" / "catalogs"
+
+# 旧数据位置兼容回退：D2 已把 ``data/weapons/builtin`` 物理迁到
+# ``data/rulesets/coc7/catalogs/weapons/builtin``；老安装（代码升级但数据目录
+# 未迁移）仍从 ``data/weapons/`` 读到。回退与 ``settings.WEAPONS_DIR`` /
+# app 配置键保留至 v1.1.0，届时删除本回退与对应配置键。
 
 
 def _app_override(key: str, fallback: Path) -> Path:
@@ -82,7 +90,7 @@ class Coc7Catalogs:
 
     def weapons(self) -> list[dict[str, Any]]:
         try:
-            return weapon_catalog.load_preset_weapons(self._weapons_dir())
+            return coc7_weapons.load_preset_weapons(self._weapons_dir())
         except OSError:
             logger.exception("Failed to load CoC7 weapon catalog")
             return []

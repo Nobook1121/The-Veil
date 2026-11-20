@@ -207,6 +207,40 @@ def weapon_malfunction(roll: Any, threshold: Any, ruleset_id: str | None = None)
     return False
 
 
+def weapon_field_rules(weapon: Any, ruleset_id: str | None = None) -> dict[str, Any]:
+    """武器行里规则集专属数据字段的解读；插件可覆盖，缺省中性。
+
+    核心只认识跨规则集的武器行字段（伤害 / 射程 / 每轮攻击数 / 装弹量），
+    ``malfunction``（故障值整数）与 ``impale``（贯穿标记）这两列的含义由
+    规则集解读：coc7 把故障值 ``95`` 解析为卡壳阈值、``impale`` 解析为贯穿
+    武器标记；缺席规则集退中性（``malfunction=None`` 恒不卡壳、
+    ``impale=False`` 恒不贯穿），与 ``weapon_malfunction`` 缺省语义一致。
+    """
+    handler = _capability("weapon_field_rules", ruleset_id)
+    if callable(handler):
+        try:
+            value = handler(weapon)
+            if isinstance(value, Mapping):
+                return {"malfunction": value.get("malfunction"), "impale": bool(value.get("impale"))}
+        except Exception:  # noqa: BLE001 - 规则实现异常不应击穿战斗主循环
+            logger.warning("weapon_field_rules failed", exc_info=True)
+    return {"malfunction": None, "impale": False}
+
+
+def skill_names(kind: str, ruleset_id: str | None = None) -> tuple[str, ...]:
+    """战斗技能名回退表；插件可用 ``<kind>_skill_names()`` 提供，缺省空表。
+
+    角色卡技能行缺失或未声明专精键时，核心按名称兜底取技能值；CoC 的
+    「格斗（斗殴）/ 射击（手枪）/ 闪避」名称表由 coc7 插件提供，其他规则集
+    缺席退空表（按 default 与请求值呈现，不套用 CoC 名称）。
+    """
+    handler = _capability(f"{str(kind or '').strip().lower()}_skill_names", ruleset_id)
+    value = handler() if callable(handler) else handler
+    if isinstance(value, (list, tuple)):
+        return tuple(str(item) for item in value)
+    return ()
+
+
 def auto_fire_composition(
     bullets: Any, extreme: Any, difficulty_rank: Any, ruleset_id: str | None = None
 ) -> tuple[int, int]:

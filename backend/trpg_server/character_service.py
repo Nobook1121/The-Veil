@@ -20,7 +20,7 @@ from trpg_server import weapon_catalog
 from trpg_server.config import load_settings
 from trpg_server.json_store import read_json, write_json_atomic
 from trpg_server.ruleset import get_plugin
-from trpg_server.settings import CHARACTERS_DIR, CONFIG_DIR, ROOMS_DIR, WEAPONS_DIR
+from trpg_server.settings import CHARACTERS_DIR, CONFIG_DIR, ROOMS_DIR
 
 CHARACTER_WRITE_FIELDS = (
     "name",
@@ -60,8 +60,21 @@ def _get_rooms_dir() -> Path:
     return Path(current_app.config.get("ROOMS_DIR", ROOMS_DIR))
 
 
-def _get_weapons_dir() -> Path:
-    return Path(current_app.config.get("WEAPONS_DIR", WEAPONS_DIR))
+def _preset_weapons_catalog() -> list[dict[str, Any]]:
+    """预设武器目录经默认规则集插件的 catalogs 能力读取（D2）。
+
+    CoC 武器表数据已归插件所有（``ruleset/coc7/weapons.py`` 读自己的目录）；
+    核心不再直接读武器数据路径。插件缺失 / 未声明目录时按空目录处理，
+    ``presetId`` 引用自然落到「无预设匹配」分支，卡面行原样保留。
+    """
+    from trpg_server.ruleset import builtin_registry
+    from trpg_server.ruleset.capabilities import catalog_items
+
+    try:
+        plugin = builtin_registry().resolve("")
+    except Exception:  # noqa: BLE001 - 插件层故障不应阻断角色卡保存
+        return []
+    return list(catalog_items(plugin, "weapons")) if plugin is not None else []
 
 
 def _normalize_id(value: Any) -> str:
@@ -288,7 +301,7 @@ def _sync_weapon_payload(character: dict[str, Any], raw_payload: dict[str, Any])
     additions = list(custom_values) if isinstance(custom_values, list) else []
     rows = raw_payload.get("weapons")
     if isinstance(rows, list):
-        presets = weapon_catalog.load_preset_weapons(_get_weapons_dir())
+        presets = _preset_weapons_catalog()
         resolved_rows = []
         for row in rows:
             if not isinstance(row, dict):
