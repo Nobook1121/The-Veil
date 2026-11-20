@@ -234,7 +234,7 @@ character_items.py[DB4S]: F:KP 物品工具：向房间快照追加物品或武�
 character_stats.py[DB4S]: F:KP 属性技能工具：修改房间快照技能值与基础属性，与控制台 rule skill、rule attr 共用 room_rules并登记统一待写回队列；持久卡仅归档时合并，能力钳制走 ruleset.capabilities | R:code:backend/trpg_server/room_rules.py | A:- | S:-
 chase.py[DB5M]: F:CoC7 追逐工具：会话、移动、险境与冲突；规则数学在 ruleset 插件 chase 模块、状态在 room_chase；房规开关经注册表能力读取，coc7 缺席时按全部关闭且本组不挂载 | R:code:backend/trpg_server/room_chase.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
 coc7.py[DB5L]: F:CoC7 房规 AI 工具：社交、组合、团体幸运、熟人、经济五个工具只做参数搬运，判定统一走 check_service；房规开关经注册表能力读取，coc7 缺席按全部关闭且不挂载 | R:code:backend/trpg_server/check_service.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
-combat.py[DB8L]: F:战斗轮工具：DEX 先攻、近战对抗、战技、射击难度与故障、护甲、重伤濒死死亡与急救医学；贯穿/卡壳/徒手/先攻合成经规则集钩子（D1），武器字段值与近战射击闪避技能名表经 registry 取用（D2），战斗 SAN 走资源槽位；房规经 room_rules 共享解析点，规则集缺席按全部关闭 | R:code:backend/trpg_server/agents/tools/dice.py,code:backend/trpg_server/agents/room_state.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:dnd5e 房间 shoot/treat 仍走 CoC 流程，B1 探针用例固化现状，分派重构属后续批次
+combat.py[DB8L]: F:战斗轮工具：DEX 先攻、近战对抗、战技、射击难度与故障、护甲、重伤濒死死亡与急救医学；贯穿/卡壳/徒手/先攻合成经规则集钩子（D1），武器字段与技能名表经 registry（D2），射击与急救入口按 flow_mode 闸门分派（D3），战斗 SAN 走资源槽位 | R:code:backend/trpg_server/agents/tools/dice.py,code:backend/trpg_server/agents/room_state.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:treat 的急救/医学技能名元组仍留核心，闸门使非 coc7 房间不可达，迁移属后续债务
 concentration.py[DB4S]: F:专注注册表工具（仅 dnd5e）：concentration.list 刷新并列出房间级专注索引，concentration.break 走插件 end_concentration 清理关联效果并同步注册表 | R:code:backend/trpg_server/workflows/concentration.py | A:- | S:-
 content.py[IB5T]: F:通用内容检索工具：核心不认识法术、怪物、装备字段；插件通过 content_search 能力提供 types 与 search，ambiguous 时绝不自行取第一条必须交调用方确认 | R:- | A:不传 type 时返回该规则集支持的内容类型 | S:-
 dice.py[DB8L]: F:骰娘工具族：COC 检定、房间检定（读角色卡真实技能值）、疯狂、理智、自由掷骰与 dnd5e 检定；阈值与难度经规则集 checks 能力并按传入 ruleset_id 解析（B1 显式携带），检定成功可同轮揭示触发器，骰面策略走 dice_policy | R:code:backend/trpg_server/dice_policy.py,code:backend/trpg_server/agents/tools/trigger.py | A:- | S:-
@@ -259,13 +259,13 @@ workflow.py[DW5M]: F:工作流查询与决策工具（仅 dnd5e 下发）：跨�
 ===/<repository>/backend/trpg_server/combat/===
 __init__.py[CD7T]: F:可插拔战斗核心包入口：核心只管事件流与结算时序（谁先行动、行动余额、轮末触发），掷骰、成功等级、伤害与死亡判定全由 ruleset 插件提供 | R:code:backend/trpg_server/combat/registry.py,code:backend/trpg_server/combat/settings.py | A:- | S:-
 contracts.py[CD6S]: F:战斗规则书插件的公共契约：刻意弱语义，只描述一次结算的输入输出，不出现 HP/SAN/DB 等专属字段；等级与顺序可插件覆盖，默认值有中性占位；DamageOutcome 重伤濒死昏迷死亡四字段可空（None 表示该伤害模型无此概念） | R:code:backend/trpg_server/combat/registry.py | A:- | S:-
-registry.py[CD6M]: F:战斗规则注册表：插件经 combat 能力注册、按规则集 id 取实现；不静态 import 任何具体战斗实现，运维兜底表只剩显式 TRPG_RULESET_COMBAT_FALLBACKS 声明；贯穿/卡壳/徒手/先攻合成/初始理智/武器字段/技能名表取用一律中性降级 | R:code:backend/trpg_server/ruleset/__init__.py | A:- | S:-
+registry.py[CD6M]: F:战斗规则注册表：插件经 combat 能力注册、按规则集 id 取实现；不静态 import 任何具体战斗实现，运维兜底表只剩显式 TRPG_RULESET_COMBAT_FALLBACKS 声明；贯穿/卡壳/徒手/先攻合成/初始理智/武器字段/技能名表/流程模式（flow_mode）取用一律中性降级 | R:code:backend/trpg_server/ruleset/__init__.py | A:- | S:-
 scheduler.py[CD7M]: F:规则书无关的回合调度器：轮与回合推进、行动余额、跳过无法行动者、轮末钩子；先攻、伤害、濒死判定是插件的事；插件声明 TurnModel 时维护多槽 budget 并按 refresh 重置，未声明时只维护 actions_remaining 行为不变 | R:code:backend/trpg_server/combat/contracts.py | A:- | S:-
 settings.py[FC5S]: F:战斗房规配置：规则书留白项（拔枪耗时、施法打断、重伤影响、盾牌格挡）统一放这里由房规覆盖，默认取最保守解释；SURPRISE_MODES 等为字面量权威 | R:code:backend/trpg_server/house_rules_store.py | A:- | S:-
 
 ===/<repository>/backend/trpg_server/combat/rulesets/===
 __init__.py[RD3T]: F:内置战斗实现包：包导入不加载具体规则包，经 __getattr__ 惰性解析；删除某实现后仅真正引用它的调用点失败 | R:code:backend/trpg_server/combat/rulesets/coc7.py | A:- | S:-
-coc7.py[CD6M]: F:CoC7 战斗规则书插件：判定、伤害、濒死与行动经济语义收在这里；六钩子（D1）加武器字段取值与三张技能名表（D2）供核心查询；成功等级统一复用骰子模块判定数学 | R:code:backend/trpg_server/combat/contracts.py,code:backend/trpg_server/combat/scheduler.py | A:LEVEL_RANK 为成功等级排序权威 | S:-
+coc7.py[CD6M]: F:CoC7 战斗规则书插件：判定、伤害、濒死与行动经济语义收在这里；六钩子（D1）、武器字段取值与三张技能名表（D2）、shoot_mode/treat_mode 流程声明（D3）供核心查询；成功等级统一复用骰子模块判定数学 | R:code:backend/trpg_server/combat/contracts.py,code:backend/trpg_server/combat/scheduler.py | A:LEVEL_RANK 为成功等级排序权威 | S:-
 
 ===/<repository>/backend/trpg_server/config/===
 __init__.py[CC7T]: F:统一配置加载包入口：四层优先级代码默认、模板、用户配置、环境变量与 CLI；模块内聚 paths、fields、schema、sources、merge、writer、bootstrap | R:code:backend/trpg_server/config/schema.py,code:backend/trpg_server/config/merge.py | A:load_settings、update_sections 为公共 API | S:-
@@ -835,7 +835,7 @@ pattern_cyber_2.md[SD2M]: F:赛博主题 pattern_cyber_2 设计文档 | R:code:d
 ===/<repository>/docs/plans/===
 coc7-rules-audit.md[SD3M]: F:CoC7 规则审计计划：规则书口径与实现的对照清单 | R:- | A:- | S:-
 coc7-rules-roadmap.md[SD2S]: F:CoC7 规则路线图 | R:code:docs/plans/coc7-rules-audit.md | A:- | S:-
-cordis-paradigm-adoption-plan.md[SD3S]: F:Cordis 范式采纳计划：插件 mini 内核、注册耦合解除、路由可逆化与规则集边界收敛的阶段计划与实施状态记录（P0/P1/默认参数化/B1/D1/D2 已落地） | R:code:backend/trpg_server/plugins/kernel/__init__.py | A:- | S:-
+cordis-paradigm-adoption-plan.md[SD3S]: F:Cordis 范式采纳计划：插件 mini 内核、注册耦合解除、路由可逆化与规则集边界收敛的阶段计划与实施状态记录（P0/P1/默认参数化/B1/D1/D2/D3 已落地，战斗域收口） | R:code:backend/trpg_server/plugins/kernel/__init__.py | A:- | S:-
 dnd5e-ruleset-plugin-design.md[SD3L]: F:dnd5e 规则集插件化设计：从内置模块到 data/plugins 插件的迁移设计 | R:- | A:- | S:-
 dnd5e-ruleset-subsystem-survey.md[SD2L]: F:dnd5e 子系统调研：判定壳、会话、资源与效果等契约的现状梳理 | R:code:docs/plans/ruleset-core-generalization-survey.md | A:- | S:-
 prop-workshop-design.md[SD3L]: F:道具工坊设计稿：模板、存储、渲染与 AI 起草通道 | R:code:backend/trpg_server/props/__init__.py | A:- | S:-
@@ -1127,7 +1127,7 @@ v1.0.3.md[SV1T]: F:v1.0.3 版本变更日志 | R:code:release/RELEASE_MANIFEST.m
 v1.0.4.md[SV1T]: F:v1.0.4 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
 v1.0.5.md[SV1T]: F:v1.0.5 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
 v1.0.6.md[SV1T]: F:v1.0.6 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
-v1.0.7.md[SV2M]: F:v1.0.7 当前版本变更日志：插件生命周期 v2、地图与工作流、规则集边界收敛各批次（P0 至 D2）变更 | R:code:release/RELEASE_MANIFEST.md | A:当前 APP_VERSION 1.0.7 | S:-
+v1.0.7.md[SV2M]: F:v1.0.7 当前版本变更日志：插件生命周期 v2、地图与工作流、规则集边界收敛各批次（P0 至 D3）变更 | R:code:release/RELEASE_MANIFEST.md | A:当前 APP_VERSION 1.0.7 | S:-
 
 ===/<repository>/research/cordis/===
 Cordis-调研报告.md[SA3L]: F:Cordis 插件框架调研报告：Shigma 的 Cordis v4 与 deepseek-harness 的采纳分析，得出插件化可借鉴结论 | R:code:docs/plans/cordis-paradigm-adoption-plan.md | A:- | S:-
