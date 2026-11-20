@@ -391,8 +391,10 @@ def apply_room_changes(actor: Any, character_id: str, changes: list[dict[str, An
 
     from trpg_server.ruleset.capabilities import clamp_attribute_value
     from trpg_server.ruleset.capabilities import derive_card as derive_with_plugin
+    from trpg_server.ruleset.capabilities import resource_slot, resource_slots
 
-    derived = derive_with_plugin(_plugin_for_card(existing), existing)
+    plugin = _plugin_for_card(existing)
+    derived = derive_with_plugin(plugin, existing)
     skill_cap = _bounded_int(derived.get("skillCap"), 0, 999, 100)
 
     payload: dict[str, Any] = {}
@@ -409,12 +411,18 @@ def apply_room_changes(actor: Any, character_id: str, changes: list[dict[str, An
             if record_key in seen_record_keys:
                 continue
             seen_record_keys.add(record_key)
-        if kind == "san":
-            payload["currentSan"] = _bounded_int(change.get("value"), 0, 999, 0)
-        elif kind in {"hp", "mp"}:
-            key = "currentHp" if kind == "hp" else "currentMp"
-            payload[key] = _bounded_int(change.get("value"), 0, 999, 0)
+        # 资源类变更类型（队列 ``type``）按卡所属规则集的槽位声明解析（F1）：
+        # 插件声明了该资源（coc7: san/hp/mp）→ 写回镜像键来自声明，与 D1 战斗侧
+        # 槽位驱动同源；未声明该槽位的规则集（dnd5e 的 san/mp）→ 静默跳过，
+        # 不把 CoC 镜像键写到别家卡上。插件缺席 / 注册表为空时
+        # :func:`resource_slots` 回落核心默认槽位，旧行为逐位不变。
+        slot = resource_slot(plugin, kind)
+        if slot is not None:
+            payload[str(slot["mirror"])] = _bounded_int(change.get("value"), 0, 999, 0)
         elif kind == "armor":
+            # 结构类：护甲是卡面派生镜像值（非「当前 / 上限」资源，槽位声明不含
+            # armor），dnd5e 无此概念（AC 由装备计算）；保留通用分支，数值随后仍
+            # 经插件派生刷新统一重算。
             payload["armor"] = _bounded_int(change.get("value"), 0, 99, 0)
         elif kind == "skill":
             skills = payload.get("skills")
@@ -479,9 +487,8 @@ def apply_room_changes(actor: Any, character_id: str, changes: list[dict[str, An
     if not payload:
         return existing
     # 属性 / 神话值变化后统一重算派生值，并写入被夹紧的 HP / MP / SAN 与上限。
-    plugin = _plugin_for_card(existing)
     if plugin is not None:
-        from trpg_server.ruleset.capabilities import derived_card_keys, resource_slots
+        from trpg_server.ruleset.capabilities import derived_card_keys
 
         merged = dict(existing)
         merged.update(payload)
