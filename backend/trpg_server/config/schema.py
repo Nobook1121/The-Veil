@@ -23,6 +23,13 @@ from trpg_server.config.fields import (
 # network.port 的代码默认值（L1）。``settings.DEFAULT_PORT`` 由此派生，避免两处漂移。
 DEFAULT_NETWORK_PORT = 8086
 
+# [ruleset] default_id 的代码默认值（L1）：未显式指定规则集时，房间创建、剧本
+# 归一化、角色卡导入导出与 AI 运行时共同回退到的缺省规则集。
+# 这是「默认规则集 id」的单一真源——模板（L2）与它保持一致，业务代码一律经
+# 配置链读取（``ruleset.bootstrap.default_ruleset_hint``），不另写字面量兜底；
+# ruleset 包本身不写死任何具体 id。
+DEFAULT_RULESET_ID = "coc7"
+
 
 @dataclass(frozen=True)
 class AIRuntimeConfig:
@@ -273,6 +280,11 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
         clamped_int(minimum=200, maximum=10000),
         2000,
     ),
+    # [ruleset]
+    # 默认规则集：房间创建、剧本归一化、角色卡导入导出与 AI 运行时在未显式
+    # 指定规则集时使用的 id。配置的 id 当前不可用（未注册或已禁用）时回退到
+    # 注册顺序中的第一个可用插件并记录 WARNING，解析链见 ruleset.bootstrap。
+    FieldSpec("default_id", "ruleset", ("default_id",), as_text, DEFAULT_RULESET_ID),
     # [character_rules]
     FieldSpec("attribute_ratio_percent", "character_rules", ("attribute_ratio_percent",), clamped_int(minimum=0, maximum=100), 20),
     FieldSpec("max_cards_per_user", "character_rules", ("max_cards_per_user",), clamped_int(minimum=1, maximum=50), 3),

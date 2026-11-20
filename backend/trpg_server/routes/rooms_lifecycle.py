@@ -119,8 +119,8 @@ def create_room():
     if scenario_id in (None, ""):
         scenario_id = None
     scenario_title = str(data.get("scenario_title", "")).strip()
-    # 规则集在创建时固化：显式请求必须可选择（dnd5e 等开发中规则集会在此被拒绝），
-    # 未指定时用默认规则集；剧本房间随后以剧本的 ruleset_id 为准。
+    # 规则集在创建时固化：显式请求必须可选择（「开发中」等 declared 占位会在此
+    # 被拒绝），未指定时用默认规则集；剧本房间随后以剧本的 ruleset_id 为准。
     requested_ruleset = str(data.get("ruleset_id") or data.get("rulesetId") or "").strip()
     try:
         ruleset_id = builtin_registry().assert_selectable(requested_ruleset or default_ruleset_id()).id

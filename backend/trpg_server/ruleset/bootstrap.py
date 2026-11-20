@@ -9,7 +9,9 @@
 可用环境变量覆盖（逗号分隔的模块路径）：
 
 - ``TRPG_RULESET_PLUGINS``：启用的插件模块，默认 ``trpg_server.ruleset.coc7``。
-- ``TRPG_RULESET_DEFAULT``：显式默认插件 id；留空时取第一个成功加载的插件。
+- ``TRPG_RULESET_DEFAULT``：显式默认插件 id，优先级高于配置文件；用于运维临时
+  覆盖。未设置时读配置项 ``[ruleset] default_id``（模板默认 ``coc7``，
+  ``config/schema.py`` 的 ``DEFAULT_RULESET_ID`` 为单一真源）。
 - ``TRPG_RULESET_COMBAT_FALLBACKS``：``id=模块路径`` 形式的战斗实现兼容表；
   核心默认不再登记任何具体规则集的兼容实现，只在运维显式配置时懒加载。
 """
@@ -54,7 +56,31 @@ def plugin_module_paths() -> tuple[str, ...]:
 
 
 def default_ruleset_hint() -> str:
-    return str(os.environ.get(ENV_DEFAULT_RULESET) or "").strip().lower()
+    """默认规则集 id 的显式配置值；空串表示「未配置」。
+
+    优先级：环境变量 ``TRPG_RULESET_DEFAULT``（运维临时覆盖）> 配置项
+    ``[ruleset] default_id``（代码/模板默认 ``coc7``）。两者都为空时注册表
+    回退到第一个成功加载的插件（注册顺序即确定性来源）。
+    """
+    env_hint = str(os.environ.get(ENV_DEFAULT_RULESET) or "").strip().lower()
+    if env_hint:
+        return env_hint
+    return configured_default_id()
+
+
+def configured_default_id() -> str:
+    """从配置链读取 ``[ruleset] default_id``（经 load_settings 类型化）。
+
+    配置层故障视为未配置：注册表回退第一个可用插件，不让启动失败。
+    """
+    from trpg_server.config import load_settings
+
+    try:
+        raw = load_settings().section("ruleset").get("default_id")
+    except Exception:  # noqa: BLE001 - 配置层故障等价于「未配置」
+        logger.warning("Failed to read [ruleset] default_id from config; treating as unconfigured", exc_info=True)
+        return ""
+    return str(raw or "").strip().lower()
 
 
 def combat_module_map() -> dict[str, str]:

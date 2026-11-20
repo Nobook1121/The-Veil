@@ -164,6 +164,12 @@ enabled = true
 inject_budget_chars = 800
 inject_max_items = 6
 
+[ruleset]
+# 默认规则集 id：房间创建、剧本归一化、角色卡导入导出与 AI 运行时在未显式
+# 指定规则集时使用。配置的 id 当前不可用（未注册或已禁用）时，自动回退到
+# 注册顺序中的第一个可用插件并记录 WARNING；留空则始终跟随第一个可用插件。
+default_id = "coc7"
+
 [character_rules]
 attribute_ratio_percent = 20
 max_cards_per_user = 3

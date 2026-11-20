@@ -124,3 +124,45 @@ def test_known_debt_registry_stays_in_sync() -> None:
     """债务登记表与磁盘保持同步：引用的文件必须真实存在。"""
     missing = sorted(rel for rel in KNOWN_DEBT_FILES if not (BACKEND_ROOT / rel).exists())
     assert not missing, f"白名单引用了不存在的文件（债务已清理？请同步删除条目）：{missing}"
+
+
+# 灰卡占位（declared）唯一允许的装配点：composition root。占位清单本身经
+# ``RulesetRegistry(declared=...)`` 参数注入，核心函数体不得出现任何实例化。
+DECLARED_ASSEMBLY_FILES = {
+    "ruleset/bootstrap.py",
+}
+
+
+def _declared_construction_files() -> list[str]:
+    """backend 内出现 ``DeclaredRuleset(...)`` 构造调用的文件（AST 扫描）。"""
+    files: list[str] = []
+    for path in _backend_python_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "DeclaredRuleset"
+            ):
+                files.append(path.relative_to(BACKEND_ROOT).as_posix())
+                break
+    return files
+
+
+def test_declared_placeholder_construction_only_in_composition_root() -> None:
+    """灰卡占位收编锚点：declared 占位不得写进任何核心函数体。
+
+    占位清单只允许经装配点（``ruleset/bootstrap.py`` 的
+    ``DEFAULT_DECLARED_RULESETS``）登记，再由 ``RulesetRegistry(declared=...)``
+    参数化消费；白名单外任何 ``DeclaredRuleset`` 实例化直接失败，防止
+    具体规则集 id 重新硬编码进核心模块（审计 §4.4 第 1 条）。
+    """
+    violations = [
+        rel
+        for rel in _declared_construction_files()
+        if rel not in DECLARED_ASSEMBLY_FILES
+    ]
+    assert not violations, (
+        "灰卡占位（DeclaredRuleset）只允许在装配点 ruleset/bootstrap.py 构造，"
+        "核心模块不得写死占位规则集：\n  " + "\n  ".join(sorted(violations))
+    )

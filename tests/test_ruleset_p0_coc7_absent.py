@@ -109,6 +109,55 @@ def test_empty_registry_reports_clear_error(coc7_absent):
         default_ruleset_id()
 
 
+def test_empty_registry_error_names_configured_default(coc7_absent):
+    """默认配置链（[ruleset] default_id = "coc7"）不可用时文案指认配置值。
+
+    「已配置默认 <id> 但不可用」是空注册表场景最常见的成因（默认值指向
+    未注册的插件），错误必须把它说出来，而不是笼统的「没有规则集」。
+    """
+    registry = coc7_absent
+    configured = registry.default_hint()
+    assert configured, "默认配置链应给出非空 default_id（模板默认 coc7）"
+
+    with pytest.raises(RulesetSelectionError) as excinfo:
+        registry.resolve(None)
+    message = str(excinfo.value)
+    assert "没有可用的规则集" in message
+    assert "已配置默认" in message
+    assert configured in message
+
+    with pytest.raises(RuntimeError) as runtime_exc:
+        default_ruleset_id()
+    runtime_message = str(runtime_exc.value)
+    assert "已配置默认" in runtime_message
+    assert configured in runtime_message
+    assert "没有可用的规则集" in runtime_message
+
+
+def test_empty_registry_error_distinguishes_unconfigured(coc7_absent, monkeypatch):
+    """显式置空 default_id 后错误换成「未配置且无可用规则集」分支。"""
+    # 配置 env 层（AI_TRPG_CFG_*）显式置空：走「未配置」文案分支。
+    monkeypatch.setenv("AI_TRPG_CFG_RULESET_DEFAULT_ID", "")
+    monkeypatch.delenv("TRPG_RULESET_DEFAULT", raising=False)
+    reset_builtin_registry()
+    registry = builtin_registry()
+    assert registry.ids() == []
+    assert registry.default_hint() == ""
+
+    with pytest.raises(RulesetSelectionError) as excinfo:
+        registry.resolve(None)
+    message = str(excinfo.value)
+    assert "没有可用的规则集" in message
+    assert "未配置" in message
+    assert "已配置默认" not in message
+
+    with pytest.raises(RuntimeError) as runtime_exc:
+        default_ruleset_id()
+    runtime_message = str(runtime_exc.value)
+    assert "未配置" in runtime_message
+    assert "没有可用的规则集" in runtime_message
+
+
 def test_combat_registry_reports_unavailable_without_coc7(coc7_absent):
     """战斗解析给「没有可用的战斗实现」语义，而不是 AttributeError。"""
     with pytest.raises(CombatRulesetUnavailable) as excinfo:

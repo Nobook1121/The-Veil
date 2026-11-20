@@ -117,6 +117,8 @@ class RulesetRegistry:
                 logger.warning("Ruleset %s disabled: %s", ruleset_id, reason)
                 continue
             self._plugins[ruleset_id] = plugin
+        # 「配置默认不可用，回退第一个可用插件」的告警每个实例只记一次。
+        self._default_fallback_warned = False
 
     # -- 查询 -------------------------------------------------------------
     def ids(self) -> list[str]:
@@ -127,12 +129,37 @@ class RulesetRegistry:
         return list(self._declared.values())
 
     def default_id(self) -> str | None:
-        """默认插件 id：显式配置优先，否则取第一个成功加载的插件。"""
+        """默认插件 id：显式配置优先，否则取第一个成功加载的插件。
+
+        回退链（确定性来源 = 注册顺序，内置插件先于第三方插件登记）：
+
+        - 配置的 id 在注册表中可用 → 用之；
+        - 未配置 / 配置的 id 未注册或不可用 → 取注册顺序中的第一个可用插件，
+          配置值存在时会记录一次 WARNING 指认「配置默认 X 不可用，回退 Y」；
+        - 注册表为空 → ``None``，由 :meth:`resolve_explicit` /
+          :func:`default_ruleset_id` 给出带区分文案的明确错误。
+        """
         if self._default_id and self._default_id in self._plugins:
             return self._default_id
         for ruleset_id in self._plugins:
+            self._warn_default_fallback(ruleset_id)
             return ruleset_id
         return None
+
+    def default_hint(self) -> str:
+        """显式配置的默认 id 原文（可能未注册 / 不可用）；空串表示未配置。"""
+        return self._default_id
+
+    def _warn_default_fallback(self, fallback_id: str) -> None:
+        """配置的默认规则集不可用时的回退告警；每个注册表实例只记一次。"""
+        if not self._default_id or self._default_fallback_warned:
+            return
+        self._default_fallback_warned = True
+        logger.warning(
+            "Configured default ruleset %s is unavailable; falling back to first available plugin %s",
+            self._default_id,
+            fallback_id,
+        )
 
     def get(self, ruleset_id: str | None = None) -> RulesetPlugin | None:
         key = str(ruleset_id or "").strip().lower()
@@ -148,10 +175,17 @@ class RulesetRegistry:
         if not key:
             default_id = self.default_id()
             if default_id is None:
+                # 空注册表：区分「已配置默认 <id> 但不可用」与「未配置且无可用规则集」。
+                hint = self._default_id
+                reason = (
+                    f"已配置默认规则集 {hint}，但当前不可用；服务端没有可用的规则集"
+                    if hint
+                    else "未配置默认规则集，且服务端没有可用的规则集"
+                )
                 return RulesetResolution(
                     ruleset_id="",
                     status=STATUS_UNAVAILABLE,
-                    reason="服务端没有可用的规则集",
+                    reason=reason,
                     reason_code="ruleset_unavailable",
                 )
             plugin = self._plugins[default_id]
@@ -314,11 +348,19 @@ def reset_builtin_registry() -> None:
 
 
 def default_ruleset_id() -> str:
-    """当前默认插件 id；未注册任何插件时抛错，由调用方决定降级方式。"""
-    default_id = builtin_registry().default_id()
-    if default_id is None:
-        raise RuntimeError("No ruleset plugin registered")
-    return default_id
+    """当前默认插件 id；未注册任何插件时抛错，由调用方决定降级方式。
+
+    空注册表的错误文案区分两种成因：配置了默认规则集但不可用（指认配置值），
+    与完全未配置且无可用规则集插件。
+    """
+    registry = builtin_registry()
+    default_id = registry.default_id()
+    if default_id is not None:
+        return default_id
+    hint = registry.default_hint()
+    if hint:
+        raise RuntimeError(f"已配置默认规则集 {hint}，但当前不可用；服务端没有可用的规则集")
+    raise RuntimeError("未配置默认规则集，且服务端没有可用的规则集插件")
 
 
 def get_plugin(ruleset_id: str | None = None) -> RulesetPlugin:
