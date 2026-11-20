@@ -200,6 +200,74 @@ class Coc7CharacterSchema:
 
         return derive_sheet(sheet)
 
+    # -- 旧卡形状（C1 下沉：test 卡 ⇄ 运行时卡）--------------------------
+
+    def is_legacy_shape(self, stored: Mapping[str, Any] | None) -> bool:
+        """存储形态是否为旧卡（test 卡）形状；核心信封外壳经能力层调用。"""
+        from trpg_server.ruleset.coc7 import card_shape
+
+        return card_shape.is_legacy_shape(stored)
+
+    def legacy_to_runtime(self, stored: Mapping[str, Any], fallback_id: str = "") -> dict[str, Any]:
+        """旧卡形状 → 运行时卡；实现见 ``coc7/card_shape.py``。"""
+        from trpg_server.ruleset.coc7 import card_shape
+
+        return card_shape.legacy_to_runtime(stored, fallback_id)
+
+    def runtime_to_legacy(self, card: Mapping[str, Any] | None) -> dict[str, Any]:
+        """运行时卡 → 旧卡形状（存储格式）；实现见 ``coc7/card_shape.py``。"""
+        from trpg_server.ruleset.coc7 import card_shape
+
+        return card_shape.runtime_to_legacy(card)
+
+    def skill_key_from_name(self, name: Any, fallback: str = "") -> str:
+        """技能名 → 技能键；目录读取走本插件 ``Coc7Catalogs``。"""
+        from trpg_server.ruleset.coc7 import card_shape
+
+        return card_shape.skill_key_from_name(name, fallback)
+
+    def card_field_specs(self) -> tuple[Any, ...]:
+        """CoC 卡面字段的导出 / 导入规格（C1 Slice 2 拆自核心 CARD_FIELD_SPECS）。
+
+        返回卡面（非信封）字段；核心按「信封前段 + 卡面 + 时间戳信封收尾」
+        组合成历史顺序，保证 coc7 默认场景导出 JSON 与拆分前逐位一致。
+        ``FieldSpec`` 定义在核心（``character_card_io``），插件 import 核心合法。
+        """
+        from trpg_server.character_card_io import FieldSpec
+
+        def spec(name, kind, default=None, minimum=None, maximum=None, required=False):
+            return FieldSpec(name, kind, default, minimum, maximum, required)
+
+        return (
+            spec("era", "str", "1920s"),
+            spec("gender", "str", ""),
+            spec("age", "int", 25, 0, 999),
+            spec("occupationName", "str", ""),
+            spec("residence", "str", ""),
+            spec("birthplace", "str", ""),
+            spec("attributes", "dict", {}, required=True),
+            spec("maxHp", "int", 0, 0, 999),
+            spec("currentHp", "int", 0, 0, 999),
+            spec("maxSan", "int", 99, 0, 999),
+            spec("initialSan", "int", 0, 0, 999),
+            spec("currentSan", "int", 0, 0, 999),
+            spec("maxMp", "int", 0, 0, 999),
+            spec("currentMp", "int", 0, 0, 999),
+            spec("magicPoints", "int", 0, 0, 999),
+            spec("damageBonus", "str", ""),
+            spec("build", "int", 0, -2, 99),
+            spec("mov", "int", 0, 0, 99),
+            spec("armor", "int", 0, 0, 99),
+            spec("status", "dict", {}),
+            spec("skills", "list", [], required=True),
+            spec("weapons", "list", [], required=True),
+            spec("equipment", "list", [], required=True),
+            spec("assets", "dict", {}),
+            spec("background", "dict", {}),
+            spec("relationships", "list", []),
+            spec("experiencedScenarios", "list", []),
+        )
+
     def max_san_loss(self, expression: Any) -> int:
         """一次 SAN 变化的最大损失；用于「掷出 100 取最大值」。"""
         from trpg_server.ruleset.coc7.rules import max_of_expression

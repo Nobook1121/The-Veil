@@ -286,9 +286,15 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     # 注册顺序中的第一个可用插件并记录 WARNING，解析链见 ruleset.bootstrap。
     FieldSpec("default_id", "ruleset", ("default_id",), as_text, DEFAULT_RULESET_ID),
     # [character_rules]
+    # 本节前三个键是真正跨规则集的角色卡配置（卡数上限 / 属性分配比例 /
+    # 武器槽位数），所有规则集共用，保持不动。
     FieldSpec("attribute_ratio_percent", "character_rules", ("attribute_ratio_percent",), clamped_int(minimum=0, maximum=100), 20),
     FieldSpec("max_cards_per_user", "character_rules", ("max_cards_per_user",), clamped_int(minimum=1, maximum=50), 3),
     FieldSpec("weapon_slot_count", "character_rules", ("weapon_slot_count",), clamped_int(minimum=1, maximum=10), 5),
+    # 下方 attribute_roll_* 十键为 coc7 专属配置（唯一消费方为 coc7 前端卡
+    # 编辑器 frontend/src/rulesets/coc7/character-sheet.ts 的建卡掷骰面板），
+    # 后端零消费、只存储转发。键本身不删除、数据不迁移（C1 [character_rules]
+    # 归位案 b：纯注释标注，兼容既有配置文件与前端写回路径）。
     FieldSpec("attribute_roll_str", "character_rules", ("attribute_roll_str",), as_text, "3d6x5"),
     FieldSpec("attribute_roll_dex", "character_rules", ("attribute_roll_dex",), as_text, "3d6x5"),
     FieldSpec("attribute_roll_siz", "character_rules", ("attribute_roll_siz",), as_text, "(2d6+6)x5"),
@@ -298,7 +304,10 @@ GENERAL_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec("attribute_roll_pow", "character_rules", ("attribute_roll_pow",), as_text, "3d6x5"),
     FieldSpec("attribute_roll_edu", "character_rules", ("attribute_roll_edu",), as_text, "(2d6+6)x5"),
     FieldSpec("attribute_roll_luc", "character_rules", ("attribute_roll_luc",), as_text, "3d6x5"),
-    # 技能基础值覆盖（JSON 字符串，前端角色卡编辑器写回）；默认不进模板。
+    # 技能基础值覆盖（JSON 字符串）：coc7 专属配置，唯一消费方为 coc7 前端
+    # 卡编辑器（读取与写回同在 character-sheet.ts）；后端零消费，默认不进模板。
+    # 注意与房间级房规 house_rules 的 skill_bases 键区分——那是规则集插件
+    # 声明的另一命名空间，不属于本节。
     FieldSpec("skill_bases", "character_rules", ("skill_bases",), as_text, ""),
     # [scenario]
     FieldSpec("trigger_max_file_size", "scenario", ("trigger_max_file_size",), clamped_int(minimum=1024, maximum=536870912), 5242880),

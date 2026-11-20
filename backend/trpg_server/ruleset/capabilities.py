@@ -161,6 +161,48 @@ def derive_card(plugin: Any, card: Mapping[str, Any] | None) -> dict[str, Any]:
     return dict(card or {})
 
 
+# ------------------------------------------------------- 旧卡形状（C1 下沉）
+
+# 旧卡（test 卡）形状是各规则集自己的历史存储格式：插件声明
+# ``is_legacy_shape`` / ``legacy_to_runtime`` / ``runtime_to_legacy``
+# 三个 schema 方法后，核心的信封外壳才做形状转换；未声明的规则集
+# （如 dnd5e）读取 / 保存都按原样透传，不再被 CoC 形状改写。
+
+
+def is_legacy_card_shape(plugin: Any, stored: Mapping[str, Any] | None) -> bool:
+    """插件声明的旧卡形状检测；未声明时按非旧形状处理（False）。"""
+    detect = getattr(schema_of(plugin), "is_legacy_shape", None)
+    if not callable(detect):
+        return False
+    return bool(detect(stored))
+
+
+def legacy_card_to_runtime(plugin: Any, stored: Mapping[str, Any] | None, fallback_id: str = "") -> dict[str, Any] | None:
+    """旧卡形状 → 运行时卡；插件未声明该能力时返回 ``None``。
+
+    返回 ``None`` 表示「调用方不应做任何形状改写」，由信封外壳决定降级方式。
+    """
+    convert = getattr(schema_of(plugin), "legacy_to_runtime", None)
+    if not callable(convert):
+        return None
+    converted = convert(dict(stored or {}), fallback_id)
+    return converted if isinstance(converted, dict) else None
+
+
+def runtime_card_to_legacy(plugin: Any, card: Mapping[str, Any] | None) -> dict[str, Any]:
+    """运行时卡 → 插件自己的存储形状；未声明时**原样返回**。
+
+    这是 C1 的行为修正点：dnd5e 等未声明旧卡形状能力的规则集保存时
+    不再被 CoC 形状改写（此前保存链对任何规则集都跑 CoC 转换）。
+    """
+    convert = getattr(schema_of(plugin), "runtime_to_legacy", None)
+    if callable(convert):
+        converted = convert(dict(card or {}))
+        if isinstance(converted, dict):
+            return converted
+    return dict(card or {})
+
+
 def catalog_value(plugin: Any, name: str, default: Any = None) -> Any:
     """读取插件目录原始值；缺失时返回 ``default``（目录可能是列表或字典）。"""
     provider = getattr(catalogs_of(plugin), name, None)

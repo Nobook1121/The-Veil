@@ -1,9 +1,17 @@
 """角色卡导入 / 导出共用的结构定义、校验与编解码。
 
-导出与导入使用同一份 ``CARD_FIELD_SPECS``，避免两边字段漂移：
+字段规格按卡的 ``rulesetId`` 解析（C1 Slice 2 拆分）：
 
-- 导出：按 spec 从运行时角色卡取值，附带头像（data URI）与自定义武器库。
-- 导入：按同一份 spec 逐字段校验类型、补齐可选默认值，拒绝非法数据。
+- 核心持有 ``ENVELOPE_FIELD_SPECS``（所有规则集通用的信封字段）；
+- 规则集插件可经 schema 的 ``card_field_specs()`` 声明自己的卡面字段
+  （coc7 见 ``ruleset/coc7/schema.py``），导出 / 导入按声明规格校验；
+- 插件未声明时按「信封 + 原样兼容」处理：只校验信封，其余字段不校验、
+  不丢弃（dnd5e 的 sheet / level / class 不再被白名单静默丢掉）。
+
+导出与导入使用同一份解析结果，避免两边字段漂移：
+
+- 导出：按规格从运行时角色卡取值，附带头像（data URI）与自定义武器库。
+- 导入：按同一份规格逐字段校验类型、补齐可选默认值，拒绝非法数据。
 """
 
 from __future__ import annotations
@@ -94,8 +102,9 @@ def _spec(name, kind, default=None, minimum=None, maximum=None, required=False):
     return FieldSpec(name, kind, default, minimum, maximum, required)
 
 
-# 运行时角色卡的完整字段清单；导出按此清单取值，导入按同一清单校验。
-CARD_FIELD_SPECS: tuple[FieldSpec, ...] = (
+# 所有规则集通用的信封字段（核心）。插件经 schema 的 ``card_field_specs()``
+# 声明自己的卡面字段；本清单只负责身份、归属与时间戳等跨规则集字段。
+ENVELOPE_FIELD_SPECS: tuple[FieldSpec, ...] = (
     _spec("id", "str", ""),
     _spec("rulesetId", "str", ""),
     _spec("public_id", "str", ""),
@@ -105,42 +114,75 @@ CARD_FIELD_SPECS: tuple[FieldSpec, ...] = (
     _spec("name", "str", "", required=True),
     _spec("playerId", "str", ""),
     _spec("playerName", "str", ""),
-    _spec("era", "str", "1920s"),
-    _spec("gender", "str", ""),
-    _spec("age", "int", 25, 0, 999),
-    _spec("occupationName", "str", ""),
-    _spec("residence", "str", ""),
-    _spec("birthplace", "str", ""),
-    _spec("attributes", "dict", {}, required=True),
-    _spec("maxHp", "int", 0, 0, 999),
-    _spec("currentHp", "int", 0, 0, 999),
-    _spec("maxSan", "int", 99, 0, 999),
-    _spec("initialSan", "int", 0, 0, 999),
-    _spec("currentSan", "int", 0, 0, 999),
-    _spec("maxMp", "int", 0, 0, 999),
-    _spec("currentMp", "int", 0, 0, 999),
-    _spec("magicPoints", "int", 0, 0, 999),
-    _spec("damageBonus", "str", ""),
-    _spec("build", "int", 0, -2, 99),
-    _spec("mov", "int", 0, 0, 99),
-    _spec("armor", "int", 0, 0, 99),
-    _spec("status", "dict", {}),
-    _spec("skills", "list", [], required=True),
-    _spec("weapons", "list", [], required=True),
-    _spec("equipment", "list", [], required=True),
-    _spec("assets", "dict", {}),
-    _spec("background", "dict", {}),
-    _spec("relationships", "list", []),
-    _spec("experiencedScenarios", "list", []),
+    _spec("isEditable", "any", True),
     _spec("createdAt", "str", ""),
     _spec("updatedAt", "str", ""),
 )
+# 历史导出顺序：前 9 个信封字段在前，createdAt / updatedAt 收尾，中间是
+# 规则集自己的卡面字段——与拆分前的 CARD_FIELD_SPECS 逐位一致，
+# 保证 coc7 默认场景导出 JSON 逐位不变。isEditable 只在
+# 「信封 + 原样兼容」透传场景导出。
+ENVELOPE_EXPORT_LEADING: tuple[FieldSpec, ...] = ENVELOPE_FIELD_SPECS[:9]
+ENVELOPE_EXPORT_TRAILING: tuple[FieldSpec, ...] = ENVELOPE_FIELD_SPECS[-2:]
 
 # 导出时额外携带的字段（导入同样校验）。
 EXPORT_EXTRA_FIELD_SPECS: tuple[FieldSpec, ...] = (
     _spec("customWeapons", "list", []),
     _spec("avatarData", "str", ""),
 )
+
+
+def _specs_plugin(ruleset_id: str):
+    """按 rulesetId 解析卡所属规则集插件；解析失败返回 None。"""
+    try:
+        return builtin_registry().resolve(str(ruleset_id or "").strip().lower() or None)
+    except Exception:  # noqa: BLE001 - 未知 id / 空注册表按未声明规格处理
+        return None
+
+
+def _declared_card_field_specs(plugin) -> tuple[FieldSpec, ...] | None:
+    """插件 schema 声明的卡面规格；未声明或声明异常返回 None。"""
+    from trpg_server.ruleset.capabilities import schema_of
+
+    declared = getattr(schema_of(plugin), "card_field_specs", None)
+    if not callable(declared):
+        return None
+    try:
+        specs = declared()
+    except Exception:  # noqa: BLE001 - 插件声明异常按未声明处理
+        return None
+    if not isinstance(specs, (list, tuple)):
+        return None
+    return tuple(item for item in specs if isinstance(item, FieldSpec))
+
+
+def _card_field_specs(ruleset_id: str) -> tuple[FieldSpec, ...] | None:
+    """导出 / 导入的字段规格；插件未声明时返回 None（信封 + 原样兼容）。
+
+    声明规格的插件按历史顺序组合：信封前段 + 插件卡面 + 时间戳信封收尾，
+    与拆分前的 CARD_FIELD_SPECS 逐位一致。
+    """
+    declared = _declared_card_field_specs(_specs_plugin(ruleset_id))
+    if declared is None:
+        return None
+    return ENVELOPE_EXPORT_LEADING + declared + ENVELOPE_EXPORT_TRAILING
+
+
+def _has_spec(specs: tuple[FieldSpec, ...], name: str) -> bool:
+    return any(spec.name == name for spec in specs)
+
+
+def _coerce_spec_value(spec: FieldSpec, value: Any) -> Any:
+    """按规格类型校验并规范化单字段值（类型不符即抛错）。"""
+    if spec.kind == "str":
+        return _as_text(value, spec.name)
+    if spec.kind == "int":
+        return _as_int(value, spec.name, spec.minimum or 0, spec.maximum or 999)
+    if spec.kind == "dict":
+        return _as_dict(value, spec.name)
+    if spec.kind == "list":
+        return _as_list(value, spec.name)
+    return value
 
 _AVATAR_MIME_BY_SUFFIX = {
     ".png": "image/png",
@@ -177,12 +219,25 @@ def _avatar_data_uri(character_id: str) -> str:
 
 
 def build_export_payload(character: dict[str, Any]) -> dict[str, Any]:
-    """返回可直接写入 JSON 文件的完整角色卡数据。"""
+    """返回可直接写入 JSON 文件的完整角色卡数据。
+
+    字段规格按卡的 rulesetId 解析：插件声明 ``card_field_specs`` 时按规格
+    取值；未声明时导出信封字段 + 其余字段原样兼容（不校验、不丢弃）。
+    """
     source = character or {}
     payload: dict[str, Any] = {}
-    for spec in CARD_FIELD_SPECS:
-        value = source.get(spec.name)
-        payload[spec.name] = copy.deepcopy(spec.default) if value is None else value
+    specs = _card_field_specs(str(source.get("rulesetId") or ""))
+    if specs is None:
+        for spec in ENVELOPE_FIELD_SPECS:
+            value = source.get(spec.name)
+            payload[spec.name] = copy.deepcopy(spec.default) if value is None else value
+        for key, value in source.items():
+            if key not in payload:
+                payload[key] = value
+    else:
+        for spec in specs:
+            value = source.get(spec.name)
+            payload[spec.name] = copy.deepcopy(spec.default) if value is None else value
     for spec in EXPORT_EXTRA_FIELD_SPECS:
         payload[spec.name] = copy.deepcopy(spec.default)
     if not payload.get("rulesetId"):
@@ -550,40 +605,66 @@ def validate_import_payload(data: Any) -> dict[str, Any]:
             "unsupported_ruleset",
         )
 
-    card: dict[str, Any] = {}
-    for spec in CARD_FIELD_SPECS:
+    specs = _card_field_specs(ruleset_id)
+    if specs is None:
+        # 插件未声明卡面规格：信封 + 原样兼容——只校验信封字段，其余内容
+        # （sheet / level / class 等）原样透传，不校验、不丢弃。
+        card: dict[str, Any] = {}
+        for spec in ENVELOPE_FIELD_SPECS:
+            present = spec.name in merged and merged.get(spec.name) is not None
+            if not present:
+                if spec.required:
+                    raise _error(f"缺少必填字段 {spec.name}。", "missing_field")
+                card[spec.name] = copy.deepcopy(spec.default)
+                continue
+            card[spec.name] = _coerce_spec_value(spec, merged[spec.name])
+        for key, value in merged.items():
+            if key not in card:
+                card[key] = value
+        name = str(card.get("name") or "").strip()
+        if not name:
+            raise _error("字段 name 不能为空。", "missing_field")
+        card["name"] = name[:80]
+        card["rulesetId"] = ruleset_id
+        card["customWeapons"] = _validate_custom_weapons(merged.get("customWeapons") or [])
+        card["avatarData"] = _validate_avatar_data(merged.get("avatarData"))
+        return card
+
+    card = {}
+    for spec in specs:
         present = spec.name in merged and merged.get(spec.name) is not None
         if not present:
             if spec.required:
                 raise _error(f"缺少必填字段 {spec.name}。", "missing_field")
             card[spec.name] = copy.deepcopy(spec.default)
             continue
-        value = merged[spec.name]
-        if spec.kind == "str":
-            card[spec.name] = _as_text(value, spec.name)
-        elif spec.kind == "int":
-            card[spec.name] = _as_int(value, spec.name, spec.minimum or 0, spec.maximum or 999)
-        elif spec.kind == "dict":
-            card[spec.name] = _as_dict(value, spec.name)
-        elif spec.kind == "list":
-            card[spec.name] = _as_list(value, spec.name)
-        else:
-            card[spec.name] = value
+        card[spec.name] = _coerce_spec_value(spec, merged[spec.name])
 
     name = str(card.get("name") or "").strip()
     if not name:
         raise _error("字段 name 不能为空。", "missing_field")
     card["name"] = name[:80]
     card["rulesetId"] = ruleset_id
-    card["attributes"] = _validate_attributes(merged.get("attributes"), int(card.get("age") or 25))
-    card["status"] = _validate_status(merged.get("status") or {})
-    card["skills"] = _validate_skills(merged.get("skills") or [])
-    card["weapons"] = _validate_weapons(merged.get("weapons") or [])
-    card["equipment"] = _validate_equipment(merged.get("equipment") or [])
-    card["assets"] = _validate_assets(merged.get("assets") or {})
-    card["background"] = _validate_background(merged.get("background") or {})
-    card["relationships"] = _validate_relationships(merged.get("relationships") or [])
-    card["experiencedScenarios"] = _validate_experienced_scenarios(merged.get("experiencedScenarios") or [])
+    # 卡面嵌套校验只在字段进入声明规格时执行：coc7 的历史口径原样保留，
+    # 其它规则集按自己的规格走，不被 CoC 校验绑架。
+    if _has_spec(specs, "attributes"):
+        card["attributes"] = _validate_attributes(merged.get("attributes"), int(card.get("age") or 25))
+    if _has_spec(specs, "status"):
+        card["status"] = _validate_status(merged.get("status") or {})
+    if _has_spec(specs, "skills"):
+        card["skills"] = _validate_skills(merged.get("skills") or [])
+    if _has_spec(specs, "weapons"):
+        card["weapons"] = _validate_weapons(merged.get("weapons") or [])
+    if _has_spec(specs, "equipment"):
+        card["equipment"] = _validate_equipment(merged.get("equipment") or [])
+    if _has_spec(specs, "assets"):
+        card["assets"] = _validate_assets(merged.get("assets") or {})
+    if _has_spec(specs, "background"):
+        card["background"] = _validate_background(merged.get("background") or {})
+    if _has_spec(specs, "relationships"):
+        card["relationships"] = _validate_relationships(merged.get("relationships") or [])
+    if _has_spec(specs, "experiencedScenarios"):
+        card["experiencedScenarios"] = _validate_experienced_scenarios(merged.get("experiencedScenarios") or [])
     card["customWeapons"] = _validate_custom_weapons(merged.get("customWeapons") or [])
     card["avatarData"] = _validate_avatar_data(merged.get("avatarData"))
     return card

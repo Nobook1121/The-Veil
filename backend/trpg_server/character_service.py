@@ -328,6 +328,7 @@ def _sync_weapon_payload(character: dict[str, Any], raw_payload: dict[str, Any])
 
 def apply_save(actor: Any, character_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     from trpg_server.routes.characters import (
+        _is_test_character_shape,
         _runtime_to_test_character,
         _sync_room_character_snapshots,
         _test_character_to_runtime,
@@ -342,7 +343,9 @@ def apply_save(actor: Any, character_id: str, payload: dict[str, Any]) -> dict[s
         raise CharacterServiceError("character_limit", "角色卡数量已达上限", 403)
 
     raw_payload = dict(payload or {})
-    if _looks_like_test_shape(raw_payload):
+    # 旧卡形状检测统一走 routes.characters 的信封外壳（按卡所属规则集分派），
+    # 本模块不再持有第二份 CoC 形状检测副本。
+    if _is_test_character_shape(raw_payload):
         raw_payload = _test_character_to_runtime(raw_payload, character_id)
     raw_payload["id"] = character_id
     character = _normalize_payload(actor, raw_payload, existing or {})
@@ -633,21 +636,6 @@ def delete_character_storage(character_id: str) -> None:
     if directory.exists():
         shutil.rmtree(directory, ignore_errors=True)
     legacy_character_path(normalized).unlink(missing_ok=True)
-
-
-def _looks_like_test_shape(character: dict[str, Any]) -> bool:
-    return any(
-        key in character
-        for key in (
-            "deriveAttributes",
-            "battleAttributes",
-            "characterStatus",
-            "skillGroups",
-            "stories",
-            "experiencedModules",
-            "friends",
-        )
-    )
 
 
 def new_character_id(actor: Any) -> str:
