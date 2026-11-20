@@ -1108,6 +1108,25 @@ def _sanity_for(card: Any):
     return sanity_of(_plugin_of(card))
 
 
+def _sanity_resource_state(card: Any) -> dict[str, Any] | None:
+    """规则集声明的 san 资源槽位（写回契约），随消息 metadata 透传前端。
+
+    前端 sanity 写回按本声明解析 state / cap_state / mirror + 别名键，
+    不再硬编码 CoC 键名（coc7/schema.py 的 san 槽：state=current_san /
+    mirror=currentSan / aliases=(current_san,) / cap_state=max_san）。
+    规则集未声明该槽位时返回 None，前端对旧消息安全跳过写回。
+    """
+    from trpg_server.ruleset.capabilities import resource_slot
+
+    try:
+        slot = resource_slot(_plugin_of(card), "san")
+    except Exception:  # noqa: BLE001 - 槽位读取失败不影响检定消息
+        return None
+    if not isinstance(slot, dict):
+        return None
+    return {key: slot[key] for key in ("kind", "state", "cap_state", "mirror", "mirror_aliases") if key in slot}
+
+
 def _room_info_of(context: Any) -> dict[str, Any] | None:
     """读取房间信息用于房规开关；上下文缺失时视为全部关闭。"""
     try:
@@ -1235,6 +1254,8 @@ def roll_sanity_check(
         player_name=player_name,
         current_san=new_san,
         max_san=maximum,
+        # 前端 sanity 写回按该槽位声明解析键名（E1：写回键不再硬编码 CoC 键）。
+        resource_state=_sanity_resource_state(card),
         madness_check_required=madness_check_required,
         temporary_insanity=bool(flags.get("temporaryInsanity")),
         indefinite_insanity=bool(flags.get("indefiniteInsanity")),
@@ -1344,12 +1365,21 @@ def roll_madness(
         from trpg_server import room_rules as _room_rules
 
         _room_rules.save_room_info(context.room_dir, room_info)
+    # 疯狂判定不改 SAN 值，但消息带当前快照与槽位声明（E1：修复前端对
+    # madness 消息写回 NaN 的既有瑕疵——此前消息不带 san 值，前端
+    # Number(undefined) 落 NaN 写进卡面）。
+    from trpg_server.ruleset.capabilities import derive_card
+
+    san_snapshot = sanity.snapshot(card, derive_card(_plugin_of(card), card), state)
     result["visible_message"] = _result_message(
         str(result.get("summary") or ""),
         "san.roll_madness",
         check_type="sanity",
         player_name=player_name,
         insanity=result.get("madness"),
+        current_san=san_snapshot["current"],
+        max_san=san_snapshot["max"],
+        resource_state=_sanity_resource_state(card),
         extra_metadata={
             "dice_roll": _dice_roll_metadata(
                 result,

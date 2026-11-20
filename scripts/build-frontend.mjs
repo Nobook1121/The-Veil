@@ -1,4 +1,5 @@
 import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -104,6 +105,36 @@ async function copyLocales() {
   const destination = path.join(root, "dist", "public", "locales");
   await mkdir(destination, { recursive: true });
   await cp(source, destination, { recursive: true });
+  await mergeRulesetLocales(destination);
+}
+
+// 规则集插件的 locale 补充（E1：CoC 卡面翻译隔离）：
+// frontend/src/rulesets/<id>/locales/<file>.json 的 translations / legacy
+// 并入 dist 同名 locale，构建产物与单文件时代逐键等价（运行时按键查值，
+// 不依赖键序）。核心 locale 文件不再混插件专属键。
+async function mergeRulesetLocales(destination) {
+  const rulesetsRoot = path.join(root, "frontend", "src", "rulesets");
+  if (!existsSync(rulesetsRoot)) return;
+  for (const ruleset of await readdir(rulesetsRoot, { withFileTypes: true })) {
+    if (!ruleset.isDirectory()) continue;
+    const localeDir = path.join(rulesetsRoot, ruleset.name, "locales");
+    if (!existsSync(localeDir)) continue;
+    for (const file of await readdir(localeDir)) {
+      if (!file.endsWith(".json")) continue;
+      const dist = path.join(destination, file);
+      if (!existsSync(dist)) continue;
+      const merged = JSON.parse(await readFile(dist, "utf8"));
+      const extra = JSON.parse(await readFile(path.join(localeDir, file), "utf8"));
+      for (const [section, block] of Object.entries(extra)) {
+        if (block && typeof block === "object" && !Array.isArray(block)) {
+          merged[section] = { ...(merged[section] || {}), ...block };
+        } else {
+          merged[section] = block;
+        }
+      }
+      await writeFile(dist, JSON.stringify(merged, null, 2) + "\n", "utf8");
+    }
+  }
 }
 
 async function copyBrandAssets() {

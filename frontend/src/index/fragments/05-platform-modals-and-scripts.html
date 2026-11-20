@@ -257,7 +257,11 @@
     <script src="/assets/vendor/marked/marked.min.js"></script>
     <script src="/assets/vendor/dompurify/purify.min.js"></script>
     <script src="/assets/vendor/katex/katex.min.js"></script>
+    <!-- 骰具三件：DiceTool → 检定分派注册表 → /check 通用壳 → 命令总入口。
+         规则集检定模块（rulesets/coc7/checkTool.js 等）稍后随规则集脚本加载并登记，
+         分派发生在每次用户输入时，晚于全部脚本加载。 -->
     <script src="data/tools/diceTool.js"></script>
+    <script src="data/tools/check-tool-registry.js"></script>
     <script src="data/tools/checkTool.js"></script>
     <script src="data/tools/toolManager.js"></script>
     <script src="js/config/TestRequestConfig.js"></script>
@@ -355,6 +359,8 @@
     <script src="js/scenario.js"></script>
     <!-- 角色卡渲染器注册表：规则集模块先登记，通用外壳再决定接管或明确阻断 -->
     <script src="js/character-sheet-registry.js"></script>
+    <!-- CoC7 私有模块：检定词表（/check 分派登记）与角色卡渲染 -->
+    <script src="rulesets/coc7/checkTool.js"></script>
     <script src="rulesets/coc7/character-sheet.js"></script>
     <script src="rulesets/dnd5e/character-sheet.js"></script>
     <script src="js/character-sheet.js"></script>

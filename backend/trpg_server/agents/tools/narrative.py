@@ -6,6 +6,7 @@ from typing import Any
 from trpg_server.agents.narrative.ledger import append_fact, load_facts
 from trpg_server.agents.narrative.runtime import NarrativeRuntime, NarrativeRuntimeError
 from trpg_server.agents.tools.base import AgentTool
+from trpg_server.ruleset.narrative import NarrativeProjection, projection_for_ruleset
 
 
 def _runtime(context: Any) -> NarrativeRuntime:
@@ -300,32 +301,37 @@ INSPECT_OBJECT_TOOL = AgentTool(
     handler=inspect_object,
 )
 
-RESOLVE_INTERACTION_TOOL = AgentTool(
-    name="narrative.resolve_interaction",
-    description=(
-        "按已完成的检定结果结算物件交互，返回该结果对应的唯一文本并写入状态/时钟/线索效果。"
-        "必须先有真实检定；不得自行编造成败或改写结果文本。"
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "object": {"type": "string", "description": "物件名称或 id。"},
-            "interaction_id": {"type": "string", "description": "交互 id；只有一个交互时可省略。"},
-            "result": {
-                "type": "string",
-                "enum": ["extreme_success", "hard_success", "success", "fail", "fumble", "大成功", "困难成功", "成功", "失败", "大失败"],
-                "description": "检定结果。",
+def _resolve_interaction_tool(projection: NarrativeProjection) -> AgentTool:
+    """``narrative.resolve_interaction`` 工具：result 枚举来自投影声明。
+
+    投影未声明（中性）时退二元枚举 ``("success", "fail")``。
+    """
+    return AgentTool(
+        name="narrative.resolve_interaction",
+        description=(
+            "按已完成的检定结果结算物件交互，返回该结果对应的唯一文本并写入状态/时钟/线索效果。"
+            "必须先有真实检定；不得自行编造成败或改写结果文本。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "object": {"type": "string", "description": "物件名称或 id。"},
+                "interaction_id": {"type": "string", "description": "交互 id；只有一个交互时可省略。"},
+                "result": {
+                    "type": "string",
+                    "enum": list(projection.tool_result_enum),
+                    "description": "检定结果。",
+                },
+                "skill": {"type": "string", "description": "使用的技能，用于记录检定。"},
+                "total": {"type": "integer", "description": "检定总值。"},
+                "roll": {"type": "integer", "description": "骰点。"},
+                "pc": {"type": "string", "description": "执行检定的 PC id。"},
+                "check_id": {"type": "string", "description": "可选：已记录的检定 check_id，引擎会校验结果一致。"},
             },
-            "skill": {"type": "string", "description": "使用的技能，用于记录检定。"},
-            "total": {"type": "integer", "description": "检定总值。"},
-            "roll": {"type": "integer", "description": "骰点。"},
-            "pc": {"type": "string", "description": "执行检定的 PC id。"},
-            "check_id": {"type": "string", "description": "可选：已记录的检定 check_id，引擎会校验结果一致。"},
+            "required": ["object", "result"],
         },
-        "required": ["object", "result"],
-    },
-    handler=resolve_interaction,
-)
+        handler=resolve_interaction,
+    )
 
 REVEAL_CLUE_TOOL = AgentTool(
     name="narrative.reveal_clue",
@@ -386,27 +392,51 @@ WRITE_FACT_TOOL = AgentTool(
     handler=write_fact,
 )
 
-NARRATIVE_TOOLS = [
-    GET_CURRENT_LOCATION_TOOL,
-    LOOKUP_LOCATION_TOOL,
-    LIST_EXITS_TOOL,
-    MOVE_TO_LOCATION_TOOL,
-    GET_AREA_TOOL,
-    GET_POI_TOOL,
-    TRAVEL_TO_TOOL,
-    INSPECT_OBJECT_TOOL,
-    RESOLVE_INTERACTION_TOOL,
-    REVEAL_CLUE_TOOL,
-    UPDATE_NPC_STATE_TOOL,
-    WRITE_FACT_TOOL,
-]
+def narrative_tools() -> list[AgentTool]:
+    """图谱工具集：``resolve_interaction`` 的 result 枚举按投影在构建期解析。
 
-NARRATIVE_TOOL_NAMES = [tool.name for tool in NARRATIVE_TOOLS]
+    无 per-room 工具 schema 机制，注册表构建期按**默认规则集**取投影
+    （coc7 在场时十值枚举与旧硬编码一致；默认规则集缺席时退二元）。
+    这是 ``tools/__init__.py._coc7_tools`` 的同族惯例：读注册表现值，
+    不引入新的 schema 分发机制。
+    """
+    projection = projection_for_ruleset("")
+    return [
+        GET_CURRENT_LOCATION_TOOL,
+        LOOKUP_LOCATION_TOOL,
+        LIST_EXITS_TOOL,
+        MOVE_TO_LOCATION_TOOL,
+        GET_AREA_TOOL,
+        GET_POI_TOOL,
+        TRAVEL_TO_TOOL,
+        INSPECT_OBJECT_TOOL,
+        _resolve_interaction_tool(projection),
+        REVEAL_CLUE_TOOL,
+        UPDATE_NPC_STATE_TOOL,
+        WRITE_FACT_TOOL,
+    ]
+
+
+# 工具名与投影无关，保持静态：profile 展开与测试对拍都只认这个序列。
+NARRATIVE_TOOL_NAMES = [
+    "narrative.get_current_location",
+    "narrative.lookup_location",
+    "narrative.list_exits",
+    "narrative.move_to_location",
+    "narrative.get_area",
+    "narrative.get_poi",
+    "narrative.travel_to",
+    "narrative.inspect_object",
+    "narrative.resolve_interaction",
+    "narrative.reveal_clue",
+    "narrative.update_npc_state",
+    "narrative.write_fact",
+]
 
 
 __all__ = [
-    "NARRATIVE_TOOLS",
     "NARRATIVE_TOOL_NAMES",
+    "narrative_tools",
     "GET_CURRENT_LOCATION_TOOL",
     "LOOKUP_LOCATION_TOOL",
     "LIST_EXITS_TOOL",
@@ -415,7 +445,6 @@ __all__ = [
     "GET_POI_TOOL",
     "TRAVEL_TO_TOOL",
     "INSPECT_OBJECT_TOOL",
-    "RESOLVE_INTERACTION_TOOL",
     "REVEAL_CLUE_TOOL",
     "UPDATE_NPC_STATE_TOOL",
     "WRITE_FACT_TOOL",

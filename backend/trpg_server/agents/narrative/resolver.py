@@ -8,6 +8,7 @@ from trpg_server.agents.narrative.conditions import evaluate_condition
 from trpg_server.agents.narrative.logger import log_event, log_warning
 from trpg_server.agents.narrative.model import NarrativeBundle
 from trpg_server.agents.narrative.triggers import normalize_trigger_spec
+from trpg_server.ruleset.narrative import NarrativeProjection, projection_for_ruleset
 
 
 def _text(value: Any) -> str:
@@ -29,11 +30,16 @@ def _as_list(value: Any) -> list[Any]:
     return [value]
 
 
-def _result_family(result: str) -> str:
+def _result_family(result: str, projection: NarrativeProjection) -> str:
+    """结果族按投影的词面族判定；族空（中性）时退化为字面相等匹配。
+
+    注意本函数消费的是**原样词面族**（含 ``critical`` / ``failure`` 与中文
+    词面），与 runtime 结算层的枚举键族是两个层级字段，不得合并。
+    """
     text = _text(result).lower()
-    if text in {"extreme_success", "hard_success", "success", "critical", "大成功", "极难成功", "困难成功", "成功"}:
+    if text in projection.success_family_terms:
         return "success"
-    if text in {"fail", "failure", "fumble", "失败", "大失败"}:
+    if text in projection.fail_family_terms:
         return "fail"
     return text
 
@@ -92,7 +98,18 @@ class TriggerHit:
 
 
 class TriggerResolver:
-    def __init__(self, bundle: NarrativeBundle | None, narrative: Mapping[str, Any]):
+    def __init__(
+        self,
+        bundle: NarrativeBundle | None,
+        narrative: Mapping[str, Any],
+        *,
+        projection: NarrativeProjection | None = None,
+    ):
+        # 投影未显式给出时按默认规则集解析（coc7 在场时与旧硬编码族逐位
+        # 一致，直接构造的既有测试保持绿）；规则集缺席时拿到中性投影。
+        self.projection = (
+            projection if projection is not None else projection_for_ruleset("")
+        )
         self.narrative = narrative if isinstance(narrative, Mapping) else {}
         self.assets = {
             _text(item.get("id")): dict(item)
@@ -141,7 +158,9 @@ class TriggerResolver:
             expected_result = _text(binding.get("result") or "any").lower()
             actual_result = _text(context.get("result"))
             if expected_result and expected_result != "any":
-                if _result_family(expected_result) != _result_family(actual_result):
+                if _result_family(expected_result, self.projection) != _result_family(
+                    actual_result, self.projection
+                ):
                     return False
             return True
         if kind == "enter":
@@ -439,7 +458,9 @@ class TriggerResolver:
             if interaction_id and not actual:
                 return False, "binding_mismatch"
             expected_result = _text(binding.get("result") or "any").lower()
-            if actual and expected_result != "any" and _result_family(expected_result) != _result_family(_text(actual)):
+            if actual and expected_result != "any" and _result_family(
+                expected_result, self.projection
+            ) != _result_family(_text(actual), self.projection):
                 return False, "binding_mismatch"
             location = _text(binding.get("location_id"))
             if location and location != _text(self.narrative.get("location")):
@@ -498,7 +519,9 @@ class TriggerResolver:
             return False, "check_mismatch"
         if expected_result != "any":
             actual = _text(record.get("result"))
-            if _result_family(expected_result) != _result_family(actual):
+            if _result_family(expected_result, self.projection) != _result_family(
+                actual, self.projection
+            ):
                 return False, "check_mismatch"
         return True, ""
 

@@ -12,7 +12,7 @@ from trpg_server.agents.tools.room import (
     REMEMBER_FACT_TOOL,
 )
 from trpg_server.agents.tools.trigger import REVEAL_SCENARIO_TRIGGER_TOOL
-from trpg_server.agents.tools.narrative import NARRATIVE_TOOLS, NARRATIVE_TOOL_NAMES
+from trpg_server.agents.tools.narrative import NARRATIVE_TOOL_NAMES, narrative_tools
 from trpg_server.agents.tools.narrative_triggers import (
     TRIGGER_RUNTIME_TOOL_NAMES,
     TRIGGER_RUNTIME_TOOLS,
@@ -83,7 +83,7 @@ def _core_tools() -> list[AgentTool]:
         *AREA_TOOLS,
         *CONCENTRATION_TOOLS,
         *REACTION_TOOLS,
-        *NARRATIVE_TOOLS,
+        *narrative_tools(),
         *TRIGGER_RUNTIME_TOOLS,
         *INTERLUDE_TOOLS,
         *GAME_CLOCK_TOOLS,
@@ -173,8 +173,8 @@ __all__ = [
     "INTERLUDE_TOOL_NAMES",
     "GAME_CLOCK_TOOLS",
     "GAME_CLOCK_TOOL_NAMES",
-    "NARRATIVE_TOOLS",
     "NARRATIVE_TOOL_NAMES",
+    "narrative_tools",
     "PROPS_TOOLS",
     "PROPS_TOOL_NAMES",
     "REST_TOOLS",

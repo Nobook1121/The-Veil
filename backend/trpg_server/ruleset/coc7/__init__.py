@@ -22,6 +22,7 @@ from trpg_server.ruleset.coc7 import growth as coc7_growth
 from trpg_server.ruleset.coc7 import combat_rules as coc7_combat_rules
 from trpg_server.ruleset.coc7 import magic as coc7_magic_rules
 from trpg_server.ruleset.coc7 import magic_content as coc7_magic_content
+from trpg_server.ruleset.coc7 import narrative as coc7_narrative
 from trpg_server.ruleset.coc7 import options as coc7_options
 from trpg_server.ruleset.coc7 import sanity_state as coc7_sanity_state
 from trpg_server.ruleset.coc7 import training as coc7_training
@@ -69,6 +70,9 @@ class Coc7Plugin:
         # 房间级房规开关解析（Coc7RuleOptions）：工具层经能力层取用，
         # 核心 agents/tools 不再直接 import 本包内部模块（阶段 4 P0）。
         self.options = coc7_options
+        # 叙述层词表投影（批次 E1）：建图/触发/结算/工具 schema 的词面
+        # 声明，核心经 ruleset.narrative.projection_of 取用（同族挂法）。
+        self.narrative = coc7_narrative
         # 法术 / 典籍内容表（批次 6 按需查询）：同样作为能力暴露。
         self.magic_content = coc7_magic_content
         # 追逐细节（批次 5）：行动点 / 险境 / 障碍耐久的纯规则模块，

@@ -135,6 +135,7 @@ def build_narrative(
         document if document is not None else "",
         scenario_id=sid,
         modules=module_list,
+        ruleset_id=str(scenario.get("ruleset_id") or ""),
     )
     bundle = NarrativeBundle(scenario_id=sid, scenario_version=version, nodes=list(extracted.nodes))
 

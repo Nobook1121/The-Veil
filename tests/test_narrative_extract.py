@@ -1,6 +1,7 @@
 """剧本结构抽取的确定性测试（§7.2-§7.4）。"""
 from trpg_server.agents.narrative.extract import _document_from_text, detect_sections, extract_narrative
 from trpg_server.agents.narrative.model import VISIBILITY_KP_ONLY
+from trpg_server.ruleset.narrative import projection_for_ruleset
 from trpg_server.scenario_documents import DocumentBlock, ParsedDocument
 
 SAMPLE = """# 第一幕 雨夜庄园
@@ -103,7 +104,8 @@ def test_sc_ambiguity_is_not_a_location():
             "门锁着。",
         ]
     )
-    sections = detect_sections(_document_from_text(text))
+    # SC 噪声过滤是 coc7 词表行为：显式按 coc7 投影建文档再切章节。
+    sections = detect_sections(_document_from_text(text, projection=projection_for_ruleset("coc7")))
     location_titles = [section.title for section in sections if section.kind == "location"]
     assert location_titles == ["玄关"]
 

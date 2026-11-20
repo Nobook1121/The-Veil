@@ -18,6 +18,7 @@ from trpg_server.agents.narrative.model import (
 )
 from trpg_server.agents.narrative.visibility import classify_visibility, normalize_visibility
 from trpg_server.scenario_documents import DocumentBlock, ParsedDocument
+from trpg_server.ruleset.narrative import NarrativeProjection, projection_for_ruleset
 
 _HEADING_RE = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$")
 _BRACKET_HEADING_RE = re.compile(r"^\s*[【《<](.{1,40})[》】>]\s*$")
@@ -26,7 +27,6 @@ _CN_HEADING_RE = re.compile(
 )
 _AREA_HEADING_RE = re.compile(r"^\s*第\s*([0-9一二三四五六七八九十百]+)\s*(层|区域|甲板|楼层|街区)\s*[、：:.\-—]?\s*(.*?)\s*$")
 _SC_HEADING_RE = re.compile(r"^\s*SC\s*[.\-]?\s*(\d+)\s*[、：:.\-—]?\s*(.*?)\s*$", re.I)
-_SC_NOISE = {"检定", "理智", "成功", "失败", "大成功", "大失败", "san", "check", "roll"}
 
 _ENDING_WORDS = ("结局", "ending", "true end", "bad end", "crazy end", "happy end", "normal end")
 _ACT_WORDS = ("幕", "章", "chapter", "act")
@@ -50,12 +50,6 @@ _MODULE_KIND = {
     "custom": "background",
 }
 
-_SKILL_WORDS = (
-    "侦查", "图书馆使用", "聆听", "心理学", "潜行", "追踪", "急救", "医学", "神秘学",
-    "历史", "话术", "魅惑", "恐吓", "闪避", "格斗", "射击", "攀爬", "跳跃", "游泳",
-    "锁匠", "机械维修", "电气维修", "会计", "法律", "博物学", "导航", "驾驶",
-)
-_DIFFICULTY_WORDS = {"极难": "extreme", "困难": "hard", "普通": "regular"}
 _OBJECT_WORDS = (
     "书架", "雕像", "尸体", "门", "窗", "钟", "桌子", "书桌", "抽屉", "柜子", "壁柜",
     "画", "画像", "镜子", "楼梯", "光幕", "箱子", "地毯", "壁炉", "电脑", "文件",
@@ -64,7 +58,6 @@ _OBJECT_WORDS = (
 )
 _OBJECT_HINT_RE = re.compile("|".join(_OBJECT_WORDS))
 _BULLET_RE = re.compile(r"^\s*(?:[-*•·]|\d+[.、)]|[（(]\d+[）)])\s*")
-_OUTCOME_RE = re.compile(r"^\s*(大成功|成功|失败|大失败)\s*[：:]?\s*(.*)$")
 _CLUE_RE = re.compile(r"线索\s*[：:]\s*([^\n。；;]{1,40})")
 _CLUE_DISCOVER_RE = re.compile(r"(?:获得|找到|发现|拾取)[了]?[「“]([^」”]{1,40})[」”]")
 _NPC_RE = re.compile(r"(?:NPC|npc|人物|角色)\s*[：:]\s*([^\n，,。；;（(]{1,20})")
@@ -97,13 +90,29 @@ class ExtractedNarrative:
     warnings: list[dict[str, Any]]
 
 
-def _document_from_text(text: str, filename: str = "script.txt") -> ParsedDocument:
+def _outcome_line_re(projection: NarrativeProjection) -> re.Pattern[str] | None:
+    """按投影 ``outcome_labels`` 的键序生成结果行正则；键序必须原样保留。
+
+    键序即正则交替序：coc7 里「大成功」必须排在「成功」之前，否则前缀更短
+    的词面会先命中。投影未声明结果词面时返回 None（中性：结果行不分桶）。
+    """
+    labels = tuple(
+        str(label or "").strip() for label in projection.outcome_labels if str(label or "").strip()
+    )
+    if not labels:
+        return None
+    return re.compile(r"^\s*(" + "|".join(re.escape(label) for label in labels) + r")\s*[：:]?\s*(.*)$")
+
+
+def _document_from_text(
+    text: str, filename: str = "script.txt", *, projection: NarrativeProjection
+) -> ParsedDocument:
     blocks: list[DocumentBlock] = []
     for raw in str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         line = raw.rstrip()
         if not line.strip():
             continue
-        info = _heading_info(line)
+        info = _heading_info(line, projection)
         blocks.append(
             DocumentBlock(
                 text=info[1] if info else line.strip(),
@@ -114,8 +123,12 @@ def _document_from_text(text: str, filename: str = "script.txt") -> ParsedDocume
     return ParsedDocument(filename=filename, markdown=markdown, blocks=blocks, page_count=None)
 
 
-def _heading_info(text: str) -> tuple[int, str] | None:
-    """返回 (标题层级, 标题文本)；纯正文返回 None。"""
+def _heading_info(text: str, projection: NarrativeProjection) -> tuple[int, str] | None:
+    """返回 (标题层级, 标题文本)；纯正文返回 None。
+
+    SC 标题噪声按投影 ``sc_noise_tokens`` 过滤；投影未声明噪声（中性）时
+    SC 标题不做规则集过滤，按通用标题处理。
+    """
     stripped = str(text or "").strip()
     if not stripped:
         return None
@@ -134,7 +147,7 @@ def _heading_info(text: str) -> tuple[int, str] | None:
     if match and match.group(2):
         rest = match.group(2).strip()
         token = re.split(r"[：:\s]", rest, maxsplit=1)[0].strip().lower()
-        if token and token not in _SC_NOISE:
+        if token and token not in projection.sc_noise_tokens:
             return 2, rest
     match = _BRACKET_HEADING_RE.match(stripped)
     if match:
@@ -179,8 +192,15 @@ def _level_for_kind(kind: str) -> int:
     return {"act": 0, "area": 1, "location": 2, "ending": 2}.get(kind, 2)
 
 
-def detect_sections(document: ParsedDocument) -> list[Section]:
-    """按标题把文档切成章节，并维护 act → area → location 的 chapter_path。"""
+def detect_sections(
+    document: ParsedDocument, projection: NarrativeProjection | None = None
+) -> list[Section]:
+    """按标题把文档切成章节，并维护 act → area → location 的 chapter_path。
+
+    未传投影时按默认规则集解析（coc7 在场时与旧实现逐位一致）。
+    """
+    if projection is None:
+        projection = projection_for_ruleset("")
     sections: list[Section] = []
     current: Section | None = None
     stack: list[tuple[int, Section]] = []
@@ -201,7 +221,7 @@ def detect_sections(document: ParsedDocument) -> list[Section]:
             markdown = _HEADING_RE.match(text)
             info = (block.heading_level, markdown.group(2).strip() if markdown else text)
         else:
-            info = _heading_info(text)
+            info = _heading_info(text, projection)
         if info and info[1]:
             _close()
             title = str(info[1]).strip()
@@ -284,12 +304,15 @@ def _negative_keywords(content: str) -> list[str]:
     return list(dict.fromkeys(match.strip() for match in _NEGATIVE_RE.findall(content or "") if match.strip()))
 
 
-def _interaction_from_line(line: str, object_id: str) -> dict[str, Any] | None:
-    skill = next((word for word in _SKILL_WORDS if word in line), None)
+def _interaction_from_line(
+    line: str, object_id: str, projection: NarrativeProjection
+) -> dict[str, Any] | None:
+    # 投影未声明技能词（中性）时不提取检定交互；难度词空时恒 regular。
+    skill = next((word for word in projection.skill_names if word in line), None)
     if not skill:
         return None
     difficulty = "regular"
-    for word, level in _DIFFICULTY_WORDS.items():
+    for word, level in projection.difficulty_labels.items():
         if word in line:
             difficulty = level
             break
@@ -302,8 +325,15 @@ def _interaction_from_line(line: str, object_id: str) -> dict[str, Any] | None:
     }
 
 
-def _parse_objects(section: Section) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """返回 (objects, beats)。成功/失败文本按标签分桶，绝不混写。"""
+def _parse_objects(
+    section: Section, projection: NarrativeProjection
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """返回 (objects, beats)。成功/失败文本按标签分桶，绝不混写。
+
+    结果行词面来自投影 ``outcome_labels``；投影未声明（中性）时结果行
+    不分桶，落入 any/beats。
+    """
+    outcome_re = _outcome_line_re(projection)
     objects: list[dict[str, Any]] = []
     beats: list[dict[str, Any]] = []
     used_ids: set[str] = set()
@@ -315,7 +345,7 @@ def _parse_objects(section: Section) -> tuple[list[dict[str, Any]], list[dict[st
     for line in lines:
         bullet = bool(_BULLET_RE.match(line))
         body = _BULLET_RE.sub("", line).strip()
-        outcome_match = _OUTCOME_RE.match(body)
+        outcome_match = outcome_re.match(body) if outcome_re is not None else None
         if outcome_match and current_object is not None:
             outcome_key = str(outcome_match.group(1) or "")
             text = outcome_match.group(2).strip()
@@ -325,7 +355,7 @@ def _parse_objects(section: Section) -> tuple[list[dict[str, Any]], list[dict[st
             if target is not None:
                 outcomes = target["outcomes"]
                 outcomes.pop("any", None)
-                outcomes[_outcome_key(outcome_key)] = {"text": text}
+                outcomes[_outcome_key(outcome_key, projection)] = {"text": text}
             continue
         if outcome_match and current_object is None:
             continue
@@ -333,7 +363,7 @@ def _parse_objects(section: Section) -> tuple[list[dict[str, Any]], list[dict[st
         # 已进入某个物件时，带技能的行优先当作该物件的交互，而不是新物件。
         if current_object is not None:
             head = re.split(r"[：:]", body, maxsplit=1)[0]
-            interaction = _interaction_from_line(body, current_object["id"])
+            interaction = _interaction_from_line(body, current_object["id"], projection)
             if interaction and not _OBJECT_HINT_RE.search(head):
                 current_object["interactions"].append(interaction)
                 current_interaction = interaction
@@ -361,7 +391,7 @@ def _parse_objects(section: Section) -> tuple[list[dict[str, Any]], list[dict[st
                 "visibility": "public",
             }
             current_interaction = None
-            interaction = _interaction_from_line(body, object_id)
+            interaction = _interaction_from_line(body, object_id, projection)
             if interaction:
                 current_object["interactions"].append(interaction)
                 current_interaction = interaction
@@ -370,14 +400,14 @@ def _parse_objects(section: Section) -> tuple[list[dict[str, Any]], list[dict[st
             continue
         if current_object is not None:
             interactions = current_object.get("interactions") or []
-            interaction = _interaction_from_line(body, current_object["id"])
+            interaction = _interaction_from_line(body, current_object["id"], projection)
             if interaction and interactions:
                 interactions.append(interaction)
                 current_interaction = interaction
                 outcome_key = None
                 continue
             if outcome_key and current_interaction is not None:
-                key = _outcome_key(outcome_key)
+                key = _outcome_key(outcome_key, projection)
                 outcomes = current_interaction["outcomes"]
                 outcomes.setdefault(key, {"text": ""})
                 outcomes[key]["text"] = f"{outcomes[key]['text']}\n{body}".strip()
@@ -388,8 +418,8 @@ def _parse_objects(section: Section) -> tuple[list[dict[str, Any]], list[dict[st
     return objects, beats
 
 
-def _outcome_key(label: str) -> str:
-    return {"大成功": "extreme_success", "成功": "success", "失败": "fail", "大失败": "fumble"}.get(label, "any")
+def _outcome_key(label: str, projection: NarrativeProjection) -> str:
+    return str(projection.outcome_labels.get(label, "any"))
 
 
 def _build_node(
@@ -400,7 +430,11 @@ def _build_node(
     parent: str | None,
     module_type: str = "",
     explicit_visibility: str | None = None,
+    projection: NarrativeProjection | None = None,
 ) -> NarrativeNode:
+    if projection is None:
+        projection = projection_for_ruleset("")
+    kind = section.kind
     kind = section.kind
     node_id = _unique_id(used_ids, f"{kind}_{section.title}")
     keywords = _keywords(section.title, section.content)
@@ -415,7 +449,7 @@ def _build_node(
         reveal_when=reveal_when,
         explicit=explicit_visibility,
     )
-    objects, beats = _parse_objects(section) if kind == "location" else ([], [])
+    objects, beats = _parse_objects(section, projection) if kind == "location" else ([], [])
     scene_role = None
     if kind == "location":
         scene_role = "hub" if any(word in section.title for word in ("大厅", "枢纽", "前厅")) else "room"
@@ -510,13 +544,20 @@ def extract_narrative(
     scenario_id: str = "",
     source: str = "import",
     modules: list[dict[str, Any]] | None = None,
+    ruleset_id: str = "",
 ) -> ExtractedNarrative:
+    """按规则集词表投影抽取剧本结构。
+
+    ``ruleset_id`` 为空时按默认规则集解析（coc7 在场时与旧硬编码实现
+    逐位一致）；规则集缺席/未知时拿到中性投影，按中性语义降级。
+    """
+    projection = projection_for_ruleset(ruleset_id)
     document = (
         document_or_text
         if isinstance(document_or_text, ParsedDocument)
-        else _document_from_text(str(document_or_text or ""))
+        else _document_from_text(str(document_or_text or ""), projection=projection)
     )
-    sections = detect_sections(document)
+    sections = detect_sections(document, projection)
 
     used_titles = {section.title for section in sections if section.kind in {"location", "ending"}}
     if modules:
@@ -542,6 +583,7 @@ def extract_narrative(
                 parent=parent,
                 module_type=section.module_type,
                 explicit_visibility=section.visibility,
+                projection=projection,
             )
             nodes.append(node)
             section_node[section.id] = node.id

@@ -1852,13 +1852,7 @@ function renderRoomMessage(message: ChatMessage | null, animate = false): void {
     const metadata = message.metadata || {};
     if (metadata.check_type === "sanity" && metadata.player_name && window.currentRoom?.members) {
         const member = window.currentRoom.members.find((item) => String(item.username || "").toLocaleLowerCase() === String(metadata.player_name).toLocaleLowerCase());
-        if (member) {
-            member.character_state = { ...(member.character_state || {}), current_san: Number(metadata.current_san), max_san: Number(metadata.max_san) };
-            if (member.character_card) {
-                member.character_card.currentSan = Number(metadata.current_san);
-                (member.character_card as Partial<COC7CharacterCard> & { current_san?: number }).current_san = Number(metadata.current_san);
-            }
-        }
+        if (member) applyResourceStateToMember(member, metadata);
     }
     let displayMessage = message.type === "trigger" && metadata.asset_url && message.content && !message.content.includes(String(metadata.asset_url))
         ? { ...message, content: `${message.content}\n\n[${metadata.asset_name || "附件"}](${metadata.asset_url})` }
@@ -1899,6 +1893,34 @@ function renderRoomMessage(message: ChatMessage | null, animate = false): void {
             || document.querySelector<HTMLElement>(`#chatHistory .message[data-id="${String(renderedId)}"] .message-content`);
         if (contentElement) revealKpContent(contentElement);
     }
+}
+
+// 按消息 metadata.resource_state 的槽位声明把资源快照写回成员的房间状态与卡面镜像。
+// 键名全部来自声明（规则集 schema 的 san 槽：state / cap_state / mirror + 别名），
+// 核心不再硬编码 CoC 键——coc7 声明（state=current_san / cap_state=max_san /
+// mirror=currentSan / aliases=[current_san]）下写回键与旧实现逐位一致。
+// 拍板（E1）：声明缺失的旧消息**安全跳过**而非沿用旧分支。写回的语义只是
+// 实时消息的即时面板反馈，房间状态的真相源是后端快照（refreshCurrentRoomMembers
+// 全量拉取）；历史 sanity 消息重渲染时跳过可避免陈旧值 / NaN 值落卡面。
+// 数值先经 finite 校验：madness 消息曾不带 san 值，旧实现 Number(undefined)
+// 写 NaN 进卡是既有瑕疵，本次后端已补齐快照，此处是前端半边的防线。
+function applyResourceStateToMember(member: RoomMember, metadata: Record<string, unknown>): void {
+    const slot = metadata.resource_state;
+    if (!slot || typeof slot !== "object") return;
+    const declared = slot as Record<string, unknown>;
+    const stateKey = typeof declared.state === "string" ? declared.state : "";
+    const stateValue = stateKey ? numericMetadata(metadata, stateKey) : null;
+    if (!stateKey || stateValue === null || !Number.isFinite(stateValue)) return;
+    const state = { ...(member.character_state || {}), [stateKey]: stateValue } as CharacterRuntimeState;
+    const capKey = typeof declared.cap_state === "string" ? declared.cap_state : "";
+    const capValue = capKey ? numericMetadata(metadata, capKey) : null;
+    if (capKey && capValue !== null && Number.isFinite(capValue)) (state as Record<string, number>)[capKey] = capValue;
+    member.character_state = state;
+    if (!member.character_card) return;
+    const card = member.character_card as Partial<COC7CharacterCard> & Record<string, unknown>;
+    const mirrorKeys = [declared.mirror, ...(Array.isArray(declared.mirror_aliases) ? declared.mirror_aliases : [])]
+        .filter((key): key is string => typeof key === "string" && key.trim().length > 0);
+    for (const key of mirrorKeys) card[key] = stateValue;
 }
 
 function clearChatMessages(): void {

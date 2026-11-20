@@ -56,6 +56,7 @@ from trpg_server.agents.narrative.store import (
     scenario_dir_for_descriptor,
 )
 from trpg_server.scenario_store import load_scenario_by_id
+from trpg_server.ruleset.narrative import NarrativeProjection, projection_for_ruleset
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +169,18 @@ class NarrativeRuntime:
         )
 
     # ---- 基础查询 ---------------------------------------------------------
+    def _projection(self) -> NarrativeProjection:
+        """叙述词表投影：房间显式 ruleset_id > 剧本 ruleset_id > 默认规则集。
+
+        优先级对齐 ``room_rules.resolve_rule_id``；runtime 在 ``load`` 时已
+        持有房间与剧本两份上下文，这里直接就地解析。规则集缺席/未知时
+        ``projection_for_ruleset`` 回中性投影，叙述链不中断。
+        """
+        ruleset_id = str(self.room_info.get("ruleset_id") or "").strip()
+        if not ruleset_id:
+            ruleset_id = str(self.scenario.get("ruleset_id") or "").strip()
+        return projection_for_ruleset(ruleset_id)
+
     @property
     def location_id(self) -> str | None:
         current = _text(self.narrative.get("location"))
@@ -749,7 +762,7 @@ class NarrativeRuntime:
         if self._at_ending() and not allow_at_ending:
             return {"triggers_fired": [], "trigger_denied": []}
         context = dict(context or {})
-        resolver = TriggerResolver(self.bundle, self.narrative)
+        resolver = TriggerResolver(self.bundle, self.narrative, projection=self._projection())
         hits, denied = resolver.evaluate(kind, context, pc=pc, audience=audience)
         if not hits:
             return {"triggers_fired": [], "trigger_denied": denied}
@@ -795,7 +808,7 @@ class NarrativeRuntime:
                 "trigger_id": _text(trigger_id),
                 "denied": [{"trigger_id": _text(trigger_id), "reason": "ending"}],
             }
-        resolver = TriggerResolver(self.bundle, self.narrative)
+        resolver = TriggerResolver(self.bundle, self.narrative, projection=self._projection())
         hits, denied = resolver.request(
             trigger_id,
             pc=pc,
@@ -841,7 +854,7 @@ class NarrativeRuntime:
         actor_id: str | None = None,
     ) -> dict[str, Any]:
         """房主/管理员手动触发：跳过条件求值，仍按可见性过滤附件。"""
-        resolver = TriggerResolver(self.bundle, self.narrative)
+        resolver = TriggerResolver(self.bundle, self.narrative, projection=self._projection())
         if resolver.trigger(trigger_id) is None:
             return {"triggered": False, "trigger_id": _text(trigger_id), "reason": "trigger_not_found"}
         hit = resolver.force_hit(trigger_id, audience=audience)
@@ -868,7 +881,7 @@ class NarrativeRuntime:
         }
 
     def list_available_triggers(self) -> dict[str, Any]:
-        resolver = TriggerResolver(self.bundle, self.narrative)
+        resolver = TriggerResolver(self.bundle, self.narrative, projection=self._projection())
         return {
             "location_id": self.location_id,
             "triggers": resolver.available(),
@@ -1101,7 +1114,8 @@ class NarrativeRuntime:
             raise NarrativeRuntimeError(f"物件 {object_ref} 没有交互：{interaction_ref}")
 
         interaction_id = _text(interaction.get("id"))
-        normalized_result = _normalize_result(result)
+        projection = self._projection()
+        normalized_result = _normalize_result(result, projection)
         check_record = self._check_record(check_id) if check_id else None
         if check_id and check_record is None:
             _deny("missing_check", interaction_id)
@@ -1112,8 +1126,10 @@ class NarrativeRuntime:
             if recorded_skill and expected_skill and recorded_skill.casefold() != expected_skill.casefold():
                 _deny("check_skill_mismatch", interaction_id)
                 raise NarrativeRuntimeError("检定技能与交互要求不一致")
-            recorded_result = _normalize_result(check_record.get("result"))
-            if _result_family(recorded_result) != _result_family(normalized_result):
+            recorded_result = _normalize_result(check_record.get("result"), projection)
+            if _result_family(recorded_result, projection) != _result_family(
+                normalized_result, projection
+            ):
                 _deny("check_result_mismatch", interaction_id)
                 raise NarrativeRuntimeError("检定结果与结算结果不一致")
         repeatable = bool(interaction.get("repeatable", True))
@@ -1128,7 +1144,7 @@ class NarrativeRuntime:
             }
 
         outcomes = interaction.get("outcomes") if isinstance(interaction.get("outcomes"), Mapping) else {}
-        outcome = _pick_outcome(outcomes, normalized_result)
+        outcome = _pick_outcome(outcomes, normalized_result, projection)
         if not isinstance(outcome, Mapping):
             _deny("missing_outcome", interaction_id)
             raise NarrativeRuntimeError(f"交互 {interaction_id} 没有可用的结果文本")
@@ -1179,7 +1195,7 @@ class NarrativeRuntime:
                 "skill": _text(skill or interaction.get("skill")),
                 "difficulty": _text(interaction.get("difficulty")) or None,
                 "check_id": _text(check_id) or None,
-                "success": _result_family(normalized_result) == "success",
+                "success": _result_family(normalized_result, projection) == "success",
             },
             pc=pc,
             source="interaction",
@@ -1283,28 +1299,20 @@ class NarrativeRuntime:
         return {"query": _text(query), "matches": items}
 
 
-def _normalize_result(value: Any) -> str:
+def _normalize_result(value: Any, projection: NarrativeProjection) -> str:
+    # 空 text→"success" 是空值守卫，不是词表，保留原样。
     text = _text(value).lower()
-    mapping = {
-        "大成功": "extreme_success",
-        "极难成功": "extreme_success",
-        "困难成功": "hard_success",
-        "成功": "success",
-        "失败": "fail",
-        "大失败": "fumble",
-    }
-    return mapping.get(text, text or "success")
+    return str(projection.result_aliases.get(text, text or "success"))
 
 
-def _pick_outcome(outcomes: Mapping[str, Any], result: str) -> Any:
-    """按结果族回退：大成功→困难成功→成功→any；大失败→失败→any。"""
-    chain = {
-        "extreme_success": ("extreme_success", "hard_success", "success", "any"),
-        "hard_success": ("hard_success", "success", "any"),
-        "success": ("success", "any"),
-        "fumble": ("fumble", "fail", "any"),
-        "fail": ("fail", "any"),
-    }.get(result, (result, "any"))
+def _pick_outcome(
+    outcomes: Mapping[str, Any], result: str, projection: NarrativeProjection
+) -> Any:
+    """按结果族回退链取桶；链声明自投影 ``outcome_chains``。
+
+    投影未声明该结果键的链时退 ``(result, "any")``（中性语义）。
+    """
+    chain = projection.outcome_chains.get(result, (result, "any"))
     for key in chain:
         value = outcomes.get(key)
         if isinstance(value, Mapping):
@@ -1312,11 +1320,12 @@ def _pick_outcome(outcomes: Mapping[str, Any], result: str) -> Any:
     return None
 
 
-def _result_family(value: Any) -> str:
-    normalized = _normalize_result(value)
-    if normalized in {"extreme_success", "hard_success", "success"}:
+def _result_family(value: Any, projection: NarrativeProjection) -> str:
+    """结算层的枚举键族：只认归一后的枚举键，与 resolver 的原样词面族分层。"""
+    normalized = _normalize_result(value, projection)
+    if normalized in projection.success_family_keys:
         return "success"
-    if normalized in {"fail", "fumble"}:
+    if normalized in projection.fail_family_keys:
         return "fail"
     return normalized
 

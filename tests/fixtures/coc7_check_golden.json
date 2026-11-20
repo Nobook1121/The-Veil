@@ -714,6 +714,7 @@
         "content": "alice 触发临时性疯狂：智力检定 1d100=10 ≤ INT 75，持续 1d10=10 小时。 疯狂表现（1d10=9）：恐惧症——调查员获得新的恐惧症；即使源头不在场也会幻想它在附近，持续 1D10 轮，期间所有行动承受惩罚骰。 新增：恶魔恐惧（demonophobia）。",
         "metadata": {
           "check_type": "sanity",
+          "current_san": 60,
           "dice_roll": {
             "auto": false,
             "bonus_dice": 0,
@@ -796,7 +797,17 @@
             "trait": "恶魔恐惧（demonophobia）",
             "type": "temporary"
           },
+          "max_san": 87,
           "player_name": "alice",
+          "resource_state": {
+            "cap_state": "max_san",
+            "kind": "san",
+            "mirror": "currentSan",
+            "mirror_aliases": [
+              "current_san"
+            ],
+            "state": "current_san"
+          },
           "tool_name": "san.roll_madness"
         },
         "sender_name": "骰娘",
@@ -851,6 +862,7 @@
         "content": "alice 触发临时性疯狂：智力检定 1d100=50 ≤ INT 75，持续 1d10=7 小时。 疯狂表现（1d10=3）：暴力——调查员陷入狂暴，对周围所有人无差别地施暴与破坏，持续 1D10 轮。",
         "metadata": {
           "check_type": "sanity",
+          "current_san": 60,
           "dice_roll": {
             "auto": false,
             "bonus_dice": 0,
@@ -933,7 +945,17 @@
             "trait": "",
             "type": "temporary"
           },
+          "max_san": 87,
           "player_name": "alice",
+          "resource_state": {
+            "cap_state": "max_san",
+            "kind": "san",
+            "mirror": "currentSan",
+            "mirror_aliases": [
+              "current_san"
+            ],
+            "state": "current_san"
+          },
           "tool_name": "san.roll_madness"
         },
         "sender_name": "骰娘",
@@ -1535,6 +1557,15 @@
           "max_san": 87,
           "permanent_insanity": false,
           "player_name": "alice",
+          "resource_state": {
+            "cap_state": "max_san",
+            "kind": "san",
+            "mirror": "currentSan",
+            "mirror_aliases": [
+              "current_san"
+            ],
+            "state": "current_san"
+          },
           "temporary_insanity": false,
           "tool_name": "san.roll_sanity_check"
         },
@@ -1646,6 +1677,15 @@
           "max_san": 87,
           "permanent_insanity": false,
           "player_name": "alice",
+          "resource_state": {
+            "cap_state": "max_san",
+            "kind": "san",
+            "mirror": "currentSan",
+            "mirror_aliases": [
+              "current_san"
+            ],
+            "state": "current_san"
+          },
           "temporary_insanity": false,
           "tool_name": "san.roll_sanity_check"
         },
@@ -1757,6 +1797,15 @@
           "max_san": 87,
           "permanent_insanity": false,
           "player_name": "alice",
+          "resource_state": {
+            "cap_state": "max_san",
+            "kind": "san",
+            "mirror": "currentSan",
+            "mirror_aliases": [
+              "current_san"
+            ],
+            "state": "current_san"
+          },
           "temporary_insanity": false,
           "tool_name": "san.roll_sanity_check"
         },
