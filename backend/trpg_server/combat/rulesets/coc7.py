@@ -18,10 +18,14 @@ def _success_level(roll: int, target: int, critical: int = 1, fumble: int = 96) 
     """CoC7 成功等级：统一复用骰子模块的判定数学，避免出现第三份阈值口径。
 
     所需值 ≥50 且未显式收紧阈值（默认 96）时，只有 100 算大失败。
+    本实现就是 coc7 的战斗数学，显式声明自己的规则集 id（B1）：进程默认规则集
+    被配置成其他规则集时，本规则集内部的等级带仍按 coc7 解析，不跟随进程默认。
     """
     from trpg_server.agents.tools import dice
 
-    return dice._success_level(int(roll), int(target), int(critical), int(fumble))
+    return dice._success_level(
+        int(roll), int(target), int(critical), int(fumble), ruleset_id="coc7"
+    )
 
 
 def build_and_damage_bonus(str_value: int, siz_value: int) -> tuple[int, str, list[tuple[int, int]]]:

@@ -232,9 +232,14 @@ def _success_level(
     target: int,
     critical_threshold: int | None = None,
     fumble_threshold: int | None = None,
+    ruleset_id: str | None = None,
 ) -> str:
-    """成功等级由规则集插件决定；未声明时返回中性的成功 / 失败。"""
-    checks = _checks_capability()
+    """成功等级由规则集插件决定；未声明时返回中性的成功 / 失败。
+
+    ``ruleset_id`` 由调用方显式携带（房间 / 战斗会话的规则集，B1）；不传时
+    保持既有语义——解析进程默认规则集。
+    """
+    checks = _checks_capability(ruleset_id)
     resolve = getattr(checks, "success_level", None)
     if callable(resolve):
         return resolve(roll, target, critical_threshold, fumble_threshold)

@@ -145,12 +145,13 @@ def _percentile_meta(
     label: str,
     target: int,
     roller: str,
+    ruleset_id: str | None = None,
 ) -> dict[str, Any]:
     return _dice_roll_metadata(
         {
             "roll": int(roll),
             "rolls": [int(roll)],
-            "success": level_rank().get(level, 0) > 0,
+            "success": level_rank(ruleset_id).get(level, 0) > 0,
             "success_level": level,
             "bonus_dice": 0,
             "penalty_dice": 0,
@@ -178,20 +179,25 @@ def _combat_settings(context: Any, info: dict[str, Any] | None = None) -> Combat
     return resolve_settings(info)
 
 
-def _coc7_room_options(context: Any, info: dict[str, Any] | None = None):
-    """读取 CoC7 房规开关；旧房间、规则集缺席或读取失败时按全部关闭处理。"""
-    if info is None:
-        info = context.room_info() if hasattr(context, "room_info") else None
-    try:
-        from trpg_server.ruleset import builtin_registry
-        from trpg_server.ruleset.capabilities import options_of
+def _room_rule_options(context: Any, info: dict[str, Any] | None = None):
+    """读取当前房间规则集的房规开关（B1：不再写字面 coc7）。
 
-        resolve = getattr(options_of(builtin_registry().get("coc7")), "resolve_options", None)
-        if resolve is None:
-            return None
-        return resolve(info)
+    解析链与阶段 4 P1 的共享解析点 ``room_rules.room_rule_options`` 一致：
+    房间规则集 → 插件 ``options`` 能力 → ``resolve_options``。规则集未注册、
+    未声明 options 能力或读取失败时按全部关闭处理——coc7 房间结果与直呼其
+    ``resolve_options`` 逐位一致；dnd5e 等未声明 options 的规则集全关，
+    调用方自然落入既有「房规未开启」分支。
+    """
+    if info is None:
+        info = context.room_info() if context is not None and hasattr(context, "room_info") else None
+    try:
+        from trpg_server.room_rules import room_rule_options
+
+        return room_rule_options(info if isinstance(info, dict) else None)
     except Exception:  # pragma: no cover - 仅在规则包损坏时触发
-        return None
+        from trpg_server.ruleset.capabilities import NEUTRAL_RULE_OPTIONS
+
+        return NEUTRAL_RULE_OPTIONS
 
 
 def _combat_detail_rules(settings: CombatSettings):
@@ -223,19 +229,20 @@ def _scheduler(
 ) -> TurnScheduler:
     settings = settings or _combat_settings(context)
     thresholds = _context_thresholds(context) if context is not None else (1, 96)
+    # 战斗会话的规则集 id：战斗快照优先，缺省回退房间战斗配置（B1 显式传递）。
+    ruleset_id = str(combat.get("ruleset") or settings.ruleset_id or "")
     turn_model = None
     try:
         from trpg_server.ruleset.registry import get_plugin
         from trpg_server.ruleset.session import turn_model_of
 
-        ruleset_id = str(combat.get("ruleset") or settings.ruleset_id or "")
         turn_model = turn_model_of(get_plugin(ruleset_id))
     except Exception:  # noqa: BLE001 - 规则集壳缺失时退回旧调度行为
         turn_model = None
     return TurnScheduler(
         _combat_ruleset(combat, settings),
         settings,
-        roll_d100=lambda: _percentile_roll(_roller)[0],
+        roll_d100=lambda: _percentile_roll(_roller, ruleset_id=ruleset_id)[0],
         roll_die=_roller,
         thresholds=thresholds,
         turn_model=turn_model,
@@ -408,7 +415,7 @@ def _card_hp(card: dict[str, Any], state: dict[str, Any]) -> tuple[int, int]:
     return max(0, min(max_hp, _as_int(current, max_hp))), max_hp
 
 
-def _combatant_from_member(member: dict[str, Any]) -> dict[str, Any]:
+def _combatant_from_member(member: dict[str, Any], ruleset_id: str | None = None) -> dict[str, Any]:
     card = member.get("character_card") if isinstance(member.get("character_card"), dict) else {}
     attrs = _card_attributes(card)
     dex = max(0, _as_int(attrs.get("DEX"), _as_int(card.get("dex"), 0)))
@@ -417,7 +424,7 @@ def _combatant_from_member(member: dict[str, Any]) -> dict[str, Any]:
     constitution = max(0, _as_int(attrs.get("CON"), _as_int(card.get("con"), 50)))
     power = max(0, _as_int(attrs.get("POW"), _as_int(card.get("pow"), 50)))
     luck = max(0, _as_int(attrs.get("LUCK"), _as_int(card.get("luck"), 50)))
-    build, damage_bonus, db_terms = build_and_damage_bonus(strength, size)
+    build, damage_bonus, db_terms = build_and_damage_bonus(strength, size, ruleset_id)
     state = member.get("character_state") if isinstance(member.get("character_state"), dict) else {}
     hp, max_hp = _card_hp(card, state)
     names = [str(member.get("username") or ""), str(card.get("name") or "")]
@@ -486,7 +493,7 @@ def _spec_actions_base(spec: dict[str, Any], weapons: list[dict[str, Any]]) -> i
     return max([1, *counts])
 
 
-def _combatant_from_spec(spec: dict[str, Any]) -> dict[str, Any]:
+def _combatant_from_spec(spec: dict[str, Any], ruleset_id: str | None = None) -> dict[str, Any]:
     name = _as_text(spec.get("name") or spec.get("player_name"))
     if not name:
         raise ValueError("participants 中的 NPC 条目缺少 name")
@@ -497,10 +504,10 @@ def _combatant_from_spec(spec: dict[str, Any]) -> dict[str, Any]:
     power = max(0, _as_int(spec.get("pow"), 50))
     build_value = spec.get("build")
     if build_value in (None, ""):
-        build, damage_bonus, db_terms = build_and_damage_bonus(strength, size)
+        build, damage_bonus, db_terms = build_and_damage_bonus(strength, size, ruleset_id)
     else:
         build = _as_int(build_value, 0)
-        _, damage_bonus, db_terms = build_and_damage_bonus(strength, size)
+        _, damage_bonus, db_terms = build_and_damage_bonus(strength, size, ruleset_id)
         if spec.get("damageBonus"):
             damage_bonus = _as_text(spec.get("damageBonus"))
     max_hp = max(1, _as_int(spec.get("max_hp", spec.get("maxHp")), max(1, (constitution + size) // 10)))
@@ -942,13 +949,16 @@ def _apply_damage(
     保存，避免房间快照与战斗快照互相覆盖。
     """
     settings = settings or _combat_settings(context)
-    ruleset = get_ruleset(str(combatant.get("ruleset") or settings.ruleset_id or ""))
+    # 伤害结算里体质检定的骰子按该战斗者的规则集解析（B1 显式传递）：
+    # 战斗者快照优先，缺省回退房间战斗配置，与上面取战斗实现同一口径。
+    ruleset_id = str(combatant.get("ruleset") or settings.ruleset_id or "")
+    ruleset = get_ruleset(ruleset_id)
     outcome = ruleset.resolve_damage(
         combatant,
         amount,
         armor=max(0, int(armor if armor is not None else combatant.get("armor") or 0)),
         ignore_armor=ignore_armor,
-        roll_d100=lambda: _percentile_roll(_roller)[0],
+        roll_d100=lambda: _percentile_roll(_roller, ruleset_id=ruleset_id)[0],
         thresholds=_context_thresholds(context),
         settings=settings,
     )
@@ -1073,6 +1083,9 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     combatants: dict[str, Any] = {}
     # 剧本模块原文只转交给声明了对应钩子的规则集，不写入战斗状态。
     combatant_modules: dict[str, dict[str, Any]] = {}
+    # B1：NPC 体格 / 伤害加值按本场战斗的规则集解析（不跟随进程默认）。
+    settings = _combat_settings(context)
+    combat_ruleset_id = settings.ruleset_id
     try:
         module_refs = arguments.get("module_ids")
         refs = [str(item).strip() for item in module_refs] if isinstance(module_refs, list) else []
@@ -1085,7 +1098,7 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             spec = _module_combat_spec(module)
             if not spec["module_id"]:
                 spec["module_id"] = module_id
-            combatant = _combatant_from_spec(spec)
+            combatant = _combatant_from_spec(spec, combat_ruleset_id)
             key = _unique_name(combatants, combatant["name"])
             combatant["name"] = key
             combatants[key] = combatant
@@ -1104,13 +1117,13 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                         value = entry.get(key)
                         if value not in (None, ""):
                             spec[key] = value
-                    combatant = _combatant_from_spec(spec)
+                    combatant = _combatant_from_spec(spec, combat_ruleset_id)
                     key = _unique_name(combatants, combatant["name"])
                     combatant["name"] = key
                     combatants[key] = combatant
                     combatant_modules[key] = module
                 elif isinstance(entry, dict) and _is_npc_entry(entry):
-                    combatant = _combatant_from_spec(entry)
+                    combatant = _combatant_from_spec(entry, combat_ruleset_id)
                     key = _unique_name(combatants, combatant["name"])
                     combatant["name"] = key
                     combatants[key] = combatant
@@ -1119,7 +1132,7 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                     member = _find_member(name, context)
                     if not member:
                         return {"error": f"player {name} was not found in current room"}
-                    combatant = _combatant_from_member(member)
+                    combatant = _combatant_from_member(member, combat_ruleset_id)
                     key = _unique_name(combatants, combatant["name"])
                     combatant["name"] = key
                     combatants[key] = combatant
@@ -1130,7 +1143,7 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                     continue
                 if member.get("is_active", True) is False or member.get("status", "active") == "removed":
                     continue
-                combatant = _combatant_from_member(member)
+                combatant = _combatant_from_member(member, combat_ruleset_id)
                 key = _unique_name(combatants, combatant["name"])
                 combatant["name"] = key
                 combatants[key] = combatant
@@ -1139,7 +1152,6 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     if not combatants:
         return {"error": "没有可加入战斗的参与者（请传入 participants 或确保房间成员已绑定角色卡）"}
 
-    settings = _combat_settings(context)
     ruleset = get_ruleset(settings.ruleset_id)
     surprised_names = [str(name).strip() for name in arguments.get("surprised") or [] if str(name).strip()]
     surprised_set = set(surprised_names)
@@ -1166,11 +1178,22 @@ def start_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
 
     if arguments.get("initiative_check"):
         # 可选先攻检定（p105）：大成功首次攻击 1 奖励骰，大失败失去首次攻击。
+        # 掷骰与成功等级带都按本场战斗的规则集解析（B1 显式传递）。
+        combat_ruleset_id = str(ruleset.ruleset_id or "")
         critical, fumble = _context_thresholds(context)
         for combatant in combatants.values():
-            roll, _ = _percentile_roll(_roller)
-            level = _success_level(roll, max(1, int(combatant.get("dex") or 1)), critical, fumble)
-            combatant["initiative"] = level_rank().get(level, 0) * 1000 + int(combatant.get("dex") or 0)
+            roll, _ = _percentile_roll(_roller, ruleset_id=combat_ruleset_id)
+            level = _success_level(
+                roll,
+                max(1, int(combatant.get("dex") or 1)),
+                critical,
+                fumble,
+                ruleset_id=combat_ruleset_id,
+            )
+            combatant["initiative"] = (
+                level_rank(combat_ruleset_id).get(level, 0) * 1000
+                + int(combatant.get("dex") or 0)
+            )
             combatant["initiative_roll"] = roll
             if level == "critical":
                 combatant["first_attack_bonus"] = 1
@@ -1245,10 +1268,10 @@ def join_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             spec = _module_combat_spec(module)
             if not spec["module_id"]:
                 spec["module_id"] = module_id
-            combatant = _combatant_from_spec(spec)
+            combatant = _combatant_from_spec(spec, settings.ruleset_id)
             source_module = module
         elif isinstance(raw, dict) and (_is_npc_entry(raw) or raw.get("dex") or raw.get("hp")):
-            combatant = _combatant_from_spec(raw)
+            combatant = _combatant_from_spec(raw, settings.ruleset_id)
         else:
             name = raw if isinstance(raw, str) else _as_text((raw or {}).get("name") if isinstance(raw, dict) else "")
             if not name:
@@ -1263,7 +1286,7 @@ def join_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             }
             if member.get("user_id") in existing_ids:
                 return {"error": f"{name} 已经在战斗中"}
-            combatant = _combatant_from_member(member)
+            combatant = _combatant_from_member(member, settings.ruleset_id)
     except ValueError as exc:
         return {"error": str(exc)}
 
@@ -1277,12 +1300,18 @@ def join_combat(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         return {"error": str(exc)}
     combatant["initiative"] = ruleset.roll_initiative(combatant, _roller, settings)
     if arguments.get("initiative_check"):
+        # 加入者沿用本场战斗的规则集做先攻检定（B1 显式传递）。
+        combat_ruleset_id = str(combat.get("ruleset") or settings.ruleset_id or "")
         critical, fumble = _context_thresholds(context)
-        roll, _ = _percentile_roll(_roller)
+        roll, _ = _percentile_roll(_roller, ruleset_id=combat_ruleset_id)
         level = _success_level(
-            roll, max(1, int(combatant.get("dex") or 1)), critical, fumble
+            roll,
+            max(1, int(combatant.get("dex") or 1)),
+            critical,
+            fumble,
+            ruleset_id=combat_ruleset_id,
         )
-        combatant["initiative"] = level_rank().get(level, 0) * 1000 + int(
+        combatant["initiative"] = level_rank(combat_ruleset_id).get(level, 0) * 1000 + int(
             combatant.get("dex") or 0
         )
         combatant["initiative_roll"] = roll
@@ -1654,12 +1683,18 @@ def _opposed_rolls(
     *,
     bonus: int = 0,
     penalty: int = 0,
+    ruleset_id: str | None = None,
 ):
+    """近战对抗掷骰；骰子策略与成功等级带按 ``ruleset_id`` 解析（B1）。"""
     critical, fumble = _context_thresholds(context)
-    attack_roll, attack_candidates = _percentile_roll(_roller, bonus, penalty)
-    defense_roll, defense_candidates = _percentile_roll(_roller)
-    attack_level = _success_level(attack_roll, max(1, attacker_value), critical, fumble)
-    defense_level = _success_level(defense_roll, max(1, defender_value), critical, fumble)
+    attack_roll, attack_candidates = _percentile_roll(_roller, bonus, penalty, ruleset_id)
+    defense_roll, defense_candidates = _percentile_roll(_roller, ruleset_id=ruleset_id)
+    attack_level = _success_level(
+        attack_roll, max(1, attacker_value), critical, fumble, ruleset_id=ruleset_id
+    )
+    defense_level = _success_level(
+        defense_roll, max(1, defender_value), critical, fumble, ruleset_id=ruleset_id
+    )
     return {
         "attack_roll": attack_roll,
         "attack_candidates": attack_candidates,
@@ -2197,9 +2232,11 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     if settings.major_wound_penalty == "cannot_act" and attacker.get("major_wound"):
         return {"error": f"{attacker.get('name')} 身负重伤，按房规无法行动"}
     ruleset = _combat_ruleset(combat, settings)
+    # 本场战斗的规则集 id：掷骰策略与成功等级带都按它解析（B1 显式传递）。
+    combat_ruleset_id = str(combat.get("ruleset") or settings.ruleset_id or "")
     if str(getattr(ruleset, "attack_mode", "opposed")).strip().lower() == "d20":
         return _attack_d20(combat, attacker, target, arguments, context, settings, ruleset)
-    room_options = _coc7_room_options(context)
+    room_options = _room_rule_options(context)
     detail_rules = _combat_detail_rules(settings)
     knockout_rule = bool(room_options and room_options.combat_knockout and detail_rules)
     hit_locations = bool(room_options and room_options.combat_hit_locations and detail_rules)
@@ -2306,6 +2343,7 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         defense_value if defense != "none" else 0,
         bonus=bonus,
         penalty=penalty,
+        ruleset_id=combat_ruleset_id,
     )
     # 战斗 UI：玩家自己掷出的攻击骰面以 attack_roll 传入，覆盖服务端随机结果。
     if arguments.get("attack_roll") not in (None, ""):
@@ -2316,9 +2354,11 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         critical, fumble = _context_thresholds(context)
         rolled["attack_roll"] = player_roll
         rolled["attack_candidates"] = []
-        rolled["attack_level"] = _success_level(player_roll, max(1, skill_value), critical, fumble)
-    attack_rank = level_rank().get(rolled["attack_level"], 0)
-    defense_rank = level_rank().get(rolled["defense_level"], 0)
+        rolled["attack_level"] = _success_level(
+            player_roll, max(1, skill_value), critical, fumble, ruleset_id=combat_ruleset_id
+        )
+    attack_rank = level_rank(combat_ruleset_id).get(rolled["attack_level"], 0)
+    defense_rank = level_rank(combat_ruleset_id).get(rolled["defense_level"], 0)
 
     if forced_surprise_hit:
         # 规则书选项：未准备目标近战自动成功，除非攻击者大失败（p90-91）。
@@ -2456,6 +2496,7 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                 label=defense_label,
                 target=defense_value,
                 roller=str(target.get("name") or ""),
+                ruleset_id=combat_ruleset_id,
             ),
         )
     result = {
@@ -2507,7 +2548,9 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     settings = _combat_settings(context)
     if settings.major_wound_penalty == "cannot_act" and attacker.get("major_wound"):
         return {"error": f"{attacker.get('name')} 身负重伤，按房规无法行动"}
-    room_options = _coc7_room_options(context)
+    # 本场战斗的规则集 id：射击掷骰与成功等级带都按它解析（B1 显式传递）。
+    combat_ruleset_id = str(combat.get("ruleset") or settings.ruleset_id or "")
+    room_options = _room_rule_options(context)
     detail_rules = _combat_detail_rules(settings)
     # 掩体闪避的后续代价：失去下一次攻击（由该房规在上一次射击时写入）。
     if attacker.get("lost_next_attack"):
@@ -2625,8 +2668,10 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             names=DODGE_SKILL_NAMES,
             default=max(1, int(target.get("dex") or 0) // 2),
         )
-        dodge_roll, _ = _percentile_roll(_roller)
-        dodge_level = _success_level(dodge_roll, max(1, dodge_value), critical, fumble)
+        dodge_roll, _ = _percentile_roll(_roller, ruleset_id=combat_ruleset_id)
+        dodge_level = _success_level(
+            dodge_roll, max(1, dodge_value), critical, fumble, ruleset_id=combat_ruleset_id
+        )
         if detail_rules.attacker_loses_next_attack(dodge_level):
             attacker["lost_next_attack"] = True
             cover_dodge_note = (
@@ -2674,7 +2719,7 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             usable = min(usable, max(0, current_ammo))
         if usable <= 0:
             return {"shot": shot_no, "error": "弹药耗尽，需要装填"}, []
-        roll, candidates = _percentile_roll(_roller, shot_bonus, shot_penalty)
+        roll, candidates = _percentile_roll(_roller, shot_bonus, shot_penalty, combat_ruleset_id)
         # 第一发可由玩家自己掷骰（战斗 UI 单发射击）。
         if shot_no == 1 and arguments.get("attack_roll") not in (None, ""):
             try:
@@ -2684,7 +2729,9 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             candidates = []
         if isinstance(current_ammo, int):
             current_ammo -= usable
-        level = _success_level(roll, max(1, skill_value), critical, fumble)
+        level = _success_level(
+            roll, max(1, skill_value), critical, fumble, ruleset_id=combat_ruleset_id
+        )
         record: dict[str, Any] = {
             "shot": shot_no,
             "bullets": usable,
@@ -3013,14 +3060,20 @@ def treat_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     if isinstance(success, bool):
         pass
     else:
+        # 急救/医学检定按本场战斗的规则集解析（B1 显式传递）。
+        combat_ruleset_id = str(
+            combat.get("ruleset") or _combat_settings(context).ruleset_id or ""
+        )
         critical, fumble = _context_thresholds(context)
         difficulty = "regular"
         if method == "medicine" and not same_day:
             # 医学治疗非当天的伤势才是困难（p101）。
             difficulty = "hard"
         threshold = skill_value // 2 if difficulty == "hard" else skill_value
-        roll, candidates = _percentile_roll(_roller)
-        level = _success_level(roll, max(1, skill_value), critical, fumble)
+        roll, candidates = _percentile_roll(_roller, ruleset_id=combat_ruleset_id)
+        level = _success_level(
+            roll, max(1, skill_value), critical, fumble, ruleset_id=combat_ruleset_id
+        )
         success = (roll <= threshold or level == "critical") and level != "fumble"
     healed = 0
     if success:
@@ -3112,7 +3165,7 @@ def poison_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     combat = _load_combat(context)
     if not combat:
         return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
-    room_options = _coc7_room_options(context)
+    room_options = _room_rule_options(context)
     settings = _combat_settings(context)
     detail_rules = _combat_detail_rules(settings)
     if not (room_options and room_options.combat_poison and detail_rules):
@@ -3185,13 +3238,16 @@ def _resolve_poison(
     persist: bool = True,
 ) -> dict[str, Any]:
     """单次毒剂伤害结算（即时与延迟到期共用）。"""
+    # 毒剂只在开启毒剂房规的房间结算，数学（毒性惩罚骰 / CON 阈值）由
+    # ``settings.ruleset_id`` 的规则集提供；掷骰与等级带同源解析（B1）。
+    combat_ruleset_id = str(combat.get("ruleset") or settings.ruleset_id or "")
     potency = detail_rules.poison_penalty_dice(potency_raw)
     dose_count = max(1, _as_int(doses, 1))
     expression = _as_text(damage_raw, "1D6") or "1D6"
     con = detail_rules.poison_check_target(target.get("con"))
     critical, fumble = _context_thresholds(context)
-    roll, candidates = _percentile_roll(_roller, 0, potency)
-    level = _success_level(roll, con, critical, fumble)
+    roll, candidates = _percentile_roll(_roller, 0, potency, combat_ruleset_id)
+    level = _success_level(roll, con, critical, fumble, ruleset_id=combat_ruleset_id)
     resisted = detail_rules.poison_resisted(level)
 
     parsed = weapon_catalog.parse_damage(expression)
@@ -3249,7 +3305,7 @@ def _settle_due_poisons(
     pending = combat.get("pending_poisons")
     if not isinstance(pending, list) or not pending:
         return []
-    room_options = _coc7_room_options(context)
+    room_options = _room_rule_options(context)
     settings = settings or _combat_settings(context)
     detail_rules = _combat_detail_rules(settings)
     if not (room_options and room_options.combat_poison and detail_rules):
@@ -3351,7 +3407,7 @@ def _find_room_member(info: dict[str, Any], name: Any) -> dict[str, Any] | None:
 
 def _narrative_poison_rules(context: Any) -> tuple[CombatSettings, Any] | tuple[None, None]:
     """战斗外毒剂只搬运数据，CON 检定等规则数学仍由规则集插件提供。"""
-    room_options = _coc7_room_options(context)
+    room_options = _room_rule_options(context)
     settings = _combat_settings(context)
     detail_rules = _combat_detail_rules(settings)
     if not (room_options and room_options.combat_poison and detail_rules):
@@ -3466,7 +3522,7 @@ def settle_narrative_poisons(
                     if member is None:
                         messages.append(f"{label} 的延迟毒剂因找不到角色而取消。")
                         continue
-                    target = _combatant_from_member(member)
+                    target = _combatant_from_member(member, settings.ruleset_id)
                     if target.get("dead"):
                         messages.append(f"{label} 的延迟毒剂因目标已倒下而取消。")
                         continue
@@ -3519,7 +3575,7 @@ def poison_queue(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     if action != "add":
         return {"error": f"未知的 action：{action}（可用 add / list）"}
 
-    room_options = _coc7_room_options(context)
+    room_options = _room_rule_options(context)
     settings = _combat_settings(context)
     detail_rules = _combat_detail_rules(settings)
     if not (room_options and room_options.combat_poison and detail_rules):
@@ -3584,7 +3640,7 @@ def poison_queue(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
             "summary": f"{label} 中毒：将于 {room_clock.format_display(due)} 发作。",
         }
 
-    target = _combatant_from_member(member)
+    target = _combatant_from_member(member, settings.ruleset_id)
     if target.get("dead"):
         return {"error": f"{label} 已死亡，无法结算毒剂"}
     result = _resolve_poison(
@@ -3924,7 +3980,7 @@ COMBAT_HEAL_TOOL = AgentTool(
 
 def knockout_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     """击晕（批次 4 房规）：钝器战技命中后只造成 1 点伤害并使目标昏迷 1D10 轮。"""
-    room_options = _coc7_room_options(context)
+    room_options = _room_rule_options(context)
     settings = _combat_settings(context)
     detail_rules = _combat_detail_rules(settings)
     if not (room_options and room_options.combat_knockout and detail_rules):
@@ -3967,7 +4023,7 @@ def hit_location_check(arguments: dict[str, Any], context: Any) -> dict[str, Any
     """部位命中（批次 4 房规）：掷 1D20 定位，可附重伤后果描述。"""
     settings = _combat_settings(context)
     detail_rules = _combat_detail_rules(settings)
-    room_options = _coc7_room_options(context)
+    room_options = _room_rule_options(context)
     if not (room_options and room_options.combat_hit_locations and detail_rules):
         return {"error": "部位命中房规未开启，请先在房规中开启「部位命中」"}
     raw = arguments.get("roll")

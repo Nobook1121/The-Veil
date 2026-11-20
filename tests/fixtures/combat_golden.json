@@ -1,0 +1,733 @@
+{
+  "attack": {
+    "result": {
+      "attacker": "Hunter",
+      "damage": {
+        "armor": 0,
+        "con_check": {
+          "level": "hard",
+          "roll": 20,
+          "value": 50
+        },
+        "damage": 5,
+        "damage_detail": "1D4=[3]",
+        "dead": false,
+        "dying": false,
+        "effective": 5,
+        "hp_after": 5,
+        "hp_before": 10,
+        "major_wound": true,
+        "note": "",
+        "unconscious": false,
+        "weapon": "Knife"
+      },
+      "defense": "dodge",
+      "defense_level": "failure",
+      "defense_roll": 40,
+      "roll": 15,
+      "rolls": [
+        15
+      ],
+      "skill": "brawl",
+      "skill_value": 50,
+      "success": true,
+      "success_level": "hard",
+      "summary": "Hunter 使用Knife攻击 Prey；攻击 brawl d100=15 / 50（hard）；目标 闪避 d100=40 / 20（failure）；Prey 受到 5 点伤害（原伤害 5，护甲 0），HP 10→5，触发重伤，重伤体质检定 d100=20 / 50（hard）；伤害明细：1D4=[3]",
+      "target": "Prey",
+      "visible_message": {
+        "avatar": "",
+        "content": "Hunter 使用Knife攻击 Prey；攻击 brawl d100=15 / 50（hard）；目标 闪避 d100=40 / 20（failure）；Prey 受到 5 点伤害（原伤害 5，护甲 0），HP 10→5，触发重伤，重伤体质检定 d100=20 / 50（hard）；伤害明细：1D4=[3]",
+        "metadata": {
+          "attacker": "Hunter",
+          "check_type": "combat_attack",
+          "dice_roll": {
+            "auto": false,
+            "bonus_dice": 0,
+            "candidates": [],
+            "check_name": "brawl",
+            "confirmed": true,
+            "count": 2,
+            "difficulty": null,
+            "expression": "1d100",
+            "faces": [
+              1,
+              5
+            ],
+            "groups": [
+              {
+                "count": 1,
+                "faces": [
+                  1
+                ],
+                "labels": [
+                  "10"
+                ],
+                "role": "tens",
+                "type": "d10"
+              },
+              {
+                "count": 1,
+                "faces": [
+                  5
+                ],
+                "labels": [
+                  "5"
+                ],
+                "role": "ones",
+                "type": "d10"
+              }
+            ],
+            "labels": [
+              "10",
+              "5"
+            ],
+            "mode": "percentile",
+            "penalty_dice": 0,
+            "player_roll": false,
+            "player_roll_ignored": false,
+            "request_id": null,
+            "reroll": {
+              "enabled": false,
+              "limit": 0,
+              "mode": "off",
+              "remaining": 0,
+              "used": 0
+            },
+            "roll": 15,
+            "roller": "Hunter",
+            "roller_user_id": null,
+            "rolls": [
+              15
+            ],
+            "selected": null,
+            "show_table": true,
+            "sides": 10,
+            "success": true,
+            "success_level": "hard",
+            "target": 50,
+            "total": 15
+          },
+          "target": "Prey",
+          "tool_name": "combat.attack"
+        },
+        "sender_name": "骰娘",
+        "type": "dice"
+      },
+      "weapon": "Knife"
+    },
+    "state": {
+      "active": true,
+      "combatants": {
+        "Hunter": {
+          "ac": null,
+          "actions_base": 1,
+          "actions_per_round": 1,
+          "actions_remaining": 0,
+          "aliases": [
+            "Hunter"
+          ],
+          "ammo": {},
+          "armor": 0,
+          "budget": {
+            "action": 1
+          },
+          "build": 0,
+          "combatant_id": "",
+          "con": 50,
+          "conditions": [],
+          "damage_bonus": "0",
+          "damage_taken_this_round": 0,
+          "db_terms": [],
+          "dead": false,
+          "dex": 60,
+          "disengaged": false,
+          "dying": false,
+          "fighting": 50,
+          "first_aid_used": false,
+          "hp": 10,
+          "initiative": 60,
+          "is_player": false,
+          "luck": 50,
+          "major_wound": false,
+          "max_hp": 10,
+          "module_id": "",
+          "monster_id": "",
+          "mp": 10,
+          "name": "Hunter",
+          "pow": 50,
+          "reactions_this_round": 0,
+          "ready_weapon": false,
+          "ruleset": "coc7",
+          "san": 50,
+          "side": "enemy",
+          "siz": 50,
+          "skills": {
+            "Fighting (Brawl)": 50
+          },
+          "status": "active",
+          "str": 50,
+          "unconscious": false,
+          "used_counter": false,
+          "used_dodge": false,
+          "user_id": null,
+          "weapons": [
+            {
+              "ammo": "",
+              "attacks": "1",
+              "damage": "1D4+2",
+              "impale": false,
+              "malfunction": "",
+              "name": "Knife",
+              "note": "",
+              "range": "",
+              "skill": "Fighting (Brawl)",
+              "skillKey": "",
+              "specialtyKey": "",
+              "weight": ""
+            }
+          ]
+        },
+        "Prey": {
+          "ac": null,
+          "actions_base": 1,
+          "actions_per_round": 1,
+          "actions_remaining": 1,
+          "aliases": [
+            "Prey"
+          ],
+          "ammo": {},
+          "armor": 0,
+          "budget": {
+            "action": 1
+          },
+          "build": 0,
+          "combatant_id": "",
+          "con": 50,
+          "conditions": [],
+          "damage_bonus": "0",
+          "damage_taken_this_round": 5,
+          "db_terms": [],
+          "dead": false,
+          "dex": 40,
+          "disengaged": false,
+          "dying": false,
+          "fighting": 50,
+          "first_aid_used": false,
+          "hp": 5,
+          "initiative": 40,
+          "is_player": false,
+          "luck": 50,
+          "major_wound": true,
+          "max_hp": 10,
+          "module_id": "",
+          "monster_id": "",
+          "mp": 10,
+          "name": "Prey",
+          "pow": 50,
+          "reactions_this_round": 1,
+          "ready_weapon": false,
+          "ruleset": "coc7",
+          "san": 50,
+          "side": "enemy",
+          "siz": 50,
+          "skills": {
+            "Fighting (Brawl)": 50
+          },
+          "status": "active",
+          "str": 50,
+          "unconscious": false,
+          "used_counter": false,
+          "used_dodge": true,
+          "user_id": null,
+          "weapons": [
+            {
+              "ammo": "",
+              "attacks": "1",
+              "damage": "1D4+2",
+              "impale": false,
+              "malfunction": "",
+              "name": "Knife",
+              "note": "",
+              "range": "",
+              "skill": "Fighting (Brawl)",
+              "skillKey": "",
+              "specialtyKey": "",
+              "weight": ""
+            }
+          ]
+        }
+      },
+      "id": "<combat-id>",
+      "log": [
+        {
+          "text": "战斗开始：Hunter → Prey",
+          "time": "<timestamp>"
+        },
+        {
+          "text": "Hunter 使用Knife攻击 Prey；攻击 brawl d100=15 / 50（hard）；目标 闪避 d100=40 / 20（failure）；Prey 受到 5 点伤害（原伤害 5，护甲 0），HP 10→5，触发重伤，重伤体质检定 d100=20 / 50（hard）；伤害明细：1D4=[3]",
+          "time": "<timestamp>"
+        }
+      ],
+      "order": [
+        "Hunter",
+        "Prey"
+      ],
+      "round": 1,
+      "ruleset": "coc7",
+      "started_at": "<timestamp>",
+      "surprised": [],
+      "turn": 1
+    }
+  },
+  "damage": {
+    "result": {
+      "armor": 0,
+      "con_check": {
+        "level": "extreme",
+        "roll": 4,
+        "value": 50
+      },
+      "damage": 5,
+      "damage_detail": [
+        {
+          "count": 1,
+          "rolls": [
+            5
+          ],
+          "sides": 6,
+          "total": 5
+        }
+      ],
+      "dead": false,
+      "dying": false,
+      "effective": 5,
+      "hp_after": 5,
+      "hp_before": 10,
+      "major_wound": true,
+      "note": "",
+      "summary": "Victim 受到 5 点伤害（原伤害 5，护甲 0），HP 10→5，触发重伤，重伤体质检定 d100=4 / 50（extreme）",
+      "target": "Victim",
+      "unconscious": false,
+      "visible_message": {
+        "avatar": "",
+        "content": "Victim 受到 5 点伤害（原伤害 5，护甲 0），HP 10→5，触发重伤，重伤体质检定 d100=4 / 50（extreme）",
+        "metadata": {
+          "check_type": "combat_damage",
+          "target": "Victim",
+          "tool_name": "combat.damage"
+        },
+        "sender_name": "骰娘",
+        "type": "dice"
+      }
+    },
+    "state": {
+      "active": true,
+      "combatants": {
+        "Assailant": {
+          "ac": null,
+          "actions_base": 1,
+          "actions_per_round": 1,
+          "actions_remaining": 1,
+          "aliases": [
+            "Assailant"
+          ],
+          "ammo": {},
+          "armor": 0,
+          "budget": {
+            "action": 1
+          },
+          "build": 0,
+          "combatant_id": "",
+          "con": 50,
+          "conditions": [],
+          "damage_bonus": "0",
+          "damage_taken_this_round": 0,
+          "db_terms": [],
+          "dead": false,
+          "dex": 60,
+          "disengaged": false,
+          "dying": false,
+          "fighting": 50,
+          "first_aid_used": false,
+          "hp": 10,
+          "initiative": 60,
+          "is_player": false,
+          "luck": 50,
+          "major_wound": false,
+          "max_hp": 10,
+          "module_id": "",
+          "monster_id": "",
+          "mp": 10,
+          "name": "Assailant",
+          "pow": 50,
+          "reactions_this_round": 0,
+          "ready_weapon": false,
+          "ruleset": "coc7",
+          "san": 50,
+          "side": "enemy",
+          "siz": 50,
+          "skills": {
+            "Fighting (Brawl)": 50
+          },
+          "status": "active",
+          "str": 50,
+          "unconscious": false,
+          "used_counter": false,
+          "used_dodge": false,
+          "user_id": null,
+          "weapons": [
+            {
+              "ammo": "",
+              "attacks": "1",
+              "damage": "1D4+2",
+              "impale": false,
+              "malfunction": "",
+              "name": "Knife",
+              "note": "",
+              "range": "",
+              "skill": "Fighting (Brawl)",
+              "skillKey": "",
+              "specialtyKey": "",
+              "weight": ""
+            }
+          ]
+        },
+        "Victim": {
+          "ac": null,
+          "actions_base": 1,
+          "actions_per_round": 1,
+          "actions_remaining": 1,
+          "aliases": [
+            "Victim"
+          ],
+          "ammo": {},
+          "armor": 0,
+          "budget": {
+            "action": 1
+          },
+          "build": 0,
+          "combatant_id": "",
+          "con": 50,
+          "conditions": [],
+          "damage_bonus": "0",
+          "damage_taken_this_round": 5,
+          "db_terms": [],
+          "dead": false,
+          "dex": 40,
+          "disengaged": false,
+          "dying": false,
+          "fighting": 50,
+          "first_aid_used": false,
+          "hp": 5,
+          "initiative": 40,
+          "is_player": false,
+          "luck": 50,
+          "major_wound": true,
+          "max_hp": 10,
+          "module_id": "",
+          "monster_id": "",
+          "mp": 10,
+          "name": "Victim",
+          "pow": 50,
+          "reactions_this_round": 0,
+          "ready_weapon": false,
+          "ruleset": "coc7",
+          "san": 50,
+          "side": "enemy",
+          "siz": 50,
+          "skills": {
+            "Fighting (Brawl)": 50
+          },
+          "status": "active",
+          "str": 50,
+          "unconscious": false,
+          "used_counter": false,
+          "used_dodge": false,
+          "user_id": null,
+          "weapons": [
+            {
+              "ammo": "",
+              "attacks": "1",
+              "damage": "1D4+2",
+              "impale": false,
+              "malfunction": "",
+              "name": "Knife",
+              "note": "",
+              "range": "",
+              "skill": "Fighting (Brawl)",
+              "skillKey": "",
+              "specialtyKey": "",
+              "weight": ""
+            }
+          ]
+        }
+      },
+      "id": "<combat-id>",
+      "log": [
+        {
+          "text": "战斗开始：Assailant → Victim",
+          "time": "<timestamp>"
+        },
+        {
+          "text": "Victim 受到 5 点伤害（原伤害 5，护甲 0），HP 10→5，触发重伤，重伤体质检定 d100=4 / 50（extreme）",
+          "time": "<timestamp>"
+        }
+      ],
+      "order": [
+        "Assailant",
+        "Victim"
+      ],
+      "round": 1,
+      "ruleset": "coc7",
+      "started_at": "<timestamp>",
+      "surprised": [],
+      "turn": 0
+    }
+  },
+  "initiative": {
+    "result": {
+      "active": true,
+      "current": "Alpha",
+      "order": [
+        {
+          "ac": null,
+          "actions_per_round": 1,
+          "actions_remaining": 1,
+          "armor": 0,
+          "budget": {
+            "action": 1
+          },
+          "concentration": null,
+          "conditions": [],
+          "death_saves": null,
+          "dex": 60,
+          "disengaged": false,
+          "dying": false,
+          "effects": [],
+          "hp": 10,
+          "initiative": 2060,
+          "is_player": false,
+          "knockout_rounds": 0,
+          "major_wound": false,
+          "max_hp": 10,
+          "name": "Alpha",
+          "poison": null,
+          "poisoned": false,
+          "reactions_this_round": 0,
+          "ready_weapon": false,
+          "side": "enemy",
+          "spell_slots": {},
+          "status": "active",
+          "stunned": false,
+          "surprised": false,
+          "temp_hp": null,
+          "used_counter": false,
+          "used_dodge": false,
+          "user_id": null
+        },
+        {
+          "ac": null,
+          "actions_per_round": 1,
+          "actions_remaining": 1,
+          "armor": 0,
+          "budget": {
+            "action": 1
+          },
+          "concentration": null,
+          "conditions": [],
+          "death_saves": null,
+          "dex": 40,
+          "disengaged": false,
+          "dying": false,
+          "effects": [],
+          "hp": 10,
+          "initiative": 2040,
+          "is_player": false,
+          "knockout_rounds": 0,
+          "major_wound": false,
+          "max_hp": 10,
+          "name": "Beta",
+          "poison": null,
+          "poisoned": false,
+          "reactions_this_round": 0,
+          "ready_weapon": false,
+          "side": "enemy",
+          "spell_slots": {},
+          "status": "active",
+          "stunned": false,
+          "surprised": false,
+          "temp_hp": null,
+          "used_counter": false,
+          "used_dodge": false,
+          "user_id": null
+        }
+      ],
+      "round": 1,
+      "ruleset": "coc7",
+      "summary": "战斗开始，第 1 轮。先攻顺序：Alpha(DEX 60) → Beta(DEX 40)。当前行动者：Alpha。",
+      "surprised": [],
+      "turn": 0
+    },
+    "state": {
+      "active": true,
+      "combatants": {
+        "Alpha": {
+          "ac": null,
+          "actions_base": 1,
+          "actions_per_round": 1,
+          "actions_remaining": 1,
+          "aliases": [
+            "Alpha"
+          ],
+          "ammo": {},
+          "armor": 0,
+          "budget": {
+            "action": 1
+          },
+          "build": 0,
+          "combatant_id": "",
+          "con": 50,
+          "conditions": [],
+          "damage_bonus": "0",
+          "damage_taken_this_round": 0,
+          "db_terms": [],
+          "dead": false,
+          "dex": 60,
+          "disengaged": false,
+          "dying": false,
+          "fighting": 50,
+          "first_aid_used": false,
+          "hp": 10,
+          "initiative": 2060,
+          "initiative_roll": 25,
+          "is_player": false,
+          "luck": 50,
+          "major_wound": false,
+          "max_hp": 10,
+          "module_id": "",
+          "monster_id": "",
+          "mp": 10,
+          "name": "Alpha",
+          "pow": 50,
+          "reactions_this_round": 0,
+          "ready_weapon": false,
+          "ruleset": "coc7",
+          "san": 50,
+          "side": "enemy",
+          "siz": 50,
+          "skills": {
+            "Fighting (Brawl)": 50
+          },
+          "status": "active",
+          "str": 50,
+          "unconscious": false,
+          "used_counter": false,
+          "used_dodge": false,
+          "user_id": null,
+          "weapons": [
+            {
+              "ammo": "",
+              "attacks": "1",
+              "damage": "1D4+2",
+              "impale": false,
+              "malfunction": "",
+              "name": "Knife",
+              "note": "",
+              "range": "",
+              "skill": "Fighting (Brawl)",
+              "skillKey": "",
+              "specialtyKey": "",
+              "weight": ""
+            }
+          ]
+        },
+        "Beta": {
+          "ac": null,
+          "actions_base": 1,
+          "actions_per_round": 1,
+          "actions_remaining": 1,
+          "aliases": [
+            "Beta"
+          ],
+          "ammo": {},
+          "armor": 0,
+          "budget": {
+            "action": 1
+          },
+          "build": 0,
+          "combatant_id": "",
+          "con": 50,
+          "conditions": [],
+          "damage_bonus": "0",
+          "damage_taken_this_round": 0,
+          "db_terms": [],
+          "dead": false,
+          "dex": 40,
+          "disengaged": false,
+          "dying": false,
+          "fighting": 50,
+          "first_aid_used": false,
+          "hp": 10,
+          "initiative": 2040,
+          "initiative_roll": 10,
+          "is_player": false,
+          "luck": 50,
+          "major_wound": false,
+          "max_hp": 10,
+          "module_id": "",
+          "monster_id": "",
+          "mp": 10,
+          "name": "Beta",
+          "pow": 50,
+          "reactions_this_round": 0,
+          "ready_weapon": false,
+          "ruleset": "coc7",
+          "san": 50,
+          "side": "enemy",
+          "siz": 50,
+          "skills": {
+            "Fighting (Brawl)": 50
+          },
+          "status": "active",
+          "str": 50,
+          "unconscious": false,
+          "used_counter": false,
+          "used_dodge": false,
+          "user_id": null,
+          "weapons": [
+            {
+              "ammo": "",
+              "attacks": "1",
+              "damage": "1D4+2",
+              "impale": false,
+              "malfunction": "",
+              "name": "Knife",
+              "note": "",
+              "range": "",
+              "skill": "Fighting (Brawl)",
+              "skillKey": "",
+              "specialtyKey": "",
+              "weight": ""
+            }
+          ]
+        }
+      },
+      "id": "<combat-id>",
+      "log": [
+        {
+          "text": "战斗开始：Alpha → Beta",
+          "time": "<timestamp>"
+        }
+      ],
+      "order": [
+        "Alpha",
+        "Beta"
+      ],
+      "round": 1,
+      "ruleset": "coc7",
+      "started_at": "<timestamp>",
+      "surprised": [],
+      "turn": 0
+    }
+  }
+}
