@@ -191,11 +191,11 @@ versioning.py[DD3T]: F:剧本发布与房间绑定辅助：normalize_semver 归�
 
 ===/<repository>/backend/trpg_server/agents/narrative/===
 __init__.py[RG4S]: F:世界树/图谱叙事层入口：集中导出建图、条件求值、边构建、抽取、模型、存储、账本、开局、状态回放、触发器、拓扑与可见性等子模块的公开 API | R:- | A:__all__ 为子模块公开面权威 | S:-
-builder.py[DB6M]: F:建图流水线阶段 A-G 确定性部分：解析文档、章节切分、定位树、边生成、拓扑判定、可见性裁决、校验布局并写 narrative.json；LLM 补边不在本模块，保持零模型调用 | R:code:backend/trpg_server/agents/narrative/extract.py,code:backend/trpg_server/agents/narrative/edges.py,code:backend/trpg_server/agents/narrative/model.py | A:build_narrative、rebuild_all、rebuild_from_descriptor | S:-
+builder.py[DW5M]: F:剧本叙事图谱构建：正文分节 → 节点/边/交互组装；按 scenario.ruleset_id 穿线叙述抽取投影（E1） | R:code:backend/trpg_server/agents/narrative/extract.py | A:- | S:-
 coerce.py[CG2T]: F:narrative 子模块共用类型归一化：as_bool、as_str_list、as_str_list_or_scalar 统一此前各写一份的漂移语义，新增字段只改一处 | R:- | A:- | S:-
 conditions.py[KB5M]: F:条件 DSL 确定性求值：只支持结构化叶子、不做自然语言求值；失败只返回缺失项不返回正确答案，避免剧透进工具结果 | R:code:backend/trpg_server/agents/narrative/resolver.py | A:evaluate_condition、condition_atoms | S:-
 edges.py[DB6L]: F:确定性结构边构建：order 仅展示绝不据此生成 next；adjacent 由正文移动语义生成且双向 hard；条件门控可结构化为叶子才生成 portal，否则退化为 soft leads_to 并留 warning；contains 只表达层级不参与走位 | R:code:backend/trpg_server/agents/narrative/model.py | A:build_structural_edges、merge_edges | S:-
-extract.py[KD5L]: F:剧本正文确定性结构抽取：Markdown、中文章节与 SC 编号标题识别为章节、地点、物件、线索、NPC、结局；无法确定的信息写 warnings 留作者复核，不做自然语言推断、不调用模型 | R:code:backend/trpg_server/agents/narrative/builder.py | A:extract_narrative、detect_sections | S:-
+extract.py[KB6L]: F:剧本文档叙述抽取：SC 章节、技能、难度、结果行解析为 nodes.interactions.outcomes；词面经规则集叙述投影（E1） | R:code:backend/trpg_server/ruleset/narrative.py | A:- | S:_OUTCOME_RE 由 outcome_labels 键序生成，改键序即改抽取结果
 generate.py[AU5L]: F:世界树生成向导（仅预览）：内存里跑确定性建图流水线，返回新 bundle 与相对当前草稿的差异；绝不写 narrative.json，确认后走 PUT /api/scenarios/<id>/narrative 的 base_revision 冲突检测 | R:code:backend/trpg_server/agents/narrative/builder.py | A:章数、场景数、结局数、时钟数均有硬上限 | S:-
 generate_ai.py[AB5M]: F:生成向导的 LLM 语义补全：仅勾选时运行，只补空白 summary/body 绝不覆盖作者内容；每批 6-8 地点最多 8 次调用；响应必须 JSON 且节点 id 在白名单内；按提示词 hash 缓存 llm_cache.json；任何失败只返回告警 | R:code:backend/trpg_server/agents/narrative/generate.py | A:- | S:-
 guards.py[MS5M]: F:输出侧护栏：模型输出之后、落库之前，含 KP-only 或未揭示专名禁词的句子整句移除，全删空时给中性占位；确定性删句不做模型二次改写 | R:code:backend/trpg_server/agents/narrative/model.py | A:GuardPolicy 可开关 move_gate 与 spoiler_gate | S:-
@@ -215,8 +215,8 @@ publisher.py[MM5S]: F:触发消息组装与发布：direct_messages 由既有聊
 quality.py[TQ4M]: F:图谱质量指标：纯确定性统计不调用模型，返回每项指标实测值、目标区间与达标判断，在校验页与 narrative validate 输出 | R:code:backend/trpg_server/agents/narrative/model.py | A:QualityMetric 列表可序列化 | S:-
 redaction.py[MS5S]: F:地图信息剥离（AI 不看图出口清洗）：strip_map_fields 递归删除底图引用、像素标定与 DM 标记，strip_trigger_asset_fields 删资源地址，redact_map_text 把图片替换为占位；全部返回新对象不改缓存 | R:code:backend/trpg_server/agents/knowledge_base.py | A:scenario_has_map_layer 判断剧本是否已标注 map/poi 层 | S:MAP_FIELD_KEYS 不含单数 marker，它被当作模块摘要文本使用，误加会误删正文
 repair.py[XD5M]: F:图谱一键修复：只做结构性确定性修复（重复 id、悬空 parent、边端点、开场起点、孤立与不可达地点、不可达结局补 leads_to）；涉及剧情判断的问题保留在 remaining 交作者处理，不臆造内容 | R:code:backend/trpg_server/agents/narrative/model.py | A:修复范围对应 validate 的通用包检查 | S:-
-resolver.py[DB6L]: F:触发器求解：绑定匹配、条件收窄、一次性/冷却与附件可见性判定（§5.8.2-5.8.3） | R:code:backend/trpg_server/agents/narrative/conditions.py,code:backend/trpg_server/agents/narrative/triggers.py | A:TriggerHit、TriggerResolver | S:-
-runtime.py[DB8L]: F:图谱模式运行时裁决：位置、出口、交互、线索与状态写入；所有能不能做集中于 NarrativeRuntime——可见性、硬条件、一次性、结局条件与原子状态/账本写入，模型无法用自然语言绕开引擎，degraded 档复用同一套编排 | R:code:backend/trpg_server/agents/narrative/state_store.py,code:backend/trpg_server/agents/narrative/ledger.py,code:backend/trpg_server/agents/tools/narrative.py | A:工具层只做参数校验与展示 | S:-
+resolver.py[DB6L]: F:触发器解析：叙事节点条件与交互绑定对消息匹配；族词面经投影（E1，resolver 词面层族与 runtime 枚举层族分层不可合并） | R:code:backend/trpg_server/ruleset/narrative.py,code:backend/trpg_server/agents/narrative/runtime.py | A:- | S:-
+runtime.py[DB7L]: F:叙述运行时：交互与触发器结算、位置与区域联动；TriggerResolver 构造按 房间>剧本>默认 解析投影（E1），结果归一与回退链走投影字段 | R:code:backend/trpg_server/ruleset/narrative.py,code:backend/trpg_server/agents/narrative/resolver.py | A:- | S:-
 runtime_settings.py[FC4T]: F:房间级叙事运行档位解析：profile（graph、degraded）、guard（enforce、shadow、off）与 kill switch；优先级房间房规高于全局代码常量，三键缺省即跟随默认，老房间无需迁移 | R:code:backend/trpg_server/agents/narrative/guards.py | A:- | S:-
 state_store.py[DB7L]: F:房间叙事状态的读写、归一化、事件应用与关键帧：权威数据仍是 state.json，旧字段原样保留、新增 narrative 键存图谱运行态；所有写入经 apply_event 或 save_narrative_state 走原子写，旧字段只做一次投影同步 | R:code:backend/trpg_server/agents/room_state.py | A:replay_narrative、write_keyframe | S:-
 store.py[DB6M]: F:narrative.json 的读写与派生索引：与 scenario.json 同级存放，原子写入；索引只在保存或导入时重建，热路径为内存查表 | R:code:backend/trpg_server/agents/narrative/model.py,code:backend/trpg_server/security.py | A:load_bundle、save_bundle、build_index | S:-
@@ -227,7 +227,7 @@ validate.py[TQ7L]: F:拓扑分档校验与任意顺序模拟：通用包（入�
 visibility.py[MS6M]: F:三态可见性与自动分类：显式作者值优先但自动判定只能收紧不得放宽；hidden 需可解析的 reveal_when 否则进人工复核；kp_only 永不因检定转为可见 | R:code:backend/trpg_server/agents/narrative/model.py,code:backend/trpg_server/agents/narrative/guards.py | A:assert_no_kp_only、forbidden_names | S:-
 
 ===/<repository>/backend/trpg_server/agents/tools/===
-__init__.py[RG6S]: F:Agent 工具清单总入口：核心工具与具体规则集无关；CoC 命名工具经 _coc7_tools 按注册表可用性组装——coc7 在场时集合与旧实现一致，缺席时整组不挂载让名给第三方插件 | R:code:backend/trpg_server/ruleset/bootstrap.py,code:backend/trpg_server/ruleset/coc7/tools.py | A:- | S:CoC 工具组是否进默认注册表只由 _coc7_tools 决定，把 CoC 工具加回 _core_tools 会重新造成注册耦合
+__init__.py[TB5S]: F:Agent 工具注册表：中性核心工具 + coc7 工具组组装点（注册表可用才挂载）+ narrative_tools 工厂（E1，enum 按默认规则集投影解析） | R:code:backend/trpg_server/agents/tools/narrative.py | A:- | S:-
 areas.py[DB6M]: F:持续区域工具（仅 dnd5e）：区域实体存场景级 scene_areas.json，把规则集插件的判定结果接到区域触发，同一目标同回合只结算一次；CoC7 不下发、handler 也拒绝 | R:code:backend/trpg_server/agents/tools/combat.py | A:- | S:-
 base.py[CG6T]: F:工具基座：AgentTool 结构与 ToolRegistry；内部工具 id 用点号命名空间，to_api_tool_name 下发前转下划线满足厂商校验规则，回传时还原命名空间 | R:- | A:ToolExecutionError 为工具可预期失败统一异常 | S:-
 character_items.py[DB4S]: F:KP 物品工具：向房间快照追加物品或武器，与玩家命令 /item、控制台 rule item 共用 room_rules；KP 与房主同级可对任意玩家发放；持久卡仅在房间归档时合并 | R:code:backend/trpg_server/room_rules.py | A:- | S:-
@@ -237,13 +237,13 @@ coc7.py[DB5L]: F:CoC7 房规 AI 工具：社交、组合、团体幸运、熟人
 combat.py[DB8L]: F:战斗轮工具：DEX 先攻、近战对抗、战技、射击难度与故障、护甲、重伤濒死死亡与急救医学；贯穿/卡壳/徒手/先攻合成经规则集钩子（D1），武器字段与技能名表经 registry（D2），射击与急救入口按 flow_mode 闸门分派（D3），战斗 SAN 走资源槽位 | R:code:backend/trpg_server/agents/tools/dice.py,code:backend/trpg_server/agents/room_state.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:treat 的急救/医学技能名元组仍留核心，闸门使非 coc7 房间不可达，迁移属后续债务
 concentration.py[DB4S]: F:专注注册表工具（仅 dnd5e）：concentration.list 刷新并列出房间级专注索引，concentration.break 走插件 end_concentration 清理关联效果并同步注册表 | R:code:backend/trpg_server/workflows/concentration.py | A:- | S:-
 content.py[IB5T]: F:通用内容检索工具：核心不认识法术、怪物、装备字段；插件通过 content_search 能力提供 types 与 search，ambiguous 时绝不自行取第一条必须交调用方确认 | R:- | A:不传 type 时返回该规则集支持的内容类型 | S:-
-dice.py[DB8L]: F:骰娘工具族：COC 检定、房间检定（读角色卡真实技能值）、疯狂、理智、自由掷骰与 dnd5e 检定；阈值与难度经规则集 checks 能力并按传入 ruleset_id 解析（B1 显式携带），检定成功可同轮揭示触发器，骰面策略走 dice_policy | R:code:backend/trpg_server/dice_policy.py,code:backend/trpg_server/agents/tools/trigger.py | A:- | S:-
+dice.py[DB8L]: F:骰娘工具族：COC 检定、房间检定、疯狂、理智、自由掷骰与 dnd5e 检定；阈值与难度经规则集 checks 能力并按传入 ruleset_id 解析（B1）；sanity/madness 消息带 resource_state 槽位声明（E1，madness 补齐缺失的 san 快照） | R:code:backend/trpg_server/dice_policy.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
 effects.py[DB5M]: F:通用效果工具（规则中立）：effect.list、apply、remove 操作核心效果容器；增删查、持续时间与作用域由核心维护，条件含义、力竭分级与回合 tick 由规则集插件决定；无 effects 能力的规则集不下发 | R:code:backend/trpg_server/room_spells.py | A:- | S:-
 interlude.py[DB4S]: F:幕间工具：AI KP 只能提议进入或结束幕间（request_interlude 与 add_review），不能自行拍板 | R:code:backend/trpg_server/room_interlude.py | A:- | S:-
 knowledge.py[IB5T]: F:规则书检索工具 search_ruleset_knowledge：结果上限 3 条、引用文本截断 1200 字，检索走 RulesetKnowledgeStore | R:code:backend/trpg_server/agents/ruleset_knowledge.py | A:- | S:-
 magic.py[DB5L]: F:CoC7 法术与典籍工具：规则数学在插件 magic 模块、状态在 room_magic；法术内容表经注册表能力 magic_content_of 获取不直接 import 规则包；coc7 缺席按全部关闭且不挂载 | R:code:backend/trpg_server/room_magic.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
 music.py[AU3S]: F:KP 显式请求外链曲目工具：同步返回 pending、检索在后台线程执行绝不卡叙事流；引擎非 external 直接返回 disabled 不偷偷启用；对外名规整为 music_request_track | R:- | A:- | S:-
-narrative.py[DB6L]: F:图谱模式运行工具：get_current_location、lookup_location、list_exits、move_to_location、get_area、get_poi、travel_to、inspect_object 等把 NarrativeRuntime 能力暴露给模型 | R:code:backend/trpg_server/agents/narrative/runtime.py | A:- | S:-
+narrative.py[DB6L]: F:叙述 AI 工具：交互结算/节点查询/位置检索等；resolve_interaction 枚举经 narrative_tools 工厂按规则集投影组装（E1） | R:code:backend/trpg_server/ruleset/narrative.py | A:- | S:-
 narrative_triggers.py[DB5T]: F:图谱模式触发器工具：trigger.list_available 只返回 id 与 label 防止模型提前读出正文；trigger.request 只放行有状态证据（检定、地点、线索、NPC）或 manual 绑定的触发器 | R:code:backend/trpg_server/agents/narrative/runtime.py,code:backend/trpg_server/agents/tools/narrative.py | A:- | S:-
 props.py[DB6L]: F:KP 道具工具：props.create、reveal、update 只做校验加调 props 包、不抛异常，可预期失败返回可读文本让模型自行改道；创建默认 hidden 必须显式 reveal | R:code:backend/trpg_server/props/registry.py | A:- | S:-
 reactions.py[DW4S]: F:反应待决队列工具（仅 dnd5e）：reaction.list 查看待决反应窗口、reaction.resolve 提交使用或不使用的决定，提交后由流程续跑器继续施法或扣位 | R:code:backend/trpg_server/workflows/reactions.py | A:- | S:-
@@ -500,9 +500,10 @@ resources.py[CD5M]: F:通用资源壳：命名空间化键值、加减夹紧、�
 rest.py[CD4T]: F:规则集中立的休息与调谐契约：核心只认识短休、长休与调谐三种操作及通用结果字段，数值全由插件声明；无 rest 能力的规则集不出现入口 | R:code:backend/trpg_server/room_rest.py,code:backend/trpg_server/agents/tools/rest.py | A:- | S:-
 session.py[CD4S]: F:通用会话回合壳：参与者、顺序、回合指针与日志容器；先攻公式与行动经济由插件声明，无战斗规则集 combat 为 None 房间不显示战斗面板 | R:code:backend/trpg_server/combat/scheduler.py | A:TurnModel.mode 为 none 时不显示战斗面板 | S:-
 ui.py[CD4L]: F:插件 UI 声明壳：workspace 声明主视图归属、slots 只允许核心定义的六个宿主、sandbox 在 V1 固定关闭；无声明时返回当前聊天主列布局，coc7 与旧房间行为不变 | R:code:backend/trpg_server/routes/plugin_ui.py | A:- | S:-
+narrative.py[CB5S]: F:规则集叙述投影：NarrativeProjection 双层级族字段（resolver 词面层与 runtime 枚举层）+ 中性投影；解析失败退中性不炸叙述链 | R:code:backend/trpg_server/ruleset/coc7/narrative.py | A:- | S:resolver 与 runtime 族集合分字段持有，合并会导致 coc7 漂移，勿归一
 
 ===/<repository>/backend/trpg_server/ruleset/coc7/===
-__init__.py[CD5S]: F:CoC7 规则书插件入口：schema、目录、判定、战斗与工具独立组装；options、magic_content、chase_rules、magic_rules、sanity_state、sanity_traits、sanity_treatment、economy 全部作为插件能力属性暴露，核心经注册表能力访问 | R:code:backend/trpg_server/ruleset/bootstrap.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
+__init__.py[CD5S]: F:CoC7 规则书插件入口：schema、目录、判定、战斗与工具各自独立组装；options、magic_content、chase_rules 等能力模块属性暴露，narrative 词表投影（E1）同惯例挂载 | R:code:backend/trpg_server/ruleset/bootstrap.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
 catalogs.py[CD4S]: F:CoC7 技能、武器与职业目录：优先读 data/rulesets/coc7/catalogs/（含 builtin 武器九类），不存在时回退项目原有位置；武器经本插件 weapons 模块读取，不再依赖核心 weapon_catalog | R:code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:-
 chase.py[KD5S]: F:CoC7 追逐纯规则（规则书第七章）：抽象地点、行动点、险境与障碍数学，不读写房间状态不掷骰不落盘 | R:code:backend/trpg_server/room_chase.py,code:backend/trpg_server/agents/tools/chase.py | A:- | S:-
 checks.py[CD7L]: F:CoC7 判定纯规则入口：数学仍来自 dice.py，插件只提供稳定接口避免复制两份；REST、控制台与 AI 工具都经 check_service 调用这里 | R:code:backend/trpg_server/check_service.py,code:backend/trpg_server/agents/tools/dice.py | A:- | S:-
@@ -530,6 +531,7 @@ traits.py[KD3S]: F:CoC7 恐惧症躁狂症表：按需读取的内容数据不�
 treatment.py[KD2T]: F:CoC7 幕间疗养与心理治疗纯规则数学（p.129、p.167）：只放数字与判定换算，编排在 room_interlude，时间来自 room_clock | R:code:backend/trpg_server/room_interlude.py,code:backend/trpg_server/room_clock.py | A:- | S:-
 weapons.py[DD4T]: F:CoC7 预设武器目录读取器：按分类读 data/rulesets/coc7/catalogs/weapons/builtin/，输出行规范与核心 normalize_weapon 对齐可直接喂合并层；旧路径与 app 配置回退兼容 | R:code:backend/trpg_server/weapon_catalog.py | A:- | S:-
 card_shape.py[DD5L]: F:CoC7 旧卡（test 形状）与运行时卡双向转换：era/maxSan/age 缺省、技能分组目录、武器行、状态六键全在此；rulesetId 缺省取插件自身 id，技能键查询走 Coc7Catalogs（C1 自 routes 整块迁入） | R:code:backend/trpg_server/routes/characters.py,code:backend/trpg_server/ruleset/coc7/catalogs.py | A:- | S:-
+narrative.py[DB4T]: F:CoC7 叙述词表投影：SC 噪声/技能词/难度/结果行/双层级族词与工具枚举供核心投影读取（E1，自核心硬编码逐位迁入） | R:code:backend/trpg_server/ruleset/narrative.py | A:- | S:-
 
 ===/<repository>/backend/trpg_server/ruleset/coc7/content/===
 grimoires.json[FC4L]: F:CoC7 典籍内容表（规则书第十一章）：书名、版本、SAN 损失、CMI 与 CMF 与所含法术，惰性加载按需查询单条 | R:code:backend/trpg_server/ruleset/coc7/magic_content.py | A:- | S:-
@@ -836,7 +838,7 @@ pattern_cyber_2.md[SD2M]: F:赛博主题 pattern_cyber_2 设计文档 | R:code:d
 ===/<repository>/docs/plans/===
 coc7-rules-audit.md[SD3M]: F:CoC7 规则审计计划：规则书口径与实现的对照清单 | R:- | A:- | S:-
 coc7-rules-roadmap.md[SD2S]: F:CoC7 规则路线图 | R:code:docs/plans/coc7-rules-audit.md | A:- | S:-
-cordis-paradigm-adoption-plan.md[SD3S]: F:Cordis 范式采纳计划：插件 mini 内核、注册耦合解除、路由可逆化与规则集边界收敛的阶段计划与实施状态记录（P0/P1/默认参数化/B1/D1/D2/D3/C1 已落地） | R:code:backend/trpg_server/plugins/kernel/__init__.py | A:- | S:-
+cordis-paradigm-adoption-plan.md[SD3S]: F:Cordis 范式采纳计划：插件 mini 内核、注册耦合解除、路由可逆化与规则集边界收敛的阶段计划与实施状态记录（P0/P1/默认参数化/B1/D1/D2/D3/C1/E1 已落地） | R:code:backend/trpg_server/plugins/kernel/__init__.py | A:- | S:-
 dnd5e-ruleset-plugin-design.md[SD3L]: F:dnd5e 规则集插件化设计：从内置模块到 data/plugins 插件的迁移设计 | R:- | A:- | S:-
 dnd5e-ruleset-subsystem-survey.md[SD2L]: F:dnd5e 子系统调研：判定壳、会话、资源与效果等契约的现状梳理 | R:code:docs/plans/ruleset-core-generalization-survey.md | A:- | S:-
 prop-workshop-design.md[SD3L]: F:道具工坊设计稿：模板、存储、渲染与 AI 起草通道 | R:code:backend/trpg_server/props/__init__.py | A:- | S:-
@@ -864,7 +866,7 @@ avatar-utils.ts[KU3S]: F:头像与封面的文字化渲染：名称首字加哈�
 bgm.ts[MU5L]: F:网站背景音乐播放器：个人 BGM 存 localStorage，房间 BGM 由房规下发默认房间优先；多首曲目与播放模式 | R:code:backend/trpg_server/routes/bgm.py | A:- | S:-
 character-sheet-registry.ts[RU3S]: F:角色卡渲染器注册表：按 id 登记查询不解释规则语义；未登记时阻断提示，绝不退化成只读伪界面 | R:code:frontend/src/app/character-sheet.ts | A:- | S:-
 character-sheet.ts[AU4L]: F:角色卡页面外壳与统一列表：按 rulesetId 解析到对应模块提供卡面摘要，模块缺失时明确阻断 | R:code:frontend/src/app/character-sheet-registry.ts | A:- | S:-
-chat.ts[AU7L]: F:聊天界面主模块：消息渲染、AI 角色配置、待发消息与房间交互 | R:code:frontend/src/app/api-client.ts | A:- | S:-
+chat.ts[DU7L]: F:房间聊天前端：消息渲染、成员状态、命令分发与骰面消息处理；sanity 写回按消息 resource_state 槽位声明通用化（E1，无声明旧消息安全跳过） | R:code:frontend/src/tools/check-tool-registry.ts | A:- | S:-
 combat.ts[AU5L]: F:战斗轮独立面板：先攻顺序、当前行动者、战斗日志与动作按钮；动作走 REST 并转玩家自掷，socket 广播回填 | R:code:backend/trpg_server/routes/combat.py | A:- | S:-
 cookie-consent.ts[AU2T]: F:Cookie 同意横幅：180 天有效期，仅本地状态 | R:- | A:- | S:-
 dialog.ts[AU3S]: F:统一应用内弹窗：确认与文本输入，禁止原生 alert 与 prompt | R:- | A:- | S:-
@@ -1005,7 +1007,7 @@ main.ts[AU6L]: F:3D 骰子舞台独立 bundle：正交垂直俯视加 cannon-es 
 02-main-tabs.html[FU5L]: F:主页主内容页签 HTML 片段 | R:code:frontend/src/app/tabs.ts | A:- | S:-
 03-room-tools-auth-settings.html[FU5L]: F:主页房间工具、认证与设置区 HTML 片段 | R:code:frontend/src/app/tabs.ts | A:- | S:-
 04-editor-modals.html[FU4L]: F:主页编辑器弹层 HTML 片段 | R:code:frontend/src/app/dialog.ts | A:- | S:-
-05-platform-modals-and-scripts.html[FU3M]: F:主页平台弹层与脚本挂载点 HTML 片段 | R:code:frontend/src/app/platform-ui.ts | A:- | S:-
+05-platform-modals-and-scripts.html[FU5M]: F:平台弹窗与脚本片段：vendor 脚本装载顺序（registry 先于壳，E1 增 check-tool 注册表与 coc7 模块位） | R:code:frontend/src/tools/check-tool-registry.ts | A:- | S:-
 06-setup-wizard.html[FU3M]: F:首次部署向导 HTML 片段 | R:code:frontend/src/app/setup-wizard.ts | A:- | S:-
 
 ===/<repository>/frontend/src/index/===
@@ -1013,7 +1015,7 @@ index.parts.json[FC3T]: F:主页 HTML 片段拼接清单：片段文件顺序定
 
 ===/<repository>/frontend/src/locales/===
 en_us.json[FC3L]: F:英文翻译目录 | R:code:frontend/src/app/i18n.ts | A:- | S:-
-zh_cn.json[FC3L]: F:简体中文翻译目录 | R:code:frontend/src/app/i18n.ts | A:- | S:-
+zh_cn.json[FL6L]: F:核心中文 locale：主翻译与 legacy DOM 文本对照（CoC 卡面 58 键已迁 coc7 插件 locale，构建合并回产物，E1） | R:code:scripts/build-frontend.mjs | A:- | S:-
 
 ===/<repository>/frontend/src/react/agent/===
 AgentActionCard.tsx[AU3S]: F:网站 Agent 待确认操作卡片：展示与确认入口 | R:code:frontend/src/react/agent/AgentChat.tsx | A:- | S:-
@@ -1039,6 +1041,7 @@ sidebar.css[FU3S]: F:React 侧边栏样式 | R:code:frontend/src/react/shell/Sid
 
 ===/<repository>/frontend/src/rulesets/coc7/===
 character-sheet.ts[AU7L]: F:COC7 角色卡前端模块：卡面渲染、字段编辑与检定入口，向核心注册渲染器 | R:code:frontend/src/app/character-sheet-registry.ts,code:backend/trpg_server/ruleset/coc7/schema.py | A:- | S:-
+checkTool.ts[DU4T]: F:CoC7 /check 工具：别名/技能键/困难极难解析与 ÷2÷5 数学（E1 自核心 checkTool 整块迁入；阈值读房间快照形态保留） | R:code:frontend/src/tools/check-tool-registry.ts | A:- | S:-
 
 ===/<repository>/frontend/src/rulesets/dnd5e/===
 character-sheet.ts[AU6L]: F:dnd5e 角色卡前端模块：卡面渲染与升级入口，向核心注册渲染器 | R:code:frontend/src/app/character-sheet-registry.ts,code:data/plugins/dnd5e/dnd5e_plugin/schema.py | A:- | S:-
@@ -1069,9 +1072,10 @@ rooms.html[FU3M]: F:独立房间页模板 | R:code:frontend/src/app/rooms.ts | A
 scenario.html[FU2T]: F:独立剧本页模板 | R:code:frontend/src/app/views/ScenarioView.ts | A:- | S:-
 
 ===/<repository>/frontend/src/tools/===
-checkTool.ts[AU2T]: F:前端工具检查器：模块自检与加载验证 | R:code:frontend/src/tools/toolManager.ts | A:- | S:-
+checkTool.ts[DU3T]: F:/check 通用壳：按房间 ruleset_id 分派插件模块，缺省回默认模块 coc7（E1 重写为壳） | R:code:frontend/src/tools/check-tool-registry.ts | A:- | S:-
 diceTool.ts[AU3M]: F:前端骰子工具模块：骰桌触发与结果展示 | R:code:frontend/src/app/diceTable.ts | A:- | S:-
 toolManager.ts[AU4L]: F:前端工具注册管理器：模块登记、加载与生命周期 | R:code:frontend/src/app/main.ts | A:- | S:-
+check-tool-registry.ts[DG3T]: F:/check 工具模块注册表：register/forRuleset 按房间规则集分派（与 character-sheet-registry 同构，E1） | R:code:frontend/src/tools/checkTool.ts | A:- | S:-
 
 ===/<repository>/frontend/src/types/===
 about.d.ts[DU3S]: F:关于页类型声明 | R:code:frontend/src/app/settings/about.ts | A:- | S:-
@@ -1128,7 +1132,7 @@ v1.0.3.md[SV1T]: F:v1.0.3 版本变更日志 | R:code:release/RELEASE_MANIFEST.m
 v1.0.4.md[SV1T]: F:v1.0.4 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
 v1.0.5.md[SV1T]: F:v1.0.5 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
 v1.0.6.md[SV1T]: F:v1.0.6 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
-v1.0.7.md[SV2M]: F:v1.0.7 当前版本变更日志：插件生命周期 v2、地图与工作流、规则集边界收敛各批次（P0 至 C1）变更 | R:code:release/RELEASE_MANIFEST.md | A:当前 APP_VERSION 1.0.7 | S:-
+v1.0.7.md[SV2M]: F:v1.0.7 当前版本变更日志：插件生命周期 v2、地图与工作流、规则集边界收敛各批次（P0 至 E1）变更 | R:code:release/RELEASE_MANIFEST.md | A:当前 APP_VERSION 1.0.7 | S:-
 
 ===/<repository>/research/cordis/===
 Cordis-调研报告.md[SA3L]: F:Cordis 插件框架调研报告：Shigma 的 Cordis v4 与 deepseek-harness 的采纳分析，得出插件化可借鉴结论 | R:code:docs/plans/cordis-paradigm-adoption-plan.md | A:- | S:-
@@ -1183,7 +1187,7 @@ npm-cordis.md[SA2T]: F:npm Cordis 包页素材 | R:code:research/cordis/Cordis-�
 npm-deepseek-cordis.md[SA2T]: F:npm deepseek-cordis 包页素材 | R:code:research/cordis/Cordis-调研报告.md | A:- | S:-
 
 ===/<repository>/scripts/===
-build-frontend.mjs[XV4M]: F:前端构建脚本：TypeScript 编译与打包 | R:code:package.json | A:- | S:-
+build-frontend.mjs[XV5S]: F:前端构建脚本：片段拼接、tsc、esbuild 与资源拷贝；copyLocales 增规则集 locale 合并（E1，产物与单文件时代逐键等价） | R:code:frontend/src/rulesets/coc7/locales/zh_cn.json | A:- | S:-
 convert_scenario.py[XD2M]: F:剧本格式转换脚本：旧格式到新格式的迁移辅助 | R:code:backend/trpg_server/scenario_importer.py | A:- | S:-
 download-bge-model.py[XI3M]: F:下载 bge-small-zh embedding 模型脚本 | R:code:backend/trpg_server/agents/embedding_provider.py | A:- | S:-
 export-brand-concepts.py[XA2T]: F:品牌概念图导出脚本 | R:code:frontend/src/assets/brand/DESIGN.md | A:- | S:-
@@ -1240,3 +1244,6 @@ semiAutoRifles.json[FD3S]: F:CoC7 内置武器目录·半自动步枪：预设�
 shotguns.json[FD3S]: F:CoC7 内置武器目录·霰弹枪：含距离分段伤害条目（D2 迁入） | R:code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:-
 sniperRifles.json[FD3T]: F:CoC7 内置武器目录·狙击步枪：预设条目（D2 迁入） | R:code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:-
 submachineGuns.json[FD3T]: F:CoC7 内置武器目录·冲锋枪：预设条目（D2 迁入） | R:code:backend/trpg_server/ruleset/coc7/weapons.py | A:- | S:-
+
+===/<repository>/frontend/src/rulesets/coc7/locales/===
+zh_cn.json[FL3T]: F:CoC7 卡面 legacy locale：调查员表/属性英文/理智损失等 58 键（E1 自核心 locale 迁出，构建时并入 dist） | R:code:scripts/build-frontend.mjs | A:- | S:-

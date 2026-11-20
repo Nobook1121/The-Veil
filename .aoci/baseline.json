@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-19T12:06:21Z",
-  "updated_at": "2026-11-20T11:16:19Z",
+  "updated_at": "2026-11-20T14:46:20Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -941,9 +941,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "941728c5b523fc262191285aeee1ac2829490d675b9acc78b72a71ff8db8461d",
-      "size": 224744,
-      "normalized_sha256": "941728c5b523fc262191285aeee1ac2829490d675b9acc78b72a71ff8db8461d"
+      "sha256": "5b1cfbb72e100caacc7ab44517f45d6c3acc88f156c49a2871f0975476eb9941",
+      "size": 225703,
+      "normalized_sha256": "5b1cfbb72e100caacc7ab44517f45d6c3acc88f156c49a2871f0975476eb9941"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -1055,9 +1055,9 @@
     },
     "backend/trpg_server/agents/narrative/builder.py": {
       "role": "index",
-      "sha256": "ed8ca01b7e267fb1753f308e591ecb5508fa659c8761b14f760154c829c207e2",
-      "size": 11525,
-      "normalized_sha256": "49c903d37b1b4887e71696c96863cd088bf97693d4dc44ce6240cb15f1742718"
+      "sha256": "361be06db1c14a3179f0e4b6bf431e76b7f8bc3ea804cdca52c475ed572ee3e5",
+      "size": 11584,
+      "normalized_sha256": "3752961c31f2e9f26e027ab363ba772c20afcaf15c49c90365f99d3c22016858"
     },
     "backend/trpg_server/agents/narrative/coerce.py": {
       "role": "index",
@@ -1079,9 +1079,9 @@
     },
     "backend/trpg_server/agents/narrative/extract.py": {
       "role": "index",
-      "sha256": "58cf705eb001911bcc91772ae30aeadd759a49f17433efe7f98f40eeb51949a9",
-      "size": 25882,
-      "normalized_sha256": "0c1d1e50526905a54b5becedc13f6e4271da6d1fcd07bbf353751505c1649477"
+      "sha256": "9f82fe76fafac4b9669898de2c17b22ebc20d6d78ad273c8a47eb1295d26603d",
+      "size": 27587,
+      "normalized_sha256": "8d6d1e0315e0f6432afcbfb65d256a50ae592e56f8be29f1b10828e445b69a3b"
     },
     "backend/trpg_server/agents/narrative/generate.py": {
       "role": "index",
@@ -1199,15 +1199,15 @@
     },
     "backend/trpg_server/agents/narrative/resolver.py": {
       "role": "index",
-      "sha256": "7ada6b11967e6770b48b2169fa948b09777de6d7b2ff0f0d2609bf47d504ab07",
-      "size": 23308,
-      "normalized_sha256": "0489659932c1c877659885c25d40cf676abda443f44d9306aad23ef837cc90f9"
+      "sha256": "e16d179f281bd1e78d193ba8c2cc0fd5ac781b6d77813bcbef42db9781b0f53d",
+      "size": 24254,
+      "normalized_sha256": "2fe908ea36bb87ec247d8554dc27dadf40f29a6a4a843802476dee062e44cf8e"
     },
     "backend/trpg_server/agents/narrative/runtime.py": {
       "role": "index",
-      "sha256": "b2164278d7c8d5ce7c5febdb1bad71c5c0795a37e7c05a23bd8042bb52d5c17a",
-      "size": 60081,
-      "normalized_sha256": "c41be0cb9f46d708ef93ea923a786118d98eecddfe0b3800283e90f3771a284a"
+      "sha256": "17f95605519cfe629064e19ccc0e0956dcebf19c6a4ded0d5100b660331ff225",
+      "size": 61025,
+      "normalized_sha256": "3a511a2db1e8ed63c75f1ec3634cff03f2350cf1f9d0ef6613b6753fcff5241c"
     },
     "backend/trpg_server/agents/narrative/runtime_settings.py": {
       "role": "index",
@@ -1337,9 +1337,9 @@
     },
     "backend/trpg_server/agents/tools/__init__.py": {
       "role": "index",
-      "sha256": "3d27da5a6f1f02d4521cd304f9b0aa64110c719e4ab0a4a06462c7596fd002de",
-      "size": 6876,
-      "normalized_sha256": "d63fa8f053cf0a7a45ed48641dde7d32259d1ee9fcc7323f4c7a7b84976b271d"
+      "sha256": "29a56fc9ad4ac8050c44152ba55ef3f32ceb063a6bdf771764343b00a94eb47c",
+      "size": 6878,
+      "normalized_sha256": "54a8b9b8158ca767d06d92d1f3a228d7a4975634ee32424061a64079562bfbc9"
     },
     "backend/trpg_server/agents/tools/areas.py": {
       "role": "index",
@@ -1397,9 +1397,9 @@
     },
     "backend/trpg_server/agents/tools/dice.py": {
       "role": "index",
-      "sha256": "3a6b05d6a50de7959b16d53a40a99b5da05ba9d972455091c103d011eb3f1569",
-      "size": 75830,
-      "normalized_sha256": "486232800d65b87500d13c3ab6df74e1cc22afa6792065b17fb5c2cea11cff42"
+      "sha256": "803f0cccb4e0a1667a0377fc207d67a9527be39da063df516c4770ce9cb04871",
+      "size": 77435,
+      "normalized_sha256": "686dc134ed13f253d4bd7e49d9f188fedbf8b268c4c7c7e1c3337fad6f951ff0"
     },
     "backend/trpg_server/agents/tools/effects.py": {
       "role": "index",
@@ -1433,9 +1433,9 @@
     },
     "backend/trpg_server/agents/tools/narrative.py": {
       "role": "index",
-      "sha256": "f5978413a72811d07ae419583361c56bba38e7f8e63c2e043bc16c202853d286",
-      "size": 16234,
-      "normalized_sha256": "9cc54be0f9baf8ad4a11aca7df251af1df6a0ee4f546dd9f2a844b3418c70d22"
+      "sha256": "f4d83cc60d93f59ab5e5cf495a75748ad9fe4288af70bd64322b92c9bf531628",
+      "size": 17609,
+      "normalized_sha256": "475383603fcebe71d5942b17a055c95baa29a034ebf73e20c7bc41a6d801b3d9"
     },
     "backend/trpg_server/agents/tools/narrative_triggers.py": {
       "role": "index",
@@ -2968,9 +2968,9 @@
     },
     "backend/trpg_server/ruleset/coc7/__init__.py": {
       "role": "index",
-      "sha256": "57c899d09d3e67ac38e58d8638c84c3b4e14ccfceeca74df8143d6eb28c4697e",
-      "size": 6981,
-      "normalized_sha256": "236593ccbc1386fb0933e06ff8a57fa3ec5ab957e577d90fa0915e6559e4098b"
+      "sha256": "b3121e7c7b691c96895024a72c69ba16b1e52c0b100fba30b308a35238fd9dc9",
+      "size": 7273,
+      "normalized_sha256": "adc8b5fa78734206f2850e40266285d8817d8bc083bf8ef2c549a7e60afc1d35"
     },
     "backend/trpg_server/ruleset/coc7/card_shape.py": {
       "role": "index",
@@ -3067,6 +3067,12 @@
       "sha256": "c057720b4e1f70c4c73d6b64bb79240f69a120924a74d2371e25460903ca4a20",
       "size": 15423,
       "normalized_sha256": "c057720b4e1f70c4c73d6b64bb79240f69a120924a74d2371e25460903ca4a20"
+    },
+    "backend/trpg_server/ruleset/coc7/narrative.py": {
+      "role": "index",
+      "sha256": "82762d5c69c78070156db886797e9dbe53c70f9e2caf0471a6173e14e968f44b",
+      "size": 4063,
+      "normalized_sha256": "82762d5c69c78070156db886797e9dbe53c70f9e2caf0471a6173e14e968f44b"
     },
     "backend/trpg_server/ruleset/coc7/options.py": {
       "role": "index",
@@ -3175,6 +3181,12 @@
       "sha256": "11715577e195ea4ca199befe6ae02d1d57661e0e281a3f08a4a29878361bd5f9",
       "size": 3369,
       "normalized_sha256": "11715577e195ea4ca199befe6ae02d1d57661e0e281a3f08a4a29878361bd5f9"
+    },
+    "backend/trpg_server/ruleset/narrative.py": {
+      "role": "index",
+      "sha256": "b193c2fd8fc68d59c42a41b9b6ace152d94f9c837bb743a6b966e6d76c08855c",
+      "size": 4829,
+      "normalized_sha256": "b193c2fd8fc68d59c42a41b9b6ace152d94f9c837bb743a6b966e6d76c08855c"
     },
     "backend/trpg_server/ruleset/prompts.py": {
       "role": "index",
@@ -5370,9 +5382,9 @@
     },
     "docs/plans/cordis-paradigm-adoption-plan.md": {
       "role": "index",
-      "sha256": "85cb3b6fc54d2cb22c9d564f7051cdc1898ccea8f68ee9b70f66e9b5da2501a0",
-      "size": 21620,
-      "normalized_sha256": "7453e4e6640ad52a5daa0761d70471102863d0f57507957bc65d1bfa0115a470"
+      "sha256": "c0de0b747f5552b178c7d21d1fb7aff59aad23336bc1ee58681f7b1cf0e854ba",
+      "size": 21987,
+      "normalized_sha256": "96e6ce5701adf5d99f0615d86047e3e7c5f58e47cf3fa7a8c81d2ba01f33879e"
     },
     "docs/plans/dnd5e-ruleset-plugin-design.md": {
       "role": "index",
@@ -5616,9 +5628,9 @@
     },
     "frontend/src/app/chat.ts": {
       "role": "index",
-      "sha256": "c0c30cf683be1e12bf040032d11410a924f040aff79db40a8e9df6e85e3f3bb7",
-      "size": 105978,
-      "normalized_sha256": "26df1a497da1d7a5f2ce918769e408b85f608bac805dc44557be02fe7b3105da"
+      "sha256": "cf074bca2d164c594b31c6e09f0b610add73b20c04f8ce133ddd2d469c4b2529",
+      "size": 107849,
+      "normalized_sha256": "b09fc414e29a5324119c3fdd286948e48c23ed2c3da9f092c3dc883abf070aa3"
     },
     "frontend/src/app/combat.ts": {
       "role": "index",
@@ -6289,9 +6301,9 @@
     },
     "frontend/src/index/fragments/05-platform-modals-and-scripts.html": {
       "role": "index",
-      "sha256": "6e7b9ef99e13a42d696a3b5ff83896ed553ff02e9dffc45df4c66bcd9ff927c5",
-      "size": 25079,
-      "normalized_sha256": "b7cfa6c31653ccd026220af1d31239880354535ea7e3b32d6381917fd836f2da"
+      "sha256": "55f5e5a7f9fea83969c5a0bb544f609b31fdd3f80389220805f61a7231fc7fbd",
+      "size": 25683,
+      "normalized_sha256": "3c0c4ca928dfbe06dfd5692f0286e70240f76922208cafc660370acc756779c3"
     },
     "frontend/src/index/fragments/06-setup-wizard.html": {
       "role": "index",
@@ -6313,9 +6325,9 @@
     },
     "frontend/src/locales/zh_cn.json": {
       "role": "index",
-      "sha256": "25bd1438477bc7b8d90a1cac4de98d4bdde9c11ed93b3844233f2ded5400d87d",
-      "size": 123760,
-      "normalized_sha256": "ab5d75fdc13e5de8d5948259d637a0f8e29e30c0f2f70735e9e479a4507b99df"
+      "sha256": "48d4685924c099302a3e0d58df24cda607072175dd55abf6450096b812df7a9f",
+      "size": 121859,
+      "normalized_sha256": "5278f0545908c429f5bf6830934b9f1216826e72e9346f0155d48016a99618e2"
     },
     "frontend/src/react/agent/AgentActionCard.tsx": {
       "role": "index",
@@ -6406,6 +6418,18 @@
       "sha256": "de7914f3c35203051c4963265de216d2412080008f4d7670e970b16626e70e15",
       "size": 275550,
       "normalized_sha256": "8bac4ad867e5e42de84c28bd11bd3cbdf59a353f8da083d0122f5ac61c613f30"
+    },
+    "frontend/src/rulesets/coc7/checkTool.ts": {
+      "role": "index",
+      "sha256": "e109573aa54d42a6e62df3d5711bab2e5c8da0e9eda7486e15f794767a3626f4",
+      "size": 8418,
+      "normalized_sha256": "e109573aa54d42a6e62df3d5711bab2e5c8da0e9eda7486e15f794767a3626f4"
+    },
+    "frontend/src/rulesets/coc7/locales/zh_cn.json": {
+      "role": "index",
+      "sha256": "fefe988fb341f877457166dc13c9d9282f02aeb19ae70803f5dbb8adf25844f4",
+      "size": 2018,
+      "normalized_sha256": "21f21b94bf7e432631ce5cce5aedf9119878c87b72dbd99ea91ead999ac4fde9"
     },
     "frontend/src/rulesets/dnd5e/character-sheet.ts": {
       "role": "index",
@@ -6539,11 +6563,17 @@
       "size": 3550,
       "normalized_sha256": "36796d2389c0531f45cd3dfed6591e5930627ac5a5d1b75b3875645e839a0517"
     },
+    "frontend/src/tools/check-tool-registry.ts": {
+      "role": "index",
+      "sha256": "4af5704278bc10675f6ddd5f27a76c022b2739558d54e8375788aa767aa41917",
+      "size": 3215,
+      "normalized_sha256": "4af5704278bc10675f6ddd5f27a76c022b2739558d54e8375788aa767aa41917"
+    },
     "frontend/src/tools/checkTool.ts": {
       "role": "index",
-      "sha256": "017aff53d1df26eb50c35b3ff2d068804f77e7cb61de69ec04f86ea414d9004d",
-      "size": 7690,
-      "normalized_sha256": "aa6cdf953adc7d36404169f486e90ec2a69e89304a4be975aeef4bf002c62f32"
+      "sha256": "16a889322973a72b22dd0e2dd0f38039755d1d5ed1ed442cc836aa3087046c43",
+      "size": 1323,
+      "normalized_sha256": "16a889322973a72b22dd0e2dd0f38039755d1d5ed1ed442cc836aa3087046c43"
     },
     "frontend/src/tools/diceTool.ts": {
       "role": "index",
@@ -6883,9 +6913,9 @@
     },
     "release/changelog/v1.0.7.md": {
       "role": "index",
-      "sha256": "87d823bc8ba23079c1799d3c8b4a71c15d73244e91e6b7d3c7ba5a2169a0bce2",
-      "size": 38443,
-      "normalized_sha256": "87d823bc8ba23079c1799d3c8b4a71c15d73244e91e6b7d3c7ba5a2169a0bce2"
+      "sha256": "accd5bf226c7a099ac308d4fe340ab1801061497f5759f11bff1e49cc427f965",
+      "size": 41605,
+      "normalized_sha256": "accd5bf226c7a099ac308d4fe340ab1801061497f5759f11bff1e49cc427f965"
     },
     "requirements-ocr.txt": {
       "role": "index",
@@ -7213,9 +7243,9 @@
     },
     "scripts/build-frontend.mjs": {
       "role": "index",
-      "sha256": "1d817f0c25087901368c23bf6346f32f84fa2ba6ee87eb10a041449be9eaf441",
-      "size": 5339,
-      "normalized_sha256": "bf534caf2451e7a518b0103f06f320e8760ac9a4acd45b5d381c4574d8a042bc"
+      "sha256": "472ec5548c51b0b03a97dccfb286f529298219a7c32100b1d17bc56f1ebe8b0f",
+      "size": 6867,
+      "normalized_sha256": "b7ab8c8a01c0a1cbb1c1e8efb55a96f774e66262ff81d47fd5629b219623c9e2"
     },
     "scripts/convert_scenario.py": {
       "role": "index",
@@ -7885,9 +7915,9 @@
     },
     "tests/test_narrative_extract.py": {
       "role": "observe",
-      "sha256": "37bbd59a633f868cd82aa45b8f320b8ae3f32d28bc7407f914aa792dbcab0f48",
-      "size": 4965,
-      "normalized_sha256": "e5c4f918a0bf1810ea91aa5adc480b6ca1842161ab3a6bc49e734f6ea2859bb4"
+      "sha256": "056124b0fde6ccd001d702d85d3f1d77eb51036fc89384847989db5e1a771cd8",
+      "size": 5166,
+      "normalized_sha256": "4e889ada11b2ac2657d6dd35eae4210065173f80cdf6488cd99f54893b360bfc"
     },
     "tests/test_narrative_generate_ai.py": {
       "role": "observe",
@@ -8308,6 +8338,12 @@
       "sha256": "98977c5e5c7489254ca84ffbc35c0a29a0b719746c9c0e5de6b200935b995832",
       "size": 14458,
       "normalized_sha256": "98977c5e5c7489254ca84ffbc35c0a29a0b719746c9c0e5de6b200935b995832"
+    },
+    "tests/test_ruleset_e1_narrative_projection.py": {
+      "role": "observe",
+      "sha256": "cebe9c90c2fd115a1d6389dc377ff56c85cfa51d7372cd8a5dfc53fd67898212",
+      "size": 15562,
+      "normalized_sha256": "cebe9c90c2fd115a1d6389dc377ff56c85cfa51d7372cd8a5dfc53fd67898212"
     },
     "tests/test_ruleset_effects_container.py": {
       "role": "observe",
