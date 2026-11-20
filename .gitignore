@@ -153,3 +153,6 @@ tmp_doc_utf16.txt
 /.screenshots/
 /.trae-html-share-packages/
 .alma-snapshots
+
+# aoci 运行时状态（索引卷与 baseline/config 已显式跟踪，其余为本地事务历史）
+/.aoci/
