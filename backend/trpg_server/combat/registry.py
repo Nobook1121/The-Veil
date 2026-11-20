@@ -283,3 +283,16 @@ def initial_sanity(power: Any, ruleset_id: str | None = None) -> int:
         except Exception:  # noqa: BLE001 - 规则实现异常不应击穿战斗主循环
             logger.warning("initial_sanity failed", exc_info=True)
     return 0
+
+
+def flow_mode(flow: str, ruleset_id: str | None = None) -> str:
+    """核心战斗流程的规则集模式声明；未声明时返回空串（流程不开放）。
+
+    核心的射击（百分骰 vs 阈值、射程难度带、掩体闪避、弹药、卡壳）与
+    急救 / 医学（1 小时窗口、回 1 HP / 1D3、濒死稳定）是 CoC7 的战斗约定，
+    不是可中性降级的通用流程：规则集必须经 ``<flow>_mode`` 属性显式声明
+    （与 ``attack_mode`` 同款声明惯例）才允许跑核心实现，缺席时调用方应
+    显式拒绝而不是静默套用。空注册表 / 规则集不可用同样返回空串。
+    """
+    value = _capability(f"{str(flow or '').strip().lower()}_mode", ruleset_id)
+    return str(value).strip().lower() if value is not None else ""

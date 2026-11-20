@@ -98,6 +98,12 @@ def build_and_damage_bonus(str_value: int, siz_value: int) -> tuple[int, str, li
 class Coc7Ruleset:
     ruleset_id = "coc7"
     display_name = "克苏鲁的呼唤 7e"
+    # 核心战斗流程的归属声明（D3，与 dnd5e 的 ``attack_mode="d20"`` 同款惯例）：
+    # 核心的射击流程（百分骰 vs 阈值、射程难度带、掩体闪避、弹药、卡壳）与
+    # 急救 / 医学流程（1 小时窗口、回 1 HP / 1D3、濒死稳定）是 CoC7 的战斗
+    # 约定；声明了模式才对核心实现开放，未声明规则集由入口显式拒绝。
+    shoot_mode = "percentile"
+    treat_mode = "first_aid"
 
     # -- 核心能力映射（供与规则无关的战斗工具调用）------------------------
     def level_rank(self) -> dict[str, int]:

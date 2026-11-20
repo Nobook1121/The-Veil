@@ -38,6 +38,7 @@ from trpg_server.combat.registry import (
     auto_fire_composition,
     build_and_damage_bonus,
     extreme_damage,
+    flow_mode,
     get_ruleset,
     initiative_score,
     initial_sanity,
@@ -2615,17 +2616,23 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     combat = _load_combat(context)
     if not combat:
         return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
+    settings = _combat_settings(context)
+    # 本场战斗的规则集 id：射击掷骰与成功等级带都按它解析（B1 显式传递）。
+    combat_ruleset_id = str(combat.get("ruleset") or settings.ruleset_id or "")
+    # 射击流程（百分骰 vs 阈值 / 射程难度带 / 掩体闪避 / 弹药 / 卡壳）是 CoC7
+    # 的战斗约定（D3）：仅对声明了 ``shoot_mode="percentile"`` 的规则集开放，
+    # 未声明规则集显式拒绝（dnd5e 的远程攻击走 combat.attack 的 d20 分派），
+    # 不再静默套用 CoC 流程 + 中性等级带。
+    if flow_mode("shoot", combat_ruleset_id) != "percentile":
+        return {"error": "当前规则集不支持射击检定，请使用 combat.attack 处理远程攻击"}
     attacker = _resolve_combatant(combat, arguments.get("attacker") or arguments.get("actor"))
     target = _resolve_combatant(combat, arguments.get("target"))
     if not attacker or not target:
         return {"error": "attacker 或 target 不在当前战斗中"}
     if attacker.get("dead") or attacker.get("unconscious") or attacker.get("dying"):
         return {"error": f"{attacker.get('name')} 当前无法行动（{attacker.get('status')}）"}
-    settings = _combat_settings(context)
     if settings.major_wound_penalty == "cannot_act" and attacker.get("major_wound"):
         return {"error": f"{attacker.get('name')} 身负重伤，按房规无法行动"}
-    # 本场战斗的规则集 id：射击掷骰与成功等级带都按它解析（B1 显式传递）。
-    combat_ruleset_id = str(combat.get("ruleset") or settings.ruleset_id or "")
     room_options = _room_rule_options(context)
     detail_rules = _combat_detail_rules(settings)
     # 掩体闪避的后续代价：失去下一次攻击（由该房规在上一次射击时写入）。
@@ -3103,6 +3110,14 @@ def treat_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     combat = _load_combat(context)
     if not combat:
         return {"error": "当前没有进行中的战斗，请先调用 combat.start"}
+    settings = _combat_settings(context)
+    # 本场战斗的规则集 id：急救 / 医学检定按它解析（B1 显式传递）。
+    combat_ruleset_id = str(combat.get("ruleset") or settings.ruleset_id or "")
+    # 急救 / 医学流程（1 小时窗口、回 1 HP / 1D3、濒死稳定）是 CoC7 的战斗
+    # 约定（D3）：仅对声明了 ``treat_mode="first_aid"`` 的规则集开放，
+    # 未声明规则集显式拒绝，不再静默套用 CoC 急救 + 中性等级带。
+    if flow_mode("treat", combat_ruleset_id) != "first_aid":
+        return {"error": "当前规则集不支持急救或医学治疗"}
     target = _resolve_combatant(combat, arguments.get("target"))
     if not target:
         return {"error": "target 不在当前战斗中"}
@@ -3142,10 +3157,8 @@ def treat_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     if isinstance(success, bool):
         pass
     else:
-        # 急救/医学检定按本场战斗的规则集解析（B1 显式传递）。
-        combat_ruleset_id = str(
-            combat.get("ruleset") or _combat_settings(context).ruleset_id or ""
-        )
+        # 急救/医学检定按本场战斗的规则集解析（B1 显式传递；
+        # combat_ruleset_id 已在入口闸门处解析，D3）。
         critical, fumble = _context_thresholds(context)
         difficulty = "regular"
         if method == "medicine" and not same_day:

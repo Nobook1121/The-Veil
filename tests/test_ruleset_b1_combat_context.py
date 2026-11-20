@@ -24,6 +24,13 @@ B1 修复方式：调用方显式携带战斗 / 房间规则集 id（``combat["r
 D1（dnd5e 房间 shoot / treat 仍跑 CoC 流程）的行为证据由本文件的
 ``test_dnd5e_room_shoot_and_treat_probe`` 固化——它是探针不是修复：B1 不动
 这两条链路，D1 落地时应把该用例改写为 dnd5e 语义断言。
+
+D3 已兑现该教义（2026-11-20）：探针改写为
+``test_dnd5e_room_shoot_and_treat_dispatch``——dnd5e 房间的 shoot / treat
+按规则集能力分派后显式拒绝（射击指向 combat.attack 的 d20 分派；急救无
+对应能力），不再静默跑 CoC 流程；coc7 房间的 shoot / treat 全流程回归
+（掩体 / 闪避 / 弹丸 / 卡壳 / 急救回血）锚定在
+``tests/test_ruleset_d3_dispatch.py``。
 """
 
 from __future__ import annotations
@@ -326,27 +333,30 @@ def test_dnd5e_room_rejects_coc7_room_rule_tools(tmp_path, dnd5e_default_process
     assert hit_location == {"error": "部位命中房规未开启，请先在房规中开启「部位命中」"}
 
 
-# -- R2 实测探针（D1 行为证据，B1 不修复） ----------------------------------
+# -- R2 兑现：shoot / treat 按规则集分派（D3 落地，探针改写为语义断言） ----
 
 
-def test_dnd5e_room_shoot_and_treat_probe(tmp_path, dnd5e_default_process, monkeypatch):
-    """R2 事实探针：dnd5e 房间的 shoot / treat 走 CoC 流程 + 中性二值带。
+def test_dnd5e_room_shoot_and_treat_dispatch(tmp_path, dnd5e_default_process, monkeypatch):
+    """D3 兑现：dnd5e 房间的 shoot / treat 显式拒绝，不再静默跑 CoC 流程。
 
-    D2 更新（CoC 技能名表下沉后改写第一段断言，其余 tripwire 保留）：
-    「格斗 / 射击 / 闪避」名称回退表已迁入 coc7 插件，dnd5e 房间不再借 CoC
-    英文别名兜底——本探针固化**名称表不跨规则集泄漏**的边界事实：
+    本用例前身 ``test_dnd5e_room_shoot_and_treat_probe`` 的教义写明「分派
+    落地时改写为语义断言」——D3 按普查事实落地后兑现：
 
-    - ``combat.shoot`` 在 dnd5e 房间仍按 CoC 射击结算（百分骰 / 射程难度 /
-      弹药流程），技能值不套用 CoC 名称表（``Firearms`` 不再被别名
-      ``firearms`` 命中，落到射击缺省 20；D2 之前是 50 命中 → regular），
-      等级带中性二值 → roll 30 失败。伤害仍走 dnd5e 的 ``resolve_damage``。
-      **不崩**。
-    - 没有远程武器时落到既有报错「Knife 不是远程武器」，不是 dnd5e 语义。
-    - ``combat.treat`` 在 dnd5e 房间仍跑 CoC 急救（急救技能缺省 30、
-      成功回 1 HP），等级带中性二值。**不崩**。
-
-    shoot / treat 的规则集分派仍未落地（属后续批次）；本用例继续作
-    tripwire：任何让这两条链路再漂移的改动都会在这里先红。
+    - dnd5e 的 ``resolve_attack_action`` 天然覆盖远程攻击（武器行按
+      ammunition 属性推导 ranged、掩体 AC +2/+5、近身 5 射尺劣势），
+      射击的正确入口就是 ``combat.attack``（D1 的 ``attack_mode="d20"``
+      分派）；把 ``combat.shoot`` 转发给它需要发明百分骰→d20、射程难度
+      带→无、burst / 弹药 / 卡壳→无的参数翻译，属「发明新 dnd5e 语义」，
+      不做——dnd5e KP 工具清单也早已 deny ``combat.shoot`` / ``combat.treat``。
+    - dnd5e 没有战斗内急救 / 医学能力（死亡豁免在 ``start_turn`` 自动
+      结算、休息恢复走 rest 工具面、Medicine 只是通用 d20 技能检定）。
+    - 因此两者显式拒绝（对齐 D2 毒剂 / 击晕的拒绝先例）：shoot →
+      「当前规则集不支持射击检定，请使用 combat.attack 处理远程攻击」；
+      treat → 「当前规则集不支持急救或医学治疗」。
+    - 闸门先于武器与战斗者解析：角色卡带着 Rifle（远程武器在场）也拒绝，
+      不再落入「Knife 不是远程武器」一类 CoC 流程内部报错（该报错仍是
+      coc7 房间的行为锚，回归锚定在 ``tests/test_ruleset_d3_dispatch.py``）；
+      拒绝路径零骰子消耗（全程只有开战的两颗 d20 先攻）。
     """
     context = FakeContext(tmp_path, "dnd5e")
     rng = SeqRng([30, 6])
@@ -362,33 +372,19 @@ def test_dnd5e_room_shoot_and_treat_probe(tmp_path, dnd5e_default_process, monke
     )
     assert "error" not in started
 
+    # 射击：规则集拒绝先于武器解析——Rifle 在卡上也不进 CoC 射击流程。
     shot = combat.shoot_combatant(
         {"attacker": "Shooter", "target": "Target", "weapon": "Rifle"}, context
     )
-    assert "error" not in shot, shot
-    # CoC 射击流程 + 中性二值带；技能名表缺席 → 不再命中 ``Firearms``，
-    # 技能值落到射击缺省 20，roll 30 失败、不掷伤害骰。
-    assert shot["roll"] == 30
-    assert shot["success_level"] in {"regular", "failure"}
-    assert shot["success_level"] == "failure"
-    assert shot["success"] is False
-    assert shot["total_damage"] == 0
-    assert "d100=30" in shot["summary"]
-    # 序列：两名 d20 先攻 + 一颗射击 d100（未命中，无伤害骰）。
-    assert rng.calls == [(20, 30), (20, 6), (100, 30)]
-
-    # 无远程武器：既有报错路径，不崩。
-    bare = FakeContext(tmp_path / "bare", "dnd5e")
-    (tmp_path / "bare").mkdir()
-    monkeypatch.setattr(combat, "_roller", SeqRng([30]))
-    started_bare = combat.start_combat(
-        {"participants": [_spec("Punchy", dex=60), _spec("Target", dex=40)]}, bare
+    assert shot == {"error": "当前规则集不支持射击检定，请使用 combat.attack 处理远程攻击"}
+    # 闸门也先于战斗者解析：未入场的 attacker 同样拿到规则集拒绝，而不是
+    # 「不在当前战斗中」——工具对本规则集整体不可用，换参数重试无意义。
+    unknown = combat.shoot_combatant(
+        {"attacker": "Ghost", "target": "Target", "weapon": "Rifle"}, context
     )
-    assert "error" not in started_bare
-    shot_bare = combat.shoot_combatant({"attacker": "Punchy", "target": "Target"}, bare)
-    assert shot_bare == {"error": "Knife 不是远程武器"}
+    assert unknown == {"error": "当前规则集不支持射击检定，请使用 combat.attack 处理远程攻击"}
 
-    # 急救：CoC 流程 + 中性二值带（急救缺省 30；roll 30 ≤ 30 → regular）。
+    # 急救：同样显式拒绝（dnd5e 无战斗内急救 / 医学能力）。
     hurt = FakeContext(tmp_path / "hurt", "dnd5e")
     (tmp_path / "hurt").mkdir()
     monkeypatch.setattr(combat, "_roller", SeqRng([30]))
@@ -397,13 +393,10 @@ def test_dnd5e_room_shoot_and_treat_probe(tmp_path, dnd5e_default_process, monke
     )
     assert "error" not in started_hurt
     treated = combat.treat_combatant({"target": "Hurt", "method": "first_aid"}, hurt)
-    assert "error" not in treated, treated
-    assert treated["roll"] == 30
-    assert treated["success_level"] in {"regular", "failure"}
-    assert treated["success_level"] == "regular"
-    assert treated["success"] is True
-    assert treated["healed"] == 1
-    assert "d100=30 / 30" in treated["summary"]
+    assert treated == {"error": "当前规则集不支持急救或医学治疗"}
+
+    # 全程只掷了开战的 d20 先攻：拒绝路径零骰子消耗，CoC 流程一步未跑。
+    assert rng.calls == [(20, 30), (20, 6)]
 
 
 # -- NPC 体格 / 伤害加值按战斗规则集解析（B1 收尾补充） ----------------------
