@@ -3,7 +3,7 @@
   "id": "fvtt-world-import",
   "name": "FVTT 世界包导入",
   "version": "0.1.0",
-  "description": "导入 Foundry VTT 世界包（v10+ LevelDB 存储）：登记台审计（inspect）与场景转换落库（run，含墙体/门/光源/棋子）。actors→角色卡与 journal→世界树是后续刀。",
+  "description": "导入 Foundry VTT 世界包（v10+ LevelDB 存储）：登记台审计（inspect）与转换落库——场景（run，含墙体/门/光源/棋子）、actors→dnd5e 角色卡与 NPC statblock（actors/run）、journal→剧本场景文本条目+世界树图谱（journal/run，AI 辅助语义切块可选，缺席/失败确定性降级）。",
   "author": "The Veil",
   "api_version": 1,
   "requires": {

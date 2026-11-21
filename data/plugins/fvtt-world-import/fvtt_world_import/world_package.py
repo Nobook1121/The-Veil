@@ -18,6 +18,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from fvtt_world_import.convert_journal import page_plain_text
 from fvtt_world_import.convert_scenes import (
     GRID_MAX,
     GRID_MIN,
@@ -45,11 +46,14 @@ AUDITED_COLLECTION_DIRS = ("actors", "folders", "items", "journal", "tables")
 
 ACTORS_DIR = "actors"
 FOLDERS_DIR = "folders"
+JOURNAL_DIR = "journal"
 ACTOR_COLLECTION = "actors"
 ACTOR_ITEM_COLLECTION = "actors.items"
 ACTOR_ITEM_EFFECT_COLLECTION = "actors.items.effects"
 ACTOR_EFFECT_COLLECTION = "actors.effects"
 FOLDER_COLLECTION = "folders"
+JOURNAL_COLLECTION = "journal"
+JOURNAL_PAGE_COLLECTION = "journal.pages"
 
 
 class PackageError(Exception):
@@ -166,6 +170,24 @@ class WorldPackage:
             raise PackageError(
                 "fvtt.folders_missing",
                 f"包里没有 data/{FOLDERS_DIR} 集合，无法读取文件夹。",
+            )
+        return LevelDbReader(str(db_dir), limits=limits or DbLimits())
+
+    def journal_db_dir(self) -> Path:
+        return self.root / DATA_DIR / JOURNAL_DIR
+
+    def journal_reader(self, limits: DbLimits | None = None) -> LevelDbReader:
+        """journal 库读取器（空库合法：sixianyuchanmian 形态）。
+
+        目录缺席抛 :class:`PackageError`（``fvtt.journal_missing``）——登记台
+        把它降级为警告 + 0 计数；``/journal/run`` 把它降级为「0 条 + 警告」，
+        不拒收整个包。
+        """
+        db_dir = self.journal_db_dir()
+        if not db_dir.is_dir():
+            raise PackageError(
+                "fvtt.journal_missing",
+                f"包里没有 data/{JOURNAL_DIR} 集合，无法读取 journal。",
             )
         return LevelDbReader(str(db_dir), limits=limits or DbLimits())
 
@@ -437,6 +459,118 @@ def read_actors(pkg: WorldPackage, *, limits: DbLimits | None = None) -> ActorIn
     return index
 
 
+class JournalIndex:
+    """``data/journal`` 单库多命名空间的一次遍历结果（journal 第四刀）。
+
+    - ``entries``：``!journal!`` 主文档（journal id → 文档，``_id`` 写回）；
+    - ``pages``：``!journal.pages!`` 页文档，键 ``<journalId>.<pageId>``，
+      复合键写回 ``_id``，按 journal id 聚合；
+    - ``folders``：``!folders!`` 里 ``type=JournalEntry`` 的文件夹文档
+      （章节层级：name/parent/sort）；
+    - ``scene_names`` / ``scene_active``：``!scenes!`` 主文档的 id → 名称与
+      激活集——journal ↔ scene 名称关联边（§5.3）的确定性挂点；scenes 库
+      缺席时静默为空（挂点是装饰，不是 journal 导入的前提）；
+    - ``orphan_pages``：主文档找不到的页条目计数（如实警告，不静默丢）。
+    """
+
+    def __init__(self) -> None:
+        self.entries: dict[str, dict[str, Any]] = {}
+        self.pages: dict[str, list[dict[str, Any]]] = {}
+        self.folders: dict[str, dict[str, Any]] = {}
+        self.scene_names: dict[str, str] = {}
+        self.scene_active: set[str] = set()
+        self.orphan_pages = 0
+
+    def entry_page_counts(self) -> dict[str, int]:
+        return {entry_id: len(rows) for entry_id, rows in self.pages.items()}
+
+
+def read_journal(pkg: WorldPackage, *, limits: DbLimits | None = None) -> JournalIndex:
+    """遍历 journal 库一次：条目 + 复合键聚合的页 + JournalEntry 文件夹 + 场景名。
+
+    - 空库（sixianyuchanmian 形态：只有 MANIFEST/CURRENT/.log、零文档）返回
+      空 index，不抛错——空库路径由调用方按「0 条 + 警告」汇报；
+    - 页的 ``_id`` 是复合键 ``<journalId>.<pageId>``，转换层据此稳定命名
+      模块/节点 id（幂等重导不翻倍）；
+    - folders 库缺席时章节映射为空（条目直接挂到隐式章节，不拒收）；
+    - scenes 库缺席或解析失败时场景挂点为空（只是少了 mentions 边）。
+    """
+    index = JournalIndex()
+    reader = pkg.journal_reader(limits)
+    for user_key, value in reader.iter_entries():
+        parts = LevelDbReader.split_key(user_key)
+        if parts is None:
+            continue
+        collection, doc_id = parts
+        try:
+            doc = json.loads(value.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        if collection == JOURNAL_COLLECTION:
+            doc = dict(doc)
+            doc["_id"] = doc_id
+            index.entries[doc_id] = doc
+        elif collection == JOURNAL_PAGE_COLLECTION:
+            parent, _sep, _tail = doc_id.partition(".")
+            if not _sep:
+                index.orphan_pages += 1
+                continue
+            doc = dict(doc)
+            doc["_id"] = doc_id
+            index.pages.setdefault(parent, []).append(doc)
+    known = set(index.entries)
+    index.orphan_pages += sum(
+        len(rows) for parent, rows in index.pages.items() if parent not in known
+    )
+    index.pages = {
+        parent: rows for parent, rows in index.pages.items() if parent in known
+    }
+
+    if pkg.folders_db_dir().is_dir():
+        folders_reader = pkg.folders_reader(limits)
+        for user_key, value in folders_reader.iter_entries():
+            parts = LevelDbReader.split_key(user_key)
+            if parts is None or parts[0] != FOLDER_COLLECTION:
+                continue
+            try:
+                doc = json.loads(value.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if not isinstance(doc, dict):
+                continue
+            if str(doc.get("type") or "").strip() != "JournalEntry":
+                continue
+            if not str(doc.get("name") or "").strip():
+                continue
+            index.folders[parts[1]] = doc
+
+    # 场景挂点（尽力而为）：scenes 库缺席/损坏不影响 journal 导入。
+    if pkg.scenes_db_dir().is_dir():
+        try:
+            scenes_reader = pkg.scenes_reader(limits)
+            for user_key, value in scenes_reader.iter_entries():
+                parts = LevelDbReader.split_key(user_key)
+                if parts is None or parts[0] != SCENE_COLLECTION:
+                    continue
+                try:
+                    doc = json.loads(value.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    continue
+                if not isinstance(doc, dict):
+                    continue
+                name = str(doc.get("name") or "").strip()
+                if not name:
+                    continue
+                index.scene_names[parts[1]] = name
+                if doc.get("active"):
+                    index.scene_active.add(parts[1])
+        except LevelDbError:
+            pass
+    return index
+
+
 def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any]:
     """嗅探报告：world.json 摘要 + 场景/棋子/墙/光计数 + 警告列表。
 
@@ -535,6 +669,39 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
         if item_effects:
             warnings.append(f"{item_effects} 个条目级效果（transfer buff）按降级策略丢弃，仅计数。")
 
+    # journal 段：目录缺席或空库都只降级为警告 + 0 计数（journal 是可选集合，
+    # sixianyuchanmian 就是空库形态），LevelDB 损坏仍转可读错误。
+    journals_detail: list[dict[str, Any]] = []
+    journal_folders = 0
+    journal_convertible = 0
+    try:
+        journal_index = read_journal(pkg, limits=limits)
+    except LevelDbError as exc:
+        raise PackageError("fvtt.leveldb_invalid", f"journal 集合（LevelDB）解析失败：{exc}") from exc
+    except PackageError:
+        warnings.append("包里没有 journal 集合，journal 导入时将返回 0 条。")
+    else:
+        journal_folders = len(journal_index.folders)
+        for entry_id, entry in sorted(journal_index.entries.items(), key=lambda pair: str(pair[1].get("name") or pair[0])):
+            rows = journal_index.pages.get(entry_id) or []
+            usable = sum(1 for row in rows if str(page_plain_text(row) or "").strip())
+            journal_convertible += usable
+            journals_detail.append(
+                {
+                    "entry_id": entry_id,
+                    "title": str(entry.get("name") or entry_id),
+                    "folder": str(journal_index.folders.get(str(entry.get("folder") or ""), {}).get("name") or ""),
+                    "pages": len(rows),
+                    "convertible": usable,
+                }
+            )
+        if not journal_index.entries:
+            warnings.append("journal 集合为空库，没有可转换的 journal 条目。")
+        if journal_index.orphan_pages:
+            warnings.append(
+                f"{journal_index.orphan_pages} 个 journal 页引用了不存在的条目，将跳过。"
+            )
+
     return {
         **pkg.summary(),
         "collections": pkg.collection_presence(),
@@ -550,6 +717,11 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
         "actor_items": actor_items,
         "actor_item_effects": item_effects,
         "actor_folders": actor_folders,
+        "journals": len(journals_detail),
+        "journal_pages": sum(row["pages"] for row in journals_detail),
+        "journal_convertible": journal_convertible,
+        "journal_folders": journal_folders,
+        "journals_detail": journals_detail,
         "warnings": warnings,
     }
 
@@ -561,13 +733,17 @@ __all__ = [
     "ACTOR_ITEM_EFFECT_COLLECTION",
     "AUDITED_COLLECTION_DIRS",
     "FOLDER_COLLECTION",
+    "JOURNAL_COLLECTION",
+    "JOURNAL_PAGE_COLLECTION",
     "MAX_PACKAGE_BYTES",
     "ActorIndex",
+    "JournalIndex",
     "PackageError",
     "SceneIndex",
     "WorldPackage",
     "audit",
     "extract_package",
     "read_actors",
+    "read_journal",
     "read_scenes",
 ]

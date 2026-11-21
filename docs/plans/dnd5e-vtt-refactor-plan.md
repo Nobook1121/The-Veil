@@ -126,8 +126,9 @@
 
 - 读取层完成并提交：`351f986 feat(fvtt-world-import): read-only LevelDB+snappy layer with collection dump CLI`——两包全量导出验证（heroes 17 集合/578 文档、sixian 12 集合/1213 文档），14 个测试，snappy copy2/4 长度位宽（6 位）与 .log WriteBatch 解析修正。
 - 格线对齐宿主契约完成并提交：`60014ca fix(map): setBaseStage 背景支持对象形态`（在此之前的 `3c2ac67` 已透传 gridOffset）——M1 的唯一核心改动收口。
-- 场景转换管线 + 插件注册：进行中。
-- actors 字段映射表：研究中（`docs/plans/fvtt-world-import-actor-mapping.md`）。
+- 场景转换管线 + 插件注册完成并提交：`bde5a87`（audit + scenes/run → veil-map）。
+- actors 转换完成并提交：`c9e1358`（characters → dnd5e 角色卡 + NPC statblock 模块并入剧本，配额预检 + 升版重钉）；字段映射表 `docs/plans/fvtt-world-import-actor-mapping.md`。
+- journal → 剧本场景文本 + 世界树完成并提交（M1 收官刀）：`convert_journal` 纯函数（folders→章节、页→节点、ownership→public/hidden/kp_only、场景挂点拓扑；AI 辅助切块/摘要/边推断可选注入，缺席/失败确定性降级）+ `journal/run` 端点（模块并入绑定剧本 + 图谱合并进 narrative.json）+ inspect journal 计数；heroes 2 条目 7 页全量对账，sixian 空库优雅返回 0 条。
 
 ---
 
