@@ -374,3 +374,347 @@
         transition: none;
     }
 }
+
+/* ==========================================================================
+   画布左上工具组 + 测量模板层 + 棋子操作卡（M3 第一段）
+   宿主：#wsStageHost 内追加的 .vtt-stage-tools（z-index 高于 veil-map 层）。
+   ========================================================================== */
+
+.vtt-stage-tools {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+}
+
+.vtt-toolbar {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+    border-radius: 12px;
+    background: color-mix(in srgb, #0d1114 86%, transparent);
+    backdrop-filter: blur(8px);
+    pointer-events: auto;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.vtt-tool-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--color-muted, rgba(236, 231, 219, 0.62));
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.vtt-tool-btn:hover {
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 16%, transparent);
+    color: var(--color-text, #ece7db);
+}
+
+.vtt-tool-btn.is-active {
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 26%, transparent);
+    border-color: color-mix(in srgb, var(--color-primary, #c8a35a) 45%, transparent);
+    color: var(--color-text, #ece7db);
+}
+
+.vtt-tool-btn.vtt-tool-danger:hover {
+    background: color-mix(in srgb, #e06666 22%, transparent);
+}
+
+.vtt-tool-sep {
+    width: 1px;
+    height: 20px;
+    margin: 0 3px;
+    background: var(--border-subtle, rgba(255, 255, 255, 0.12));
+}
+
+.vtt-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    pointer-events: none;
+    touch-action: none;
+}
+
+.vtt-tool-hint {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    max-width: min(420px, 60%);
+    padding: 5px 10px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+    border-radius: 9px;
+    background: color-mix(in srgb, #0d1114 82%, transparent);
+    color: var(--color-muted, rgba(236, 231, 219, 0.66));
+    font-size: 0.7rem;
+    line-height: 1.5;
+    pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- 棋子操作卡 */
+
+.vtt-token-card {
+    position: fixed;
+    z-index: 60;
+    width: 280px;
+    padding: 10px;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 32%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--theme-bg-elevated, #14181c) 96%, transparent);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+    font-size: 0.78rem;
+    color: var(--color-text, #ece7db);
+}
+
+.vtt-token-card[hidden] {
+    display: none !important;
+}
+
+.vtt-card-head {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+}
+
+.vtt-card-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    border-radius: 10px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 18%, #1a2025);
+    color: var(--color-text, #ece7db);
+    font-weight: 700;
+    overflow: hidden;
+}
+
+.vtt-card-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.vtt-card-title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.vtt-card-title strong {
+    font-size: 0.88rem;
+    letter-spacing: 0.02em;
+}
+
+.vtt-card-title small {
+    color: var(--color-muted, rgba(236, 231, 219, 0.6));
+    font-size: 0.68rem;
+}
+
+.vtt-card-head button {
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--color-muted, rgba(236, 231, 219, 0.6));
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.vtt-card-head button:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--color-text, #ece7db);
+}
+
+.vtt-card-hp {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 9px 0 4px;
+    color: var(--color-muted, rgba(236, 231, 219, 0.72));
+    font-size: 0.7rem;
+}
+
+.vtt-hp-bar {
+    position: relative;
+    flex: 1 1 auto;
+    height: 8px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+}
+
+.vtt-hp-bar i {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 5px;
+    background: linear-gradient(90deg, #93c47d, #6aa84f);
+    transition: width 0.25s ease;
+}
+
+.vtt-card-ac {
+    padding: 1px 7px;
+    border-radius: 6px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
+    color: var(--color-text, #ece7db);
+    font-weight: 700;
+}
+
+.vtt-card-buttons {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+    margin-top: 8px;
+}
+
+.vtt-card-buttons button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 6px 2px;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 34%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 10%, transparent);
+    color: var(--color-text, #ece7db);
+    font-size: 0.72rem;
+    cursor: pointer;
+}
+
+.vtt-card-buttons button:hover {
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 22%, transparent);
+}
+
+.vtt-card-buttons button em {
+    font-style: normal;
+    color: var(--color-muted, rgba(236, 231, 219, 0.58));
+    font-size: 0.62rem;
+}
+
+.vtt-card-buttons button[data-vtt-empty="true"] {
+    opacity: 0.55;
+}
+
+.vtt-card-hint {
+    margin-top: 8px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 22%, transparent);
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 7%, transparent);
+    color: var(--color-muted, rgba(236, 231, 219, 0.7));
+    font-size: 0.68rem;
+    line-height: 1.55;
+}
+
+.vtt-card-detail {
+    margin-top: 8px;
+    border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+    padding-top: 7px;
+}
+
+.vtt-detail-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 0 0 6px;
+    color: color-mix(in srgb, var(--color-primary, #c8a35a) 80%, var(--color-text, #ece7db));
+    font-size: 0.78rem;
+}
+
+.vtt-detail-title span {
+    color: var(--color-muted, rgba(236, 231, 219, 0.55));
+    font-size: 0.66rem;
+    font-weight: 400;
+}
+
+.vtt-action-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: 0;
+    padding: 0;
+    max-height: 180px;
+    overflow-y: auto;
+    list-style: none;
+    scrollbar-width: thin;
+}
+
+.vtt-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 7px;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.045);
+}
+
+.vtt-action-name {
+    font-weight: 600;
+}
+
+.vtt-action-hit,
+.vtt-action-damage {
+    padding: 1px 6px;
+    border-radius: 6px;
+    font-size: 0.66rem;
+    font-weight: 700;
+}
+
+.vtt-action-hit {
+    background: color-mix(in srgb, #6fa8dc 24%, transparent);
+    color: #a8c8e8;
+}
+
+.vtt-action-damage {
+    background: color-mix(in srgb, #e06666 22%, transparent);
+    color: #eeb0b0;
+}
+
+.vtt-action-row small {
+    flex-basis: 100%;
+    color: var(--color-muted, rgba(236, 231, 219, 0.55));
+    font-size: 0.64rem;
+}
+
+.vtt-card-empty {
+    padding: 10px 6px;
+    color: var(--color-muted, rgba(236, 231, 219, 0.6));
+    text-align: center;
+}
+
+.vtt-card-empty strong {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--color-text, #ece7db);
+}
+
+.vtt-card-empty p {
+    margin: 0;
+    font-size: 0.66rem;
+    line-height: 1.55;
+}
+
+/* 战桌挂载期间：核心缩放控件抬到模板层之上，工具激活时仍可点按。 */
+.home-chat-body[data-vtt-mounted] .ws-stage-controls {
+    z-index: 6;
+}

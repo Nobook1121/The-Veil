@@ -130,6 +130,7 @@
 - actors 转换完成并提交：`c9e1358`（characters → dnd5e 角色卡 + NPC statblock 模块并入剧本，配额预检 + 升版重钉）；字段映射表 `docs/plans/fvtt-world-import-actor-mapping.md`。
 - journal → 剧本场景文本 + 世界树完成并提交（M1 收官刀）：`convert_journal` 纯函数（folders→章节、页→节点、ownership→public/hidden/kp_only、场景挂点拓扑；AI 辅助切块/摘要/边推断可选注入，缺席/失败确定性降级）+ `journal/run` 端点（模块并入绑定剧本 + 图谱合并进 narrative.json）+ inspect journal 计数；heroes 2 条目 7 页全量对账，sixian 空库优雅返回 0 条。
 - M2 第一刀完成并提交：`374a024`——dnd5e-vtt 战桌骨架：骑在 dnd5e 已有的 `dnd5e-canvas` workspace 声明上（进房自动切画布是核心现成路径），新增 `room.rail.right` 插件槽消费（每插件独立事件 handlers）；六面板：聊天全桥接现有聊天流、战斗接核心 combat 事件、角色含 NPC/怪物目录（仅 DM）、日志按观察者过滤、场景与物品为空态接线点；`/panels` 观察者裁剪端点（玩家响应无 scenes/npc 键）；无地图降级提示与插件拔出回落 E7 三 tab。基线 2447 passed / 3 skipped。
+- M2 第二刀（计划里 M3 的第一段）完成：地图交互——画布左上工具组（选择/测距尺 ↔ 模板四型 + 清空，学 FVTT 点击-拖出-松手、格点吸附、ft 标注、Shift+滚轮旋转/Ctrl+滚轮微调）；模板服务端登记 `GET|POST /api/plugins/dnd5e-vtt/rooms/<id>/templates`（request_id 幂等 + revision 乐观并发 + 四态回执，写仅 DM 玩家 403，存 `plugins/dnd5e-vtt/templates.json`，socket 广播 `dnd5e_vtt_templates` 全员只读）；测距尺复用 veil-map `/spatial/line`；受影响格高亮：圆/线走 veil-map `/spatial/range`、锥（53.13° 无对应原语）与方形本地几何近似并明说；棋子操作卡 `GET …/token-actions`（DM 从战斗状态/剧本 statblock/角色卡拉攻击/法术/特性/能力/物品清单，本刀只做详情浮层；玩家仅自己棋子且响应无 actions 键 → DOM 不渲染，他人 403）；玩家工具组只有选择+测距尺（模板按钮不渲染）。veil-map 零改动、fvtt-world-import 与规则引擎未动。测试 `tests/test_dnd5e_vtt_templates.py` 17 例。
 
 ---
 
