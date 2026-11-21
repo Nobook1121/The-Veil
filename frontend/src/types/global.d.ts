@@ -83,6 +83,12 @@ interface Window {
     refreshGeneralSettingsBaseline?: () => void;
     refreshScenarioManagement?: () => void;
     openCreateRoomWithScenario?: (scenarioId: number) => Promise<void>;
+    TrpgWorldImport?: {
+        /** 剧本管理页入口：世界包 → 登记台自动建剧本（幂等升版）。 */
+        importWorldPackageAsScenario: () => void;
+        /** 房间详情页（DM 视图）入口：世界包 → 场景 / 角色 / journal 落库到房间。 */
+        importWorldPackageToRoom: (roomId: string, roomTitle: string) => void;
+    };
     TrpgQr?: { renderSvg: (text: string, options?: { cellSize?: number; margin?: number; alt?: string }) => string };
     TrpgDialog?: {
         confirm: (options: TrpgDialogOptions) => Promise<boolean>;

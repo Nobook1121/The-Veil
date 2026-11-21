@@ -139,6 +139,11 @@ function initRoomManagement(): void {
     document.getElementById("editHouseRules")?.addEventListener("click", () => {
         void openHouseRulesModal();
     });
+    document.getElementById("importWorldPackage")?.addEventListener("click", () => {
+        // DM 视图的房间维度世界导入：弹层走 inspect → 三个房间端点按需勾选。
+        if (!currentRoom?.id) return;
+        window.TrpgWorldImport?.importWorldPackageToRoom(String(currentRoom.id), currentRoom.name || "");
+    });
     document.getElementById("switchScenario")?.addEventListener("click", () => {
         void openSwitchScenarioModal();
     });
@@ -1373,6 +1378,13 @@ function updateRoomDetail(room: Room): void {
     }
     const houseRulesButton = document.getElementById("editHouseRules") as HTMLButtonElement | null;
     if (houseRulesButton) houseRulesButton.hidden = Boolean(room.archived) || !canManageRoom(room);
+    // 「导入世界包」仅 dnd5e 房间对房主/房管开放（插件端点按 ruleset 拒绝非 5e 房间）。
+    const worldImportButton = document.getElementById("importWorldPackage") as HTMLButtonElement | null;
+    if (worldImportButton) {
+        worldImportButton.hidden = Boolean(room.archived)
+            || !canManageRoom(room)
+            || String(room.ruleset_id || "").trim().toLowerCase() !== "dnd5e";
+    }
     // 「切换剧本」仅管理员/房主可见，且已归档或自由叙事房间不再允许换绑。
     const switchScenarioButton = document.getElementById("switchScenario") as HTMLButtonElement | null;
     if (switchScenarioButton) {
@@ -2101,6 +2113,95 @@ function readRulesetHouseRuleValues(): Record<string, unknown> {
     return values;
 }
 
+/** dnd5e 房规档案推荐端点载荷（data/plugins/dnd5e/dnd5e_plugin/http.py rules/recommendation）。 */
+interface Dnd5eRulesRecommendation {
+    status?: "ok" | "manual" | "disabled";
+    site_enabled?: boolean;
+    /** 房间剧本形态：mapped（挂地图）/ text。 */
+    scenario_form?: "mapped" | "text";
+    reasons?: string[];
+    current_profile?: string;
+    current_source?: "default" | "auto" | "manual";
+    recommended_profile?: string;
+    recommendation_active?: boolean;
+    auto_applied?: boolean;
+    can_apply?: boolean;
+    profiles?: Record<string, { label?: string; label_i18n?: Record<string, string> }>;
+}
+
+/**
+ * 房规弹窗顶部的 dnd5e 档案推荐横幅：仅房主/房管的 dnd5e 房间拉取；
+ * manual（房主手动设置过）与 disabled（站点开关关闭）不渲染；玩家端不拉接口。
+ */
+async function refreshDnd5eProfileBanner(): Promise<void> {
+    const banner = document.getElementById("dnd5eProfileBanner");
+    if (!banner) return;
+    banner.hidden = true;
+    banner.replaceChildren();
+    const room = currentRoom;
+    if (!room?.id || !canManageRoom(room)) return;
+    if (String(room.ruleset_id || "").trim().toLowerCase() !== "dnd5e") return;
+    try {
+        const response = await TrpgApi.get<ApiResponse<Dnd5eRulesRecommendation>>(
+            `/api/plugins/dnd5e/rooms/${encodeURIComponent(room.id)}/rules/recommendation`,
+        );
+        const payload = response.success ? response.data : undefined;
+        if (!payload || payload.status !== "ok" || payload.recommendation_active !== true) return;
+        // 端点首次命中会自动应用并返回 auto_applied；此后档案记忆 source=auto 仍需继续展示。
+        const autoApplied = payload.auto_applied === true || String(payload.current_source || "") === "auto";
+        if (!autoApplied) return;
+        const profileId = String(payload.recommended_profile || payload.current_profile || "");
+        const declared = payload.profiles?.[profileId];
+        const profileLabel = houseRuleText(declared?.label, declared?.label_i18n)
+            || (profileId === "grid-combat" ? "方格战斗" : "剧场式");
+        const reasons = (payload.reasons || []).map((item) => String(item)).filter(Boolean).join("，");
+        const isGrid = profileId === "grid-combat";
+        const target = isGrid ? "theater_of_mind" : "grid";
+        const actionLabel = isGrid ? "撤销，改为剧场式" : "改为方格战斗";
+        banner.innerHTML = `已按剧本形态自动应用「${escapeRoomHtml(profileLabel)}」房规`
+            + (reasons ? `（${escapeRoomHtml(reasons)}）` : "")
+            + `。${isGrid ? "距离以格计（1 格 = 5 尺），可随时在下方手动调整。" : "与默认房规一致。"}`
+            + ` <a href="#" data-dnd5e-profile-switch="${target}">${actionLabel}</a>`;
+        banner.hidden = false;
+        banner.querySelectorAll<HTMLAnchorElement>("[data-dnd5e-profile-switch]").forEach((link) => {
+            link.addEventListener("click", (event) => {
+                event.preventDefault();
+                void switchDnd5ePositioning(String(link.dataset.dnd5eProfileSwitch || ""));
+            });
+        });
+    } catch {
+        // 推荐接口失败不影响房规面板的其它功能。
+    }
+}
+
+/** 横幅上的「撤销 / 改为另一档」：走现有房规 PUT，只改 dnd5e_positioning。 */
+async function switchDnd5ePositioning(target: string): Promise<void> {
+    const room = currentRoom;
+    if (!room?.id) return;
+    if (target !== "grid" && target !== "theater_of_mind") return;
+    try {
+        const response = await TrpgApi.put<ApiResponse<RoomHouseRulesPayload>>(
+            `/api/rooms/${encodeURIComponent(room.id)}/house-rules`,
+            { house_rules: { dnd5e_positioning: target } },
+        );
+        if (!response.success || !response.data) throw new Error(response.message || response.error || "保存失败");
+        // room 与 currentRoom 是同一引用，改属性即可同步全局房间状态。
+        room.house_rules = response.data.house_rules;
+        // 弹窗内的 5e 房规控件（含「距离与位置口径」下拉）同步新值。
+        renderRulesetHouseRules(response.data);
+        // 房主一旦手动改过，推荐判定翻为 manual：横幅自动消失。
+        await refreshDnd5eProfileBanner();
+        showNotification(
+            target === "grid"
+                ? "已改为方格战斗口径；自动推荐已停止，可继续在下方手动调整"
+                : "已改为剧场式口径；自动推荐已停止，可继续在下方手动调整",
+            "success",
+        );
+    } catch (error) {
+        showNotification(`房规口径修改失败：${roomErrorMessage(error)}`, "error");
+    }
+}
+
 async function openHouseRulesModal(): Promise<void> {
     if (!currentRoom?.id) return;
     const modalElement = document.getElementById("roomHouseRulesModal");
@@ -2244,6 +2345,8 @@ async function openHouseRulesModal(): Promise<void> {
             animationHint.textContent = parts.join("；");
         }
         renderRulesetHouseRules(response.data);
+        // dnd5e 房规档案推荐横幅：auto/manual/disabled 三态由端点判定，非 dnd5e 或玩家端不拉接口。
+        void refreshDnd5eProfileBanner();
         new bootstrap.Modal(modalElement).show();
     } catch (error) {
         showNotification(`加载房规失败：${roomErrorMessage(error)}`, "error");

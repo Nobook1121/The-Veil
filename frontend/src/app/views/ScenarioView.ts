@@ -433,20 +433,26 @@ class ScenarioView {
         }
     }
 
-    /** 剧本页唯一的导入入口：先让用户选择是原始文档，还是已整理好的剧本包。 */
-    showImportEntryChoice(): Promise<"document" | "bundle" | "cancel"> {
+    /** 剧本页唯一的导入入口：先让用户选择是原始文档、剧本包，还是 FVTT 世界包。 */
+    showImportEntryChoice(): Promise<"document" | "bundle" | "world" | "cancel"> {
         return new Promise((resolve) => {
             const modal = document.createElement("div");
             modal.className = "modal fade";
             modal.innerHTML = `<div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">选择导入方式</h5></div><div class="modal-body">
                 <p class="mb-2"><b>导入剧本文档</b>：支持 .doc / .docx / .pdf / .txt / .md。上传后可选择直接导入、AI 全链路导入或生成审核草稿。</p>
-                <p class="mb-0"><b>导入剧本包</b>：选择已按《帷幕》格式整理好的 .veil-scenario.json（例如用剧本创作 Skill 生成的文件）。不再调用 AI 转换，校验与修复后直接发布。</p>
-            </div><div class="modal-footer"><button class="btn btn-secondary" data-import-entry="cancel">取消</button><button class="btn btn-outline-primary" data-import-entry="document">导入剧本文档</button><button class="btn btn-primary" data-import-entry="bundle">导入剧本包</button></div></div></div>`;
+                <p class="mb-2"><b>导入剧本包</b>：选择已按《帷幕》格式整理好的 .veil-scenario.json（例如用剧本创作 Skill 生成的文件）。不再调用 AI 转换，校验与修复后直接发布。</p>
+                <p class="mb-0"><b>导入世界包</b>：Foundry VTT v10+ 世界包 zip。先审计预览，再自动建剧本（journal → 场景文本 + 世界树；同包重导原位升版），并可一键开团。</p>
+            </div><div class="modal-footer">
+                <button class="btn btn-secondary" data-import-entry="cancel">取消</button>
+                <button class="btn btn-outline-primary" data-import-entry="document">导入剧本文档</button>
+                <button class="btn btn-outline-primary" data-import-entry="world">导入世界包</button>
+                <button class="btn btn-primary" data-import-entry="bundle">导入剧本包</button>
+            </div></div></div>`;
             document.body.appendChild(modal);
             const instance = new bootstrap.Modal(modal, { backdrop: "static" });
             let settled = false;
-            const finish = (choice: "document" | "bundle" | "cancel") => { if (settled) return; settled = true; instance.hide(); resolve(choice); };
-            modal.querySelectorAll<HTMLElement>("[data-import-entry]").forEach((button) => button.addEventListener("click", () => finish((button.dataset.importEntry || "cancel") as "document" | "bundle" | "cancel")));
+            const finish = (choice: "document" | "bundle" | "world" | "cancel") => { if (settled) return; settled = true; instance.hide(); resolve(choice); };
+            modal.querySelectorAll<HTMLElement>("[data-import-entry]").forEach((button) => button.addEventListener("click", () => finish((button.dataset.importEntry || "cancel") as "document" | "bundle" | "world" | "cancel")));
             modal.addEventListener("hidden.bs.modal", () => { modal.remove(); if (!settled) resolve("cancel"); });
             instance.show();
         });

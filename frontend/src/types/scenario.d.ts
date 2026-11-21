@@ -303,7 +303,7 @@ interface ScenarioView {
     showDraftPrompt(): Promise<"continue" | "discard" | "cancel">;
     closeModal(): void;
     previewScenario(scenario: Scenario, knowledge?: { vector_count?: number; path?: string; backend?: string }): void;
-    showImportEntryChoice(): Promise<"document" | "bundle" | "cancel">;
+    showImportEntryChoice(): Promise<"document" | "bundle" | "world" | "cancel">;
     showImportChoice(): Promise<"edit" | "direct" | "ai" | "cancel">;
     showDirectImportMetadata(defaults: { title: string; creator: string }): Promise<{ title: string; author: string; creator: string; playerCount: number; description: string; autoPublish: boolean } | null>;
     showImportReview(preview: ScenarioInput, job: ScenarioImportJob): Promise<{ title: string; author: string; playerCount: number; notes: string } | null>;

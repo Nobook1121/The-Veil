@@ -93,8 +93,9 @@ class ScenarioController {
         this.view.renderScenarioList(this.model.getScenarios());
     }
 
+    /** 外部写入（登录、世界包导入等）后的刷新：从 API 重载列表，失败回落本地缓存。 */
     refresh(): void {
-        this.renderScenarioList();
+        void this.model.loadScenarios().then(() => this.renderScenarioList());
     }
 
     private async onCreateScenarioClick(): Promise<void> {
@@ -118,10 +119,16 @@ class ScenarioController {
         this.view.openCreateModal();
     }
 
-    /** 统一导入入口：先选原始文档还是整理好的剧本包，再打开对应文件选择框。 */
+    /** 统一导入入口：先选原始文档、剧本包还是 FVTT 世界包，再打开对应文件选择框。 */
     private async onImportScenarioEntryClick(): Promise<void> {
         const choice = await this.view.showImportEntryChoice();
         if (choice === "cancel") return;
+        if (choice === "world") {
+            // FVTT 世界包走插件弹层：inspect 预览 → scenario/import 自动建剧本
+            // → 「用此剧本开团」跳现有建房表单；弹层内部自行刷新剧本列表。
+            window.TrpgWorldImport?.importWorldPackageAsScenario();
+            return;
+        }
         if (choice === "document") {
             await this.onImportScenarioDocumentClick();
             return;
