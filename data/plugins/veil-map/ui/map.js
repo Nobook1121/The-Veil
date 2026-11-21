@@ -15,6 +15,24 @@
     var DEFAULT_BOUNDS = 50;
     var POLL_INTERVAL = 12000;
 
+    // ------------------------------------------------------------------
+    // 战争迷雾观感常量（对齐奥法地图 / FVTT 的三档迷雾）：
+    //   未探索 → 近黑实雾，底图只留 ~5% 隐约轮廓；
+    //   已探索、当前不在视野 → 深灰半透（探索记忆）；
+    //   当前视野 → 不罩，昏暗光区叠一层极轻冷调与明亮区区分。
+    // 边缘柔化：雾层按 1px/格 解码，离屏放大后高斯模糊，过渡带约 1.5 格宽。
+    // ------------------------------------------------------------------
+    var FOG_MAX_DIM = 1536;      // 雾层离屏渲染边长上限（px）：200×200 格也只有这一档
+    var FOG_EDGE_PAD = 2;       // 源图四周外扩格数：给模糊补实色采样，地图边缘不虚
+    var FOG_BLUR_CELLS = 0.8;   // 高斯柔化半径（格），过渡带 ≈ 1.6 格
+    var FOG_REVEAL_MS = 300;    // 掩码更新后的新旧雾层交叉淡入时长
+    var FOG_UNSEEN = { r: 4, g: 6, b: 10, a: 243 };     // 未探索：alpha 0.95 近黑
+    var FOG_EXPLORED = { r: 14, g: 18, b: 26, a: 160 }; // 探索记忆：alpha 0.63 深灰
+    var FOG_UNLIT = { r: 10, g: 14, b: 22, a: 132 };    // 视野内无光：冷暗 alpha 0.52
+    var FOG_DIM = { r: 26, g: 36, b: 56, a: 40 };       // 昏暗光区：极轻冷调 alpha 0.16
+    var FOG_BRIGHT = { r: 0, g: 0, b: 0, a: 0 };       // 明亮光区：不罩
+    var FOG_OVERFLOW_FILL = "rgba(4, 6, 10, 0.95)";     // 底图溢出地图边界的部分整体罩死黑
+
     function clamp(value, minimum, maximum) {
         return Math.max(minimum, Math.min(maximum, value));
     }
@@ -98,9 +116,14 @@
         var socketHandler = null;
         var fogState = { enabled: false };
         var fogMask = null;
-        var fogMaskCanvas = document.createElement("canvas");
-        var fogSignature = "";
+        // 掩码版本号：内容或网格几何变化才 +1；雾层离屏重建与揭示动画只看它。
+        var fogMaskVersion = 0;
+        var fogRenderVersion = -1;
+        var fogTarget = null;
+        var fogSteady = null;
+        var fogRevealStart = 0;
         var fogHidden = false;
+        var fogFilterSupport = null;
         // 剧本场景地图的标定与标记（服务端已按观察者过滤 DM 版内容）。
         var sceneBinding = null;
 
@@ -283,12 +306,13 @@
             if (!fog || fog.enabled !== true) {
                 fogState = { enabled: false };
                 fogMask = null;
-                fogSignature = "";
                 updateFogToggle();
                 return;
             }
             var bounds = asInt(fog.bounds_cells, DEFAULT_BOUNDS);
             var size = Math.max(1, bounds) * Math.max(1, bounds);
+            var previous = fogMask;
+            var previousGrid = asInt(fogState.grid_size, 0);
             fogState = fog;
             fogMask = {
                 bounds: bounds,
@@ -297,7 +321,14 @@
                 bright: decodeMask(fog.bright, size),
                 dim: decodeMask(fog.dim, size),
             };
-            fogSignature = "";
+            if (!previous || previous.bounds !== bounds ||
+                asInt(fog.grid_size, 0) !== previousGrid ||
+                !sameMask(previous.explored, fogMask.explored) ||
+                !sameMask(previous.visible, fogMask.visible) ||
+                !sameMask(previous.bright, fogMask.bright) ||
+                !sameMask(previous.dim, fogMask.dim)) {
+                fogMaskVersion += 1;
+            }
             updateFogToggle();
         }
 
@@ -307,68 +338,240 @@
             fogToggle.textContent = fogHidden ? "显示迷雾" : "隐藏迷雾";
         }
 
-        function ensureFogMaskCanvas() {
-            if (!fogMask) return null;
-            var bounds = fogMask.bounds;
-            var signature = [
-                bounds,
-                fogState.explored || "",
-                fogState.visible || "",
-                fogState.bright || "",
-                fogState.dim || "",
-            ].join("|");
-            if (signature === fogSignature) return fogMaskCanvas;
-            fogSignature = signature;
-            // 一格一像素：大场景也只有 bounds²，绘制时再放大，不在每帧重建。
-            fogMaskCanvas.width = bounds;
-            fogMaskCanvas.height = bounds;
-            var maskContext = fogMaskCanvas.getContext("2d");
-            if (!maskContext) return null;
-            var image = maskContext.createImageData(bounds, bounds);
-            var data = image.data;
-            var total = bounds * bounds;
-            for (var index = 0; index < total; index += 1) {
-                // 未见 → 全黑；探索过但不在视野 → 半暗；视野内按明/暗区分层。
-                var alpha = 242;
-                if (fogMask.visible[index]) {
-                    if (fogMask.bright[index]) alpha = 0;
-                    else if (fogMask.dim[index]) alpha = 112;
-                    else alpha = 178;
-                } else if (fogMask.explored[index]) {
-                    alpha = 148;
-                }
-                var offset = index * 4;
-                data[offset] = 6;
-                data[offset + 1] = 8;
-                data[offset + 2] = 12;
-                data[offset + 3] = alpha;
+        // ------------------------------------------------------------------
+        // 迷雾渲染管线：解码（1px/格）→ 离屏柔化 → 版本化缓存 → 贴回主画布。
+        // 雾层只在掩码版本变化时重建；相机平移/缩放只平移已渲染的雾层。
+        // ------------------------------------------------------------------
+
+        function sameMask(left, right) {
+            if (!left || !right || left.length !== right.length) return false;
+            for (var index = 0; index < left.length; index += 1) {
+                if (left[index] !== right[index]) return false;
             }
-            maskContext.putImageData(image, 0, 0);
-            return fogMaskCanvas;
+            return true;
+        }
+
+        function supportsFogBlur() {
+            if (fogFilterSupport === null) {
+                var probe = document.createElement("canvas").getContext("2d");
+                fogFilterSupport = false;
+                if (probe && typeof probe.filter === "string") {
+                    probe.filter = "blur(2px)";
+                    fogFilterSupport = probe.filter === "blur(2px)";
+                }
+            }
+            return fogFilterSupport;
+        }
+
+        function fogTierAt(index) {
+            // 视野内按明/暗光区分层；已探索不在视野 → 记忆半暗；其余近黑实雾。
+            if (fogMask.visible[index]) {
+                if (fogMask.bright[index]) return FOG_BRIGHT;
+                if (fogMask.dim[index]) return FOG_DIM;
+                return FOG_UNLIT;
+            }
+            return fogMask.explored[index] ? FOG_EXPLORED : FOG_UNSEEN;
+        }
+
+        function blurFogAxis(source, target, extent, horizontal) {
+            for (var y = 0; y < extent; y += 1) {
+                for (var x = 0; x < extent; x += 1) {
+                    var red = 0, green = 0, blue = 0, alpha = 0;
+                    for (var step = -1; step <= 1; step += 1) {
+                        var sampleX = horizontal ? Math.min(extent - 1, Math.max(0, x + step)) : x;
+                        var sampleY = horizontal ? y : Math.min(extent - 1, Math.max(0, y + step));
+                        var index = (sampleY * extent + sampleX) * 4;
+                        red += source[index];
+                        green += source[index + 1];
+                        blue += source[index + 2];
+                        alpha += source[index + 3];
+                    }
+                    var slot = (y * extent + x) * 4;
+                    target[slot] = red / 3;
+                    target[slot + 1] = green / 3;
+                    target[slot + 2] = blue / 3;
+                    target[slot + 3] = alpha / 3;
+                }
+            }
+        }
+
+        function blurFogSource(image, extent) {
+            // 没有 ctx.filter 的浏览器退化路径：在 1px/格 源图上做两轮三点盒式模糊。
+            var data = image.data;
+            var buffer = new Uint8ClampedArray(data.length);
+            for (var pass = 0; pass < 2; pass += 1) {
+                blurFogAxis(data, buffer, extent, true);
+                blurFogAxis(buffer, data, extent, false);
+            }
+        }
+
+        function buildFogCanvas() {
+            var bounds = fogMask.bounds;
+            var grid = Math.max(1, asInt(fogState.grid_size, gridSize()));
+            var world = bounds * grid;
+            var side = Math.max(1, Math.round(world * Math.min(1, FOG_MAX_DIM / world)));
+            var pad = FOG_EDGE_PAD;
+            var extent = bounds + pad * 2;
+
+            var source = document.createElement("canvas");
+            source.width = extent;
+            source.height = extent;
+            var sourceContext = source.getContext("2d");
+            if (!sourceContext) return null;
+            var image = sourceContext.createImageData(extent, extent);
+            var data = image.data;
+            for (var row = 0; row < extent; row += 1) {
+                var cellY = row < pad ? 0 : row >= pad + bounds ? bounds - 1 : row - pad;
+                for (var col = 0; col < extent; col += 1) {
+                    // 四周外扩格按边缘格补值：模糊采样不透边，地图边缘保持实雾。
+                    var cellX = col < pad ? 0 : col >= pad + bounds ? bounds - 1 : col - pad;
+                    var tier = fogTierAt(cellY * bounds + cellX);
+                    var offset = (row * extent + col) * 4;
+                    data[offset] = tier.r;
+                    data[offset + 1] = tier.g;
+                    data[offset + 2] = tier.b;
+                    data[offset + 3] = tier.a;
+                }
+            }
+            if (!supportsFogBlur()) blurFogSource(image, extent);
+            sourceContext.putImageData(image, 0, 0);
+
+            var layer = document.createElement("canvas");
+            layer.width = side;
+            layer.height = side;
+            var layerContext = layer.getContext("2d");
+            if (!layerContext) return null;
+            var cellPx = side / bounds;
+            var span = side + pad * 2 * cellPx;
+            var blurred = supportsFogBlur();
+            // 有 GPU 高斯模糊时按整格块放大（模糊负责柔化）；退化路径靠双线性补软。
+            layerContext.imageSmoothingEnabled = !blurred;
+            if (blurred) {
+                layerContext.filter = "blur(" + (Math.max(1.5, cellPx * FOG_BLUR_CELLS)).toFixed(2) + "px)";
+            }
+            // 外扩格画到目标画布之外：给模糊提供实色采样，边缘不会虚成透明。
+            layerContext.drawImage(source, -pad * cellPx, -pad * cellPx, span, span);
+            layerContext.filter = "none";
+            return layer;
+        }
+
+        function fogRevealProgress() {
+            if (!fogRevealStart) return 1;
+            return clamp((performance.now() - fogRevealStart) / FOG_REVEAL_MS, 0, 1);
+        }
+
+        function easeFogReveal(progress) {
+            return progress * progress * (3 - 2 * progress);
+        }
+
+        function freezeFogFrame() {
+            // 淡入没放完又来了新掩码：定格当前混合帧作为新起点，避免视觉回跳。
+            var frozen = document.createElement("canvas");
+            frozen.width = fogTarget.width;
+            frozen.height = fogTarget.height;
+            var frozenContext = frozen.getContext("2d");
+            if (!frozenContext) return fogTarget;
+            frozenContext.drawImage(fogSteady, 0, 0);
+            frozenContext.globalAlpha = easeFogReveal(fogRevealProgress());
+            frozenContext.drawImage(fogTarget, 0, 0);
+            frozenContext.globalAlpha = 1;
+            return frozen;
+        }
+
+        function ensureFogRender() {
+            if (!fogMask) return null;
+            if (fogRenderVersion === fogMaskVersion && fogTarget) return fogTarget;
+            var next = buildFogCanvas();
+            if (!next) return fogTarget;
+            // 上一版雾层作为交叉淡入的起点；几何变了（尺寸对不上）直接切换不淡入。
+            var steady = null;
+            if (fogTarget && fogTarget.width === next.width && fogTarget.height === next.height) {
+                steady = fogTarget;
+                if (fogSteady && fogSteady.width === next.width && fogSteady.height === next.height) {
+                    steady = freezeFogFrame();
+                }
+            }
+            fogSteady = steady;
+            fogTarget = next;
+            fogRenderVersion = fogMaskVersion;
+            fogRevealStart = steady ? performance.now() : 0;
+            return fogTarget;
+        }
+
+        function fogMapRect() {
+            // 底图按原始像素居中于世界原点（与核心舞台的背景绘制一致）。
+            var meta = mapState && mapState.background_meta;
+            var width = asInt(meta && meta.width, 0);
+            var height = asInt(meta && meta.height, 0);
+            if (width <= 0 || height <= 0) return null;
+            return { x0: -width / 2, y0: -height / 2, x1: width / 2, y1: height / 2 };
+        }
+
+        function fillFogRect(x0, y0, x1, y1) {
+            var topLeft = ctx.worldToScreen(x0, y0);
+            var bottomRight = ctx.worldToScreen(x1, y1);
+            context.fillRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
+        }
+
+        function fillFogOverflow(mapRect, boundsX, boundsY, side) {
+            // 底图比地图边界大：边界外的图像整体罩死黑，未探索画面不会漏出。
+            if (mapRect.x0 >= boundsX && mapRect.x1 <= boundsX + side &&
+                mapRect.y0 >= boundsY && mapRect.y1 <= boundsY + side) return;
+            context.fillStyle = FOG_OVERFLOW_FILL;
+            if (mapRect.x0 < boundsX) fillFogRect(mapRect.x0, mapRect.y0, boundsX, mapRect.y1);
+            if (mapRect.x1 > boundsX + side) fillFogRect(boundsX + side, mapRect.y0, mapRect.x1, mapRect.y1);
+            var innerX0 = Math.max(mapRect.x0, boundsX);
+            var innerX1 = Math.min(mapRect.x1, boundsX + side);
+            if (mapRect.y0 < boundsY) fillFogRect(innerX0, mapRect.y0, innerX1, boundsY);
+            if (mapRect.y1 > boundsY + side) fillFogRect(innerX0, boundsY + side, innerX1, mapRect.y1);
         }
 
         function drawFog(camera) {
             if (fogState.enabled !== true || fogHidden || !fogMask) return;
-            var maskCanvas = ensureFogMaskCanvas();
-            if (!maskCanvas) return;
-            var grid = asInt(fogState.grid_size, gridSize());
-            var half = asInt(fogState.half, Math.floor(fogMask.bounds / 2));
+            var target = ensureFogRender();
+            if (!target) return;
+            var bounds = fogMask.bounds;
+            var grid = Math.max(1, asInt(fogState.grid_size, gridSize()));
+            var half = asInt(fogState.half, Math.floor(bounds / 2));
             var offset = fogState.grid_offset || { x: 0, y: 0 };
-            var topLeft = ctx.worldToScreen(
-                (Number(offset.x) || 0) - half * grid,
-                (Number(offset.y) || 0) - half * grid
-            );
-            var cellPx = grid * camera.zoom;
+            var boundsX = (Number(offset.x) || 0) - half * grid;
+            var boundsY = (Number(offset.y) || 0) - half * grid;
+            var sideWorld = bounds * grid;
+            var topLeft = ctx.worldToScreen(boundsX, boundsY);
+            var sidePx = sideWorld * camera.zoom;
+            var mapRect = fogMapRect();
+
             context.save();
-            context.imageSmoothingEnabled = false;
-            context.drawImage(
-                maskCanvas,
-                topLeft.x,
-                topLeft.y,
-                fogMask.bounds * cellPx,
-                fogMask.bounds * cellPx
-            );
+            context.imageSmoothingEnabled = true;
+            if (mapRect) {
+                // 迷雾只罩底图区域；底图与地图边界之间的 padding 不罩。
+                var mapTopLeft = ctx.worldToScreen(mapRect.x0, mapRect.y0);
+                var mapBottomRight = ctx.worldToScreen(mapRect.x1, mapRect.y1);
+                context.beginPath();
+                context.rect(
+                    mapTopLeft.x,
+                    mapTopLeft.y,
+                    mapBottomRight.x - mapTopLeft.x,
+                    mapBottomRight.y - mapTopLeft.y
+                );
+                context.clip();
+                fillFogOverflow(mapRect, boundsX, boundsY, sideWorld);
+            }
+            var revealing = Boolean(fogSteady) && fogRevealProgress() < 1;
+            if (revealing) {
+                // 掩码更新 → 新旧雾层交叉淡入：新探索格从近黑缓缓揭开，
+                // 未变化的格两层同值，混合后仍是自身，不会整图闪烁。
+                context.drawImage(fogSteady, topLeft.x, topLeft.y, sidePx, sidePx);
+                context.globalAlpha = easeFogReveal(fogRevealProgress());
+                context.drawImage(target, topLeft.x, topLeft.y, sidePx, sidePx);
+                context.globalAlpha = 1;
+            } else {
+                context.drawImage(target, topLeft.x, topLeft.y, sidePx, sidePx);
+                fogSteady = null;
+                fogRevealStart = 0;
+            }
             context.restore();
+            if (revealing) scheduleDraw();
         }
 
         function newRequestId() {
