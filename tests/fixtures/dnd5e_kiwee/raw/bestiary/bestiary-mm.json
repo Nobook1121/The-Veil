@@ -1,0 +1,70 @@
+{
+  "monster": [
+    {
+      "ENG_name": "Goblin",
+      "name": "地精",
+      "source": "MM",
+      "page": 166,
+      "srd": true,
+      "size": "S",
+      "type": "humanoid",
+      "alignment": "中立邪恶",
+      "ac": [{ "ac": 15, "from": ["皮甲"] }],
+      "hp": { "average": 7, "formula": "2d6" },
+      "speed": { "walk": 30, "burrow": 10 },
+      "str": 8,
+      "dex": 14,
+      "con": 10,
+      "int": 10,
+      "wis": 8,
+      "cha": 8,
+      "cr": "1/4",
+      "passive": 9,
+      "languages": "通用语、地精语",
+      "entries": [
+        {
+          "type": "entries",
+          "name": "灵巧逃脱。",
+          "entries": ["地精可以用附赠动作进行撤离或藏匿动作。"]
+        }
+      ],
+      "action": [
+        {
+          "name": "弯刀。",
+          "entries": [
+            "{@atk mw} +{@hit 4} 命中，触及 5 尺，单一目标。命中：{@damage 1d6+2}挥砍伤害。"
+          ]
+        }
+      ],
+      "hasFluff": true,
+      "hasToken": true
+    },
+    {
+      "ENG_name": "Goblin Boss",
+      "name": "地精头目",
+      "source": "MM",
+      "page": 166,
+      "srd": true,
+      "size": "S",
+      "type": "humanoid",
+      "alignment": "中立邪恶",
+      "ac": [{ "ac": 17, "from": ["镶嵌皮甲"] }],
+      "hp": { "average": 21, "formula": "6d6" },
+      "speed": { "walk": 30 },
+      "str": 10,
+      "dex": 14,
+      "con": 10,
+      "int": 10,
+      "wis": 8,
+      "cha": 10,
+      "cr": "1",
+      "action": [
+        {
+          "name": "多头攻击。",
+          "entries": ["地精头目进行两次攻击，分别使用弯刀与{@recharge 5-6}的火箭筒。"]
+        }
+      ],
+      "translator": "不全书"
+    }
+  ]
+}

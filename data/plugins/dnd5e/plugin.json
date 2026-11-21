@@ -3,7 +3,7 @@
   "id": "dnd5e",
   "name": "D&D 5e 规则集",
   "version": "0.1.0",
-  "description": "D&D 5e（SRD 5.1）规则集插件：5e 角色卡、属性检定与豁免、canvas workspace 声明。内容数据由 dnd5e-srd 提供。",
+  "description": "D&D 5e（SRD 5.1）规则集插件：5e 角色卡、属性检定与豁免、canvas workspace 声明。内容数据由 dnd5e-srd 提供；另含 kiwee 内容深库子模块（5etools 中文镜像本地快照 + SQLite FTS + datatag 解析，CC BY-NC-SA 4.0 见 NOTICE-KIWEE.md，快照缺席自动降级）。",
   "author": "The Veil",
   "api_version": 1,
   "requires": {

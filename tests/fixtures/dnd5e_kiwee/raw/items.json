@@ -1,0 +1,31 @@
+{
+  "item": [
+    {
+      "ENG_name": "Longsword",
+      "name": "长剑",
+      "source": "PHB",
+      "page": 149,
+      "srd": true,
+      "alias": ["长剑（军用武器）"],
+      "type": "M",
+      "weaponCategory": "martial",
+      "dmg1": "1d8",
+      "dmgType": "S",
+      "entries": [
+        "军用近战武器。命中：{@damage 1d8}挥砍伤害（使用双手握持时为 1d10）。"
+      ],
+      "translator": "不全书"
+    }
+  ],
+  "baseitem": [
+    {
+      "ENG_name": "Longsword",
+      "name": "长剑",
+      "source": "PHB",
+      "page": 149,
+      "srd": true,
+      "type": "M",
+      "weaponCategory": "martial"
+    }
+  ]
+}

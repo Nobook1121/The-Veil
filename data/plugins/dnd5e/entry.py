@@ -125,6 +125,17 @@ def create_tools():
 
     house_rule_profiles.register_kp_context()
 
+    # kiwee 内容深库服务（资料层本体）：注册失败绝不拖垮插件其余能力；
+    # 快照缺席时服务自带「深库未建」降级语义，见 kiwee/__init__.py 契约。
+    try:
+        from dnd5e_plugin import kiwee
+
+        kiwee.register_kiwee_db()
+    except Exception:  # noqa: BLE001 - 深库缺席不能影响战斗工具
+        import logging
+
+        logging.getLogger(__name__).debug("dnd5e_kiwee_register_failed", exc_info=True)
+
     from dnd5e_plugin.encounter import create_tools as _encounter_tools
 
     return _encounter_tools()

@@ -1,0 +1,25 @@
+{
+  "condition": [
+    {
+      "ENG_name": "Poisoned",
+      "name": "中毒",
+      "source": "PHB",
+      "page": 292,
+      "srd": true,
+      "entries": ["处于中毒状态时，你的攻击检定与属性检定处于劣势。"],
+      "translator": "不全书"
+    }
+  ],
+  "disease": [
+    {
+      "ENG_name": "Bluerot",
+      "name": "蓝腐病",
+      "source": "DMG",
+      "page": 257,
+      "entries": [
+        "这种来自深海的疾病使受害者咳嗽出蓝色的粘液。每天黎明，受害者必须进行一次{@save con}豁免，失败则受到{@damage 1d4}点伤害。"
+      ],
+      "translator": "机翻"
+    }
+  ]
+}

@@ -34,6 +34,10 @@ htmlcov/
 /data/runtime/
 /backend/data/runtime/
 
+# kiwee 深库本地生成物（GitHub 快照 + 建好的 SQLite，许可声明见
+# data/plugins/dnd5e/NOTICE-KIWEE.md；脚本与 fixture 进库，数据不进）
+/data/plugins/dnd5e/kiwee-data/
+
 # User config: generated from config/templates on first start; local test state must not be committed
 /data/config/
 /data/characters/*

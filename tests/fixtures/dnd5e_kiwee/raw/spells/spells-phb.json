@@ -1,0 +1,37 @@
+{
+  "spell": [
+    {
+      "ENG_name": "Fireball",
+      "name": "火球术",
+      "source": "PHB",
+      "page": 241,
+      "srd": true,
+      "basicRules": true,
+      "otherSources": [{ "source": "RMR", "page": 53 }],
+      "referenceSources": ["CM", "CoA"],
+      "reprintedAs": ["火球术|XPHB"],
+      "level": 3,
+      "school": "V",
+      "time": [{ "number": 1, "unit": "action" }],
+      "range": { "type": "point", "distance": { "type": "feet", "amount": 150 } },
+      "components": { "v": true, "s": true, "m": "一小球蝙蝠粪及硫磺" },
+      "duration": [{ "type": "instant" }],
+      "entries": [
+        "从你施法距离内指定的一点射出一道明亮的闪光，随即在该点爆成一团火球。目标点周围半径 20 尺球状区域内的每个生物必须进行一次{@save dex}豁免。豁免失败者将受到{@damage 8d6}点火焰伤害，豁免成功则伤害减半。",
+        "被卷入火球的{@creature 地精|MM}往往来不及惨叫。该区域内未被穿戴或携带的可燃物体会被点燃。"
+      ],
+      "entriesHigherLevel": [
+        {
+          "name": "升环施法",
+          "entries": ["使用 3 环以上法术位施展该法术时，每升 1 环，伤害提高{@scaledamage 8d6|3-9|1d6}。"]
+        }
+      ],
+      "damageInflict": ["fire"],
+      "savingThrow": ["dexterity"],
+      "miscTags": ["BO", "OBJ"],
+      "areaTags": ["S"],
+      "hasFluffImages": true,
+      "translator": "不全书"
+    }
+  ]
+}

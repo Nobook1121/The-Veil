@@ -1,0 +1,51 @@
+{
+  "spell": [
+    {
+      "ENG_name": "Fireball",
+      "name": "火球术",
+      "source": "XPHB",
+      "page": 255,
+      "srd52": true,
+      "basicRules2024": true,
+      "reprintedAs": ["火球术|PHB"],
+      "level": 3,
+      "school": "V",
+      "time": [{ "number": 1, "unit": "action" }],
+      "range": { "type": "point", "distance": { "type": "feet", "amount": 150 } },
+      "components": { "v": true, "s": true, "m": "一小球蝙蝠粪及硫磺" },
+      "duration": [{ "type": "instant" }],
+      "entries": [
+        "目标点周围半径 20 尺球状区域内的每个生物进行一次{@save dex}豁免。豁免失败者受到{@damage 8d6}点火焰伤害，成功则减半。"
+      ],
+      "entriesHigherLevel": [
+        {
+          "name": "使用更高环阶法术位",
+          "entries": ["3 环以上每升 1 环，伤害提高{@scaledamage 8d6|3-9|1d6}。"]
+        }
+      ],
+      "damageInflict": ["fire"],
+      "savingThrow": ["dexterity"],
+      "translator": "不全书"
+    },
+    {
+      "ENG_name": "Lightning Bolt",
+      "name": "闪电束",
+      "source": "XPHB",
+      "page": 266,
+      "srd52": true,
+      "reprintedAs": ["闪电束|PHB"],
+      "level": 3,
+      "school": "V",
+      "time": [{ "number": 1, "unit": "action" }],
+      "range": { "type": "line", "distance": { "type": "feet", "amount": 100 } },
+      "components": { "v": true, "s": true, "m": "一小片皮毛和琥珀、水晶或玻璃棒" },
+      "duration": [{ "type": "instant" }],
+      "entries": [
+        "你射出一道 100 尺长、5 尺宽的闪电直线。直线内的每个生物必须进行一次{@save dex}豁免。豁免失败者受到{@damage 8d6}点闪电伤害，成功则减半。"
+      ],
+      "damageInflict": ["lightning"],
+      "savingThrow": ["dexterity"],
+      "translator": "机翻"
+    }
+  ]
+}
