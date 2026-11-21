@@ -191,6 +191,42 @@ def _text_list(value: Any) -> list[str]:
     return [_text(item) for item in value or [] if _text(item)]
 
 
+def _spellcasting_profile(sources: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """模块施法档案 ``{ability, spellSaveDC, spellAttackBonus}``。
+
+    施法属性缺席时不透传（DC/攻击加值无从消费，法术清单仍可用）；
+    DC/加值缺失时按 ability 现算的口径由战斗层兜底，这里不做二次推导。
+    """
+    raw = _first(sources, "spellcasting")
+    if not isinstance(raw, Mapping):
+        return None
+    ability = _text(raw.get("ability")).casefold()
+    if not ability:
+        return None
+    return {
+        "ability": ability,
+        "spellSaveDC": _as_int(raw.get("spellSaveDC"), 0),
+        "spellAttackBonus": _as_int(raw.get("spellAttackBonus"), 0),
+    }
+
+
+def _slot_rows(value: Any) -> dict[str, dict[str, int]] | None:
+    """模块法术位表 → ``{"1": {"max", "used"}}``（1-9 环，键外值忽略）。"""
+    if not isinstance(value, Mapping) or not value:
+        return None
+    rows: dict[str, dict[str, int]] = {}
+    for key, raw in value.items():
+        level = _text(key)
+        if not level.isdigit() or not 1 <= int(level) <= 9:
+            continue
+        maximum = _as_int(raw.get("max"), 0) if isinstance(raw, Mapping) else _as_int(raw, 0)
+        if maximum <= 0:
+            continue
+        used = max(0, min(maximum, _as_int(raw.get("used"), 0) if isinstance(raw, Mapping) else 0))
+        rows[level] = {"max": maximum, "used": used}
+    return rows or None
+
+
 def combatant_from_module(module: Mapping[str, Any]) -> dict[str, Any]:
     """按剧本 NPC 模块组装 5e 战斗参与者规格。
 
@@ -243,7 +279,7 @@ def combatant_from_module(module: Mapping[str, Any]) -> dict[str, Any]:
 
     monster_name = _display_name(monster) if monster is not None else ""
     display_name = module_display_name(module)
-    return {
+    spec = {
         "name": display_name,
         "display_name": display_name,
         "monster_id": reference,
@@ -279,6 +315,22 @@ def combatant_from_module(module: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "source": "dnd5e-srd" if monster is not None else "scenario",
     }
+    # 施法档案 / 法术位 / 已知与已准备法术清单：剧本 NPC 模块自带时透传，
+    # 由 prepare_combatant_from_module 落到战斗者上（核心 spells 管线消费
+    # ``spellcasting.spellSaveDC``、``spell_slots``、``spells_known/prepared``）。
+    spell_profile = _spellcasting_profile(sources)
+    if spell_profile is not None:
+        spec["spellcasting"] = spell_profile
+    slot_rows = _slot_rows(_first(sources, "spell_slots"))
+    if slot_rows is not None:
+        spec["spell_slots"] = slot_rows
+    known = _text_list(_first(sources, "spells_known"))
+    if known:
+        spec["spells_known"] = known
+    prepared = _text_list(_first(sources, "spells_prepared"))
+    if prepared:
+        spec["spells_prepared"] = prepared
+    return spec
 
 
 __all__ = ["combatant_from_module", "module_display_name"]

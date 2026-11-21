@@ -519,7 +519,8 @@ def test_inspect_reports_sixian_plan(app_env):
     data = rv.get_json()["data"]
     assert data["scenes"] == 6 and data["convertible_scenes"] == 6
     assert data["tokens"] == 0 and data["walls"] == 482 and data["lights"] == 200
-    assert data["warnings"] == []
+    # actors 审计如实上报：14 个条目级效果按降级策略丢弃（仅计数）。
+    assert data["warnings"] == ["14 个条目级效果（transfer buff）按降级策略丢弃，仅计数。"]
 
 
 @pytest.mark.parametrize(

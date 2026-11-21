@@ -488,6 +488,23 @@ class Dnd5eCombatRules:
                 "statblock_source": spec.get("source") or "",
             }
         )
+        # 施法透传：模块 statblock 自带的施法档案/法术位/法术清单落到战斗者上，
+        # 核心法术管线（spells.py）按 spellcasting.spellSaveDC、spell_slots、
+        # spells_known/spells_prepared 消费，反制与升环判定无需再查卡面。
+        spell_profile = spec.get("spellcasting")
+        if isinstance(spell_profile, Mapping):
+            combatant["spellcasting"] = dict(spell_profile)
+        slot_rows = spec.get("spell_slots")
+        if isinstance(slot_rows, Mapping) and slot_rows:
+            combatant["spell_slots"] = {
+                str(key): dict(row) for key, row in slot_rows.items() if isinstance(row, Mapping)
+            }
+        known = spec.get("spells_known")
+        if known:
+            combatant["spells_known"] = list(known)
+        prepared = spec.get("spells_prepared")
+        if prepared:
+            combatant["spells_prepared"] = list(prepared)
         if combatant["hp"] > combatant["max_hp"]:
             combatant["hp"] = combatant["max_hp"]
 
