@@ -135,6 +135,7 @@
 - 第五刀完成并提交：`c85e815`——AI DM 战桌四工具（dnd5e-vtt.place_template / switch_scene / roll_broadcast / worldtree_recall，DM 门闸、幂等/四态回执、观察者裁剪广播）+ KP 提示词【战桌状态】行注入（kp_context 服务 → ruleset_fragments，任何一环缺席零注入）+ 场景切换前端遮罩；顺手修正核心 plugins/registry 的能力段 module 激活 bug（第二模块被已导入 entry 静默吞掉）。基线 2483 passed / 3 skipped。
 - M2 第二刀（计划里 M3 的第一段）完成：地图交互——画布左上工具组（选择/测距尺 ↔ 模板四型 + 清空，学 FVTT 点击-拖出-松手、格点吸附、ft 标注、Shift+滚轮旋转/Ctrl+滚轮微调）；模板服务端登记 `GET|POST /api/plugins/dnd5e-vtt/rooms/<id>/templates`（request_id 幂等 + revision 乐观并发 + 四态回执，写仅 DM 玩家 403，存 `plugins/dnd5e-vtt/templates.json`，socket 广播 `dnd5e_vtt_templates` 全员只读）；测距尺复用 veil-map `/spatial/line`；受影响格高亮：圆/线走 veil-map `/spatial/range`、锥（53.13° 无对应原语）与方形本地几何近似并明说；棋子操作卡 `GET …/token-actions`（DM 从战斗状态/剧本 statblock/角色卡拉攻击/法术/特性/能力/物品清单，本刀只做详情浮层；玩家仅自己棋子且响应无 actions 键 → DOM 不渲染，他人 403）；玩家工具组只有选择+测距尺（模板按钮不渲染）。veil-map 零改动、fvtt-world-import 与规则引擎未动。测试 `tests/test_dnd5e_vtt_templates.py` 17 例。
 - M4 地图骰桌完成：所有掷骰汇聚为带 `metadata.dice_roll` 的房间消息 + `combat_dice` 广播，两路共用去重键（request_id 缺省时表达式/骰面/总数/掷骰者复合键，TTL ~8s）；插件在掷骰者可见棋子（无则视口中心）落一桌 3D 骰子（`/js/dice/dice3d.js` 按需注入不重编译、不传 seed——bundle 翻滚后 `applyLegacyResultFaces` 把服务端 faces 贴到朝上面，动画即权威值；外观照 diceAppearance 精简移植：localStorage + 主题变量 + `/api/dice-textures`；同屏最多 2 桌活 WebGL，超限冻结成静态图），同时上浮结果飘字（nat20/nat1 高亮、多骰合并 total+expression）；DM 齿轮弹「骰桌动画」开关 + 上限输入（`GET|POST /api/plugins/dnd5e-vtt/rooms/<id>/dice-settings`，GET 全员、POST 仅 DM 403 rejected 四态回执，max_dice clamp 1–20，存 `plugins/dnd5e-vtt/dice-settings.json`，广播 `dnd5e_vtt_dice_settings`）；底栏 d20 dock 全员快捷掷骰（表达式限 NdM 加法，复用 `TrpgDiceTable.handleDiceTableCommand`，本地掷骰者以 persistLocalDiceMessage 包装捕获喂地图动画，失败静默降级）。无地图（background 空）时地图层整体跳过；聊天掷骰卡管线零改动。测试 `tests/test_dnd5e_vtt_dice.py`。
+- M5 第一刀完成（范围修订版 §7.5）：登记台自动建剧本 + 一键开团指引——`POST /api/plugins/fvtt-world-import/scenario/import`（登录即可，multipart zip）：审计复用 inspect 的 world_package.audit（不过审零写入）→ 自动创建可开团的新剧本条目（标题/描述取 world.json、封面 background 解 zip 后内容寻址落剧本 `assets/<hash16>`、journal 场景文本模块 + 图谱 `narrative.json` 复用第四刀 convert_world_journal 直接写入，journal 空库/集合缺席 → 0 条 + 警告、图谱不写、条目照常产出）；幂等：同 world id 重导按 `fvtt_world_import` 溯源标记定位既有剧本原位升版（journal 产物与图谱整体替换，作者手写模块与 actors 刀 NPC 模块保留），不生成重复剧本；孤儿防御：新建路径图谱写失败整目录清理、升版路径回滚剧本记录并报告；inspect 补 `scenario_would_create` 摘要（标题/版本/模块数预估）；场景与角色卡仍走房间维度（`rooms/<id>/run`、`rooms/<id>/actors/run` 不变），响应附「开团指引」（已核实 `POST /api/rooms` 本就接受 scenario_id 直选：room_mode=scripted 时校验剧本规则集并钉版本与首个场景指针，无需另做「从剧本开房」封装），玩家进桌走现有房间码/邀请链接，零新造请柬体系。测试 `tests/test_fvtt_world_import_scenario.py` 10 例（两包实测：heroes 7 模块/14 节点/封面 337KB；sixian 0 模块/封面 6.5MB 如实落盘）。基线 2502 passed / 3 skipped。
 
 ---
 
@@ -309,6 +310,8 @@ AI DM 掷先攻、操 NPC、放模板、结算伤害；玩家回合宣布动作 
 
 1. **登记台自动建剧本**：世界包导入直接产出可开团的剧本条目（world.json 元数据/封面/场景文本/图谱），不再要求房间先绑定既有剧本——导入完即可开房。
 2. **一键开团**：从剧本库（或导入完成页）发起开房，预填剧本与规则集，走现有 create_room + 现有房间邀请/房间码流程让玩家进桌；「踢人不收卡可凭原链接回座」的语义沿用现有房间成员管理，不新造。
+
+落地核实（M5 第一刀，2026-11-21）：`POST /api/rooms` **已接受 scenario_id 直选**——`room_mode=scripted` 时校验剧本规则集可用、钉 `scenario_version` 与首个场景指针（`routes/rooms_lifecycle.py` 的 `create_room()`，锚点见 room-modes-plan §3），因此**不做**「从剧本开房」的额外封装，`scenario/import` 响应只附开团指引字段（剧本 id + 现有开房流程提示），开房校验全部沿用现状。
 
 无 AI 房间的预留不变（§7.6）。
 

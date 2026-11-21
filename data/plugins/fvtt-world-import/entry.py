@@ -21,16 +21,32 @@ NPC statblock 模块；journal/folders → 剧本场景文本条目 + 世界树�
 平台配置，复用 ``narrative_fill`` 小模型通道），回调缺席/失败一律确定性
 降级；journal 空库（sixianyuchanmian 形态）与集合缺席返回 0 条 + 警告，
 不拒收整包。
+
+第五刀（登记台，M5 第一段）：``POST /scenario/import`` 世界包直接产出
+**可开团的新剧本条目**——审计（复用 inspect 的 world_package 审计）→
+自动创建剧本记录（标题/描述/封面取 world.json，封面内容寻址落剧本
+``assets/``；journal 场景文本模块 + 图谱 ``narrative.json`` 直接写入新
+剧本，复用第四刀的 convert_world_journal），不再要求先有绑定剧本的房间。
+幂等：同 world id 重导 → 定位既有剧本原位升版覆盖本插件产物（journal
+产物整体替换，作者手写/actors 刀 NPC 模块保留），不生成重复剧本。场景与
+角色卡仍是**房间维度**的运行时数据（``rooms/<id>/run``、``rooms/<id>/actors/run``
+不变）；响应附「开团指引」——走现有 ``POST /api/rooms``（scenario_id 直选）
++ 现有房间码/邀请，零新造请柬体系。孤儿防御：写一半失败时新建路径整目录
+清理、升版路径回滚剧本记录并报告。
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
+import html
 import json
 import logging
 import os
 import re
 import tempfile
+import time
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from flask import Blueprint, current_app, request, session
@@ -803,77 +819,38 @@ def make_journal_ai_callbacks() -> dict[str, Any]:
     return {"chunk_page": chunk_page, "summarize": summarize, "infer_edges": infer_edges, "warning": None}
 
 
-def _append_journal_modules(scenario: dict[str, Any], modules: list[dict[str, Any]]) -> None:
-    """幂等并入 journal 场景文本模块：同 ``fvtt_page_id``（或同模块 id）先移除再追加。"""
-    new_ids = {str(row.get("id") or "") for row in modules}
-    new_page_ids = {str(row.get("fvtt_page_id") or "") for row in modules}
-    new_ids.discard("")
-    new_page_ids.discard("")
-    kept: list[Any] = []
-    for row in scenario.get("modules") or []:
-        if isinstance(row, dict):
-            page_id = str(row.get("fvtt_page_id") or "")
-            module_id = str(row.get("id") or "")
-            if (page_id and page_id in new_page_ids) or (module_id and module_id in new_ids):
-                continue
-        kept.append(row)
+def _replace_journal_modules(scenario: dict[str, Any], modules: list[dict[str, Any]]) -> None:
+    """journal 产物整体替换：旧 journal 模块（``fvtt_page_id`` 标记）全部移除再追加。
+
+    与图谱合并同语义：本插件 journal 产物整体替换（含包版本间被删掉的页），
+    作者手写 / actors 刀的 NPC statblock 模块原样保留。
+    """
+    kept = [
+        row
+        for row in scenario.get("modules") or []
+        if not (isinstance(row, dict) and str(row.get("fvtt_page_id") or ""))
+    ]
     scenario["modules"] = kept + list(modules)
 
 
-def _journal_scenario_repin(room_dir: Any, info: dict[str, Any], converted: dict[str, Any]):
-    """journal 产物并入房间绑定剧本：模块追加 + 图谱合并 + 升版 + 重钉房间。
+def _merged_journal_bundle_payload(
+    storage_dir: Any,
+    converted: dict[str, Any],
+    scenario_id: Any,
+    scenario_version: str,
+) -> dict[str, Any]:
+    """journal 图谱产物 + 剧本既有 ``narrative.json`` → 合并后的 bundle 载荷。
 
-    图谱合并规则：旧 ``narrative.json`` 里**本刀产物**（id 前缀 / ``fvtt_*``
-    标记识别）整体替换，作者手写或其他导入刀的节点/边原样保留；悬空边由
-    ``NarrativeBundle.from_dict`` 统一丢弃。返回 (scenario payload, error)。
+    旧 bundle 里**本刀产物**（id 前缀 / ``fvtt_*`` 标记识别）整体替换，
+    作者手写或其他导入刀的节点/边原样保留；悬空边由
+    ``NarrativeBundle.from_dict`` 统一丢弃。读取失败抛
+    :class:`trpg_server.agents.narrative.store.NarrativeStoreError`，由调用方
+    决定错误响应与孤儿清理。
     """
-    from pathlib import Path
+    from trpg_server.agents.narrative.store import load_bundle
 
-    from trpg_server.agents.narrative.model import NarrativeBundle
-    from trpg_server.agents.narrative.store import (
-        NarrativeStoreError,
-        load_bundle,
-        save_bundle,
-        scenario_dir_for_descriptor,
-    )
-    from trpg_server.agents.versioning import bind_room_to_scenario_version, next_scenario_version, normalize_semver
-    from trpg_server.scenario_store import load_scenario_by_id, save_scenario_record
-
-    scenario_id = str(info.get("scenario_id") or "").strip()
-    if not scenario_id:
-        return None, error_response(
-            "房间没有绑定剧本，无法导入 journal；请先选择剧本再导入。",
-            400,
-            "fvtt.scenario_missing",
-        )
-    scenarios_dir = Path(current_app.config.get("SCENARIOS_DIR") or "")
-    descriptor, scenario = load_scenario_by_id(scenarios_dir, scenario_id)
-    if not descriptor or not scenario:
-        return None, error_response(
-            f"房间绑定的剧本（{scenario_id}）不存在，无法导入 journal。",
-            400,
-            "fvtt.scenario_missing",
-        )
-
-    _append_journal_modules(scenario, converted["modules"])
-    current = str(scenario.get("scenario_version") or scenario.get("version") or "1.0.0")
-    scenario["scenario_version"] = normalize_semver(next_scenario_version(normalize_semver(current)))
-    try:
-        save_scenario_record(scenarios_dir, scenario, existing_descriptor=descriptor)
-    except (OSError, ValueError) as exc:  # noqa: BLE001 - 剧本写入失败按 500 可读错误处理
-        logger.warning("fvtt_journal_scenario_write_failed", exc_info=True)
-        return None, error_response(f"剧本写入失败：{exc}", 500, "fvtt.scenario_write_failed")
-
-    # 图谱数据：合并进剧本目录的 narrative.json（剧本存储原生支持的独立
-    # 图谱文件，narrative.store 的读写即其唯一真身——没有「scenario.json 里
-    # 塞图谱字段」这种形态，切分产物不需要降级成带 marker 的纯文本）。
-    storage_dir = scenario_dir_for_descriptor(descriptor)
     bundle_payload: dict[str, Any] = dict(converted["bundle"])
-    try:
-        existing = load_bundle(storage_dir, use_cache=False)
-    except NarrativeStoreError as exc:
-        logger.warning("fvtt_journal_narrative_read_failed", exc_info=True)
-        return None, error_response(f"剧本图谱（narrative.json）解析失败：{exc}", 500, "fvtt.narrative_read_failed")
+    existing = load_bundle(storage_dir, use_cache=False)
     if existing is not None:
         old = existing.to_dict()
         old_journal_ids = {
@@ -899,8 +876,68 @@ def _journal_scenario_repin(room_dir: Any, info: dict[str, Any], converted: dict
         bundle_payload = merged
     else:
         bundle_payload["meta"] = {"journal": dict(bundle_payload.get("meta") or {})}
-    bundle_payload["scenario_id"] = str(scenario.get("id") or scenario_id)
-    bundle_payload["scenario_version"] = str(scenario.get("scenario_version") or "1.0.0")
+    bundle_payload["scenario_id"] = str(scenario_id)
+    bundle_payload["scenario_version"] = str(scenario_version or "1.0.0")
+    return bundle_payload
+
+
+def _journal_scenario_repin(room_dir: Any, info: dict[str, Any], converted: dict[str, Any]):
+    """journal 产物并入房间绑定剧本：模块整体替换 + 图谱合并 + 升版 + 重钉房间。
+
+    图谱合并规则：旧 ``narrative.json`` 里**本刀产物**（id 前缀 / ``fvtt_*``
+    标记识别）整体替换，作者手写或其他导入刀的节点/边原样保留；悬空边由
+    ``NarrativeBundle.from_dict`` 统一丢弃。返回 (scenario payload, error)。
+    """
+    from pathlib import Path
+
+    from trpg_server.agents.narrative.model import NarrativeBundle
+    from trpg_server.agents.narrative.store import (
+        NarrativeStoreError,
+        save_bundle,
+        scenario_dir_for_descriptor,
+    )
+    from trpg_server.agents.versioning import bind_room_to_scenario_version, next_scenario_version, normalize_semver
+    from trpg_server.scenario_store import load_scenario_by_id, save_scenario_record
+
+    scenario_id = str(info.get("scenario_id") or "").strip()
+    if not scenario_id:
+        return None, error_response(
+            "房间没有绑定剧本，无法导入 journal；请先选择剧本再导入。",
+            400,
+            "fvtt.scenario_missing",
+        )
+    scenarios_dir = Path(current_app.config.get("SCENARIOS_DIR") or "")
+    descriptor, scenario = load_scenario_by_id(scenarios_dir, scenario_id)
+    if not descriptor or not scenario:
+        return None, error_response(
+            f"房间绑定的剧本（{scenario_id}）不存在，无法导入 journal。",
+            400,
+            "fvtt.scenario_missing",
+        )
+
+    _replace_journal_modules(scenario, converted["modules"])
+    current = str(scenario.get("scenario_version") or scenario.get("version") or "1.0.0")
+    scenario["scenario_version"] = normalize_semver(next_scenario_version(normalize_semver(current)))
+    try:
+        save_scenario_record(scenarios_dir, scenario, existing_descriptor=descriptor)
+    except (OSError, ValueError) as exc:  # noqa: BLE001 - 剧本写入失败按 500 可读错误处理
+        logger.warning("fvtt_journal_scenario_write_failed", exc_info=True)
+        return None, error_response(f"剧本写入失败：{exc}", 500, "fvtt.scenario_write_failed")
+
+    # 图谱数据：合并进剧本目录的 narrative.json（剧本存储原生支持的独立
+    # 图谱文件，narrative.store 的读写即其唯一真身——没有「scenario.json 里
+    # 塞图谱字段」这种形态，切分产物不需要降级成带 marker 的纯文本）。
+    storage_dir = scenario_dir_for_descriptor(descriptor)
+    try:
+        bundle_payload = _merged_journal_bundle_payload(
+            storage_dir,
+            converted,
+            scenario.get("id") or scenario_id,
+            str(scenario.get("scenario_version") or "1.0.0"),
+        )
+    except NarrativeStoreError as exc:
+        logger.warning("fvtt_journal_narrative_read_failed", exc_info=True)
+        return None, error_response(f"剧本图谱（narrative.json）解析失败：{exc}", 500, "fvtt.narrative_read_failed")
     bundle = NarrativeBundle.from_dict(bundle_payload)
     try:
         save_bundle(storage_dir, bundle)
@@ -1040,6 +1077,416 @@ def run_journal_import(room_id: str):
             message += f"（剧本图谱 {scenario_repin['narrative_nodes']} 节点 / {scenario_repin['narrative_edges']} 边）"
         message += "。"
     return success_response(payload, message)
+
+
+# -- 登记台自动建剧本（第五刀，M5 第一段）-----------------------------------
+
+#: 剧本封面上限。人工上传路由（``/api/scenarios/cover``）限 5MB；世界包封面
+#: 是程序化导入的既有资产，实测样例包（sixianyuchanmian）就有 6.5MB 的
+#: world-cover.png，这里放宽到 16MB——只落盘为静态资产，不做任何解码。
+SCENARIO_COVER_MAX_BYTES = 16 * 1024 * 1024
+_SCENARIO_COVER_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+#: world.json description（HTML）归一后的字数上限。
+SCENARIO_DESCRIPTION_MAX_CHARS = 600
+#: 本插件剧本产物的溯源标记键（幂等定位：同 world id → 原位升版）。
+SCENARIO_WORLD_MARKER_KEY = "fvtt_world_import"
+
+
+def _world_description_text(world: Mapping[str, Any]) -> str:
+    """world.json description（HTML）→ 纯文本：标签剔除、实体反转义、压平空白。"""
+    raw = str(world.get("description") or "")
+    if not raw.strip():
+        return ""
+    text = re.sub(r"<[^>]+>", " ", raw)
+    text = html.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()[:SCENARIO_DESCRIPTION_MAX_CHARS]
+
+
+def _world_cover_asset(pkg: Any) -> tuple[bytes | None, str, str]:
+    """world.json ``background`` → (封面字节, 扩展名, 警告)；缺失败回 (None, "", 警告)。
+
+    封面解析复用场景背景的 ``resolve_background``（``worlds/<id>/assets/...``
+    前缀剥除 + 文件名兜底）；解析不到 / 格式不支持 / 超限时剧本不设封面，
+    由前端渲染剧本名文字封面，不拒收整包。
+    """
+    src = str((pkg.world.get("background") or "")).strip()
+    if not src:
+        return None, "", "world.json 没有封面（background 为空），剧本不设封面。"
+    rel = pkg.resolve_background(src)
+    if rel is None:
+        return None, "", f"封面图（{src}）在包内找不到，剧本不设封面。"
+    ext = os.path.splitext(rel)[1].lower()
+    if ext not in _SCENARIO_COVER_EXTS:
+        return None, "", f"封面图格式（{ext or '未知'}）不受支持，剧本不设封面。"
+    try:
+        data = pkg.read_asset(rel)
+    except (OSError, KeyError, RuntimeError) as exc:  # noqa: BLE001 - 资产读取按警告降级
+        return None, "", f"封面图读取失败（{exc}），剧本不设封面。"
+    if len(data) > SCENARIO_COVER_MAX_BYTES:
+        limit = SCENARIO_COVER_MAX_BYTES // (1024 * 1024)
+        return None, "", f"封面图超过 {limit} MB 上限，剧本不设封面。"
+    return data, ext, ""
+
+
+def _write_scenario_cover(storage_dir: Path, data: bytes, ext: str) -> str:
+    """封面按内容寻址落剧本 ``assets/``（学素材区 ``assets/<hash16>`` 模式）。
+
+    内容寻址 + 不可变缓存路由（``routes/assets`` 的 ``_HASH_ASSET_PATH``）：
+    同图重导同名零增长，图变了必然换名。返回相对 storage_dir 的路径。
+    """
+    digest = hashlib.sha256(data).hexdigest()[:16]
+    rel = f"assets/{digest}{ext}"
+    target = Path(storage_dir) / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    return rel
+
+
+def _remove_stale_cover(storage_dir: Path, rel: str) -> None:
+    """升版覆盖后清掉上一轮的封面文件（本插件产物，内容寻址不可变名）。"""
+    text = str(rel or "")
+    if not text.startswith("assets/"):
+        return
+    try:
+        (Path(storage_dir) / text).unlink()
+    except OSError:  # noqa: BLE001 - 清理失败不影响导入结果
+        logger.warning("fvtt_scenario_stale_cover_left rel=%s", text, exc_info=True)
+
+
+def _existing_public_ids(scenarios_dir: Path) -> set[str]:
+    from trpg_server.json_store import read_json
+    from trpg_server.scenario_store import scenario_descriptor_paths
+
+    values: set[str] = set()
+    for path in scenario_descriptor_paths(Path(scenarios_dir)):
+        data = read_json(path, default=None)
+        if isinstance(data, dict):
+            public_id = str(data.get("public_id") or "")
+            if public_id:
+                values.add(public_id)
+    return values
+
+
+def _find_scenario_by_world_id(scenarios_dir: Path, world_id: str) -> int | None:
+    """按 ``fvtt_world_import.world_id`` 溯源标记定位既有剧本（幂等键）。
+
+    只读原始 JSON 不做完整归一（扫描轻量）；命中后由调用方
+    ``load_scenario_by_id`` 取正式记录。返回剧本 id 或 None。
+    """
+    from trpg_server.json_store import read_json
+    from trpg_server.scenario_store import scenario_descriptor_paths
+
+    if not str(world_id or "").strip() or not Path(scenarios_dir).exists():
+        return None
+    for path in scenario_descriptor_paths(Path(scenarios_dir)):
+        data = read_json(path, default=None)
+        if not isinstance(data, dict):
+            continue
+        marker = data.get(SCENARIO_WORLD_MARKER_KEY)
+        if isinstance(marker, dict) and str(marker.get("world_id") or "") == str(world_id):
+            try:
+                return int(data.get("id"))
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _remove_tree_best_effort(path: Path) -> None:
+    from trpg_server.json_store import remove_tree
+
+    try:
+        remove_tree(Path(path))
+    except OSError:  # noqa: BLE001 - 清理失败必须如实报告
+        logger.warning("fvtt_scenario_cleanup_failed path=%s", path, exc_info=True)
+
+
+@bp.route("/scenario/import", methods=["POST"])
+def run_scenario_import():
+    """登记台：世界包 → 直接产出**可开团的新剧本条目**（登录即可）。
+
+    - 审计复用 inspect 的 ``world_package.audit``（体积/魔数/system 门闸/
+      场景/角色/journal 计数与警告），审计不过整个导入拒绝、零写入；
+    - journal 产物复用第四刀 ``convert_world_journal``：场景文本模块并入
+      新剧本（FVTT 玩家可读页 ``public``、其余 ``kp``）+ 图谱合并进剧本
+      ``narrative.json``（journal 为空库/集合缺席 → 0 条 + 警告，图谱不写，
+      剧本条目照常产出）；AI 语义增强回调可用时注入，缺席/失败确定性降级；
+    - 幂等：同 world id 重导按溯源标记定位既有剧本 → 原位升版覆盖本插件
+      产物（journal 模块/图谱/标题/描述/封面整体替换；作者手写模块与
+      actors 刀 NPC 模块保留），不生成重复剧本；
+    - 场景与角色卡**不进剧本**（运行时数据）：响应附「开团指引」，走现有
+      ``POST /api/rooms``（scenario_id 直选）+ 现有房间码/邀请流程；
+    - 孤儿防御：新建路径写一半失败 → 整目录清理；升版路径 → 回滚剧本
+      记录并明确报告。
+    """
+    if not _authenticated():
+        return error_response("请先登录再导入世界包。", 403, "fvtt.login_required")
+    try:
+        raw = _read_upload()
+    except PackageError as exc:
+        return _package_error_response(exc)
+
+    from trpg_server.agents.versioning import normalize_semver, next_scenario_version
+    from trpg_server.scenario_store import (
+        generate_public_id,
+        load_scenario_by_id,
+        scenario_public_asset_url,
+        scenario_version_path,
+        save_scenario_record,
+    )
+
+    scenarios_dir = Path(current_app.config.get("SCENARIOS_DIR") or "")
+    journal_missing = False
+    with tempfile.TemporaryDirectory(prefix="fvtt-scenario-") as workdir:
+        pkg = None
+        try:
+            pkg = extract_package(raw, workdir)
+            report = world_package.audit(pkg)
+        except PackageError as exc:
+            return _package_error_response(exc)
+        except LevelDbError as exc:
+            return error_response(f"世界包数据读取失败：{exc}", 400, "fvtt.leveldb_invalid")
+        except Exception as exc:  # noqa: BLE001 - 未知审计失败转可读错误
+            logger.warning("fvtt_scenario_audit_failed", exc_info=True)
+            return error_response(f"世界包审计失败：{exc}", 400, "fvtt.audit_failed")
+
+        world_summary = pkg_summary_safe(pkg)
+        world_title = str(world_summary.get("title") or pkg.id or "").strip()
+
+        # -- journal 读取与转换（第四刀复用）--------------------------------
+        ai = make_journal_ai_callbacks()
+        converted: dict[str, Any] = {
+            "modules": [],
+            "bundle": None,
+            "warnings": [],
+            "degradations": {},
+            "totals": {
+                "journals": 0, "pages": 0, "modules": 0, "nodes": 0, "edges": 0,
+                "chunks": 0, "scene_anchors": 0, "warnings": 0,
+            },
+        }
+        try:
+            journal_index = read_journal(pkg)
+        except PackageError as exc:
+            if str(exc.code) == "fvtt.journal_missing":
+                # journal 集合缺席：可选集合，0 条 + 警告，剧本条目照常产出。
+                journal_missing = True
+            else:
+                return _package_error_response(exc)
+        except LevelDbError as exc:
+            return error_response(f"journal 集合（LevelDB）解析失败：{exc}", 400, "fvtt.leveldb_invalid")
+        except Exception as exc:  # noqa: BLE001 - LevelDB 结构问题转可读错误
+            logger.warning("fvtt_scenario_journal_read_failed", exc_info=True)
+            return error_response(f"世界包 journal 读取失败：{exc}", 400, "fvtt.leveldb_invalid")
+        else:
+            converted = convert_world_journal(
+                journal_index,
+                world_title=world_title,
+                chunk_page=ai.get("chunk_page"),
+                summarize=ai.get("summarize"),
+                infer_edges=ai.get("infer_edges"),
+            )
+
+        # 封面字节必须在关包前读出（资产留在内存 zip 里按需读取）。
+        cover_data, cover_ext, cover_warning = _world_cover_asset(pkg)
+        world = dict(pkg.world)
+        _close_package(pkg)
+
+    # -- 剧本条目：幂等定位（同 world id → 原位升版）------------------------
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%S") + ".000Z"
+    marker: dict[str, Any] = {
+        "world_id": pkg.id,
+        "world_title": pkg.title,
+        "world_version": pkg.version,
+        "imported_at": timestamp,
+        "cover_asset": "",
+    }
+    existing_id = _find_scenario_by_world_id(scenarios_dir, pkg.id)
+    descriptor: Path | None = None
+    previous_record: dict[str, Any] | None = None
+    created_new = True
+    if existing_id is not None:
+        descriptor, previous_record = load_scenario_by_id(scenarios_dir, existing_id)
+    if descriptor is not None and previous_record is not None:
+        scenario = dict(previous_record)
+        created_new = False
+        current = str(scenario.get("scenario_version") or scenario.get("version") or "1.0.0")
+        scenario["scenario_version"] = normalize_semver(
+            next_scenario_version(normalize_semver(current))
+        )
+        scenario["updatedAt"] = timestamp
+    else:
+        scenario_id = int(time.time() * 1000)
+        scenario = {
+            "id": scenario_id,
+            "title": world_title or "未命名剧本",
+            "ruleset_id": "dnd5e",
+            "scenario_version": normalize_semver(pkg.version),
+            "owner_id": session.get("user_id"),
+            "creator_username": str(session.get("username") or "").strip() or "FVTT 导入",
+            "public_id": generate_public_id(_existing_public_ids(scenarios_dir)),
+            "createdAt": timestamp,
+            "updatedAt": timestamp,
+            "modules": [],
+        }
+    scenario_id = int(scenario.get("id") or 0)
+    if scenario_id <= 0:
+        return error_response("剧本 id 缺失，导入中止。", 500, "fvtt.scenario_write_failed")
+
+    scenario["title"] = world_title or str(scenario.get("title") or "").strip() or "未命名剧本"
+    scenario["description"] = _world_description_text(world)
+    scenario["tags"] = ["FVTT 世界包"]
+    scenario["import_mode"] = "fvtt_world"
+    _replace_journal_modules(scenario, converted["modules"])
+
+    # -- 封面：world.json background → 剧本 assets/（内容寻址）--------------
+    # 与 ``save_scenario_record`` 同一套 storage 目录规则（legacy 文件迁移）。
+    if descriptor is not None and descriptor.parent != scenarios_dir:
+        storage_dir = descriptor.parent
+    else:
+        storage_dir = scenarios_dir / f"scenario-{scenario_id}"
+    cover_rel = ""
+    if cover_data is not None:
+        cover_rel = _write_scenario_cover(storage_dir, cover_data, cover_ext)
+        scenario["cover"] = scenario_public_asset_url(f"{storage_dir.name}/{cover_rel}")
+    else:
+        scenario["cover"] = ""
+    marker["cover_asset"] = cover_rel
+    scenario[SCENARIO_WORLD_MARKER_KEY] = marker
+
+    # -- 写入：剧本记录 → 图谱；失败走孤儿防御 -----------------------------
+    try:
+        saved_descriptor = save_scenario_record(
+            scenarios_dir, scenario, existing_descriptor=descriptor
+        )
+    except (OSError, ValueError) as exc:
+        logger.warning("fvtt_scenario_record_write_failed", exc_info=True)
+        if created_new:
+            _remove_tree_best_effort(storage_dir)
+        return error_response(f"剧本写入失败：{exc}", 500, "fvtt.scenario_write_failed")
+
+    stale_cover_rel = ""
+    if not created_new and previous_record is not None:
+        old_marker = previous_record.get(SCENARIO_WORLD_MARKER_KEY)
+        stale_cover_rel = (
+            str(old_marker.get("cover_asset") or "")
+            if isinstance(old_marker, dict)
+            else ""
+        )
+
+    narrative: dict[str, Any] = {"written": False, "nodes": 0, "edges": 0}
+    if converted["modules"]:
+        # 第四刀语义：journal 有产物才写图谱；空库/集合缺席不写 narrative.json。
+        from trpg_server.agents.narrative.model import NarrativeBundle
+        from trpg_server.agents.narrative.store import (
+            NarrativeStoreError,
+            save_bundle,
+            scenario_dir_for_descriptor,
+        )
+
+        narrative_dir = scenario_dir_for_descriptor(saved_descriptor)
+        try:
+            bundle_payload = _merged_journal_bundle_payload(
+                narrative_dir,
+                converted,
+                scenario_id,
+                str(scenario.get("scenario_version") or "1.0.0"),
+            )
+            bundle = NarrativeBundle.from_dict(bundle_payload)
+            save_bundle(narrative_dir, bundle)
+        except NarrativeStoreError as exc:
+            logger.warning("fvtt_scenario_narrative_write_failed", exc_info=True)
+            rollback_note = ""
+            if created_new:
+                # 新建路径：整目录清理，库回到导入前状态。
+                _remove_tree_best_effort(saved_descriptor.parent)
+            else:
+                # 升版路径：回滚剧本记录（旧内容重写 + 新版本文件删除）。
+                rolled_back = True
+                try:
+                    save_scenario_record(
+                        scenarios_dir, previous_record, existing_descriptor=descriptor
+                    )
+                    scenario_version_path(descriptor, scenario.get("scenario_version")).unlink()
+                except (OSError, ValueError):  # noqa: BLE001 - 回滚失败必须如实报告
+                    rolled_back = False
+                    logger.warning("fvtt_scenario_rollback_failed", exc_info=True)
+                rollback_note = (
+                    "已回滚剧本记录。"
+                    if rolled_back
+                    else "剧本记录回滚失败，请重跑一次导入修复。"
+                )
+            return error_response(
+                f"剧本图谱写入失败：{exc}；{rollback_note}",
+                500,
+                "fvtt.narrative_write_failed",
+            )
+        narrative = {"written": True, "nodes": len(bundle.nodes), "edges": len(bundle.edges)}
+
+    # 图谱与剧本记录都已落稳后才清上一轮封面（本插件产物）。
+    if stale_cover_rel and stale_cover_rel != cover_rel:
+        _remove_stale_cover(storage_dir, stale_cover_rel)
+
+    # -- 完成报告 -----------------------------------------------------------
+    warnings: list[str] = []
+    if ai.get("warning"):
+        warnings.append(str(ai["warning"]))
+    if journal_missing:
+        warnings.append("包里没有 journal 集合，未产出剧本文本（0 条）。")
+    if cover_warning:
+        warnings.append(cover_warning)
+    warnings.extend(str(row) for row in report.get("warnings") or [])
+    warnings.extend(str(row) for row in converted["warnings"])
+
+    counts = dict(converted["totals"])
+    counts["warnings"] = len(warnings)
+    counts["scenes"] = report.get("scenes", 0)
+    counts["convertible_scenes"] = report.get("convertible_scenes", 0)
+    counts["characters"] = report.get("characters", 0)
+    counts["npcs"] = report.get("npcs", 0)
+    counts["vehicles"] = report.get("vehicles", 0)
+
+    open_room = {
+        "scenario_id": scenario_id,
+        "scenario_title": scenario.get("title") or "",
+        "room_mode": "scripted",
+        "create_room_endpoint": "POST /api/rooms",
+        "hint": (
+            "开团走现有创建房间流程：POST /api/rooms 传 name + room_mode=scripted "
+            f"+ scenario_id={scenario_id} 即可绑定本剧本开房；"
+            "玩家进桌用现有房间码/邀请链接，无需任何新请柬。"
+        ),
+        "room_steps": [
+            f"POST /api/rooms（name + room_mode=scripted + scenario_id={scenario_id}）创建房间",
+            f"POST /api/plugins/fvtt-world-import/rooms/<room_id>/run 把本包场景写入房间地图（挂房间，不进剧本）",
+            "POST /api/plugins/fvtt-world-import/rooms/<room_id>/actors/run 导入角色卡与 NPC（挂用户库/房间剧本）",
+            "把现有房间码/邀请链接发给玩家进桌跑团",
+        ],
+    }
+    message = (
+        f"已{'创建' if created_new else '更新'}剧本「{scenario.get('title')}」"
+        f"（v{scenario.get('scenario_version')}）："
+        + (
+            f"{len(converted['modules'])} 条场景文本，图谱 {narrative['nodes']} 节点 / {narrative['edges']} 边。"
+            if converted["modules"]
+            else "journal 为空库或集合缺席，未产出场景文本（剧本条目照常产出）。"
+        )
+    )
+    return success_response(
+        {
+            "scenario_id": scenario_id,
+            "title": scenario.get("title") or "",
+            "version": str(scenario.get("scenario_version") or ""),
+            "created": created_new,
+            "cover_url": str(scenario.get("cover") or ""),
+            "counts": counts,
+            "narrative": narrative,
+            "degradations": converted["degradations"],
+            "warnings": warnings,
+            "world": world_summary,
+            "open_room": open_room,
+        },
+        message,
+    )
 
 
 __all__ = ["bp"]

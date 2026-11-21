@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,10 @@ SUPPORTED_SYSTEMS = {"dnd5e"}
 # coreVersion 兼容窗口：本期只放行 FVTT 13.x（v10+ LevelDB 存储格式）。
 SUPPORTED_CORE_MAJORS = {13}
 
+# 剧本条目预估里的版本归一：与核心 ``agents/versioning.normalize_semver``
+# 同一套规则（本模块不 import 核心，改那边时同步这里）。
+_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+
 SCENE_COLLECTION = "scenes"
 SUBCOLLECTIONS = ("scenes.tokens", "scenes.walls", "scenes.lights")
 AUDITED_COLLECTION_DIRS = ("actors", "folders", "items", "journal", "tables")
@@ -64,6 +69,17 @@ class PackageError(Exception):
         self.code = code
         self.message = message
         self.status = status
+
+
+def _world_semver(value: Any) -> str:
+    """world.json version → n.n.n；纯数字按补丁位解释，其余回落 1.0.0。"""
+    text = str(value or "").strip()
+    match = _SEMVER_RE.fullmatch(text)
+    if match:
+        return ".".join(str(int(part)) for part in match.groups())
+    if text.isdigit():
+        return f"1.0.{int(text)}"
+    return "1.0.0"
 
 
 def _core_major(world: dict[str, Any]) -> int:
@@ -705,6 +721,13 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
     return {
         **pkg.summary(),
         "collections": pkg.collection_presence(),
+        # 登记台（M5）：本包导入将产出的剧本条目预估——标题/版本/模块数
+        # （journal 可转换页）。场景与角色不进剧本条目（运行时数据，走房间维度）。
+        "scenario_would_create": {
+            "title": str(pkg.title or pkg.id or "").strip(),
+            "version": _world_semver(pkg.version),
+            "modules": journal_convertible,
+        },
         "scenes": len(index.documents),
         "convertible_scenes": convertible,
         "tokens": total_tokens,
