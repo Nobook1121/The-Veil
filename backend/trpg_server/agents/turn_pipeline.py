@@ -1179,6 +1179,22 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
                 ]
         except Exception:  # noqa: BLE001 - 规则集片段失败不应阻断主流程
             ruleset_fragments = []
+        # 战桌状态行（dnd5e-vtt 插件服务，§7.2 最小版）：同一片段通道追加一行
+        # 「当前场景/棋子/战斗/模板」摘要。走公开服务表（与 veil-map map_service
+        # 同一机制），插件缺席、非 dnd5e 房间或读取失败时零注入，KP 主流程不受影响。
+        if room_id and agent_profile.id == "kp":
+            try:
+                from trpg_server.plugins.runtime import get_service
+
+                _vtt_kp_context = get_service("dnd5e-vtt", "kp_context")
+                if _vtt_kp_context is not None:
+                    ruleset_fragments.extend(
+                        str(item)
+                        for item in (_vtt_kp_context.kp_prompt_fragments(agent_context) or [])
+                        if str(item or "").strip()
+                    )
+            except Exception:  # noqa: BLE001 - 插件上下文失败不影响主流程
+                logger.debug("vtt_kp_context_fragment_failed room=%s", room_id, exc_info=True)
         if interlude_active and isinstance(projected_state, dict):
             # 复盘材料只取已落盘摘要 / 关键帧 / 日志，避免把全量聊天重新塞回上下文。
             projected_state["interlude"] = room_interlude.review_context(

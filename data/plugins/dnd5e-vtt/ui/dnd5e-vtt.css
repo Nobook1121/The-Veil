@@ -1059,3 +1059,27 @@
     .vtt-dice-dock-panel { width: min(248px, calc(100vw - 40px)); }
     .vtt-pop-value { font-size: 1.22rem; }
 }
+
+/* ---------------------------------------------------------------- 场景切换遮罩 */
+
+.vtt-scene-mask {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.95rem;
+    letter-spacing: 0.28em;
+    text-indent: 0.28em;
+    color: var(--color-text, #ece7db);
+    background: rgba(8, 10, 14, 0.58);
+    backdrop-filter: blur(2px);
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 0.45s ease;
+}
+
+.vtt-scene-mask.is-fading {
+    opacity: 0;
+}

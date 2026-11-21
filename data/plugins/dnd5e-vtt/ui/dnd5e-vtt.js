@@ -1065,6 +1065,7 @@ function mountStageTools(ctx, roomObserver) {
     var pendingClick = null;
     var rotateTimer = 0;
     var rulerQueryTimer = 0;
+    var sceneMaskTimer = 0;
     var drawScheduled = false;
     var pollTimer = 0;
     var socket = null;
@@ -2712,6 +2713,31 @@ function mountStageTools(ctx, roomObserver) {
         loadDiceSettings();
     }
 
+    function onSocketSceneSwitch(payload) {
+        // AI KP 切场景（dnd5e-vtt.switch_scene）：底图刷新走 veil-map 的
+        // room_map_changed（broadcast_state 已推），这里只给 #wsStageHost 盖
+        // 一层短暂遮罩，盖住背景重绘与棋子重排的闪变，淡入淡出 ~1s。
+        if (destroyed || !payload) return;
+        if (String(payload.room_id || "") !== roomId) return;
+        var host = document.getElementById("wsStageHost");
+        if (!host || !host.appendChild) return;
+        var mask = host.querySelector(".vtt-scene-mask");
+        if (!mask) {
+            mask = document.createElement("div");
+            mask.className = "vtt-scene-mask";
+            mask.textContent = "场景切换中…";
+            host.appendChild(mask);
+        }
+        mask.classList.remove("is-fading");
+        window.clearTimeout(sceneMaskTimer);
+        sceneMaskTimer = window.setTimeout(function () {
+            mask.classList.add("is-fading");
+            sceneMaskTimer = window.setTimeout(function () {
+                if (mask.parentNode) mask.parentNode.removeChild(mask);
+            }, 450);
+        }, 600);
+    }
+
     function attachSocket() {
         socket = window.TrpgSocket || null;
         if (!socket) return;
@@ -2721,6 +2747,7 @@ function mountStageTools(ctx, roomObserver) {
         }
         bind("dnd5e_vtt_templates", onSocketTemplates);
         bind("room_map_changed", onSocketMapChanged);
+        bind("dnd5e_vtt_scene_switch", onSocketSceneSwitch);
         bind("dnd5e_vtt_dice_settings", onSocketDiceSettings);
         bind("combat_dice", onSocketCombatDice);
         bind("new_message", onSocketNewMessage);
@@ -2801,6 +2828,7 @@ function mountStageTools(ctx, roomObserver) {
             window.clearInterval(pollTimer);
             window.clearTimeout(rulerQueryTimer);
             window.clearTimeout(rotateTimer);
+            window.clearTimeout(sceneMaskTimer);
             detachSocket();
             unsubscribers.forEach(function (unsubscribe) {
                 try {

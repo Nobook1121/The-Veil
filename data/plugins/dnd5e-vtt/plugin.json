@@ -19,6 +19,15 @@
       "module": "entry.py",
       "blueprints": ["bp"]
     },
+    "agent_tools": {
+      "module": "agent_tools.py",
+      "tools": [
+        "dnd5e-vtt.place_template",
+        "dnd5e-vtt.switch_scene",
+        "dnd5e-vtt.roll_broadcast",
+        "dnd5e-vtt.worldtree_recall"
+      ]
+    },
     "ui": {
       "api_version": 1,
       "slots": [

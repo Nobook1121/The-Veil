@@ -5409,6 +5409,37 @@ class _MapService:
             logger.warning("veil_map_import_scene_failed", exc_info=True)
             return {"ok": False, "code": "map.import_failed", "error": "场景写入失败。"}
 
+    def list_scenes(self, room_dir) -> dict[str, Any]:
+        """场景目录（只读）：给 AI DM 工具（dnd5e-vtt.switch_scene）做名称解析。
+
+        只包一层 :func:`scene_store.list_scenes`，不新增存储语义；没有分片时
+        返回空清单而不是报错，调用方自行降级到世界树节点名。
+        """
+        try:
+            directory = Path(room_dir)
+            return {
+                "ok": True,
+                "scenes": scene_store.list_scenes(directory),
+                "active_scene_id": scene_store.active_scene_id(directory),
+            }
+        except Exception:  # noqa: BLE001
+            logger.warning("veil_map_list_scenes_failed", exc_info=True)
+            return {"ok": False, "code": "map.scene_unavailable", "error": "读取场景目录失败。", "scenes": []}
+
+    def broadcast_state(self, room_id, state) -> dict[str, Any]:
+        """把（已切换的）地图状态按观察者裁剪广播给房间（AI 工具切场景后复用）。
+
+        场景激活原语 ``activate_for_area`` 只落盘不广播（HTTP 路由各自补播）；
+        AI 工具没有路由层可借用，这里把同一 ``_broadcast`` 暴露成服务原语，
+        避免调用方复制迷雾/观察者裁剪逻辑。
+        """
+        try:
+            _broadcast(str(room_id), state if isinstance(state, dict) else {})
+            return {"ok": True}
+        except Exception:  # noqa: BLE001
+            logger.warning("veil_map_broadcast_state_failed", exc_info=True)
+            return {"ok": False, "error": "地图广播失败。"}
+
 
 _MAP_SERVICE = _MapService()
 _ACTION_GUARD_REGISTERED = False

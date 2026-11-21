@@ -740,13 +740,17 @@ class PluginRegistry:
             if manifest.has_code and manifest.code_entry:
                 module = self._import_module(record, manifest.code_entry)
 
+            # 能力段各自导入自己声明的 module：``module or ...`` 会在 code.entry
+            # 已导入时静默忽略能力段的第二模块声明（例如 dnd5e-vtt 的
+            # agent_tools.py），导致清单声明的工厂永远拿不到。``_import_module``
+            # 按 (插件 id, 相对路径) 缓存，同路径声明仍归一到同一实例。
             if "http_blueprints" in manifest.capabilities:
-                module = module or self._import_module(
+                blueprints_module = self._import_module(
                     record, str(manifest.capabilities["http_blueprints"]["module"])
                 )
                 blueprints: list[Any] = []
                 for name in manifest.capabilities["http_blueprints"]["blueprints"]:
-                    blueprint = getattr(module, name, None)
+                    blueprint = getattr(blueprints_module, name, None)
                     if blueprint is None:
                         raise ManifestError(f"入口模块没有蓝图：{name}")
                     blueprints.append(blueprint)
@@ -754,10 +758,10 @@ class PluginRegistry:
                 loaded_capabilities.append("http_blueprints")
 
             if "agent_tools" in manifest.capabilities:
-                module = module or self._import_module(
+                tools_module = self._import_module(
                     record, str(manifest.capabilities["agent_tools"]["module"])
                 )
-                self._activate_tools(record, module, ctx)
+                self._activate_tools(record, tools_module, ctx)
                 loaded_capabilities.append("agent_tools")
 
             if "rulesets" in manifest.capabilities:
