@@ -48,8 +48,21 @@ interface RoomStageMarker {
     member?: boolean;
 }
 
+/**
+ * 背景「对象形态」：显式给出绘制尺寸与摆放。
+ * width/height 为世界像素绘制尺寸（缺省/非正数 = 原图自然尺寸）；
+ * offsetX/offsetY 为图中心的世界像素坐标（缺省 0 = 原图原始像素居中于世界原点，即字符串形态）。
+ */
+interface RoomStageBackgroundSpec {
+    src?: string;
+    width?: number;
+    height?: number;
+    offsetX?: number;
+    offsetY?: number;
+}
+
 interface RoomStageState {
-    background?: string;
+    background?: string | RoomStageBackgroundSpec;
     grid_size?: number;
     // 格线原点（世界像素，相对背景图中心）；旧数据缺省时按 (0, 0) 处理。
     grid_offset?: { x?: number; y?: number };
@@ -131,7 +144,7 @@ interface StagePluginContext {
     getViewport(): StagePluginViewport;
     getGridSize(): number;
     setBaseStage(view: {
-        background?: string;
+        background?: string | RoomStageBackgroundSpec;
         gridSize?: number;
         gridOffset?: { x?: number; y?: number };
     }): void;

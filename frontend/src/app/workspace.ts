@@ -18,8 +18,19 @@
         zoom: number;
     }
 
+    /** 背景摆放（对象形态归一化后）：0 表示按原图自然尺寸 / 居中于世界原点。 */
+    interface StageBackgroundGeometry {
+        width: number;
+        height: number;
+        offsetX: number;
+        offsetY: number;
+    }
+
     interface StageView {
         background: string;
+        // 背景对象形态：width/height 为世界像素绘制尺寸（0 = 原图自然尺寸），
+        // offsetX/offsetY 为图中心的世界坐标（缺省 0 = 原图原始像素居中于世界原点）。
+        backgroundGeometry: StageBackgroundGeometry;
         gridSize: number;
         // 格线原点（世界像素）；旧状态没有该字段时按 (0, 0) 渲染。
         gridOffset: { x: number; y: number };
@@ -623,6 +634,43 @@
         return { x: Number.isFinite(x) ? x : 0, y: Number.isFinite(y) ? y : 0 };
     }
 
+    function defaultBackgroundGeometry(): StageBackgroundGeometry {
+        return { width: 0, height: 0, offsetX: 0, offsetY: 0 };
+    }
+
+    /** 背景对象形态的摆放字段：width/height 非正数按「原图自然尺寸」处理。 */
+    function normalizeBackgroundGeometry(raw: unknown): StageBackgroundGeometry {
+        const value = raw && typeof raw === "object"
+            ? (raw as { width?: unknown; height?: unknown; offsetX?: unknown; offsetY?: unknown })
+            : {};
+        const width = Number(value.width);
+        const height = Number(value.height);
+        const offsetX = Number(value.offsetX);
+        const offsetY = Number(value.offsetY);
+        return {
+            width: Number.isFinite(width) && width > 0 ? width : 0,
+            height: Number.isFinite(height) && height > 0 ? height : 0,
+            offsetX: Number.isFinite(offsetX) ? offsetX : 0,
+            offsetY: Number.isFinite(offsetY) ? offsetY : 0,
+        };
+    }
+
+    function sameBackgroundGeometry(a: StageBackgroundGeometry, b: StageBackgroundGeometry): boolean {
+        return a.width === b.width && a.height === b.height && a.offsetX === b.offsetX && a.offsetY === b.offsetY;
+    }
+
+    /** 背景（声明/存储/插件传入）可能是字符串（原图居中）或对象（显式尺寸与摆放）。 */
+    function readBackgroundSpec(raw: unknown): { src: string; geometry: StageBackgroundGeometry } {
+        if (raw && typeof raw === "object") {
+            const source = raw as { src?: unknown };
+            return {
+                src: typeof source.src === "string" ? source.src : "",
+                geometry: normalizeBackgroundGeometry(raw),
+            };
+        }
+        return { src: typeof raw === "string" ? raw : "", geometry: defaultBackgroundGeometry() };
+    }
+
     function illustrationBackground(): string {
         const image = byId<HTMLImageElement>("immersiveStageImage");
         if (image && !image.hidden && image.getAttribute("src")) return image.getAttribute("src") || "";
@@ -658,8 +706,12 @@
             : Array.isArray(stored?.markers) && stored.markers.length
                 ? stored.markers
                 : buildMemberMarkers(room);
+        let backgroundSpec = readBackgroundSpec(declared?.background);
+        if (!backgroundSpec.src) backgroundSpec = readBackgroundSpec(stored?.background);
+        if (!backgroundSpec.src) backgroundSpec = readBackgroundSpec(illustrationBackground());
         const view: StageView = {
-            background: String(declared?.background || stored?.background || illustrationBackground() || ""),
+            background: backgroundSpec.src,
+            backgroundGeometry: backgroundSpec.geometry,
             gridSize: Math.max(16, Math.min(256, Number(declared?.grid_size || stored?.grid_size || 64))),
             gridOffset: normalizeGridOffset(declared?.grid_offset || stored?.grid_offset),
             markers,
@@ -796,8 +848,18 @@
         stageContext.scale(cam.zoom, cam.zoom);
 
         if (backgroundImage && backgroundImage.complete && backgroundImage.naturalWidth > 0) {
+            const geometry = view.backgroundGeometry;
+            const drawWidth = geometry.width > 0 ? geometry.width : backgroundImage.naturalWidth;
+            const drawHeight = geometry.height > 0 ? geometry.height : backgroundImage.naturalHeight;
             stageContext.globalAlpha = 0.92;
-            stageContext.drawImage(backgroundImage, -backgroundImage.naturalWidth / 2, -backgroundImage.naturalHeight / 2);
+            // 背景对象带尺寸/偏移时按其摆放绘制；缺省保持原图原始像素居中于世界原点。
+            stageContext.drawImage(
+                backgroundImage,
+                geometry.offsetX - drawWidth / 2,
+                geometry.offsetY - drawHeight / 2,
+                drawWidth,
+                drawHeight,
+            );
             stageContext.globalAlpha = 1;
         }
         if (showGrid) drawGrid(stageContext, width, height, cam, view.gridSize, view.gridOffset);
@@ -957,15 +1019,20 @@
     }
 
     function setBaseStage(view: {
-        background?: string;
+        background?: string | RoomStageBackgroundSpec;
         gridSize?: number;
         gridOffset?: { x?: number; y?: number };
     }): void {
         const current = stageView();
         let changed = false;
-        if (typeof view.background === "string" && view.background !== current.background) {
-            current.background = view.background;
-            changed = true;
+        if (typeof view.background === "string" || (view.background && typeof view.background === "object")) {
+            // 字符串 = 原图原始像素居中于世界原点；对象 = 显式尺寸/摆放，缺省字段与字符串等价。
+            const spec = readBackgroundSpec(view.background);
+            if (spec.src !== current.background || !sameBackgroundGeometry(spec.geometry, current.backgroundGeometry)) {
+                current.background = spec.src;
+                current.backgroundGeometry = spec.geometry;
+                changed = true;
+            }
         }
         if (Number.isFinite(view.gridSize)) {
             const grid = clamp(Number(view.gridSize), 16, 256);
@@ -983,7 +1050,10 @@
         }
         if (!changed) return;
         writeStore(stageStorageKey(), JSON.stringify({
-            background: current.background,
+            // 默认摆放存纯字符串（与旧数据同形）；带尺寸/偏移时存对象形态，重载后原样恢复。
+            background: sameBackgroundGeometry(current.backgroundGeometry, defaultBackgroundGeometry())
+                ? current.background
+                : { src: current.background, ...current.backgroundGeometry },
             grid_size: current.gridSize,
             grid_offset: current.gridOffset,
             markers: current.markers,
@@ -994,6 +1064,7 @@
         emitPluginEvent("stage", {
             gridSize: current.gridSize,
             background: current.background,
+            backgroundGeometry: { ...current.backgroundGeometry },
             gridOffset: { ...current.gridOffset },
         });
     }
