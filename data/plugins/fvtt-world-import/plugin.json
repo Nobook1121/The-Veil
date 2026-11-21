@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "fvtt-world-import",
+  "name": "FVTT 世界包导入",
+  "version": "0.1.0",
+  "description": "导入 Foundry VTT 世界包（v10+ LevelDB 存储）：登记台审计（inspect）与场景转换落库（run，含墙体/门/光源/棋子）。actors→角色卡与 journal→世界树是后续刀。",
+  "author": "The Veil",
+  "api_version": 1,
+  "requires": {
+    "plugins": {
+      "veil-map": ">=0.1.0"
+    }
+  },
+  "code": {
+    "entry": "entry.py"
+  },
+  "capabilities": {
+    "http_blueprints": {
+      "module": "entry.py",
+      "blueprints": ["bp"]
+    }
+  }
+}

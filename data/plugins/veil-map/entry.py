@@ -5130,6 +5130,189 @@ def _notify_area_move(
         logger.warning("veil_map_area_move_trigger_failed", exc_info=True)
 
 
+def _import_external_scene(
+    room_dir: Path, info: dict[str, Any], scene: dict[str, Any], *, activate: bool = False
+) -> dict[str, Any]:
+    """把外部转换器产出的场景写成 veil-map 场景（当前供 fvtt-world-import 调用）。
+
+    载荷字段（全部图片像素坐标，转换器不感知世界原点）::
+
+        scene_id/title/active          # active 只作标记，激活由 activate 控制
+        grid{size, origin_x, origin_y}  # 图内网格原点（shift/offset 直供）
+        image{name, bytes}              # 背景图，走 media 校验后落房间资产区
+        walls[]/lights[]/tokens[]       # 见 convert 端的稳定字段
+        ambient{enabled, color, intensity, darkness, baked}
+        warnings[]                      # 转换警告，进 background_meta.import
+
+    校验与归一化全部复用本插件现有路径：media.inspect_image（尺寸/体积/魔数）、
+    _normalize_walls/_lights/_ambient（上限与字段裁剪）、_save_map（分片代际
+    + revision + 迷雾重算）。图片中心换算一次完成，转换器不做第二套几何。
+    """
+    payload_grid = scene.get("grid") if isinstance(scene.get("grid"), dict) else {}
+    grid = _as_int(payload_grid.get("size"), 0)
+    if grid < MIN_GRID or grid > MAX_GRID:
+        return {
+            "ok": False,
+            "code": "map.import_grid",
+            "error": f"网格尺寸（{grid}）不在 {MIN_GRID}–{MAX_GRID} 像素范围内。",
+        }
+    image = scene.get("image") if isinstance(scene.get("image"), dict) else {}
+    raw = image.get("bytes") or b""
+    display_name = str(image.get("name") or "外部地图")[:120]
+    meta = media.inspect_image(raw, display_name)
+    width, height = int(meta["width"]), int(meta["height"])
+    scene_id = scene_store.safe_scene_id(scene.get("scene_id"))
+    if not scene_id:
+        return {"ok": False, "code": "map.import_scene_id", "error": "场景 id 不合法。"}
+
+    origin_x = _fraction(payload_grid.get("origin_x"))
+    origin_y = _fraction(payload_grid.get("origin_y"))
+    center_x, center_y = width / 2.0, height / 2.0
+
+    def _shift_x(value: Any) -> int:
+        return int(round(_as_int(value, 0) - center_x))
+
+    def _shift_y(value: Any) -> int:
+        return int(round(_as_int(value, 0) - center_y))
+
+    walls = [
+        {
+            "id": item.get("id"),
+            "kind": item.get("kind"),
+            "state": item.get("state"),
+            "blocks_sight": item.get("blocks_sight"),
+            "blocks_movement": item.get("blocks_movement"),
+            "blocks_light": item.get("blocks_light"),
+            "points": [
+                {"x": _shift_x(point.get("x")), "y": _shift_y(point.get("y"))}
+                for point in item.get("points") or []
+                if isinstance(point, dict)
+            ],
+        }
+        for item in scene.get("walls") or []
+        if isinstance(item, dict)
+    ]
+    lights = [
+        {
+            "id": item.get("id"),
+            "x": _shift_x(item.get("x")),
+            "y": _shift_y(item.get("y")),
+            "range_cells": item.get("range_cells"),
+            "bright_cells": item.get("bright_cells"),
+            "color": item.get("color"),
+            "intensity": item.get("intensity"),
+            "angle": item.get("angle"),
+            "enabled": item.get("enabled"),
+        }
+        for item in scene.get("lights") or []
+        if isinstance(item, dict)
+    ]
+    tokens = [
+        {
+            "id": item.get("id"),
+            "name": item.get("name"),
+            "x": _shift_x(item.get("x")),
+            "y": _shift_y(item.get("y")),
+            "w": item.get("w"),
+            "h": item.get("h"),
+            "kind": item.get("kind") or "npc",
+            "color": item.get("color"),
+        }
+        for item in scene.get("tokens") or []
+        if isinstance(item, dict)
+    ]
+    scene_warnings = [str(text)[:200] for text in (scene.get("warnings") or []) if str(text).strip()]
+    asset_dir = _map_assets_dir(room_dir)
+    stored_name = f"{uuid4().hex}.{meta['suffix']}"
+    asset_path = asset_dir / stored_name
+    room_id = Path(room_dir).name
+
+    with room_lock(room_dir):
+        exists = scene_store.has_scene(room_dir, scene_id)
+        if exists:
+            loaded = scene_store.load_scene(room_dir, scene_id)
+            state = _normalize_map(loaded or {}) if loaded else _default_map()
+        else:
+            state = _default_map()
+        state["scene_id"] = scene_id
+        state["title"] = str(scene.get("title") or scene_id)[:80]
+        state["scene_binding"] = {}
+        try:
+            asset_dir.mkdir(parents=True, exist_ok=True)
+            asset_path.write_bytes(raw)
+            state["background"] = (
+                f"/api/plugins/veil-map/rooms/{room_id}/assets/maps/{stored_name}"
+            )
+            state["background_meta"] = _normalize_background_meta(
+                {
+                    "kind": "external",
+                    "format": str(scene.get("format") or "external")[:24],
+                    "name": display_name,
+                    "url": state["background"],
+                    "width": width,
+                    "height": height,
+                    "bytes": int(meta["size"]),
+                    "uploaded_at": _now(),
+                    "import": {
+                        "format": str(scene.get("format") or "external")[:24],
+                        "walls": len(walls),
+                        "doors": sum(
+                            1
+                            for wall in walls
+                            if str(wall.get("kind")) in {"door", "window"}
+                        ),
+                        "lights": len(lights),
+                        "needs_review": bool(scene_warnings),
+                        "warnings": scene_warnings[:8],
+                    },
+                }
+            )
+            state["grid_size"] = grid
+            state["grid_offset"] = {
+                "x": _wrap_grid_offset(origin_x - center_x, grid),
+                "y": _wrap_grid_offset(origin_y - center_y, grid),
+            }
+            cells_across = max(1, int(round(width / grid)))
+            cells_down = max(1, int(round(height / grid)))
+            state["calibration"] = {
+                "cells_across": cells_across,
+                "cells_down": cells_down,
+                "offset_x": int(round(origin_x)) % grid,
+                "offset_y": int(round(origin_y)) % grid,
+            }
+            state["bounds_cells"] = _clamp(
+                max(BOUNDS_DEFAULT, cells_across, cells_down), MIN_BOUNDS, MAX_BOUNDS
+            )
+            state["walls"] = _normalize_walls(walls)
+            state["lights"] = _normalize_lights(lights)
+            state["ambient_light"] = _normalize_ambient(scene.get("ambient") or {})
+            state["tokens"] = tokens
+            saved = _save_map(room_dir, state, activate=activate)
+        except Exception:  # noqa: BLE001 - 写失败必须回滚已落盘的背景资产
+            asset_path.unlink(missing_ok=True)
+            raise
+    if activate:
+        _broadcast(room_id, saved)
+    return {
+        "ok": True,
+        "scene_id": scene_id,
+        "title": str(saved.get("title") or ""),
+        "created": not exists,
+        "revision": int(saved.get("revision") or 0),
+        "grid_size": grid,
+        "grid_offset": saved.get("grid_offset"),
+        "bounds_cells": saved.get("bounds_cells"),
+        "walls": len(saved.get("walls") or []),
+        "lights": len(saved.get("lights") or []),
+        "tokens": len(saved.get("tokens") or []),
+        "background": {
+            "url": str(saved.get("background") or ""),
+            "width": width,
+            "height": height,
+        },
+    }
+
+
 class _MapService:
     """给核心叙事层用的地图能力（避免核心 import 插件包）。"""
 
@@ -5204,6 +5387,27 @@ class _MapService:
             "token_id": str(token.get("id") or ""),
             "name": str(token.get("name") or ""),
         }
+
+    def import_scene(
+        self, room_dir: Any, info: dict[str, Any], scene: dict[str, Any], *, activate: bool = False
+    ) -> dict[str, Any]:
+        """外部转换器（fvtt-world-import）批量写入一个场景。
+
+        载荷用「背景图片像素坐标」：``grid.origin_x/origin_y`` 是图内网格
+        原点，墙/光/棋子坐标也是图片像素。图片中心对齐、格坐标换算与全部
+        归一化都在本插件内完成——转换器不需要了解 veil-map 的世界原点约定。
+        """
+        try:
+            if not _ruleset_enabled(info or {}):
+                return {"ok": False, "code": "map.ruleset_disabled", "error": "当前房间的规则集未启用地图。"}
+            return _import_external_scene(
+                Path(room_dir), info or {}, scene if isinstance(scene, dict) else {}, activate=activate
+            )
+        except media.ImageError as exc:
+            return {"ok": False, "code": exc.code, "error": exc.message}
+        except Exception:  # noqa: BLE001
+            logger.warning("veil_map_import_scene_failed", exc_info=True)
+            return {"ok": False, "code": "map.import_failed", "error": "场景写入失败。"}
 
 
 _MAP_SERVICE = _MapService()
