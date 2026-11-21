@@ -3,7 +3,7 @@
   "id": "fvtt-world-import",
   "name": "FVTT 世界包导入",
   "version": "0.1.0",
-  "description": "导入 Foundry VTT 世界包（v10+ LevelDB 存储）：登记台审计（inspect，含 scenario_would_create 预估）与转换落库——场景（run，含墙体/门/光源/棋子）、actors→dnd5e 角色卡与 NPC statblock（actors/run）、journal→剧本场景文本条目+世界树图谱（journal/run，AI 辅助语义切块可选，缺席/失败确定性降级）、登记台自动建剧本（scenario/import：世界包直接产出可开团的新剧本条目，同 world id 重导原位升版，响应附现有开房流程的开团指引）。",
+  "description": "导入 Foundry VTT 世界包（v10+ LevelDB 存储）：登记台审计（inspect，含 scenario_would_create 预估）与转换落库——场景（run，含墙体/门/光源/棋子）、actors→dnd5e 角色卡与 NPC statblock（actors/run）、journal→剧本场景文本条目+世界树图谱（journal/run，AI 辅助语义切块可选，缺席/失败确定性降级）、登记台自动建剧本（scenario/import：世界包直接产出可开团的新剧本条目，同 world id 重导原位升版，响应附现有开房流程的开团指引）；进房自动装配（rooms/<id>/auto-provision + 剧本侧 stash：从世界包剧本开房后 DM 首次进房自动载入初始地图/棋子与 NPC 模块，幂等零重复）。",
   "author": "The Veil",
   "api_version": 1,
   "requires": {

@@ -426,3 +426,74 @@ window.TrpgWorldImport = {
     importWorldPackageAsScenario,
     importWorldPackageToRoom,
 };
+
+/* ------------------------------------------------------------------ *
+ * 进房自动装配（auto-provision）
+ *
+ * 从世界包剧本开房后，房主/房管首次进房静默调一次
+ * POST /rooms/<id>/auto-provision：世界包的初始地图（墙/光/棋子）与
+ * NPC 模块自动落库，全员经 veil-map 广播看到地图。后端幂等（装配过/
+ * 房间已有场景 → skipped 零写入），玩家端不触发；失败静默，手动
+ * 「导入世界包」入口仍可兜底。
+ * ------------------------------------------------------------------ */
+
+interface FvttAutoProvisionResult {
+    status?: string;
+    reason?: string;
+    scenes?: number;
+    npcs?: number;
+}
+
+const fvttAutoProvisionTried = new Set<string>();
+
+function fvttRoomAllowsAutoProvision(room: unknown): boolean {
+    const target = room as
+        | {
+              id?: string | number;
+              ruleset_id?: string;
+              scenario_id?: number;
+              archived?: boolean;
+              creator_id?: string | number;
+              members?: Array<{ user_id?: string | number; room_role?: string }>;
+          }
+        | null;
+    if (!target || target.id === undefined || target.id === null) return false;
+    if (String(target.ruleset_id || "").toLowerCase() !== "dnd5e") return false;
+    if (!target.scenario_id || target.archived) return false;
+    // 与后端口径一致：房主/房管/站点管理员；玩家不触发（后端仍最终把关）。
+    const role = String(window.currentUser?.role || "");
+    if (role === "ADMIN" || role === "OWNER") return true;
+    const userId = String(window.currentUser?.user_id ?? "");
+    const member = (target.members || []).find((entry) => String(entry.user_id ?? "") === userId);
+    return Boolean(member && (member.room_role === "owner" || member.room_role === "admin"))
+        || String(target.creator_id ?? "") === userId;
+}
+
+async function fvttAutoProvisionRoom(room: unknown): Promise<void> {
+    const target = room as { id?: string | number } | null;
+    if (!target || target.id === undefined || target.id === null) return;
+    if (!fvttRoomAllowsAutoProvision(room)) return;
+    const roomId = String(target.id);
+    if (fvttAutoProvisionTried.has(roomId)) return;
+    fvttAutoProvisionTried.add(roomId);
+    try {
+        const { data } = await TrpgApi.requestWithResponse<ApiResponse<FvttAutoProvisionResult>>(
+            `${FVTT_IMPORT_BASE}/rooms/${encodeURIComponent(roomId)}/auto-provision`,
+            { method: "POST" },
+        );
+        const payload = data && data.success ? (data.data as FvttAutoProvisionResult | null) : null;
+        if (payload && payload.status === "provisioned") {
+            showNotification(
+                `已自动载入世界地图与 NPC（场景 ${fvttCount(payload.scenes)} 个 · NPC ${fvttCount(payload.npcs)} 个）`,
+                "success",
+            );
+        }
+    } catch {
+        // 静默降级：不打扰进房体验，房主可用房间页「导入世界包」手动兜底。
+    }
+}
+
+window.addEventListener("trpg:room-changed", (event) => {
+    const detail = (event as CustomEvent).detail as { room?: unknown } | undefined;
+    if (detail && detail.room) void fvttAutoProvisionRoom(detail.room);
+});

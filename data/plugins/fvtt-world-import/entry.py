@@ -33,6 +33,18 @@ NPC statblock 模块；journal/folders → 剧本场景文本条目 + 世界树�
 不变）；响应附「开团指引」——走现有 ``POST /api/rooms``（scenario_id 直选）
 + 现有房间码/邀请，零新造请柬体系。孤儿防御：写一半失败时新建路径整目录
 清理、升版路径回滚剧本记录并报告。
+
+第六刀（进房自动装配）：``scenario/import`` 建剧本时把「已转换的场景负载
+（墙/光/棋子/网格）+ NPC statblock 模块」暂存进剧本 ``fvtt-world/stash.json``，
+背景图当时解 zip 后**内容寻址**复制进剧本 ``assets/``（同图零增长，stash 只
+引用资产相对路径）；``POST rooms/<id>/auto-provision``（房主/房管，仅 dnd5e）
+在「房间绑定剧本有 stash 且房间当前无场景」时逐场景走 veil-map
+``import_scene``（世界 active 场景置激活）+ stash NPC 幂等并入房间绑定剧本
+（actors 刀同款升版重钉）+ 落装配标记（``rooms/<id>/plugins/fvtt-world-import/
+provision.json``）防重复。触发是前端插件胶水（``frontend/src/app/fvtt-world-import.ts``
+监听 ``trpg:room-changed``）：房主/房管进房静默探测一次，玩家不调；装配广播
+走 veil-map 现有 ``room_map_changed``，所有在场端地图自动出现。房间页
+「导入世界包」手动全量入口保留为兜底。
 """
 
 from __future__ import annotations
@@ -194,31 +206,8 @@ def run_import(room_id: str):
                 f"世界包数据读取失败：{exc}", 400, "fvtt.leveldb_invalid"
             )
 
-        def resolve_background(scene_doc: dict[str, Any]) -> dict[str, Any] | None:
-            rel = pkg.resolve_background(convert_scenes.scene_background_src(scene_doc))
-            if rel is None:
-                return None
-            return {
-                "path": rel,
-                "name": os.path.basename(rel),
-                "bytes": pkg.asset_size(rel),
-            }
-
-        def companion_for(scene_doc: dict[str, Any]) -> dict[str, Any] | None:
-            """sixianyuchanmian 形态的伴生 JSON（``assets/scenes/<名>.json``）。"""
-            src = convert_scenes.scene_background_src(scene_doc)
-            base = os.path.basename(src)
-            if not base:
-                return None
-            candidate = os.path.join("assets", "scenes", os.path.splitext(base)[0] + ".json")
-            if not pkg.has_asset(candidate):
-                return None
-            try:
-                data = json.loads(pkg.read_asset(candidate).decode("utf-8-sig"))
-            except (UnicodeDecodeError, ValueError):
-                return None
-            return data if isinstance(data, dict) else None
-
+        # 第六刀抽出的共用回调：与 scenario/import 的 stash 转换逐字节同口径。
+        resolve_background, companion_for = _scene_resolution_callbacks(pkg)
         converted, skipped, warnings = convert_world_scenes(
             index,
             resolve_background=resolve_background,
@@ -1128,11 +1117,12 @@ def _world_cover_asset(pkg: Any) -> tuple[bytes | None, str, str]:
     return data, ext, ""
 
 
-def _write_scenario_cover(storage_dir: Path, data: bytes, ext: str) -> str:
-    """封面按内容寻址落剧本 ``assets/``（学素材区 ``assets/<hash16>`` 模式）。
+def _write_content_addressed_asset(storage_dir: Path, data: bytes, ext: str) -> str:
+    """字节按内容寻址落剧本 ``assets/``（学素材区 ``assets/<hash16>`` 模式）。
 
-    内容寻址 + 不可变缓存路由（``routes/assets`` 的 ``_HASH_ASSET_PATH``）：
-    同图重导同名零增长，图变了必然换名。返回相对 storage_dir 的路径。
+    封面与第六刀的场景背景图共用：内容寻址 + 不可变缓存路由（``routes/assets``
+    的 ``_HASH_ASSET_PATH``）——同图重导同名零增长，图变了必然换名。返回相对
+    storage_dir 的路径。
     """
     digest = hashlib.sha256(data).hexdigest()[:16]
     rel = f"assets/{digest}{ext}"
@@ -1142,15 +1132,19 @@ def _write_scenario_cover(storage_dir: Path, data: bytes, ext: str) -> str:
     return rel
 
 
-def _remove_stale_cover(storage_dir: Path, rel: str) -> None:
-    """升版覆盖后清掉上一轮的封面文件（本插件产物，内容寻址不可变名）。"""
+def _remove_stale_asset(storage_dir: Path, rel: str) -> None:
+    """升版覆盖后清掉上一轮的本插件资产文件（内容寻址不可变名）。
+
+    封面与 stash 场景背景共用：只清 ``assets/`` 下的相对路径，越界路径忽略；
+    清理失败不影响导入结果。
+    """
     text = str(rel or "")
-    if not text.startswith("assets/"):
+    if not text.startswith("assets/") or ".." in text.split("/"):
         return
     try:
         (Path(storage_dir) / text).unlink()
     except OSError:  # noqa: BLE001 - 清理失败不影响导入结果
-        logger.warning("fvtt_scenario_stale_cover_left rel=%s", text, exc_info=True)
+        logger.warning("fvtt_scenario_stale_asset_left rel=%s", text, exc_info=True)
 
 
 def _existing_public_ids(scenarios_dir: Path) -> set[str]:
@@ -1198,6 +1192,217 @@ def _remove_tree_best_effort(path: Path) -> None:
         remove_tree(Path(path))
     except OSError:  # noqa: BLE001 - 清理失败必须如实报告
         logger.warning("fvtt_scenario_cleanup_failed path=%s", path, exc_info=True)
+
+
+# -- 世界包暂存（第六刀：进房自动装配的数据源）------------------------------
+
+#: stash 文件布局：``<scenario-storage>/fvtt-world/stash.json``。stash 与装配
+#: 标记都是**运行时数据**（落 gitignore 过的 scenarios/rooms 数据区），不进
+#: git 索引范围。
+STASH_SCHEMA = 1
+STASH_DIR_NAME = "fvtt-world"
+STASH_FILE_NAME = "stash.json"
+#: stash 收录的 NPC 转换警告上限（角色卡刀的警告完整清单留在手动导入报告里，
+#: stash 只带 NPC 相关的告警摘要）。
+STASH_NPC_WARNING_CAP = 50
+#: 装配标记：``<room>/plugins/fvtt-world-import/provision.json``。
+PROVISION_MARKER_SCHEMA = 1
+
+
+def stash_path(storage_dir: Path | str) -> Path:
+    return Path(storage_dir) / STASH_DIR_NAME / STASH_FILE_NAME
+
+
+def provision_marker_path(room_dir: Path | str) -> Path:
+    return Path(room_dir) / "plugins" / "fvtt-world-import" / "provision.json"
+
+
+def _load_stash(storage_dir: Path | str) -> dict[str, Any] | None:
+    """读剧本暂存；缺失 / schema 不符 / 结构非法 → None（按「非世界包剧本」处理）。"""
+    from trpg_server.json_store import read_json
+
+    data = read_json(stash_path(storage_dir), default=None)
+    if not isinstance(data, dict):
+        return None
+    try:
+        if int(data.get("schema") or 0) != STASH_SCHEMA:
+            return None
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data.get("scenes"), list) or not isinstance(data.get("npcs"), list):
+        return None
+    return data
+
+
+def _write_stash(storage_dir: Path | str, payload: dict[str, Any]) -> None:
+    from trpg_server.json_store import write_json_atomic
+
+    target = stash_path(storage_dir)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(target, payload)
+
+
+def _stash_scene_asset_rels(stash: dict[str, Any] | None) -> set[str]:
+    """stash → 其中场景背景引用的资产相对路径集合（升版清理上一轮用）。"""
+    if not isinstance(stash, dict):
+        return set()
+    rels: set[str] = set()
+    for row in stash.get("scenes") or []:
+        if not isinstance(row, dict):
+            continue
+        background = row.get("background") if isinstance(row.get("background"), dict) else {}
+        rel = str(background.get("asset") or "")
+        if rel.startswith("assets/") and ".." not in rel.split("/"):
+            rels.add(rel)
+    return rels
+
+
+def _scene_resolution_callbacks(
+    pkg: Any,
+) -> tuple[Callable[[dict[str, Any]], dict[str, Any] | None], Callable[[dict[str, Any]], dict[str, Any] | None]]:
+    """``run`` 与登记台共用的场景解析回调：背景图 zip 路径 + 伴生 JSON。
+
+    抽出来是第六刀复用——``rooms/<id>/run`` 与 ``scenario/import`` 的场景
+    转换必须逐字节同口径（同一套 ``convert_world_scenes`` 输入）。
+    """
+
+    def resolve_background(scene_doc: dict[str, Any]) -> dict[str, Any] | None:
+        rel = pkg.resolve_background(convert_scenes.scene_background_src(scene_doc))
+        if rel is None:
+            return None
+        return {
+            "path": rel,
+            "name": os.path.basename(rel),
+            "bytes": pkg.asset_size(rel),
+        }
+
+    def companion_for(scene_doc: dict[str, Any]) -> dict[str, Any] | None:
+        """sixianyuchanmian 形态的伴生 JSON（``assets/scenes/<名>.json``）。"""
+        src = convert_scenes.scene_background_src(scene_doc)
+        base = os.path.basename(src)
+        if not base:
+            return None
+        candidate = os.path.join("assets", "scenes", os.path.splitext(base)[0] + ".json")
+        if not pkg.has_asset(candidate):
+            return None
+        try:
+            data = json.loads(pkg.read_asset(candidate).decode("utf-8-sig"))
+        except (UnicodeDecodeError, ValueError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    return resolve_background, companion_for
+
+
+def _convert_stash_npcs(pkg: Any) -> tuple[list[dict[str, Any]], list[str], str]:
+    """包内 actors → stash 的 NPC statblock 行（fvtt_actor_id 幂等键 + module）。
+
+    - 角色卡不暂存：角色卡是**用户维度**数据（配额/归属要走 ``actors/run``
+      的人工决策），自动装配只管 NPC statblock 模块；
+    - actors 集合缺席 → 空清单 + 警告（不拒收剧本导入）；
+    - 只保留怪物（NPC）相关转换警告，角色卡的告警留给手动导入报告。
+    """
+    slot_table, weapon_name = _dnd5e_slot_and_weapon_callbacks()
+    try:
+        actor_index = read_actors(pkg)
+    except PackageError as exc:
+        return [], [], f"包里没有 actors 集合（{exc.message}），NPC 未暂存。"
+    except LevelDbError as exc:
+        raise PackageError(
+            "fvtt.leveldb_invalid", f"角色集合（LevelDB）解析失败：{exc}"
+        ) from exc
+    converted = convert_world_actors(
+        actor_index,
+        slot_table=slot_table,
+        weapon_name=weapon_name,
+        avatar_data_uri=_avatar_data_uri_factory(pkg),
+    )
+    rows: list[dict[str, Any]] = []
+    for item in converted["npcs"]:
+        module = item.get("module") if isinstance(item.get("module"), dict) else {}
+        rows.append(
+            {
+                "fvtt_actor_id": str(module.get("fvtt_actor_id") or item.get("source_id") or ""),
+                "title": str(item.get("title") or module.get("title") or ""),
+                "cr": str(item.get("cr") or ""),
+                "module": module,
+            }
+        )
+    npc_warnings = [
+        str(text)
+        for text in converted["warnings"]
+        if str(text).startswith("怪物") or not str(text).startswith("角色卡")
+    ][:STASH_NPC_WARNING_CAP]
+    return rows, npc_warnings, ""
+
+
+def _write_stash_scene_assets(
+    pkg: Any, storage_dir: Path, scenes: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[str], int]:
+    """逐场景把背景图内容寻址复制进剧本 ``assets/``，返回 (stash 场景行, 警告, 字节数)。
+
+    必须在**关包前**执行（字节留在内存 zip 里按需读取）。同图多场景 / 同图
+    重导 → 同一 hash 文件零增长；单场景读取失败 → 该场景不进 stash（警告
+    如实上报，不拒收整包）。
+    """
+    rows: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    total_bytes = 0
+    for scene in scenes:
+        background = scene.get("background") if isinstance(scene.get("background"), dict) else {}
+        rel_path = str(background.get("path") or "")
+        title = str(scene.get("title") or scene.get("scene_id") or "")
+        try:
+            data = pkg.read_asset(rel_path)
+        except (OSError, KeyError, RuntimeError) as exc:  # noqa: BLE001 - 单场景失败降级
+            warnings.append(f"场景「{title}」背景图读取失败（{exc}），未进暂存。")
+            continue
+        ext = os.path.splitext(rel_path)[1].lower()
+        try:
+            asset_rel = _write_content_addressed_asset(storage_dir, data, ext)
+        except OSError as exc:  # noqa: BLE001 - 单场景失败降级
+            warnings.append(f"场景「{title}」背景图落盘失败（{exc}），未进暂存。")
+            continue
+        total_bytes += len(data)
+        row = dict(scene)
+        row["background"] = {
+            "asset": asset_rel,
+            "name": str(background.get("name") or os.path.basename(asset_rel)),
+            "bytes": int(background.get("bytes") or len(data)),
+            "source_path": rel_path,
+        }
+        rows.append(row)
+    return rows, warnings, total_bytes
+
+
+def _stash_scene_image(storage_dir: Path, scene: Mapping[str, Any]) -> dict[str, Any] | None:
+    """stash 场景行 → ``import_scene`` 的 ``image{bytes, name}``；资产缺失返回 None。"""
+    background = scene.get("background") if isinstance(scene.get("background"), dict) else {}
+    rel = str(background.get("asset") or "")
+    if not rel.startswith("assets/") or ".." in rel.split("/"):
+        return None
+    try:
+        data = (Path(storage_dir) / rel).read_bytes()
+    except OSError:  # noqa: BLE001 - 资产缺失按该场景失败降级
+        return None
+    if not data:
+        return None
+    return {"bytes": data, "name": str(background.get("name") or os.path.basename(rel))}
+
+
+def _load_provision_marker(room_dir: Path | str) -> dict[str, Any] | None:
+    from trpg_server.json_store import read_json
+
+    data = read_json(provision_marker_path(room_dir), default=None)
+    return data if isinstance(data, dict) else None
+
+
+def _write_provision_marker(room_dir: Path | str, payload: dict[str, Any]) -> None:
+    from trpg_server.json_store import write_json_atomic
+
+    target = provision_marker_path(room_dir)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(target, payload)
 
 
 @bp.route("/scenario/import", methods=["POST"])
@@ -1286,12 +1491,63 @@ def run_scenario_import():
                 infer_edges=ai.get("infer_edges"),
             )
 
+        # -- 场景与 NPC 暂存载荷（第六刀）-------------------------------------
+        # 与 ``rooms/<id>/run`` 同一套转换口径（同一对解析回调）：背景图当时
+        # 内容寻址复制进剧本 ``assets/``，stash 只引用资产相对路径、不内嵌
+        # 字节（不复制两份大图）；NPC 暂存 statblock 模块，角色卡不暂存
+        # （用户维度数据，归属与配额走手动导入的人工决策）。
+        try:
+            stash_scene_index = read_scenes(pkg)
+        except PackageError as exc:
+            return _package_error_response(exc)
+        except LevelDbError as exc:
+            return error_response(f"世界包数据读取失败：{exc}", 400, "fvtt.leveldb_invalid")
+        except Exception as exc:  # noqa: BLE001 - LevelDB 结构问题转可读错误
+            logger.warning("fvtt_scenario_scenes_read_failed", exc_info=True)
+            return error_response(f"世界包场景读取失败：{exc}", 400, "fvtt.leveldb_invalid")
+        resolve_background, companion_for = _scene_resolution_callbacks(pkg)
+        stash_scenes_converted, stash_skipped, stash_scene_warnings = convert_world_scenes(
+            stash_scene_index,
+            resolve_background=resolve_background,
+            companion_for=companion_for,
+        )
+        try:
+            stash_npcs, stash_npc_warnings, stash_actor_note = _convert_stash_npcs(pkg)
+        except PackageError as exc:
+            return _package_error_response(exc)
+        except LevelDbError as exc:
+            return error_response(f"世界包数据读取失败：{exc}", 400, "fvtt.leveldb_invalid")
+
+        # -- 幂等定位提前到关包前：stash 资产要写进剧本 storage 目录 ----------
+        # 与 ``save_scenario_record`` 同一套 storage 目录规则（legacy 文件迁移）。
+        existing_id = _find_scenario_by_world_id(scenarios_dir, pkg.id)
+        descriptor: Path | None = None
+        previous_record: dict[str, Any] | None = None
+        if existing_id is not None:
+            descriptor, previous_record = load_scenario_by_id(scenarios_dir, existing_id)
+        if descriptor is not None and previous_record is not None:
+            scenario_id = int(previous_record.get("id") or 0)
+        else:
+            descriptor = None
+            previous_record = None
+            scenario_id = int(time.time() * 1000)
+        storage_dir = (
+            descriptor.parent
+            if descriptor is not None and descriptor.parent != scenarios_dir
+            else scenarios_dir / f"scenario-{scenario_id}"
+        )
+        if scenario_id <= 0:
+            return error_response("剧本 id 缺失，导入中止。", 500, "fvtt.scenario_write_failed")
+        stash_scenes, stash_asset_warnings, stash_assets_bytes = _write_stash_scene_assets(
+            pkg, storage_dir, stash_scenes_converted
+        )
+
         # 封面字节必须在关包前读出（资产留在内存 zip 里按需读取）。
         cover_data, cover_ext, cover_warning = _world_cover_asset(pkg)
         world = dict(pkg.world)
         _close_package(pkg)
 
-    # -- 剧本条目：幂等定位（同 world id → 原位升版）------------------------
+    # -- 剧本条目：幂等定位已在关包前完成（stash 资产要写进 storage 目录）----
     timestamp = time.strftime("%Y-%m-%dT%H:%M:%S") + ".000Z"
     marker: dict[str, Any] = {
         "world_id": pkg.id,
@@ -1299,23 +1555,17 @@ def run_scenario_import():
         "world_version": pkg.version,
         "imported_at": timestamp,
         "cover_asset": "",
+        "stash": {"scenes": len(stash_scenes), "npcs": len(stash_npcs)},
     }
-    existing_id = _find_scenario_by_world_id(scenarios_dir, pkg.id)
-    descriptor: Path | None = None
-    previous_record: dict[str, Any] | None = None
-    created_new = True
-    if existing_id is not None:
-        descriptor, previous_record = load_scenario_by_id(scenarios_dir, existing_id)
-    if descriptor is not None and previous_record is not None:
+    created_new = descriptor is None or previous_record is None
+    if not created_new:
         scenario = dict(previous_record)
-        created_new = False
         current = str(scenario.get("scenario_version") or scenario.get("version") or "1.0.0")
         scenario["scenario_version"] = normalize_semver(
             next_scenario_version(normalize_semver(current))
         )
         scenario["updatedAt"] = timestamp
     else:
-        scenario_id = int(time.time() * 1000)
         scenario = {
             "id": scenario_id,
             "title": world_title or "未命名剧本",
@@ -1339,14 +1589,10 @@ def run_scenario_import():
     _replace_journal_modules(scenario, converted["modules"])
 
     # -- 封面：world.json background → 剧本 assets/（内容寻址）--------------
-    # 与 ``save_scenario_record`` 同一套 storage 目录规则（legacy 文件迁移）。
-    if descriptor is not None and descriptor.parent != scenarios_dir:
-        storage_dir = descriptor.parent
-    else:
-        storage_dir = scenarios_dir / f"scenario-{scenario_id}"
+    # storage_dir 已在关包前按同一套目录规则算好（stash 资产先落了盘）。
     cover_rel = ""
     if cover_data is not None:
-        cover_rel = _write_scenario_cover(storage_dir, cover_data, cover_ext)
+        cover_rel = _write_content_addressed_asset(storage_dir, cover_data, cover_ext)
         scenario["cover"] = scenario_public_asset_url(f"{storage_dir.name}/{cover_rel}")
     else:
         scenario["cover"] = ""
@@ -1373,6 +1619,61 @@ def run_scenario_import():
             else ""
         )
 
+    def _orphan_defense(message: str, code: str):
+        """暂存/图谱写失败的孤儿防御：新建清目录、升版回滚剧本记录。"""
+        logger.warning("fvtt_scenario_write_failed code=%s", code, exc_info=True)
+        rollback_note = ""
+        if created_new:
+            # 新建路径：整目录清理，库回到导入前状态。
+            _remove_tree_best_effort(saved_descriptor.parent)
+        else:
+            # 升版路径：回滚剧本记录（旧内容重写 + 新版本文件删除）。
+            rolled_back = True
+            try:
+                save_scenario_record(
+                    scenarios_dir, previous_record, existing_descriptor=descriptor
+                )
+                scenario_version_path(descriptor, scenario.get("scenario_version")).unlink()
+            except (OSError, ValueError):  # noqa: BLE001 - 回滚失败必须如实报告
+                rolled_back = False
+                logger.warning("fvtt_scenario_rollback_failed", exc_info=True)
+            rollback_note = (
+                "已回滚剧本记录。"
+                if rolled_back
+                else "剧本记录回滚失败，请重跑一次导入修复。"
+            )
+        return error_response(f"{message}；{rollback_note}", 500, code)
+
+    # -- 世界包暂存（第六刀）：场景/NPC 载荷 → fvtt-world/stash.json --------
+    # stash 是**世界级**运行时数据（同 world id 幂等刷新，不随剧本版本回滚），
+    # 因此在剧本记录落稳之后、图谱之前写入；写失败与图谱同款孤儿防御。
+    old_stash = _load_stash(saved_descriptor.parent)
+    old_stash_rels = _stash_scene_asset_rels(old_stash)
+    stash_warnings = list(stash_asset_warnings)
+    stash_warnings.extend(str(row) for row in stash_scene_warnings)
+    if stash_actor_note:
+        stash_warnings.append(stash_actor_note)
+    stash_warnings.extend(str(row) for row in stash_npc_warnings)
+    stash_payload = {
+        "schema": STASH_SCHEMA,
+        "world": world_summary,
+        "imported_at": timestamp,
+        "scenes": stash_scenes,
+        "skipped": stash_skipped,
+        "npcs": stash_npcs,
+        "warnings": stash_warnings[:200],
+    }
+    try:
+        _write_stash(saved_descriptor.parent, stash_payload)
+    except OSError as exc:
+        return _orphan_defense(f"世界包暂存写入失败：{exc}", "fvtt.stash_write_failed")
+    # 暂存与剧本记录都已落稳后才清上一轮不再被引用的 stash 资产（封面共用
+    # assets/，清掉的是「旧 stash 引用过、新 stash 与封面都不再引用」的文件）。
+    new_stash_rels = _stash_scene_asset_rels(stash_payload)
+    for rel in sorted(old_stash_rels - new_stash_rels):
+        if rel != cover_rel and rel != stale_cover_rel:
+            _remove_stale_asset(saved_descriptor.parent, rel)
+
     narrative: dict[str, Any] = {"written": False, "nodes": 0, "edges": 0}
     if converted["modules"]:
         # 第四刀语义：journal 有产物才写图谱；空库/集合缺席不写 narrative.json。
@@ -1394,37 +1695,12 @@ def run_scenario_import():
             bundle = NarrativeBundle.from_dict(bundle_payload)
             save_bundle(narrative_dir, bundle)
         except NarrativeStoreError as exc:
-            logger.warning("fvtt_scenario_narrative_write_failed", exc_info=True)
-            rollback_note = ""
-            if created_new:
-                # 新建路径：整目录清理，库回到导入前状态。
-                _remove_tree_best_effort(saved_descriptor.parent)
-            else:
-                # 升版路径：回滚剧本记录（旧内容重写 + 新版本文件删除）。
-                rolled_back = True
-                try:
-                    save_scenario_record(
-                        scenarios_dir, previous_record, existing_descriptor=descriptor
-                    )
-                    scenario_version_path(descriptor, scenario.get("scenario_version")).unlink()
-                except (OSError, ValueError):  # noqa: BLE001 - 回滚失败必须如实报告
-                    rolled_back = False
-                    logger.warning("fvtt_scenario_rollback_failed", exc_info=True)
-                rollback_note = (
-                    "已回滚剧本记录。"
-                    if rolled_back
-                    else "剧本记录回滚失败，请重跑一次导入修复。"
-                )
-            return error_response(
-                f"剧本图谱写入失败：{exc}；{rollback_note}",
-                500,
-                "fvtt.narrative_write_failed",
-            )
+            return _orphan_defense(f"剧本图谱写入失败：{exc}", "fvtt.narrative_write_failed")
         narrative = {"written": True, "nodes": len(bundle.nodes), "edges": len(bundle.edges)}
 
     # 图谱与剧本记录都已落稳后才清上一轮封面（本插件产物）。
     if stale_cover_rel and stale_cover_rel != cover_rel:
-        _remove_stale_cover(storage_dir, stale_cover_rel)
+        _remove_stale_asset(storage_dir, stale_cover_rel)
 
     # -- 完成报告 -----------------------------------------------------------
     warnings: list[str] = []
@@ -1436,6 +1712,9 @@ def run_scenario_import():
         warnings.append(cover_warning)
     warnings.extend(str(row) for row in report.get("warnings") or [])
     warnings.extend(str(row) for row in converted["warnings"])
+    # stash 资产级失败是审计覆盖不到的新信息（读取/落盘失败），如实进警告；
+    # 场景跳过类警告审计已报过，不重复。
+    warnings.extend(str(row) for row in stash_asset_warnings)
 
     counts = dict(converted["totals"])
     counts["warnings"] = len(warnings)
@@ -1445,20 +1724,31 @@ def run_scenario_import():
     counts["npcs"] = report.get("npcs", 0)
     counts["vehicles"] = report.get("vehicles", 0)
 
+    stash_summary = {
+        "written": True,
+        "scenes": len(stash_scenes),
+        "skipped": len(stash_skipped),
+        "npcs": len(stash_npcs),
+        "assets_bytes": stash_assets_bytes,
+        "warnings": len(stash_warnings),
+    }
     open_room = {
         "scenario_id": scenario_id,
         "scenario_title": scenario.get("title") or "",
         "room_mode": "scripted",
         "create_room_endpoint": "POST /api/rooms",
+        "auto_provision": True,
         "hint": (
             "开团走现有创建房间流程：POST /api/rooms 传 name + room_mode=scripted "
             f"+ scenario_id={scenario_id} 即可绑定本剧本开房；"
+            "房主/房管首次进房会自动装配暂存的场景（含墙/光/棋子）与 NPC，"
             "玩家进桌用现有房间码/邀请链接，无需任何新请柬。"
         ),
         "room_steps": [
             f"POST /api/rooms（name + room_mode=scripted + scenario_id={scenario_id}）创建房间",
-            f"POST /api/plugins/fvtt-world-import/rooms/<room_id>/run 把本包场景写入房间地图（挂房间，不进剧本）",
-            "POST /api/plugins/fvtt-world-import/rooms/<room_id>/actors/run 导入角色卡与 NPC（挂用户库/房间剧本）",
+            "房主/房管进房：自动装配场景与 NPC（POST rooms/<room_id>/auto-provision，前端静默触发）",
+            "（可选兜底）POST /api/plugins/fvtt-world-import/rooms/<room_id>/run 全量重导场景",
+            "（可选兜底）POST /api/plugins/fvtt-world-import/rooms/<room_id>/actors/run 导入角色卡与 NPC",
             "把现有房间码/邀请链接发给玩家进桌跑团",
         ],
     }
@@ -1470,6 +1760,12 @@ def run_scenario_import():
             if converted["modules"]
             else "journal 为空库或集合缺席，未产出场景文本（剧本条目照常产出）。"
         )
+        + (
+            f"已暂存 {stash_summary['scenes']} 个场景、{stash_summary['npcs']} 个 NPC"
+            "（开房进房自动装配）。"
+            if stash_summary["scenes"] or stash_summary["npcs"]
+            else ""
+        )
     )
     return success_response(
         {
@@ -1479,11 +1775,258 @@ def run_scenario_import():
             "created": created_new,
             "cover_url": str(scenario.get("cover") or ""),
             "counts": counts,
+            "stash": stash_summary,
             "narrative": narrative,
             "degradations": converted["degradations"],
             "warnings": warnings,
             "world": world_summary,
             "open_room": open_room,
+        },
+        message,
+    )
+
+
+# -- 进房自动装配（第六刀）--------------------------------------------------
+
+
+def _provision_skipped(reason: str, message: str, **extra: Any):
+    """幂等跳过响应：200 + status=skipped + 稳定 reason，零写入。"""
+    payload: dict[str, Any] = {"status": "skipped", "reason": reason, "message": message}
+    payload.update(extra)
+    return success_response(payload, message)
+
+
+@bp.route("/rooms/<room_id>/auto-provision", methods=["POST"])
+def auto_provision_room(room_id: str):
+    """世界包剧本 → 房间自动水合：地图场景（墙/光/棋子）+ NPC statblock 模块。
+
+    判定（全部满足才执行，否则 200 skipped + 稳定 reason，零写入）：
+
+    - 房主/房管触发（玩家 403）——前端胶水只在 DM 侧静默调用；
+    - 房间规则集是 dnd5e（非 5e 房 403）；
+    - 房间绑定的剧本有本插件的 fvtt-world stash（非世界包剧本可读跳过）；
+    - 房间当前没有任何场景（``list_scenes`` 为空）且未装配过（provision 标记）。
+
+    执行：stash.scenes 逐个走 veil-map ``import_scene``（世界 active 场景置
+    激活并广播 ``room_map_changed``），stash.npcs 幂等并入房间绑定剧本
+    （``_npc_scenario_repin``：actors/run 同款升版重钉），最后落装配标记
+    （``rooms/<id>/plugins/fvtt-world-import/provision.json``）防重复。
+    角色卡不自动装配（用户维度数据，走房间页手动导入）。
+    """
+    room_dir, info, denied = _room_and_manager(room_id)
+    if denied:
+        return denied
+
+    # 规则集门闸：与 actors/journal 刀同口径，但按「探测端点」语义给 403。
+    try:
+        ruleset_id = str(
+            resolve_rule_id(info, scenarios_dir=current_app.config.get("SCENARIOS_DIR")) or ""
+        ).strip().lower()
+    except RulesetSelectionError as exc:
+        return error_response(str(exc.message or exc), 400, "fvtt.ruleset_unavailable")
+    if ruleset_id != "dnd5e":
+        return error_response(
+            "只有 dnd5e 房间可以自动装配世界包数据（当前房间规则集不支持）。",
+            403,
+            "fvtt.ruleset_unsupported",
+        )
+
+    scenario_id = str(info.get("scenario_id") or "").strip()
+    if not scenario_id:
+        return _provision_skipped(
+            "scenario_missing", "房间没有绑定剧本，无需自动装配。", scenario_id=""
+        )
+
+    marker = _load_provision_marker(room_dir)
+    if marker is not None and str(marker.get("scenario_id") or "") == scenario_id:
+        return _provision_skipped(
+            "already_provisioned",
+            "本房间的世界包数据已装配过，不重复装配。",
+            scenario_id=scenario_id,
+        )
+
+    service = _map_service()
+    if service is None:
+        return error_response(
+            "地图插件（veil-map）未加载，无法自动装配场景；请启用后重试。",
+            503,
+            "fvtt.map_unavailable",
+        )
+
+    listing = service.list_scenes(room_dir)
+    if not listing.get("ok"):
+        return error_response(
+            str(listing.get("error") or "读取场景目录失败。"),
+            500,
+            str(listing.get("code") or "map.scene_unavailable"),
+        )
+    if listing.get("scenes"):
+        return _provision_skipped(
+            "room_has_scenes",
+            "房间已有地图场景，跳过世界包自动装配。",
+            scenario_id=scenario_id,
+        )
+
+    from trpg_server.scenario_store import load_scenario_by_id
+
+    scenarios_dir = Path(current_app.config.get("SCENARIOS_DIR") or "")
+    descriptor, _scenario = load_scenario_by_id(scenarios_dir, scenario_id)
+    if descriptor is None:
+        return _provision_skipped(
+            "scenario_missing",
+            f"房间绑定的剧本（{scenario_id}）不存在，无法自动装配。",
+            scenario_id=scenario_id,
+        )
+    # stash 与装配标记一样是剧本 storage 根目录的运行时数据（不随版本文件走）。
+    storage_dir = descriptor.resolve().parent
+    if storage_dir.name == "versions" and not (storage_dir / "scenario.json").exists():
+        storage_dir = storage_dir.parent
+    stash = _load_stash(storage_dir)
+    if stash is None:
+        return _provision_skipped(
+            "scenario_not_world",
+            "当前剧本不是世界包导入的剧本（没有可装配的世界数据）；"
+            "如需导入地图请在房间页使用「导入世界包」。",
+            scenario_id=scenario_id,
+        )
+    scenes = [row for row in stash.get("scenes") or [] if isinstance(row, dict)]
+    npcs = [row for row in stash.get("npcs") or [] if isinstance(row, dict)]
+    if not scenes and not npcs:
+        return _provision_skipped(
+            "stash_empty",
+            "世界包暂存里没有可装配的场景或 NPC，跳过自动装配。",
+            scenario_id=scenario_id,
+        )
+
+    # -- 场景：非激活先写、世界 active 场景最后写（带 activate 切换并广播）---
+    chosen = next((row for row in scenes if row.get("active")), None)
+    if chosen is None and scenes:
+        chosen = scenes[0]
+    ordered = [row for row in scenes if row is not chosen]
+    if chosen is not None:
+        ordered.append(chosen)
+
+    results: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    active_scene_id = ""
+    for row in ordered:
+        title = str(row.get("title") or row.get("scene_id") or "")
+        image = _stash_scene_image(storage_dir, row)
+        if image is None:
+            failures.append(
+                {
+                    "title": title,
+                    "code": "fvtt.stash_asset_missing",
+                    "error": f"背景资产缺失或读取失败：{(row.get('background') or {}).get('asset', '')}",
+                }
+            )
+            warnings.append(f"场景「{title}」的背景资产缺失，未装配。")
+            continue
+        payload = dict(row)
+        payload["image"] = image
+        activate = row is chosen
+        try:
+            outcome = service.import_scene(room_dir, info, payload, activate=activate)
+        except Exception:  # noqa: BLE001 - 服务端异常按单场景失败处理
+            logger.warning("fvtt_autoprovision_scene_failed room=%s", room_id, exc_info=True)
+            outcome = {"ok": False, "code": "map.import_failed", "error": "场景写入失败。"}
+        if not outcome.get("ok"):
+            failures.append(
+                {
+                    "title": title,
+                    "code": str(outcome.get("code") or "map.import_failed"),
+                    "error": str(outcome.get("error") or "场景写入失败。"),
+                }
+            )
+            warnings.append(f"场景「{title}」写入失败：{outcome.get('error')}")
+            continue
+        if activate:
+            active_scene_id = str(outcome.get("scene_id") or "")
+        results.append(
+            {
+                "scene_id": outcome.get("scene_id"),
+                "title": outcome.get("title") or title,
+                "created": bool(outcome.get("created")),
+                "active": activate,
+                "walls": outcome.get("walls"),
+                "lights": outcome.get("lights"),
+                "tokens": outcome.get("tokens"),
+                "grid_size": outcome.get("grid_size"),
+                "warnings": list(row.get("warnings") or []),
+            }
+        )
+
+    if scenes and not results:
+        first_error = str(failures[0].get("error")) if failures else "未知错误"
+        return error_response(
+            "世界包场景装配失败（"
+            + first_error
+            + "）；未写装配标记，可稍后重进房间重试，或在房间页"
+            "「导入世界包」手动导入。",
+            500,
+            "fvtt.provision_failed",
+        )
+
+    # -- NPC：幂等并入房间绑定剧本（actors/run 同款升版重钉）-----------------
+    scenario_repin = None
+    npc_merged = 0
+    npc_error = None
+    if npcs:
+        scenario_repin, npc_error = _npc_scenario_repin(room_dir, info, [dict(row) for row in npcs])
+        if scenario_repin is not None:
+            npc_merged = len(npcs)
+        else:
+            try:
+                npc_message = str(npc_error[0].get_json().get("message") or "剧本写入失败")
+            except Exception:  # noqa: BLE001 - 取错误文案尽力而为
+                npc_message = "剧本写入失败"
+            warnings.append(f"NPC 模块并入剧本失败：{npc_message}")
+
+    provisioned_at = time.strftime("%Y-%m-%dT%H:%M:%S") + ".000Z"
+    marker_payload = {
+        "schema": PROVISION_MARKER_SCHEMA,
+        "scenario_id": scenario_id,
+        "world_id": str((stash.get("world") or {}).get("id") or ""),
+        "world_title": str((stash.get("world") or {}).get("title") or ""),
+        "world_version": str((stash.get("world") or {}).get("version") or ""),
+        "scenes": len(results),
+        "scene_failures": failures,
+        "npcs": npc_merged,
+        "npc_failed": npc_error is not None,
+        "scenario_version": str((scenario_repin or {}).get("scenario_version") or ""),
+        "active_scene_id": active_scene_id,
+        "provisioned_at": provisioned_at,
+        "provisioned_by": {
+            "user_id": session.get("user_id"),
+            "username": str(session.get("username") or ""),
+        },
+    }
+    try:
+        _write_provision_marker(room_dir, marker_payload)
+    except OSError:  # noqa: BLE001 - 标记写失败不影响已装配数据，如实警告
+        logger.warning("fvtt_provision_marker_failed room=%s", room_id, exc_info=True)
+        warnings.append("装配标记写入失败；再次进房可能重复探测，重复装配是幂等的。")
+
+    world_title = str((stash.get("world") or {}).get("title") or "")
+    message = f"已自动装配世界包「{world_title}」：{len(results)} 个场景"
+    if npc_merged:
+        message += f"、{npc_merged} 个 NPC 模块"
+    message += "。"
+    if failures:
+        message += f"{len(failures)} 个场景装配失败，可在房间页手动补齐。"
+    return success_response(
+        {
+            "status": "provisioned",
+            "scenario_id": scenario_id,
+            "world": dict(stash.get("world") or {}),
+            "scenes": results,
+            "active_scene_id": active_scene_id,
+            "scene_failures": failures,
+            "npcs": {"merged": npc_merged, "failed": npc_error is not None},
+            "scenario": scenario_repin,
+            "warnings": warnings,
+            "provisioned_at": provisioned_at,
         },
         message,
     )

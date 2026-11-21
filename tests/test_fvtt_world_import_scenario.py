@@ -227,6 +227,11 @@ def test_import_heroes_is_idempotent_upgrades_in_place(tmp_path, plugins):
     first = _import(client, _require_zip(HEROES_ZIP))
     assert first.status_code == 200
     scenario_id = int(first.get_json()["data"]["scenario_id"])
+    assets_before = {
+        path.name for path in (scenarios / f"scenario-{scenario_id}" / "assets").iterdir()
+    }
+    # 第六刀后 assets/ 除封面外还有 stash 场景背景（heroes 3 个可转换场景）。
+    assert len(assets_before) == 4
 
     second = _import(client, HEROES_ZIP)
     assert second.status_code == 200
@@ -244,10 +249,13 @@ def test_import_heroes_is_idempotent_upgrades_in_place(tmp_path, plugins):
     assert record["scenario_version"] == "0.1.7"
     assert record["fvtt_world_import"]["world_version"] == "0.1.6"
     assert (scenarios / f"scenario-{scenario_id}" / "versions" / "0.1.7.json").is_file()
-    # 图谱节点同样不翻倍；封面内容寻址同名零增长。
+    # 图谱节点同样不翻倍；封面与 stash 场景背景全部内容寻址——同图重导
+    # 零增长（资产集合与首次导入完全一致，而不是只有封面一个文件）。
     assert len(_narrative(scenarios, scenario_id)["nodes"]) == 14
-    assets = list((scenarios / f"scenario-{scenario_id}" / "assets").iterdir())
-    assert len(assets) == 1
+    assets_after = {
+        path.name for path in (scenarios / f"scenario-{scenario_id}" / "assets").iterdir()
+    }
+    assert assets_after == assets_before
 
 
 def test_import_upgrade_preserves_non_journal_modules(tmp_path, plugins):
