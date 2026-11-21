@@ -90,6 +90,11 @@ body.is-guest .guest-login-hint {
 
 .scenario-card-meta p {
     margin: 0;
+    /* 作者/创建者名过长时省略，避免把卡片横向撑长（与标题行同款处理）。 */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
 }
 
 /* 按钮布局：游玩独占一行，其余四个按钮一行两个（2 × 2）。 */
