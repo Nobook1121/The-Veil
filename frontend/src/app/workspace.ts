@@ -70,13 +70,17 @@
         pluginId: string;
         el: HTMLElement;
         instance: TrpgPluginInstance | null;
+        // 插件自己的事件订阅表；销毁时只清自己的，避免误伤并存的其它插件。
+        handlers: Map<string, Set<(payload: unknown) => void>>;
     }
 
-    const pluginHandlers = new Map<string, Set<(payload: unknown) => void>>();
+    let stagePlugin: ActiveStagePlugin | null = null;
+    let railPlugin: ActiveStagePlugin | null = null;
+    let pluginRequestSeq = 0;
+    let railRequestSeq = 0;
     const pluginAssets = new Map<string, Promise<void>>();
     const pluginNotified = new Set<string>();
-    let stagePlugin: ActiveStagePlugin | null = null;
-    let pluginRequestSeq = 0;
+    const railNotified = new Set<string>();
 
     let canvas: HTMLCanvasElement | null = null;
     let stageContext: CanvasRenderingContext2D | null = null;
@@ -910,10 +914,13 @@
         }
         resizeStage();
         void ensureStagePlugin();
+        void ensureRailPlugin();
     }
 
     function destroyStage(): void {
         destroyStagePlugin();
+        destroyRailPlugin();
+        setStageEmptyHint(false);
         if (stageObserver) {
             stageObserver.disconnect();
             stageObserver = null;
@@ -927,19 +934,18 @@
 
     // ---------------------------------------------------------------- 插件宿主
     function emitPluginEvent(type: string, payload: unknown): void {
-        const handlers = pluginHandlers.get(type);
-        if (!handlers) return;
-        handlers.forEach((handler) => {
-            try {
-                handler(payload);
-            } catch (error) {
-                console.warn("workspace plugin handler failed", type, error);
-            }
-        });
-    }
-
-    function clearPluginHandlers(): void {
-        pluginHandlers.clear();
+        // 事件总线广播给全部在挂插件（舞台 / 右栏），各自按需订阅。
+        for (const plugin of [stagePlugin, railPlugin]) {
+            const handlers = plugin?.handlers.get(type);
+            if (!handlers) continue;
+            handlers.forEach((handler) => {
+                try {
+                    handler(payload);
+                } catch (error) {
+                    console.warn("workspace plugin handler failed", type, error);
+                }
+            });
+        }
     }
 
     function notifyCamera(): void {
@@ -957,7 +963,24 @@
         }
         if (stagePlugin?.el) stagePlugin.el.remove();
         stagePlugin = null;
-        clearPluginHandlers();
+    }
+
+    function destroyRailPlugin(invalidate = true): void {
+        if (invalidate) railRequestSeq += 1;
+        if (railPlugin?.instance?.destroy) {
+            try {
+                railPlugin.instance.destroy();
+            } catch (error) {
+                console.warn("workspace rail plugin destroy failed", error);
+            }
+        }
+        if (railPlugin?.el) railPlugin.el.remove();
+        railPlugin = null;
+    }
+
+    function setStageEmptyHint(visible: boolean): void {
+        const hint = byId<HTMLElement>("wsStageEmpty");
+        if (hint) hint.hidden = !visible;
     }
 
     function findAssetByUrl(url: string): boolean {
@@ -1074,7 +1097,7 @@
         return { width: host?.clientWidth || 0, height: host?.clientHeight || 0 };
     }
 
-    function createPluginContext(payload: RoomUiPayload, slot: RoomUiSlot): StagePluginContext {
+    function createPluginContext(payload: RoomUiPayload, slot: RoomUiSlot, handlers: Map<string, Set<(payload: unknown) => void>>): StagePluginContext {
         const room = activeRoom();
         return {
             room: {
@@ -1093,14 +1116,14 @@
             assets: Array.isArray(slot.assets) ? [...slot.assets] : [],
             events: {
                 on(type: string, handler: (payload: unknown) => void): () => void {
-                    let handlers = pluginHandlers.get(type);
-                    if (!handlers) {
-                        handlers = new Set();
-                        pluginHandlers.set(type, handlers);
+                    let bucket = handlers.get(type);
+                    if (!bucket) {
+                        bucket = new Set();
+                        handlers.set(type, bucket);
                     }
-                    handlers.add(handler);
+                    bucket.add(handler);
                     return () => {
-                        handlers?.delete(handler);
+                        bucket?.delete(handler);
                     };
                 },
             },
@@ -1181,6 +1204,8 @@
                 .sort((left, right) => Number(right.priority || 0) - Number(left.priority || 0))[0];
             if (!payload || !slot) {
                 destroyStagePlugin(false);
+                // 没有地图插件（如 veil-map 未启用）时给空画布提示，而不是黑屏。
+                setStageEmptyHint(true);
                 return;
             }
             if (stagePlugin?.pluginId === slot.plugin_id && stagePlugin.el.isConnected) {
@@ -1195,14 +1220,16 @@
             el.className = "ws-plugin-stage";
             el.dataset.pluginId = slot.plugin_id;
             host.appendChild(el);
-            stagePlugin = { pluginId: slot.plugin_id, el, instance: null };
+            const handlers = new Map<string, Set<(payload: unknown) => void>>();
+            stagePlugin = { pluginId: slot.plugin_id, el, instance: null, handlers };
             const module = window.TrpgStagePlugins?.[slot.plugin_id];
             const mount = module?.[slot.mount] || module?.mount;
             if (typeof mount !== "function") {
                 throw new Error(`plugin mount missing: ${slot.plugin_id}.${slot.mount}`);
             }
-            const instance = mount(el, createPluginContext(payload, slot)) || null;
-            stagePlugin = { pluginId: slot.plugin_id, el, instance };
+            const instance = mount(el, createPluginContext(payload, slot, handlers)) || null;
+            stagePlugin = { pluginId: slot.plugin_id, el, instance, handlers };
+            setStageEmptyHint(false);
             drawStage();
             emitPluginEvent("combat", combatState);
             emitPluginEvent("members", activeRoom());
@@ -1219,6 +1246,66 @@
                 if (!pluginNotified.has(roomId)) {
                     pluginNotified.add(roomId);
                     window.showNotification?.("地图插件加载失败，已回退到基础画布。", "error");
+                }
+            }
+        }
+    }
+
+    /**
+     * 右侧栏插件（``room.rail.right`` 槽）：dnd5e-vtt 战桌面板等。
+     * 与舞台插件共用同一条房间 UI 声明接口与资产加载路径；没有声明该槽的
+     * 房间保持核心三 tab 侧栏，不做任何 DOM 变更。
+     */
+    async function ensureRailPlugin(): Promise<void> {
+        if (layout !== "canvas" || !roomId) {
+            destroyRailPlugin();
+            return;
+        }
+        const seq = ++railRequestSeq;
+        try {
+            const response = await TrpgApi.get<ApiResponse<RoomUiPayload>>(
+                `/api/rooms/${encodeURIComponent(roomId)}/ui`
+            );
+            if (seq !== railRequestSeq) return;
+            const payload = response?.success ? response.data : null;
+            const slots = payload && Array.isArray(payload.slots) ? payload.slots : [];
+            const slot = slots
+                .filter((item) => item.slot === "room.rail.right")
+                .sort((left, right) => Number(right.priority || 0) - Number(left.priority || 0))[0];
+            if (!payload || !slot) {
+                destroyRailPlugin(false);
+                return;
+            }
+            if (railPlugin?.pluginId === slot.plugin_id && railPlugin.el.isConnected) {
+                return;
+            }
+            destroyRailPlugin(false);
+            await loadPluginAssets(slot.plugin_id, Array.isArray(slot.assets) ? slot.assets : []);
+            if (seq !== railRequestSeq || layout !== "canvas") return;
+            const body = bodyElement();
+            if (!body) return;
+            const el = document.createElement("div");
+            el.className = "ws-chrome ws-plugin-rail";
+            el.dataset.pluginId = slot.plugin_id;
+            body.appendChild(el);
+            const handlers = new Map<string, Set<(payload: unknown) => void>>();
+            railPlugin = { pluginId: slot.plugin_id, el, instance: null, handlers };
+            const module = window.TrpgStagePlugins?.[slot.plugin_id];
+            const mount = module?.[slot.mount] || module?.mount;
+            if (typeof mount !== "function") {
+                throw new Error(`plugin mount missing: ${slot.plugin_id}.${slot.mount}`);
+            }
+            const instance = mount(el, createPluginContext(payload, slot, handlers)) || null;
+            railPlugin = { pluginId: slot.plugin_id, el, instance, handlers };
+            emitPluginEvent("combat", combatState);
+            emitPluginEvent("members", activeRoom());
+        } catch (error) {
+            console.warn("workspace rail plugin failed", error);
+            if (seq === railRequestSeq) {
+                destroyRailPlugin(false);
+                if (!railNotified.has(roomId)) {
+                    railNotified.add(roomId);
+                    window.showNotification?.("战桌面板加载失败，已回退到基础侧栏。", "error");
                 }
             }
         }
@@ -1421,6 +1508,7 @@
         const nextRoomId = String(room?.id || "");
         if (nextRoomId !== roomId) {
             destroyStagePlugin();
+            destroyRailPlugin();
             roomId = nextRoomId;
             sidebarTouched = false;
             panel = "chat";
@@ -1456,6 +1544,7 @@
     function bindStaticEvents(): void {
         window.addEventListener("trpg:room-changed", (event) => {
             destroyStagePlugin();
+            destroyRailPlugin();
             const detail = (event as CustomEvent<{ room?: Room | null }>).detail;
             void onRoomChanged(detail?.room || null);
         });

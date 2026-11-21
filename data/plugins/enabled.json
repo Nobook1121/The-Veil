@@ -1,5 +1,5 @@
 {
   "version": 1,
-  "enabled": ["dnd5e-srd", "dnd5e", "veil-map", "fvtt-world-import"],
+  "enabled": ["dnd5e-srd", "dnd5e", "veil-map", "fvtt-world-import", "dnd5e-vtt"],
   "updated_at": "2026-11-21T00:00:00"
 }

@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "dnd5e-vtt",
+  "name": "D&D 5e 战桌",
+  "version": "0.1.0",
+  "description": "D&D 5e 战桌 UI（M2 骨架）：右侧栏六面板（聊天/战斗/场景/角色/物品/日志）与观察者裁剪的面板数据端点。布局沿用 dnd5e 规则集声明的 dnd5e-canvas；veil-map 为可选依赖，缺失时地图区降级为空画布提示，面板照常工作。",
+  "author": "The Veil",
+  "api_version": 1,
+  "requires": {
+    "plugins": {
+      "dnd5e": ">=0.1.0"
+    }
+  },
+  "code": {
+    "entry": "entry.py"
+  },
+  "capabilities": {
+    "http_blueprints": {
+      "module": "entry.py",
+      "blueprints": ["bp"]
+    },
+    "ui": {
+      "api_version": 1,
+      "slots": [
+        {
+          "id": "dnd5e-vtt-rail",
+          "slot": "room.rail.right",
+          "title_i18n": "dnd5e_vtt.rail_title",
+          "rulesets": ["dnd5e"],
+          "requires": [],
+          "priority": 100,
+          "layout": {
+            "desktop": "fill"
+          },
+          "permissions": [
+            "room.read"
+          ],
+          "mount": "mountRail"
+        }
+      ]
+    },
+    "frontend_assets": [
+      {
+        "path": "ui/dnd5e-vtt.js",
+        "type": "script"
+      },
+      {
+        "path": "ui/dnd5e-vtt.css",
+        "type": "style"
+      }
+    ]
+  }
+}

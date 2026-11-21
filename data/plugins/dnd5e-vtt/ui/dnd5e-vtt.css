@@ -1,0 +1,376 @@
+/* dnd5e-vtt 插件：战桌右侧栏六面板样式。
+   全部限定在 vtt- 前缀与 .ws-plugin-rail 宿主内；主题色沿用房间主题变量
+   （--theme-bg-elevated / --color-panel / --color-primary / --border-subtle），
+   做法与 veil-map 的 map.css 一致：color-mix + var 回退值。 */
+
+/* --------------------------------------------------------------------------
+   tab 接管：战桌面板就绪后，核心的聊天/角色 tab 由插件同名面板替代，
+   设置 tab 与折叠/浮层按钮保留给核心。
+   -------------------------------------------------------------------------- */
+.home-chat-body[data-vtt-mounted] .ws-sidebar-tabs [data-ws-panel="chat"],
+.home-chat-body[data-vtt-mounted] .ws-sidebar-tabs [data-ws-panel="character"] {
+    display: none;
+}
+
+/* tab 顺序（学 FVTT）：六面板 → 核心设置 → 折叠/浮层按钮。
+   DOM 上插件 tab 追加在末尾（不打进 React 子序列表），视觉顺序交给 flex order。 */
+.home-chat-body[data-vtt-mounted] .ws-sidebar-tabs .vtt-tab[data-vtt-panel="chat"] { order: 1; }
+.home-chat-body[data-vtt-mounted] .ws-sidebar-tabs .vtt-tab[data-vtt-panel="combat"] { order: 2; }
+.home-chat-body[data-vtt-mounted] .ws-sidebar-tabs .vtt-tab[data-vtt-panel="scenes"] { order: 3; }
+.home-chat-body[data-vtt-mounted] .ws-sidebar-tabs .vtt-tab[data-vtt-panel="characters"] { order: 4; }
+.home-chat-body[data-vtt-mounted] .ws-sidebar-tabs .vtt-tab[data-vtt-panel="items"] { order: 5; }
+.home-chat-body[data-vtt-mounted] .ws-sidebar-tabs .vtt-tab[data-vtt-panel="journal"] { order: 6; }
+.home-chat-body[data-vtt-mounted] .ws-sidebar-tabs [data-ws-panel="settings"] { order: 7; }
+.home-chat-body[data-vtt-mounted] .ws-sidebar-tabs .ws-sidebar-toggle { order: 8; }
+
+/* --------------------------------------------------------------------------
+   面板容器
+   -------------------------------------------------------------------------- */
+.vtt-rail-host {
+    background: var(--theme-bg-elevated, var(--color-panel, #14181c));
+}
+
+.vtt-rail {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.vtt-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--color-muted, rgba(236, 231, 219, 0.62));
+    font-size: 0.78rem;
+}
+
+.vtt-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    height: 100%;
+    min-height: 0;
+    padding: 14px 14px 18px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    overscroll-behavior: contain;
+}
+
+.vtt-panel[hidden] {
+    display: none !important;
+}
+
+.vtt-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 0 0 auto;
+    margin: 0;
+}
+
+.vtt-panel-head h3 {
+    margin: 0;
+    color: var(--color-text, #ece7db);
+    font-size: 0.92rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+/* --------------------------------------------------------------------------
+   空态 / 提示 / 操作
+   -------------------------------------------------------------------------- */
+.vtt-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    margin-top: 22px;
+    padding: 18px 14px;
+    border: 1px dashed var(--border-subtle, rgba(255, 255, 255, 0.12));
+    border-radius: 12px;
+    color: var(--color-muted, rgba(236, 231, 219, 0.6));
+    text-align: center;
+}
+
+.vtt-empty i {
+    font-size: 1.4rem;
+    color: color-mix(in srgb, var(--color-primary, #c8a35a) 72%, transparent);
+}
+
+.vtt-empty strong {
+    color: var(--color-text, #ece7db);
+    font-size: 0.86rem;
+}
+
+.vtt-empty p {
+    margin: 0;
+    font-size: 0.74rem;
+    line-height: 1.6;
+}
+
+.vtt-note {
+    margin: 0;
+    padding: 7px 9px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 26%, transparent);
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 8%, transparent);
+    color: color-mix(in srgb, var(--color-text, #ece7db) 82%, transparent);
+    font-size: 0.7rem;
+    line-height: 1.55;
+}
+
+.vtt-actions {
+    display: flex;
+    justify-content: center;
+    margin-top: 6px;
+}
+
+.vtt-retry {
+    padding: 6px 16px;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 42%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 14%, transparent);
+    color: var(--color-text, #ece7db);
+    font-size: 0.76rem;
+    cursor: pointer;
+}
+
+.vtt-retry:hover {
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 22%, transparent);
+}
+
+/* --------------------------------------------------------------------------
+   战斗：先攻列表
+   -------------------------------------------------------------------------- */
+.vtt-initiative {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.vtt-init-item {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--color-text, #fff) 4%, transparent);
+    color: var(--color-text, #ece7db);
+    font-size: 0.78rem;
+}
+
+.vtt-init-item.is-current {
+    border-color: color-mix(in srgb, var(--color-primary, #c8a35a) 60%, transparent);
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 16%, transparent);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--color-primary, #c8a35a) 22%, transparent);
+}
+
+.vtt-init-roll {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    height: 22px;
+    padding: 0 4px;
+    border-radius: 7px;
+    background: color-mix(in srgb, #0d1114 72%, transparent);
+    color: color-mix(in srgb, var(--color-primary, #c8a35a) 88%, var(--color-text, #ece7db));
+    font-weight: 700;
+    font-size: 0.76rem;
+}
+
+.vtt-init-item.is-current .vtt-init-roll {
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 30%, #0d1114);
+    color: #f5e6c8;
+}
+
+.vtt-init-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vtt-init-hp {
+    color: var(--color-muted, rgba(236, 231, 219, 0.66));
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.vtt-init-item.is-player .vtt-init-name::after {
+    content: "（玩家）";
+    margin-left: 4px;
+    color: var(--color-muted, rgba(236, 231, 219, 0.55));
+    font-size: 0.68rem;
+}
+
+/* --------------------------------------------------------------------------
+   角色目录（玩家 + NPC/怪物分组）
+   -------------------------------------------------------------------------- */
+.vtt-directory {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.vtt-member {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 8px;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--color-text, #fff) 4%, transparent);
+}
+
+.vtt-member-avatar {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--color-text, #fff) 18%, transparent);
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 26%, #14181c);
+    color: var(--color-text, #ece7db);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.vtt-member-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.vtt-member-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.vtt-member-main strong {
+    color: var(--color-text, #ece7db);
+    font-size: 0.8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vtt-member-main small {
+    color: var(--color-muted, rgba(236, 231, 219, 0.6));
+    font-size: 0.7rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vtt-member-dot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--color-text, #fff) 16%, transparent);
+}
+
+.vtt-member[data-online="true"] .vtt-member-dot {
+    background: #43c463;
+    box-shadow: 0 0 6px rgba(67, 196, 99, 0.6);
+}
+
+.vtt-group-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 14px 0 4px;
+    color: var(--color-muted, rgba(236, 231, 219, 0.62));
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.vtt-group-title span {
+    padding: 1px 7px;
+    border: 1px solid color-mix(in srgb, var(--color-warning, #e0b54a) 42%, transparent);
+    border-radius: 999px;
+    color: var(--color-warning, #e0b54a);
+    font-size: 0.62rem;
+    letter-spacing: 0.03em;
+    text-transform: none;
+}
+
+/* --------------------------------------------------------------------------
+   日志事件流
+   -------------------------------------------------------------------------- */
+.vtt-log {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.vtt-log-item {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    align-items: baseline;
+    gap: 7px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-text, #fff) 3%, transparent);
+    font-size: 0.74rem;
+}
+
+.vtt-log-time {
+    color: var(--color-muted, rgba(236, 231, 219, 0.5));
+    font-size: 0.66rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.vtt-log-kind {
+    flex: 0 0 auto;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 34%, transparent);
+    color: color-mix(in srgb, var(--color-primary, #c8a35a) 86%, var(--color-text, #ece7db));
+    font-size: 0.64rem;
+    white-space: nowrap;
+}
+
+.vtt-log-content {
+    color: var(--color-text, rgba(236, 231, 219, 0.9));
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   动效尊重系统设置
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+    .vtt-tab,
+    .vtt-retry,
+    .vtt-init-item,
+    .vtt-member {
+        transition: none;
+    }
+}

@@ -353,6 +353,48 @@ body:has(.home-chat-body[data-room-layout="canvas"][data-ws-size="narrow"]) {
     z-index: 2;
 }
 
+/* 插件右侧栏宿主（room.rail.right 槽）：几何与核心侧栏面板一致；
+   显示规则保持通用——data-room-panel 的值不属于核心三面板（chat/character/
+   settings）时，视为插件面板并显示宿主，核心不需要认识具体面板 id。 */
+.ws-plugin-rail {
+    display: none;
+    position: absolute;
+    top: calc(var(--ws-topbar-height, 48px) + 36px);
+    right: 0;
+    bottom: 0;
+    width: var(--ws-sidebar-active, 380px);
+    overflow: hidden;
+    background: var(--theme-bg-elevated, var(--color-panel, #14181c));
+    border-left: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    z-index: 7;
+}
+
+.home-chat-body[data-ws-size="medium"] .ws-plugin-rail {
+    top: calc(var(--ws-topbar-compact, 44px) + 36px);
+}
+
+.home-chat-body[data-room-layout="canvas"]:not([data-room-panel="chat"]):not([data-room-panel="character"]):not([data-room-panel="settings"]) .ws-plugin-rail {
+    display: block;
+}
+
+/* 折叠成 48px 图标栏时只保留图标，不显示插件面板本体。 */
+.home-chat-body[data-ws-size="wide"][data-ws-sidebar="collapsed"] .ws-plugin-rail,
+.home-chat-body[data-ws-size="medium"][data-ws-sidebar="collapsed"] .ws-plugin-rail {
+    display: none;
+}
+
+/* 紧凑/窄屏：插件面板与设置面板同款覆盖层。 */
+.home-chat-body[data-ws-size="compact"] .ws-plugin-rail,
+.home-chat-body[data-ws-size="narrow"] .ws-plugin-rail {
+    position: fixed;
+    top: var(--ws-topbar-compact, 44px);
+    right: 0;
+    bottom: 0;
+    width: min(420px, 92vw);
+    z-index: 30;
+    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.45);
+}
+
 .ws-stage-empty {
     position: absolute;
     inset: 0;
