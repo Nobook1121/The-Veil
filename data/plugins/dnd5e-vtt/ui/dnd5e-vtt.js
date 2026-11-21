@@ -27,6 +27,19 @@
  * 面板清单从 ``/api/plugins/dnd5e-vtt/panels?room=…`` 拉取，观察者裁剪
  * 全部在服务端完成，前端只消费；veil-map 缺失时面板照常工作、模板按
  * 本地几何近似渲染。
+ *
+ * 地图骰桌（M4）：所有掷骰汇聚为带 ``metadata.dice_roll`` 的房间消息
+ * （``new_message`` socket，兼容 {room_id, message} 与 AI 工具裸消息两种
+ * 形态）+ ``combat_dice`` 广播；两路共用去重键（request_id 缺省时
+ * 表达式/骰面/总数/掷骰者复合键，TTL ~8s）。有地图时在掷骰者棋子（无则
+ * 视口中心）落一桌 3D 骰子动画（注入 /js/dice/dice3d.js，不重编译；
+ * 不传 seed，bundle 翻滚后把服务端 faces 贴到朝上面 → 动画即权威值），
+ * 同时上浮结果飘字（nat20 金色、nat1 低亮、多骰合并 total+expression）。
+ * DM 工具栏齿轮可关动画与调骰数上限（POST 仅 DM，广播
+ * ``dnd5e_vtt_dice_settings``）；底栏 d20 dock 给全员快捷掷骰入口
+ * （表达式限 NdM 加法，复用 TrpgDiceTable.handleDiceTableCommand，本地
+ * 掷骰者以 persistLocalDiceMessage 包装捕获喂地图动画）。无地图时地图层
+ * 整体跳过，聊天掷骰卡管线零改动。
  */
 (function () {
     "use strict";
@@ -675,6 +688,357 @@ function formatFeet(cells) {
     return String(Math.max(0, Math.round(cells)) * FEET_PER_CELL) + " 尺";
 }
 
+
+/* ==========================================================================
+   M4 地图骰桌公共层：dice3d bundle 按需注入（不重编译）、外观移植
+   （localStorage trpg_dice_appearance + 主题 CSS 变量 + /api/dice-textures，
+   照 diceAppearance.ts 精简移植）、DiceRollMeta → plan/snapshot 逐字段平移
+   （照 diceTable.ts planFromMeta / snapshotFromMeta）。
+   ========================================================================== */
+
+var DICE_BUNDLE_URL = "/js/dice/dice3d.js";
+var DICE_APPEARANCE_KEY = "trpg_dice_appearance";
+var DICE_TEXTURES_API = "/api/dice-textures";
+// 同时存活的地图 3D 骰盘上限：超限把最早一桌冻结成静态图，防 WebGL context 耗尽。
+var MAP_DICE_MAX_LIVE = 2;
+// new_message 与 combat_dice 双路同播的去重窗口。
+var DICE_DEDUP_TTL = 8000;
+// 骰盘落定后的停留时长（随后淡出移除）。
+var MAP_DICE_TRAY_MS = 3200;
+// 结果飘字总时长（含上浮与淡出）。
+var DICE_POP_MS = 2400;
+
+var diceBundlePromise = null;
+
+function loadDice3DBundle() {
+    if (window.TrpgDice3D) return Promise.resolve(true);
+    if (diceBundlePromise) return diceBundlePromise;
+    diceBundlePromise = new Promise(function (resolve) {
+        var script = document.createElement("script");
+        script.src = DICE_BUNDLE_URL;
+        script.async = true;
+        script.onload = function () { resolve(Boolean(window.TrpgDice3D)); };
+        script.onerror = function () { resolve(false); };
+        document.head.appendChild(script);
+    });
+    return diceBundlePromise;
+}
+
+/* ------------------------------------------------------------ 外观（本机偏好，照 diceAppearance.ts 精简移植） */
+
+function diceLoadAppearance() {
+    var defaults = { body: "", text: "", table: "", edge: "", tableSkinId: "", diceSkinIds: {} };
+    try {
+        var raw = window.localStorage.getItem(DICE_APPEARANCE_KEY);
+        var config = raw ? JSON.parse(raw) : {};
+        if (!config || typeof config !== "object") return defaults;
+        return {
+            body: String(config.body || ""),
+            text: String(config.text || ""),
+            table: String(config.table || ""),
+            edge: String(config.edge || ""),
+            tableSkinId: String(config.tableSkinId || ""),
+            diceSkinIds: config.diceSkinIds && typeof config.diceSkinIds === "object" ? config.diceSkinIds : {}
+        };
+    } catch (error) {
+        return defaults;
+    }
+}
+
+function diceCssVariable(name, fallback) {
+    // 必须从 body 读：主题变量定义在 body.theme-* 上，:root 别名在默认主题下求值。
+    var scopes = [document.body, document.documentElement];
+    for (var index = 0; index < scopes.length; index += 1) {
+        if (!scopes[index]) continue;
+        var value = window.getComputedStyle(scopes[index]).getPropertyValue(name).trim();
+        if (value) return value;
+    }
+    return fallback;
+}
+
+function diceParseColor(value) {
+    var text = String(value || "").trim();
+    var hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
+    if (hex) {
+        var body = hex[1];
+        if (body.length === 3) {
+            return [
+                parseInt(body.charAt(0) + body.charAt(0), 16),
+                parseInt(body.charAt(1) + body.charAt(1), 16),
+                parseInt(body.charAt(2) + body.charAt(2), 16)
+            ];
+        }
+        return [
+            parseInt(body.slice(0, 2), 16),
+            parseInt(body.slice(2, 4), 16),
+            parseInt(body.slice(4, 6), 16)
+        ];
+    }
+    var rgb = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i.exec(text);
+    if (rgb) return [parseFloat(rgb[1]), parseFloat(rgb[2]), parseFloat(rgb[3])];
+    return null;
+}
+
+function diceLuminance(value) {
+    var rgb = diceParseColor(value);
+    if (!rgb) return null;
+    var normalized = rgb.map(function (channel) {
+        var unit = Math.max(0, Math.min(255, channel)) / 255;
+        return unit <= 0.03928 ? unit / 12.92 : Math.pow((unit + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * normalized[0] + 0.7152 * normalized[1] + 0.0722 * normalized[2];
+}
+
+function diceContrastRatio(foreground, background) {
+    var front = diceLuminance(foreground);
+    var back = diceLuminance(background);
+    if (front === null || back === null) return 0;
+    return (Math.max(front, back) + 0.05) / (Math.min(front, back) + 0.05);
+}
+
+function diceMixColor(source, target, weight) {
+    var first = diceParseColor(source);
+    var second = diceParseColor(target);
+    if (!first || !second) return null;
+    var mixed = first.map(function (channel, index) {
+        return Math.round(channel * (1 - weight) + second[index] * weight);
+    });
+    return "#" + mixed.map(function (channel) {
+        var clamped = Math.max(0, Math.min(255, channel));
+        var hex = clamped.toString(16);
+        return hex.length < 2 ? "0" + hex : hex;
+    }).join("");
+}
+
+function diceReadableColor(background, preferred) {
+    if (diceContrastRatio(preferred, background) >= 4.5) return preferred;
+    var weights = [0.2, 0.4, 0.6, 0.8];
+    for (var wi = 0; wi < weights.length; wi += 1) {
+        var targets = ["#ffffff", "#000000"];
+        for (var ti = 0; ti < targets.length; ti += 1) {
+            var mixed = diceMixColor(preferred, targets[ti], weights[wi]);
+            if (mixed && diceContrastRatio(mixed, background) >= 4.5) return mixed;
+        }
+    }
+    return diceContrastRatio("#f6f1e7", background) >= diceContrastRatio("#1f2933", background) ? "#f6f1e7" : "#1f2933";
+}
+
+function diceResolvedColors(config) {
+    var body = config.body || diceCssVariable("--theme-dice-body", "#f6f1e7");
+    var themeText = diceCssVariable("--theme-text-primary", "#2b2a33");
+    return {
+        body: body,
+        text: config.text || diceReadableColor(body, themeText),
+        table: config.table || diceCssVariable("--theme-dice-table", diceCssVariable("--theme-bg-panel-muted", "#1d3a34")),
+        edge: config.edge || diceCssVariable("--theme-dice-accent", diceCssVariable("--theme-accent-primary", "#d8b56d"))
+    };
+}
+
+var diceTextureLibraryCache = null;
+var diceTextureLibraryPromise = null;
+
+function diceTextureLibrary() {
+    if (diceTextureLibraryCache) return Promise.resolve(diceTextureLibraryCache);
+    if (diceTextureLibraryPromise) return diceTextureLibraryPromise;
+    diceTextureLibraryPromise = apiRequest("GET", DICE_TEXTURES_API)
+        .then(function (response) {
+            diceTextureLibraryCache =
+                (response && response.success && response.data) ||
+                { assets: [], table_skins: [], dice_skins: [] };
+            return diceTextureLibraryCache;
+        })
+        .catch(function (error) {
+            // 贴图库缺席是合法形态：Canvas 面兜底，不阻塞骰盘。
+            console.debug("dnd5e-vtt dice texture library unavailable", error);
+            diceTextureLibraryCache = { assets: [], table_skins: [], dice_skins: [] };
+            return diceTextureLibraryCache;
+        });
+    return diceTextureLibraryPromise;
+}
+
+function diceAssetUrl(assetId) {
+    return "/api/dice-textures/assets/" + encodeURIComponent(assetId);
+}
+
+function diceDieTypeFor(sides, mode) {
+    if (mode === "percentile") return "d10";
+    var map = { 4: "d4", 6: "d6", 8: "d8", 10: "d10", 12: "d12", 20: "d20", 100: "d10" };
+    return map[Number(sides)] || "";
+}
+
+function diceFaceUrls(dieType, skinIds) {
+    var skinId = skinIds && skinIds[dieType];
+    var library = diceTextureLibraryCache;
+    if (!skinId || !library) return {};
+    var skin = null;
+    (library.dice_skins || []).forEach(function (item) {
+        if (item && String(item.id) === String(skinId) && item.enabled !== false) skin = item;
+    });
+    if (!skin) return {};
+    var urls = {};
+    Object.keys(skin.faces || {}).forEach(function (face) {
+        var assetId = skin.faces[face];
+        if (assetId) urls[face] = diceAssetUrl(assetId);
+    });
+    return urls;
+}
+
+function diceTableSkinUrl(tableSkinId) {
+    var library = diceTextureLibraryCache;
+    if (!tableSkinId || !library) return "";
+    var skin = null;
+    (library.table_skins || []).forEach(function (item) {
+        if (item && String(item.id) === String(tableSkinId) && item.enabled !== false) skin = item;
+    });
+    return skin ? diceAssetUrl(skin.asset_id) : "";
+}
+
+function diceFaceUrlsForPlan(plan) {
+    var appearance = diceLoadAppearance();
+    var urls = {};
+    var types = [];
+    (plan.groups || []).forEach(function (group) {
+        var type = group && group.type ? String(group.type) : "";
+        if (type && types.indexOf(type) < 0) types.push(type);
+    });
+    if (!types.length) {
+        var fallback = diceDieTypeFor(Number(plan.sides) || 6, plan.mode);
+        if (fallback) types.push(fallback);
+    }
+    types.forEach(function (type) {
+        var faceUrls = diceFaceUrls(type, appearance.diceSkinIds);
+        Object.keys(faceUrls).forEach(function (face) { urls[face] = faceUrls[face]; });
+    });
+    return urls;
+}
+
+/* ------------------------------------------------------------ DiceRollMeta 转换（照 diceTable.ts 平移） */
+
+function dicePlanFromMeta(meta) {
+    return {
+        mode: meta.mode || "standard",
+        expression: meta.expression || "1d100",
+        count: Number(meta.count) || 1,
+        sides: Number(meta.sides) || 6,
+        bonus_dice: Number(meta.bonus_dice) || 0,
+        penalty_dice: Number(meta.penalty_dice) || 0,
+        candidates: meta.candidates || [],
+        groups: meta.groups || [],
+        selected: meta.selected == null ? null : meta.selected,
+        check: {
+            name: meta.check_name || "",
+            difficulty: meta.difficulty || null,
+            target: meta.target == null ? null : meta.target
+        }
+    };
+}
+
+function diceSnapshotFromMeta(meta) {
+    return {
+        faces: meta.faces || [],
+        labels: meta.labels || [],
+        groups: meta.groups || [],
+        selected: meta.selected == null ? null : meta.selected,
+        roll: meta.roll == null ? null : meta.roll,
+        rolls: meta.rolls || [],
+        total: meta.total == null ? null : meta.total,
+        success: meta.success == null ? null : meta.success,
+        success_level: meta.success_level == null ? null : meta.success_level,
+        summary: "",
+        check_name: meta.check_name == null ? null : meta.check_name,
+        difficulty: meta.difficulty == null ? null : meta.difficulty,
+        target: meta.target == null ? null : meta.target,
+        roller: meta.roller == null ? null : meta.roller,
+        mode: meta.mode || "standard",
+        expression: meta.expression || "",
+        count: meta.count == null ? 0 : meta.count,
+        sides: meta.sides == null ? 0 : meta.sides,
+        candidates: meta.candidates || [],
+        natural: meta.natural == null ? null : meta.natural,
+        advantage: Boolean(meta.advantage),
+        disadvantage: Boolean(meta.disadvantage),
+        reroll: meta.reroll == null ? null : meta.reroll
+    };
+}
+
+function diceRollerLabel(roller) {
+    if (!roller) return "";
+    if (typeof roller === "string") return roller;
+    var name = roller.username;
+    return name === undefined || name === null ? "" : String(name);
+}
+
+function diceRollerUserId(meta) {
+    var roller = meta.roller;
+    if (roller && typeof roller === "object") return String(roller.user_id || meta.roller_user_id || "");
+    return String(meta.roller_user_id || "");
+}
+
+function diceCountFor(meta) {
+    var groups = meta.groups;
+    if (Array.isArray(groups) && groups.length) {
+        var total = 0;
+        groups.forEach(function (group) {
+            if (group && typeof group === "object") total += Math.max(0, asInt(group.count, 0));
+        });
+        if (total > 0) return total;
+    }
+    if (Array.isArray(meta.faces) && meta.faces.length) return meta.faces.length;
+    var count = asInt(meta.count, 0);
+    if (count > 0) return count;
+    // 兜底：从表达式粗算各 NdM 项的 N 之和。
+    var estimated = 0;
+    String(meta.expression || "").toLowerCase().split("+").forEach(function (term) {
+        var match = /^(\d+)?d\d+$/.exec(term.trim());
+        if (match) estimated += Math.max(1, parseInt(match[1] || "1", 10));
+    });
+    return estimated || 1;
+}
+
+function diceGroupsHaveHighlight(groups, kind) {
+    if (!Array.isArray(groups)) return false;
+    for (var index = 0; index < groups.length; index += 1) {
+        var highlights = groups[index] && groups[index].highlights;
+        if (!Array.isArray(highlights)) continue;
+        for (var slot = 0; slot < highlights.length; slot += 1) {
+            if (highlights[slot] === kind) return true;
+        }
+    }
+    return false;
+}
+
+function diceBundleDiceLimit() {
+    // dice3d bundle 的硬上限（main.ts rebuild）：窄屏 10、宽屏 20。
+    return window.innerWidth < 720 ? 10 : 20;
+}
+
+function diceTraySize() {
+    return window.innerWidth < 720 ? { width: 190, height: 128 } : { width: 264, height: 168 };
+}
+
+function validQuickRollExpression(expression) {
+    // 快捷掷骰限定 NdM 加法：项是 NdM（N 1–99 缺省 1，M 2–100）或 0–999 常数。
+    var text = String(expression || "").replace(/\s+/g, "").toLowerCase();
+    if (!text || text.length > 60) return false;
+    if (!/^[0-9d+]+$/.test(text)) return false;
+    var terms = text.split("+");
+    for (var index = 0; index < terms.length; index += 1) {
+        var term = terms[index];
+        if (!term) return false;
+        var die = /^(\d{1,2})?d(\d{1,3})$/.exec(term);
+        if (die) {
+            var count = parseInt(die[1] || "1", 10);
+            var sides = parseInt(die[2], 10);
+            if (count < 1 || count > 99) return false;
+            if (sides < 2 || sides > 100) return false;
+            continue;
+        }
+        if (!/^\d{1,3}$/.test(term)) return false;
+        if (parseInt(term, 10) > 999) return false;
+    }
+    return true;
+}
+
 /**
  * 画布工具组挂载。返回 ``{observer, destroy}``；宿主缺失时返回 ``null``。
  */
@@ -706,6 +1070,12 @@ function mountStageTools(ctx, roomObserver) {
     var socket = null;
     var socketHandlers = [];
     var unsubscribers = [];
+    // M4 地图骰桌：设置快照、去重键、存活骰盘与飘字错位计数。
+    var diceSettings = { enabled: true, max_dice: 20 };
+    var diceRecentKeys = {};
+    var diceTrays = [];
+    var dicePopCursor = 0;
+    var diceSettingsModal = null;
 
     /* ------------------------------------------------------------ DOM */
 
@@ -747,6 +1117,15 @@ function mountStageTools(ctx, roomObserver) {
         clearButton.innerHTML = '<i class="fa fa-trash-o" aria-hidden="true"></i>';
         clearButton.addEventListener("click", clearTemplates);
         toolbar.appendChild(clearButton);
+        // M4：骰桌动画设置（开关 + 骰数上限），仅 DM。
+        var diceSettingsButton = document.createElement("button");
+        diceSettingsButton.type = "button";
+        diceSettingsButton.className = "vtt-tool-btn";
+        diceSettingsButton.title = "骰桌动画设置（仅 DM）";
+        diceSettingsButton.setAttribute("aria-label", "骰桌动画设置");
+        diceSettingsButton.innerHTML = '<i class="fa fa-cog" aria-hidden="true"></i>';
+        diceSettingsButton.addEventListener("click", openDiceSettings);
+        toolbar.appendChild(diceSettingsButton);
     }
 
     var canvas = document.createElement("canvas");
@@ -757,6 +1136,48 @@ function mountStageTools(ctx, roomObserver) {
     var hintBar = document.createElement("div");
     hintBar.className = "vtt-tool-hint";
     root.appendChild(hintBar);
+
+    // M4：底栏 d20 dock（全员可用）：快捷掷骰入口（d20/d6/d100 芯片 + 表达式输入）。
+    var diceDock = document.createElement("div");
+    diceDock.className = "vtt-dice-dock";
+    diceDock.innerHTML =
+        '<div class="vtt-dice-dock-panel" data-vtt-dice-panel hidden>' +
+        '<div class="vtt-dice-chips">' +
+        '<button type="button" data-vtt-chip="1d20">d20</button>' +
+        '<button type="button" data-vtt-chip="1d6">d6</button>' +
+        '<button type="button" data-vtt-chip="1d100">d100</button>' +
+        "</div>" +
+        '<form class="vtt-dice-expr" data-vtt-dice-form>' +
+        '<input type="text" data-vtt-dice-input placeholder="如 2d6+1d4，仅支持 NdM 加法" autocomplete="off" spellcheck="false">' +
+        '<button type="submit">掷骰</button>' +
+        "</form>" +
+        '<p class="vtt-dice-dock-hint">表达式仅支持 NdM 加法（如 1d20+3、2d6+1d4）；结果广播全员并落在地图上。</p>' +
+        "</div>" +
+        '<button type="button" class="vtt-dice-dock-btn" data-vtt-dice-toggle title="快捷掷骰" aria-label="快捷掷骰">d20</button>';
+    root.appendChild(diceDock);
+    var diceDockPanel = diceDock.querySelector("[data-vtt-dice-panel]");
+    diceDock.querySelector("[data-vtt-dice-toggle]").addEventListener("click", function () {
+        var hidden = diceDockPanel.hidden;
+        diceDockPanel.hidden = !hidden;
+        if (!hidden) return;
+        var input = diceDock.querySelector("[data-vtt-dice-input]");
+        if (input) input.focus();
+    });
+    Array.prototype.forEach.call(diceDock.querySelectorAll("[data-vtt-chip]"), function (chip) {
+        chip.addEventListener("click", function () {
+            quickRoll(chip.getAttribute("data-vtt-chip") || "1d20");
+        });
+    });
+    diceDock.querySelector("[data-vtt-dice-form]").addEventListener("submit", function (event) {
+        event.preventDefault();
+        var input = diceDock.querySelector("[data-vtt-dice-input]");
+        var expression = String((input && input.value) || "").trim();
+        if (!validQuickRollExpression(expression)) {
+            notify("表达式仅支持 NdM 加法（如 1d20+3、2d6+1d4）。", "info");
+            return;
+        }
+        quickRoll(expression);
+    });
 
     stageHost.appendChild(root);
     var context = canvas.getContext("2d");
@@ -1665,6 +2086,14 @@ function mountStageTools(ctx, roomObserver) {
             scheduleDraw();
             return;
         }
+        if (diceSettingsModal) {
+            closeDiceSettings();
+            return;
+        }
+        if (diceDockPanel && !diceDockPanel.hidden) {
+            diceDockPanel.hidden = true;
+            return;
+        }
         if (cardEl && !cardEl.hidden) {
             closeTokenCard();
             return;
@@ -1850,9 +2279,376 @@ function mountStageTools(ctx, roomObserver) {
     }
 
     function onDocumentPointerDown(event) {
+        // M4：dock 面板外点关闭（在棋子卡判定之前独立处理）。
+        if (diceDockPanel && !diceDockPanel.hidden) {
+            if (!(event.target instanceof Element && event.target.closest(".vtt-dice-dock"))) {
+                diceDockPanel.hidden = true;
+            }
+        }
         if (cardEl.hidden) return;
         if (event.target instanceof Element && event.target.closest(".vtt-token-card")) return;
         closeTokenCard();
+    }
+
+    /* ------------------------------------------------------------ M4 地图骰桌 */
+
+    function applyDiceSettings(data) {
+        if (!data || typeof data !== "object") return;
+        if (typeof data.enabled === "boolean") diceSettings.enabled = data.enabled;
+        if (data.max_dice != null) {
+            diceSettings.max_dice = clamp(asInt(data.max_dice, 20), 1, 20);
+        }
+    }
+
+    function loadDiceSettings() {
+        return apiRequest("GET", "/rooms/" + encodeURIComponent(roomId) + "/dice-settings")
+            .then(function (response) {
+                if (destroyed || !response || !response.success) return;
+                applyDiceSettings(response.data);
+            })
+            .catch(function (error) {
+                console.debug("dnd5e-vtt dice settings unavailable", error);
+            });
+    }
+
+    function hasMapStage() {
+        // 无地图（veil-map 缺席或场景无背景）：地图动画与飘字整体跳过，
+        // 聊天掷骰卡路径不受影响。
+        return Boolean(mapState && String(mapState.background || "").trim());
+    }
+
+    function diceDedupKey(meta) {
+        var request = String(meta.request_id || "").trim();
+        if (request) return "id|" + request;
+        var roller = meta.roller;
+        var rollerId = roller && typeof roller === "object" ? String(roller.user_id || "") : String(roller || "");
+        return [
+            "expr", meta.expression || "",
+            "faces", (meta.faces || []).join(","),
+            "total", meta.total == null ? "" : String(meta.total),
+            "roller", rollerId
+        ].join("|");
+    }
+
+    function diceKeySeen(key) {
+        var now = Date.now();
+        Object.keys(diceRecentKeys).forEach(function (item) {
+            if (!diceRecentKeys[item] || diceRecentKeys[item] < now) delete diceRecentKeys[item];
+        });
+        if (diceRecentKeys[key]) return true;
+        diceRecentKeys[key] = now + DICE_DEDUP_TTL;
+        return false;
+    }
+
+    function diceRollerToken(meta) {
+        var rollerId = diceRollerUserId(meta);
+        if (!rollerId) return null;
+        var tokens = (mapState && Array.isArray(mapState.tokens)) ? mapState.tokens : [];
+        for (var index = 0; index < tokens.length; index += 1) {
+            var token = tokens[index];
+            if (token && String(token.owner_user_id || "") === rollerId) return token;
+        }
+        return null;
+    }
+
+    function mapDiceAnchor(meta) {
+        // 落点：掷骰者有可见棋子 → 棋子位置；否则视口中心。
+        var token = diceRollerToken(meta);
+        if (token) {
+            var world = tokenWorld(token);
+            var point = ctx.worldToScreen(world.x, world.y);
+            return { x: point.x, y: point.y, onToken: true };
+        }
+        var viewport = ctx.getViewport() || {};
+        return {
+            x: Math.max(0, asFloat(viewport.width, 320)) / 2,
+            y: Math.max(0, asFloat(viewport.height, 240)) / 2,
+            onToken: false
+        };
+    }
+
+    function clampDiceAnchor(x, y, width, height) {
+        // 骰盘整体钳制在舞台可视区内。
+        var viewport = ctx.getViewport() || {};
+        var stageWidth = Math.max(width, asFloat(viewport.width, width));
+        var stageHeight = Math.max(height, asFloat(viewport.height, height));
+        return {
+            x: clamp(x, width / 2, stageWidth - width / 2),
+            y: clamp(y, height / 2, stageHeight - height / 2)
+        };
+    }
+
+    function handleDiceMeta(meta) {
+        if (destroyed || !meta || typeof meta !== "object") return;
+        // new_message 与 combat_dice 双路同播：共用去重键短窗去重。
+        if (diceKeySeen(diceDedupKey(meta))) return;
+        if (!hasMapStage()) return;
+        var anchor = mapDiceAnchor(meta);
+        spawnDicePop(anchor, meta);
+        if (!diceSettings.enabled) return; // DM 关闭：只留结果飘字。
+        // 动画骰数上限取 DM 设置与 dice3d bundle 硬上限的较小值。
+        var limit = Math.min(diceSettings.max_dice, diceBundleDiceLimit());
+        if (diceCountFor(meta) > limit) return; // 超上限：只飘字。
+        void spawnMapDiceTray(anchor, meta);
+    }
+
+    function spawnDicePop(anchor, meta) {
+        var total = meta.total;
+        var firstFace = Array.isArray(meta.faces) && meta.faces.length ? meta.faces[0] : null;
+        var value = total != null ? total : firstFace != null ? firstFace : "—";
+        var labelParts = [];
+        if (meta.check_name) labelParts.push(String(meta.check_name));
+        if (meta.expression) labelParts.push(String(meta.expression)); // 多骰合并显示 total + expression。
+        var roller = diceRollerLabel(meta.roller);
+        var natural = meta.natural == null ? null : asInt(meta.natural, 0);
+        var classes = ["vtt-dice-pop"];
+        if (natural === 20 || diceGroupsHaveHighlight(meta.groups, "critical")) {
+            classes.push("is-crit");
+        } else if (natural === 1 || diceGroupsHaveHighlight(meta.groups, "fumble")) {
+            classes.push("is-fumble");
+        }
+        var pop = document.createElement("div");
+        pop.className = classes.join(" ");
+        pop.innerHTML =
+            '<strong class="vtt-pop-value">' + escapeHtml(String(value)) + "</strong>" +
+            '<span class="vtt-pop-label">' + escapeHtml(labelParts.join(" · ")) + "</span>" +
+            (roller ? '<span class="vtt-pop-roller">' + escapeHtml(roller) + "</span>" : "");
+        // 同屏多枚飘字按序错位，避免完全重叠。
+        var jitter = ((dicePopCursor % 5) - 2) * 26;
+        dicePopCursor += 1;
+        var viewport = ctx.getViewport() || {};
+        var stageWidth = Math.max(160, asFloat(viewport.width, 320));
+        pop.style.left = Math.round(clamp(anchor.x + jitter, 84, stageWidth - 84)) + "px";
+        pop.style.top = Math.round(Math.max(70, anchor.y - 26)) + "px";
+        root.appendChild(pop);
+        window.setTimeout(function () { pop.remove(); }, DICE_POP_MS);
+    }
+
+    function removeDiceTray(record) {
+        if (!record) return;
+        (record.timers || []).forEach(function (timer) { window.clearTimeout(timer); });
+        record.timers = [];
+        if (record.instance) {
+            try { record.instance.dispose(); } catch (error) { console.debug("dnd5e-vtt tray dispose failed", error); }
+            record.instance = null;
+        }
+        record.el.remove();
+        var index = diceTrays.indexOf(record);
+        if (index >= 0) diceTrays.splice(index, 1);
+    }
+
+    function freezeDiceTray(record) {
+        // 超出同时存活上限：把最早一桌导出成静态图并释放 WebGL context。
+        if (!record || record.frozen || !record.instance) return;
+        record.frozen = true;
+        var snapshot = null;
+        try {
+            snapshot = record.instance.freeze();
+        } catch (error) {
+            console.debug("dnd5e-vtt tray freeze failed", error);
+        }
+        try {
+            record.instance.dispose();
+        } catch (error) { /* 已判定不可用 */ }
+        record.instance = null;
+        if (!snapshot) {
+            removeDiceTray(record);
+            return;
+        }
+        var image = document.createElement("img");
+        image.className = "dice3d-canvas dice3d-static";
+        image.alt = "骰子结果";
+        image.src = snapshot;
+        record.el.innerHTML = "";
+        record.el.appendChild(image);
+    }
+
+    function enforceDiceTrayLimit() {
+        var live = diceTrays.filter(function (record) { return record.instance && !record.frozen; });
+        while (live.length > MAP_DICE_MAX_LIVE) {
+            freezeDiceTray(live.shift());
+        }
+    }
+
+    function scheduleDiceTrayRemoval(record, delay) {
+        (record.timers || []).forEach(function (timer) { window.clearTimeout(timer); });
+        record.timers = [];
+        record.timers.push(
+            window.setTimeout(function () {
+                record.el.classList.add("is-fading");
+                record.timers.push(
+                    window.setTimeout(function () { removeDiceTray(record); }, 420)
+                );
+            }, Math.max(0, delay))
+        );
+    }
+
+    function spawnMapDiceTray(anchor, meta) {
+        var plan = dicePlanFromMeta(meta);
+        var snapshot = diceSnapshotFromMeta(meta);
+        return Promise.all([loadDice3DBundle(), diceTextureLibrary()]).then(function (results) {
+            if (destroyed || !results[0]) return; // bundle 缺席：静默降级，聊天卡照播。
+            var size = diceTraySize();
+            var clamped = clampDiceAnchor(anchor.x, anchor.y, size.width, size.height);
+            var tray = document.createElement("div");
+            tray.className = "vtt-map-dice";
+            tray.setAttribute("aria-label", "地图骰盘");
+            tray.style.width = size.width + "px";
+            tray.style.height = size.height + "px";
+            tray.style.left = Math.round(clamped.x - size.width / 2) + "px";
+            tray.style.top = Math.round(clamped.y - size.height / 2) + "px";
+            root.appendChild(tray);
+            var record = { el: tray, instance: null, frozen: false, timers: [] };
+            diceTrays.push(record);
+            enforceDiceTrayLimit();
+            // 安全兜底：动画即便卡死也按时移除。
+            scheduleDiceTrayRemoval(record, MAP_DICE_TRAY_MS + 5200);
+            var appearance = diceLoadAppearance();
+            try {
+                record.instance = window.TrpgDice3D.create(tray, {
+                    plan: plan,
+                    faceUrls: diceFaceUrlsForPlan(plan),
+                    tableSkinUrl: diceTableSkinUrl(appearance.tableSkinId),
+                    colors: diceResolvedColors(appearance)
+                });
+            } catch (error) {
+                console.debug("dnd5e-vtt map dice create failed", error);
+                removeDiceTray(record);
+                return;
+            }
+            try {
+                // 不传 seed：bundle 翻滚后把服务端 faces 贴到朝上面，动画即权威结果。
+                Promise.resolve(record.instance.roll(snapshot)).then(
+                    function () {
+                        if (destroyed) return;
+                        tray.classList.add("is-settled");
+                        scheduleDiceTrayRemoval(record, MAP_DICE_TRAY_MS);
+                    },
+                    function (error) {
+                        console.debug("dnd5e-vtt map dice roll failed", error);
+                        removeDiceTray(record);
+                    }
+                );
+            } catch (error) {
+                // dice_count_exceeded / unsupported_dice / webgl_unavailable：静默降级仅飘字。
+                console.debug("dnd5e-vtt map dice roll rejected", error);
+                removeDiceTray(record);
+            }
+        }).catch(function (error) {
+            console.debug("dnd5e-vtt map dice spawn failed", error);
+        });
+    }
+
+    function closeDiceSettings() {
+        if (!diceSettingsModal) return;
+        diceSettingsModal.remove();
+        diceSettingsModal = null;
+    }
+
+    function openDiceSettings() {
+        if (diceSettingsModal) return;
+        var modal = document.createElement("div");
+        modal.className = "vtt-dice-settings";
+        modal.innerHTML =
+            '<div class="vtt-dice-settings-mask" data-vtt-dice-close></div>' +
+            '<div class="vtt-dice-settings-card" role="dialog" aria-modal="true" aria-label="骰桌动画设置">' +
+            "<header><i class=\"fa fa-cog\" aria-hidden=\"true\"></i><strong>骰桌动画</strong></header>" +
+            '<label class="vtt-dice-toggle">' +
+            '<input type="checkbox" data-vtt-dice-enabled>' +
+            "<span>在地图上播放 3D 骰子动画<small>关闭后地图仅保留结果飘字；聊天掷骰卡不受影响。</small></span>" +
+            "</label>" +
+            '<label class="vtt-dice-limit">' +
+            "<span>单次动画骰数上限</span>" +
+            '<input type="number" min="1" max="20" step="1" data-vtt-dice-max>' +
+            "<small>1–20；超过上限的掷骰只显示结果飘字。</small>" +
+            "</label>" +
+            "<footer>" +
+            '<button type="button" data-vtt-dice-close>取消</button>' +
+            '<button type="button" class="is-primary" data-vtt-dice-save>保存</button>' +
+            "</footer>" +
+            "</div>";
+        var enabledInput = modal.querySelector("[data-vtt-dice-enabled]");
+        var maxInput = modal.querySelector("[data-vtt-dice-max]");
+        enabledInput.checked = diceSettings.enabled !== false;
+        maxInput.value = String(clamp(asInt(diceSettings.max_dice, 20), 1, 20));
+        modal.querySelectorAll("[data-vtt-dice-close]").forEach(function (element) {
+            element.addEventListener("click", closeDiceSettings);
+        });
+        modal.querySelector("[data-vtt-dice-save]").addEventListener("click", function () {
+            var maxDice = clamp(asInt(maxInput.value, diceSettings.max_dice), 1, 20);
+            void saveDiceSettings(enabledInput.checked, maxDice);
+        });
+        document.body.appendChild(modal);
+        diceSettingsModal = modal;
+    }
+
+    function saveDiceSettings(enabled, maxDice) {
+        return apiRequest(
+            "POST",
+            "/rooms/" + encodeURIComponent(roomId) + "/dice-settings",
+            { enabled: enabled, max_dice: maxDice }
+        )
+            .then(function (response) {
+                if (destroyed) return response;
+                if (!response || response.success !== true) {
+                    notify(String((response && response.message) || "骰桌动画设置保存失败。"), "error");
+                    if (response && response.data) applyDiceSettings(response.data);
+                    return response;
+                }
+                applyDiceSettings(response.data);
+                notify("骰桌动画设置已更新。", "success");
+                closeDiceSettings();
+                return response;
+            })
+            .catch(function (error) {
+                console.error("dnd5e-vtt dice settings failed", error);
+                if (!destroyed) notify("骰桌动画设置保存失败，请稍后重试。", "error");
+                return null;
+            });
+    }
+
+    function quickRoll(expression) {
+        // 玩家快捷掷骰：复用现有 TrpgDiceTable.handleDiceTableCommand（与
+        // /dice <expr> --table 同款：本地投掷 → persistLocalDiceMessage 落库
+        // → 广播全员）。掷骰者自己收不到 send_message 回显（include_self=False），
+        // 作用域内临时包一层 persistLocalDiceMessage 捕获 metadata.dice_roll
+        // 喂地图动画；失败静默降级，仅聊天卡。
+        var diceTable = window.TrpgDiceTable;
+        if (!diceTable || typeof diceTable.handleDiceTableCommand !== "function") {
+            notify("骰桌组件不可用，快捷掷骰未执行。", "error");
+            return;
+        }
+        var original = window.persistLocalDiceMessage;
+        var restored = false;
+        function restorePersist() {
+            if (restored) return;
+            restored = true;
+            if (window.persistLocalDiceMessage === wrapper) {
+                window.persistLocalDiceMessage = original;
+            }
+        }
+        function wrapper(content, metadata) {
+            restorePersist();
+            var meta = metadata && metadata.dice_roll;
+            if (meta && typeof meta === "object") {
+                try {
+                    handleDiceMeta(meta);
+                } catch (error) {
+                    console.debug("dnd5e-vtt local dice feed failed", error);
+                }
+            }
+            if (typeof original === "function") return original(content, metadata);
+            return Promise.resolve(null);
+        }
+        window.persistLocalDiceMessage = wrapper;
+        Promise.resolve()
+            .then(function () { return diceTable.handleDiceTableCommand(expression); })
+            .then(function () { restorePersist(); })
+            .catch(function (error) {
+                restorePersist();
+                console.warn("dnd5e-vtt quick roll failed", error);
+                notify("快捷掷骰失败。", "error");
+            });
     }
 
     /* ------------------------------------------------------------ 清空（仅 DM） */
@@ -1881,11 +2677,39 @@ function mountStageTools(ctx, roomObserver) {
         if (payload.map && typeof payload.map === "object") mapState = payload.map;
     }
 
+    function onSocketDiceSettings(payload) {
+        if (destroyed || !payload) return;
+        if (String(payload.room_id || "") !== roomId) return;
+        applyDiceSettings(payload);
+    }
+
+    function onSocketCombatDice(payload) {
+        // 服务端（NPC）掷骰广播：payload {room_id, meta}；与 new_message 双路
+        // 同播由 handleDiceMeta 的去重键兜住。
+        if (destroyed || !payload) return;
+        if (String(payload.room_id || "") !== roomId) return;
+        var meta = payload.meta;
+        if (meta && typeof meta === "object") handleDiceMeta(meta);
+    }
+
+    function onSocketNewMessage(payload) {
+        // 兼容两种形态：客户端中继 {room_id, message}；AI 工具裸消息
+        // （字段平铺、room_id 顶层）。room_id 缺席时按 socket 房间归属放行。
+        if (destroyed || !payload || typeof payload !== "object") return;
+        var message = payload.message && typeof payload.message === "object" ? payload.message : payload;
+        var messageRoom = String(message.room_id || payload.room_id || "");
+        if (messageRoom && messageRoom !== roomId) return;
+        var metadata = message.metadata;
+        var meta = metadata && typeof metadata === "object" ? metadata.dice_roll : null;
+        if (meta && typeof meta === "object") handleDiceMeta(meta);
+    }
+
     function onSocketReconnect() {
-        // 断线期间模板/地图可能已变：重连后重新拉取。
+        // 断线期间模板/地图/骰桌设置可能已变：重连后重新拉取。
         if (destroyed) return;
         loadTemplates();
         loadMapTokens();
+        loadDiceSettings();
     }
 
     function attachSocket() {
@@ -1897,6 +2721,9 @@ function mountStageTools(ctx, roomObserver) {
         }
         bind("dnd5e_vtt_templates", onSocketTemplates);
         bind("room_map_changed", onSocketMapChanged);
+        bind("dnd5e_vtt_dice_settings", onSocketDiceSettings);
+        bind("combat_dice", onSocketCombatDice);
+        bind("new_message", onSocketNewMessage);
         if (typeof socket.on === "function") {
             bind("connect", onSocketReconnect);
             bind("reconnect", onSocketReconnect);
@@ -1949,6 +2776,7 @@ function mountStageTools(ctx, roomObserver) {
     attachSocket();
     void loadTemplates();
     void loadMapTokens();
+    void loadDiceSettings();
     scheduleDraw();
     pollTimer = window.setInterval(function () {
         if (destroyed || document.visibilityState === "hidden") return;
@@ -1956,11 +2784,13 @@ function mountStageTools(ctx, roomObserver) {
             attachSocket();
             void loadTemplates();
             void loadMapTokens();
+            void loadDiceSettings();
             return;
         }
         if (!window.TrpgSocket || (socket && socket.connected === false)) {
             void loadTemplates();
             void loadMapTokens();
+            void loadDiceSettings();
         }
     }, TEMPLATE_POLL);
 
@@ -1991,6 +2821,9 @@ function mountStageTools(ctx, roomObserver) {
             document.removeEventListener("pointerdown", onDocumentPointerDown);
             document.removeEventListener("keydown", onKeyDown);
             closeTokenCard();
+            // M4：骰盘逐个释放（WebGL context 不能泄漏），设置弹层收掉。
+            diceTrays.slice().forEach(removeDiceTray);
+            closeDiceSettings();
             cardEl.remove();
             root.remove();
         }

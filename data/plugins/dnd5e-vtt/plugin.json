@@ -2,8 +2,8 @@
   "schema_version": 1,
   "id": "dnd5e-vtt",
   "name": "D&D 5e 战桌",
-  "version": "0.2.0",
-  "description": "D&D 5e 战桌 UI：右侧栏六面板（聊天/战斗/场景/角色/物品/日志）+ 画布左上工具组（选择/测距尺/测量模板圆锥线方+清空，仅 DM 可编辑）+ 棋子操作卡（DM 拉动作清单，玩家响应不含操作按钮）。模板走房间级登记端点（request_id 幂等）并广播全员只读展示；空间几何复用 veil-map 公开端点，锥/方按本地几何近似。布局沿用 dnd5e 规则集声明的 dnd5e-canvas。",
+  "version": "0.3.0",
+  "description": "D&D 5e 战桌 UI：右侧栏六面板 + 画布左上工具组（模板/测距尺，仅 DM 可编辑）+ 棋子操作卡 + 地图骰桌（掷骰落在地图上播 3D 骰子动画与结果飘字，nat20/nat1 高亮；DM 可关动画与调骰数上限，底栏 d20 dock 全员快捷掷骰）。模板与骰桌设置走房间级端点（幂等/四态回执）并 socket 广播；地图落点与棋子目录读 veil-map 公开载荷，dice3d bundle 按需注入不重编译；聊天掷骰卡管线零改动。",
   "author": "The Veil",
   "api_version": 1,
   "requires": {

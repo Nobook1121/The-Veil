@@ -1078,3 +1078,189 @@ def token_actions(room_id: str):
         )
     payload = _token_actions_payload(room_dir, info, manager=manager, params=params)
     return success_response(payload, "棋子操作卡数据")
+
+
+# ============================================================
+# 骰桌动画设置（M4）：DM 节流开关（enabled）+ 单次动画骰数上限
+# （max_dice，clamp 1–20）。GET 全员可读（玩家端据此决定是否播放
+# 地图骰子动画）；POST 仅 DM，玩家 403 rejected。写后广播
+# ``dnd5e_vtt_dice_settings``，所有客户端即时应用。
+# ============================================================
+
+DICE_SETTINGS_VERSION = 1
+MIN_DICE_ANIMATION = 1
+MAX_DICE_ANIMATION = 20
+DEFAULT_DICE_ANIMATION = 20
+
+
+def _dice_settings_path(room_dir) -> Path:
+    return Path(room_dir) / "plugins" / "dnd5e-vtt" / "dice-settings.json"
+
+
+def _default_dice_settings() -> dict[str, Any]:
+    return {
+        "version": DICE_SETTINGS_VERSION,
+        "enabled": True,
+        "max_dice": DEFAULT_DICE_ANIMATION,
+        "updated_at": "",
+    }
+
+
+def _normalize_dice_settings(store: Any) -> dict[str, Any]:
+    """读盘归一：字段缺失或越界都折回默认值，前端拿到的永远是合法设置。"""
+    if not isinstance(store, dict):
+        return _default_dice_settings()
+    enabled = store.get("enabled")
+    try:
+        max_dice = int(store.get("max_dice"))
+    except (TypeError, ValueError):
+        max_dice = DEFAULT_DICE_ANIMATION
+    return {
+        "version": DICE_SETTINGS_VERSION,
+        "enabled": True if enabled is None else bool(enabled),
+        "max_dice": min(MAX_DICE_ANIMATION, max(MIN_DICE_ANIMATION, max_dice)),
+        "updated_at": str(store.get("updated_at") or ""),
+    }
+
+
+def _load_dice_settings(room_dir) -> dict[str, Any]:
+    return _normalize_dice_settings(read_json(_dice_settings_path(room_dir), default=None))
+
+
+def _dice_settings_payload(settings: dict[str, Any], *, manager: bool) -> dict[str, Any]:
+    return {
+        "enabled": bool(settings["enabled"]),
+        "max_dice": int(settings["max_dice"]),
+        "can_manage": manager,
+        "observer": "dm" if manager else "player",
+    }
+
+
+def _dice_receipt(status: str, message: str, *, code: str = "", data: dict[str, Any] | None = None, http_status: int = 200):
+    """四态回执（success / rejected / invalid），照模板端点的回执结构。"""
+    payload: dict[str, Any] = {
+        "success": status == "success",
+        "status": status,
+        "code": code,
+        "message": message,
+    }
+    if data is not None:
+        payload["data"] = data
+    return jsonify(payload), http_status
+
+
+def _broadcast_dice_settings(room_id: str, settings: dict[str, Any]) -> None:
+    """设置广播到房间：开关与上限对全员生效，所有客户端立即应用。"""
+    socketio = current_app.extensions.get("socketio")
+    if socketio is None:
+        return
+    try:
+        socketio.emit(
+            "dnd5e_vtt_dice_settings",
+            {
+                "room_id": str(room_id),
+                "enabled": bool(settings["enabled"]),
+                "max_dice": int(settings["max_dice"]),
+            },
+            room=str(room_id),
+        )
+    except Exception:  # noqa: BLE001 - 广播失败不能影响写入结果
+        logger.warning("dnd5e_vtt_dice_settings_broadcast_failed room=%s", room_id, exc_info=True)
+
+
+@bp.route("/rooms/<room_id>/dice-settings", methods=["GET"])
+def get_dice_settings(room_id: str):
+    """骰桌设置读取：全员可读（玩家端据此播放或跳过地图动画）。"""
+    room_dir, info, denied = _templates_room_or_error(room_id)
+    if denied:
+        return denied
+    with room_lock(room_dir):
+        settings = _load_dice_settings(room_dir)
+    manager = _is_manager(info)
+    return success_response(
+        _dice_settings_payload(settings, manager=manager), "骰桌动画设置"
+    )
+
+
+@bp.route("/rooms/<room_id>/dice-settings", methods=["POST"])
+def write_dice_settings(room_id: str):
+    """骰桌设置写入：仅 DM；enabled 必须是布尔，max_dice 数值 clamp 1–20。"""
+    room_dir, info, denied = _templates_room_or_error(room_id)
+    if denied:
+        return denied
+    manager = _is_manager(info)
+    if not manager:
+        return _dice_receipt(
+            "rejected",
+            "骰桌动画设置只能由 DM（房主/房管）修改。",
+            code="dnd5e_vtt.dice_settings_dm_only",
+            http_status=403,
+        )
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return _dice_receipt(
+            "invalid",
+            "请求体必须是 JSON 对象。",
+            code="dnd5e_vtt.invalid_payload",
+            http_status=400,
+        )
+    has_enabled = "enabled" in payload
+    has_max_dice = "max_dice" in payload
+    if not (has_enabled or has_max_dice):
+        return _dice_receipt(
+            "invalid",
+            "至少提供 enabled 或 max_dice 之一。",
+            code="dnd5e_vtt.dice_settings_empty",
+            http_status=400,
+        )
+    if has_enabled and not isinstance(payload.get("enabled"), bool):
+        return _dice_receipt(
+            "invalid",
+            "enabled 必须是布尔值。",
+            code="dnd5e_vtt.invalid_enabled",
+            http_status=400,
+        )
+    raw_max = payload.get("max_dice") if has_max_dice else None
+    if raw_max is not None and isinstance(raw_max, bool):
+        return _dice_receipt(
+            "invalid",
+            "max_dice 必须是 1–20 的整数。",
+            code="dnd5e_vtt.invalid_max_dice",
+            http_status=400,
+        )
+    if raw_max is None:
+        max_dice = None
+    else:
+        try:
+            max_dice = int(round(float(raw_max)))
+        except (TypeError, ValueError):
+            return _dice_receipt(
+                "invalid",
+                "max_dice 必须是 1–20 的整数。",
+                code="dnd5e_vtt.invalid_max_dice",
+                http_status=400,
+            )
+        if not math.isfinite(float(raw_max)):
+            return _dice_receipt(
+                "invalid",
+                "max_dice 必须是 1–20 的整数。",
+                code="dnd5e_vtt.invalid_max_dice",
+                http_status=400,
+            )
+        # 超限不报错：按 dice3d bundle 的骰数上限语义 clamp 到 1–20。
+        max_dice = min(MAX_DICE_ANIMATION, max(MIN_DICE_ANIMATION, max_dice))
+    with room_lock(room_dir):
+        settings = _load_dice_settings(room_dir)
+        if has_enabled:
+            settings["enabled"] = bool(payload.get("enabled"))
+        if max_dice is not None:
+            settings["max_dice"] = max_dice
+        settings["updated_at"] = _utc_now()
+        write_json_atomic(_dice_settings_path(room_dir), settings)
+    _broadcast_dice_settings(room_id, settings)
+    return _dice_receipt(
+        "success",
+        "骰桌动画设置已更新。",
+        code="dnd5e_vtt.dice_settings_updated",
+        data=_dice_settings_payload(settings, manager=manager),
+    )

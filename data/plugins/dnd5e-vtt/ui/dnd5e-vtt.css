@@ -718,3 +718,344 @@
 .home-chat-body[data-vtt-mounted] .ws-stage-controls {
     z-index: 6;
 }
+
+/* ==========================================================================
+   地图骰桌（M4）：骰盘浮层 + 结果飘字 + d20 快捷掷骰 dock + DM 设置弹层。
+   骰盘内部 canvas 由全局 .dice3d-canvas 样式接管（宽高 100%）。
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- 骰盘浮层 */
+
+.vtt-map-dice {
+    position: absolute;
+    z-index: 3;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 34%, transparent);
+    border-radius: 14px;
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+    animation: vtt-map-dice-in 0.28s ease-out;
+    transition: opacity 0.4s ease;
+}
+
+.vtt-map-dice.is-settled {
+    border-color: color-mix(in srgb, var(--color-primary, #c8a35a) 52%, transparent);
+}
+
+.vtt-map-dice.is-fading {
+    opacity: 0;
+}
+
+@keyframes vtt-map-dice-in {
+    from { opacity: 0; transform: scale(0.88); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+/* ---------------------------------------------------------------- 结果飘字 */
+
+.vtt-dice-pop {
+    position: absolute;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 7px 14px 6px;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 40%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, #0d1114 88%, transparent);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+    color: var(--color-text, #ece7db);
+    font-size: 0.78rem;
+    text-align: center;
+    pointer-events: none;
+    transform: translate(-50%, -100%);
+    animation: vtt-dice-pop 2.2s ease forwards;
+}
+
+.vtt-pop-value {
+    font-size: 1.42rem;
+    font-weight: 800;
+    line-height: 1.05;
+    color: var(--color-primary, #c8a35a);
+}
+
+.vtt-pop-label {
+    max-width: 180px;
+    overflow: hidden;
+    color: var(--color-muted, rgba(236, 231, 219, 0.72));
+    font-size: 0.64rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vtt-pop-roller {
+    color: var(--color-muted, rgba(236, 231, 219, 0.55));
+    font-size: 0.6rem;
+}
+
+.vtt-dice-pop.is-crit {
+    border-color: color-mix(in srgb, #ffd166 78%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, #ffd166 42%, transparent), 0 12px 34px rgba(255, 209, 102, 0.28);
+}
+
+.vtt-dice-pop.is-crit .vtt-pop-value {
+    color: #ffd166;
+    text-shadow: 0 0 14px rgba(255, 209, 102, 0.65);
+    animation: vtt-dice-crit 0.9s ease;
+}
+
+.vtt-dice-pop.is-fumble {
+    border-color: color-mix(in srgb, #e06666 45%, transparent);
+}
+
+.vtt-dice-pop.is-fumble .vtt-pop-value {
+    color: color-mix(in srgb, #eeb0b0 72%, var(--color-muted, #999));
+}
+
+@keyframes vtt-dice-pop {
+    0% { opacity: 0; transform: translate(-50%, -82%) scale(0.82); }
+    12% { opacity: 1; transform: translate(-50%, -100%) scale(1.06); }
+    22% { transform: translate(-50%, -104%) scale(1); }
+    70% { opacity: 1; transform: translate(-50%, -128%); }
+    100% { opacity: 0; transform: translate(-50%, -146%); }
+}
+
+@keyframes vtt-dice-crit {
+    0%, 100% { transform: scale(1); }
+    45% { transform: scale(1.22); }
+}
+
+/* ---------------------------------------------------------------- d20 dock */
+
+.vtt-dice-dock {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    z-index: 5;
+    transform: translateX(-50%);
+    pointer-events: auto;
+}
+
+.vtt-dice-dock-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 52px;
+    height: 34px;
+    padding: 0 14px;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 42%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 16%, #0d1114 82%);
+    color: var(--color-text, #ece7db);
+    font-size: 0.82rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.vtt-dice-dock-btn:hover {
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 30%, #0d1114 70%);
+    transform: translateY(-1px);
+}
+
+.vtt-dice-dock-panel {
+    position: absolute;
+    bottom: 44px;
+    left: 50%;
+    width: 248px;
+    padding: 10px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+    border-radius: 12px;
+    background: color-mix(in srgb, #0d1114 92%, transparent);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+    transform: translateX(-50%);
+}
+
+.vtt-dice-dock-panel[hidden] {
+    display: none;
+}
+
+.vtt-dice-chips {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.vtt-dice-chips button {
+    flex: 1;
+    padding: 5px 0;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--color-text, #ece7db);
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.vtt-dice-chips button:hover {
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 22%, transparent);
+}
+
+.vtt-dice-expr {
+    display: flex;
+    gap: 6px;
+}
+
+.vtt-dice-expr input {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 9px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.32);
+    color: var(--color-text, #ece7db);
+    font-size: 0.74rem;
+}
+
+.vtt-dice-expr input:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--color-primary, #c8a35a) 55%, transparent);
+}
+
+.vtt-dice-expr button {
+    padding: 6px 12px;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 46%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 24%, transparent);
+    color: var(--color-text, #ece7db);
+    font-size: 0.74rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.vtt-dice-dock-hint {
+    margin: 8px 0 0;
+    color: var(--color-muted, rgba(236, 231, 219, 0.55));
+    font-size: 0.62rem;
+    line-height: 1.5;
+}
+
+/* ---------------------------------------------------------------- DM 设置弹层 */
+
+.vtt-dice-settings {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.vtt-dice-settings-mask {
+    position: absolute;
+    inset: 0;
+    background: rgba(4, 6, 8, 0.55);
+    backdrop-filter: blur(2px);
+}
+
+.vtt-dice-settings-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: min(340px, calc(100vw - 48px));
+    padding: 16px;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 32%, transparent);
+    border-radius: 14px;
+    background: var(--theme-bg-elevated, var(--color-panel, #14181c));
+    box-shadow: 0 22px 54px rgba(0, 0, 0, 0.55);
+    color: var(--color-text, #ece7db);
+    font-size: 0.78rem;
+}
+
+.vtt-dice-settings-card header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.92rem;
+}
+
+.vtt-dice-settings-card header i {
+    color: var(--color-primary, #c8a35a);
+}
+
+.vtt-dice-toggle {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    cursor: pointer;
+    line-height: 1.5;
+}
+
+.vtt-dice-toggle input {
+    margin-top: 3px;
+    accent-color: var(--color-primary, #c8a35a);
+}
+
+.vtt-dice-toggle span,
+.vtt-dice-limit {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.vtt-dice-toggle small,
+.vtt-dice-limit small {
+    color: var(--color-muted, rgba(236, 231, 219, 0.55));
+    font-size: 0.62rem;
+    font-weight: 400;
+}
+
+.vtt-dice-limit {
+    cursor: default;
+}
+
+.vtt-dice-limit input {
+    width: 76px;
+    margin-top: 2px;
+    padding: 5px 8px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.32);
+    color: var(--color-text, #ece7db);
+    font-size: 0.76rem;
+}
+
+.vtt-dice-limit input:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--color-primary, #c8a35a) 55%, transparent);
+}
+
+.vtt-dice-settings-card footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.vtt-dice-settings-card footer button {
+    padding: 6px 14px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--color-text, #ece7db);
+    font-size: 0.74rem;
+    cursor: pointer;
+}
+
+.vtt-dice-settings-card footer button.is-primary {
+    border-color: color-mix(in srgb, var(--color-primary, #c8a35a) 50%, transparent);
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 26%, transparent);
+    font-weight: 700;
+}
+
+@media (max-width: 720px) {
+    .vtt-dice-dock { bottom: 10px; }
+    .vtt-dice-dock-panel { width: min(248px, calc(100vw - 40px)); }
+    .vtt-pop-value { font-size: 1.22rem; }
+}
