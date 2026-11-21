@@ -129,6 +129,7 @@
 - 场景转换管线 + 插件注册完成并提交：`bde5a87`（audit + scenes/run → veil-map）。
 - actors 转换完成并提交：`c9e1358`（characters → dnd5e 角色卡 + NPC statblock 模块并入剧本，配额预检 + 升版重钉）；字段映射表 `docs/plans/fvtt-world-import-actor-mapping.md`。
 - journal → 剧本场景文本 + 世界树完成并提交（M1 收官刀）：`convert_journal` 纯函数（folders→章节、页→节点、ownership→public/hidden/kp_only、场景挂点拓扑；AI 辅助切块/摘要/边推断可选注入，缺席/失败确定性降级）+ `journal/run` 端点（模块并入绑定剧本 + 图谱合并进 narrative.json）+ inspect journal 计数；heroes 2 条目 7 页全量对账，sixian 空库优雅返回 0 条。
+- M2 第一刀完成并提交：`374a024`——dnd5e-vtt 战桌骨架：骑在 dnd5e 已有的 `dnd5e-canvas` workspace 声明上（进房自动切画布是核心现成路径），新增 `room.rail.right` 插件槽消费（每插件独立事件 handlers）；六面板：聊天全桥接现有聊天流、战斗接核心 combat 事件、角色含 NPC/怪物目录（仅 DM）、日志按观察者过滤、场景与物品为空态接线点；`/panels` 观察者裁剪端点（玩家响应无 scenes/npc 键）；无地图降级提示与插件拔出回落 E7 三 tab。基线 2447 passed / 3 skipped。
 
 ---
 
