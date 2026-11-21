@@ -119,6 +119,12 @@ PLUGIN = Dnd5ePlugin()
 
 def create_tools():
     """插件级 Agent 工具：5e 专属的开战入口（核心不认识具体规则集）。"""
+    # 房规档案口径行（M5 第二段）：挂进插件服务表，核心回合管线按规则集
+    # id 探测并拼进 KP 提示词（与 dnd5e-vtt 战桌状态行同一通道）。
+    from dnd5e_plugin import house_rule_profiles
+
+    house_rule_profiles.register_kp_context()
+
     from dnd5e_plugin.encounter import create_tools as _encounter_tools
 
     return _encounter_tools()

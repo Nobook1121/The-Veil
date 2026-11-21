@@ -1195,6 +1195,27 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
                     )
             except Exception:  # noqa: BLE001 - 插件上下文失败不影响主流程
                 logger.debug("vtt_kp_context_fragment_failed room=%s", room_id, exc_info=True)
+            # 房规档案口径行（M5 第二段）：规则集插件按自己的 ruleset id 注册
+            # ``kp_context`` 服务（dnd5e → 房规档案/距离口径）；核心只按当前
+            # 房间规则集 id 探测，不写任何 5e 分支。插件未注册或读取失败零注入。
+            if room_ruleset_id:
+                try:
+                    from trpg_server.plugins.runtime import get_service as _ruleset_get_service
+
+                    _ruleset_kp_context = _ruleset_get_service(room_ruleset_id, "kp_context")
+                    if _ruleset_kp_context is not None:
+                        ruleset_fragments.extend(
+                            str(item)
+                            for item in (_ruleset_kp_context.kp_prompt_fragments(agent_context) or [])
+                            if str(item or "").strip()
+                        )
+                except Exception:  # noqa: BLE001 - 规则集片段失败不影响主流程
+                    logger.debug(
+                        "ruleset_kp_context_fragment_failed room=%s ruleset=%s",
+                        room_id,
+                        room_ruleset_id,
+                        exc_info=True,
+                    )
         if interlude_active and isinstance(projected_state, dict):
             # 复盘材料只取已落盘摘要 / 关键帧 / 日志，避免把全量聊天重新塞回上下文。
             projected_state["interlude"] = room_interlude.review_context(

@@ -118,6 +118,28 @@ def content_search(room_id: str):
     return success_response(result, "Content search")
 
 
+@bp.route("/rooms/<room_id>/rules/recommendation", methods=["GET"])
+def rules_recommendation(room_id: str):
+    """按房间剧本形态推荐 dnd5e 房规档案（M5 第二段）。
+
+    只读优先：推荐 + 理由 + 当前档案三态。自动应用仅在「房主从未手动
+    设置过 dnd5e 房规」的窗口内、且调用方是房主/管理员时发生（普通玩家
+    请求绝不触发房间写入）；站点配置可整体关闭。
+    """
+    room_dir, info, denied = _room_or_error(room_id)
+    if denied:
+        return denied
+    from dnd5e_plugin import house_rule_profiles
+
+    payload = house_rule_profiles.recommendation_payload(
+        room_dir,
+        info,
+        can_apply=_rank(info) >= 2,
+        config_dir=current_app.config.get("CONFIG_DIR"),
+    )
+    return success_response(payload, "D&D 5e house-rule profile recommendation")
+
+
 @bp.route("/rooms/<room_id>/progression/plan", methods=["POST"])
 def progression_plan(room_id: str):
     room_dir, info, denied = _room_or_error(room_id)

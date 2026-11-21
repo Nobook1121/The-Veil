@@ -150,6 +150,66 @@ def house_rules() -> dict[str, dict[str, Any]]:
                 "When enabled, use spell points instead of spell slots using the SRD variant conversion.",
             ),
         },
+        "dnd5e_positioning": {
+            "type": "enum",
+            "default": "theater_of_mind",
+            "values": ["theater_of_mind", "grid"],
+            "scope": _SCOPE,
+            "group": "combat",
+            "group_label_i18n": combat,
+            "label_i18n": _text("距离与位置口径", "Distance & Positioning"),
+            "description_i18n": _text(
+                "剧场式：距离用近战/近/远档位叙述，不依赖棋盘格（现状默认）。"
+                "方格：距离以格计（1 格 = 5 尺），移动与射程按棋盘位置折算，"
+                "适合带地图的战桌房间。该口径同时决定 AI 主持的距离描述方式。",
+                "Theater of mind: narrated distance tiers without a grid (current default). "
+                "Grid: distances in cells (5 ft each), movement and range follow board "
+                "positions — for map-enabled tables. Also drives how the AI DM narrates distance.",
+            ),
+            "option_labels": _option_labels(
+                theater_of_mind=("剧场式（近战/近/远档位）", "Theater of mind (melee/near/far tiers)"),
+                grid=("方格（1 格 = 5 尺）", "Grid (1 cell = 5 ft)"),
+            ),
+        },
+        "dnd5e_diagonal_rule": {
+            "type": "enum",
+            "default": "5-5-5",
+            "values": ["5-5-5", "5-10-5"],
+            "scope": _SCOPE,
+            "group": "combat",
+            "group_label_i18n": combat,
+            "label_i18n": _text("对角线规则（预留）", "Diagonal Rule (reserved)"),
+            "description_i18n": _text(
+                "方格战斗的对角线规则（DMG 可选规则）：5-5-5 每步对角计 5 尺，"
+                "5-10-5 交替计 5/10 尺。注意：引擎当前测距固定按 5-5-5（Chebyshev）"
+                "结算，本键为预留档位、尚未生效。",
+                "Diagonal movement on a grid (DMG optional rule): 5-5-5 counts every "
+                "diagonal as 5 ft; 5-10-5 alternates 5/10 ft. Note: the engine currently "
+                "measures distances as 5-5-5 (Chebyshev) — this key is reserved and not "
+                "yet in effect.",
+            ),
+            "option_labels": _option_labels(
+                **{
+                    "5-5-5": ("5-5-5（每步对角 5 尺）", "5-5-5 (every diagonal 5 ft)"),
+                    "5-10-5": ("5-10-5（交替 5/10 尺）", "5-10-5 (alternating 5/10 ft)"),
+                }
+            ),
+        },
+        "dnd5e_milestone_leveling": {
+            "type": "boolean",
+            "default": False,
+            "scope": _SCOPE,
+            "group": "optional",
+            "group_label_i18n": optional,
+            "label_i18n": _text("里程碑升级（预留）", "Milestone Leveling (reserved)"),
+            "description_i18n": _text(
+                "里程碑升级（DMG 可选规则）：由 KP 按剧情节点直接授级，跳过 XP 结算。"
+                "注意：当前升级管线只支持 XP，本键为预留开关、尚未生效。",
+                "Milestone leveling (DMG optional rule): the DM grants levels at story "
+                "beats instead of XP. Note: the progression pipeline currently only "
+                "supports XP — this key is reserved and not yet in effect.",
+            ),
+        },
     }
 
 
