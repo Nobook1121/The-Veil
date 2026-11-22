@@ -4450,6 +4450,1018 @@ body.is-guest .guest-login-hint {
     color: inherit;
 }
 
+/* ------------------------------------------------- D&D 5e 页签卡（FVTT 式卡面） */
+
+.dnd5e-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-panel);
+    color: var(--color-text);
+}
+
+.dnd5e-sheet-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(180px, 0.9fr) auto;
+    gap: 16px;
+    align-items: center;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.dnd5e-sheet-identity {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.dnd5e-sheet-name {
+    width: 100%;
+    padding: 4px 8px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 1.45rem;
+    font-weight: 700;
+}
+
+.dnd5e-sheet-name:hover,
+.dnd5e-sheet-name:focus {
+    border-color: var(--border-subtle);
+    background: var(--color-panel-muted);
+    outline: none;
+}
+
+.dnd5e-sheet-name-static {
+    margin: 0;
+    font-size: 1.45rem;
+    font-weight: 700;
+}
+
+.dnd5e-sheet-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    color: var(--color-muted);
+    font-size: 0.86rem;
+}
+
+.dnd5e-level-badge {
+    padding: 2px 10px;
+    border-radius: var(--theme-radius-pill);
+    color: var(--theme-text-inverse);
+    background: var(--color-primary);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.dnd5e-sheet-line {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dnd5e-sheet-xp {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.dnd5e-xp-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: var(--color-muted);
+}
+
+.dnd5e-xp-input {
+    width: 88px;
+}
+
+.dnd5e-xp-head small {
+    margin-left: auto;
+    white-space: nowrap;
+}
+
+.dnd5e-xp-bar,
+.dnd5e-hp-bar {
+    position: relative;
+    height: 8px;
+    overflow: hidden;
+    border-radius: var(--theme-radius-pill);
+    background: var(--color-panel-muted);
+    box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.dnd5e-xp-bar i,
+.dnd5e-hp-bar i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--color-primary);
+    transition: width 0.18s ease;
+}
+
+.dnd5e-sheet-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.dnd5e-btn,
+.dnd5e-chip,
+.dnd5e-mini,
+.dnd5e-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--color-panel-muted);
+    color: var(--color-text);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.16s ease, border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.dnd5e-btn:hover,
+.dnd5e-chip:hover,
+.dnd5e-mini:hover,
+.dnd5e-icon-btn:hover {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+}
+
+.dnd5e-btn:disabled,
+.dnd5e-chip:disabled,
+.dnd5e-mini:disabled,
+.dnd5e-icon-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.dnd5e-btn-primary {
+    border-color: var(--color-primary);
+    background: var(--color-primary);
+    color: var(--theme-text-inverse);
+}
+
+.dnd5e-btn-primary:hover {
+    color: var(--theme-text-inverse);
+    background: var(--theme-accent-primary-hover);
+}
+
+.dnd5e-chip.is-on {
+    border-color: var(--color-primary);
+    background: var(--theme-accent-soft);
+    color: var(--color-primary);
+}
+
+.dnd5e-mini {
+    padding: 3px 9px;
+    font-size: 0.76rem;
+}
+
+.dnd5e-icon-btn {
+    padding: 4px 8px;
+}
+
+.dnd5e-sheet-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px dashed var(--theme-warning);
+    border-radius: var(--radius-sm);
+    background: var(--theme-warning-soft);
+    color: var(--color-text);
+    font-size: 0.8rem;
+}
+
+.dnd5e-sheet-status[hidden] {
+    display: none;
+}
+
+.dnd5e-sheet-body {
+    display: grid;
+    grid-template-columns: minmax(200px, 250px) minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+}
+
+/* ---- 左栏（portrait / AC / HP / 死亡豁免 / 疲惫） ---- */
+
+.dnd5e-sheet-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-panel-muted);
+    position: sticky;
+    top: 12px;
+}
+
+.dnd5e-portrait-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.dnd5e-portrait {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    padding: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-panel);
+    cursor: pointer;
+}
+
+.dnd5e-portrait img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.dnd5e-portrait-hint {
+    position: absolute;
+    inset: auto 0 0 0;
+    padding: 4px 0;
+    background: rgba(15, 23, 42, 0.55);
+    color: #fff;
+    font-size: 0.72rem;
+    opacity: 0;
+    transition: opacity 0.16s ease;
+}
+
+.dnd5e-portrait:hover .dnd5e-portrait-hint,
+.dnd5e-portrait:focus-visible .dnd5e-portrait-hint {
+    opacity: 1;
+}
+
+.dnd5e-portrait-modes {
+    display: flex;
+    gap: 6px;
+}
+
+.dnd5e-portrait-modes .dnd5e-mini {
+    flex: 1 1 0;
+    justify-content: center;
+}
+
+.dnd5e-ac-badge {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: "label value" "note note";
+    align-items: center;
+    gap: 4px 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-panel);
+}
+
+.dnd5e-ac-label {
+    grid-area: label;
+    color: var(--color-muted);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+}
+
+.dnd5e-ac-value,
+.dnd5e-ac-input {
+    grid-area: value;
+    justify-self: end;
+    color: var(--color-primary);
+    font-size: 1.7rem;
+    font-weight: 800;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
+.dnd5e-ac-input {
+    width: 72px;
+    padding: 2px 6px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    text-align: right;
+    font: inherit;
+    font-size: 1.7rem;
+    font-weight: 800;
+}
+
+.dnd5e-ac-input:hover,
+.dnd5e-ac-input:focus {
+    border-color: var(--border-subtle);
+    background: var(--color-panel-muted);
+    outline: none;
+}
+
+.dnd5e-ac-note {
+    grid-area: note;
+    color: var(--color-muted);
+    font-size: 0.7rem;
+}
+
+.dnd5e-hp {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-panel);
+}
+
+.dnd5e-hp-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--color-muted);
+    font-size: 0.76rem;
+    font-weight: 700;
+}
+
+.dnd5e-temp-hp strong {
+    color: var(--theme-warning);
+}
+
+.dnd5e-hp-inputs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.dnd5e-hp-inputs .dnd5e-input {
+    width: 56px;
+    text-align: center;
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
+.dnd5e-hp-inputs .dnd5e-temp-input {
+    width: 46px;
+    margin-left: auto;
+    border-style: dashed;
+    color: var(--theme-warning);
+    font-size: 0.9rem;
+}
+
+.dnd5e-hp-slash {
+    color: var(--color-muted);
+}
+
+.dnd5e-hp-bar {
+    height: 10px;
+}
+
+.dnd5e-hp-bar i {
+    background: linear-gradient(90deg, var(--theme-success), color-mix(in srgb, var(--theme-success) 60%, var(--color-primary)));
+}
+
+.dnd5e-hp-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--color-muted);
+    font-size: 0.72rem;
+}
+
+.dnd5e-hitdice {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dnd5e-rail-title {
+    display: block;
+    color: var(--color-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+.dnd5e-death-saves,
+.dnd5e-exhaustion {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-panel);
+}
+
+.dnd5e-death-saves.is-active {
+    border-color: color-mix(in srgb, var(--theme-danger) 55%, var(--border-subtle));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-danger) 22%, transparent);
+}
+
+.dnd5e-death-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.76rem;
+    color: var(--color-muted);
+}
+
+.dnd5e-death-row > span {
+    width: 2.4em;
+}
+
+.dnd5e-pip {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: 50%;
+    background: var(--color-panel-muted);
+    cursor: pointer;
+    transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.dnd5e-pip:disabled {
+    cursor: default;
+}
+
+.dnd5e-pip-success.is-filled {
+    border-color: var(--theme-success);
+    background: var(--theme-success);
+}
+
+.dnd5e-pip-failure.is-filled {
+    border-color: var(--theme-danger);
+    background: var(--theme-danger);
+}
+
+.dnd5e-pip-exhaustion {
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-sm);
+    color: var(--color-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.dnd5e-pip-exhaustion.is-filled {
+    border-color: var(--theme-warning);
+    background: var(--theme-warning);
+    color: #4a3208;
+}
+
+.dnd5e-exhaustion-pips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.dnd5e-death-note,
+.dnd5e-exhaustion-note {
+    color: var(--color-muted);
+    font-size: 0.68rem;
+}
+
+/* ---- 右侧页签 ---- */
+
+.dnd5e-sheet-main {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+.dnd5e-tablist {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-panel-muted);
+}
+
+.dnd5e-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-muted);
+    font-size: 0.84rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.16s ease, background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.dnd5e-tab:hover {
+    color: var(--color-primary);
+}
+
+.dnd5e-tab.is-active,
+.dnd5e-tab[aria-selected="true"] {
+    border-color: var(--color-primary);
+    background: var(--color-panel);
+    color: var(--color-primary);
+    box-shadow: var(--shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.12));
+}
+
+.dnd5e-tab:focus-visible,
+.dnd5e-chip:focus-visible,
+.dnd5e-btn:focus-visible,
+.dnd5e-pip:focus-visible,
+.dnd5e-icon-btn:focus-visible {
+    outline: 2px solid var(--theme-focus-ring);
+    outline-offset: 2px;
+}
+
+.dnd5e-tabpanels {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.dnd5e-tabpanel[hidden] {
+    display: none;
+}
+
+.dnd5e-panel-section {
+    padding: 12px 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-panel);
+}
+
+.dnd5e-section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 10px;
+    color: var(--color-text);
+    font-size: 0.95rem;
+}
+
+.dnd5e-hint {
+    margin: 0 0 10px;
+    color: var(--color-muted);
+    font-size: 0.76rem;
+    line-height: 1.55;
+}
+
+.dnd5e-input,
+.dnd5e-field .dnd5e-input,
+.dnd5e-field input.dnd5e-input,
+.dnd5e-field textarea.dnd5e-input {
+    width: 100%;
+    min-width: 0;
+    padding: 5px 8px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--color-panel-muted);
+    color: var(--color-text);
+    font: inherit;
+    font-size: 0.84rem;
+}
+
+.dnd5e-input:focus {
+    border-color: var(--color-primary);
+    outline: none;
+    box-shadow: 0 0 0 2px var(--theme-focus-ring);
+}
+
+.dnd5e-input[readonly] {
+    border-color: transparent;
+    background: transparent;
+}
+
+.dnd5e-input-number {
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.dnd5e-textarea {
+    resize: vertical;
+    line-height: 1.6;
+}
+
+/* 属性块 */
+
+.dnd5e-ability-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    gap: 10px;
+}
+
+.dnd5e-ability {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 10px 8px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-panel-muted);
+    text-align: center;
+}
+
+.dnd5e-ability.is-save-proficient {
+    border-color: color-mix(in srgb, var(--color-primary) 45%, var(--border-subtle));
+}
+
+.dnd5e-ability-head {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    font-size: 0.82rem;
+}
+
+.dnd5e-ability-head small {
+    color: var(--color-muted);
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+}
+
+.dnd5e-ability-score,
+.dnd5e-input.dnd5e-ability-score {
+    width: 62px;
+    text-align: center;
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+
+.dnd5e-ability-score-static {
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+
+.dnd5e-ability-mod {
+    color: var(--color-primary);
+    font-size: 1rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.dnd5e-save-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    color: var(--color-muted);
+    font-size: 0.7rem;
+    cursor: pointer;
+}
+
+.dnd5e-save-toggle strong {
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+}
+
+/* 派生数值 */
+
+.dnd5e-derived-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px;
+}
+
+.dnd5e-derived {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--color-panel-muted);
+}
+
+.dnd5e-derived > span {
+    color: var(--color-muted);
+    font-size: 0.72rem;
+}
+
+.dnd5e-derived strong {
+    font-size: 1.05rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.dnd5e-derived-wide {
+    grid-column: 1 / -1;
+}
+
+.dnd5e-derived-input {
+    width: 100%;
+}
+
+/* 表格类 */
+
+.dnd5e-table-shell,
+.dnd5e-skill-shell {
+    overflow-x: auto;
+    margin-bottom: 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--color-panel-muted);
+}
+
+.dnd5e-table,
+.dnd5e-skill-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.dnd5e-table th,
+.dnd5e-table td,
+.dnd5e-skill-table th,
+.dnd5e-skill-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border-subtle);
+    text-align: left;
+    vertical-align: middle;
+}
+
+.dnd5e-table thead th,
+.dnd5e-skill-table thead th {
+    position: sticky;
+    top: 0;
+    color: var(--color-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+    background: var(--color-panel);
+}
+
+.dnd5e-table tbody tr:last-child td,
+.dnd5e-skill-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.dnd5e-skill-table {
+    min-width: 420px;
+}
+
+.dnd5e-skill-flag {
+    width: 56px;
+    text-align: center;
+}
+
+.dnd5e-skill-ability {
+    color: var(--color-muted);
+    font-size: 0.72rem;
+}
+
+.dnd5e-skill-bonus {
+    width: 68px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.dnd5e-skill-table tr.is-proficient {
+    background: var(--theme-accent-soft);
+}
+
+.dnd5e-table tr.is-equipped {
+    background: var(--theme-accent-soft);
+}
+
+.dnd5e-equip-cell {
+    width: 54px;
+    text-align: center;
+}
+
+.dnd5e-row-actions {
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+}
+
+.dnd5e-qty-input,
+.dnd5e-input.dnd5e-qty-input {
+    width: 64px;
+    text-align: center;
+}
+
+.dnd5e-empty-cell {
+    padding: 14px 10px;
+    color: var(--color-muted);
+    font-size: 0.8rem;
+    text-align: center;
+}
+
+/* 列表类（特性 / 状态） */
+
+.dnd5e-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0 0 10px;
+    padding: 0;
+    list-style: none;
+}
+
+.dnd5e-list-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--color-panel-muted);
+}
+
+.dnd5e-list-index {
+    flex: 0 0 22px;
+    color: var(--color-muted);
+    font-size: 0.74rem;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.dnd5e-list-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.dnd5e-status-chip {
+    flex: 0 0 auto;
+    padding: 2px 8px;
+    border-radius: var(--theme-radius-pill);
+    background: var(--theme-accent-soft);
+    color: var(--color-primary);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.dnd5e-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+/* 施法 */
+
+.dnd5e-cast-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+}
+
+.dnd5e-slot-table {
+    min-width: 320px;
+}
+
+.dnd5e-slot-add {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    color: var(--color-muted);
+    font-size: 0.76rem;
+}
+
+/* 展示字段 / 传记 */
+
+.dnd5e-field-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px 14px;
+}
+
+.dnd5e-field-static {
+    padding: 4px 2px;
+    font-size: 0.86rem;
+}
+
+.dnd5e-bio-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.dnd5e-prose {
+    padding: 8px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--color-panel-muted);
+    font-size: 0.84rem;
+    line-height: 1.65;
+    white-space: pre-wrap;
+}
+
+.dnd5e-readonly-note {
+    margin: 0;
+    color: var(--color-muted);
+    font-size: 0.76rem;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* 窄屏：左栏折叠到顶部，页签横滑 */
+@media (max-width: 960px) {
+    .dnd5e-sheet-header {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+
+    .dnd5e-sheet-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+    }
+}
+
+@media (max-width: 720px) {
+    .dnd5e-sheet {
+        padding: 10px;
+    }
+
+    .dnd5e-sheet-header {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 10px;
+    }
+
+    .dnd5e-sheet-body {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .dnd5e-sheet-rail {
+        position: static;
+        display: grid;
+        grid-template-columns: minmax(0, 120px) minmax(0, 1fr);
+        grid-template-areas:
+            "portrait ac"
+            "portrait hp"
+            "death death"
+            "exhaust exhaust";
+        gap: 10px;
+        align-items: start;
+        top: auto;
+    }
+
+    .dnd5e-portrait-shell { grid-area: portrait; }
+    .dnd5e-ac-badge { grid-area: ac; }
+    .dnd5e-hp { grid-area: hp; }
+    .dnd5e-death-saves { grid-area: death; }
+    .dnd5e-exhaustion { grid-area: exhaust; }
+
+    .dnd5e-death-row { justify-content: flex-start; }
+    .dnd5e-exhaustion-pips { justify-content: flex-start; }
+
+    .dnd5e-tablist {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: thin;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .dnd5e-tab {
+        flex: 0 0 auto;
+    }
+
+    .dnd5e-ability-grid {
+        grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+    }
+
+    .dnd5e-derived-grid {
+        grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+    }
+}
+
 /* 剧本地图编辑器（场景底图 / 人工标定 / DM 标记） */
 .scenario-map-editor {
     display: flex;

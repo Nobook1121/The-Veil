@@ -393,3 +393,39 @@ def roll_check(room_id: str):
             return _rule_error(exc)
         return error_response(str(exc), 400, "invalid_argument")
     return success_response(result)
+
+
+@bp.post("/api/rooms/<room_id>/rules/rest")
+def take_rest(room_id: str):
+    """玩家自跑房间：结算一次短休 / 长休。
+
+    休息数值全部由规则集插件结算（``room_rest`` 只做成员挑选与落盘）；没有
+    ``rest`` 能力的规则集（如 CoC7）在这里直接得到明确错误，不下发入口。
+    与 AI 工具 ``rest.take`` 共用同一实现，区别只是操作者来自会话而不是 KP。
+    """
+    from trpg_server import room_rest
+
+    room_dir, info, failure = _load_room(room_id)
+    if failure:
+        return failure
+    if not room_rest.rest_available(info):
+        return error_response("当前规则集未提供休息能力", 400, "no_rest")
+    data = _payload()
+    try:
+        member = _target_member(info, data)
+        hit_dice = _optional_int(data.get("hit_dice"))
+        result = room_rest.take_rest(
+            room_dir,
+            info,
+            kind=str(data.get("kind") or "short"),
+            hit_dice=1 if hit_dice is None else hit_dice,
+            members=[str(member.get("username") or "")],
+            actor=session.get("username"),
+            actor_id=session.get("user_id"),
+        )
+    except room_rules.RuleOperationError as exc:
+        return _rule_error(exc)
+    except ValueError as exc:
+        return error_response(str(exc), 400, "invalid_argument")
+    _notify_room(room_id)
+    return success_response(result)
