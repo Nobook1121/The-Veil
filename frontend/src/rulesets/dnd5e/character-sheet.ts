@@ -2092,12 +2092,34 @@ interface Dnd5eRoomInfo {
         }
     }
 
+    /**
+     * 「新建角色卡」入口：交给 dnd5e 专属建卡向导（四步：概念/属性/技能装备/速览）。
+     * 向导缺席（脚本没加载）或用户点「高级：直接填写表单」时，仍回到旧的通用表单，
+     * 所以两条路都能建卡，不会因为向导出问题把入口堵死。
+     */
     function createCharacterFromList(): void {
         if (!global.currentUser) {
             notify("请先登录后再创建角色卡", "warning");
             return;
         }
-        openEditorModal(newCard(), true);
+        const wizard = global.TrpgDnd5eCharacterWizard;
+        if (!wizard) {
+            notify("建卡向导未加载，已切回直接填写表单", "warning");
+            openEditorModal(newCard(), true);
+            return;
+        }
+        wizard.open({
+            onAdvanced: () => openEditorModal(newCard(), true),
+            onCreated: (raw) => {
+                const saved = createCharacterCard(raw as Dnd5eCardInput);
+                cards = cards.some((item) => item.id === saved.id)
+                    ? cards.map((item) => item.id === saved.id ? saved : item)
+                    : [saved, ...cards];
+                activeCardId = saved.id;
+                showDetail(saved.id);
+                global.TrpgCharacterListBridge?.refresh?.();
+            },
+        });
     }
 
     function describeCharacterCard(raw: Record<string, unknown>): CharacterSheetCardSummary {
