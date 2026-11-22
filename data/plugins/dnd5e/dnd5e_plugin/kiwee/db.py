@@ -30,6 +30,9 @@ KIWEE_SITE = "https://5e.kiwee.top"
 SOURCE_REPO_URL = "https://github.com/tjliqy/5etools-cn"
 SOURCE_REF_DEFAULT = "cn2.0"
 SCHEMA_VERSION = "1"
+# 上游中文数据许可（NOTICE-KIWEE.md 同一口径）：检索结果随条目回传，
+# 消费方（知识工具 / UI）不需要另写死许可文案。
+KIWEE_LICENSE = "CC BY-NC-SA 4.0"
 
 # 机翻判定口径＝kiwee 站点自身渲染逻辑（js/render.js）：
 # translator 字段缺失/为空，或恰好等于"机翻"，都算未校对机翻。
@@ -535,6 +538,33 @@ class KiweeDb:
             params.update({f"dm{i}": cat for i, cat in enumerate(sorted(DM_ONLY_CATEGORIES))})
         return where, params
 
+    # -- 单条 --------------------------------------------------------------
+
+    def get(self, category: Any, uid_or_name: Any) -> dict[str, Any] | None:
+        """按 ``uid``（``名称|来源`` 小写）取单条；取不到时按名称再检索一次。
+
+        **不做 DM 门控**：门控是观察者的事，由调用方（UI 路由 / 工具）
+        决定；本方法只负责取数。类目非法抛 ``ValueError``（与 search 一致）。
+        """
+        cat = category_id(category)
+        if not cat:
+            return None
+        key = str(uid_or_name or "").strip()
+        if not key:
+            return None
+        row = self._conn.execute(
+            f"SELECT {_ENTRY_COLUMNS} FROM entries WHERE category = :cat AND uid = :uid COLLATE NOCASE LIMIT 1",
+            {"cat": cat, "uid": key.lower()},
+        ).fetchone()
+        if row is not None:
+            return _row_to_result(row)
+        # 兼容「只给名字」和「名称|来源 大小写不一致」的调用：退化为检索首条。
+        name = key.split("|")[0].strip()
+        if not name:
+            return None
+        found = self.search(cat, name, limit=1, observer_is_dm=True)
+        return found[0] if found else None
+
     # -- 状态 --------------------------------------------------------------
 
     def status(self) -> dict[str, Any]:
@@ -614,6 +644,10 @@ def _row_to_result(row: tuple) -> dict[str, Any]:
         "is_machine_translated": int(machine),
         "rules_era": rules_era,
         "raw": json.loads(raw_json),
+        # 许可与站点随结果回传：知识工具/UI 直接透传，不必各自写死文案。
+        "license": KIWEE_LICENSE,
+        "license_url": SOURCE_REPO_URL,
+        "site": KIWEE_SITE,
     }
 
 
@@ -623,6 +657,7 @@ __all__ = [
     "CATEGORIES",
     "DM_ONLY_CATEGORIES",
     "ERA_2024_SOURCES",
+    "KIWEE_LICENSE",
     "KIWEE_SITE",
     "MACHINE_TRANSLATOR_MARK",
     "SCHEMA_VERSION",

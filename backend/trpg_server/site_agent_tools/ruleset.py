@@ -153,12 +153,14 @@ def _build_context(context: ToolContext, ruleset_id: str) -> SiteAgentRulesetCon
             config_dir / "ruleset_knowledge",
             rooms_dir=rooms_dir,
         )
-        agent_context.tool_state["ruleset_search"] = lambda query, top_k=3: search_ruleset(
+        # 网站 Agent 是 KP/创作者视角，默认可看 DM 侧深库类目。
+        agent_context.tool_state["ruleset_search"] = lambda query, top_k=3, **options: search_ruleset(
             context.room_id,
             query,
             store=store,
             ruleset_id=ruleset_id,
             top_k=top_k,
+            observer_is_dm=bool(options.get("observer_is_dm", True)),
         )
     return agent_context
 

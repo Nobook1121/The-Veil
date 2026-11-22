@@ -262,12 +262,14 @@ def run_player_turn(
         current_app.config.get("KNOWLEDGE_BASES_DIR", KNOWLEDGE_BASES_DIR),
         rooms_dir=rooms_dir,
     )
-    context.tool_state["ruleset_search"] = lambda query, top_k: search_ruleset(
+    # AI 玩家角色是玩家视角：深库不返回 bestiary/掷表/变体规则等 DM 侧类目。
+    context.tool_state["ruleset_search"] = lambda query, top_k, **options: search_ruleset(
         room_id,
         query,
         store=ruleset_store,
         ruleset_id=ruleset_id,
         top_k=top_k,
+        observer_is_dm=bool(options.get("observer_is_dm", False)),
     )
 
     character_name = ""

@@ -110,14 +110,10 @@ class RulesetKnowledgeStore:
         meta = self._meta(ruleset_id); meta["enabled"] = False; data = self._registry(); data[str(ruleset_id)] = meta; self._save_registry(data); return meta
 
 
-def search_ruleset(room_id: str, query: str, *, store: RulesetKnowledgeStore, ruleset_id: str = "", top_k: int = 3) -> list[dict[str, Any]]:
-    if not ruleset_id:
-        try:
-            from trpg_server.ruleset import default_ruleset_id
-
-            ruleset_id = default_ruleset_id()
-        except RuntimeError:
-            ruleset_id = ""
+def _legacy_ruleset_search(
+    room_id: str, query: str, *, store: RulesetKnowledgeStore, ruleset_id: str, top_k: int
+) -> list[dict[str, Any]]:
+    """既有检索路径（房间索引 + 规则集内置内容包），保持逐位行为不变。"""
     version = None
     if store.rooms_dir:
         info = read_json(store.rooms_dir / str(room_id) / "info.json", default={})
@@ -134,3 +130,147 @@ def search_ruleset(room_id: str, query: str, *, store: RulesetKnowledgeStore, ru
         return stored
     merged = list(builtin(query, limit=top_k)) + list(stored)
     return merged[: max(1, min(int(top_k), 20))]
+
+
+# 深库服务的约定名（插件注册在 ``get_service(ruleset_id, name)``）。核心只认
+# 「名字 + search() 鸭子类型」，不 import 任何插件包；插件缺席/未建库时下面
+# 一路探测都会落空，检索退回既有路径，零回归。
+DEEP_SEARCH_SERVICES = ("kiwee_db",)
+DEEP_TEXT_LIMIT = 1200
+
+
+def deep_ruleset_search(
+    ruleset_id: str, query: str, *, limit: int = 3, observer_is_dm: bool = True
+) -> list[dict[str, Any]]:
+    """深库优先检索：先问插件的深库服务，服务缺席/无命中 → ``[]``。
+
+    返回统一 chunk dict（与 :meth:`RulesetKnowledgeStore.search` 同构的
+    ruleset_id/chunk_id/topic/citation/text/source/license + 深库附加的
+    deep_link / rules_version / 机翻标记），失败一律降级为空列表，
+    绝不把 KP 回合拖挂。
+    """
+    text = str(query or "").strip()
+    ruleset = str(ruleset_id or "").strip()
+    if not text or not ruleset:
+        return []
+    try:
+        from trpg_server.plugins.runtime import get_service
+    except Exception:  # noqa: BLE001 - 旧核心没有服务表时按无深库处理
+        return []
+    try:
+        limit = max(1, min(int(limit), 20))
+    except (TypeError, ValueError):
+        limit = 3
+    for layer in DEEP_SEARCH_SERVICES:
+        service = get_service(ruleset, layer)
+        search = getattr(service, "search", None)
+        if not callable(search):
+            continue
+        try:
+            rows = search(None, text, observer_is_dm=observer_is_dm, limit=limit, with_text=True)
+        except TypeError:
+            # 第三方深库服务没有 with_text 扩展：退回基础契约。
+            try:
+                rows = search(None, text, observer_is_dm=observer_is_dm, limit=limit)
+            except Exception:  # noqa: BLE001 - 深库失败不阻断规则检索
+                logger.warning("Deep ruleset search failed (layer=%s)", layer, exc_info=True)
+                continue
+        except Exception:  # noqa: BLE001 - 深库失败不阻断规则检索
+            logger.warning("Deep ruleset search failed (layer=%s)", layer, exc_info=True)
+            continue
+        if not rows:
+            continue
+        version = ""
+        getter = getattr(service, "version", None)
+        if callable(getter):
+            try:
+                version = str(getter() or "")
+            except Exception:  # noqa: BLE001 - 版本只是标签，取不到留空
+                version = ""
+        return [
+            _deep_chunk(ruleset, layer, row, version)
+            for row in rows
+            if isinstance(row, dict) and str(row.get("text") or "").strip()
+        ]
+    return []
+
+
+def _deep_chunk(ruleset_id: str, layer: str, row: dict[str, Any], version: str) -> dict[str, Any]:
+    """深库结果 → 统一 chunk（下游工具/提示词只认这套字段）。"""
+    category = str(row.get("category") or "")
+    uid = str(row.get("uid") or "")
+    name = str(row.get("name") or "").strip()
+    # 服务名带 _db 后缀是注册约定，对外的层名只要 "kiwee" 这种短标签。
+    layer_label = layer[: -len("_db")] if layer.endswith("_db") else layer
+    eng_name = str(row.get("eng_name") or "").strip()
+    page_hint = str(row.get("page_hint") or "").strip()
+    machine = bool(row.get("is_machine_translated"))
+    return {
+        "ruleset_id": ruleset_id,
+        "knowledge_version": version,
+        "chunk_id": f"{layer}:{category}:{uid}",
+        "topic": category,
+        "title": f"{name}（{eng_name}）" if eng_name else name,
+        "citation": f"{page_hint} / {name}" if page_hint else name,
+        "text": str(row.get("text") or "").strip()[:DEEP_TEXT_LIMIT],
+        "score": 1.0,
+        "source": {
+            "system": ruleset_id,
+            "document": page_hint or str(row.get("source") or ""),
+            "edition": str(row.get("rules_era") or ""),
+            "attribution": str(row.get("site") or ""),
+        },
+        "license": str(row.get("license") or ""),
+        "license_url": str(row.get("license_url") or ""),
+        "deep_layer": layer_label,
+        "deep_link": str(row.get("deep_link") or ""),
+        "category": category,
+        "uid": uid,
+        "name": name,
+        "eng_name": eng_name,
+        "rules_version": str(row.get("rules_era") or ""),
+        "is_machine_translated": machine,
+        "translator_ok": bool(row.get("translator_ok")),
+        # 直接可用的质量提示：UI 与提示词都不需要再判一次。
+        "translator_note": "机翻，未校对" if machine else "",
+    }
+
+
+def search_ruleset(
+    room_id: str,
+    query: str,
+    *,
+    store: RulesetKnowledgeStore,
+    ruleset_id: str = "",
+    top_k: int = 3,
+    observer_is_dm: bool = True,
+) -> list[dict[str, Any]]:
+    """规则检索总入口：**深库优先**，深库缺席/无命中时逐位回落到既有路径。
+
+    ``observer_is_dm=False``（AI 玩家角色侧）时深库不返回 bestiary / 掷表 /
+    变体规则等 DM 侧类目；KP 侧保持默认 True。深库不可用时 legacy 路径
+    的结果与改动前完全一致。
+    """
+    if not ruleset_id:
+        try:
+            from trpg_server.ruleset import default_ruleset_id
+
+            ruleset_id = default_ruleset_id()
+        except RuntimeError:
+            ruleset_id = ""
+    legacy = _legacy_ruleset_search(room_id, query, store=store, ruleset_id=ruleset_id, top_k=top_k)
+    deep = deep_ruleset_search(ruleset_id, query, limit=top_k, observer_is_dm=observer_is_dm)
+    if not deep:
+        return legacy
+    seen = {(str(item.get("category") or ""), str(item.get("uid") or "")) for item in deep}
+    rest = [
+        item
+        for item in legacy
+        if (str(item.get("category") or ""), str(item.get("uid") or "")) not in seen
+    ]
+    merged = deep + rest
+    try:
+        limit = max(1, min(int(top_k), 20))
+    except (TypeError, ValueError):
+        limit = 3
+    return merged[:limit]

@@ -569,11 +569,19 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
                 rooms_dir=current_app.config.get("ROOMS_DIR", ROOMS_DIR),
             )
 
-            def ruleset_search(query, top_k):
+            def ruleset_search(query, top_k, **options):
                 started = time.perf_counter()
                 _emit_thinking_stage(room_id, ai_request_id, "ruleset_search", "正在查询规则书")
                 try:
-                    return search_ruleset(room_id, query, store=ruleset_store, ruleset_id=room_ruleset_id, top_k=top_k)
+                    return search_ruleset(
+                        room_id,
+                        query,
+                        store=ruleset_store,
+                        ruleset_id=room_ruleset_id,
+                        top_k=top_k,
+                        # 回合管线是 KP 视角；显式传下来时以调用方为准。
+                        observer_is_dm=bool(options.get("observer_is_dm", True)),
+                    )
                 finally:
                     ruleset_metrics["latency_ms"] += round((time.perf_counter() - started) * 1000, 2)
 
