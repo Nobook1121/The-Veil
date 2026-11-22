@@ -278,11 +278,63 @@ function Resolve-PipIndex {
     return $ordered
 }
 
+# 探测「本机代理是否还活着」：部分用户装过 v2ray / clash 之类的工具，环境变量里
+# 残留 http://127.0.0.1:xxxxx 一类的代理地址，但代理软件并没有启动。此时 pip 会把
+# 每一次请求都塞进这个死端口，报「NewConnectionError ... WinError 10061」，且换
+# 任何镜像源都同样失败（看起来像是所有源都坏了）。远端代理无法离线判定，不在此处理。
+function Test-LocalProxyAlive([string]$ProxyUrl) {
+    if (-not $ProxyUrl) { return $true }
+    $uri = $null
+    if (-not [uri]::TryCreate($ProxyUrl, [System.UriKind]::Absolute, [ref]$uri)) { return $true }
+    $hostName = $uri.Host.Trim('[', ']')
+    if ($hostName -notin @('127.0.0.1', 'localhost', '::1')) { return $true }
+    $port = if ($uri.Port -gt 0) { $uri.Port } else { 80 }
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $task = $client.ConnectAsync($hostName, $port)
+        if (-not $task.Wait(1500)) { return $false }
+        return $client.Connected
+    } catch {
+        return $false
+    } finally {
+        $client.Dispose()
+    }
+}
+
+# 环境里配置了「已失效的本机代理」时，通知用户并返回 pip 需要的禁用代理参数
+# （--proxy "" 覆盖 pip 配置文件里的 proxy；环境变量在本次进程内清空，双管齐下）。
+# 只在真正要跑 pip 时调用一次（结果缓存在脚本作用域，避免重复告警）。
+$script:PipProxyWorkaround = $null
+function Get-PipProxyWorkaround {
+    if ($null -ne $script:PipProxyWorkaround) { return $script:PipProxyWorkaround }
+    $proxies = @()
+    foreach ($name in @('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy')) {
+        $value = [Environment]::GetEnvironmentVariable($name)
+        if ($value) { $proxies += [pscustomobject]@{ Name = $name; Value = $value } }
+    }
+    $dead = @()
+    if ($proxies.Count -gt 0) {
+        $dead = @($proxies | Where-Object { -not (Test-LocalProxyAlive $_.Value) })
+    }
+    if ($dead.Count -eq 0) {
+        $script:PipProxyWorkaround = @()
+        return $script:PipProxyWorkaround
+    }
+    $names = ($dead | ForEach-Object { $_.Name }) -join '、'
+    Write-Warn "检测到本机代理 $($dead[0].Value) 无法连接（代理软件可能没有启动），本次安装将自动绕开它。"
+    Write-Note "如需长期修复：启动代理软件，或删除环境变量 $names / pip 配置中的 proxy 设置。"
+    foreach ($item in $dead) { [Environment]::SetEnvironmentVariable($item.Name, $null) }
+    $script:PipProxyWorkaround = @('--proxy', '')
+    return $script:PipProxyWorkaround
+}
+
 # 拼出 pip 的公共参数（超时与重试都收紧一些，便于失败后快速换源）。
 function New-PipArguments([string[]]$Extra) {
     $arguments = @('-m', 'pip') + $Extra + @(
         '--disable-pip-version-check', '--prefer-binary', '--retries', '3', '--timeout', '30'
     )
+    $proxyArgs = @(Get-PipProxyWorkaround)
+    if ($proxyArgs.Count -gt 0) { $arguments += $proxyArgs }
     return $arguments
 }
 
@@ -510,7 +562,7 @@ function Ensure-Dependencies {
     }
 
     if (-not $installed) {
-        Fail "运行依赖安装失败。可指定一个可用的镜像后重试，例如：`n        powershell -ExecutionPolicy Bypass -File .\start-bootstrap.ps1 -IndexUrl https://pypi.tuna.tsinghua.edu.cn/simple`n        或手动执行：.venv\Scripts\python.exe -m pip install -r requirements.txt"
+        Fail "运行依赖安装失败。可指定一个可用的镜像后重试，例如：`n        powershell -ExecutionPolicy Bypass -File .\start-bootstrap.ps1 -IndexUrl https://pypi.tuna.tsinghua.edu.cn/simple`n        或手动执行：.venv\Scripts\python.exe -m pip install -r requirements.txt`n        若日志出现 127.0.0.1 端口的连接被拒（WinError 10061），通常是代理软件未启动或环境变量残留：`n        请先启动代理，或在同一个窗口执行 $env:HTTP_PROXY="" 后重试。"
     }
     Set-Content -Path $MarkerFile -Value $hash -Encoding ascii
     Write-Ok '运行依赖安装完成'
