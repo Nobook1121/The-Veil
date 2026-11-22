@@ -12,13 +12,13 @@ THIRD-PARTY-LICENSES.md[SV3M]: F:第三方依赖许可证清单：由脚本侧�
 docker-compose.qdrant.yml[OD2T]: F:Qdrant 向量库的 docker compose 部署样例 | R:code:backend/trpg_server/agents/vector_store.py | A:- | S:-
 package.json[FC3T]: F:前端 npm 包清单：构建脚本与依赖版本，含发布包依赖锁定 | R:- | A:- | S:-
 pyrightconfig.json[FC2T]: F:pyright 类型检查配置 | R:- | A:- | S:-
-pytest.ini[FC3T]: F:pytest 测试配置 | R:- | A:- | S:-
+pytest.ini[FC3T]: F:pytest 全局配置：Windows 下用 thread 方式实现 180 秒超时兜底，与 kiwee_real 真实快照集成测试标记 | R:- | A:signal 方式在 Windows 不可用，必须 thread；超时只兜真卡死 | S:-
 requirements-ocr.txt[FC2T]: F:OCR 可选依赖清单：PaddleOCR 相关 | R:code:backend/trpg_server/agents/ocr_provider.py | A:- | S:-
 requirements-vector-qdrant.txt[FC2T]: F:Qdrant 向量库可选依赖清单 | R:code:backend/trpg_server/agents/vector_store.py | A:- | S:-
 requirements-vector.txt[FC2T]: F:向量库基础可选依赖清单 | R:code:backend/trpg_server/agents/vector_store.py | A:- | S:-
 requirements.txt[FC3T]: F:主依赖清单：运行所需 Python 包与版本 | R:- | A:- | S:-
 server.py[EE6S]: F:服务器启动入口：端口选择、控制台线程与 make_server | R:code:backend/trpg_server/app_factory.py | A:控制台命令在此线程运行 | S:-
-start-bootstrap.ps1[OV3T]: F:首次部署引导脚本：Python 依赖安装与初始化 | R:code:start.cmd | A:- | S:-
+start-bootstrap.ps1[FE6L]: F:启动环境准备脚本：找/装 Python、建 .venv、装依赖（自动选源/失效本机代理探测绕行）、补本地 embedding、缺前端产物时构建、依赖指纹标记跳过 | R:code:requirements.txt | A:- | S:改动需兼容 PS 5.1；pip 调用只经 New-PipArguments 一个出口
 start.cmd[OV2T]: F:Windows 一键启动脚本：按配置端口启动服务器 | R:code:server.py | A:- | S:-
 tsconfig.frontend.json[FC2T]: F:前端 TypeScript 编译配置 | R:code:package.json | A:- | S:-
 tsconfig.json[FC2T]: F:基础 TypeScript 编译配置 | R:code:tsconfig.frontend.json | A:- | S:-
@@ -28,16 +28,6 @@ w3.txt[SD1T]: F:临时笔记文件 | R:- | A:- | S:-
 
 ===/<repository>/.github/ISSUE_TEMPLATE/===
 bug_report.md[FQ2T]: F:GitHub Issue 缺陷报告模板：定义 [BUG] 标题前缀、复现步骤、期望行为、截图日志与桌面环境等填写结构 | R:- | A:- | S:-
-
-===/<repository>/.tmp-agent-check/config/aiplatform/===
-default-request.json[FC1T]: F:agent 冒烟检查环境的 AI 平台默认请求模板：local-model、stream=true、temperature 0.7、top_p 0.9 | R:- | A:- | S:-
-
-===/<repository>/.tmp-agent-check/config/===
-general.toml[FC2L]: F:agent 检查环境的全局配置模板副本：声明主题、语言、通知、房间控制台与日志、AI 与提示词缓存、规则集、站点与网络访问控制等全部默认段 | R:code:config/templates/general.toml | A:- | S:-
-
-===/<repository>/.tmp-agent-check/config/roles/===
-debug-kp.md[FB2T]: F:调试角色提示词：约束 KP 调试会话的工具纪律——房间快照、剧本上下文、角色卡优先走 room.* 工具，检定按是否绑定角色卡分流 check.roll_room_check 或 dice.roll_coc_check，骰点必须来自工具 | R:code:.tmp-agent-check/config/roles/kp.md | A:- | S:-
-kp.md[FU4T]: F:KP 守秘人系统提示词副本：不可覆盖的防注入守则、主持职责与玩家能动性保护、房间边界与工具调用规则、检定失败叙事处理、第二人称叙事风格与【NPC:名字】【旁白】配音标记约定 | R:code:.tmp-agent-check/config/roles/debug-kp.md | A:- | S:需检定的行动必须当轮直接调用工具，工具返回前不得叙述成败；展示顺序固定为检定结果、KP 判断、触发器内容
 
 ===/<repository>/2026-11-12/create-app-cost/work/===
 appcount_hashed.json[TP2T]: F:基准结果：HashedTokenEmbedding 场景下 create_app 实测 9 次构建共 2.09s，首次 0.616s，其余中位 0.187s | R:code:2026-11-12/create-app-cost/work/appcount_plugin.py | A:- | S:-
@@ -171,20 +161,20 @@ latex.py[MU4L]: F:LaTeX 叙事排版：三档强度设置解析、提示词段�
 memory.py[PB4T]: F:房间记忆工具：remember_room_fact 原子写 agent_memory.json（上限 200 条、单条 1000 字），read_room_memory 按 kind/content 过滤并合并长期记忆账本召回，按重要度与时间排序 | R:code:backend/trpg_server/agents/memory_consolidation.py | A:与 KP 工具和网站 Agent 两种上下文形态兼容 | S:-
 memory_consolidation.py[PB6L]: F:房间长期记忆巩固：只读 state.json、agent_memory.json、story_ledger.jsonl 与对话归档抽取条目，追加写独立 memory_ledger.jsonl（带 source 可追溯），按相关性受预算注入；账本按文件指纹增量解析并超阈值分片轮转 | R:code:backend/trpg_server/agents/memory.py | A:memory_recall、memory_cache_stats 可独立观测 | S:账本分片最多 12 片，最旧分片磁盘保留但不再载入索引，超限后最早期记录不再可检索
 ocr_provider.py[IE2T]: F:PaddleOCR 懒加载适配器：扫描文档页 OCR 提取；available 探测依赖可导入性，extract 返回 text 与 confidence 行 | R:- | A:- | S:-
-player_agent.py[AU5M]: F:玩家侧 AI 回合：复用现有 Agent 基础设施让 AI 代替角色发言、行动并执行必要检定；工具集只含玩家可用检定、掷骰与规则检索，绝不暴露 KP 的剧本、触发器与场景推进工具；输出经 persist_player_turn 落库并带 ai_controlled 标记 | R:code:backend/trpg_server/agents/profiles.py,code:backend/trpg_server/agents/ruleset_knowledge.py | A:- | S:-
+player_agent.py[AU5M]: F:玩家侧 AI 回合：复用现有 Agent 基础设施让 AI 代替角色发言、行动并执行必要检定；工具集只含玩家可用检定/掷骰/规则检索且按房间规则集裁剪，绝不暴露 KP 剧本、触发器与场景推进工具 | R:code:backend/trpg_server/agents/profiles.py,code:backend/trpg_server/site_agent_tools/ruleset.py | A:- | S:-
 player_roll.py[RU6L]: F:玩家投掷状态机：pending、rolled、awaiting_confirm、finished、timeout；Chat 线程 wait_for_player_roll 阻塞、REST 推进；重投开启时只有 confirm 或到期解除阻塞，超时自动投掷是终局且视为已确认 | R:code:backend/trpg_server/agents/dice_settings.py | A:resolve_roll、reroll、confirm_roll、complete_roll | S:-
 profiles.py[RC5M]: F:Agent profile 与工具集装配：图谱模式隐藏 redundant 场景模块工具并追加叙事运行工具；插件工具名经 plugin_tool_names 合并，房间 profile 决定工具可见性 | R:code:backend/trpg_server/agents/tools/__init__.py,code:backend/trpg_server/ruleset/__init__.py | A:GRAPH_EXCLUDED_TOOLS、GRAPH_TOOL_NAMES 为图谱模式工具面权威 | S:-
 prompt_builder.py[MU5M]: F:提示词分层装配：PromptLayers 输出 messages、cache_key、static_prefix 与分段标签；wrap_user_input 用 USER_INPUT 定界符包裹玩家输入防注入 | R:- | A:segments 供 token 成本归因 | S:-
 responses_transport.py[IN5M]: F:Responses API 传输层：messages 与 input 双向翻译、多轮工具调用复用 previous_response_id；仅当平台被探测支持且用户显式开启时启用，任何异常立即锁定并回退 chat/completions，聊天不因该能力中断 | R:code:backend/trpg_server/agents/http_retry.py | A:tools_to_responses 做双向结构转换 | S:-
 room_state.py[PB5S]: F:房间运行态 store：state.json 原子读写，事件日志上限 200 条、摘要 4000 字；提供 load_room_state 与 mutate_room_state 读写入口 | R:code:backend/trpg_server/json_store.py | A:MAX_EVENT_LOG、MAX_SUMMARY_LENGTH | S:-
 ruleset_adapters.py[IE5M]: F:外部桌面规则集知识适配层：RulesetChunk 版本化结构（ruleset_id、topic、rule_scope、visibility、priority 等）与 RulesetRegistry 扩展协议 | R:code:backend/trpg_server/agents/ruleset_knowledge.py | A:- | S:-
-ruleset_knowledge.py[KB5S]: F:规则集知识的版本化存储与确定性检索：RulesetKnowledgeStore 管理 rulesets.json 与分块文本，检索复用 knowledge_base 的词法打分 | R:code:backend/trpg_server/agents/knowledge_base.py,code:backend/trpg_server/agents/ruleset_adapters.py | A:- | S:-
+ruleset_knowledge.py[KB6M]: F:规则集知识的版本化存储与确定性检索：RulesetKnowledgeStore 管理 rulesets.json 与分块文本；search_ruleset 优先插件深库（deep_ruleset_search，附来源与许可），不可用/无命中回落分块检索 | R:code:backend/trpg_server/agents/knowledge_base.py,code:backend/trpg_server/agents/ruleset_adapters.py | A:- | S:-
 runtime.py[MB7L]: F:Agent 运行循环：工具注册表解析、多轮工具调用编排；内部工具 id 点号命名与 API 下划线名互转；会改成员状态的工具同批只广播一次 | R:code:backend/trpg_server/agents/tools/base.py,code:backend/trpg_server/agents/tools/__init__.py | A:run_agent_completion 为编排入口 | S:UI 载体字段 visible_message、direct_message 与 direct_messages 回传模型前会被剥离，不得依赖它们做后续轮判定
 structured_output.py[AB4M]: F:结构化 KP 响应：StructuredKPResponse 从模型 JSON 输出解析叙事、选项、状态更新、场景切换、NPC 行动与触发文件，写回经 room_state 原子落盘 | R:code:backend/trpg_server/agents/room_state.py | A:- | S:-
 telemetry.py[OO4S]: F:AI 用量遥测：ai_usage.jsonl 按天记录 token 消耗与缓存命中率（calculate_cache_hit_rate），供仪表盘统计 | R:code:backend/trpg_server/agents/token_accounting.py | A:- | S:-
 token_accounting.py[OA3S]: F:提示词 token 成本归因：按分段估算静态前缀、规则集口径、剧本核心、检索与历史的占比；估算只用于归因不是计费口径，真实 token 以上游 usage 为准 | R:code:backend/trpg_server/agents/telemetry.py | A:SEGMENT_LABELS 为分段标签权威 | S:-
 trigger_system.py[DD6L]: F:触发器与资源域模型及运行时校验：TRIGGER_TYPES 六类；存储保持 JSON 兼容，资源只存引用、二进制放在剧本目录下；媒体派生清理走 media 包，路径经 safe_join 防穿越 | R:code:backend/trpg_server/security.py,code:backend/trpg_server/json_store.py | A:- | S:-
-turn_pipeline.py[MB8L]: F:AI 回合流水线：房间上下文、记忆、叙事检索、提示词组装、模型调用与收尾广播七阶段在 run_turn 内顺序执行；coc7 房规开关经注册表能力层取用，缺席退中性全关对应工具整组不出现；路由层只留请求解析与错误映射 | R:code:backend/trpg_server/agents/knowledge_base.py,code:backend/trpg_server/agents/prompt_builder.py,code:backend/trpg_server/ai_platform_resolver.py,code:backend/trpg_server/ruleset/capabilities.py | A:run_turn | S:-
+turn_pipeline.py[MB8L]: F:AI 回合流水线：房间上下文、记忆、叙事检索、提示词组装、模型调用与收尾广播七阶段在 run_turn 顺序执行；coc7 房规开关经注册表能力层取用，插件工具按 profile 并入，路由层只留请求解析与错误映射 | R:code:backend/trpg_server/agents/profiles.py,code:backend/trpg_server/agents/prompt_builder.py | A:- | S:-
 vector_migration.py[PD2T]: F:把人类可读的剧本 knowledge-index JSON 迁入向量库：扫描 scenario-*/knowledge-index/*.json，默认用哈希向量，返回文件与块计数 | R:code:backend/trpg_server/agents/vector_store.py,code:backend/trpg_server/agents/knowledge_base.py | A:- | S:-
 vector_store.py[PD6L]: F:后端中立的向量存储：嵌入式 SQLite 默认实现（纯标准库）与可选 Qdrant 适配器（显式配置才启用）；count 走 SQL COUNT 不全表扫描 | R:code:backend/trpg_server/agents/embedding_provider.py | A:create_vector_store 工厂入口 | S:-
 versioning.py[DD3T]: F:剧本发布与房间绑定辅助：normalize_semver 归一化语义版本（纯数字按补丁位解释），提供版本比较与房间绑定 | R:- | A:SEMVER_RE 为合法版本形状权威 | S:-
@@ -234,13 +224,13 @@ character_items.py[DB4S]: F:KP 物品工具：向房间快照追加物品或武�
 character_stats.py[DB4S]: F:KP 属性技能工具：修改房间快照技能值与基础属性，与控制台 rule skill、rule attr 共用 room_rules并登记统一待写回队列；持久卡仅归档时合并，能力钳制走 ruleset.capabilities | R:code:backend/trpg_server/room_rules.py | A:- | S:-
 chase.py[DB5M]: F:CoC7 追逐工具：会话、移动、险境与冲突；规则数学在 ruleset 插件 chase 模块、状态在 room_chase；房规开关经注册表能力读取，coc7 缺席时按全部关闭且本组不挂载 | R:code:backend/trpg_server/room_chase.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
 coc7.py[DB5L]: F:CoC7 房规 AI 工具：社交、组合、团体幸运、熟人、经济五个工具只做参数搬运，判定统一走 check_service；房规开关经注册表能力读取，coc7 缺席按全部关闭且不挂载 | R:code:backend/trpg_server/check_service.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
-combat.py[DB8L]: F:战斗轮工具：DEX 先攻、近战对抗、战技、射击难度与故障、护甲、重伤濒死死亡与急救医学；贯穿/卡壳/徒手/先攻合成经规则集钩子（D1），武器字段与技能名表经 registry（D2），射击与急救入口按 flow_mode 闸门分派（D3），战斗 SAN 走资源槽位 | R:code:backend/trpg_server/agents/tools/dice.py,code:backend/trpg_server/agents/room_state.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:treat 的急救/医学技能名元组仍留核心，闸门使非 coc7 房间不可达，迁移属后续债务
+combat.py[DB8L]: F:战斗轮工具：DEX 先攻、近战对抗、战技、射击与故障、护甲、重伤濒死死亡与急救；贯穿/卡壳/徒手/先攻合成经规则集钩子（D1/D2），流程按 flow_mode 闸门（D3），攻击/豁免经 combat_chain 附结构化数值链 | R:code:backend/trpg_server/agents/tools/dice.py,code:backend/trpg_server/agents/tools/combat_chain.py | A:- | S:dnd5e 房间 shoot/treat 显式拒绝，treat 的急救/医学技能名元组仍留核心（非 coc7 不可达）
 concentration.py[DB4S]: F:专注注册表工具（仅 dnd5e）：concentration.list 刷新并列出房间级专注索引，concentration.break 走插件 end_concentration 清理关联效果并同步注册表 | R:code:backend/trpg_server/workflows/concentration.py | A:- | S:-
 content.py[IB5T]: F:通用内容检索工具：核心不认识法术、怪物、装备字段；插件通过 content_search 能力提供 types 与 search，ambiguous 时绝不自行取第一条必须交调用方确认 | R:- | A:不传 type 时返回该规则集支持的内容类型 | S:-
 dice.py[DB8L]: F:骰娘工具族：COC 检定、房间检定、疯狂、理智、自由掷骰与 dnd5e 检定；阈值与难度经规则集 checks 能力并按传入 ruleset_id 解析（B1）；sanity/madness 消息带 resource_state 槽位声明（E1，madness 补齐缺失的 san 快照） | R:code:backend/trpg_server/dice_policy.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
 effects.py[DB5M]: F:通用效果工具（规则中立）：effect.list、apply、remove 操作核心效果容器；增删查、持续时间与作用域由核心维护，条件含义、力竭分级与回合 tick 由规则集插件决定；无 effects 能力的规则集不下发 | R:code:backend/trpg_server/room_spells.py | A:- | S:-
 interlude.py[DB4S]: F:幕间工具：AI KP 只能提议进入或结束幕间（request_interlude 与 add_review），不能自行拍板 | R:code:backend/trpg_server/room_interlude.py | A:- | S:-
-knowledge.py[IB5T]: F:规则书检索工具 search_ruleset_knowledge：结果上限 3 条、引用文本截断 1200 字，检索走 RulesetKnowledgeStore | R:code:backend/trpg_server/agents/ruleset_knowledge.py | A:- | S:-
+knowledge.py[IB5T]: F:规则书检索工具 search_ruleset_knowledge：结果上限 3 条、引用截断 1200 字；基础字段恒定、深库附加字段只增不删；AI 玩家身份不看 DM 侧类目 | R:code:backend/trpg_server/agents/ruleset_knowledge.py | A:- | S:-
 magic.py[DB5L]: F:CoC7 法术与典籍工具：规则数学在插件 magic 模块、状态在 room_magic；法术内容表经注册表能力 magic_content_of 获取不直接 import 规则包；coc7 缺席按全部关闭且不挂载 | R:code:backend/trpg_server/room_magic.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
 music.py[AU3S]: F:KP 显式请求外链曲目工具：同步返回 pending、检索在后台线程执行绝不卡叙事流；引擎非 external 直接返回 disabled 不偷偷启用；对外名规整为 music_request_track | R:- | A:- | S:-
 narrative.py[DB6L]: F:叙述 AI 工具：交互结算/节点查询/位置检索等；resolve_interaction 枚举经 narrative_tools 工厂按规则集投影组装（E1） | R:code:backend/trpg_server/ruleset/narrative.py | A:- | S:-
@@ -250,11 +240,12 @@ reactions.py[DW4S]: F:反应待决队列工具（仅 dnd5e）：reaction.list �
 rest.py[DB4S]: F:休息、生命骰与同调工具：工具本身规则集中立，数值与判定由房间规则集插件提供；无 rest 能力的规则集（CoC7）不下发，直接调用返回明确错误 | R:code:backend/trpg_server/room_rest.py | A:- | S:-
 room.py[DB6L]: F:房间信息工具：get_room_snapshot、get_scenario_context、get_character_cards、remember_fact、get_memory 与场景模块读取；输出经 redaction 剥离地图与触发器资源字段防剧透 | R:code:backend/trpg_server/agents/memory.py,code:backend/trpg_server/agents/narrative/redaction.py | A:- | S:-
 sanity.py[DB5M]: F:CoC7 理智结构化工具：发作、习惯恐惧、现实认知与恐惧躁狂表查询；恐惧躁狂表按需查询不整表注入；表查询经 room_sanity 走房间规则集能力，房规经注册表读取，coc7 缺席按全部关闭不挂载 | R:code:backend/trpg_server/room_sanity.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
-spells.py[DB6L]: F:法术工具（规则中立）：spell.list 与 spell.cast 解析角色、校验行动预算并把请求转给当前规则集的 spells 能力，法术位、升环、攻击豁免、伤害与专注全在插件侧；无战斗时走 room_spells 房间级结算 | R:code:backend/trpg_server/room_spells.py | A:- | S:-
+spells.py[DB6L]: F:法术工具（规则中立）：spell.list/cast 解析角色、校验行动预算并转当前规则集 spells 能力；法术位/升环/攻击豁免/专注全在插件侧，攻击与豁免结果经 combat_chain 生成数值链；无战斗时走房间级结算 | R:code:backend/trpg_server/agents/tools/combat_chain.py,code:backend/trpg_server/room_spells.py | A:- | S:-
 suggest.py[DB3T]: F:行动建议工具：最多 5 条、每条 80 字；routes/chat.py 在 tool_state 记录全局开关与房规的权威决定，直接调用者回落房规单开关 | R:code:backend/trpg_server/agents/hint_guard.py | A:MAX_SUGGESTED_ACTIONS=5 | S:-
 time.py[DB3T]: F:只读时钟工具：返回当前游戏时间与累计推进量；时间推进只能由房主经房间控制台完成，AI 侧不提供任何推进入口 | R:code:backend/trpg_server/room_clock.py | A:- | S:-
 trigger.py[DB5M]: F:触发器揭示工具：validate 与 reveal，图谱模式输出经 redaction 剥离资源与地图字段；检定同轮揭示由 dice 侧 trigger_id 联动完成 | R:code:backend/trpg_server/agents/trigger_system.py,code:backend/trpg_server/agents/narrative/redaction.py | A:- | S:-
 workflow.py[DW5M]: F:工作流查询与决策工具（仅 dnd5e 下发）：跨请求查看、取消、超时收尾与提交待决决定；CoC7 无自动化工作流，handler 里再校验规则集防直接调用 | R:code:backend/trpg_server/workflows/engine.py | A:- | S:-
+combat_chain.py[DB5M]: F:战斗数值链纯函数：攻击/法术攻击/豁免三类结算整理为 metadata.combat_log 结构化卡（命中/未命中/暴击/豁免五态、伤害与 HP 变动）；不读状态不掷骰，旧消息无此字段前端按老样式渲染 | R:code:backend/trpg_server/agents/tools/combat.py | A:- | S:metadata.dice_roll 必须完全不动（骰桌动画依赖），combat_log 只允许追加
 
 ===/<repository>/backend/trpg_server/combat/===
 __init__.py[CD7T]: F:可插拔战斗核心包入口：核心只管事件流与结算时序（谁先行动、行动余额、轮末触发），掷骰、成功等级、伤害与死亡判定全由 ruleset 插件提供 | R:code:backend/trpg_server/combat/registry.py,code:backend/trpg_server/combat/settings.py | A:- | S:-
@@ -312,7 +303,7 @@ builtin.py[EP4T]: F:内置插件视图：把随包规则集适配成插件清单
 content_packs.py[EP6L]: F:插件内容数据包容器：pack.json 声明包与文件清单，纯数据不执行代码；校验只做通用约束——路径不越界、大小条目数深度上限、ID 同类型唯一、来源与许可声明存在 | R:code:backend/trpg_server/plugins/manifest.py | A:- | S:-
 contracts.py[EP6M]: F:插件公共契约：默认不启用任何第三方插件（只有 enabled.json 的 enabled 列表才激活）；插件代码以宿主进程权限运行，信任边界是管理员显式安装启用；路径经 safe_plugin_path 防符号链接逃逸；清单加载阶段零副作用 | R:code:backend/trpg_server/plugins/bootstrap.py | A:PLUGIN_API_VERSION、PLUGIN_MANIFEST_VERSION 为版本常量 | S:-
 manifest.py[EP6L]: F:插件清单解析与校验：清单纯数据、解析阶段不 import 插件代码不触网络；JSON Schema 视图与实现互为镜像并以本模块为准；能力名、路径与版本经 contracts 常量校验 | R:code:backend/trpg_server/plugins/contracts.py | A:- | S:-
-registry.py[EP8L]: F:插件注册表：发现、校验、依赖与冲突检查、激活、启用禁用与卸载；失败隔离——任一插件任何一步抛错只标记该插件及依赖者 failed，主程序照常启动；激活在插件自己的 PluginContext 上登记可撤销效果，enable 与 disable 是增量操作只重建目标 fiber 及依赖子图 | R:code:backend/trpg_server/plugins/kernel/context.py,code:backend/trpg_server/plugins/route_proxy.py,code:backend/trpg_server/plugins/manifest.py | A:- | S:-
+registry.py[CD8L]: F:插件注册表：发现→校验→依赖/冲突→激活→启停→卸载；激活为 PluginContext 可撤销效果链（直写槽位经激活窗口对拍补入），enable/disable 增量、rescan 全量，蓝图经代理路由即时可逆 | R:code:backend/trpg_server/plugins/runtime.py,code:backend/trpg_server/plugins/kernel/__init__.py | A:- | S:-
 route_proxy.py[EP6M]: F:插件代理路由层：宿主只注册一次总蓝图，插件蓝图全部 mount 进路由表并挂在插件自己的效果链上；disable 时 unmount 路由立即 404，重启不再必需 | R:code:backend/trpg_server/plugins/registry.py,code:backend/trpg_server/app_factory.py | A:接线顺序硬约束：总蓝图在核心蓝图之后注册 | S:-
 runtime.py[EP5S]: F:插件运行期注册表：核心只在两处读这里——工具注册表合并 extra_agent_tools、规则集注册表合并 extra_ruleset_plugins；核心不 import 任何插件包，插件移除或加载失败不让核心导入失败 | R:code:backend/trpg_server/plugins/registry.py | A:extra_agent_tools、extra_ruleset_plugins 为扩展钩子 | S:-
 security.py[SS5S]: F:插件目录安全边界：所有路径经 safe_plugin_path 拒绝 .. 与绝对路径；插件目录及任意一级 symlink 即拒绝防逃逸；资源有文件数、单文件与总量上限；代码执行隔离不在这里、信任边界是管理员显式安装 | R:code:backend/trpg_server/security.py | A:- | S:-
@@ -462,7 +453,7 @@ props.py[EU5L]: F:道具工坊 REST 接口：模板清单、道具索引与 CRUD
 room_console.py[EU4M]: F:房间内嵌 Web 控制台 REST 接口：本房间日志读取与命令执行，权限复用房间角色判定 | R:code:backend/trpg_server/room_console_commands.py,code:backend/trpg_server/room_log/__init__.py | A:- | S:-
 room_log.py[EU4M]: F:团录导出 REST 接口：预览归约、创建任务、查询状态、下载 PDF 与清理 | R:code:backend/trpg_server/room_log/jobs.py,code:backend/trpg_server/room_log/model.py | A:- | S:-
 room_narrative.py[EU4M]: F:房间侧图谱运行态 API：当前地点、队伍与状态查询，房主手动触发写运行态账本并记审计 | R:code:backend/trpg_server/agents/narrative/runtime.py | A:- | S:-
-room_rules.py[EU4M]: F:房间规则操作接口：聊天斜杠命令 /sc 与 /item 的 REST 入口，与控制台 rule 域及 KP 工具共用 room_rules 实现 | R:code:backend/trpg_server/room_rules.py | A:- | S:-
+room_rules.py[EU5L]: F:房间规则操作接口（不依赖 AI KP）：理智结算、物品追加/移除、技能属性改动、休息与检定；聊天斜杠、房间控制台 rule 域与 KP 工具共用同一套权限与留痕，休息对接插件 rest 能力 | R:code:backend/trpg_server/room_rules.py,code:backend/trpg_server/ruleset/capabilities.py | A:- | S:-
 rooms.py[EU5M]: F:房间路由入口：提供共享蓝图、重新导出全部历史符号保持旧 import 兼容，实现按域拆到 room_ops 与 rooms_* 子模块 | R:code:backend/trpg_server/room_ops/access.py,code:backend/trpg_server/routes/rooms_house_rules.py | A:- | S:-
 rooms_ai_players.py[EU4M]: F:AI 托管与 AI 玩家路由：添加接管 AI 玩家、切换托管与触发 AI 行动 | R:code:backend/trpg_server/room_ops/ai_players.py,code:backend/trpg_server/agents/player_agent.py | A:- | S:-
 rooms_house_rules.py[EU4M]: F:房间房规路由：世界意志状态、房规读取与更新 | R:code:backend/trpg_server/room_ops/house_rules.py,code:backend/trpg_server/house_rules_store.py | A:- | S:-
@@ -545,7 +536,7 @@ narrative.py[ID6L]: F:剧本世界树节点工具：粒度降到节点边关键�
 permissions.py[IP4S]: F:权限矩阵工具：只允许在自身权限范围内改动 | R:code:backend/trpg_server/permission_config.py | A:- | S:-
 profile.py[IP3S]: F:个人设置工具：只允许修改当前登录用户自己的昵称与邮箱 | R:code:backend/trpg_server/security.py | A:- | S:-
 rooms.py[IB5M]: F:房间相关工具：快照、角色记录、房间记忆与剧本知识检索；只在服务端确认用户当前停留在该房间时才暴露 | R:code:backend/trpg_server/agents/memory.py,code:backend/trpg_server/agents/ruleset_knowledge.py | A:- | S:-
-ruleset.py[IE4M]: F:网站 Agent 的规则集分派：当前规则集由房间或剧本上下文解析，工具、创作提示词与角色卡 schema 全部来自插件声明的 profile，核心不写死规则集 id | R:code:backend/trpg_server/ruleset/registry.py,code:backend/trpg_server/ruleset/coc7/site_agent.py | A:- | S:-
+ruleset.py[IB5M]: F:网站 Agent 的规则集分派：核心不写死规则集 id 与工具名——当前规则集由房间/剧本上下文解析，工具、创作提示词与 schema 全部来自插件 profile；只读工具免两段确认 | R:code:backend/trpg_server/agents/profiles.py,code:backend/trpg_server/agents/tools/__init__.py | A:- | S:-
 scenarios.py[IB5L]: F:剧本相关工具：列表、读取与保存（两段式确认），复用 scenario_service 保证与界面保存一致 | R:code:backend/trpg_server/scenario_service.py,code:backend/trpg_server/site_agent_tools/base.py | A:- | S:-
 settings.py[IB4M]: F:网站设置工具：读取与修改 general.toml；写操作统一要求 settings.general 权限，网络安全与 Agent 自身配置仅 OWNER，密钥字段不可经 Agent 读写明文 | R:code:backend/trpg_server/config/secret_keys.py,code:backend/trpg_server/config/writer.py | A:- | S:-
 users.py[IB4M]: F:用户管理工具：列表、详情、角色与状态变更、强制重置密码；角色改动经 can_modify_role 与 owner_count 约束 | R:code:backend/trpg_server/users/service.py,code:backend/trpg_server/site_agent_auth.py | A:- | S:-
@@ -738,7 +729,7 @@ plugin.json[FC4T]: F:dnd5e-srd 内容包插件清单：SRD 5.1 纯数据无规�
 
 ===/<repository>/data/plugins/dnd5e-srd/packs/===
 abilities.json[FC4T]: F:5e SRD 能力数据包：六项属性定义 | R:code:data/plugins/dnd5e-srd/packs/pack.json | A:- | S:-
-classes.json[FC4T]: F:5e SRD 职业数据包：职业、子职业与生命骰熟练项 | R:code:data/plugins/dnd5e-srd/packs/pack.json | A:- | S:-
+classes.json[FD3S]: F:dnd5e-srd 职业数据包：补 wizard/cleric 的 subclasses/subclass_level 与等级特性表等 SRD 事实（zh-CN，升级向导与规则引擎消费） | R:code:data/plugins/dnd5e/dnd5e_plugin/progression.py | A:- | S:-
 conditions.json[FC4T]: F:5e SRD 条件数据包：状态效果与重复豁免 | R:code:data/plugins/dnd5e-srd/packs/pack.json,code:data/plugins/dnd5e/dnd5e_plugin/effects.py | A:- | S:-
 equipment.json[FC4T]: F:5e SRD 装备数据包：武器护甲与装备条目 | R:code:data/plugins/dnd5e-srd/packs/pack.json,code:data/plugins/dnd5e/dnd5e_plugin/combat.py | A:- | S:-
 monsters.json[FC4M]: F:5e SRD 怪物数据包：属性、AC、HP、攻击与 CR | R:code:data/plugins/dnd5e-srd/packs/pack.json,code:data/plugins/dnd5e/dnd5e_plugin/statblock.py | A:- | S:-
@@ -750,32 +741,35 @@ spells.json[FC4M]: F:5e SRD 法术数据包：环阶、施法时间、豁免、�
 ===/<repository>/data/plugins/dnd5e/dnd5e_plugin/===
 __init__.py[RE1T]: F:dnd5e 插件内部实现包入口 | R:- | A:- | S:-
 checks.py[KD5M]: F:5e 检定与豁免：d20 加属性调整值加熟练加值，结果统一交 CheckOutcome；成功等级只是插件自定字符串核心不比较不解释 | R:code:backend/trpg_server/ruleset/check_outcome.py,code:data/plugins/dnd5e/dnd5e_plugin/rules.py | A:- | S:-
-combat.py[CD7L]: F:5e 战斗结算：先攻、攻击 vs AC、伤害骰、暴击、抗性易伤免疫、临时 HP、死亡豁免与行动经济；武器护甲怪物数据全部来自 srd 数据包不另存 | R:code:backend/trpg_server/combat/contracts.py,code:data/plugins/dnd5e-srd/packs/monsters.json | A:- | S:-
+combat.py[DB7L]: F:D&D 5e（SRD 5.1）战斗结算：先攻、攻击 vs AC、伤害骰与暴击、抗性/易伤/免疫、临时 HP、死亡豁免与行动经济、负重与装备 AC；武器/护甲/怪物数据全部来自 dnd5e-srd，插件不另存数值 | R:code:data/plugins/dnd5e/dnd5e_plugin/effects.py,code:data/plugins/dnd5e-srd/packs | A:- | S:-
 content_search.py[IE4S]: F:5e 内容检索消歧层：复用核心内容包查找，补充环阶、CR 与装备类别等区分字段，核心不出现 5e 词表 | R:code:backend/trpg_server/agents/tools/content.py | A:- | S:-
 effects.py[CD5L]: F:5e 状态与效果：条件、力竭分级与重复豁免取自 srd conditions；整理成通用效果实例，修正以标志位暴露在 detail.effects 供战斗与法术按标志位读取 | R:code:backend/trpg_server/ruleset/effects.py,code:data/plugins/dnd5e-srd/packs/conditions.json | A:- | S:-
 encounter.py[DB5M]: F:5e 遭遇开战工具 dnd5e.start_encounter：怪物与遭遇来自叙事图 POI 卡片，实际战斗复用核心 combat.start，先攻与数值由规则集处理 | R:code:backend/trpg_server/agents/tools/combat.py,code:backend/trpg_server/agents/narrative/mapgraph.py | A:- | S:-
-house_rules.py[FC4S]: F:5e 房规声明：字段名、取值范围、默认值与文案都属于插件，核心只合并校验下发不出现任何 5e 字段 | R:code:backend/trpg_server/house_rules_store.py | A:- | S:-
-http.py[IE4M]: F:dnd5e 插件 HTTP 接口：升级规划与内容检索；房间访问与角色卡读写仍由核心提供 | R:code:backend/trpg_server/plugins/route_proxy.py | A:- | S:-
+house_rules.py[FD5M]: F:D&D 5e 房规声明：schema（字段/枚举/默认值/中英文文案）全部属于插件，核心只按 type 校验并原样下发，核心不出现任何 5e 字段 | R:code:data/plugins/dnd5e/dnd5e_plugin/house_rule_profiles.py | A:- | S:-
+http.py[EB6L]: F:dnd5e 插件 HTTP：升级规划/应用与角色升级端点、内容检索、kiwee 规则深库三端点（搜索/详情/状态，DM 侧类目鉴权）；房间访问与角色卡读写仍由核心提供 | R:code:data/plugins/dnd5e/dnd5e_plugin/kiwee/__init__.py,code:data/plugins/dnd5e/dnd5e_plugin/progression.py | A:- | S:-
 map_link.py[IE3T]: F:5e 战斗与 veil-map 棋子同步的插件侧胶水：核心只按规则集调 on_combat_saved，地图不可用返回可读状态不阻断战斗 | R:code:backend/trpg_server/plugins/route_proxy.py | A:- | S:-
-progression.py[CD6L]: F:5e 升级规划：plan 只读生成选择槽位，apply 一次性校验落库；只支持升 1 级，越级跨职业未知职业返回明确错误；数据全部来自 srd 数据包 | R:code:data/plugins/dnd5e-srd/packs/progression.json,code:data/plugins/dnd5e-srd/packs/classes.json | A:- | S:-
+progression.py[DB7L]: F:5e 升级规划：plan 只读生成槽位、apply 全量校验后一次性落库；数据全来自 dnd5e-srd（progression/classes/spells），class_advancement 档额外给生命值/职业特性/子职且 XP 冻结；越级/跨职业明确报错 | R:code:data/plugins/dnd5e-srd/packs | A:- | S:-
 rest.py[CD4M]: F:5e 休息、生命骰与调谐：时长、恢复比例与同调上限属于插件由 dnd5e_rest_variant 房规决定；核心只做规则集中立恢复流程 | R:code:backend/trpg_server/room_rest.py,code:backend/trpg_server/agents/tools/rest.py | A:- | S:-
 rules.py[KD4M]: F:5e 判定数学：属性调整值、熟练加值与检定名解析；接受英文键、英文全名与中文名便于自然语言调用；纯计算不掷骰不写存储 | R:code:data/plugins/dnd5e/dnd5e_plugin/checks.py | A:- | S:-
 schema.py[CD5M]: F:5e 角色卡 schema：公共信封加 sheet，只整理稳定结构、补齐派生值并给告警，不负责落盘 | R:code:backend/trpg_server/ruleset/descriptors.py | A:- | S:-
 site_agent.py[CD4M]: F:5e 插件对网站 Agent 的声明：核心只读 profile 按规则集分派，不在核心写死 5e 工具名与口径 | R:code:backend/trpg_server/site_agent_tools/ruleset.py | A:- | S:-
 spell_schema.py[KD5L]: F:5e 法术结构化字段统一解析与升环计算：新字段缺失时从旧字段推断，旧数据包不迁移可读；升环归一化成规则表不做逐法术分支 | R:code:data/plugins/dnd5e/dnd5e_plugin/spells.py | A:- | S:-
 spells.py[CD6L]: F:5e 法术：法术位、已知与准备、升环、攻击豁免与专注；事实全部来自 srd 数据包，伤害治疗复用核心管线，攻击豁免走判定壳 | R:code:backend/trpg_server/agents/tools/spells.py,code:data/plugins/dnd5e-srd/packs/spells.json | A:- | S:-
-statblock.py[KD4M]: F:剧本 NPC 桥接成 5e 战斗者：属性 AC HP 以 srd 怪物为基线，剧本模块同名字段可覆盖；没有基线时显式失败不生成占位数值 | R:code:data/plugins/dnd5e-srd/packs/monsters.json,code:backend/trpg_server/agents/tools/combat.py | A:- | S:-
+statblock.py[DB5M]: F:剧本 NPC 模块 → 5e 战斗者桥接：属性/AC/HP/攻击/CR 以 dnd5e-srd 数据包为基线，剧本同名字段可覆盖；无怪物基线显式失败不造占位数值 | R:code:data/plugins/dnd5e-srd/packs | A:- | S:-
 tools.py[FC4S]: F:5e 专属 AI 工具声明与提示词片段：只声明哪些专属工具属于 5e 与 KP 规则口径，核心只拼提示词不解释 5e 语义 | R:code:backend/trpg_server/ruleset/coc7/tools.py,code:backend/trpg_server/agents/tools/__init__.py | A:- | S:-
+builder.py[DB6M]: F:D&D 5e（SRD 5.1）建卡计算：购点 27/标准数组/4d6 去最低/种族加值/1 级 HP/被动感知；建卡向导与 AI 建卡共用同一口径，preview 必须与 schema.derive 完全一致 | R:code:data/plugins/dnd5e/dnd5e_plugin/schema.py | A:预览口径不一致会让玩家看到预览一套、存档另一套 | S:-
+house_rule_profiles.py[DB6L]: F:5e 房规档案：theater-of-mind 与 grid-combat 两具名档（键→值声明集）+ 按场景形态推荐（veil-map 活动场景→grid）；只在房主从未手改的窗口自动应用，记忆落插件自有 house-rule-profile.json | R:code:data/plugins/dnd5e/dnd5e_plugin/house_rules.py | A:推荐不等于强改，手动改动后窗口永久关闭 | S:-
 
 ===/<repository>/data/plugins/dnd5e/===
-entry.py[EP4S]: F:dnd5e 规则集插件入口：组装 schema、判定、战斗、法术、升级与工具能力 | R:code:data/plugins/dnd5e/plugin.json | A:- | S:-
-plugin.json[FC4T]: F:dnd5e 规则集插件清单：能力声明与 canvas workspace 声明，内容来源指向 dnd5e-srd | R:code:backend/trpg_server/plugins/contracts.py | A:- | S:-
+entry.py[EB5S]: F:D&D 5e 规则集插件入口：只做组装（schema/检定/战斗/休息/法术/工具/房规/http 蓝图），核心通过 ruleset.contracts 协议访问，不认识 5e 专属字段与成功等级 | R:code:data/plugins/dnd5e/dnd5e_plugin/schema.py | A:- | S:-
+plugin.json[FE3T]: F:dnd5e 插件清单：requires dnd5e-srd、rulesets/http_blueprints/agent_tools 等能力声明，描述注明 kiwee 子模块与许可 | R:code:data/plugins/dnd5e/entry.py | A:- | S:-
+NOTICE-KIWEE.md[SD3T]: F:kiwee 内容深库的数据来源与许可声明：5etools 中文镜像快照、来源站与 CC BY-NC-SA 标注、本地检索库用途 | R:code:data/plugins/dnd5e/dnd5e_plugin/kiwee/__init__.py | A:- | S:-
 
 ===/<repository>/data/plugins/===
-enabled.json[FC3T]: F:插件启用列表：当前启用 dnd5e-srd、dnd5e 与 veil-map，是插件激活的唯一开关 | R:code:backend/trpg_server/plugins/bootstrap.py | A:- | S:-
+enabled.json[FE3T]: F:第三方插件启用清单：dnd5e-srd/dnd5e/veil-map/fvtt-world-import/dnd5e-vtt 五项启用（唯一激活来源，原子写） | R:code:backend/trpg_server/plugins/registry.py | A:- | S:-
 
 ===/<repository>/data/plugins/veil-map/===
-entry.py[EP7L]: F:veil-map 地图插件入口：地图蓝图注册、REST 与 Socket 路由、移动校验、先攻回合联动与移动力校验，仅对声明 canvas workspace 的规则集开放 | R:code:data/plugins/veil-map/plugin.json,code:backend/trpg_server/plugins/route_proxy.py | A:- | S:-
+entry.py[EB7L]: F:地图插件服务端：棋子坐标/网格吸附/多格占位/地图编辑/战争迷雾/动态光源与战斗回合联动，状态写房间插件命名空间；行动经济复用 combat.scheduler；另含场景导入 import_scene 与公开 map_service | R:code:backend/trpg_server/combat/scheduler.py | A:- | S:插件间协作只经 get_service，不直接 import 对方 Python 模块
 importer.py[IE4L]: F:地图导入器：解析外部地图格式为场景与墙体数据 | R:code:data/plugins/veil-map/entry.py,code:backend/trpg_server/agents/ocr_provider.py | A:- | S:-
 media.py[PD3S]: F:地图媒体资产：图片派生与缩略图 | R:code:data/plugins/veil-map/scene_store.py | A:- | S:-
 plugin.json[FC4T]: F:veil-map 插件清单：拖拽移动、网格吸附、多格占位与先攻回合联动，仅对声明 canvas workspace 的规则集开放 | R:code:backend/trpg_server/plugins/contracts.py | A:- | S:-
@@ -785,7 +779,7 @@ visibility.py[SS5L]: F:迷雾与可见性：视线遮挡、已探索区域与玩
 
 ===/<repository>/data/plugins/veil-map/ui/===
 map.css[FU3M]: F:地图 UI 样式：网格、棋子与迷雾层的 CSS | R:code:data/plugins/veil-map/ui/map.js | A:- | S:-
-map.js[FU5L]: F:地图前端交互：拖拽、网格吸附、多格棋子与迷雾渲染 | R:code:data/plugins/veil-map/entry.py,code:data/plugins/veil-map/ui/map.css | A:- | S:-
+map.js[FU7L]: F:veil-map 前端：棋子绘制/拖拽吸附/多格占位/先攻条/房主地图编辑与迷雾渲染，自行请求插件 HTTP 并经房间广播同步；核心只提供 canvas 宿主与事件通道 | R:code:data/plugins/veil-map/entry.py | A:- | S:-
 
 ===/<repository>/data/rulesets/coc7/catalogs/===
 manias.json[FC3S]: F:CoC7 躁狂症表：id、名称、英文与描述，按需查询单条 | R:code:backend/trpg_server/ruleset/coc7/traits.py | A:- | S:-
@@ -847,6 +841,9 @@ room-modes-plan.md[SD2S]: F:房间模式计划：scripted、freeform、manual �
 ruleset-boundary-audit.md[SD3L]: F:规则集边界审计：核心与规则集插件的职责边界清单 | R:- | A:- | S:-
 ruleset-core-generalization-survey.md[SD3L]: F:规则集核心泛化调研：判定壳、内容壳、会话与 UI 契约的泛化现状 | R:- | A:- | S:-
 ruleset-plugin-design.md[SD3M]: F:规则集插件设计：契约、能力与加载 | R:code:backend/trpg_server/ruleset/contracts.py | A:- | S:-
+arcanemap-replication-audit.md[SA3S]: F:奥法地图复刻审查报告（craft-anything 会话级）：四类矩阵 9 复刻/8 适配/6 不做/4 补缺与 4 项待核；结论战桌层核心大部分复刻且有 AI DM 超集 | R:code:docs/plans/dnd5e-vtt-refactor-plan.md | A:- | S:-
+dnd5e-vtt-refactor-plan.md[SD4M]: F:D&D 5e VTT 重构计划书：目标（战桌 UI/世界包导入/AI DM/地图即骰桌）、参考基准与逐刀提交快照（后续会话先读它） | R:code:data/plugins/dnd5e-vtt/plugin.json | A:- | S:-
+fvtt-world-import-actor-mapping.md[SD4L]: F:FVTT dnd5e 5.3.3 角色文档到本仓库角色卡/怪物 statblock 的逐字段映射：基于两个真实世界包全量导出实测，供 actors 转换层实现与验收依据 | R:code:frontend/src/app/fvtt-world-import.ts | A:每个结论标注证据出处（包名+actor+文档 id），不凭记忆猜结构 | S:-
 
 ===/<repository>/docs/schemas/===
 plugin-manifest.schema.json[SD4L]: F:插件清单 JSON Schema：与 manifest.py 实现互为镜像，供编辑器补全与第三方开发者参考，准入以实现为准 | R:code:backend/trpg_server/plugins/manifest.py | A:- | S:-
@@ -866,7 +863,7 @@ avatar-utils.ts[KU3S]: F:头像与封面的文字化渲染：名称首字加哈�
 bgm.ts[MU5L]: F:网站背景音乐播放器：个人 BGM 存 localStorage，房间 BGM 由房规下发默认房间优先；多首曲目与播放模式 | R:code:backend/trpg_server/routes/bgm.py | A:- | S:-
 character-sheet-registry.ts[RU3S]: F:角色卡渲染器注册表：按 id 登记查询不解释规则语义；未登记时阻断提示，绝不退化成只读伪界面 | R:code:frontend/src/app/character-sheet.ts | A:- | S:-
 character-sheet.ts[AU4L]: F:角色卡页面外壳与统一列表：按 rulesetId 解析到对应模块提供卡面摘要，模块缺失时明确阻断 | R:code:frontend/src/app/character-sheet-registry.ts | A:- | S:-
-chat.ts[DU7L]: F:房间聊天前端：消息渲染、成员状态、命令分发与骰面消息处理；sanity 写回按消息 resource_state 槽位声明通用化（E1，无声明旧消息安全跳过） | R:code:frontend/src/tools/check-tool-registry.ts | A:- | S:-
+chat.ts[FU7L]: F:聊天主模块：消息渲染与发送、斜杠命令、AI 思考态、打字提示、战斗数值链卡（metadata.combat_log 追加渲染，旧消息按老样式）、掷骰资源池回写；按房间规则集调整卡面写回 | R:code:frontend/src/app/workspace.ts | A:- | S:-
 combat.ts[AU5L]: F:战斗轮独立面板：先攻顺序、当前行动者、战斗日志与动作按钮；动作走 REST 并转玩家自掷，socket 广播回填 | R:code:backend/trpg_server/routes/combat.py | A:- | S:-
 cookie-consent.ts[AU2T]: F:Cookie 同意横幅：180 天有效期，仅本地状态 | R:- | A:- | S:-
 dialog.ts[AU3S]: F:统一应用内弹窗：确认与文本输入，禁止原生 alert 与 prompt | R:- | A:- | S:-
@@ -881,15 +878,16 @@ qr.ts[AU2T]: F:二维码渲染工具 | R:- | A:- | S:-
 room-console.ts[AU4M]: F:房间内嵌 Web 控制台界面：日志查看与命令执行 | R:code:backend/trpg_server/routes/room_console.py | A:- | S:-
 room-log.ts[AU5L]: F:团录导出 PDF 前端：预览、任务创建与下载 | R:code:backend/trpg_server/routes/room_log.py | A:- | S:-
 room-narrative.ts[AU4L]: F:房间世界树运行态面板：当前地点、队伍与手动触发 | R:code:backend/trpg_server/routes/room_narrative.py | A:- | S:-
-rooms.ts[AU7L]: F:房间列表与详情主模块：加入、成员、房规与生命周期交互 | R:code:backend/trpg_server/routes/rooms.py | A:- | S:-
+rooms.ts[FU7L]: F:房间管理主模块：建房/进房/删房、成员与角色卡选择、按规则集选择卡面主体（coc7 旧卡/dnd5e 新卡）、缺卡拦截、休息与升级入口接线、世界包导入入口 | R:code:frontend/src/app/workspace.ts | A:- | S:-
 scenario-favorites.ts[AU2T]: F:剧本收藏：按当前账号存本机 localStorage，通过事件通知剧本广场、个人主页与创建房间选择器 | R:- | A:- | S:-
 scenario-narrative.ts[AU4M]: F:剧本世界树图谱编辑器入口：校验、发布与子模块编排 | R:code:frontend/src/app/scenario-narrative/graph-view.ts | A:- | S:-
 scenario-triggers.ts[AU5L]: F:剧本触发器与媒体编辑器：触发条件、资源与可见性 | R:code:backend/trpg_server/agents/trigger_system.py | A:- | S:-
 scenario.ts[IU3T]: F:剧本接口封装：上传封面等剧本级接口 | R:code:frontend/src/app/api-client.ts | A:- | S:-
 setup-wizard.ts[AU5L]: F:首次部署向导：AI 配置测试、站点命名与创建 OWNER | R:code:backend/trpg_server/routes/setup.py | A:- | S:-
 tabs.ts[AU6L]: F:主界面页签框架：页签切换、用户管理与各页签路由 | R:code:frontend/src/app/main.ts | A:- | S:-
-workspace.ts[AU6L]: F:房间 workspace 布局仲裁与 canvas 舞台宿主 | R:code:backend/trpg_server/ruleset/ui.py | A:- | S:-
+workspace.ts[FU6L]: F:房间 workspace 布局仲裁与 canvas 舞台宿主：主视图由规则集 workspace 声明决定，布局切换只改 data 属性与 CSS 变量不重挂载聊天；插件右栏与地图宿主接线 | R:code:frontend/src/types/workspace.d.ts | A:核心不写死 5e 尺寸，未声明 canvas 的规则集不创建地图 DOM | S:-
 worldOverride.ts[AU4M]: F:世界意志直执行入口：权限判定、入口按钮与一句话弹窗；是否可用由后端房规决定 | R:code:backend/trpg_server/world_override.py | A:- | S:-
+fvtt-world-import.ts[FU6L]: F:FVTT 世界包导入弹层：选 zip→审计预览→落库→结果摘要，服务剧本管理页与房间详情两入口；含 trpg:room-changed 自动装配触发（幂等防重试） | R:code:frontend/src/app/rooms.ts | A:- | S:-
 
 ===/<repository>/frontend/src/app/auth/===
 api.ts[IU3T]: F:认证模块 API 封装 | R:code:frontend/src/app/api-client.ts | A:- | S:-
@@ -908,7 +906,7 @@ ConfigManager.ts[RU4L]: F:前端配置管理器：TOML 配置加载缓存、部�
 TestRequestConfig.ts[FU2T]: F:AI 平台连通性测试请求模板 | R:code:frontend/src/app/config/AIPlatformManager.ts | A:- | S:-
 
 ===/<repository>/frontend/src/app/controllers/===
-ScenarioController.ts[AU5L]: F:剧本控制器：MVP 模式编排剧本列表与导入任务轮询，后台导入徽标去重与审核弹窗互斥 | R:- | A:- | S:-
+ScenarioController.ts[FU5L]: F:剧本管理控制器：列表/编辑/发布流程、AI 转换任务进度与审核弹窗轮询（任务状态去重提示、前台后台竞态防护）、FVTT 导入徽标刷新 | R:code:frontend/src/app/views/ScenarioView.ts | A:- | S:-
 
 ===/<repository>/frontend/src/app/dice/===
 adminDiceTextures.ts[AU3L]: F:管理员骰子贴图库界面：上传桌面与逐面骰子皮肤，仅管理员可见，服务端再次校验权限 | R:code:backend/trpg_server/routes/dice_textures.py | A:- | S:-
@@ -990,7 +988,7 @@ rain.ts[AU3M]: F:赛博主题雨效果：数据雨动效 | R:code:frontend/src/a
 qrcode.ts[LU5L]: F:内置二维码生成库：本地渲染不依赖外部服务 | R:code:frontend/src/app/qr.ts | A:- | S:-
 
 ===/<repository>/frontend/src/app/views/===
-ScenarioView.ts[AU5L]: F:剧本视图：列表、编辑入口与保存编排 | R:code:frontend/src/app/controllers/ScenarioController.ts | A:- | S:-
+ScenarioView.ts[FU6L]: F:剧本管理视图：列表/编辑区渲染、草稿自动保存、AI 转换进度弹窗（本地计时）、发布阻塞提示、FVTT 导入弹窗挂载 | R:code:frontend/src/app/controllers/ScenarioController.ts | A:- | S:-
 scenario-helpers.ts[AU3M]: F:剧本视图共享工具：卡片渲染与字段辅助 | R:code:frontend/src/app/views/ScenarioView.ts | A:- | S:-
 scenario-map.ts[AU6L]: F:剧本地图编辑器：导入底图、人工标定格子大小与放置标记；标定结果写入 scenario.map_config，房间侧按每格像素对齐不靠图片尺寸推测 | R:code:data/plugins/veil-map/importer.py | A:- | S:-
 scenario-modules.ts[AU5L]: F:剧本模块编辑器：模块数据模型与归一化、编辑器渲染、字段采集与模块级小工具 | R:code:frontend/src/app/views/ScenarioView.ts | A:- | S:-
@@ -1004,10 +1002,10 @@ main.ts[AU6L]: F:3D 骰子舞台独立 bundle：正交垂直俯视加 cannon-es 
 
 ===/<repository>/frontend/src/index/fragments/===
 01-head-and-sidebar.html[FU2T]: F:主页头部与侧边栏 HTML 片段 | R:code:frontend/src/app/main.ts | A:- | S:-
-02-main-tabs.html[FU5L]: F:主页主内容页签 HTML 片段 | R:code:frontend/src/app/tabs.ts | A:- | S:-
-03-room-tools-auth-settings.html[FU5L]: F:主页房间工具、认证与设置区 HTML 片段 | R:code:frontend/src/app/tabs.ts | A:- | S:-
+02-main-tabs.html[FU5L]: F:主页签结构片段：主页(React 挂载)/剧本/房间等 tab 容器的骨架与页面头，被构建脚本拼接进 index.html | R:code:frontend/src/app/workspace.ts | A:- | S:-
+03-room-tools-auth-settings.html[FU7L]: F:房间工具/鉴权/设置模态框片段：建房、成员、角色卡编辑与 D&D 5e 卡面容器、系统设置面板的 DOM 骨架 | R:code:frontend/src/app/rooms.ts | A:- | S:-
 04-editor-modals.html[FU4L]: F:主页编辑器弹层 HTML 片段 | R:code:frontend/src/app/dialog.ts | A:- | S:-
-05-platform-modals-and-scripts.html[FU5M]: F:平台弹窗与脚本片段：vendor 脚本装载顺序（registry 先于壳，E1 增 check-tool 注册表与 coc7 模块位） | R:code:frontend/src/tools/check-tool-registry.ts | A:- | S:-
+05-platform-modals-and-scripts.html[FU5M]: F:AI 平台与通用模态框片段 + 脚本装配顺序（含规则集工具本地化合并与 dnd5e 卡面/向导模块加载次序） | R:code:scripts/build-frontend.mjs | A:- | S:脚本顺序调整须同步构建脚本，规则集 locale 由 build 阶段 mergeRulesetLocales 合并
 06-setup-wizard.html[FU3M]: F:首次部署向导 HTML 片段 | R:code:frontend/src/app/setup-wizard.ts | A:- | S:-
 
 ===/<repository>/frontend/src/index/===
@@ -1044,16 +1042,18 @@ character-sheet.ts[AU7L]: F:COC7 角色卡前端模块：卡面渲染、字段�
 checkTool.ts[DU4T]: F:CoC7 /check 工具：别名/技能键/困难极难解析与 ÷2÷5 数学（E1 自核心 checkTool 整块迁入；阈值读房间快照形态保留） | R:code:frontend/src/tools/check-tool-registry.ts | A:- | S:-
 
 ===/<repository>/frontend/src/rulesets/dnd5e/===
-character-sheet.ts[AU6L]: F:dnd5e 角色卡前端模块：卡面渲染与升级入口，向核心注册渲染器 | R:code:frontend/src/app/character-sheet-registry.ts,code:data/plugins/dnd5e/dnd5e_plugin/schema.py | A:- | S:-
+character-sheet.ts[FU7L]: F:D&D 5e 角色卡面（FVTT 式页签卡）：左栏 AC/HP/死亡豁免/疲惫、头区 XP/灵感/短长休、六页签展示编辑与升级按钮；对外保持既有卡面模块契约 | R:code:frontend/src/rulesets/dnd5e/character-wizard.ts,code:frontend/src/rulesets/dnd5e/character-levelup.ts | A:- | S:装备开关不影响 AC（插件只读 armorClass），技能熟练字段必须写英文 id 否则派生失效
+character-levelup.ts[FU6L]: F:D&D 5e 升级向导：确认/HP（后端真随机或平均值+CON）/提升（特性/子职/属性，上限 20）/法术预览四步；单职业锁定，复用建卡向导样式与 plan-apply 两端点 | R:code:frontend/src/rulesets/dnd5e/character-wizard.ts | A:- | S:-
+character-wizard.ts[FU6L]: F:D&D 5e 建卡向导：概念/属性（购点27、4d6去最低、标准数组）/技能装备/预览四步；算法是插件 builder.py 的浏览器镜像，预览与保存共用 buildDraftSheet | R:code:data/plugins/dnd5e/dnd5e_plugin/builder.py | A:预览口径必须与 schema.derive 一致 | S:-
 
 ===/<repository>/frontend/src/styles/===
 00-theme-tokens.css[FU4L]: F:主题令牌基础样式：CSS 变量定义，供各主题与组件消费 | R:code:backend/trpg_server/routes/themes.py | A:- | S:-
 01-foundation-chat.css[FU4L]: F:基础与聊天样式：全局排版与聊天界面 | R:code:frontend/src/app/chat.ts | A:- | S:-
-02-scenario-character.css[FU4L]: F:剧本与角色卡样式 | R:code:frontend/src/app/views/ScenarioView.ts | A:- | S:-
+02-scenario-character.css[FU7L]: F:剧本管理与角色卡样式：访客提示条、剧本列表/编辑区、旧版角色卡表单、D&D 5e 页签卡与建卡/升级向导（dnd5e-wiz-*）样式 | R:code:frontend/src/rulesets/dnd5e/character-sheet.ts | A:- | S:-
 03-tools-settings-platform.css[FU4L]: F:工具、设置与平台样式 | R:code:frontend/src/app/tabs.ts | A:- | S:-
 04-auth-profile-overrides.css[FU4L]: F:认证与个人主页覆盖样式 | R:code:frontend/src/app/auth/profile-dialog.ts | A:- | S:-
 05-dice-animation.css[FU4M]: F:骰子动画样式：3D 与简易档位的公共视觉 | R:code:frontend/src/app/diceTable.ts | A:- | S:-
-06-combat-world-override.css[FU4L]: F:战斗面板与世界意志样式 | R:code:frontend/src/app/combat.ts,code:frontend/src/app/worldOverride.ts | A:- | S:-
+06-combat-world-override.css[FU5L]: F:战斗轮独立面板样式：先攻、HP、当前行动者与战斗日志收进一块 UI，玩家自行掷骰提交；含战斗数值链卡样式 | R:code:frontend/src/app/chat.ts | A:- | S:-
 07-theme-abyss-tokens.css[FU3M]: F:深渊主题令牌样式：主题专属 CSS 变量 | R:code:frontend/src/app/themes/abyss/core.ts | A:- | S:-
 08-theme-abyss-components.css[FU4L]: F:深渊主题组件样式 | R:code:frontend/src/styles/07-theme-abyss-tokens.css | A:- | S:-
 09-theme-cyber-tokens.css[FU3M]: F:赛博主题令牌样式：主题专属 CSS 变量 | R:code:frontend/src/app/themes/cyber/core.ts | A:- | S:-
@@ -1063,7 +1063,7 @@ character-sheet.ts[AU6L]: F:dnd5e 角色卡前端模块：卡面渲染与升级�
 13-settings-redesign.css[FU4L]: F:设置页重设计样式 | R:code:frontend/src/app/settings/settingsAssistant.ts | A:- | S:-
 14-room-log.css[FU3M]: F:团录导出样式 | R:code:frontend/src/app/room-log.ts | A:- | S:-
 15-props.css[FU4L]: F:道具工坊样式：卡片、编辑器与道具袋 | R:code:frontend/src/app/props/prop-card.ts | A:- | S:-
-16-workspace.css[FU4L]: F:房间 workspace 与画布舞台样式 | R:code:frontend/src/app/workspace.ts | A:- | S:-
+16-workspace.css[FU5L]: F:规则集 workspace 布局样式：尺寸全部来自规则集声明的 --ws-* 变量，未声明 canvas 的规则集不显示 workspace chrome；含插件右栏 .ws-plugin-rail 几何 | R:code:frontend/src/app/workspace.ts | A:- | S:-
 
 ===/<repository>/frontend/src/templates/===
 chat.html[FU2T]: F:独立聊天页模板 | R:code:frontend/src/app/chat.ts | A:- | S:-
@@ -1084,16 +1084,16 @@ combat.d.ts[DU3S]: F:战斗面板类型声明 | R:code:frontend/src/app/combat.t
 config.d.ts[DU3S]: F:配置页类型声明：含与 AIPlatformManager 实现同名合并的接口约束 | R:code:frontend/src/app/config/AIPlatformManager.ts | A:- | S:-
 core.d.ts[DU2T]: F:核心共享类型声明 | R:- | A:- | S:-
 dice.d.ts[DU3M]: F:骰子类型声明 | R:code:frontend/src/app/dice/diceTypes.ts | A:- | S:-
-global.d.ts[DU3S]: F:全局 Window 类型声明 | R:code:frontend/src/app/auth/state.ts | A:- | S:-
+global.d.ts[FD3S]: F:全局类型声明：Window 上的桥接对象（TRPG/TrpgApi/TrpgDom/TrpgTemplates/ScenarioModel 等），供原生 DOM 模块跨脚本引用 | R:code:frontend/src/types/scenario.d.ts | A:- | S:-
 immersive.d.ts[DU4L]: F:沉浸系统类型声明 | R:code:frontend/src/app/immersive/index.ts | A:- | S:-
 room.d.ts[DU3M]: F:房间类型声明 | R:code:frontend/src/app/rooms.ts | A:- | S:-
 scenario-narrative.d.ts[DU3M]: F:剧本世界树类型声明 | R:code:frontend/src/app/scenario-narrative.ts | A:- | S:-
-scenario.d.ts[DU3M]: F:剧本类型声明 | R:code:frontend/src/app/models/ScenarioModel.ts | A:- | S:-
+scenario.d.ts[FD4M]: F:剧本与房间类型声明：触发器/资源引用/发布阻塞详情、转换任务状态、房间信息与成员结构 | R:code:frontend/src/app/controllers/ScenarioController.ts | A:- | S:-
 templates.d.ts[DU1T]: F:模板类型声明 | R:- | A:- | S:-
 tools.d.ts[DU2T]: F:工具类型声明 | R:code:frontend/src/tools/toolManager.ts | A:- | S:-
 vendor.d.ts[DU2T]: F:第三方库类型声明 | R:- | A:- | S:-
 voice.d.ts[DU3S]: F:语音配音类型声明 | R:code:frontend/src/app/immersive/voice.ts | A:- | S:-
-workspace.d.ts[DU3S]: F:房间 workspace 类型声明 | R:code:frontend/src/app/workspace.ts | A:- | S:-
+workspace.d.ts[FD3S]: F:规则集 workspace 声明类型（侧栏规格/画布布局等），由 /api/rulesets 转述、核心不解释语义 | R:code:frontend/src/app/workspace.ts | A:- | S:-
 
 ===/<repository>/release/===
 RELEASE_MANIFEST.md[SV4M]: F:发布清单：版本资产与发布流程汇总 | R:- | A:- | S:-
@@ -1132,7 +1132,7 @@ v1.0.3.md[SV1T]: F:v1.0.3 版本变更日志 | R:code:release/RELEASE_MANIFEST.m
 v1.0.4.md[SV1T]: F:v1.0.4 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
 v1.0.5.md[SV1T]: F:v1.0.5 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
 v1.0.6.md[SV1T]: F:v1.0.6 版本变更日志 | R:code:release/RELEASE_MANIFEST.md | A:- | S:-
-v1.0.7.md[SV2M]: F:v1.0.7 当前版本变更日志：插件生命周期 v2、地图与工作流、规则集边界收敛全部批次（P0 至 F1，已收官）变更 | R:code:release/RELEASE_MANIFEST.md | A:当前 APP_VERSION 1.0.7 | S:-
+v1.0.7.md[SD4M]: F:v1.0.7 发布日志：地图导入/5e 自动化/插件文档收口、角色卡三件套、审计补缺、启动引导死代理绕过等分节记录 | R:- | A:- | S:-
 
 ===/<repository>/research/cordis/===
 Cordis-调研报告.md[SA3L]: F:Cordis 插件框架调研报告：Shigma 的 Cordis v4 与 deepseek-harness 的采纳分析，得出插件化可借鉴结论 | R:code:docs/plans/cordis-paradigm-adoption-plan.md | A:- | S:-
@@ -1247,3 +1247,47 @@ submachineGuns.json[FD3T]: F:CoC7 内置武器目录·冲锋枪：预设条目�
 
 ===/<repository>/frontend/src/rulesets/coc7/locales/===
 zh_cn.json[FL3T]: F:CoC7 卡面 legacy locale：调查员表/属性英文/理智损失等 58 键（E1 自核心 locale 迁出，构建时并入 dist） | R:code:scripts/build-frontend.mjs | A:- | S:-
+
+===/<repository>/2026-11-21/arcanemap-lobby-survey/outputs/===
+arcanemap-lobby-survey.md[SA4L]: F:奥法地图（arcanemap.com）大厅/资料库/OSS 世界包分发只读调研：样本世界包解压比对与 API 探测，为仓库地图与导入链路提供商业参考 | R:- | A:- | S:-
+
+===/<repository>/2026-11-21/arcanemap-video-survey/outputs/===
+arcanemap-video-survey.md[SA3M]: F:奥法地图产品介绍视频（bilibili BV1JSsT6JEhK）逐章调研笔记：产品初衷/战役导入/地图邀请/角色卡/迷雾/战斗演示与置信度说明 | R:- | A:- | S:-
+
+===/<repository>/2026-11-21/fvtt-ui-survey/outputs/===
+fvtt-ui-survey.md[SA3M]: F:Foundry VTT UI 布局与交互面板调研（官方 KB v13.350 + dnd5e v6.1.1 源码）：战桌面板复刻的布局与交互依据，不重复机制调研 | R:- | A:- | S:-
+
+===/<repository>/2026-11-21/kiwee-wiki-survey/outputs/===
+kiwee-wiki-survey.md[SA3M]: F:5e.kiwee.top（5etools 中文镜像）只读调研：规则数据在公开 JSON、可作 AI DM 规则事实源的可行性与许可评估 | R:- | A:- | S:-
+
+===/<repository>/data/plugins/dnd5e-vtt/===
+agent_tools.py[DB6L]: F:dnd5e-vtt 的 AI DM 战桌工具：place_template/switch_scene/roll_broadcast/worldtree_recall 经 agent_tools 能力并入 KP 与网站 Agent 两面；只复用既有原语且带 DM 身份闸门 | R:code:data/plugins/dnd5e-vtt/entry.py | A:- | S:-
+entry.py[EU6L]: F:D&D 5e 战桌插件服务端：按观察者裁剪的面板（NPC 分组只对 DM）、角色速览四盒+资源池、测量模板与棋子操作卡、房间级模板/骰桌设置端点（幂等+四态回执+socket 广播）；数值只取 dnd5e 派生值绝不重算 | R:code:data/plugins/dnd5e/dnd5e_plugin/combat.py | A:- | S:没有角色卡的成员也带 quick_stats（全 null），前端据此渲染未建卡态
+plugin.json[FE3T]: F:dnd5e-vtt 插件清单：requires dnd5e、agent_tools 与 room.rail.right 槽位、frontend_assets 声明（战桌六面板+画布工具组） | R:code:data/plugins/dnd5e-vtt/entry.py | A:- | S:-
+
+===/<repository>/data/plugins/dnd5e-vtt/ui/===
+dnd5e-vtt.css[FU6L]: F:dnd5e-vtt 战桌样式：右侧栏六面板与画布工具组，限定 vtt- 前缀与 .ws-plugin-rail 宿主；主题色沿用房间变量（color-mix + var 回退，与 veil-map 同做法） | R:code:data/plugins/dnd5e-vtt/ui/dnd5e-vtt.js | A:- | S:-
+dnd5e-vtt.js[FU7L]: F:dnd5e-vtt 战桌前端：六面板（聊天/战斗/场景/角色/物品/日志）+ 画布工具组（模板/测距，仅 DM）+ 棋子操作卡 + 地图骰桌 3D 动画与 nat20/nat1 高亮 + d20 dock；挂载 room.rail.right 槽 | R:code:data/plugins/dnd5e-vtt/entry.py | A:- | S:-
+
+===/<repository>/data/plugins/dnd5e/dnd5e_plugin/kiwee/===
+__init__.py[IA5M]: F:kiwee 内容深库子模块：快照脚本+SQLite FTS+datatag 解析并入插件；register_kiwee_db 挂 get_service('dnd5e','kiwee_db') 服务契约（未建→None、无命中→[]），消费方回落 dnd5e-srd | R:code:data/plugins/dnd5e/dnd5e_plugin/kiwee/db.py | A:- | S:数据不进 git，快照由脚本按需重建
+__main__.py[IA3T]: F:python -m dnd5e_plugin.kiwee 的包入口 shim：转发 snapshot.main（快照 fetch/build） | R:code:data/plugins/dnd5e/dnd5e_plugin/kiwee/snapshot.py | A:- | S:-
+datatags.py[KB5M]: F:5etools datatag 解析器：{@damage/@dice/@save/@dc/@ref…} 富文本拆为文本+marks（骰公式/豁免/跨实体引用），未知 tag 兜底；零外部依赖，供规则引擎与详情页消费 | R:code:data/plugins/dnd5e/dnd5e_plugin/kiwee/mechanics.py | A:- | S:-
+db.py[PB6L]: F:kiwee 深库 SQLite 建库与查询：条目表+FTS5 全文索引（不可用降 LIKE），中英名/别名检索、DM 类目门控与规则版本过滤；库缺席返回 None 由消费方回落 dnd5e-srd；快照与库不进 git | R:code:data/plugins/dnd5e/dnd5e_plugin/kiwee/snapshot.py | A:- | S:-
+mechanics.py[KB5L]: F:kiwee 条目→结构化数值契约：法术（环/学派/成分/伤害/升环/范围/专注）与怪物（AC/HP/CR/速度/属性）数据提取层，只提取不猜值，不接战斗管线 | R:code:data/plugins/dnd5e/dnd5e_plugin/kiwee/datatags.py | A:- | S:-
+snapshot.py[IC5M]: F:kiwee 快照脚本：GitHub 稀疏检出 tjliqy/5etools-cn@cn2.0 的 data/ 子集（不爬活站，robots 禁止抓 data/），build 建 SQLite；v1 收录范围见重构计划 §4 | R:code:data/plugins/dnd5e/dnd5e_plugin/kiwee/db.py | A:- | S:-
+
+===/<repository>/data/plugins/fvtt-world-import/===
+entry.py[EB7L]: F:FVTT 世界包导入插件入口：inspect 审计与 run/actors/journal/scenario 四类落库端点；场景经 veil-map map_service（插件间零 import），actors 走 apply_save+配额预检，journal 落剧本模块+世界树图谱；非 dnd5e 房间整体拒绝 | R:code:data/plugins/fvtt-world-import/fvtt_world_import/world_package.py | A:- | S:-
+plugin.json[FE3T]: F:fvtt-world-import 插件清单：inspect/scenario/actors/journal 端点与 http_blueprints 能力声明 | R:code:data/plugins/fvtt-world-import/entry.py | A:- | S:-
+
+===/<repository>/data/plugins/fvtt-world-import/fvtt_world_import/===
+__init__.py[IB3T]: F:fvtt-world-import 包入口：读取层（LevelDB+snappy）/登记台/转换管线（场景/actors/journal）模块说明与 LevelDb 导出 | R:code:data/plugins/fvtt-world-import/fvtt_world_import/leveldb.py | A:- | S:-
+armor_calc.py[DB4S]: F:AC 装备重算小引擎：FVTT ac.flat 数值直用，空则从已装备护甲/盾重算（轻/中/重甲敏捷规则、magicalBonus、dex 显式上限），多件取最高，无甲 10+敏 | R:code:data/plugins/fvtt-world-import/fvtt_world_import/convert_actors.py | A:- | S:-
+convert_actors.py[DB7L]: F:FVTT actor 文档→dnd5e 角色卡/NPC statblock 纯函数：character 落卡、npc 落剧本模块（statblock 数值+可读文本）、vehicle 降级；映射表 17 条降级带稳定 code 进 warnings；不 import 规则集，slot/武器名经回调注入 | R:code:data/plugins/fvtt-world-import/fvtt_world_import/armor_calc.py | A:- | S:-
+convert_journal.py[DB6L]: F:FVTT journal/folders→剧本场景文本条目+世界树图谱纯函数：folders 层级成 act/area 章节，journal 页成 clue/concept 节点，场景成 location 锚点；ownership 映射可见性三态，确定性不依赖 AI | R:code:backend/trpg_server/agents/narrative/runtime.py | A:- | S:-
+convert_scenes.py[DB6L]: F:FVTT 场景→veil-map 载荷纯函数：像素坐标直供（墙/光/棋子不二次标定），网格原点=shift+background offset；六边形/超窗/缺图/超限/非英尺网格带 code 跳过不猜；几何换算由 veil-map 导入服务统一完成 | R:code:data/plugins/veil-map/entry.py | A:- | S:-
+dump.py[IC4T]: F:开发 CLI：FVTT 世界包 LevelDB 集合导出为 JSON（每集合一文件+summary，zip 解包到临时目录） | R:code:data/plugins/fvtt-world-import/fvtt_world_import/leveldb.py | A:- | S:-
+leveldb.py[PB6L]: F:只读 LevelDB 读取器（FVTT v10+ 世界包）：解析 MANIFEST 得活动表集合防旧表误读、按 (seq,type) 取最新、删除标记生效；CRC 默认关、文档/键值上限防不可信 zip；键格式 !collection!docId | R:code:data/plugins/fvtt-world-import/fvtt_world_import/snappy.py | A:- | S:-
+snappy.py[KB4S]: F:纯 Python snappy raw 解码（只解压方向）：uvarint+literal/copy1/2/4 全类型，零第三方依赖，LevelDB 压缩块用 | R:code:data/plugins/fvtt-world-import/fvtt_world_import/leveldb.py | A:- | S:-
+world_package.py[IB6L]: F:FVTT 世界包审计与只读视图：zip→world.json 校验→LevelDB 分组（场景子集合与主文档同库）；包/成员/文档数/单值上限防滥用；只校验计数不写持久数据 | R:code:data/plugins/fvtt-world-import/fvtt_world_import/leveldb.py | A:- | S:-

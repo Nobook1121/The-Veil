@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-19T12:06:21Z",
-  "updated_at": "2026-11-20T16:04:56Z",
+  "updated_at": "2026-11-22T13:32:47Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -17,9 +17,9 @@
     },
     ".gitignore": {
       "role": "index",
-      "sha256": "411ef2347069b8b098ab6325d4d0116db5a146a5b5b5d0f41502a0d4f58f7a14",
-      "size": 3111,
-      "normalized_sha256": "f4b25264094006be3c3a80e12d4336cc46751928f664f2d1072341e7a553e292"
+      "sha256": "015dfec2096bf37d88609da7efd0e5b4571d979a7c37c56676d2fd86979d73c4",
+      "size": 3317,
+      "normalized_sha256": "165830a172e5e4621fec2fb2a1591b89436868c2b158304e4cc4712dc22462f8"
     },
     ".tmp-agent-check/config/aiplatform/default-request.json": {
       "role": "index",
@@ -903,6 +903,30 @@
       "size": 2652,
       "normalized_sha256": "e6c2223c78685a7d6ca3ce042db3671b59afc76cfe791f37e0603eaab17848c4"
     },
+    "2026-11-21/arcanemap-lobby-survey/outputs/arcanemap-lobby-survey.md": {
+      "role": "index",
+      "sha256": "3ee51e6627583cab92dd66c3c158c11b3b8ddabead88ed3b77b2c2646bf896ea",
+      "size": 57671,
+      "normalized_sha256": "1eca6f6f92b3213d8636045c163af5fe04bc82a9b2aef223ef2c83c1c14b55e6"
+    },
+    "2026-11-21/arcanemap-video-survey/outputs/arcanemap-video-survey.md": {
+      "role": "index",
+      "sha256": "8b1df0107ea8ead43a7345c01925cae7eae421ab63b5b429cc98d898a7ecc33a",
+      "size": 32314,
+      "normalized_sha256": "9bd1368cc537e9889fb0cceee983616bf4ef92df390a31a0b33106e1d6d81716"
+    },
+    "2026-11-21/fvtt-ui-survey/outputs/fvtt-ui-survey.md": {
+      "role": "index",
+      "sha256": "5f7d23609e31acd10cefc356fd21dab195724e43a08b35206df7a7cde11083f9",
+      "size": 33739,
+      "normalized_sha256": "7327b49cd24b67405e96f981b94025c34311cdff2914a680bfa1b8346156223c"
+    },
+    "2026-11-21/kiwee-wiki-survey/outputs/kiwee-wiki-survey.md": {
+      "role": "index",
+      "sha256": "6ca5671bf4c9aabfab61a6a4a28551f7c78357a19fb7165a09cc6457ca9d01bd",
+      "size": 22930,
+      "normalized_sha256": "5ae79e8d681caf6a6cb51d78c9e84b5008fc5f357665a56008e0f907047b56bc"
+    },
     "AGENT-INSTALL.md": {
       "role": "index",
       "sha256": "5e702f16dfc593d1f1ffdec69c769e0726c01a99c84ba7857b7ca0e1f5b5ff61",
@@ -941,9 +965,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "029831318a2905980f1e3c11c3d4e20b5f2258d9d98dc8b02dba37ff4b145ff0",
-      "size": 225827,
-      "normalized_sha256": "029831318a2905980f1e3c11c3d4e20b5f2258d9d98dc8b02dba37ff4b145ff0"
+      "sha256": "b9e3181901dd4d3b211fe49a52ea7a50120a9aba13433ff2ac307df580288155",
+      "size": 238116,
+      "normalized_sha256": "b9e3181901dd4d3b211fe49a52ea7a50120a9aba13433ff2ac307df580288155"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -1265,9 +1289,9 @@
     },
     "backend/trpg_server/agents/player_agent.py": {
       "role": "index",
-      "sha256": "054d08a3ffea090189568d444163ddfad62ac56ea83aab6cd1e7b97b511e4d36",
-      "size": 13738,
-      "normalized_sha256": "054d08a3ffea090189568d444163ddfad62ac56ea83aab6cd1e7b97b511e4d36"
+      "sha256": "70ec09f034a68ce95f9f55d2996925c2a86f8b168e8e6c8e03b1351a0db9e3fb",
+      "size": 13919,
+      "normalized_sha256": "70ec09f034a68ce95f9f55d2996925c2a86f8b168e8e6c8e03b1351a0db9e3fb"
     },
     "backend/trpg_server/agents/player_roll.py": {
       "role": "index",
@@ -1307,9 +1331,9 @@
     },
     "backend/trpg_server/agents/ruleset_knowledge.py": {
       "role": "index",
-      "sha256": "17da4b708a2acd5c835afdab62a8a233e1f681f1f0b3a54395302bf5f93bf2f1",
-      "size": 8073,
-      "normalized_sha256": "86c48d6c94a9f2c811aa4999828f019c3a21c14bd4021b2d37bed329338706b1"
+      "sha256": "e753ffb3f8091e0ee44bc6aa983252d0376bf309b18544168d6add97b88c9ea0",
+      "size": 14065,
+      "normalized_sha256": "9f382e72131409e8cc087c9895a33397f2642a5131a9b209af165f20c550f5dd"
     },
     "backend/trpg_server/agents/runtime.py": {
       "role": "index",
@@ -1379,9 +1403,15 @@
     },
     "backend/trpg_server/agents/tools/combat.py": {
       "role": "index",
-      "sha256": "0d4c9e39b23374e7afe76ea7a9d02ddc088960248cb56889709445f83c059b5f",
-      "size": 193729,
-      "normalized_sha256": "a6af07222c3878ad6f18cca7fa9cd4c11d351c1e8f8a08892cb4cd87c0918c5f"
+      "sha256": "35e9fb77f10cff658283bc3c21008159bc6056267c5e76277dfd74792b6da891",
+      "size": 195036,
+      "normalized_sha256": "b4492d9dfc9620a5ddf0c24a5d2a7642cbb0b21c324310a95b2a5f87c635e1cc"
+    },
+    "backend/trpg_server/agents/tools/combat_chain.py": {
+      "role": "index",
+      "sha256": "c0825d48765194b0249f462faaef79cc5ee477f76294406588321d2e760ceb86",
+      "size": 11564,
+      "normalized_sha256": "c0825d48765194b0249f462faaef79cc5ee477f76294406588321d2e760ceb86"
     },
     "backend/trpg_server/agents/tools/concentration.py": {
       "role": "index",
@@ -1415,9 +1445,9 @@
     },
     "backend/trpg_server/agents/tools/knowledge.py": {
       "role": "index",
-      "sha256": "d233c4bf059ab0411047e641f350df64f2fafe2d1cec3c74ce802fe0ea2158d1",
-      "size": 3328,
-      "normalized_sha256": "5e9a030186faaae4fbf7c3ff7db1ef11963b8e27cdf7729bd01191608b47dab1"
+      "sha256": "67f5ec9aa2f4cab05776b4f443dda3157d05b48068733ad1d0d0b37771b8874d",
+      "size": 5197,
+      "normalized_sha256": "67f5ec9aa2f4cab05776b4f443dda3157d05b48068733ad1d0d0b37771b8874d"
     },
     "backend/trpg_server/agents/tools/magic.py": {
       "role": "index",
@@ -1475,9 +1505,9 @@
     },
     "backend/trpg_server/agents/tools/spells.py": {
       "role": "index",
-      "sha256": "6d9f54713e6cb854316ee87cdaefd50a6c8b2b5c436c88419149bee8c746ec6f",
-      "size": 37614,
-      "normalized_sha256": "6d9f54713e6cb854316ee87cdaefd50a6c8b2b5c436c88419149bee8c746ec6f"
+      "sha256": "a9b33e6717c6f57900b1e3b4c55b16a8794c39871b615652593a204124b4d5e2",
+      "size": 39289,
+      "normalized_sha256": "a9b33e6717c6f57900b1e3b4c55b16a8794c39871b615652593a204124b4d5e2"
     },
     "backend/trpg_server/agents/tools/suggest.py": {
       "role": "index",
@@ -1511,9 +1541,9 @@
     },
     "backend/trpg_server/agents/turn_pipeline.py": {
       "role": "index",
-      "sha256": "3e15515c009ac76d358af2bc5e4962d7d1b963ab52451123c240083ee5d91338",
-      "size": 107044,
-      "normalized_sha256": "3e15515c009ac76d358af2bc5e4962d7d1b963ab52451123c240083ee5d91338"
+      "sha256": "f93374858285d2294de3f91f3ca5f7e49456e4a5aa4c44a67180dbd0d6de4053",
+      "size": 109611,
+      "normalized_sha256": "f93374858285d2294de3f91f3ca5f7e49456e4a5aa4c44a67180dbd0d6de4053"
     },
     "backend/trpg_server/agents/vector_migration.py": {
       "role": "index",
@@ -1997,9 +2027,9 @@
     },
     "backend/trpg_server/plugins/registry.py": {
       "role": "index",
-      "sha256": "d6e961140bff25f11994facb31c6403962a35bb2afe77f360c8a9e54f0bd6129",
-      "size": 55199,
-      "normalized_sha256": "d6e961140bff25f11994facb31c6403962a35bb2afe77f360c8a9e54f0bd6129"
+      "sha256": "64d1c78a1d4ccac44e55995563b6e340f5ae1ef475af93f93c3d5754e80c2477",
+      "size": 55595,
+      "normalized_sha256": "64d1c78a1d4ccac44e55995563b6e340f5ae1ef475af93f93c3d5754e80c2477"
     },
     "backend/trpg_server/plugins/route_proxy.py": {
       "role": "index",
@@ -2818,9 +2848,9 @@
     },
     "backend/trpg_server/routes/room_rules.py": {
       "role": "index",
-      "sha256": "9a0a6c326fdad1f30fb32a0926b14f199c24aa50942ca3a72889700b8158083f",
-      "size": 14634,
-      "normalized_sha256": "9a0a6c326fdad1f30fb32a0926b14f199c24aa50942ca3a72889700b8158083f"
+      "sha256": "b7ac3c946e41ae8845c035005a341245cfa942d91628dca20e382d537fe4a83d",
+      "size": 16049,
+      "normalized_sha256": "b7ac3c946e41ae8845c035005a341245cfa942d91628dca20e382d537fe4a83d"
     },
     "backend/trpg_server/routes/rooms.py": {
       "role": "index",
@@ -3388,9 +3418,9 @@
     },
     "backend/trpg_server/site_agent_tools/ruleset.py": {
       "role": "index",
-      "sha256": "4e3556227cb0657ed2a022bccdafab0ccbfe5946e8b49744f534bbe3217d4a5e",
-      "size": 9904,
-      "normalized_sha256": "4e3556227cb0657ed2a022bccdafab0ccbfe5946e8b49744f534bbe3217d4a5e"
+      "sha256": "5ba916357564cbde41c9c3e8d44d02a5ee5ad4c4c089f466b38472f781069fd5",
+      "size": 10068,
+      "normalized_sha256": "5ba916357564cbde41c9c3e8d44d02a5ee5ad4c4c089f466b38472f781069fd5"
     },
     "backend/trpg_server/site_agent_tools/scenarios.py": {
       "role": "index",
@@ -4820,9 +4850,9 @@
     },
     "data/plugins/dnd5e-srd/packs/classes.json": {
       "role": "index",
-      "sha256": "621328b1bcb14554a01a1c1613480db3a146e1944fb5065b22fb7fae8e4958fb",
-      "size": 2969,
-      "normalized_sha256": "621328b1bcb14554a01a1c1613480db3a146e1944fb5065b22fb7fae8e4958fb"
+      "sha256": "028b852a0dca25921ab71ef069c1a23ee8944bc11d594f0f60abe2729ce79361",
+      "size": 7057,
+      "normalized_sha256": "028b852a0dca25921ab71ef069c1a23ee8944bc11d594f0f60abe2729ce79361"
     },
     "data/plugins/dnd5e-srd/packs/conditions.json": {
       "role": "index",
@@ -4872,11 +4902,53 @@
       "size": 413,
       "normalized_sha256": "5de34810f9f9fec396e3257439d72ff006537a0f1868d5da59f72416fb7e30cd"
     },
+    "data/plugins/dnd5e-vtt/agent_tools.py": {
+      "role": "index",
+      "sha256": "4999c71119a022036cfde3c3bfc0b09addf389aaaf2df9a86b35cf287fb50758",
+      "size": 35328,
+      "normalized_sha256": "4999c71119a022036cfde3c3bfc0b09addf389aaaf2df9a86b35cf287fb50758"
+    },
+    "data/plugins/dnd5e-vtt/entry.py": {
+      "role": "index",
+      "sha256": "b63df41758bd3d03c5066a0ea3a923576f8dfce7b5f7685060d3dcdc2a755a8c",
+      "size": 69546,
+      "normalized_sha256": "319a43b8d4e05c23e6f8cc1f93b7b20ad93cb7a43bb23baf3cd94e9579bf8b4a"
+    },
+    "data/plugins/dnd5e-vtt/plugin.json": {
+      "role": "index",
+      "sha256": "8fd325199047ef1710f7ae9c6f0b887a36694fc72496d76b594d7a28a1e5aa18",
+      "size": 1754,
+      "normalized_sha256": "8fd325199047ef1710f7ae9c6f0b887a36694fc72496d76b594d7a28a1e5aa18"
+    },
+    "data/plugins/dnd5e-vtt/ui/dnd5e-vtt.css": {
+      "role": "index",
+      "sha256": "76b7216354b82cd4525ab23f43db8b395bac0157cadddd88150ea5468d42bfea",
+      "size": 43726,
+      "normalized_sha256": "76b7216354b82cd4525ab23f43db8b395bac0157cadddd88150ea5468d42bfea"
+    },
+    "data/plugins/dnd5e-vtt/ui/dnd5e-vtt.js": {
+      "role": "index",
+      "sha256": "deacaabd3e6a86601fe6723401a84c0bf70a16d9635aac3caf0e15bfe9e028bb",
+      "size": 168189,
+      "normalized_sha256": "2cbbd199da3d2134808a1ab620a197a63b5c7438d475357620104ade85d4243d"
+    },
+    "data/plugins/dnd5e/NOTICE-KIWEE.md": {
+      "role": "index",
+      "sha256": "a7130b0deb54a4a128057679966992a8f8ab720e76d400f3a110e060fe293cda",
+      "size": 2608,
+      "normalized_sha256": "a7130b0deb54a4a128057679966992a8f8ab720e76d400f3a110e060fe293cda"
+    },
     "data/plugins/dnd5e/dnd5e_plugin/__init__.py": {
       "role": "index",
       "sha256": "5d56febe9e06c99a4a0bf7ee743a27ec8c196cae1ea04c8d146051dfab1de6a2",
       "size": 37,
       "normalized_sha256": "5d56febe9e06c99a4a0bf7ee743a27ec8c196cae1ea04c8d146051dfab1de6a2"
+    },
+    "data/plugins/dnd5e/dnd5e_plugin/builder.py": {
+      "role": "index",
+      "sha256": "706195c88cd766eb5eddfa4518302588150bcdcb40a21d0cfdf2920bc1eb4fb1",
+      "size": 14442,
+      "normalized_sha256": "38a6d6f69ab6580c6b2bde0397ebb6c559db7e71222c310a75338b2c65b336f2"
     },
     "data/plugins/dnd5e/dnd5e_plugin/checks.py": {
       "role": "index",
@@ -4886,9 +4958,9 @@
     },
     "data/plugins/dnd5e/dnd5e_plugin/combat.py": {
       "role": "index",
-      "sha256": "afdcade9de1244cdfdb1d5eb3e43cf8b934dffeb22b0be789f6a4a071acefdfa",
-      "size": 49895,
-      "normalized_sha256": "afdcade9de1244cdfdb1d5eb3e43cf8b934dffeb22b0be789f6a4a071acefdfa"
+      "sha256": "57d7bff20165928521310d7428e6369c03e5b152e912a0b76c14275df91cd732",
+      "size": 50830,
+      "normalized_sha256": "57d7bff20165928521310d7428e6369c03e5b152e912a0b76c14275df91cd732"
     },
     "data/plugins/dnd5e/dnd5e_plugin/content_search.py": {
       "role": "index",
@@ -4908,17 +4980,59 @@
       "size": 8197,
       "normalized_sha256": "59643df0b610c0086297a37f80809b2d8c33951beee405eea8fb53a3c174ec35"
     },
+    "data/plugins/dnd5e/dnd5e_plugin/house_rule_profiles.py": {
+      "role": "index",
+      "sha256": "289709697f01bf758946ca0af787d0f93bb19ec6f47de655b98ffaef93ac11b9",
+      "size": 21268,
+      "normalized_sha256": "289709697f01bf758946ca0af787d0f93bb19ec6f47de655b98ffaef93ac11b9"
+    },
     "data/plugins/dnd5e/dnd5e_plugin/house_rules.py": {
       "role": "index",
-      "sha256": "ffd1c6f7f28d86dbde55db2fac5f27cff4bc12277affb810ae18b1df09a396b0",
-      "size": 7091,
-      "normalized_sha256": "ffd1c6f7f28d86dbde55db2fac5f27cff4bc12277affb810ae18b1df09a396b0"
+      "sha256": "4979b63882104c96bd82574b785f5d5de2839c701e83d0318176639543dc4686",
+      "size": 10444,
+      "normalized_sha256": "4979b63882104c96bd82574b785f5d5de2839c701e83d0318176639543dc4686"
     },
     "data/plugins/dnd5e/dnd5e_plugin/http.py": {
       "role": "index",
-      "sha256": "d97281197e6ab49da707fef7eecdef59cb640d83081a335c4e226191f7c7e9d1",
-      "size": 8023,
-      "normalized_sha256": "d97281197e6ab49da707fef7eecdef59cb640d83081a335c4e226191f7c7e9d1"
+      "sha256": "89cfdbba6d48a2bad2869337395afd59cf96e5b64ea46c835bed9949e5674d92",
+      "size": 23877,
+      "normalized_sha256": "89cfdbba6d48a2bad2869337395afd59cf96e5b64ea46c835bed9949e5674d92"
+    },
+    "data/plugins/dnd5e/dnd5e_plugin/kiwee/__init__.py": {
+      "role": "index",
+      "sha256": "5c9b7aa43d84e00790b3a252a53ad798bba5437f57b1e468235f46ee51c6b9e1",
+      "size": 12382,
+      "normalized_sha256": "5c9b7aa43d84e00790b3a252a53ad798bba5437f57b1e468235f46ee51c6b9e1"
+    },
+    "data/plugins/dnd5e/dnd5e_plugin/kiwee/__main__.py": {
+      "role": "index",
+      "sha256": "9b46f25256e9bfc48c8c0b4dc846d00a3866fa878d570f52f124e9bed3a98c13",
+      "size": 206,
+      "normalized_sha256": "9b46f25256e9bfc48c8c0b4dc846d00a3866fa878d570f52f124e9bed3a98c13"
+    },
+    "data/plugins/dnd5e/dnd5e_plugin/kiwee/datatags.py": {
+      "role": "index",
+      "sha256": "47157766e1ad95c5f1f98b17d011b6ab64c25742ad8794172cdd4a5a062cc230",
+      "size": 11416,
+      "normalized_sha256": "47157766e1ad95c5f1f98b17d011b6ab64c25742ad8794172cdd4a5a062cc230"
+    },
+    "data/plugins/dnd5e/dnd5e_plugin/kiwee/db.py": {
+      "role": "index",
+      "sha256": "56bffd1fef59649e63c4b2a14f400628d3dd6b50fac42e392b8d57716fd9b9e5",
+      "size": 25421,
+      "normalized_sha256": "56bffd1fef59649e63c4b2a14f400628d3dd6b50fac42e392b8d57716fd9b9e5"
+    },
+    "data/plugins/dnd5e/dnd5e_plugin/kiwee/mechanics.py": {
+      "role": "index",
+      "sha256": "fb62d2991d9c8b2b7c0ea2c3b02b6d7e8efc0df6a5c56466a7c7a62098c8734b",
+      "size": 16756,
+      "normalized_sha256": "fb62d2991d9c8b2b7c0ea2c3b02b6d7e8efc0df6a5c56466a7c7a62098c8734b"
+    },
+    "data/plugins/dnd5e/dnd5e_plugin/kiwee/snapshot.py": {
+      "role": "index",
+      "sha256": "4722c108b82d3092dcb5f75dd7d2590313f92d6d808fc32ab1c6c789c70277ab",
+      "size": 10809,
+      "normalized_sha256": "4722c108b82d3092dcb5f75dd7d2590313f92d6d808fc32ab1c6c789c70277ab"
     },
     "data/plugins/dnd5e/dnd5e_plugin/map_link.py": {
       "role": "index",
@@ -4928,9 +5042,9 @@
     },
     "data/plugins/dnd5e/dnd5e_plugin/progression.py": {
       "role": "index",
-      "sha256": "c28efb0ce29d9b93e58987e9638c3ccd8fe9b5fd9605f04a167ac5173acf22a4",
-      "size": 27705,
-      "normalized_sha256": "c28efb0ce29d9b93e58987e9638c3ccd8fe9b5fd9605f04a167ac5173acf22a4"
+      "sha256": "e23877dce33a05b5a5531931115e08652d4fb68c7908778a12697716e1edd573",
+      "size": 41826,
+      "normalized_sha256": "e23877dce33a05b5a5531931115e08652d4fb68c7908778a12697716e1edd573"
     },
     "data/plugins/dnd5e/dnd5e_plugin/rest.py": {
       "role": "index",
@@ -4970,9 +5084,9 @@
     },
     "data/plugins/dnd5e/dnd5e_plugin/statblock.py": {
       "role": "index",
-      "sha256": "c47668fd6a0b2e6937a60cd8e2217641dbe1d2c5688465e7870ac163a204bb00",
-      "size": 11112,
-      "normalized_sha256": "c47668fd6a0b2e6937a60cd8e2217641dbe1d2c5688465e7870ac163a204bb00"
+      "sha256": "2a12740c6d991ea99367b5b86512ea948efcae384205f38dff2ff9b2a53a1e47",
+      "size": 13352,
+      "normalized_sha256": "2a12740c6d991ea99367b5b86512ea948efcae384205f38dff2ff9b2a53a1e47"
     },
     "data/plugins/dnd5e/dnd5e_plugin/tools.py": {
       "role": "index",
@@ -4982,27 +5096,93 @@
     },
     "data/plugins/dnd5e/entry.py": {
       "role": "index",
-      "sha256": "33e03228fc7d3c3ef4b15b2ff77caa7ec7efd4f065dfc638fca57802f89faaf9",
-      "size": 4991,
-      "normalized_sha256": "33e03228fc7d3c3ef4b15b2ff77caa7ec7efd4f065dfc638fca57802f89faaf9"
+      "sha256": "c353e8a1df88e4248eec0289d991573a1144af1b892396b59caee3723bbe3e4c",
+      "size": 5750,
+      "normalized_sha256": "c353e8a1df88e4248eec0289d991573a1144af1b892396b59caee3723bbe3e4c"
     },
     "data/plugins/dnd5e/plugin.json": {
       "role": "index",
-      "sha256": "ec81f49a7072ccb433fe25048f16fe0f25758771d03fa88629b7417b0b2112ae",
-      "size": 1458,
-      "normalized_sha256": "ec81f49a7072ccb433fe25048f16fe0f25758771d03fa88629b7417b0b2112ae"
+      "sha256": "6896c4dfa1ea990f4e478d007e1c3c552123bb2903e5134f3d2608264736a699",
+      "size": 1628,
+      "normalized_sha256": "6896c4dfa1ea990f4e478d007e1c3c552123bb2903e5134f3d2608264736a699"
     },
     "data/plugins/enabled.json": {
       "role": "index",
-      "sha256": "f31c60654a747e6a6acd19e48114608d80d7fc5c58ba08270ce883b8fe3870e2",
-      "size": 107,
-      "normalized_sha256": "f31c60654a747e6a6acd19e48114608d80d7fc5c58ba08270ce883b8fe3870e2"
+      "sha256": "040f86e69915cbf7c32ae5c5aecdf4eb8269c62d3bda9f29e474e4b341f2c2d5",
+      "size": 141,
+      "normalized_sha256": "040f86e69915cbf7c32ae5c5aecdf4eb8269c62d3bda9f29e474e4b341f2c2d5"
+    },
+    "data/plugins/fvtt-world-import/entry.py": {
+      "role": "index",
+      "sha256": "527222b4b12662934a601c11589a1f8cad9170ffccfce208796311f6ad9548f8",
+      "size": 93285,
+      "normalized_sha256": "756ff71d68c0f496cac325ebdd3c82a9422ea15ab762962e49719b110f4c0570"
+    },
+    "data/plugins/fvtt-world-import/fvtt_world_import/__init__.py": {
+      "role": "index",
+      "sha256": "635df0bab88dd76a6e985f962bb173d7dbd846ab9613956aecdaef2657025bc0",
+      "size": 860,
+      "normalized_sha256": "635df0bab88dd76a6e985f962bb173d7dbd846ab9613956aecdaef2657025bc0"
+    },
+    "data/plugins/fvtt-world-import/fvtt_world_import/armor_calc.py": {
+      "role": "index",
+      "sha256": "73ed7f86eaeeba82b6707abf8030bcaff0f0e3ebec2ad284f26e703085dda18d",
+      "size": 7353,
+      "normalized_sha256": "73ed7f86eaeeba82b6707abf8030bcaff0f0e3ebec2ad284f26e703085dda18d"
+    },
+    "data/plugins/fvtt-world-import/fvtt_world_import/convert_actors.py": {
+      "role": "index",
+      "sha256": "4f88a4d5b46c7393d8995f4f63a9432128ce1b4c999d34573fe95b419e38b0d0",
+      "size": 73282,
+      "normalized_sha256": "4401d342164bc207d75d5dce409d7f8c0f506caefc8e28b4c69a539826a46195"
+    },
+    "data/plugins/fvtt-world-import/fvtt_world_import/convert_journal.py": {
+      "role": "index",
+      "sha256": "847af1c7b5673feff511e603b97cda440d8c792f18e5d37d76c78ccbaef01f31",
+      "size": 35072,
+      "normalized_sha256": "847af1c7b5673feff511e603b97cda440d8c792f18e5d37d76c78ccbaef01f31"
+    },
+    "data/plugins/fvtt-world-import/fvtt_world_import/convert_scenes.py": {
+      "role": "index",
+      "sha256": "1068054cc6975b0f1adc0c998839b6896badd0c37907ef1952a2a1f657c70c70",
+      "size": 20248,
+      "normalized_sha256": "1068054cc6975b0f1adc0c998839b6896badd0c37907ef1952a2a1f657c70c70"
+    },
+    "data/plugins/fvtt-world-import/fvtt_world_import/dump.py": {
+      "role": "index",
+      "sha256": "5b394de59e8cf39fa28e9ad5b317627cb38e0b5450dea463c30e9255fd1143a0",
+      "size": 3200,
+      "normalized_sha256": "5b394de59e8cf39fa28e9ad5b317627cb38e0b5450dea463c30e9255fd1143a0"
+    },
+    "data/plugins/fvtt-world-import/fvtt_world_import/leveldb.py": {
+      "role": "index",
+      "sha256": "5899dcd9845b96f28d64848ec382973fe7b998b159aa354cd8c6df907f31674b",
+      "size": 19107,
+      "normalized_sha256": "5899dcd9845b96f28d64848ec382973fe7b998b159aa354cd8c6df907f31674b"
+    },
+    "data/plugins/fvtt-world-import/fvtt_world_import/snappy.py": {
+      "role": "index",
+      "sha256": "0f0dc124eacc6fc44d29694e816415faca7a4dbea692cf2a54e11d27abdb33b3",
+      "size": 5047,
+      "normalized_sha256": "0f0dc124eacc6fc44d29694e816415faca7a4dbea692cf2a54e11d27abdb33b3"
+    },
+    "data/plugins/fvtt-world-import/fvtt_world_import/world_package.py": {
+      "role": "index",
+      "sha256": "78aaf9c7fe986cba4e2da82d424548497cc51a8286b7f08814bcdac78dbf9b18",
+      "size": 33135,
+      "normalized_sha256": "c1bd396f2ad71ef6ae0e7ad318a8ec2e2b113765c3901a0f7154b348d8f49819"
+    },
+    "data/plugins/fvtt-world-import/plugin.json": {
+      "role": "index",
+      "sha256": "64bd7d610de8f14d0c7347d587a582668fef7cd718cb2981eb2f11760beddc4b",
+      "size": 1136,
+      "normalized_sha256": "64bd7d610de8f14d0c7347d587a582668fef7cd718cb2981eb2f11760beddc4b"
     },
     "data/plugins/veil-map/entry.py": {
       "role": "index",
-      "sha256": "e974f3a95eec5802ddafd7e1a87a682e784362ff75c44d7728580de7ab958379",
-      "size": 204522,
-      "normalized_sha256": "e974f3a95eec5802ddafd7e1a87a682e784362ff75c44d7728580de7ab958379"
+      "sha256": "e43a13b7d55e2b1486e728eff1313522f7dfcfba065c7e20cf16f4be6f04dd23",
+      "size": 215077,
+      "normalized_sha256": "e43a13b7d55e2b1486e728eff1313522f7dfcfba065c7e20cf16f4be6f04dd23"
     },
     "data/plugins/veil-map/importer.py": {
       "role": "index",
@@ -5042,9 +5222,9 @@
     },
     "data/plugins/veil-map/ui/map.js": {
       "role": "index",
-      "sha256": "c9e31b191fad0624849c18366595ed50949f5775f2f70363d33068bf83e53b51",
-      "size": 84245,
-      "normalized_sha256": "c9e31b191fad0624849c18366595ed50949f5775f2f70363d33068bf83e53b51"
+      "sha256": "b5abd70afcd7746d2863150c5581d2b0189f43a55b0868d3cbdb5648ab7d4646",
+      "size": 95278,
+      "normalized_sha256": "b5abd70afcd7746d2863150c5581d2b0189f43a55b0868d3cbdb5648ab7d4646"
     },
     "data/plugins/veil-map/visibility.py": {
       "role": "index",
@@ -5368,6 +5548,12 @@
       "size": 10994,
       "normalized_sha256": "d8ed5f6618dceb5808d16761f53330f8e2071569a820ecebe2e92775d92eebf7"
     },
+    "docs/plans/arcanemap-replication-audit.md": {
+      "role": "index",
+      "sha256": "b20b17eb57d5fdbe0ddf12d23005bc47ad2771cdb2a8f210665eb7d4c2cd7082",
+      "size": 12219,
+      "normalized_sha256": "b20b17eb57d5fdbe0ddf12d23005bc47ad2771cdb2a8f210665eb7d4c2cd7082"
+    },
     "docs/plans/coc7-rules-audit.md": {
       "role": "index",
       "sha256": "7ed5ccbda04159e83346523bb4964d256c818ce39252f208851aa5c482d66206",
@@ -5397,6 +5583,18 @@
       "sha256": "fd383ed6f6dde8b67da9748959c48d9cbb07207b949a235f400b892a0af0cb6c",
       "size": 51192,
       "normalized_sha256": "fd383ed6f6dde8b67da9748959c48d9cbb07207b949a235f400b892a0af0cb6c"
+    },
+    "docs/plans/dnd5e-vtt-refactor-plan.md": {
+      "role": "index",
+      "sha256": "dd385ca68735235588f6c0e32da2ba5f9a89ba9af51f082c8fac29e7c07a9e75",
+      "size": 48483,
+      "normalized_sha256": "dd385ca68735235588f6c0e32da2ba5f9a89ba9af51f082c8fac29e7c07a9e75"
+    },
+    "docs/plans/fvtt-world-import-actor-mapping.md": {
+      "role": "index",
+      "sha256": "434f905a5a5de49dcbf64d79d7571fa5218f84f82d700306af98799eb0cb2de6",
+      "size": 57754,
+      "normalized_sha256": "434f905a5a5de49dcbf64d79d7571fa5218f84f82d700306af98799eb0cb2de6"
     },
     "docs/plans/prop-workshop-design.md": {
       "role": "index",
@@ -5628,9 +5826,9 @@
     },
     "frontend/src/app/chat.ts": {
       "role": "index",
-      "sha256": "cf074bca2d164c594b31c6e09f0b610add73b20c04f8ce133ddd2d469c4b2529",
-      "size": 107849,
-      "normalized_sha256": "b09fc414e29a5324119c3fdd286948e48c23ed2c3da9f092c3dc883abf070aa3"
+      "sha256": "707d5cbf2c65b67e0515d45730122f31386d492867578c2608e7e1d519c28f17",
+      "size": 115391,
+      "normalized_sha256": "ee1dadb8ac4e2f665c12827119a368dcd4efedee1bea390e92b94fd0f01f1e59"
     },
     "frontend/src/app/combat.ts": {
       "role": "index",
@@ -5658,9 +5856,9 @@
     },
     "frontend/src/app/controllers/ScenarioController.ts": {
       "role": "index",
-      "sha256": "97323a81d20e9cda55f8141c944f96444460141761bd36cc53af2edc28a16701",
-      "size": 33378,
-      "normalized_sha256": "62797571902b03391745c1906862d26b25f714cb766e95eb1c2bb6642ff4c4dc"
+      "sha256": "36d3bf851be3811a4c75899b8ac0ebbab0447b4645026f1e7c7fbf39684e6676",
+      "size": 33924,
+      "normalized_sha256": "ca33c31c902a181f7bf1f55999317732940ca02360f4722cd8eb2f8bb8a8883a"
     },
     "frontend/src/app/cookie-consent.ts": {
       "role": "index",
@@ -5733,6 +5931,12 @@
       "sha256": "cdc81466669449b283bb7e23be08924232afd0ae338243bc9c99c17fe06912c7",
       "size": 2130,
       "normalized_sha256": "1d11426d1aec51566ab5b58bed32aafaec27e7b7abc56e7e0e268cce7fd1a007"
+    },
+    "frontend/src/app/fvtt-world-import.ts": {
+      "role": "index",
+      "sha256": "309829bb4f17b02191476204eb0edefad3bedbf1fa060532f0de260f84a69ad0",
+      "size": 25744,
+      "normalized_sha256": "309829bb4f17b02191476204eb0edefad3bedbf1fa060532f0de260f84a69ad0"
     },
     "frontend/src/app/i18n.ts": {
       "role": "index",
@@ -5892,9 +6096,9 @@
     },
     "frontend/src/app/rooms.ts": {
       "role": "index",
-      "sha256": "b44e57c735acf93b85e035140e4b4282490b9f768945a1d84a6ed5a424d504bb",
-      "size": 172860,
-      "normalized_sha256": "46eac98c7267371a4e4451d4e9288795dbeeed73982314c8292e0bc03e9a42d4"
+      "sha256": "a6a345531ffdfc03d31014ddc342a207caaca3ab9f4b26d1148e26588bbc62ee",
+      "size": 178932,
+      "normalized_sha256": "5d96affb3f3aa9e3b07d531208c98b87ce8bc137799ac60675255fcd205487fe"
     },
     "frontend/src/app/scenario-favorites.ts": {
       "role": "index",
@@ -6138,9 +6342,9 @@
     },
     "frontend/src/app/views/ScenarioView.ts": {
       "role": "index",
-      "sha256": "b451886784390af706cf6dd98971deafb6d5c56afec2b7666db264ef9b443753",
-      "size": 87095,
-      "normalized_sha256": "77a6d08e94eb55e0e0248f4d608b999933c432c2b5ae32b07500230f78f4d316"
+      "sha256": "3b1b1b1013a1f0745fc0c3c8a383223ac104fe84989c2bb4bc4091c94bf0751f",
+      "size": 87529,
+      "normalized_sha256": "17e8acfc84b6874ea2145dfe6c9134293fc80c48c80d9f2f4b704e66d69ef5b0"
     },
     "frontend/src/app/views/scenario-helpers.ts": {
       "role": "index",
@@ -6162,9 +6366,9 @@
     },
     "frontend/src/app/workspace.ts": {
       "role": "index",
-      "sha256": "89caa80948350de38ce036e17b934d56c74742ef1c44a4acaebe6b57e31cb60a",
-      "size": 68565,
-      "normalized_sha256": "89caa80948350de38ce036e17b934d56c74742ef1c44a4acaebe6b57e31cb60a"
+      "sha256": "e993091411e02d2d6afd63aa9dce1bf7d14efaad90a5696cf31eb66697e9950a",
+      "size": 76769,
+      "normalized_sha256": "e993091411e02d2d6afd63aa9dce1bf7d14efaad90a5696cf31eb66697e9950a"
     },
     "frontend/src/app/worldOverride.ts": {
       "role": "index",
@@ -6283,15 +6487,15 @@
     },
     "frontend/src/index/fragments/02-main-tabs.html": {
       "role": "index",
-      "sha256": "a607e6a6df4a19b14310bb3cd28d63ceae2aafa5677f7992db1f67013290d27a",
-      "size": 39159,
-      "normalized_sha256": "2b8e3463568a2ded395994e538afd153c4be0069698139a750dfbe7da7a31923"
+      "sha256": "21dde1014d94bb8a48d2940e6390e09fabcabbfd78cefc4a8e4fa5ed2d9858bc",
+      "size": 39378,
+      "normalized_sha256": "9432a6d052ac7f9e48f41789ed62c69530b20649b18a0c87f2f5b1e723c07e53"
     },
     "frontend/src/index/fragments/03-room-tools-auth-settings.html": {
       "role": "index",
-      "sha256": "28bd0af51b4ac47773ea29fc517d597b9db6fe0e6faf0f4ca7716a666adbf8ef",
-      "size": 256107,
-      "normalized_sha256": "c3d7f657f5ca3c08427dada0cd994660f652dab265cce057bff0e074f5a3abbd"
+      "sha256": "a0a7fa0e3b48e01a7cc8cc80f34f59fff5abd574b8bf8f552a3079d53bc983f5",
+      "size": 256239,
+      "normalized_sha256": "f56adefaa7e1062fe070179c97e2787d62a915bbc645e98e133e54d5dbe66c09"
     },
     "frontend/src/index/fragments/04-editor-modals.html": {
       "role": "index",
@@ -6301,9 +6505,9 @@
     },
     "frontend/src/index/fragments/05-platform-modals-and-scripts.html": {
       "role": "index",
-      "sha256": "55f5e5a7f9fea83969c5a0bb544f609b31fdd3f80389220805f61a7231fc7fbd",
-      "size": 25683,
-      "normalized_sha256": "3c0c4ca928dfbe06dfd5692f0286e70240f76922208cafc660370acc756779c3"
+      "sha256": "8a73abb807c3cf9b67d755d91a05891f7d16b0a1fe3d19046915694d75a220b4",
+      "size": 26167,
+      "normalized_sha256": "46d5d049c87193786709289427f2da9f0db8c5f4914c056f0793dc8d695fcf7b"
     },
     "frontend/src/index/fragments/06-setup-wizard.html": {
       "role": "index",
@@ -6431,11 +6635,23 @@
       "size": 2018,
       "normalized_sha256": "21f21b94bf7e432631ce5cce5aedf9119878c87b72dbd99ea91ead999ac4fde9"
     },
+    "frontend/src/rulesets/dnd5e/character-levelup.ts": {
+      "role": "index",
+      "sha256": "cf90bff3b63d3a57fcdb5b784b1b89408c59e1af4008cc0f82e1bb8863151938",
+      "size": 51337,
+      "normalized_sha256": "cf90bff3b63d3a57fcdb5b784b1b89408c59e1af4008cc0f82e1bb8863151938"
+    },
     "frontend/src/rulesets/dnd5e/character-sheet.ts": {
       "role": "index",
-      "sha256": "4f58b68ec6b27ce8f4323f7e0328ebb4c15c5ffb5c1649ffe72b7c30118582bc",
-      "size": 49177,
-      "normalized_sha256": "4f58b68ec6b27ce8f4323f7e0328ebb4c15c5ffb5c1649ffe72b7c30118582bc"
+      "sha256": "9d3df07e29af6023f76eda3d078e700b4e6ca7ebbfa66d3a8750273c57db2641",
+      "size": 125511,
+      "normalized_sha256": "9d3df07e29af6023f76eda3d078e700b4e6ca7ebbfa66d3a8750273c57db2641"
+    },
+    "frontend/src/rulesets/dnd5e/character-wizard.ts": {
+      "role": "index",
+      "sha256": "9c16e0757fa5464c8e36ae4edf36af4db0165775ea7ac2669c1155c36f2bc19c",
+      "size": 82643,
+      "normalized_sha256": "b188e84117fa4384f76b777a308fbe48c2a445b8aa6c2060715e74de46021e70"
     },
     "frontend/src/styles/00-theme-tokens.css": {
       "role": "index",
@@ -6451,9 +6667,9 @@
     },
     "frontend/src/styles/02-scenario-character.css": {
       "role": "index",
-      "sha256": "8c040a9be266e4a98ef5514e2c2f62bfe064d4e7021e9fb04865b82159c4fe25",
-      "size": 112285,
-      "normalized_sha256": "ca3ab88698cb68895c18e7e15c205984d3ec6ac60d1eb4ea657ceb1263d9e292"
+      "sha256": "78146987682ac9d197fb52c762f950bdecbcb5a54b8d8d930e6a51107d9b882f",
+      "size": 147672,
+      "normalized_sha256": "7f2fd390e384242a8319cbc31c33c59ce6ac335b4ca574f4633c8c42fb57dd3b"
     },
     "frontend/src/styles/03-tools-settings-platform.css": {
       "role": "index",
@@ -6475,9 +6691,9 @@
     },
     "frontend/src/styles/06-combat-world-override.css": {
       "role": "index",
-      "sha256": "4a3c6caa205bf865ccc9b295cb19549331bade86a11ad4983feb16a4dfdf9649",
-      "size": 17243,
-      "normalized_sha256": "4a3c6caa205bf865ccc9b295cb19549331bade86a11ad4983feb16a4dfdf9649"
+      "sha256": "c579cf4524ff77e7358be430f687d27cacc1b00377e2f6e818896c540f93f001",
+      "size": 19777,
+      "normalized_sha256": "c579cf4524ff77e7358be430f687d27cacc1b00377e2f6e818896c540f93f001"
     },
     "frontend/src/styles/07-theme-abyss-tokens.css": {
       "role": "index",
@@ -6535,9 +6751,9 @@
     },
     "frontend/src/styles/16-workspace.css": {
       "role": "index",
-      "sha256": "21e1ee84f2237f7d6ff3d1f72e99b7e1e4a0874d44a4d3daa84b9d2fe36bc5b6",
-      "size": 31029,
-      "normalized_sha256": "21e1ee84f2237f7d6ff3d1f72e99b7e1e4a0874d44a4d3daa84b9d2fe36bc5b6"
+      "sha256": "dbd756abb7c17872b347f0a9ba377fc632ab175d07c714ec1e36809e87768f43",
+      "size": 32632,
+      "normalized_sha256": "dbd756abb7c17872b347f0a9ba377fc632ab175d07c714ec1e36809e87768f43"
     },
     "frontend/src/templates/chat.html": {
       "role": "index",
@@ -6625,9 +6841,9 @@
     },
     "frontend/src/types/global.d.ts": {
       "role": "index",
-      "sha256": "e10e400b76daf5fdc9ce1524c20c07f50c7b6ae675f7dc30d74b436af4ed136e",
-      "size": 4871,
-      "normalized_sha256": "62bf843ed1bc15b449c61953e341d0bb24f0e886902bded9f743514cd84e7b28"
+      "sha256": "34799c89dae4d6ecdb94b4e6e0a1827e97b8f4cd2c1809f8bb3c1464dccce786",
+      "size": 5251,
+      "normalized_sha256": "71760c81fe58d0bddd507f6a27ae2c72d2d41b6be371852385065265f8107f5f"
     },
     "frontend/src/types/immersive.d.ts": {
       "role": "index",
@@ -6649,9 +6865,9 @@
     },
     "frontend/src/types/scenario.d.ts": {
       "role": "index",
-      "sha256": "c89c47ed91b2da961ce03f89fa136863d4bce07bafbbc4f6abcd1c0047e2653c",
-      "size": 13323,
-      "normalized_sha256": "6d051137de29bb2a796d425e1701e8e9815fe4720eff4fcf8891e4d355e56642"
+      "sha256": "15837288747671d7ccd55a3969e3940bebe9d75a2094d0ed963b388f08a0f31d",
+      "size": 13333,
+      "normalized_sha256": "748a2297fd94e258e4027e68bc99e21bd4d332bc77f17bd1fb61cff06a0e8832"
     },
     "frontend/src/types/templates.d.ts": {
       "role": "index",
@@ -6679,9 +6895,9 @@
     },
     "frontend/src/types/workspace.d.ts": {
       "role": "index",
-      "sha256": "e6194ce5aca710ba6b095edf976dc3241fde8a2664dce5b5cef626299352b0be",
-      "size": 4305,
-      "normalized_sha256": "e6194ce5aca710ba6b095edf976dc3241fde8a2664dce5b5cef626299352b0be"
+      "sha256": "14a6d626a35a43ea35242b0ff777c0a741168b356d5fedd9baf0bf643c5e5b15",
+      "size": 4797,
+      "normalized_sha256": "14a6d626a35a43ea35242b0ff777c0a741168b356d5fedd9baf0bf643c5e5b15"
     },
     "package-lock.json": {
       "role": "observe",
@@ -6703,9 +6919,9 @@
     },
     "pytest.ini": {
       "role": "index",
-      "sha256": "cef76fd5f9ed26978668ef1d053b6150c5559e6367694d6b4c0bf4c65a98337c",
-      "size": 436,
-      "normalized_sha256": "cef76fd5f9ed26978668ef1d053b6150c5559e6367694d6b4c0bf4c65a98337c"
+      "sha256": "25ca20092e719c755851abcee516affda9b23be3f7b2dd30a7af56002e96198e",
+      "size": 572,
+      "normalized_sha256": "25ca20092e719c755851abcee516affda9b23be3f7b2dd30a7af56002e96198e"
     },
     "release/RELEASE_MANIFEST.md": {
       "role": "index",
@@ -6913,9 +7129,9 @@
     },
     "release/changelog/v1.0.7.md": {
       "role": "index",
-      "sha256": "39b1cde78b4c8531a65b305045b55bcee4e7134a79ea3ef0198796824baf3d68",
-      "size": 49377,
-      "normalized_sha256": "39b1cde78b4c8531a65b305045b55bcee4e7134a79ea3ef0198796824baf3d68"
+      "sha256": "dccc745f572229ef7253a61349e72d2b4c0712bb70221342c8c1c8763511c5b9",
+      "size": 50514,
+      "normalized_sha256": "dccc745f572229ef7253a61349e72d2b4c0712bb70221342c8c1c8763511c5b9"
     },
     "requirements-ocr.txt": {
       "role": "index",
@@ -7429,9 +7645,9 @@
     },
     "start-bootstrap.ps1": {
       "role": "index",
-      "sha256": "1dc77fdac9dad82942ba851e66b6089b675dca04785fcbe5a93ab40e993ce4cc",
-      "size": 27697,
-      "normalized_sha256": "72f75a47dd5c87750ae7a4d386d5040f15def82dd60a70cde5e8bf8fbb853ce8"
+      "sha256": "8c88ea7fc540e138c3f5c14827effd8fbb8e36d7e208d802bc0b97867dc739f7",
+      "size": 30803,
+      "normalized_sha256": "57d05f28841173cee322f309302006cb3772892c7434cd5c2ceb18223dec4ac0"
     },
     "start.cmd": {
       "role": "index",
@@ -7721,11 +7937,23 @@
       "size": 3539,
       "normalized_sha256": "07d4e4b3713441a77d2a484b2082ea30ada34e92d6bff9c4fc83e84667ac1c55"
     },
+    "tests/test_dnd5e_builder.py": {
+      "role": "observe",
+      "sha256": "2a8218c7704284b02d4fd7961cb0d560e75e346368cde4ae0a20849e5e30336a",
+      "size": 11948,
+      "normalized_sha256": "b4da155fab47a7a1ce7038fd5e1c8551e74c5b3b84f94ccde5b070574bb0072d"
+    },
     "tests/test_dnd5e_combat.py": {
       "role": "observe",
       "sha256": "60e27fb3d1d9c920c1648d8abaf3dad7b2f91af305adb3bbb73b08a84e23cdb4",
       "size": 22244,
       "normalized_sha256": "60e27fb3d1d9c920c1648d8abaf3dad7b2f91af305adb3bbb73b08a84e23cdb4"
+    },
+    "tests/test_dnd5e_combat_log_chain.py": {
+      "role": "observe",
+      "sha256": "c735ef3db687cb139d3302437a8143b4042cc0c1dbdce4f842c061d9a6980702",
+      "size": 12177,
+      "normalized_sha256": "c735ef3db687cb139d3302437a8143b4042cc0c1dbdce4f842c061d9a6980702"
     },
     "tests/test_dnd5e_effects.py": {
       "role": "observe",
@@ -7738,6 +7966,30 @@
       "sha256": "6badb0fa6f9cf324540574e07a2ba065c0f341702100a3c5b35b451fba354a0a",
       "size": 2505,
       "normalized_sha256": "6badb0fa6f9cf324540574e07a2ba065c0f341702100a3c5b35b451fba354a0a"
+    },
+    "tests/test_dnd5e_house_rule_profiles.py": {
+      "role": "observe",
+      "sha256": "d756ce6ad1f41bd5b6fff2887945a43f14b0f18296911495284cb852271dd281",
+      "size": 22644,
+      "normalized_sha256": "d756ce6ad1f41bd5b6fff2887945a43f14b0f18296911495284cb852271dd281"
+    },
+    "tests/test_dnd5e_kiwee.py": {
+      "role": "observe",
+      "sha256": "31f9141bc0b9bbff213697a9b4305d498c7ba0e7a51a2974fbc780a855793430",
+      "size": 19882,
+      "normalized_sha256": "31f9141bc0b9bbff213697a9b4305d498c7ba0e7a51a2974fbc780a855793430"
+    },
+    "tests/test_dnd5e_kiwee_consumers.py": {
+      "role": "observe",
+      "sha256": "8a515f6f5bd681c133d6eb9f2894da463b4a4de6ad26d438ef9574586c213475",
+      "size": 21686,
+      "normalized_sha256": "8a515f6f5bd681c133d6eb9f2894da463b4a4de6ad26d438ef9574586c213475"
+    },
+    "tests/test_dnd5e_levelup.py": {
+      "role": "observe",
+      "sha256": "f8655a4e1ba6ed96777284dfc3fb4cebb353f2d0772dffd698028c674dd3ed57",
+      "size": 17239,
+      "normalized_sha256": "f8655a4e1ba6ed96777284dfc3fb4cebb353f2d0772dffd698028c674dd3ed57"
     },
     "tests/test_dnd5e_noncombat_spells.py": {
       "role": "observe",
@@ -7781,6 +8033,36 @@
       "size": 5117,
       "normalized_sha256": "f00ba56fe3ac20bf12f5b918c9fedbd1720117359357ac7c042114bc0fae3cb2"
     },
+    "tests/test_dnd5e_vtt_agent_tools.py": {
+      "role": "observe",
+      "sha256": "0345b473cc4737c77fc6c37de262077ddf930615101b505e126cfdb9ddaae86e",
+      "size": 26374,
+      "normalized_sha256": "0345b473cc4737c77fc6c37de262077ddf930615101b505e126cfdb9ddaae86e"
+    },
+    "tests/test_dnd5e_vtt_dice.py": {
+      "role": "observe",
+      "sha256": "892c8b10ca938885b61cccf21af4023d374bd0e75852b19d571b963ab3f0ef2a",
+      "size": 13186,
+      "normalized_sha256": "892c8b10ca938885b61cccf21af4023d374bd0e75852b19d571b963ab3f0ef2a"
+    },
+    "tests/test_dnd5e_vtt_plugin.py": {
+      "role": "observe",
+      "sha256": "2dba4cf8be10ae78f13418637be7aef4e3b4e9509aabd25e28187094ef7de69e",
+      "size": 14119,
+      "normalized_sha256": "2dba4cf8be10ae78f13418637be7aef4e3b4e9509aabd25e28187094ef7de69e"
+    },
+    "tests/test_dnd5e_vtt_quick_stats.py": {
+      "role": "observe",
+      "sha256": "3b54e6def624c173f4bf2f9355d1a7e58e4f272e6046eb2d984bd6b0f88fc05c",
+      "size": 17740,
+      "normalized_sha256": "3b54e6def624c173f4bf2f9355d1a7e58e4f272e6046eb2d984bd6b0f88fc05c"
+    },
+    "tests/test_dnd5e_vtt_templates.py": {
+      "role": "observe",
+      "sha256": "7150abd210475b1f923b777f0f656e1e216309a9c5a14d2412bd3e22fefc4873",
+      "size": 23743,
+      "normalized_sha256": "7150abd210475b1f923b777f0f656e1e216309a9c5a14d2412bd3e22fefc4873"
+    },
     "tests/test_embedding_health.py": {
       "role": "observe",
       "sha256": "6b6f5881b0316cdf0dacc1cf0ee7aa51138d76afbf3f4f86074e50a95aaa4a08",
@@ -7816,6 +8098,42 @@
       "sha256": "e7a81512ac5777c0c0e6c1755a220f7a4baf0e10e2b79994ac9177f5915aa5ee",
       "size": 44385,
       "normalized_sha256": "1f1a92c4f390515359e0c043c6144af5d62e790208fb038d2f2f5d46ad3174c1"
+    },
+    "tests/test_fvtt_world_import_actors.py": {
+      "role": "observe",
+      "sha256": "761dbe02a10df42b554903c40aa871f2c15bfc8033c5a384e686a83b3ef9fd82",
+      "size": 14976,
+      "normalized_sha256": "761dbe02a10df42b554903c40aa871f2c15bfc8033c5a384e686a83b3ef9fd82"
+    },
+    "tests/test_fvtt_world_import_autoprovision.py": {
+      "role": "observe",
+      "sha256": "d49eb0a2fbc83cf0b5822cca606e5cc6df26f38b0da5a74a7e83e428132de674",
+      "size": 20740,
+      "normalized_sha256": "d49eb0a2fbc83cf0b5822cca606e5cc6df26f38b0da5a74a7e83e428132de674"
+    },
+    "tests/test_fvtt_world_import_convert.py": {
+      "role": "observe",
+      "sha256": "983596d7858da0edcdf824b2f507fd378123fcdf111720b23b74e7b89acf88f7",
+      "size": 37855,
+      "normalized_sha256": "983596d7858da0edcdf824b2f507fd378123fcdf111720b23b74e7b89acf88f7"
+    },
+    "tests/test_fvtt_world_import_journal.py": {
+      "role": "observe",
+      "sha256": "5eabb55f4cc59049b5743f3a7dc3d4c96692a0e12781e94c1efbcd02dcb775be",
+      "size": 29899,
+      "normalized_sha256": "5eabb55f4cc59049b5743f3a7dc3d4c96692a0e12781e94c1efbcd02dcb775be"
+    },
+    "tests/test_fvtt_world_import_leveldb.py": {
+      "role": "observe",
+      "sha256": "8822431dab5b904caa6dec125082c774e42e78be23a6a88e5ac82cffe5774d96",
+      "size": 9524,
+      "normalized_sha256": "8822431dab5b904caa6dec125082c774e42e78be23a6a88e5ac82cffe5774d96"
+    },
+    "tests/test_fvtt_world_import_scenario.py": {
+      "role": "observe",
+      "sha256": "e805513ef8578a966239efe9e222288299c843393f3331457bf0591c3e8d545a",
+      "size": 19915,
+      "normalized_sha256": "8e59ffdb0bb4877d2bff9f5f40577edb4ea43b4912ffe9b9fe22eb0f449f1f52"
     },
     "tests/test_hint_guard.py": {
       "role": "observe",
