@@ -146,6 +146,8 @@
 - 迷雾视觉全面升级：`3817af5`——三档（未探索近黑 0.95 / 探索记忆 0.63 / 视野透亮+冷调区分明暗）、边缘 1.6 格柔化（ctx.filter 高斯 + JS 退化路径）、新区域 300ms 交叉淡入、雾裁剪到底图矩形（溢出区死黑修漏）、掩码版本号节流；200×200 格 worst case 重建 1.0ms。
 - **开房自动装配**：`c238126`——根因：登记台只写剧本数据，场景/actors 是房间维度，「导入剧本→开房」路径无人调它们。方案：scenario/import 时把已转换场景+NPC 模块暂存剧本侧（stash，背景图内容寻址复制，重导幂等刷新）+ `rooms/<id>/auto-provision`（房主/房管首次进房前端静默触发，幂等零重复，房间已有场景绝不抢占）+ veil-map 广播全员见图。heroes 实测：3 场景（雨中伏击激活，10 棋子）+ 12 NPC 模块自动落房。
 
+- kiwee 消费面接线完成并提交：`d175276`——①`knowledge.search_ruleset` 深库优先（机翻徽章/深链/2014·2024 版本，KI/AI 玩家分视角 observer_is_dm），未建库逐位回落旧路径 ②UI 三端点（/rules/search 玩家侧类目、/rules/entry DM 门控 403 dm_only、/rules/status），深库缺席 200+available:false 不 500 ③引擎结构化服务 spell_mechanics（火球术 8d6 火焰/敏捷/球 20 尺/升环 1d6 全锚点命中）与 monster_mechanics（地精 AC15/HP7/CR¼）。真库实测：22.3MB / 9215 条（monster 4559/spell 969/item 2512）/ FTS5 / cn2.0@5cc0bbe。基线 2569 passed / 3 skipped。**剩：UI 界面（规则速查入口）刀**。
+
 ---
 
 ## 4. 总体架构：插件划分与依赖
