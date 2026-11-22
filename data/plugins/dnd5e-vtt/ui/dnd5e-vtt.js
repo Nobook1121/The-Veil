@@ -70,6 +70,15 @@
         items: "fa fa-briefcase",
         journal: "fa fa-book"
     };
+    // 角色速览（quick_stats）：命中加值来源与资源池刷新口径的中文文案。
+    var QUICK_ATTACK_LABELS = {
+        weapon: "主要武器攻击加值",
+        spell: "法术攻击加值"
+    };
+    var QUICK_RESET_LABELS = {
+        long_rest: "长休恢复"
+    };
+
     var KIND_LABELS = {
         player_decision: "玩家决定",
         state_update: "状态更新",
@@ -165,6 +174,8 @@
         var pollTimer = 0;
         var observer = null;
         var stageTools = null;
+        // 展开中的角色速览（DM 视角）：轮询重渲染后按此恢复展开状态。
+        var quickExpanded = {};
 
         host.classList.add("vtt-rail-host");
 
@@ -351,7 +362,113 @@
                 noteBox("当前行动：" + escapeHtml(view.current || "—"));
         }
 
-        function playerRow(player) {
+        // ---------------------------------------------------- 角色速览（四盒）
+        function quickNumber(value) {
+            if (value == null || value === "") return "—";
+            return String(asInt(value, 0));
+        }
+
+        function quickModifier(value) {
+            // 命中加值按 d20 习惯带正负号（+5 / -1）；没有就是「—」。
+            if (value == null || value === "") return "—";
+            var number = asInt(value, 0);
+            return (number >= 0 ? "+" : "") + String(number);
+        }
+
+        function quickBox(label, text, hint) {
+            // label + 数值是可见的四盒内容；口径说明只进 title（窄栏不挤行）。
+            return (
+                '<div class="vtt-quick-box" title="' + escapeHtml(label + "：" + (hint || "")) + '">' +
+                "<small>" + escapeHtml(label) + "</small>" +
+                "<strong>" + escapeHtml(text) + "</strong>" +
+                "</div>"
+            );
+        }
+
+        function quickFourBox(stats) {
+            var source = String((stats && stats.attack_bonus_source) || "");
+            var attackHint = QUICK_ATTACK_LABELS[source] || "无可用攻击";
+            return (
+                '<div class="vtt-quick-grid">' +
+                quickBox("AC", quickNumber(stats && stats.ac), "护甲等级") +
+                quickBox("命中", quickModifier(stats && stats.attack_bonus), attackHint) +
+                quickBox("法术DC", quickNumber(stats && stats.spell_save_dc), "法术豁免 DC") +
+                quickBox("被动感知", quickNumber(stats && stats.passive_perception), "被动察觉") +
+                "</div>"
+            );
+        }
+
+        function quickHpBlock(stats) {
+            var hp = (stats && stats.hp) || {};
+            var maximum = asInt(hp.max, 0);
+            var value = asInt(hp.value, 0);
+            var temp = asInt(hp.temp, 0);
+            if (maximum <= 0) {
+                return (
+                    '<div class="vtt-quick-hp" data-tone="unknown">' +
+                    '<span class="vtt-quick-hp-bar"><i style="width:0%"></i></span>' +
+                    '<span class="vtt-quick-hp-text">生命值未知</span>' +
+                    "</div>"
+                );
+            }
+            var percent = clamp(Math.round((value / maximum) * 100), 0, 100);
+            var tone = percent <= 25 ? "critical" : percent <= 50 ? "wounded" : "healthy";
+            var text = value + " / " + maximum + (temp > 0 ? " (+" + temp + ")" : "");
+            return (
+                '<div class="vtt-quick-hp" data-tone="' + tone + '">' +
+                '<span class="vtt-quick-hp-bar"><i style="width:' + percent + '%"></i></span>' +
+                '<span class="vtt-quick-hp-text">' + escapeHtml(text) + "</span>" +
+                "</div>"
+            );
+        }
+
+        function quickResourcePills(stats) {
+            var resources = (stats && stats.resources) || [];
+            if (!resources.length) return "";
+            return (
+                '<div class="vtt-quick-res">' +
+                resources
+                    .map(function (item) {
+                        var reset = QUICK_RESET_LABELS[String((item && item.reset) || "")] || "长休恢复";
+                        var die = asInt(item && item.die, 0);
+                        var label = String((item && item.label) || (item && item.id) || "资源");
+                        var text = label + " " + asInt(item && item.value, 0) + "/" + asInt(item && item.max, 0);
+                        var hint = reset + (die > 0 ? "（骰型 d" + die + "）" : "");
+                        return (
+                            '<span class="vtt-quick-pill" title="' + escapeHtml(hint) + '">' +
+                            escapeHtml(text) +
+                            (die > 0 ? '<em>d' + die + "</em>" : "") +
+                            "</span>"
+                        );
+                    })
+                    .join("") +
+                "</div>"
+            );
+        }
+
+        function quickBody(stats) {
+            if (!stats) return "";
+            return quickFourBox(stats) + quickHpBlock(stats) + quickResourcePills(stats);
+        }
+
+        function currentUserId() {
+            try {
+                return String((ctx.user && ctx.user.id) || "");
+            } catch (error) {
+                return "";
+            }
+        }
+
+        function myCharacterRow(players) {
+            var meId = currentUserId();
+            if (!meId) return null;
+            for (var index = 0; index < players.length; index += 1) {
+                if (String(players[index].user_id || "") === meId) return players[index];
+            }
+            return null;
+        }
+
+        function myCharacterCard(player) {
             var initial = String(player.name || player.username || "?").slice(0, 1) || "?";
             var image = player.avatar
                 ? '<img src="' + escapeHtml(player.avatar) + '" alt="" loading="lazy">'
@@ -360,35 +477,139 @@
                 .filter(Boolean)
                 .join(" · ");
             return (
-                '<li class="vtt-member" data-vtt-user="' + escapeHtml(player.user_id || "") + '"' +
-                (player.online ? ' data-online="true"' : "") + ">" +
-                '<span class="vtt-member-avatar">' + image + "</span>" +
-                '<span class="vtt-member-main"><strong>' + escapeHtml(player.name || "（未建卡）") + "</strong>" +
-                "<small>" + escapeHtml(meta || player.username || "") + "</small></span>" +
-                '<i class="vtt-member-dot" aria-hidden="true"></i>' +
+                '<div class="vtt-mycard">' +
+                '<div class="vtt-mycard-head">' +
+                '<span class="vtt-member-avatar vtt-mycard-avatar">' + image + "</span>" +
+                '<span class="vtt-mycard-id"><strong>' + escapeHtml(player.name || "（未建卡）") + "</strong>" +
+                "<small>" + escapeHtml(meta || player.username || "未建卡") + "</small></span>" +
+                (player.online ? '<span class="vtt-mycard-online">在线</span>' : "") +
+                "</div>" +
+                quickBody(player.quick_stats) +
+                "</div>"
+            );
+        }
+
+        function quickDetail(key, stats, open) {
+            return (
+                '<li class="vtt-quick-row" data-vtt-quick-detail="' + escapeHtml(key) + '"' +
+                (open ? "" : " hidden") + ">" +
+                '<div class="vtt-quick-body">' + quickBody(stats) + "</div>" +
                 "</li>"
             );
         }
 
-        function npcRow(item) {
-            return (
-                '<li class="vtt-member vtt-npc-item">' +
+        function playerRow(player, expandable) {
+            var initial = String(player.name || player.username || "?").slice(0, 1) || "?";
+            var image = player.avatar
+                ? '<img src="' + escapeHtml(player.avatar) + '" alt="" loading="lazy">'
+                : "<span>" + escapeHtml(initial) + "</span>";
+            var meta = [player.race, player.class ? player.class + " · Lv." + (player.level || "1") : ""]
+                .filter(Boolean)
+                .join(" · ");
+            var stats = player.quick_stats || null;
+            var key = "player:" + String(player.user_id || player.name || "");
+            // 只有 DM 视角可展开（玩家侧速览只给自己的「我的角色」卡）。
+            var canExpand = expandable === true && !!stats;
+            var open = canExpand && quickExpanded[key] === true;
+            var row =
+                '<li class="vtt-member' +
+                (canExpand ? (open ? " is-expandable is-open" : " is-expandable") : "") + '"' +
+                ' data-vtt-user="' + escapeHtml(player.user_id || "") + '"' +
+                (player.online ? ' data-online="true"' : "") +
+                (canExpand ? ' data-vtt-quick="' + escapeHtml(key) + '" role="button" tabindex="0"' +
+                    ' aria-expanded="' + (open ? "true" : "false") + '"' : "") +
+                ">" +
+                '<span class="vtt-member-avatar">' + image + "</span>" +
+                '<span class="vtt-member-main"><strong>' + escapeHtml(player.name || "（未建卡）") + "</strong>" +
+                "<small>" + escapeHtml(meta || player.username || "") + "</small></span>" +
+                (canExpand ? '<i class="vtt-member-caret fa fa-chevron-down" aria-hidden="true"></i>' : "") +
+                '<i class="vtt-member-dot" aria-hidden="true"></i>' +
+                "</li>";
+            if (!canExpand) return row;
+            return row + quickDetail(key, stats, open);
+        }
+
+        function npcRow(item, expandable) {
+            var stats = item.quick_stats || null;
+            var key = "npc:" + String(item.id || item.title || "");
+            var canExpand = expandable === true && !!stats;
+            var open = canExpand && quickExpanded[key] === true;
+            var row =
+                '<li class="vtt-member vtt-npc-item' +
+                (canExpand ? (open ? " is-expandable is-open" : " is-expandable") : "") + '"' +
+                (canExpand ? ' data-vtt-quick="' + escapeHtml(key) + '" role="button" tabindex="0"' +
+                    ' aria-expanded="' + (open ? "true" : "false") + '"' : "") +
+                ">" +
                 '<span class="vtt-member-avatar"><i class="fa fa-user-secret" aria-hidden="true"></i></span>' +
                 '<span class="vtt-member-main"><strong>' + escapeHtml(item.title || "未命名") + "</strong>" +
                 "<small>" + escapeHtml(item.summary || "") + "</small></span>" +
-                "</li>"
-            );
+                (canExpand ? '<i class="vtt-member-caret fa fa-chevron-down" aria-hidden="true"></i>' : "") +
+                "</li>";
+            if (!canExpand) return row;
+            return row + quickDetail(key, stats, open);
+        }
+
+        function toggleQuickRow(row) {
+            var key = String(row.getAttribute("data-vtt-quick") || "");
+            if (!key) return;
+            var detail = row.nextElementSibling;
+            var open;
+            if (detail && detail.hasAttribute("data-vtt-quick-detail")) {
+                open = detail.hidden === true;
+                detail.hidden = !open;
+            } else {
+                open = quickExpanded[key] !== true;
+            }
+            quickExpanded[key] = open;
+            row.classList.toggle("is-open", open);
+            row.setAttribute("aria-expanded", open ? "true" : "false");
+        }
+
+        function bindQuickToggle(el) {
+            if (el.dataset.vttQuickBound === "true") return;
+            el.dataset.vttQuickBound = "true";
+            el.addEventListener("click", function (event) {
+                var target = event.target;
+                var row = target instanceof Element ? target.closest("[data-vtt-quick]") : null;
+                if (!row) return;
+                toggleQuickRow(row);
+            });
+            el.addEventListener("keydown", function (event) {
+                if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
+                var target = event.target;
+                var row = target instanceof Element ? target.closest("[data-vtt-quick]") : null;
+                if (!row) return;
+                event.preventDefault();
+                toggleQuickRow(row);
+            });
+        }
+
+        function observerRole() {
+            return String((panelsData && panelsData.observer) || "player");
         }
 
         function renderCharacters() {
             var el = ensurePanelBody("characters");
             var panel = findPanel("characters") || { players: [] };
-            var html = panelHeader("角色");
             var players = panel.players || [];
+            var dmView = observerRole() === "dm";
+            var html = panelHeader("角色");
+            // 玩家视角：顶部先给自己的速览卡（头像 + 名字 + 四盒 + HP + 资源池）。
+            if (!dmView) {
+                var me = myCharacterRow(players);
+                if (me && me.quick_stats) html += myCharacterCard(me);
+            }
             if (!players.length) {
                 html += emptyState("fa fa-users", "暂无玩家角色", "房间成员建卡并携带角色卡后，会列在这里。");
             } else {
-                html += '<ul class="vtt-directory">' + players.map(playerRow).join("") + "</ul>";
+                html +=
+                    '<ul class="vtt-directory">' +
+                    players
+                        .map(function (player) {
+                            return playerRow(player, dmView);
+                        })
+                        .join("") +
+                    "</ul>";
             }
             // npc 分组只存在于 DM 响应；玩家响应没有这个键（服务端裁剪）。
             if (panel.npc) {
@@ -396,10 +617,19 @@
                 if (!(panel.npc.items || []).length) {
                     html += emptyState("fa fa-user-secret", "暂无 NPC 模块", panel.npc.hint || "导入世界包后，怪物与 NPC 会列在这里。");
                 } else {
-                    html += '<ul class="vtt-directory">' + (panel.npc.items || []).map(npcRow).join("") + "</ul>";
+                    html +=
+                        '<ul class="vtt-directory">' +
+                        (panel.npc.items || [])
+                            .map(function (item) {
+                                return npcRow(item, dmView);
+                            })
+                            .join("") +
+                        "</ul>";
                 }
+                if (dmView) html += noteBox("点角色或 NPC 行展开速览（AC / 命中 / 法术 DC / 被动感知 + HP）。");
             }
             el.innerHTML = html;
+            bindQuickToggle(el);
         }
 
         function renderScenes() {

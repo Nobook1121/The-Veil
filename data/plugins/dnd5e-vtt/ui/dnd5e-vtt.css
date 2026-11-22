@@ -318,6 +318,229 @@
 }
 
 /* --------------------------------------------------------------------------
+   角色速览（quick_stats）：四盒（AC / 命中 / 法术DC / 被动感知）+ HP 条 +
+   资源池胶囊。玩家视角是顶部「我的角色」卡；DM 视角是角色/NPC 行点开的分组。
+   -------------------------------------------------------------------------- */
+.vtt-mycard {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding: 10px;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 30%, transparent);
+    border-radius: 12px;
+    background:
+        linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--color-primary, #c8a35a) 12%, transparent),
+            color-mix(in srgb, var(--color-text, #fff) 3%, transparent)
+        );
+}
+
+.vtt-mycard-head {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+}
+
+.vtt-mycard-avatar {
+    width: 38px;
+    height: 38px;
+    font-size: 0.9rem;
+}
+
+.vtt-mycard-id {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.vtt-mycard-id strong {
+    color: var(--color-text, #ece7db);
+    font-size: 0.84rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vtt-mycard-id small {
+    color: var(--color-muted, rgba(236, 231, 219, 0.6));
+    font-size: 0.7rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vtt-mycard-online {
+    flex: 0 0 auto;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid rgba(67, 196, 99, 0.45);
+    color: #6fd58a;
+    font-size: 0.62rem;
+    white-space: nowrap;
+}
+
+.vtt-quick-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+}
+
+.vtt-quick-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 5px 2px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-text, #fff) 4%, transparent);
+    cursor: help;
+}
+
+.vtt-quick-box small {
+    color: var(--color-muted, rgba(236, 231, 219, 0.6));
+    font-size: 0.6rem;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+
+.vtt-quick-box strong {
+    color: var(--color-text, #ece7db);
+    font-size: 0.86rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+}
+
+.vtt-quick-hp {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.vtt-quick-hp-bar {
+    position: relative;
+    flex: 1 1 auto;
+    height: 7px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+}
+
+.vtt-quick-hp-bar i {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #93c47d, #6aa84f);
+    transition: width 0.25s ease;
+}
+
+.vtt-quick-hp[data-tone="wounded"] .vtt-quick-hp-bar i {
+    background: linear-gradient(90deg, #e0b54a, #c99a2e);
+}
+
+.vtt-quick-hp[data-tone="critical"] .vtt-quick-hp-bar i {
+    background: linear-gradient(90deg, #e06666, #b54040);
+}
+
+.vtt-quick-hp[data-tone="unknown"] .vtt-quick-hp-bar i {
+    background: transparent;
+}
+
+.vtt-quick-hp-text {
+    flex: 0 0 auto;
+    color: var(--color-muted, rgba(236, 231, 219, 0.68));
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.vtt-quick-res {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.vtt-quick-pill {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 3px;
+    padding: 1px 8px;
+    border: 1px solid color-mix(in srgb, var(--color-primary, #c8a35a) 32%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-primary, #c8a35a) 9%, transparent);
+    color: color-mix(in srgb, var(--color-primary, #c8a35a) 84%, var(--color-text, #ece7db));
+    font-size: 0.64rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.vtt-quick-pill em {
+    color: var(--color-muted, rgba(236, 231, 219, 0.55));
+    font-size: 0.58rem;
+    font-style: normal;
+}
+
+/* DM 视角：目录行可展开（分组结构不变，速览是行下方的一块）。 */
+.vtt-member.is-expandable {
+    cursor: pointer;
+}
+
+.vtt-member.is-expandable:hover {
+    background: color-mix(in srgb, var(--color-text, #fff) 8%, transparent);
+}
+
+.vtt-member.is-expandable:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary, #c8a35a) 60%, transparent);
+    outline-offset: 1px;
+}
+
+.vtt-member-caret {
+    flex: 0 0 auto;
+    color: var(--color-muted, rgba(236, 231, 219, 0.5));
+    font-size: 0.62rem;
+    transition: transform 0.18s ease;
+}
+
+.vtt-member.is-open .vtt-member-caret {
+    transform: rotate(180deg);
+}
+
+.vtt-quick-row {
+    margin: -2px 0 4px;
+    padding: 0;
+    list-style: none;
+}
+
+.vtt-quick-row[hidden] {
+    display: none;
+}
+
+.vtt-quick-body {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 8px 9px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-text, #fff) 3%, transparent);
+}
+
+/* 窄栏 / 小屏：四盒改两列，数值与胶囊不挤成一团。 */
+@media (max-width: 420px) {
+    .vtt-quick-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .vtt-quick-hp-text,
+    .vtt-quick-pill {
+        font-size: 0.62rem;
+    }
+}
+
+/* --------------------------------------------------------------------------
    日志事件流
    -------------------------------------------------------------------------- */
 .vtt-log {
@@ -370,7 +593,9 @@
     .vtt-tab,
     .vtt-retry,
     .vtt-init-item,
-    .vtt-member {
+    .vtt-member,
+    .vtt-member-caret,
+    .vtt-quick-hp-bar i {
         transition: none;
     }
 }

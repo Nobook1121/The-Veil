@@ -5,6 +5,16 @@ M2 骨架 + M3 第一段（地图交互）：
 - ``GET /api/plugins/dnd5e-vtt/panels?room=<room_id>``：按观察者（DM/玩家）
   裁剪的面板清单。**场景面板与角色面板的 NPC/怪物分组只对 DM 下发**，
   玩家的响应里整块不出现（不是前端隐藏）；前端只消费、不做本地权限判断。
+- 角色速览 ``quick_stats``（本刀）：角色面板的每个玩家条目与（DM 视角的）
+  NPC 条目都多一个 ``quick_stats`` 字段——四盒（AC / 命中 / 法术豁免 DC /
+  被动感知）+ 当前 HP + 有限资源池（生命骰剩余、法术位合计，长休刷新）。
+  数值**一律取 dnd5e 插件已有的派生值**：卡面已落盘的派生键（核心
+  ``sync_derived_stats`` 写回）优先，缺失的由 ``plugin.schema.derive`` 补齐；
+  命中加值取插件 ``combat`` 推导的攻击行（``attack_bonus``），卡上无可用
+  武器时退回法术命中 ``spellAttackBonus``；资源池走 ``rest.hit_dice_state``
+  与 ``spells.spell_slots_from_sheet``。本插件不重算任何 5e 公式，拿不到就
+  少给或给 null，绝不编造。**没有角色卡的成员也带 quick_stats（全 null +
+  resources 空数组）**，前端据此渲染「未建卡」态。
 - 测量模板（圆/锥/线/方）：房间级登记 + 广播。
   ``GET  /api/plugins/dnd5e-vtt/rooms/<id>/templates`` 全员可读（玩家端只读
   展示）；``POST`` 仅 DM（玩家 403），``request_id`` 幂等 + ``revision``
@@ -167,7 +177,393 @@ def _card_text(card: Any, *keys: str, limit: int = 120) -> str:
     return ""
 
 
-def _player_roster(info: dict[str, Any]) -> list[dict[str, Any]]:
+def _as_int(value: Any, fallback: int = 0) -> int:
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _optional_int(value: Any) -> int | None:
+    """面板里的可选数值：拿不到就是 ``None``（前端渲染成「—」），不落 0。"""
+    if value is None or value == "":
+        return None
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+# ------------------------------------------------------------ 角色速览常量
+# 派生值全部由 dnd5e 插件给出；这里只列要读的键名（顺序即回退顺序）。
+QUICK_DERIVED_KEYS = (
+    "maxHp",
+    "armorClass",
+    "proficiencyBonus",
+    "initiative",
+    "passivePerception",
+    "spellSaveDC",
+    "spellAttackBonus",
+)
+# 资源池最多两个：生命骰优先，其次法术位合计（都是长休刷新）。
+QUICK_RESOURCE_LIMIT = 2
+QUICK_RESET_LONG_REST = "long_rest"
+# 命中加值来源：主要武器攻击加值 → 法术命中加值。
+QUICK_ATTACK_WEAPON = "weapon"
+QUICK_ATTACK_SPELL = "spell"
+
+
+def _dnd5e_plugin():
+    """规则集插件对象（通过核心注册表拿，不直接 import 插件私有实现）。"""
+    try:
+        from trpg_server.ruleset import get_plugin
+
+        return get_plugin("dnd5e")
+    except Exception:  # noqa: BLE001 - 插件未装载时降级为「无速览」
+        logger.debug("dnd5e-vtt: 取 dnd5e 插件失败", exc_info=True)
+        return None
+
+
+def _dnd5e_modules() -> dict[str, Any] | None:
+    """dnd5e 插件的模块级助手（派生 / 资源池的现成逻辑，只读不改）。
+
+    dnd5e-vtt 依赖 dnd5e（plugin.json 的 depends），运行期插件目录已在
+    ``sys.path`` 上；单独加载 entry.py 做静态检查 / 单测时可能还没挂上，
+    因此统一按「拿不到就不给速览」处理——绝不在本插件里重算规则公式。
+    """
+    try:
+        from dnd5e_plugin import rest as rest_module
+        from dnd5e_plugin import spells as spells_module
+        from dnd5e_plugin import statblock as statblock_module
+    except Exception:  # noqa: BLE001 - 插件未装入 sys.path：降级
+        return None
+    return {
+        "rest": rest_module,
+        "spells": spells_module,
+        "statblock": statblock_module,
+    }
+
+
+def _equipment_entry(identifier: str) -> dict[str, Any] | None:
+    """装备条目查询（核心数据包目录）：用来判断某件装备是不是武器。"""
+    key = _trim_card_text(identifier, 60)
+    if not key:
+        return None
+    try:
+        from trpg_server.plugins import runtime
+
+        row = runtime.content_packs_for("dnd5e").get("dnd5e", "equipment", key)
+    except Exception:  # noqa: BLE001 - 数据包未启用：按查不到处理
+        return None
+    return row if isinstance(row, dict) else None
+
+
+def _derived_card(card: dict[str, Any], plugin: Any) -> dict[str, Any]:
+    """补派生值：卡面已落盘的键优先，缺的交给插件 ``schema.derive``。"""
+    data = dict(card or {})
+    if plugin is None:
+        return data
+    if all(data.get(key) is not None for key in QUICK_DERIVED_KEYS):
+        return data
+    payload = dict(data)
+    if not str(payload.get("rulesetId") or "").strip():
+        # 战桌只服务 dnd5e 房间；旧卡可能没写 rulesetId，按房间规则集补。
+        payload["rulesetId"] = "dnd5e"
+    try:
+        derived = dict(plugin.schema.derive(payload) or {})
+    except Exception:  # noqa: BLE001 - 卡面异常时保留原卡，不阻断面板
+        logger.debug("dnd5e-vtt: 派生角色卡失败", exc_info=True)
+        return data
+    for key in QUICK_DERIVED_KEYS:
+        if data.get(key) is None and derived.get(key) is not None:
+            data[key] = derived[key]
+    return data
+
+
+def _quick_hp(card: dict[str, Any], state: dict[str, Any]) -> dict[str, int]:
+    """当前 HP：房间 ``character_state`` 优先，其次卡面扁平键，最后卡片 ``hp``。
+
+    三源都没有（例如只填了名字与等级的简化卡）时给 ``max=0``，前端按
+    「未知」渲染——不用派生默认值凑一个假血量。
+    """
+    sheet = card.get("sheet") if isinstance(card.get("sheet"), dict) else {}
+    hp_field = card.get("hp") if isinstance(card.get("hp"), dict) else {}
+    sheet_hp = sheet.get("hp") if isinstance(sheet.get("hp"), dict) else {}
+    maximum = 0
+    for source in (
+        state.get("max_hp"),
+        card.get("maxHp"),
+        hp_field.get("max"),
+        sheet_hp.get("max"),
+        card.get("max_hp"),
+    ):
+        value = _as_int(source, 0)
+        if value > 0:
+            maximum = value
+            break
+    current: int | None = None
+    for source in (
+        state.get("current_hp"),
+        card.get("currentHp"),
+        card.get("current_hp"),
+        hp_field.get("current"),
+        sheet_hp.get("current"),
+    ):
+        if source is None or source == "":
+            continue
+        current = _as_int(source, 0)
+        break
+    temp = 0
+    for source in (card.get("tempHp"), hp_field.get("temp"), sheet_hp.get("temp")):
+        value = _as_int(source, 0)
+        if value > 0:
+            temp = value
+            break
+    if maximum <= 0:
+        return {"value": 0, "max": 0, "temp": max(0, temp)}
+    if current is None:
+        current = maximum
+    return {"value": max(0, min(maximum, current)), "max": maximum, "temp": max(0, temp)}
+
+
+def _quick_resources(
+    card: dict[str, Any],
+    state: dict[str, Any],
+    modules: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """有限资源池：生命骰剩余（优先）+ 法术位合计，均按长休刷新。
+
+    生命骰骰型 / 池上限走插件 ``hit_dice_state``（卡面显式 ``hit_dice`` 优先，
+    否则按职业生命骰与等级），法术位走 ``spell_slots_from_sheet``（卡面
+    ``spellcasting.slots`` 优先，否则按职业表）。都没有就给空数组。
+    注意 5e 长休只恢复**一半**生命骰、法术位全部恢复；``reset`` 字段沿用
+    契约的 ``long_rest``，细则由前端 tooltip 说明。
+    """
+    if modules is None:
+        return []
+    sheet = card.get("sheet") if isinstance(card.get("sheet"), dict) else {}
+    holder = dict(state) if isinstance(state, dict) else {}
+    resources: list[dict[str, Any]] = []
+    dice: dict[str, Any] = {}
+    try:
+        dice = dict(modules["rest"].hit_dice_state(holder, sheet) or {})
+    except Exception:  # noqa: BLE001 - 生命骰读不到就不给这一池
+        logger.debug("dnd5e-vtt: 生命骰状态读取失败", exc_info=True)
+        dice = {}
+    maximum = _as_int(dice.get("max"), 0)
+    if maximum > 0:
+        used = max(0, min(maximum, _as_int(dice.get("used"), 0)))
+        resources.append(
+            {
+                "id": "hit_dice",
+                "label": "生命骰",
+                "value": maximum - used,
+                "max": maximum,
+                # 骰型（d6/d8…）随行下发，前端显示「生命骰 5/5 · d8」。
+                "die": _as_int(dice.get("die"), 0),
+                "reset": QUICK_RESET_LONG_REST,
+            }
+        )
+    slots: dict[str, Any] = {}
+    try:
+        slots = dict(modules["spells"].spell_slots_from_sheet(sheet) or {})
+    except Exception:  # noqa: BLE001 - 法术位读不到就不给这一池
+        logger.debug("dnd5e-vtt: 法术位读取失败", exc_info=True)
+        slots = {}
+    total = 0
+    used = 0
+    for row in slots.values():
+        if not isinstance(row, dict):
+            continue
+        total += max(0, _as_int(row.get("max"), 0))
+        used += max(0, _as_int(row.get("used"), 0))
+    if total > 0:
+        resources.append(
+            {
+                "id": "spell_slots",
+                "label": "法术位",
+                "value": max(0, total - min(total, used)),
+                "max": total,
+                "reset": QUICK_RESET_LONG_REST,
+            }
+        )
+    return resources[:QUICK_RESOURCE_LIMIT]
+
+
+def _quick_attack(card: dict[str, Any], plugin: Any) -> tuple[int | None, str]:
+    """命中加值：优先主要武器攻击加值，其次法术命中加值。
+
+    字段语义（写清在这里，前后端同口径）：
+    - ``attack_bonus`` = d20 攻击检定要加的加值（不含 d20 本身）；
+    - 卡上有可用武器（``sheet.equipment`` 里存在装备中的 weapon 条目）时，
+      取插件 ``combat.prepare_combatant`` 推导出的攻击行里**最高**的
+      ``attack_bonus``（= 熟练加值 + 力量/敏捷调整值），来源 ``weapon``；
+    - 没有可用武器（纯施法者 / 只填了名字的简化卡）时退回派生值
+      ``spellAttackBonus``（法术攻击加值），来源 ``spell``；
+    - 两者都没有 → ``None``，前端渲染「—」。
+    """
+    if plugin is None:
+        return None, ""
+    sheet = card.get("sheet") if isinstance(card.get("sheet"), dict) else {}
+    has_weapon = False
+    raw_items = sheet.get("equipment")
+    if isinstance(raw_items, dict):
+        raw_items = raw_items.get("items")
+    for item in raw_items if isinstance(raw_items, list) else []:
+        identifier = ""
+        if isinstance(item, dict):
+            identifier = _trim_card_text(item.get("id") or item.get("item_id") or item.get("name"), 60)
+            equipped = item.get("equipped", item.get("worn", item.get("equip", True)))
+            if not bool(equipped):
+                continue
+        elif isinstance(item, str):
+            identifier = _trim_card_text(item, 60)
+        if not identifier:
+            continue
+        # 条目的分类只有数据包知道：查核心装备目录，别在本地猜武器类型。
+        row = _equipment_entry(identifier)
+        if isinstance(row, dict) and str(row.get("category") or "").strip().lower() == "weapon":
+            has_weapon = True
+            break
+    combat = getattr(plugin, "combat", None)
+    if has_weapon and combat is not None:
+        holder: dict[str, Any] = {
+            "name": _card_text(card, "name", limit=60) or "冒险者",
+            "is_player": True,
+            "level": _as_int(card.get("level"), 1),
+        }
+        try:
+            combat.prepare_combatant(holder, card=card, settings=None)
+        except Exception:  # noqa: BLE001 - 推导失败退回法术命中
+            logger.debug("dnd5e-vtt: 玩家攻击行推导失败", exc_info=True)
+            holder = {}
+        bonuses = [
+            _as_int(row.get("attack_bonus"), 0)
+            for row in holder.get("attacks") or []
+            if isinstance(row, dict)
+        ]
+        if bonuses:
+            return max(bonuses), QUICK_ATTACK_WEAPON
+    spell = _optional_int(card.get("spellAttackBonus"))
+    if spell is not None:
+        return spell, QUICK_ATTACK_SPELL
+    return None, ""
+
+
+def _player_quick_stats(
+    member: dict[str, Any],
+    plugin: Any,
+    modules: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """玩家角色的速览数据；没有角色卡时给全 null + 空资源池（不报错）。"""
+    card = member.get("character_card") if isinstance(member.get("character_card"), dict) else {}
+    state = member.get("character_state") if isinstance(member.get("character_state"), dict) else {}
+    if not card or not _card_text(card, "name"):
+        return {
+            "ac": None,
+            "attack_bonus": None,
+            "attack_bonus_source": "",
+            "spell_save_dc": None,
+            "passive_perception": None,
+            "hp": _quick_hp({}, state),
+            "resources": [],
+        }
+    derived = _derived_card(card, plugin)
+    attack_bonus, attack_source = _quick_attack(derived, plugin)
+    return {
+        "ac": _optional_int(derived.get("armorClass")),
+        "attack_bonus": attack_bonus,
+        "attack_bonus_source": attack_source,
+        "spell_save_dc": _optional_int(derived.get("spellSaveDC")),
+        "passive_perception": _optional_int(derived.get("passivePerception")),
+        "hp": _quick_hp(card, state),
+        "resources": _quick_resources(card, state, modules),
+    }
+
+
+def _npc_passive_perception(module: dict[str, Any]) -> int | None:
+    """NPC 被动察觉：世界包导入的 ``senses.passive_perception``（导入时算好）。"""
+    sources: list[dict[str, Any]] = []
+    for key in ("statblock", "battle"):
+        value = module.get(key)
+        if isinstance(value, dict):
+            sources.append(value)
+    sources.append(module)
+    for source in sources:
+        value = _optional_int(source.get("passive_perception"))
+        if value is not None:
+            return value
+        senses = source.get("senses")
+        if isinstance(senses, dict):
+            value = _optional_int(senses.get("passive_perception"))
+            if value is not None:
+                return value
+    return None
+
+
+def _npc_quick_stats(module: dict[str, Any]) -> dict[str, Any] | None:
+    """NPC/怪物的速览数据：数值全部来自剧本模块 statblock 的现成转换。
+
+    ``combatant_from_module`` 是 c9e1358 那刀的产物：数据包怪物数值为基线、
+    模块字段覆盖。它拿不到完整数值时会显式抛错——这里如实降级成「没有
+    速览」（条目上不出现 ``quick_stats`` 键），不塞占位数字。
+    """
+    modules = _dnd5e_modules()
+    if modules is None:
+        return None
+    try:
+        spec = modules["statblock"].combatant_from_module(module)
+    except Exception:  # noqa: BLE001 - 模块缺数值：不给速览
+        logger.debug("dnd5e-vtt: NPC statblock 转换失败", exc_info=True)
+        return None
+    if not isinstance(spec, dict):
+        return None
+    attacks = [row for row in spec.get("attacks") or [] if isinstance(row, dict)]
+    attack_bonus: int | None = None
+    if attacks:
+        attack_bonus = max(_as_int(row.get("attack_bonus"), 0) for row in attacks)
+    spellcasting = spec.get("spellcasting") if isinstance(spec.get("spellcasting"), dict) else {}
+    spell_save_dc = _optional_int(spellcasting.get("spellSaveDC"))
+    if spell_save_dc == 0:
+        spell_save_dc = None
+    resources: list[dict[str, Any]] = []
+    total = 0
+    used = 0
+    for row in spec.get("spell_slots") or []:
+        if not isinstance(row, dict):
+            continue
+        total += max(0, _as_int(row.get("max"), 0))
+        used += max(0, _as_int(row.get("used"), 0))
+    if total > 0:
+        resources.append(
+            {
+                "id": "spell_slots",
+                "label": "法术位",
+                "value": max(0, total - min(total, used)),
+                "max": total,
+                "reset": QUICK_RESET_LONG_REST,
+            }
+        )
+    return {
+        "ac": _optional_int(spec.get("armorClass")),
+        "attack_bonus": attack_bonus,
+        "attack_bonus_source": QUICK_ATTACK_WEAPON if attack_bonus is not None else "",
+        "spell_save_dc": spell_save_dc,
+        "passive_perception": _npc_passive_perception(module),
+        "hp": {
+            "value": max(0, _as_int(spec.get("hp"), 0)),
+            "max": max(0, _as_int(spec.get("max_hp"), 0)),
+            "temp": max(0, _as_int(spec.get("temp_hp"), 0)),
+        },
+        "resources": resources[:QUICK_RESOURCE_LIMIT],
+    }
+
+
+def _player_roster(
+    info: dict[str, Any],
+    plugin: Any = None,
+    modules: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     """玩家角色目录：成员卡是唯一数据源；未建卡的成员如实标记。"""
     roster: list[dict[str, Any]] = []
     for member in info.get("members") or []:
@@ -190,6 +586,8 @@ def _player_roster(info: dict[str, Any]) -> list[dict[str, Any]]:
                 "race": _card_text(card, "race"),
                 "online": member.get("is_online") is True,
                 "has_card": bool(_card_text(card, "name")),
+                # 速览四盒 + HP + 资源池；派生值口径见 _player_quick_stats。
+                "quick_stats": _player_quick_stats(member, plugin, modules),
             }
         )
         if len(roster) >= MAX_PLAYERS:
@@ -202,6 +600,8 @@ def _npc_roster(info: dict[str, Any]) -> dict[str, Any]:
 
     世界包导入（fvtt-world-import actors/run）的产物就是 ``module_type=npc``
     的剧本模块；没有绑定剧本或剧本为空时如实给空态，不造假数据。
+    每个条目额外带 ``quick_stats``（AC / 命中 / 法术 DC / 被动察觉 + HP），
+    数值来自 statblock 模块；模块数值不全时该键不出现（不塞占位值）。
     """
     scenario_id = str(info.get("scenario_id") or "").strip()
     if not scenario_id:
@@ -231,13 +631,15 @@ def _npc_roster(info: dict[str, Any]) -> dict[str, Any]:
         title = _card_text(module, "title", "name")
         if not title:
             continue
-        items.append(
-            {
-                "id": str(module.get("id") or ""),
-                "title": title,
-                "summary": _card_text(module, "summary", limit=200),
-            }
-        )
+        item = {
+            "id": str(module.get("id") or ""),
+            "title": title,
+            "summary": _card_text(module, "summary", limit=200),
+        }
+        quick = _npc_quick_stats(module)
+        if quick is not None:
+            item["quick_stats"] = quick
+        items.append(item)
         if len(items) >= MAX_NPCS:
             break
     return {
@@ -293,10 +695,22 @@ def _panels_payload(room_dir: Path | None, info: dict[str, Any], *, manager: boo
                 "hint": "场景列表将在地图插件数据接入后列出，用于切换场景与把玩家拉入场景。",
             }
         )
+    # 角色速览用的派生值 / 资源池口径全部由 dnd5e 插件提供（本插件只搬数据）。
+    plugin = _dnd5e_plugin()
+    modules = _dnd5e_modules()
     characters: dict[str, Any] = {
         "id": "characters",
         "title": "角色",
-        "players": _player_roster(info),
+        "players": _player_roster(info, plugin, modules),
+        # 四盒字段说明：前端 tooltip 与文档同源（字段名 = 语义）。
+        "quick_stats_fields": {
+            "ac": "护甲等级（派生 armorClass）",
+            "attack_bonus": "命中加值：d20 + 此值做攻击检定",
+            "spell_save_dc": "法术豁免 DC（派生 spellSaveDC）",
+            "passive_perception": "被动感知（派生 passivePerception）",
+            "hp": "当前生命值 / 上限（+临时值）",
+            "resources": "长休刷新的有限资源池：生命骰剩余、法术位合计",
+        },
     }
     if manager:
         # NPC/怪物分组仅 DM 视图；玩家响应里没有 npc 键。
