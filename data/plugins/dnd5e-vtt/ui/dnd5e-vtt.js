@@ -40,6 +40,12 @@
  * （表达式限 NdM 加法，复用 TrpgDiceTable.handleDiceTableCommand，本地
  * 掷骰者以 persistLocalDiceMessage 包装捕获喂地图动画）。无地图时地图层
  * 整体跳过，聊天掷骰卡管线零改动。
+ *
+ * 规则速查（kiwee 第三刀的 UI 消费面）：工具组尾部书图标打开浮层，检索法术/
+ * 物品/专长/职业等**玩家侧**类目，点条目看解析后正文、结构化摘要与 kiwi 站
+ * 深链。数据只走 ``/api/plugins/dnd5e/rules/search`` 与 ``.../entry``（服务端
+ * 已按观察者裁剪，怪物/掷表/变体规则不下发），未建库时面板显示「规则深库
+ * 未建」+ 建库指引而不是报错。快捷键 Ctrl/⌘+K 与 ``/``。
  */
 (function () {
     "use strict";
@@ -1039,6 +1045,650 @@ function validQuickRollExpression(expression) {
     return true;
 }
 
+/* ==========================================================================
+   规则速查（kiwee 深库，玩家侧）
+
+   入口位置：**左上工具组尾部书图标**。右侧栏 tab 条已有六个面板 + 核心设置 +
+   折叠/浮层共 8 个槽位，再加一个会挤出或折行；工具组是横向图标条、剩余空间
+   充裕，且「速查」是跨面板的全局工具，不是第七个面板。
+
+   数据只走玩家侧端点（权限裁剪全在服务端完成，前端不做权限推测）：
+   - ``GET /api/plugins/dnd5e/rules/search``：名称/英文名/别名检索。类目目录
+     取响应里的 ``categories[]``（服务端已剔除怪物/DMG 掷表/变体规则）；未建库
+     时回 200 + ``available:false`` + ``hint``，面板显示「规则深库未建」引导，
+     不弹错误框。
+   - ``GET /api/plugins/dnd5e/rules/entry/<category>/<uid>``：详情（解析后正文 +
+     ``structured`` + ``deep_link``）。玩家侧类目任何登录用户可读；本面板不列
+     怪物类目，因此不会撞 403。
+
+   性能与竞态：面板按需打开（首次打开才发请求）；输入防抖 250ms；检索用请求
+   序号守卫丢弃过期响应（后发先至也不会把旧结果画上去）；结果固定 limit=20，
+   列表是普通 DOM（不上虚拟化）。快捷键 Ctrl/⌘+K（核心只占用 Alt+B 与
+   Ctrl+Shift+C）与 ``/``（焦点在输入框/可编辑区时不抢键）。
+   ========================================================================== */
+
+var RULES_CATEGORY_LABELS = {
+    spell: "法术",
+    item: "物品",
+    baseitem: "基础物品",
+    feat: "专长",
+    race: "种族",
+    class: "职业",
+    subclass: "子职业",
+    background: "背景",
+    condition: "状态",
+    disease: "疾病"
+};
+
+// 服务端 categories[] 已剔除这些类目；前端再兜一层，避免上游改动把 DM 内容
+// 漏进玩家界面（怪物图鉴 / DMG 掷表 / 变体规则）。
+var RULES_DM_ONLY = { monster: true, variantrule: true, table: true };
+
+var RULES_AREA_LABELS = {
+    sphere: "球状",
+    cone: "锥形",
+    line: "线形",
+    cube: "立方",
+    cylinder: "柱状",
+    rectangle: "矩形",
+    hemisphere: "半球"
+};
+
+// 非法术类目的 structured 字段中文名（对象键序＝渲染顺序）。
+var RULES_FIELD_LABELS = {
+    level: "等级",
+    school: "学派",
+    rarity: "稀有度",
+    attunement: "同调",
+    type: "类型",
+    size: "体型",
+    cr: "挑战等级",
+    ac: "护甲等级",
+    hp: "生命值",
+    time: "使用时间",
+    range: "距离",
+    components: "成分",
+    duration: "持续时间",
+    prerequisite: "前置条件",
+    weaponCategory: "武器类别",
+    property: "属性",
+    dmg1: "伤害",
+    dmg2: "附加伤害",
+    dmgType: "伤害类型",
+    damageInflict: "伤害类型",
+    savingThrow: "豁免",
+    value: "价值",
+    weight: "重量"
+};
+
+var RULES_DEBOUNCE = 250;
+var RULES_RESULT_LIMIT = 20;
+var RULES_SEARCH_PATH = "/api/plugins/dnd5e/rules/search";
+var RULES_ENTRY_PATH = "/api/plugins/dnd5e/rules/entry/";
+
+function rulesCategoryLabel(id) {
+    return RULES_CATEGORY_LABELS[id] || String(id || "");
+}
+
+function rulesValueText(value) {
+    if (value === null || value === undefined) return "";
+    if (Array.isArray(value)) return value.map(rulesValueText).filter(Boolean).join("、");
+    if (typeof value === "object") return ""; // 复杂对象不猜语义
+    if (typeof value === "boolean") return value ? "是" : "否";
+    return String(value).trim();
+}
+
+/**
+ * 正文转段落：空行分段、段内换行保留为 ``<br>``（服务端 text 已解析 datatag）。
+ */
+function rulesParagraphs(text) {
+    var normalized = String(text || "").replace(/\r\n/g, "\n").trim();
+    if (!normalized) return '<p class="vtt-rules-text-empty">这条记录没有正文。</p>';
+    return normalized
+        .split(/\n{2,}/)
+        .map(function (block) {
+            return "<p>" + escapeHtml(block).replace(/\n/g, "<br>") + "</p>";
+        })
+        .join("");
+}
+
+/**
+ * 结构化摘要行：法术按机制字段渲染（环阶/施法时间/距离/成分/持续时间/豁免/
+ * 伤害/区域/升环），其余类目按 ``entry_fields`` 的字段白名单渲染，未覆盖的
+ * 字段不猜语义、直接不显示。
+ */
+function rulesSummaryRows(category, structured) {
+    var data = structured && typeof structured === "object" ? structured : {};
+    var rows = [];
+    var seen = {};
+    function push(label, value) {
+        var text = rulesValueText(value);
+        if (!text || seen[label]) return;
+        seen[label] = true;
+        rows.push({ label: label, value: text });
+    }
+    if (category === "spell") {
+        var level = typeof data.level === "number" ? data.level : null;
+        if (level !== null) push("环阶", level === 0 ? "戏法" : level + " 环");
+        push("学派", data.school);
+        push("施法时间", data.casting_time);
+        push("距离", data.range_text);
+        push("成分", data.components);
+        var duration = rulesValueText(data.duration);
+        if (data.concentration) duration = duration ? duration + "（专注）" : "专注";
+        if (data.ritual) duration = duration ? duration + " · 仪式" : "仪式";
+        push("持续时间", duration);
+        push("豁免", data.save_ability_zh || data.save_ability);
+        var damage = Array.isArray(data.damage) ? data.damage : [];
+        if (damage.length) {
+            push(
+                "伤害",
+                damage
+                    .map(function (item) {
+                        var dice = rulesValueText(item && item.dice);
+                        var type = rulesValueText((item && (item.type_zh || item.type)) || "");
+                        if (!dice) return "";
+                        return type ? dice + "（" + type + "）" : dice;
+                    })
+                    .filter(Boolean)
+                    .join(" + ")
+            );
+        }
+        var area = data.area && typeof data.area === "object" ? data.area : {};
+        if (area.shape) {
+            var shape = RULES_AREA_LABELS[String(area.shape)] || String(area.shape);
+            push("区域", area.size_ft ? shape + " " + area.size_ft + " 尺" : shape);
+        }
+        var scaling = data.scaling && typeof data.scaling === "object" ? data.scaling : {};
+        var slotRange = rulesValueText(scaling.slot_range);
+        var perLevel = rulesValueText(scaling.per_level);
+        var scalingLine = [slotRange ? slotRange + " 环" : "", perLevel ? "每环 " + perLevel : ""].filter(Boolean).join(" · ");
+        if (scalingLine) push("升环", scalingLine);
+        return rows;
+    }
+    Object.keys(RULES_FIELD_LABELS).forEach(function (key) {
+        if (!(key in data)) return;
+        var value = data[key];
+        if (key === "attunement") {
+            if (value === true) push(RULES_FIELD_LABELS[key], "需要同调");
+            else if (value !== false) push(RULES_FIELD_LABELS[key], rulesValueText(value));
+            return;
+        }
+        push(RULES_FIELD_LABELS[key], value);
+    });
+    return rows;
+}
+
+/**
+ * 规则速查浮层。``host`` 为挂在 ``#wsStageHost`` 里的工具组根；
+ * ``options.onChange(isOpen)`` 用于同步入口按钮的选中态。
+ * 首次打开才发请求；返回 ``{open, close, toggle, isOpen, destroy}``。
+ */
+function createRulesLookup(host, options) {
+    var settings = options || {};
+    var destroyed = false;
+    var open = false;
+    var el = null;
+    var inputEl = null;
+    var chipsEl = null;
+    var bodyEl = null;
+    var meta = { available: null, reason: "", hint: "", categories: [] };
+    var chipsSignature = "";
+    var category = "";
+    var query = "";
+    var seq = 0;
+    var detailSeq = 0;
+    var debounceTimer = 0;
+    var view = "idle";     // idle | loading | results | empty | unavailable | error | detail
+    var listView = "idle";
+    var results = [];
+    var detail = null;     // {loading, error, unavailable, request, item}
+    var lastError = "";
+
+    /* ---------------------------------------------------------- DOM（懒建） */
+
+    function root() {
+        if (el) return el;
+        el = document.createElement("div");
+        el.className = "vtt-rules-window";
+        el.hidden = true;
+        el.setAttribute("role", "dialog");
+        el.setAttribute("aria-label", "规则速查");
+        el.innerHTML =
+            '<header class="vtt-rules-head">' +
+            '<strong><i class="fa fa-book" aria-hidden="true"></i> 规则速查</strong>' +
+            '<button type="button" class="vtt-rules-close" data-vtt-rules-close title="关闭（Esc）" aria-label="关闭规则速查">' +
+            '<i class="fa fa-times" aria-hidden="true"></i></button>' +
+            "</header>" +
+            '<label class="vtt-rules-search">' +
+            '<i class="fa fa-search" aria-hidden="true"></i>' +
+            '<input type="search" data-vtt-rules-input placeholder="搜法术 / 物品 / 专长 / 职业…" autocomplete="off" spellcheck="false">' +
+            "</label>" +
+            '<div class="vtt-rules-chips" data-vtt-rules-chips hidden></div>' +
+            '<div class="vtt-rules-body" data-vtt-rules-body></div>';
+        host.appendChild(el);
+        inputEl = el.querySelector("[data-vtt-rules-input]");
+        chipsEl = el.querySelector("[data-vtt-rules-chips]");
+        bodyEl = el.querySelector("[data-vtt-rules-body]");
+        inputEl.addEventListener("input", onInput);
+        el.addEventListener("click", onClick);
+        return el;
+    }
+
+    function notifyChange() {
+        if (typeof settings.onChange === "function") {
+            try {
+                settings.onChange(open);
+            } catch (error) {
+                // 入口态同步失败不影响面板本身。
+            }
+        }
+    }
+
+    /* ---------------------------------------------------------- 状态与渲染 */
+
+    function stateBox(icon, title, hint, extra) {
+        return (
+            '<div class="vtt-rules-state">' +
+            '<i class="' + escapeHtml(icon) + '" aria-hidden="true"></i>' +
+            "<strong>" + escapeHtml(title) + "</strong>" +
+            (hint ? '<p class="vtt-rules-hint">' + escapeHtml(hint) + "</p>" : "") +
+            (extra || "") +
+            "</div>"
+        );
+    }
+
+    function renderChips() {
+        if (!chipsEl) return;
+        var list = [{ id: "", label: "全部" }].concat(
+            (meta.categories || []).map(function (item) {
+                var id = String((item && item.id) || "");
+                return { id: id, label: rulesCategoryLabel(id) };
+            }).filter(function (item) {
+                return item.id;
+            })
+        );
+        chipsEl.hidden = list.length <= 1;
+        if (chipsEl.hidden) return;
+        var signature = JSON.stringify(list) + "|" + category;
+        if (signature === chipsSignature) return;
+        chipsSignature = signature;
+        chipsEl.innerHTML = list
+            .map(function (item) {
+                var active = item.id === category;
+                return (
+                    '<button type="button" class="vtt-rules-chip' + (active ? " is-active" : "") + '"' +
+                    ' data-vtt-rules-chip="' + escapeHtml(item.id) + '"' +
+                    ' aria-pressed="' + (active ? "true" : "false") + '">' +
+                    escapeHtml(item.label) +
+                    "</button>"
+                );
+            })
+            .join("");
+    }
+
+    function resultRow(item, index) {
+        var machine = item && item.is_machine_translated;
+        return (
+            '<li><button type="button" class="vtt-rules-item" data-vtt-rules-open="' + index + '">' +
+            '<span class="vtt-rules-item-name"><strong>' + escapeHtml(item.name || "（无名称）") + "</strong>" +
+            (item.eng_name ? "<em>" + escapeHtml(item.eng_name) + "</em>" : "") +
+            "</span>" +
+            '<span class="vtt-rules-item-meta">' +
+            '<span class="vtt-rules-cat">' + escapeHtml(rulesCategoryLabel(item.category)) + "</span>" +
+            (item.page_hint ? '<span class="vtt-rules-src">' + escapeHtml(item.page_hint) + "</span>" : "") +
+            (item.rules_version ? '<span class="vtt-rules-era">' + escapeHtml(item.rules_version) + "</span>" : "") +
+            (machine
+                ? '<span class="vtt-rules-flag" title="' + escapeHtml(item.translator_note || "机翻，未校对") + '">⚠️ 机翻</span>'
+                : "") +
+            "</span></button></li>"
+        );
+    }
+
+    function listMarkup() {
+        if (meta.available === false || view === "unavailable") {
+            return (
+                '<div class="vtt-rules-state">' +
+                '<i class="fa fa-database" aria-hidden="true"></i>' +
+                "<strong>规则深库未建</strong>" +
+                '<p class="vtt-rules-hint">' + escapeHtml(meta.reason || "深库未建") + "</p>" +
+                (meta.hint ? '<p class="vtt-rules-hint vtt-rules-hint-code">' + escapeHtml(meta.hint) + "</p>" : "") +
+                "</div>"
+            );
+        }
+        if (view === "loading") return stateBox("fa fa-spinner fa-spin", "检索中…", "");
+        if (view === "error") {
+            return stateBox(
+                "fa fa-plug",
+                "规则速查暂时不可用",
+                lastError || "网络异常，请稍后重试。",
+                '<div class="vtt-rules-actions"><button type="button" data-vtt-rules-retry>重试</button></div>'
+            );
+        }
+        if (view === "empty") return stateBox("fa fa-search", "没有匹配的条目", "换个关键词试试，或把类目切回「全部」。");
+        if (view === "results") {
+            return (
+                '<ul class="vtt-rules-list">' + results.map(resultRow).join("") + "</ul>" +
+                '<p class="vtt-rules-footnote">共 ' + results.length + " 条（上限 " + RULES_RESULT_LIMIT + "）· 点条目看正文与深链</p>"
+            );
+        }
+        return stateBox(
+            "fa fa-book",
+            "查法术、物品、专长与职业",
+            "输入中文或英文名开始检索；列表带来源页码，机翻条目带 ⚠️ 徽章。",
+            '<p class="vtt-rules-footnote">数据来源：kiwee 5etools 中文镜像（CC BY-NC-SA 4.0）· 仅玩家侧类目</p>'
+        );
+    }
+
+    function detailBackButton() {
+        return (
+            '<div class="vtt-rules-detail-head">' +
+            '<button type="button" class="vtt-rules-back" data-vtt-rules-back>' +
+            '<i class="fa fa-angle-left" aria-hidden="true"></i> 返回列表</button>' +
+            "</div>"
+        );
+    }
+
+    function detailMarkup() {
+        var state = detail || {};
+        var item = state.item || {};
+        if (state.loading) return detailBackButton() + stateBox("fa fa-spinner fa-spin", "读取条目…", "");
+        if (state.error) {
+            return (
+                detailBackButton() +
+                stateBox(
+                    "fa fa-plug",
+                    "条目读取失败",
+                    state.error,
+                    '<div class="vtt-rules-actions"><button type="button" data-vtt-rules-retry-detail>重试</button></div>'
+                )
+            );
+        }
+        if (state.unavailable) return detailBackButton() + stateBox("fa fa-database", "规则深库未建", meta.reason || "深库未建");
+
+        var rows = rulesSummaryRows(String(item.category || ""), item.structured);
+        var source = String(item.source || "");
+        var pageHint = String(item.page_hint || "");
+        var metaLine = [
+            rulesCategoryLabel(item.category),
+            // page_hint 形如「PHB 241」已含来源码，重复的 source 不再显示。
+            source && pageHint.indexOf(source) !== 0 ? source : "",
+            pageHint,
+            item.rules_version ? "规则版本 " + item.rules_version : ""
+        ]
+            .filter(Boolean)
+            .map(escapeHtml)
+            .join(" · ");
+        var deepLink = /^https?:\/\//i.test(String(item.deep_link || "")) ? String(item.deep_link) : "";
+        return (
+            detailBackButton() +
+            '<h4 class="vtt-rules-title">' + escapeHtml(item.name || "（无名称）") +
+            (item.eng_name ? ' <small>' + escapeHtml(item.eng_name) + "</small>" : "") + "</h4>" +
+            '<p class="vtt-rules-detail-meta">' + metaLine + "</p>" +
+            (item.is_machine_translated
+                ? '<p class="vtt-rules-flagline"><span class="vtt-rules-flag">⚠️ 机翻</span>' +
+                  escapeHtml(item.translator_note || "机翻，未校对") + "</p>"
+                : "") +
+            (rows.length
+                ? '<dl class="vtt-rules-summary">' +
+                  rows.map(function (row) {
+                      return "<dt>" + escapeHtml(row.label) + "</dt><dd>" + escapeHtml(row.value) + "</dd>";
+                  }).join("") +
+                  "</dl>"
+                : "") +
+            '<div class="vtt-rules-text">' + rulesParagraphs(item.text) + "</div>" +
+            (deepLink
+                ? '<a class="vtt-rules-link" href="' + escapeHtml(deepLink) + '" target="_blank" rel="noopener">' +
+                  '<i class="fa fa-external-link" aria-hidden="true"></i> 在 kiwi 站打开</a>'
+                : '<p class="vtt-rules-footnote">这条记录没有站点深链。</p>')
+        );
+    }
+
+    function render() {
+        if (!el || destroyed) return;
+        renderChips();
+        el.setAttribute("data-vtt-rules-view", view);
+        bodyEl.innerHTML = view === "detail" ? detailMarkup() : listMarkup();
+        if (view !== "detail") bodyEl.scrollTop = 0;
+    }
+
+    /* ---------------------------------------------------------- 请求 */
+
+    function applyMeta(data) {
+        if (!data || typeof data !== "object") return;
+        if (typeof data.available === "boolean") meta.available = data.available;
+        if (typeof data.reason === "string" && data.reason) meta.reason = data.reason;
+        if (typeof data.hint === "string" && data.hint) meta.hint = data.hint;
+        if (Array.isArray(data.categories)) {
+            meta.categories = data.categories.filter(function (entry) {
+                var id = String((entry && entry.id) || "");
+                return id && !RULES_DM_ONLY[id];
+            });
+        }
+    }
+
+    function bootstrap() {
+        // 首次打开先探可用性（空查询也给准确的 available/hint 与类目目录）。
+        if (meta.available !== null) {
+            render();
+            return;
+        }
+        var mine = ++seq;
+        view = "loading";
+        render();
+        apiRequest("GET", RULES_SEARCH_PATH + "?q=&limit=1")
+            .then(function (response) {
+                if (destroyed || mine !== seq) return;
+                if (!response || response.success !== true) {
+                    lastError = String((response && response.message) || "检索接口没有响应。");
+                    view = "error";
+                    render();
+                    return;
+                }
+                applyMeta(response.data);
+                view = meta.available === false ? "unavailable" : "idle";
+                render();
+            })
+            .catch(function () {
+                if (destroyed || mine !== seq) return;
+                lastError = "网络异常，未能连到规则深库。";
+                view = "error";
+                render();
+            });
+    }
+
+    function runSearch() {
+        if (destroyed) return;
+        if (!query.trim()) {
+            seq += 1; // 让在途响应作废
+            results = [];
+            view = listView = "idle";
+            render();
+            return;
+        }
+        if (meta.available === false) {
+            view = listView = "unavailable";
+            render();
+            return;
+        }
+        var mine = ++seq;
+        view = "loading";
+        render();
+        var url = RULES_SEARCH_PATH + "?q=" + encodeURIComponent(query.trim()) + "&limit=" + RULES_RESULT_LIMIT;
+        if (category) url += "&category=" + encodeURIComponent(category);
+        apiRequest("GET", url)
+            .then(function (response) {
+                if (destroyed || mine !== seq) return; // 竞态：旧响应丢弃
+                if (!response || response.success !== true) {
+                    lastError = String((response && response.message) || "检索失败，请稍后重试。");
+                    view = "error";
+                    render();
+                    return;
+                }
+                applyMeta(response.data);
+                if (meta.available === false) {
+                    view = listView = "unavailable";
+                    render();
+                    return;
+                }
+                results = Array.isArray(response.data && response.data.results) ? response.data.results : [];
+                view = listView = results.length ? "results" : "empty";
+                render();
+            })
+            .catch(function () {
+                if (destroyed || mine !== seq) return;
+                lastError = "网络异常，检索未能完成。";
+                view = "error";
+                render();
+            });
+    }
+
+    function openEntry(item) {
+        if (destroyed || !item || !item.category || !item.uid) return;
+        var mine = ++detailSeq;
+        detail = { loading: true, request: item, item: item };
+        view = "detail";
+        render();
+        var url = RULES_ENTRY_PATH + encodeURIComponent(String(item.category)) + "/" + encodeURIComponent(String(item.uid));
+        apiRequest("GET", url)
+            .then(function (response) {
+                if (destroyed || mine !== detailSeq) return;
+                if (!response || response.success !== true) {
+                    detail = { loading: false, request: item, item: item, error: String((response && response.message) || "读取失败，请稍后重试。") };
+                    render();
+                    return;
+                }
+                var data = response.data || {};
+                if (data.available === false) {
+                    applyMeta(data);
+                    detail = { loading: false, request: item, item: item, unavailable: true };
+                    render();
+                    return;
+                }
+                detail = { loading: false, request: item, item: data };
+                render();
+            })
+            .catch(function () {
+                if (destroyed || mine !== detailSeq) return;
+                detail = { loading: false, request: item, item: item, error: "网络异常，条目未能读取。" };
+                render();
+            });
+    }
+
+    function backToList() {
+        detail = null;
+        view = listView;
+        render();
+    }
+
+    /* ---------------------------------------------------------- 交互 */
+
+    function onInput(event) {
+        var value = String((event.target && event.target.value) || "");
+        if (value === query) return;
+        query = value;
+        window.clearTimeout(debounceTimer);
+        if (!query.trim()) {
+            runSearch();
+            return;
+        }
+        debounceTimer = window.setTimeout(runSearch, RULES_DEBOUNCE);
+    }
+
+    function onClick(event) {
+        var target = event.target;
+        if (!target || typeof target.closest !== "function") return;
+        if (target.closest("[data-vtt-rules-close]")) {
+            close();
+            return;
+        }
+        var openButton = target.closest("[data-vtt-rules-open]");
+        if (openButton) {
+            var index = asInt(openButton.getAttribute("data-vtt-rules-open"), -1);
+            if (index >= 0 && results[index]) openEntry(results[index]);
+            return;
+        }
+        var chip = target.closest("[data-vtt-rules-chip]");
+        if (chip) {
+            category = String(chip.getAttribute("data-vtt-rules-chip") || "");
+            chipsSignature = "";
+            window.clearTimeout(debounceTimer);
+            runSearch();
+            return;
+        }
+        if (target.closest("[data-vtt-rules-back]")) {
+            backToList();
+            return;
+        }
+        if (target.closest("[data-vtt-rules-retry]")) {
+            if (query.trim()) runSearch();
+            else bootstrap();
+            return;
+        }
+        if (target.closest("[data-vtt-rules-retry-detail]")) {
+            if (detail && detail.request) openEntry(detail.request);
+        }
+    }
+
+    function focusInput() {
+        if (!inputEl) return;
+        window.setTimeout(function () {
+            if (!destroyed && inputEl) {
+                inputEl.focus();
+                inputEl.select();
+            }
+        }, 0);
+    }
+
+    function openPanel() {
+        if (destroyed) return;
+        root();
+        var wasOpen = open;
+        el.hidden = false;
+        open = true;
+        if (!wasOpen) {
+            bootstrap();
+            notifyChange();
+        }
+        focusInput();
+    }
+
+    function close() {
+        window.clearTimeout(debounceTimer);
+        if (!open && (!el || el.hidden)) return;
+        open = false;
+        if (el) el.hidden = true;
+        notifyChange();
+    }
+
+    function isOpen() {
+        return open && !!el && !el.hidden;
+    }
+
+    function toggle() {
+        if (isOpen()) close();
+        else openPanel();
+    }
+
+    return {
+        open: openPanel,
+        close: close,
+        toggle: toggle,
+        isOpen: isOpen,
+        destroy: function () {
+            destroyed = true;
+            window.clearTimeout(debounceTimer);
+            if (el) {
+                el.remove();
+                el = null;
+            }
+            inputEl = null;
+            chipsEl = null;
+            bodyEl = null;
+        }
+    };
+}
+
 /**
  * 画布工具组挂载。返回 ``{observer, destroy}``；宿主缺失时返回 ``null``。
  */
@@ -1089,6 +1739,14 @@ function mountStageTools(ctx, roomObserver) {
     toolbar.setAttribute("aria-label", "战桌工具");
     root.appendChild(toolbar);
 
+    // 规则速查浮层（玩家侧）：懒建 DOM，入口按钮创建后再同步选中态。
+    var rulesButton = null;
+    var rulesLookup = createRulesLookup(root, {
+        onChange: function (isOpen) {
+            if (rulesButton) rulesButton.classList.toggle("is-active", isOpen);
+        }
+    });
+
     var toolButtons = {};
     TOOL_DEFS.forEach(function (def) {
         if (def.dm && !isDm) return; // 玩家视图：模板按钮不渲染
@@ -1127,6 +1785,27 @@ function mountStageTools(ctx, roomObserver) {
         diceSettingsButton.innerHTML = '<i class="fa fa-cog" aria-hidden="true"></i>';
         diceSettingsButton.addEventListener("click", openDiceSettings);
         toolbar.appendChild(diceSettingsButton);
+    }
+
+    // 规则速查入口：挂在工具组尾部（右侧栏 tab 条已有 8 个槽位，再加会挤出/
+    // 折行；工具组是横向图标条，剩余空间充裕，且速查是跨面板的全局工具）。
+    // 未登录（无 currentUser）时不渲染——房间内正常有会话，此处只做兜底。
+    if (window.currentUser) {
+        var rulesSeparator = document.createElement("span");
+        rulesSeparator.className = "vtt-tool-sep";
+        rulesSeparator.setAttribute("aria-hidden", "true");
+        toolbar.appendChild(rulesSeparator);
+        rulesButton = document.createElement("button");
+        rulesButton.type = "button";
+        rulesButton.className = "vtt-tool-btn vtt-tool-rules";
+        rulesButton.title = "规则速查（Ctrl+K 或 /）";
+        rulesButton.setAttribute("aria-label", "规则速查");
+        rulesButton.setAttribute("data-vtt-tool", "rules");
+        rulesButton.innerHTML = '<i class="fa fa-book" aria-hidden="true"></i>';
+        rulesButton.addEventListener("click", function () {
+            rulesLookup.toggle();
+        });
+        toolbar.appendChild(rulesButton);
     }
 
     var canvas = document.createElement("canvas");
@@ -1987,6 +2666,8 @@ function mountStageTools(ctx, roomObserver) {
     }
 
     function onStagePointerDown(event) {
+        // 规则速查浮层上的按下不算画布操作（否则会顺手选中底下的棋子）。
+        if (event.target instanceof Element && event.target.closest(".vtt-rules-window")) return;
         if (tool !== "select") return; // 画布层已接管（模板/测距工具激活）
         var point = stagePoint(event);
         if (isDm) {
@@ -2071,8 +2752,39 @@ function mountStageTools(ctx, roomObserver) {
         if (String(selectedTemplateId) === String(template.id)) selectedTemplateId = "";
     }
 
+    function isTypingTarget(target) {
+        // 焦点在输入框/可编辑区时不抢键（聊天输入、表单输入都算）。
+        if (!target || !target.tagName) return false;
+        var tag = String(target.tagName).toLowerCase();
+        if (tag === "input" || tag === "textarea" || tag === "select") return true;
+        return target.isContentEditable === true;
+    }
+
+    function handleRulesShortcut(event) {
+        // 核心按键占用：Alt+B（侧栏折叠）、Ctrl+Shift+C（聊天浮层）、Esc、场景内
+        // Ctrl+S。「/」与 Ctrl/⌘+K 未被占用，取作速查唤起键。
+        if (destroyed) return false;
+        var key = String(event.key || "");
+        if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && key.toLowerCase() === "k") {
+            event.preventDefault();
+            rulesLookup.toggle();
+            return true;
+        }
+        if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "/" && !isTypingTarget(event.target)) {
+            event.preventDefault();
+            rulesLookup.open();
+            return true;
+        }
+        return false;
+    }
+
     function onKeyDown(event) {
+        if (handleRulesShortcut(event)) return;
         if (event.key !== "Escape") return;
+        if (rulesLookup.isOpen()) {
+            rulesLookup.close();
+            return;
+        }
         if (placing) {
             cancelPlacing();
             return;
@@ -2280,6 +2992,12 @@ function mountStageTools(ctx, roomObserver) {
     }
 
     function onDocumentPointerDown(event) {
+        // 规则速查：点浮层外（入口按钮除外）收起，Esc 也可关。
+        if (rulesLookup.isOpen() && event.target instanceof Element) {
+            if (!event.target.closest(".vtt-rules-window") && !event.target.closest(".vtt-tool-rules")) {
+                rulesLookup.close();
+            }
+        }
         // M4：dock 面板外点关闭（在棋子卡判定之前独立处理）。
         if (diceDockPanel && !diceDockPanel.hidden) {
             if (!(event.target instanceof Element && event.target.closest(".vtt-dice-dock"))) {
@@ -2852,6 +3570,7 @@ function mountStageTools(ctx, roomObserver) {
             // M4：骰盘逐个释放（WebGL context 不能泄漏），设置弹层收掉。
             diceTrays.slice().forEach(removeDiceTray);
             closeDiceSettings();
+            rulesLookup.destroy();
             cardEl.remove();
             root.remove();
         }
