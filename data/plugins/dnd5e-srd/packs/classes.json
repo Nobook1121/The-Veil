@@ -3,6 +3,12 @@
     "id": "wizard",
     "name": "Wizard",
     "hit_die": 6,
+    "subclass_level": 2,
+    "subclass_name": "Arcane Tradition",
+    "subclass_name_zh": "奥术传承",
+    "subclasses": [
+      { "id": "evocation", "name": "School of Evocation", "locales": { "zh-CN": { "name": "塑能学派" } } }
+    ],
     "primary_ability": ["int"],
     "saving_throw_proficiencies": ["int", "wis"],
     "armor_proficiencies": [],
@@ -38,7 +44,16 @@
         [4, 3, 3, 3, 3, 2, 2, 1, 1]
       ]
     },
-    "features": [],
+    "features": [
+      { "id": "wizard-spellcasting", "level": 1, "name": "Spellcasting", "locales": { "zh-CN": { "name": "施法" } } },
+      { "id": "wizard-arcane-recovery", "level": 1, "name": "Arcane Recovery", "locales": { "zh-CN": { "name": "奥术恢复" } } },
+      { "id": "wizard-arcane-tradition", "level": 2, "kind": "subclass", "name": "Arcane Tradition", "locales": { "zh-CN": { "name": "奥术传承" } } },
+      { "id": "wizard-arcane-tradition-6", "level": 6, "kind": "subclass_feature", "name": "Arcane Tradition feature", "locales": { "zh-CN": { "name": "奥术传承特性" } } },
+      { "id": "wizard-arcane-tradition-10", "level": 10, "kind": "subclass_feature", "name": "Arcane Tradition feature", "locales": { "zh-CN": { "name": "奥术传承特性" } } },
+      { "id": "wizard-arcane-tradition-14", "level": 14, "kind": "subclass_feature", "name": "Arcane Tradition feature", "locales": { "zh-CN": { "name": "奥术传承特性" } } },
+      { "id": "wizard-spell-mastery", "level": 18, "name": "Spell Mastery", "locales": { "zh-CN": { "name": "法术精通" } } },
+      { "id": "wizard-signature-spell", "level": 20, "name": "Signature Spell", "locales": { "zh-CN": { "name": "招牌法术" } } }
+    ],
     "locales": { "zh-CN": { "name": "法师" } },
     "source": "SRD 5.1"
   },
@@ -46,6 +61,12 @@
     "id": "cleric",
     "name": "Cleric",
     "hit_die": 8,
+    "subclass_level": 1,
+    "subclass_name": "Divine Domain",
+    "subclass_name_zh": "神圣领域",
+    "subclasses": [
+      { "id": "life", "name": "Life Domain", "locales": { "zh-CN": { "name": "生命领域" } } }
+    ],
     "primary_ability": ["wis"],
     "saving_throw_proficiencies": ["wis", "cha"],
     "armor_proficiencies": ["light", "medium", "shield"],
@@ -81,7 +102,23 @@
         [4, 3, 3, 3, 3, 2, 2, 1, 1]
       ]
     },
-    "features": [],
+    "features": [
+      { "id": "cleric-spellcasting", "level": 1, "name": "Spellcasting", "locales": { "zh-CN": { "name": "施法" } } },
+      { "id": "cleric-divine-domain", "level": 1, "kind": "subclass", "name": "Divine Domain", "locales": { "zh-CN": { "name": "神圣领域" } } },
+      { "id": "cleric-channel-divinity-1", "level": 2, "name": "Channel Divinity (1/rest)", "locales": { "zh-CN": { "name": "引导神力（每次休息 1 次）" } } },
+      { "id": "cleric-destroy-undead-1", "level": 5, "name": "Destroy Undead (CR 1/2)", "locales": { "zh-CN": { "name": "摧毁不死生物（CR 1/2）" } } },
+      { "id": "cleric-channel-divinity-2", "level": 6, "name": "Channel Divinity (2/rest)", "locales": { "zh-CN": { "name": "引导神力（每次休息 2 次）" } } },
+      { "id": "cleric-divine-domain-6", "level": 6, "kind": "subclass_feature", "name": "Divine Domain feature", "locales": { "zh-CN": { "name": "神圣领域特性" } } },
+      { "id": "cleric-destroy-undead-2", "level": 8, "name": "Destroy Undead (CR 1)", "locales": { "zh-CN": { "name": "摧毁不死生物（CR 1）" } } },
+      { "id": "cleric-divine-domain-8", "level": 8, "kind": "subclass_feature", "name": "Divine Domain feature", "locales": { "zh-CN": { "name": "神圣领域特性" } } },
+      { "id": "cleric-divine-intervention", "level": 10, "name": "Divine Intervention", "locales": { "zh-CN": { "name": "神明干预" } } },
+      { "id": "cleric-destroy-undead-3", "level": 11, "name": "Destroy Undead (CR 2)", "locales": { "zh-CN": { "name": "摧毁不死生物（CR 2）" } } },
+      { "id": "cleric-destroy-undead-4", "level": 14, "name": "Destroy Undead (CR 3)", "locales": { "zh-CN": { "name": "摧毁不死生物（CR 3）" } } },
+      { "id": "cleric-destroy-undead-5", "level": 17, "name": "Destroy Undead (CR 4)", "locales": { "zh-CN": { "name": "摧毁不死生物（CR 4）" } } },
+      { "id": "cleric-divine-domain-17", "level": 17, "kind": "subclass_feature", "name": "Divine Domain feature", "locales": { "zh-CN": { "name": "神圣领域特性" } } },
+      { "id": "cleric-channel-divinity-3", "level": 18, "name": "Channel Divinity (3/rest)", "locales": { "zh-CN": { "name": "引导神力（每次休息 3 次）" } } },
+      { "id": "cleric-divine-intervention-20", "level": 20, "name": "Divine Intervention improvement", "locales": { "zh-CN": { "name": "神明干预强化" } } }
+    ],
     "locales": { "zh-CN": { "name": "牧师" } },
     "source": "SRD 5.1"
   }

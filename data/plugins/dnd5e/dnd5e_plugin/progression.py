@@ -8,6 +8,9 @@
 - 只支持从当前等级提升 1 级；越级、跨职业、未知职业都返回明确错误。
 - plan 结果带服务端过期时间与角色卡指纹；apply 前重新读取角色卡比对指纹。
 - apply 先完整校验所有槽位，全部合法后返回新 sheet；任何一项不合法都不写盘。
+- 两档口径：默认（房间内的旧入口）只算属性提升 / 熟练加值 / 法术；卡面手动
+  升级入口传 ``class_advancement=True``，额外生成生命值、职业特性、子职槽位，
+  并保持 XP 不变（手动升级不按等级表补经验）。
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import secrets
 import threading
 import time
 from typing import Any, Mapping
@@ -32,6 +36,9 @@ ABILITY_LABELS = {
     "cha": "魅力",
 }
 ASI_LEVELS = {4, 8, 12, 16, 19}
+# SRD 5.1：属性提升不能把单项属性推过 20（史诗恩赐类能力不在本模块范围内）。
+ABILITY_CAP = 20
+MAX_SUBCLASS_NAME = 60
 PLAN_TTL_SECONDS = 600
 _WIZARD_SPELLS_PER_LEVEL = 2
 _FEATS = (
@@ -141,6 +148,124 @@ def _progression_row(library: Any, level: int) -> dict[str, Any]:
         if _as_int(row.get("level"), 0) == level:
             return row
     raise ProgressionError("progression.level_unknown", f"数据包缺少 {level} 级的熟练与经验表。")
+
+
+def _hit_die(class_entry: Mapping[str, Any]) -> int:
+    """职业生命骰面数；数据包缺失按 d8 兜底。"""
+    die = _as_int(class_entry.get("hit_die"), 8)
+    return die if 4 <= die <= 20 else 8
+
+
+def _feature_rows(class_entry: Mapping[str, Any], level: int) -> list[dict[str, Any]]:
+    """职业表在该等级授予的特性行（classes.json 的 features 表）。"""
+    rows = class_entry.get("features")
+    granted: list[dict[str, Any]] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, Mapping) or _as_int(row.get("level"), 0) != level:
+            continue
+        granted.append(
+            {
+                "id": str(row.get("id") or ""),
+                "level": level,
+                "kind": str(row.get("kind") or "feature"),
+                "name": str(row.get("name") or ""),
+                "label": _localized_name(row) or str(row.get("name") or ""),
+            }
+        )
+    return granted
+
+
+def _subclass_candidates(class_entry: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """子职候选：classes.json 的 subclasses 表（SRD 5.1 每个职业只列一条）。"""
+    rows = class_entry.get("subclasses")
+    candidates: list[dict[str, Any]] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, Mapping):
+            continue
+        base = str(row.get("name") or row.get("id") or "")
+        zh = _localized_name(row)
+        label = f"{base}（{zh}）" if zh and zh.casefold() != base.casefold() else base
+        candidates.append(
+            {
+                "value": str(row.get("id") or base),
+                "label": label,
+                "detail": {"name": base, "label_zh": zh, "source": "SRD 5.1"},
+            }
+        )
+    return candidates
+
+
+def _hit_points_block(
+    sheet: Mapping[str, Any], class_entry: Mapping[str, Any], roll: int | None = None
+) -> dict[str, Any]:
+    """升级生命值：掷骰（服务端真随机）与平均值两个候选，都加 CON 调整值。"""
+    die = _hit_die(class_entry)
+    rolled = roll if isinstance(roll, int) and 1 <= roll <= die else secrets.randbelow(die) + 1
+    average = die // 2 + 1
+    con = _ability_modifier(sheet, "con")
+    hp = sheet.get("hp") if isinstance(sheet.get("hp"), Mapping) else {}
+    before_max = max(1, _as_int(hp.get("max"), 1))
+    return {
+        "die": die,
+        "roll": rolled,
+        "average": average,
+        "con_modifier": con,
+        "roll_total": max(1, rolled + con),
+        "average_total": max(1, average + con),
+        "before_max": before_max,
+        "before_current": max(0, _as_int(hp.get("current"), before_max)),
+    }
+
+
+def _hit_points_slot(
+    sheet: Mapping[str, Any], class_entry: Mapping[str, Any], level: int
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    block = _hit_points_block(sheet, class_entry)
+    die = block["die"]
+    con = block["con_modifier"]
+    con_note = f"，CON {con:+d}" if con else ""
+    candidates = [
+        {
+            "value": "roll",
+            "label": f"掷生命骰 1d{die} = {block['roll']}{con_note} → +{block['roll_total']}",
+            "detail": {
+                "die": die,
+                "roll": block["roll"],
+                "con_modifier": con,
+                "total": block["roll_total"],
+            },
+        },
+        {
+            "value": "average",
+            "label": f"取平均值（{die}/2+1）= {block['average']}{con_note} → +{block['average_total']}",
+            "detail": {
+                "die": die,
+                "roll": block["average"],
+                "con_modifier": con,
+                "total": block["average_total"],
+                "averaged": True,
+            },
+        },
+    ]
+    slot = _slot(
+        f"level-{level}:hp",
+        "hp",
+        level,
+        "生命值上限",
+        candidates=candidates,
+        required=True,
+        min_picks=1,
+        max_picks=1,
+        default="average",
+        detail={
+            "die": die,
+            "con_modifier": con,
+            "before_max": block["before_max"],
+            "before_current": block["before_current"],
+        },
+        not_selected="生命值必须选择「掷骰」或「平均值」其中一项。",
+    )
+    return slot, block
 
 
 def _slot_table_row(class_entry: Mapping[str, Any], level: int) -> list[int]:
@@ -256,7 +381,15 @@ def create_plan(
     owner_key: str,
     target_user_id: str = "",
     class_id: str = "",
+    class_advancement: bool = False,
 ) -> dict[str, Any]:
+    """生成升级计划。
+
+    ``class_advancement=False``（默认）保持房间内旧入口的口径：属性提升 / 熟练
+    加值 / 法术位与法术。``class_advancement=True`` 是卡面手动升级入口：额外给出
+    生命值槽位（掷骰 / 平均值）、该等级的职业特性、子职选择，并把 XP 冻结在升级
+    前的值（手动升级不按等级表补经验）。
+    """
     library = runtime.content_packs_for("dnd5e")
     sheet = _sheet_of(card)
     current = _as_int(sheet.get("level"), 1)
@@ -281,14 +414,34 @@ def create_plan(
     warnings: list[str] = []
     row = _progression_row(library, target)
     current_row = _progression_row(library, current)
-    xp_after = _as_int(row.get("xp"), 0)
+    xp_before = _as_int(sheet.get("xp"), 0)
+    # 手动升级入口不补 XP：升级后经验值保持原值，只有房间内的旧口径才对齐等级表。
+    xp_after = xp_before if class_advancement else _as_int(row.get("xp"), 0)
+
+    granted = _feature_rows(class_entry, target)
+    subclass_level = _as_int(class_entry.get("subclass_level"), 0)
+    subclass_now = str(sheet.get("subclass") or "").strip()
+    hit_points: dict[str, Any] = {}
+
+    if class_advancement:
+        hp_slot, hit_points = _hit_points_slot(sheet, class_entry, target)
+        slots.append(hp_slot)
 
     if target in ASI_LEVELS:
+        abilities_before = sheet.get("abilities") or sheet.get("attributes") or {}
+        abilities_before = abilities_before if isinstance(abilities_before, Mapping) else {}
         ability_candidates = [
             {
                 "value": key,
-                "label": f"{ABILITY_LABELS[key]} +2（或与其他属性各 +1）",
-                "detail": {"ability": key},
+                "label": (
+                    f"{ABILITY_LABELS[key]} {_as_int(abilities_before.get(key), 10)}"
+                    f" → {min(ABILITY_CAP, _as_int(abilities_before.get(key), 10) + 2)}（+2）"
+                ),
+                "detail": {
+                    "ability": key,
+                    "current": _as_int(abilities_before.get(key), 10),
+                    "cap": ABILITY_CAP,
+                },
             }
             for key in ABILITY_KEYS
         ]
@@ -305,6 +458,37 @@ def create_plan(
                 not_selected="属性提升是必选项；不选则无法完成升级。",
             )
         )
+
+    if subclass_level:
+        label = str(
+            class_entry.get("subclass_name_zh")
+            or class_entry.get("subclass_name")
+            or "子职"
+        )
+        if not subclass_now and target == subclass_level:
+            slots.append(
+                _slot(
+                    f"level-{target}:subclass",
+                    "subclass",
+                    target,
+                    f"{label}（子职）",
+                    candidates=_subclass_candidates(class_entry),
+                    required=True,
+                    min_picks=1,
+                    max_picks=1,
+                    detail={
+                        "subclass_level": subclass_level,
+                        "allow_custom": True,
+                        "source": "dnd5e-srd/classes",
+                    },
+                    not_selected=f"本职业在 {subclass_level} 级必须选定{label}。",
+                )
+            )
+        elif not subclass_now and target > subclass_level:
+            warnings.append(
+                f"角色卡还没有子职：{class_entry.get('name')} 按 SRD 应在 {subclass_level} 级选定{label}，"
+                "本次升级不会补选（可在卡面直接填写，或先补到该等级）。"
+            )
 
     pb_before = _as_int(current_row.get("proficiency_bonus"), 2)
     pb_after = _as_int(row.get("proficiency_bonus"), pb_before)
@@ -391,11 +575,15 @@ def create_plan(
                 )
             )
 
-    if not class_entry.get("features"):
-        warnings.append(
-            "classes 数据包没有声明等级特性，本次计划不生成职业特性槽位。"
-        )
-    warnings.append("生命值上限未自动结算，请按职业生命骰另行处理。")
+    if not granted:
+        warnings.append("该等级没有新获得职业特性（职业表在 classes.json）。")
+    if class_advancement:
+        if hit_points:
+            warnings.append(
+                f"生命值按 1d{hit_points['die']} + CON 调整值结算，升级后经验值保持不变（手动升级入口）。"
+            )
+    else:
+        warnings.append("生命值上限未自动结算，请按职业生命骰另行处理。")
 
     plan_id = f"plan-{uuid4().hex}"
     expires_epoch = time.time() + PLAN_TTL_SECONDS
@@ -406,7 +594,23 @@ def create_plan(
         "class_name": _localized_name(class_entry),
         "current_level": current,
         "target_level": target,
-        "xp": {"before": _as_int(sheet.get("xp"), 0), "after": xp_after},
+        "xp": {
+            "before": xp_before,
+            "after": xp_after,
+            "manual": bool(class_advancement),
+        },
+        # 卡面升级入口用：HP 候选与职业表命中项（不含选择槽位的纯展示信息）。
+        "advancement": bool(class_advancement),
+        "hit_die": _hit_die(class_entry),
+        "hit_points": hit_points,
+        "features": granted,
+        "subclass": {
+            "level": subclass_level,
+            "current": subclass_now,
+            "label": str(class_entry.get("subclass_name_zh") or class_entry.get("subclass_name") or ""),
+            "options": _subclass_candidates(class_entry),
+            "level_due": bool(subclass_level and not subclass_now and target == subclass_level),
+        },
         "slots": slots,
         "warnings": warnings,
         "expires_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expires_epoch)),
@@ -532,8 +736,88 @@ def _apply_asi(sheet: dict[str, Any], slot: Mapping[str, Any], values: list[str]
         abilities = dict(sheet.get("attributes") or {})
         sheet["abilities"] = abilities
     amount = 2 if len(values) == 1 else 1
+    # 先整体校验上限（SRD：属性提升不能把单项推过 20），任何一项越界都不改卡。
+    overflow = [
+        f"{ABILITY_LABELS.get(key, key)} {_as_int(abilities.get(key), 10)}"
+        for key in values
+        if _as_int(abilities.get(key), 10) + amount > ABILITY_CAP
+    ]
+    if overflow:
+        raise ProgressionError(
+            "progression.ability_cap",
+            f"属性提升上限是 {ABILITY_CAP}：{'、'.join(overflow)} 再加 +{amount} 会超过上限。",
+        )
     for key in values:
-        abilities[key] = min(30, _as_int(abilities.get(key), 10) + amount)
+        abilities[key] = _as_int(abilities.get(key), 10) + amount
+
+
+def _apply_hit_points(
+    sheet: dict[str, Any], slot: Mapping[str, Any], values: list[str], level: int
+) -> None:
+    """升级生命值：上限 + 掷骰/平均值 + CON；当前 HP 同步加同额（5e 常规口径）。"""
+    if len(values) != 1:
+        raise ProgressionError(
+            "progression.invalid_option", "生命值需要选择「掷骰」或「平均值」其中一项。"
+        )
+    candidate = next(
+        (
+            item
+            for item in slot.get("candidates") or []
+            if str(item.get("value")) == values[0]
+        ),
+        None,
+    )
+    if candidate is None:
+        raise ProgressionError(
+            "progression.invalid_option", f"生命值不支持：{'、'.join(values)}。"
+        )
+    detail = candidate.get("detail") or {}
+    gain = max(1, _as_int(detail.get("total"), 0))
+    hp = sheet.get("hp") if isinstance(sheet.get("hp"), dict) else {}
+    before_max = max(1, _as_int(hp.get("max"), 1))
+    before_current = max(0, min(before_max, _as_int(hp.get("current"), before_max)))
+    hp["max"] = before_max + gain
+    hp["current"] = min(hp["max"], before_current + gain)
+    hp["temp"] = max(0, _as_int(hp.get("temp"), 0))
+    sheet["hp"] = hp
+    # 生命骰池 +1（rest 模块读 sheet.hit_dice；首刀卡面也按这个形状显示）。
+    die = _as_int(detail.get("die"), 8) or 8
+    dice = sheet.get("hit_dice")
+    dice = dict(dice) if isinstance(dice, Mapping) else {}
+    dice["die"] = die
+    dice["max"] = _as_int(dice.get("max"), max(0, level - 1)) + 1
+    dice["used"] = max(0, min(dice["max"], _as_int(dice.get("used"), 0)))
+    sheet["hit_dice"] = dice
+
+
+def _apply_subclass(
+    sheet: dict[str, Any], slot: Mapping[str, Any], values: list[str]
+) -> None:
+    """子职落地：命中职业表候选就用中文名，否则接受手填（深库/非 SRD 子职）。"""
+    if len(values) != 1:
+        raise ProgressionError("progression.invalid_option", "子职只能选择一项。")
+    raw = values[0].strip()
+    if not raw:
+        raise ProgressionError("progression.invalid_option", "子职不能为空。")
+    candidate = next(
+        (
+            item
+            for item in slot.get("candidates") or []
+            if str(item.get("value")) == raw
+        ),
+        None,
+    )
+    if candidate is not None:
+        detail = candidate.get("detail") or {}
+        label = str(detail.get("label_zh") or detail.get("name") or candidate.get("label") or raw)
+    else:
+        if len(raw) > MAX_SUBCLASS_NAME:
+            raise ProgressionError(
+                "progression.invalid_option",
+                f"子职名称最多 {MAX_SUBCLASS_NAME} 个字符。",
+            )
+        label = raw
+    sheet["subclass"] = label
 
 
 def apply_plan(plan_id: str, choices: Any, card: Mapping[str, Any]) -> dict[str, Any]:
@@ -582,10 +866,9 @@ def apply_plan(plan_id: str, choices: Any, card: Mapping[str, Any]) -> dict[str,
         )
 
     new_sheet = copy.deepcopy(sheet)
+    # 施法块按需写入：非施法职业升级后不该凭空多出一个空 spellcasting。
     casting = new_sheet.get("spellcasting")
-    if not isinstance(casting, dict):
-        casting = {}
-        new_sheet["spellcasting"] = casting
+    casting = casting if isinstance(casting, dict) else {}
 
     for slot in plan.get("slots") or []:
         kind = slot.get("kind")
@@ -595,9 +878,16 @@ def apply_plan(plan_id: str, choices: Any, card: Mapping[str, Any]) -> dict[str,
                 continue
             if kind == "spell_slots" and slot.get("default"):
                 casting["slots"] = copy.deepcopy((slot.get("detail") or {}).get("after") or {})
+                new_sheet["spellcasting"] = casting
             continue
         if kind == "asi":
             _apply_asi(new_sheet, slot, values)
+        elif kind == "hp":
+            _apply_hit_points(
+                new_sheet, slot, values, _as_int(plan.get("target_level"), 1)
+            )
+        elif kind == "subclass":
+            _apply_subclass(new_sheet, slot, values)
         elif kind == "proficiency_bonus":
             if values and values != ["apply"]:
                 raise ProgressionError("progression.invalid_option", "熟练加值槽位不接受其它选项。")
@@ -605,6 +895,7 @@ def apply_plan(plan_id: str, choices: Any, card: Mapping[str, Any]) -> dict[str,
             if values and values != ["apply"]:
                 raise ProgressionError("progression.invalid_option", "法术位槽位不接受其它选项。")
             casting["slots"] = copy.deepcopy((slot.get("detail") or {}).get("after") or {})
+            new_sheet["spellcasting"] = casting
         elif kind in {"spell_known", "spell_prepared"}:
             allowed = {str(item.get("value")) for item in slot.get("candidates") or []}
             invalid = [value for value in values if value not in allowed]
@@ -633,14 +924,34 @@ def apply_plan(plan_id: str, choices: Any, card: Mapping[str, Any]) -> dict[str,
                 casting["known"] = known
             else:
                 casting["prepared"] = list(values)
+            new_sheet["spellcasting"] = casting
         else:
             raise ProgressionError(
                 "progression.unknown_slot_kind",
                 f"不认识的槽位类型：{kind}。",
             )
 
+    if plan.get("advancement"):
+        # 职业表在该等级授予的特性：没有选择项，直接并入 features（去重）。
+        features = new_sheet.get("features")
+        features = list(features) if isinstance(features, list) else []
+        for item in plan.get("features") or []:
+            if str(item.get("kind") or "") == "subclass":
+                continue
+            label = str(item.get("label") or item.get("name") or "").strip()
+            if label and label not in features:
+                features.append(label)
+        new_sheet["features"] = features
+
     new_sheet["level"] = _as_int(plan.get("target_level"), new_sheet.get("level", 1))
-    new_sheet["xp"] = max(_as_int(new_sheet.get("xp"), 0), _as_int((plan.get("xp") or {}).get("after"), 0))
+    if (plan.get("xp") or {}).get("manual"):
+        # 手动升级入口：经验值原样保留，不按等级表补齐。
+        new_sheet["xp"] = _as_int(new_sheet.get("xp"), 0)
+    else:
+        new_sheet["xp"] = max(
+            _as_int(new_sheet.get("xp"), 0),
+            _as_int((plan.get("xp") or {}).get("after"), 0),
+        )
     before = _summary(sheet)
     after = _summary(new_sheet)
     changes = _changes(sheet, new_sheet, plan)
@@ -671,9 +982,15 @@ def abort_plan(plan_id: str) -> None:
 def _summary(sheet: Mapping[str, Any]) -> dict[str, Any]:
     casting = sheet.get("spellcasting")
     casting = casting if isinstance(casting, Mapping) else {}
+    hp = sheet.get("hp") if isinstance(sheet.get("hp"), Mapping) else {}
+    dice = sheet.get("hit_dice") if isinstance(sheet.get("hit_dice"), Mapping) else {}
     return {
         "level": _as_int(sheet.get("level"), 1),
         "xp": _as_int(sheet.get("xp"), 0),
+        "class": str(sheet.get("class") or ""),
+        "subclass": str(sheet.get("subclass") or ""),
+        "hp": copy.deepcopy(hp),
+        "hit_dice": copy.deepcopy(dice),
         "abilities": dict(sheet.get("abilities") or sheet.get("attributes") or {}),
         "features": list(sheet.get("features") or []),
         "proficiencies": copy.deepcopy(sheet.get("proficiencies") or {}),
@@ -705,6 +1022,27 @@ def _changes(
                 "after": _as_int(after.get("xp"), 0),
             }
         )
+    for field in ("class", "subclass"):
+        old = str(before.get(field) or "")
+        new = str(after.get(field) or "")
+        if old != new:
+            changes.append({"field": field, "before": old, "after": new})
+    old_hp = _as_int((before.get("hp") or {}).get("max"), 0)
+    new_hp = _as_int((after.get("hp") or {}).get("max"), 0)
+    if old_hp != new_hp:
+        changes.append({"field": "hp.max", "before": old_hp, "after": new_hp})
+    if (before.get("hp") or {}) != (after.get("hp") or {}):
+        changes.append(
+            {
+                "field": "hp",
+                "before": copy.deepcopy(before.get("hp") or {}),
+                "after": copy.deepcopy(after.get("hp") or {}),
+            }
+        )
+    old_dice = _as_int((before.get("hit_dice") or {}).get("max"), 0)
+    new_dice = _as_int((after.get("hit_dice") or {}).get("max"), 0)
+    if old_dice != new_dice:
+        changes.append({"field": "hit_dice.max", "before": old_dice, "after": new_dice})
     before_abilities = before.get("abilities") or {}
     after_abilities = after.get("abilities") or {}
     for key in ABILITY_KEYS:

@@ -16,7 +16,12 @@ from flask import Blueprint, current_app, request, session
 
 from dnd5e_plugin import kiwee, progression
 from dnd5e_plugin.content_search import Dnd5eContentSearch
-from trpg_server.character_service import CharacterServiceError, apply_room_changes
+from trpg_server.character_service import (
+    CharacterServiceError,
+    apply_room_changes,
+    apply_save,
+    get_for_actor,
+)
 from trpg_server.json_store import read_json
 from trpg_server.responses import error_response, success_response
 from trpg_server.room_access import can_access, find_room, is_elevated
@@ -220,6 +225,81 @@ def progression_apply(room_id: str):
             "sheet": result["sheet"],
         },
         "Progression applied",
+    )
+
+
+@bp.route("/characters/<character_id>/level-up", methods=["POST"])
+def character_level_up(character_id: str):
+    """卡面手动升级入口（不依赖房间，直接落在持久角色卡上）。
+
+    两段式契约，与房间版 ``progression/plan`` / ``progression/apply`` 同源：
+
+    - 规划：``{"target_level": N, "class"?: "wizard"}`` →
+      返回升级计划（HP 掷骰/平均值候选、该等级职业特性、子职、属性提升、
+      法术位与法术名额），外加 ``hit_points`` / ``features`` / ``subclass`` 展示块。
+    - 落库：``{"plan_id": "...", "choices": [...]}`` → 校验全部槽位后
+      复用 ``apply_save``（权限 + 规则集信封 + 房间镜像同步）写卡，
+      返回升级前后的摘要、变更清单与新 sheet。
+
+    升级后 XP 保持不变：手动升级是玩家/DM 主动推进等级，不按等级表补经验。
+    """
+    from trpg_server.site_agent_auth import AgentAuthError, build_actor
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return error_response("请求体必须是 JSON 对象。", 400, "dnd5e.invalid_payload")
+    try:
+        actor = build_actor()
+    except AgentAuthError as exc:
+        return error_response(exc.message, exc.status, "not_logged_in")
+    try:
+        card = get_for_actor(actor, character_id)
+    except CharacterServiceError as exc:
+        return error_response(exc.message, exc.status, exc.code)
+
+    plan_id = str(payload.get("plan_id") or "").strip()
+    if not plan_id:
+        try:
+            plan = progression.create_plan(
+                card,
+                payload.get("target_level"),
+                owner_key=f"character:{character_id}",
+                class_advancement=True,
+                class_id=str(payload.get("class") or ""),
+            )
+        except progression.ProgressionError as exc:
+            return error_response(exc.message, exc.status, exc.code)
+        plan["character_id"] = str(character_id)
+        return success_response(plan, "Level-up plan created")
+
+    try:
+        result = progression.apply_plan(plan_id, payload.get("choices"), card)
+    except progression.ProgressionError as exc:
+        return error_response(exc.message, exc.status, exc.code)
+
+    try:
+        saved = apply_save(actor, character_id, {"sheet": result["sheet"]})
+    except CharacterServiceError as exc:
+        progression.abort_plan(plan_id)
+        return error_response(exc.message, exc.status, exc.code)
+    except Exception:  # noqa: BLE001 - 写卡失败必须回退计划占用
+        progression.abort_plan(plan_id)
+        logger.exception(
+            "dnd5e_level_up_persist_failed character=%s plan=%s", character_id, plan_id
+        )
+        return error_response("角色卡写入失败，请稍后重试。", 500, "progression.persist_failed")
+    progression.commit_plan(plan_id)
+    return success_response(
+        {
+            "plan_id": plan_id,
+            "character_id": str(character_id),
+            "before": result["before"],
+            "after": result["after"],
+            "changes": result["changes"],
+            "sheet": saved.get("sheet") or result["sheet"],
+            "card": saved,
+        },
+        "Level-up applied",
     )
 
 

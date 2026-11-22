@@ -749,6 +749,13 @@ interface Dnd5eRoomInfo {
                         : `<h3 class="dnd5e-sheet-name-static">${escapeHtml(name)}</h3>`}
                     <div class="dnd5e-sheet-meta">
                         <span class="dnd5e-level-badge" title="等级">Lv ${level}</span>
+                        ${editable
+                            ? `<button type="button" class="dnd5e-chip dnd5e-levelup"
+                                data-dnd5e-act="level-up" title="升级向导：HP / 特性 / 子职 / 属性提升"
+                                ${level >= 20 ? "disabled" : ""}>
+                                <i class="fa fa-level-up" aria-hidden="true"></i> 升级
+                               </button>`
+                            : ""}
                         <span class="dnd5e-sheet-line">${escapeHtml(line || "尚未填写职业 / 种族")}</span>
                     </div>
                 </div>
@@ -1460,6 +1467,55 @@ interface Dnd5eRoomInfo {
         }
         startDraft(card);
         renderDetailView();
+    }
+
+    /**
+     * 升级向导（四步：确认 / 生命值 / 提升 / 法术与预览）。
+     *
+     * 与建卡向导对称：规则数学在后端 progression.py，向导只提交选择；落库走
+     * `POST /api/plugins/dnd5e/characters/<id>/level-up`（内部复用 apply_save）。
+     * 升级读的是服务端的卡，所以有未保存改动时先要求保存，避免「升级把草稿盖掉」。
+     */
+    async function openLevelUpWizard(root: HTMLElement): Promise<void> {
+        const card = activeCard();
+        if (!card) return;
+        if (draftDirty) {
+            notify("升级会重新读取服务端的角色卡，请先保存（或重置）当前修改。", "warning");
+            return;
+        }
+        const wizard = global.TrpgDnd5eLevelUp;
+        if (!wizard) {
+            notify("升级向导未加载（character-levelup.js），已取消。", "error");
+            return;
+        }
+        const level = levelOf(card.sheet);
+        if (level >= 20) {
+            notify("已经是 20 级，无法继续升级。", "warning");
+            return;
+        }
+        void root;
+        wizard.open({
+            card: {
+                id: card.id,
+                name: card.name,
+                rulesetId: RULESET_ID,
+                sheet: card.sheet as unknown as Record<string, unknown>,
+            },
+            onSaved: (raw) => applyLevelUpCard(raw),
+        });
+    }
+
+    /** 升级落库后：换成服务端返回的卡，重置草稿并重渲染（等级徽章 / 页签 / HP 一起更新）。 */
+    function applyLevelUpCard(raw: Record<string, unknown>): void {
+        const saved = createCharacterCard(raw as Dnd5eCardInput);
+        cards = cards.some((item) => item.id === saved.id)
+            ? cards.map((item) => item.id === saved.id ? saved : item)
+            : [saved, ...cards];
+        activeCardId = saved.id;
+        startDraft(saved);
+        renderDetailView();
+        render();
+        global.TrpgCharacterListBridge?.refresh?.();
     }
 
     async function confirmAction(message: string, title: string): Promise<boolean> {
@@ -2225,6 +2281,13 @@ interface Dnd5eRoomInfo {
             }
             portraitMode = mode;
             renderDetailView();
+            return;
+        }
+
+        // 升级入口在头区，和「保存」不同：它读的是服务端的卡，所以必须先保存草稿。
+        if (action === "level-up") {
+            if (!editable) return;
+            void openLevelUpWizard(root);
             return;
         }
 
