@@ -40,6 +40,45 @@
         "metadata": {
           "attacker": "Hunter",
           "check_type": "combat_attack",
+          "combat_log": {
+            "attacker": "Hunter",
+            "compare": {
+              "label": "技能值",
+              "value": 50
+            },
+            "critical": false,
+            "damage": 5,
+            "damage_raw": 5,
+            "damage_roll": "1D4=[3]",
+            "damage_type": null,
+            "defense": {
+              "kind": "dodge",
+              "level": "failure",
+              "roll": 40
+            },
+            "expression": "1d100",
+            "hit": true,
+            "hp_after": 5,
+            "hp_before": 10,
+            "hp_delta": -5,
+            "kind": "attack",
+            "modifier": null,
+            "notes": [
+              "重伤"
+            ],
+            "outcome": "hit",
+            "roll": 15,
+            "rolls": [
+              15
+            ],
+            "ruleset": "coc7",
+            "skill_value": 50,
+            "spell": "",
+            "target": "Prey",
+            "total": 15,
+            "version": 1,
+            "weapon": "Knife"
+          },
           "dice_roll": {
             "auto": false,
             "bonus_dice": 0,

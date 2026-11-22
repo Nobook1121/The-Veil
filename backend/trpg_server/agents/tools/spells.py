@@ -13,6 +13,7 @@ from typing import Any, Mapping
 
 from trpg_server import room_spells
 from trpg_server.agents.tools.base import AgentTool
+from trpg_server.agents.tools.combat_chain import save_chain, spell_attack_chain
 from trpg_server.agents.tools.dice import _dice_roll_metadata, _result_message
 from trpg_server.agents.tools.combat import (
     _append_log,
@@ -125,14 +126,30 @@ def _outcome_dice_metadata(
     )
 
 
+def _spell_damage_entry(result: Mapping[str, Any], target_name: Any) -> Mapping[str, Any] | None:
+    """取出该目标的伤害结算（含 hp_before/hp_after），供数值链使用。"""
+    wanted = str(target_name or "").strip()
+    rows = [
+        row
+        for row in (result.get("damage") or [])
+        if isinstance(row, Mapping) and str(row.get("target") or "").strip() == wanted
+    ]
+    return rows[0] if wanted and rows else None
+
+
 def _attach_spell_dice_message(result: dict[str, Any]) -> None:
-    """法术攻击与单目标豁免追加骰桌消息；多目标豁免交给摘要，避免错配。"""
+    """法术攻击与单目标豁免追加骰桌消息；多目标豁免交给摘要，避免错配。
+
+    消息 metadata 以 ``dice_roll``（骰桌动画）为主体，追加 ``combat_log``
+    数值链（攻击式 → vs AC/DC → 命中或豁免 → 伤害 → HP），供聊天卡渲染。
+    """
     if not isinstance(result, dict) or result.get("error"):
         return
     spell = result.get("spell") if isinstance(result.get("spell"), dict) else {}
     label = str(spell.get("name") or "法术")
     caster_name = str(result.get("caster") or "")
     messages: list[dict[str, Any]] = []
+    damage_rows = [row for row in (result.get("damage") or []) if isinstance(row, Mapping)]
 
     attack = result.get("attack")
     if isinstance(attack, dict):
@@ -147,13 +164,27 @@ def _attach_spell_dice_message(result: dict[str, Any]) -> None:
             or (attack.get("presentation") or {}).get("summary")
             or ""
         )
+        # 只有在目标唯一时才敢把伤害挂到这张卡上，多目标绝不猜。
+        attack_target = (
+            str(damage_rows[0].get("target") or "").strip() if len(damage_rows) == 1 else ""
+        )
+        chain = spell_attack_chain(
+            attack,
+            caster=caster_name,
+            target=attack_target,
+            spell=label,
+            damage=damage_rows[0] if len(damage_rows) == 1 else None,
+        )
         if meta and summary:
             messages.append(
                 _result_message(
                     summary,
                     "spell.cast",
                     check_type="spell_attack",
-                    extra_metadata={"dice_roll": meta},
+                    extra_metadata={
+                        "dice_roll": meta,
+                        **({"combat_log": chain} if chain else {}),
+                    },
                 )
             )
 
@@ -168,13 +199,22 @@ def _attach_spell_dice_message(result: dict[str, Any]) -> None:
             roller=target_name or None,
         )
         summary = str(save.get("summary") or "")
+        chain = save_chain(
+            save,
+            caster=caster_name,
+            spell=label,
+            damage=_spell_damage_entry(result, target_name),
+        )
         if meta and summary:
             messages.append(
                 _result_message(
                     summary,
                     "spell.cast",
                     check_type="spell_save",
-                    extra_metadata={"dice_roll": meta},
+                    extra_metadata={
+                        "dice_roll": meta,
+                        **({"combat_log": chain} if chain else {}),
+                    },
                 )
             )
 

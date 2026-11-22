@@ -378,6 +378,119 @@
 }
 
 /* --------------------------------------------------------------------------
+   战斗数值链卡（聊天）：攻击式 → vs AC/DC → 命中/豁免 → 伤害 → HP a→b
+   挂在骰子消息之后，骰桌动画隐藏消息体时仍然可见。
+   -------------------------------------------------------------------------- */
+.combat-chain-card {
+    align-self: flex-start;
+    max-width: min(560px, 92%);
+    margin: 2px 0 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--color-accent, #e05252);
+    border-radius: var(--radius-md, 12px);
+    background:
+        linear-gradient(158deg, rgba(224, 82, 82, 0.1), transparent 62%),
+        var(--color-panel);
+    font-size: 0.8rem;
+    color: var(--color-text);
+}
+
+.combat-chain-card[data-outcome="miss"] {
+    border-left-color: var(--color-muted);
+}
+
+.combat-chain-card[data-outcome="critical"] {
+    border-left-color: #f5c451;
+}
+
+.combat-chain-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.combat-chain-route {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+
+.combat-chain-badge {
+    flex: 0 0 auto;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    background: rgba(0, 0, 0, 0.22);
+    color: var(--color-text);
+}
+
+.combat-chain-badge.is-hit {
+    background: rgba(94, 200, 128, 0.22);
+    color: #7fdca0;
+}
+
+.combat-chain-badge.is-crit {
+    background: rgba(245, 196, 81, 0.24);
+    color: #f5c451;
+}
+
+.combat-chain-badge.is-miss,
+.combat-chain-badge.is-save-ok {
+    background: rgba(148, 163, 184, 0.22);
+    color: var(--color-muted);
+}
+
+.combat-chain-badge.is-save-fail {
+    background: rgba(224, 82, 82, 0.22);
+    color: #ef8d8d;
+}
+
+.combat-chain-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.combat-chain-step {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    font-variant-numeric: tabular-nums;
+}
+
+.combat-chain-label {
+    color: var(--color-muted);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.combat-chain-value {
+    overflow-wrap: anywhere;
+}
+
+.combat-chain-value em {
+    margin-left: 6px;
+    font-style: normal;
+    color: var(--color-muted);
+}
+
+.combat-chain-notes {
+    margin-top: 6px;
+    color: var(--color-muted);
+    font-size: 0.74rem;
+}
+
+/* --------------------------------------------------------------------------
    世界意志：输入框旁的入口与一句话执行弹窗
    -------------------------------------------------------------------------- */
 #worldOverrideButton {

@@ -360,11 +360,158 @@ function isCurrentUserCardless(room: Room | null | undefined): boolean {
     return member ? !member.character_card : false;
 }
 
-/** 战斗轮工具消息（检定/伤害）由战斗面板承载，聊天流只保留叙事。 */
+/** 战斗消息的结构化数值链：攻击式 → vs AC/DC → 命中/豁免 → 伤害 → HP。 */
+interface CombatChain {
+    version?: number;
+    kind?: string;
+    attacker?: string;
+    target?: string;
+    weapon?: string;
+    spell?: string;
+    expression?: string;
+    roll?: number | null;
+    rolls?: number[];
+    modifier?: number | null;
+    total?: number | null;
+    compare?: { label?: string; value?: number | null };
+    hit?: boolean;
+    critical?: boolean;
+    outcome?: string;
+    damage_roll?: string | null;
+    damage?: number | null;
+    damage_raw?: number | null;
+    damage_type?: string | null;
+    hp_before?: number | null;
+    hp_after?: number | null;
+    hp_delta?: number | null;
+    notes?: string[];
+    save_ability?: string;
+    dc?: number | null;
+    save_total?: number | null;
+    success?: boolean;
+    auto_fail?: boolean;
+}
+
+/** 取消息里的数值链；旧消息没有该字段（或字段残缺）时返回 null，绝不抛错。 */
+function combatChainOf(metadata: Record<string, unknown> | undefined): CombatChain | null {
+    const raw = metadata?.combat_log;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const chain = raw as CombatChain;
+    if (chain.roll === undefined && chain.total === undefined) return null;
+    return chain;
+}
+
+/** 战斗轮工具消息：带数值链的作为单卡进聊天，其余（旧消息/纯状态）仍只走战斗面板。 */
 function isCombatPanelMessage(message: ChatMessage): boolean {
     const metadata = message.metadata as Record<string, unknown> | undefined;
     const checkType = typeof metadata?.check_type === "string" ? metadata.check_type : "";
-    return checkType.startsWith("combat");
+    if (!checkType.startsWith("combat")) return false;
+    return combatChainOf(metadata) === null;
+}
+
+function combatChainVerdict(chain: CombatChain): { text: string; tone: string } {
+    if (chain.kind === "save") {
+        if (chain.auto_fail) return { text: "豁免自动失败", tone: "miss" };
+        return chain.success
+            ? { text: "豁免成功", tone: "save-ok" }
+            : { text: "豁免失败", tone: "save-fail" };
+    }
+    if (chain.critical) return { text: "暴击", tone: "crit" };
+    return chain.hit ? { text: "命中", tone: "hit" } : { text: "未命中", tone: "miss" };
+}
+
+/** 数值链 → 卡片 HTML；命中/豁免失败才继续画伤害与 HP 段（否则链就止于此）。 */
+function renderCombatChainCard(chain: CombatChain): string {
+    const escape = (value: unknown): string => chatEscapeHtml(String(value ?? ""));
+    const compareLabel = String(chain.compare?.label || (chain.kind === "save" ? "DC" : "AC"));
+    const compareValue = chain.compare?.value;
+    const expression = String(chain.expression || "d20");
+    const faces = Array.isArray(chain.rolls) && chain.rolls.length ? chain.rolls : chain.roll !== undefined && chain.roll !== null ? [chain.roll] : [];
+    const rollPart = faces.length ? `[${faces.join(", ")}]` : "";
+    const modifier = typeof chain.modifier === "number" ? chain.modifier : null;
+    let totalText = "";
+    if (typeof chain.roll === "number" || faces.length) {
+        totalText = `${rollPart}`;
+        if (modifier !== null) totalText += ` ${modifier >= 0 ? "+" : "-"} ${Math.abs(modifier)}`;
+        if (typeof chain.total === "number") totalText += ` = ${chain.total}`;
+    } else if (typeof chain.total === "number") {
+        totalText = String(chain.total);
+    }
+    const verdict = combatChainVerdict(chain);
+    const steps: string[] = [];
+    steps.push(
+        `<li class="combat-chain-step" data-step="roll">`
+        + `<span class="combat-chain-label">${escape(expression)}</span>`
+        + `<span class="combat-chain-value">${escape(totalText)}`
+        + (typeof compareValue === "number" ? `<em>vs ${escape(compareLabel)} ${compareValue}</em>` : "")
+        + `</span></li>`,
+    );
+    steps.push(
+        `<li class="combat-chain-step" data-step="verdict">`
+        + `<span class="combat-chain-label">判定</span>`
+        + `<span class="combat-chain-value">${escape(verdict.text)}</span></li>`,
+    );
+    // 链式收束：没命中 / 豁免成功且无伤害时，伤害与 HP 段不出现。
+    const landed = chain.hit === true || (typeof chain.damage === "number" && chain.damage > 0);
+    if (landed && (typeof chain.damage === "number" || chain.damage_roll)) {
+        const amount = typeof chain.damage === "number" ? chain.damage : "";
+        const detail = chain.damage_roll ? `（${chain.damage_roll}）` : "";
+        const typeText = chain.damage_type ? ` ${chain.damage_type}` : "";
+        steps.push(
+            `<li class="combat-chain-step" data-step="damage">`
+            + `<span class="combat-chain-label">伤害</span>`
+            + `<span class="combat-chain-value">${escape(`${amount}${typeText}`)}${escape(detail)}</span></li>`,
+        );
+    }
+    if (typeof chain.hp_before === "number" && typeof chain.hp_after === "number") {
+        const delta = typeof chain.hp_delta === "number" ? chain.hp_delta : chain.hp_after - chain.hp_before;
+        steps.push(
+            `<li class="combat-chain-step" data-step="hp">`
+            + `<span class="combat-chain-label">HP</span>`
+            + `<span class="combat-chain-value">${chain.hp_before} → ${chain.hp_after}`
+            + `<em>${delta > 0 ? "+" : ""}${delta}</em></span></li>`,
+        );
+    }
+    const actor = String(chain.attacker || "");
+    const target = String(chain.target || "");
+    const action = String(chain.spell || chain.weapon || "");
+    const route = [actor, action, target].filter((part) => part).join(actor && target ? " → " : " ");
+    const notes = Array.isArray(chain.notes) ? chain.notes.filter((note) => String(note || "").trim()) : [];
+    return `<div class="combat-chain-card" data-kind="${escape(chain.kind || "attack")}" data-outcome="${escape(chain.outcome || "")}">`
+        + `<div class="combat-chain-head">`
+        + `<span class="combat-chain-route">${escape(route)}</span>`
+        + `<span class="combat-chain-badge is-${escape(verdict.tone)}">${escape(verdict.text)}</span>`
+        + `</div>`
+        + `<ol class="combat-chain-steps">${steps.join("")}</ol>`
+        + (notes.length ? `<div class="combat-chain-notes">${notes.map(escape).join(" · ")}</div>` : "")
+        + `</div>`;
+}
+
+/**
+ * 把数值链挂到消息下方（作为兄弟节点）。
+ *
+ * 骰桌动画会把原消息 `.dice-message-consumed` 隐藏并接管数字，所以卡片不能
+ * 塞进消息体内，否则会被一起藏掉。插在消息之后即可：先看骰桌过程，再看
+ * 数值链结论；纯文本档位下则是「叙事 + 卡」。
+ */
+function attachCombatChain(messageElement: HTMLElement, message: ChatMessage): void {
+    const metadata = (message.metadata || {}) as Record<string, unknown>;
+    const chain = combatChainOf(metadata);
+    if (!chain) return;
+    const host = document.getElementById("chatHistory");
+    if (!host) return;
+    const key = message.id === undefined || message.id === null ? "" : String(message.id);
+    if (key) {
+        const existing = Array.from(host.querySelectorAll<HTMLElement>(".combat-chain-card[data-message-id]"))
+            .some((card) => card.dataset.messageId === key);
+        if (existing) return;
+    }
+    const card = document.createElement("div");
+    card.innerHTML = renderCombatChainCard(chain);
+    const root = card.firstElementChild as HTMLElement | null;
+    if (!root) return;
+    if (key) root.dataset.messageId = key;
+    messageElement.insertAdjacentElement("afterend", root);
 }
 
 /** §6.6「问问 KP」：把玩家的问题与道具 id 一起送进既有 KP 对话链路。 */
@@ -1882,6 +2029,8 @@ function renderRoomMessage(message: ChatMessage | null, animate = false): void {
     // 骰子结果按房间生效档位渲染虚拟投掷桌；历史消息静态展示，避免回看时重播动画。
     if (messageElement) {
         window.TrpgDiceTable?.renderForMessage(messageElement, displayMessage, animate);
+        // 战斗数值链卡：挂在消息之后（骰桌动画会隐藏原消息体，卡片不能被一起藏掉）。
+        attachCombatChain(messageElement, displayMessage);
         // KP 消息带语音片段时挂上小喇叭按钮；实时到达的消息按站点/个人设置自动播放。
         if (type === "kp") {
             window.TrpgVoice?.attachMessageButton(messageElement, displayMessage, animate);

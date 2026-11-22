@@ -21,6 +21,7 @@ from uuid import uuid4
 from trpg_server import weapon_catalog
 from trpg_server.agents.room_state import load_room_state, mutate_room_state
 from trpg_server.agents.tools.base import AgentTool
+from trpg_server.agents.tools.combat_chain import attack_chain
 from trpg_server.agents.tools.dice import (
     _context_thresholds,
     _dice_count,
@@ -132,6 +133,18 @@ def _broadcast_dice(context: Any, meta: dict[str, Any]) -> None:
         broadcaster("combat_dice", payload)
     except Exception:  # noqa: BLE001 - 展示失败不能影响战斗结算
         pass
+
+
+def _chain_extra(result: Any, damage: Any = None) -> dict[str, Any]:
+    """把一次攻击结算整理成 ``combat_log`` 数值链（给聊天卡；无法识别时为空）。
+
+    ``damage`` 用于射击这类伤害散落在 ``shots[]`` 里的返回结构。
+    """
+    payload = result if isinstance(result, dict) else {}
+    if damage is not None:
+        payload = {**payload, "damage": damage}
+    chain = attack_chain(payload)
+    return {"combat_log": chain} if chain else {}
 
 
 def _percentile_meta(
@@ -1880,7 +1893,9 @@ def _finalize_attack(
                     check_name=str(result.get("weapon") or "攻击"),
                     target=result.get("target_ac"),
                     roller=str(attacker.get("name") or ""),
-                )
+                ),
+                # 数值链：攻击式 → total vs AC → 命中/未命中 → 伤害 → HP a→b。
+                **_chain_extra(result),
             },
         )
         _log_roll_result(
@@ -2605,7 +2620,9 @@ def attack_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                 check_name=skill_label,
                 target=skill_value,
                 roller=str(attacker.get("name") or ""),
-            )
+            ),
+            # 数值链：d100 vs 技能值 → 命中/被化解 → 伤害 → HP a→b。
+            **_chain_extra(result),
         },
     )
     _log_roll_result(result, context, tool_name="combat.attack", actor=str(attacker.get("name") or ""))
@@ -3034,6 +3051,7 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
         "summary": summary,
     }
     last_roll = next((shot for shot in shots if "roll" in shot), None)
+    scored_shots = [shot for shot in shots if isinstance(shot, dict) and "roll" in shot]
     if last_roll:
         result.update(
             {
@@ -3057,7 +3075,16 @@ def shoot_combatant(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
                 difficulty=difficulty,
                 target=threshold,
                 roller=str(attacker.get("name") or ""),
-            )
+            ),
+            # 数值链只做单发：连发/全自动的伤害是逐发结算的，拼成一张卡会骗人。
+            **(
+                _chain_extra(
+                    {**result, "skill_value": threshold},
+                    scored_shots[0].get("damage"),
+                )
+                if len(scored_shots) == 1
+                else {}
+            ),
         }
         if last_roll
         else {},
