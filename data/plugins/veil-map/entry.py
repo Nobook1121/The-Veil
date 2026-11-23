@@ -19,6 +19,7 @@ import math
 import re
 import sys
 import time
+from collections import OrderedDict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -2844,71 +2845,223 @@ def _occupancy_conflict(
 
 
 _MOVE_INSET_PX = 1.0
+# 贴边容差：只压到 footprint 外侧 15% 的墙算"擦边"（导入地图的墙线常常画在格线
+# 里侧几个像素），不拦；穿进这个范围的墙才是真阻挡。起点已经被墙穿到时不再拦
+# 这面墙，否则被 KP 放进墙里的棋子会卡死在原地。
+_MOVE_EDGE_TOLERANCE = 0.15
+_WALL_INDEX_LIMIT = 8
+# 墙体分桶索引按 (墙体内容版本, 网格, 格线偏移) 缓存：墙体不变时移动只走桶查询。
+_WALL_INDEX_CACHE: "OrderedDict[tuple, Any]" = OrderedDict()
+
+
+def _movement_wall_index(state: dict[str, Any]):
+    """按墙体内容缓存的 movement 模式分桶索引；没有挡路墙时返回 ``None``。"""
+    walls = state.get("walls")
+    if not isinstance(walls, list) or not walls:
+        return None
+    grid, offset_x, offset_y = _grid_of(state)
+    key = (
+        visibility.state_version(walls),
+        len(walls),
+        int(grid),
+        int(offset_x),
+        int(offset_y),
+    )
+    cached = _WALL_INDEX_CACHE.get(key)
+    if cached is not None:
+        _WALL_INDEX_CACHE.move_to_end(key)
+        return cached or None
+    index = spatial.WallIndex(walls, grid, (offset_x, offset_y), mode="movement")
+    _WALL_INDEX_CACHE[key] = index
+    _WALL_INDEX_CACHE.move_to_end(key)
+    while len(_WALL_INDEX_CACHE) > _WALL_INDEX_LIMIT:
+        _WALL_INDEX_CACHE.popitem(last=False)
+    return index or None
 
 
 def _footprint_points(
-    state: dict[str, Any], cell_x: int, cell_y: int, width: int, height: int
+    state: dict[str, Any],
+    cell_x: int,
+    cell_y: int,
+    width: int,
+    height: int,
+    fraction_x: float = 0.0,
+    fraction_y: float = 0.0,
 ) -> list[tuple[float, float]]:
-    """棋子 footprint 四角（世界像素）；向内收 1px，避免贴墙格把边线当成穿越。"""
+    """棋子 footprint 四角（世界像素）；向内收 1px，避免贴墙格把边线当成穿越。
+
+    ``fraction_x/fraction_y`` 是格内偏移（0–1 格），人类拖拽的落点可能不在格心，
+    判定必须用真实像素位置，否则"同一格内横穿一段墙"会漏检。
+    """
     grid, offset_x, offset_y = _grid_of(state)
-    left = offset_x + int(cell_x) * grid + _MOVE_INSET_PX
-    top = offset_y + int(cell_y) * grid + _MOVE_INSET_PX
-    right = offset_x + (int(cell_x) + width) * grid - _MOVE_INSET_PX
-    bottom = offset_y + (int(cell_y) + height) * grid - _MOVE_INSET_PX
+    left = offset_x + (int(cell_x) + float(fraction_x)) * grid + _MOVE_INSET_PX
+    top = offset_y + (int(cell_y) + float(fraction_y)) * grid + _MOVE_INSET_PX
+    right = offset_x + (int(cell_x) + float(fraction_x) + width) * grid - _MOVE_INSET_PX
+    bottom = offset_y + (int(cell_y) + float(fraction_y) + height) * grid - _MOVE_INSET_PX
     right = max(left, right)
     bottom = max(top, bottom)
     return [(left, top), (right, top), (right, bottom), (left, bottom)]
 
 
+def _footprint_rect(points: list[tuple[float, float]]) -> tuple[float, float, float, float]:
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _safe_rect(
+    rect: tuple[float, float, float, float], ratio: float = _MOVE_EDGE_TOLERANCE
+) -> tuple[float, float, float, float]:
+    """footprint 去掉贴边容差后的矩形；墙体只压到外侧容差带时不算阻挡。"""
+    left, top, right, bottom = rect
+    inset_x = (right - left) * ratio
+    inset_y = (bottom - top) * ratio
+    if right - left <= 2 * inset_x + 1e-6 or bottom - top <= 2 * inset_y + 1e-6:
+        return rect
+    return (left + inset_x, top + inset_y, right - inset_x, bottom - inset_y)
+
+
+def _footprint_trace(points: list[tuple[float, float]], width: int, height: int) -> list[tuple[float, float]]:
+    """footprint 周边采样点：四角 + 每条边按格数等分出来的边点。
+
+    多格棋子只用四个角会漏掉"只在两条角轨迹之间擦到墙"的情况，所以每条边按
+    footprint 格数等分取样；1×1 棋子退化为四角，开销不变。
+    """
+    left, top = points[0]
+    right, bottom = points[2]
+    columns = max(1, int(width))
+    rows = max(1, int(height))
+    xs = [left + (right - left) * step / columns for step in range(columns + 1)]
+    ys = [top + (bottom - top) * step / rows for step in range(rows + 1)]
+    trace: list[tuple[float, float]] = []
+    for x in xs:
+        trace.append((x, top))
+        trace.append((x, bottom))
+    for y in ys[1:-1]:
+        trace.append((left, y))
+        trace.append((right, y))
+    return trace
+
+
+def _wall_hit(wall_id: str, kind: str, segment: tuple[Any, Any], reason: str) -> dict[str, Any]:
+    start, end = segment
+    return {
+        "id": str(wall_id or ""),
+        "kind": str(kind or "wall"),
+        "reason": reason,
+        "from": {"x": int(round(float(start[0]))), "y": int(round(float(start[1])))},
+        "to": {"x": int(round(float(end[0]))), "y": int(round(float(end[1])))},
+    }
+
+
 def _movement_wall_blockers(
     state: dict[str, Any],
     token: dict[str, Any],
-    from_cell: tuple[int, int],
-    to_cell: tuple[int, int],
-) -> list[str]:
-    """返回移动路径穿过的墙体 id；门 open 时放行，窗户按 blocks_movement 判定。"""
-    walls = state.get("walls")
-    if not isinstance(walls, list) or not walls:
-        return []
-    if (int(from_cell[0]), int(from_cell[1])) == (int(to_cell[0]), int(to_cell[1])):
+    from_position: tuple[int, int, float, float],
+    to_position: tuple[int, int, float, float],
+) -> list[dict[str, Any]]:
+    """返回挡住这次移动的墙段。
+
+    - ``reason="path"``：起点 footprint → 落点 footprint 的轨迹穿过了墙段；
+    - ``reason="target"``：落点 footprint 压在墙上（墙段穿过 footprint，或整段
+      藏在 footprint 里）。棋子不能停在墙里。
+
+    门 ``state=open`` 放行、窗户按 ``blocks_movement`` 判定、``terrain`` 只看自己的
+    标志位——全部复用 ``spatial.wall_blocks`` 的既有语义（索引在建的时候已经按
+    ``mode="movement"`` 过滤过一遍）。判定只用服务端权威墙体数据，与迷雾裁剪无关。
+    起点已经被某面墙穿过时（被 KP 放进墙里、老数据残留）不再拦这面墙，否则棋子
+    会永久卡死。
+    """
+    index = _movement_wall_index(state)
+    if index is None:
         return []
     width, height = _footprint(token)
-    starts = _footprint_points(state, from_cell[0], from_cell[1], width, height)
-    ends = _footprint_points(state, to_cell[0], to_cell[1], width, height)
-    paths = list(zip(starts, ends))
-    if width > 1 or height > 1:
-        # 多格棋子再检查四条边的中点，覆盖四角轨迹之间的中段。
-        for index in range(4):
-            start_a, start_b = starts[index], starts[(index + 1) % 4]
-            end_a, end_b = ends[index], ends[(index + 1) % 4]
-            paths.append(
-                (
-                    ((start_a[0] + start_b[0]) / 2.0, (start_a[1] + start_b[1]) / 2.0),
-                    ((end_a[0] + end_b[0]) / 2.0, (end_a[1] + end_b[1]) / 2.0),
-                )
-            )
-    blockers: list[str] = []
-    for start, end in paths:
+    start_points = _footprint_points(
+        state,
+        from_position[0],
+        from_position[1],
+        width,
+        height,
+        from_position[2],
+        from_position[3],
+    )
+    end_points = _footprint_points(
+        state,
+        to_position[0],
+        to_position[1],
+        width,
+        height,
+        to_position[2],
+        to_position[3],
+    )
+    # 起点已经被墙穿过（KP 手放、老数据）时，这面墙不再参与本次判定，否则棋子
+    # 会永久卡死；只压到外侧容差带的墙不算"已经穿到"，照常拦。
+    escaped = {hit[0] for hit in index.rect_hits(*_safe_rect(_footprint_rect(start_points)))}
+    hits: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    def record(segment: tuple[str, str, Any, Any], reason: str) -> None:
+        wall_id, kind = segment[0], segment[1]
+        if wall_id in escaped or wall_id in seen_ids:
+            return
+        seen_ids.add(wall_id)
+        hits.append(_wall_hit(wall_id, kind, (segment[2], segment[3]), reason))
+
+    # 先判穿越：同一面墙既被穿过又压在落点上时，按"挡住去路"来说更直观。
+    start_trace = _footprint_trace(start_points, width, height)
+    end_trace = _footprint_trace(end_points, width, height)
+    for start, end in zip(start_trace, end_trace):
         if abs(end[0] - start[0]) < 1e-6 and abs(end[1] - start[1]) < 1e-6:
             continue
-        for wall_id in spatial.segment_blockers(walls, start, end, mode="movement"):
-            if wall_id not in blockers:
-                blockers.append(wall_id)
-    return blockers
+        for segment in index.hits(start, end):
+            record(segment, "path")
+    # 落点压在墙上：角落/边点轨迹不一定穿得过一面短墙，必须单独判一次。
+    for segment in index.rect_hits(*_safe_rect(_footprint_rect(end_points))):
+        record(segment, "target")
+    return hits
 
 
-def _movement_block_message(state: dict[str, Any], blockers: list[str]) -> str:
-    blocked_ids = {str(item) for item in blockers}
-    kinds = {
-        str(wall.get("kind") or "wall").strip().lower()
-        for wall in state.get("walls") or []
-        if isinstance(wall, dict) and str(wall.get("id") or "") in blocked_ids
-    }
+def _wall_hit_text(hit: dict[str, Any]) -> str:
+    return (
+        f"{hit['id']}（kind={hit['kind']}, "
+        f"({hit['from']['x']}, {hit['from']['y']})–({hit['to']['x']}, {hit['to']['y']})）"
+    )
+
+
+def _crossing_message(kinds: set[str]) -> str:
     if "door" in kinds and "window" not in kinds:
         return "移动路径被未打开的门挡住，请先开门或绕行。"
     if "window" in kinds and "door" not in kinds:
         return "移动路径被窗户挡住，无法穿过。"
     return "移动路径被墙体挡住，请绕行。"
+
+
+def _movement_block_message(
+    blockers: list[dict[str, Any]], *, manager: bool = True
+) -> str:
+    """可读的拦截文案；非管理者不带墙体 id/坐标，避免用逐格试走枚举暗墙。"""
+    crossing = [hit for hit in blockers if str(hit.get("reason")) == "path"]
+    if crossing:
+        message = _crossing_message(
+            {str(hit.get("kind") or "wall").lower() for hit in crossing}
+        )
+    else:
+        message = "落点压在墙体上，棋子不能停在墙里，请换一格。"
+    if not manager or not blockers:
+        return message
+    detail = "、".join(_wall_hit_text(hit) for hit in blockers[:3])
+    if len(blockers) > 3:
+        detail += f" 等 {len(blockers)} 面墙"
+    return f"{message.rstrip('。')}：{detail}。"
+
+
+def _wall_detail(blockers: list[dict[str, Any]], *, manager: bool) -> dict[str, Any]:
+    """拒绝回执里的墙体明细：KP 拿 id + 坐标，玩家只拿数量。"""
+    detail: dict[str, Any] = {"blocked_by_count": len(blockers)}
+    if manager:
+        detail["blocked_by"] = [hit["id"] for hit in blockers]
+        detail["blocking_walls"] = blockers
+    return detail
 
 
 def _move_target_rejection(
@@ -2918,8 +3071,14 @@ def _move_target_rejection(
     cell_y: int,
     *,
     manager: bool = True,
-) -> tuple[str, str] | None:
+    fraction_x: float = 0.0,
+    fraction_y: float = 0.0,
+) -> tuple[str, str, dict[str, Any] | None] | None:
     """移动入口共用的目标格校验：边界、占位与墙体穿越；被挡住时不改坐标与预算。
+
+    人类拖拽（``POST /tokens/<id>/move``）、AI 工具（``veil-map.move_token``）与
+    试探移动（``veil-map.preview_move``）都走这里，因此三条路径的墙体规则一致；
+    判定只用服务端权威墙体数据，与迷雾裁剪无关。
 
     非管理者只拿中性文案：迷雾下逐个格试走不能用来枚举隐藏棋子的名字。
     """
@@ -2927,17 +3086,36 @@ def _move_target_rejection(
         bounds = _clamp(
             _as_int(state.get("bounds_cells"), BOUNDS_DEFAULT), MIN_BOUNDS, MAX_BOUNDS
         )
-        return "map.out_of_bounds", f"目标位置超出地图边界（当前地图 {bounds} 格）。"
+        return (
+            "map.out_of_bounds",
+            f"目标位置超出地图边界（当前地图 {bounds} 格）。",
+            None,
+        )
     occupied = _occupancy_conflict(state, token, cell_x, cell_y)
     if occupied is not None:
         if manager:
-            return "map.cell_occupied", f"目标格已被「{occupied.get('name') or '其他棋子'}」占用。"
-        return "map.cell_occupied", "目标格已有其他棋子或障碍物，无法进入。"
+            return (
+                "map.cell_occupied",
+                f"目标格已被「{occupied.get('name') or '其他棋子'}」占用。",
+                None,
+            )
+        return "map.cell_occupied", "目标格已有其他棋子或障碍物，无法进入。", None
     grid, offset_x, offset_y = _grid_of(state)
     from_cell = _cell_of(token, grid, offset_x, offset_y)
-    blockers = _movement_wall_blockers(state, token, from_cell, (cell_x, cell_y))
+    from_position = (
+        from_cell[0],
+        from_cell[1],
+        _fraction(token.get("offset_x")),
+        _fraction(token.get("offset_y")),
+    )
+    to_position = (int(cell_x), int(cell_y), float(fraction_x), float(fraction_y))
+    blockers = _movement_wall_blockers(state, token, from_position, to_position)
     if blockers:
-        return "map.wall_blocked", _movement_block_message(state, blockers)
+        return (
+            "map.wall_blocked",
+            _movement_block_message(blockers, manager=manager),
+            _wall_detail(blockers, manager=manager),
+        )
     return None
 
 
@@ -3684,16 +3862,25 @@ def move_token(room_id: str, token_id: str):
             )
         cell_x, cell_y, fraction_x, fraction_y = target
         rejection = _move_target_rejection(
-            state, token, cell_x, cell_y, manager=manager
+            state,
+            token,
+            cell_x,
+            cell_y,
+            manager=manager,
+            fraction_x=fraction_x,
+            fraction_y=fraction_y,
         )
         if rejection is not None:
-            code, message = rejection
+            code, message, detail = rejection
+            data = {"map": view, "fog": fog_view, "can_manage": manager}
+            if detail:
+                data.update(detail)
             return _rejected_request(
                 message,
                 code,
                 request_id=request_id,
                 revision=state["revision"],
-                data={"map": view, "fog": fog_view, "can_manage": manager},
+                data=data,
             )
         ok, code, message = _apply_combat_cost(room_id, room_dir, state, token, cell_x, cell_y)
         if not ok:
@@ -4584,8 +4771,11 @@ def _move_token_agent(
 
         rejection = _move_target_rejection(state, token, to_cell_x, to_cell_y)
         if rejection is not None:
-            code, message = rejection
-            return {"ok": False, "error": message, "code": code}
+            code, message, detail = rejection
+            blocked: dict[str, Any] = {"ok": False, "error": message, "code": code}
+            if detail:
+                blocked.update(detail)
+            return blocked
 
         combat = load_room_state(room_dir).get("combat")
         combat_active = isinstance(combat, dict) and bool(combat.get("active"))
@@ -4888,7 +5078,10 @@ def _preview_move_tool(arguments: dict[str, Any], context: Any) -> dict[str, Any
             "encounter_ready": False,
         }
         if rejection is not None:
-            payload["code"], payload["error"] = rejection
+            code, message, detail = rejection
+            payload["code"], payload["error"] = code, message
+            if detail:
+                payload.update(detail)
         bundle = _narrative_bundle(info)
         if bundle is not None:
             try:
@@ -5286,9 +5479,21 @@ def _import_external_scene(
                 "offset_x": int(round(origin_x)) % grid,
                 "offset_y": int(round(origin_y)) % grid,
             }
-            state["bounds_cells"] = _clamp(
-                max(BOUNDS_DEFAULT, cells_across, cells_down), MIN_BOUNDS, MAX_BOUNDS
-            )
+            # 地图边界：``bounds_cells`` 是**正方形边长（格）**，世界坐标以原点
+            # 为中心。显式载荷（转换器按底图尺寸算好的）优先；否则按底图横/竖
+            # 格数的较大值推导，向上取整，别让底图边缘落到可玩区外。旧实现用
+            # ``max(BOUNDS_DEFAULT, ...)`` 兜底，2100×1500/150 = 14×10 的酒馆也
+            # 被撑成 50 格（7500 单位）：底图只占中心一小块、标尺画到 39 列
+            # （用户实测「丝线测试」房间）。BOUNDS_DEFAULT 只留作空场景默认值。
+            requested = _as_int(scene.get("bounds_cells"), 0)
+            if requested > 0:
+                state["bounds_cells"] = _clamp(requested, MIN_BOUNDS, MAX_BOUNDS)
+            else:
+                state["bounds_cells"] = _clamp(
+                    max(math.ceil(width / grid), math.ceil(height / grid)),
+                    MIN_BOUNDS,
+                    MAX_BOUNDS,
+                )
             state["walls"] = _normalize_walls(walls)
             state["lights"] = _normalize_lights(lights)
             state["ambient_light"] = _normalize_ambient(scene.get("ambient") or {})

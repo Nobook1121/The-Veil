@@ -977,13 +977,14 @@ def test_move_conflict_message_hides_unknown_token_name():
         ],
     }
     bob = state["tokens"][0]
-    code, message = veil_map._move_target_rejection(
+    code, message, detail = veil_map._move_target_rejection(
         state, bob, 1, 0, manager=False
     )
     assert code == "map.cell_occupied"
     assert "食人魔" not in message
+    assert detail is None
 
-    code, message = veil_map._move_target_rejection(
+    code, message, detail = veil_map._move_target_rejection(
         state, bob, 1, 0, manager=True
     )
     assert code == "map.cell_occupied"
@@ -1221,6 +1222,319 @@ def test_agent_move_wall_check_uses_corners_doors_and_windows(tmp_path):
     assert allowed["ok"] is True
     ogre = next(token for token in _read_map_tokens(room_dir) if token["name"] == "Ogre")
     assert (ogre["cell_x"], ogre["cell_y"]) == (7, 3)
+
+
+_FILLER_CELLS = {"member-u2": (-8, -8), "member-u3": (-9, -8)}
+
+
+def _wall_state(
+    app: Flask,
+    *,
+    tokens: list[dict],
+    walls: list[dict],
+    grid_size: int = 64,
+    offset: tuple[int, int] = (0, 0),
+) -> Path:
+    """把带墙体的地图直接写进房间（legacy map.json，首次写入后自动迁移分片）。
+
+    没写进 ``tokens`` 的成员会被补在入口附近，容易撞上测试要走的格；这里把其余
+    成员统一放到远处，保证"占位"不会干扰墙体断言。
+    """
+    room_dir = Path(app.config["ROOMS_DIR"]) / "room1"
+    map_dir = room_dir / "plugins" / "veil-map"
+    map_dir.mkdir(parents=True, exist_ok=True)
+    given = {str(token.get("id")) for token in tokens}
+    filled = list(tokens)
+    for token_id, (cell_x, cell_y) in _FILLER_CELLS.items():
+        if token_id in given:
+            continue
+        filled.append(
+            {
+                "id": token_id,
+                "name": token_id,
+                "cell_x": cell_x,
+                "cell_y": cell_y,
+                "owner_user_id": token_id.replace("member-", ""),
+            }
+        )
+    state = {
+        "grid_size": grid_size,
+        "grid_offset": {"x": offset[0], "y": offset[1]},
+        "bounds_cells": 50,
+        "tokens": filled,
+        "walls": walls,
+    }
+    (map_dir / "map.json").write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    return room_dir
+
+
+def _move(client, token_id: str, body: dict):
+    return _write(
+        client, "post", f"/api/plugins/veil-map/rooms/room1/tokens/{token_id}/move", body
+    )
+
+
+def test_move_across_wall_inside_same_cell_is_blocked(client):
+    """落在同一格内、但 footprint 挪过去会横穿墙，也要拦。
+
+    墙体按像素摆放，不一定压在格线上；旧实现按"格坐标是否变化"提前返回，
+    这类搬运会直接放行。
+    """
+    manager, app = client
+    _login(manager, "u1")
+    _wall_state(
+        app,
+        tokens=[{"id": "member-u1", "name": "Alice", "cell_x": 0, "cell_y": 0}],
+        walls=[
+            {"id": "wall-mid", "kind": "wall", "points": [{"x": 80, "y": -128}, {"x": 80, "y": 128}]}
+        ],
+    )
+    data = _map(manager)
+    alice = _token(data, "member-u1")
+    assert (alice["cell_x"], alice["cell_y"], alice["offset_x"]) == (0, 0, 0.0)
+
+    blocked = _move(manager, "member-u1", {"cell_x": 0, "cell_y": 0, "offset_x": 0.3})
+    body = blocked.get_json()
+    assert blocked.status_code == 403
+    assert body["code"] == "map.wall_blocked"
+    assert body["data"]["blocked_by"] == ["wall-mid"]
+    kept = _token(_map(manager), "member-u1")
+    assert (kept["cell_x"], kept["cell_y"], kept["offset_x"]) == (0, 0, 0.0)
+
+    # 同格内不碰墙的小幅挪动仍然允许。
+    nudge = _move(manager, "member-u1", {"cell_x": 0, "cell_y": 0, "offset_x": 0.1})
+    assert nudge.status_code == 200
+    assert _token(_map(manager), "member-u1")["offset_x"] == 0.1
+
+
+def test_move_onto_wall_body_is_rejected(client):
+    """落点 footprint 压在墙上（短墙整段藏在目标格里）同样非法——不能站到墙里面。"""
+    manager, app = client
+    _login(manager, "u1")
+    _wall_state(
+        app,
+        tokens=[{"id": "member-u1", "name": "Alice", "cell_x": 0, "cell_y": 0}],
+        walls=[
+            {"id": "stub-1", "kind": "wall", "points": [{"x": 80, "y": 10}, {"x": 110, "y": 40}]}
+        ],
+    )
+    _map(manager)
+
+    blocked = _move(manager, "member-u1", {"cell_x": 1, "cell_y": 0})
+    body = blocked.get_json()
+    assert blocked.status_code == 403
+    assert body["code"] == "map.wall_blocked"
+    assert "墙" in body["message"]
+    assert body["data"]["blocked_by"] == ["stub-1"]
+    assert body["data"]["blocking_walls"][0]["id"] == "stub-1"
+    assert body["data"]["blocking_walls"][0]["reason"] == "target"
+    alice = _token(_map(manager), "member-u1")
+    assert (alice["cell_x"], alice["cell_y"]) == (0, 0)
+
+
+def test_move_detours_around_wall_and_then_passes(client):
+    manager, app = client
+    _login(manager, "u1")
+    _wall_state(
+        app,
+        tokens=[{"id": "member-u1", "name": "Alice", "cell_x": 0, "cell_y": 0}],
+        walls=[
+            {"id": "wall-door", "kind": "wall", "points": [{"x": 64, "y": -64}, {"x": 64, "y": 64}]}
+        ],
+    )
+    _map(manager)
+
+    straight = _move(manager, "member-u1", {"cell_x": 1, "cell_y": 0})
+    assert straight.status_code == 403
+    assert straight.get_json()["code"] == "map.wall_blocked"
+
+    # 绕行：先向下两格，再向东——两段都不穿墙。
+    down = _move(manager, "member-u1", {"cell_x": 0, "cell_y": 2})
+    assert down.status_code == 200, down.get_json()
+    east = _move(manager, "member-u1", {"cell_x": 1, "cell_y": 2})
+    assert east.status_code == 200, east.get_json()
+    alice = _token(_map(manager), "member-u1")
+    assert (alice["cell_x"], alice["cell_y"]) == (1, 2)
+
+
+def test_closed_door_blocks_and_open_door_passes(client):
+    manager, app = client
+    _login(manager, "u1")
+    room_dir = _wall_state(
+        app,
+        tokens=[{"id": "member-u1", "name": "Alice", "cell_x": 0, "cell_y": 0}],
+        walls=[
+            {
+                "id": "door-1",
+                "kind": "door",
+                "state": "closed",
+                "points": [{"x": 64, "y": -64}, {"x": 64, "y": 64}],
+            }
+        ],
+    )
+    _map(manager)
+
+    closed = _move(manager, "member-u1", {"cell_x": 1, "cell_y": 0})
+    body = closed.get_json()
+    assert closed.status_code == 403
+    assert body["code"] == "map.wall_blocked"
+    assert "门" in body["message"]
+    assert body["data"]["blocked_by"] == ["door-1"]
+
+    opened = _write(
+        manager,
+        "put",
+        "/api/plugins/veil-map/rooms/room1/walls",
+        {
+            "walls": [
+                {
+                    "id": "door-1",
+                    "kind": "door",
+                    "state": "open",
+                    "points": [{"x": 64, "y": -64}, {"x": 64, "y": 64}],
+                }
+            ]
+        },
+    )
+    assert opened.status_code == 200
+    passed = _move(manager, "member-u1", {"cell_x": 1, "cell_y": 0})
+    assert passed.status_code == 200, passed.get_json()
+    assert _token(_map(manager), "member-u1")["cell_x"] == 1
+    assert (room_dir / "plugins" / "veil-map").exists()
+
+
+def test_window_blocks_movement_only_when_flag_says_so(client):
+    manager, app = client
+    _login(manager, "u1")
+    window = {
+        "id": "win-1",
+        "kind": "window",
+        "points": [{"x": 64, "y": -64}, {"x": 64, "y": 64}],
+    }
+    _wall_state(
+        app,
+        tokens=[{"id": "member-u1", "name": "Alice", "cell_x": 0, "cell_y": 0}],
+        walls=[window],
+    )
+    _map(manager)
+
+    blocked = _move(manager, "member-u1", {"cell_x": 1, "cell_y": 0})
+    body = blocked.get_json()
+    assert blocked.status_code == 403
+    assert "窗户" in body["message"]
+
+    # 显式关掉 blocks_movement 的窗户不挡人（但仍挡视线）。
+    sail = _write(
+        manager,
+        "put",
+        "/api/plugins/veil-map/rooms/room1/walls",
+        {"walls": [dict(window, blocks_movement=False, blocks_sight=True)]},
+    )
+    assert sail.status_code == 200
+    passed = _move(manager, "member-u1", {"cell_x": 1, "cell_y": 0})
+    assert passed.status_code == 200, passed.get_json()
+
+    sight = veil_map.spatial.segment_blockers(
+        [dict(window, blocks_movement=False, blocks_sight=True)],
+        (0, 0),
+        (128, 0),
+        mode="sight",
+    )
+    assert sight == ["win-1"]
+
+
+def test_multicell_token_grazing_wall_is_blocked(client):
+    manager, app = client
+    _login(manager, "u1")
+    _wall_state(
+        app,
+        tokens=[{"id": "npc-ogre", "name": "Ogre", "cell_x": 2, "cell_y": 2, "w": 2, "h": 2, "kind": "npc"}],
+        walls=[
+            {"id": "wall-edge", "kind": "wall", "points": [{"x": 256, "y": 150}, {"x": 256, "y": 200}]}
+        ],
+    )
+    _map(manager)
+
+    blocked = _move(manager, "npc-ogre", {"cell_x": 3, "cell_y": 2})
+    body = blocked.get_json()
+    assert blocked.status_code == 403
+    assert body["code"] == "map.wall_blocked"
+    assert body["data"]["blocked_by"] == ["wall-edge"]
+    ogre = _token(_map(manager), "npc-ogre")
+    assert (ogre["cell_x"], ogre["cell_y"]) == (2, 2)
+
+    # 远离这面墙的移动不受影响。
+    away = _move(manager, "npc-ogre", {"cell_x": 2, "cell_y": 4})
+    assert away.status_code == 200, away.get_json()
+
+
+def test_human_and_agent_moves_enforce_the_same_wall_rule(tmp_path):
+    """人类拖拽与 AI 工具最终都经过 _move_target_rejection：两入口结论一致。"""
+    rooms = _write_room(tmp_path)
+    room_dir = rooms / "room1"
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.config.update(ROOMS_DIR=str(rooms), CONFIG_DIR=str(tmp_path / "config"))
+    app.extensions["socketio"] = _FakeSocket()
+    app.register_blueprint(veil_map.bp)
+    _wall_state(
+        app,
+        tokens=[
+            {"id": "member-u1", "name": "Alice", "cell_x": 0, "cell_y": 0},
+            {"id": "npc-ogre", "name": "Ogre", "cell_x": 0, "cell_y": 0, "w": 1, "h": 1, "kind": "npc"},
+        ],
+        walls=[
+            {"id": "stub-1", "kind": "wall", "points": [{"x": 80, "y": 10}, {"x": 110, "y": 40}]}
+        ],
+    )
+    manager = app.test_client()
+    _login(manager, "u1")
+    _map(manager)
+
+    human = _move(manager, "member-u1", {"cell_x": 1, "cell_y": 0}).get_json()
+    assert human["status"] == "rejected"
+    assert human["code"] == "map.wall_blocked"
+    assert human["data"]["blocked_by"] == ["stub-1"]
+
+    tool = veil_map.create_tools()[0]
+    context = _agent_context(room_dir, user_id="u1", agent_id="kp")
+    with app.app_context():
+        agent = tool.handler({"token": "Ogre", "cell_x": 1, "cell_y": 0}, context)
+
+    assert agent["ok"] is False
+    assert agent["code"] == "map.wall_blocked"
+    assert agent["blocked_by"] == ["stub-1"]
+    # 两条入口的文案同源（同一个 _movement_block_message）。
+    assert agent["error"].split("：")[0] == human["message"].split("：")[0]
+    assert _token(_map(manager), "member-u1")["cell_x"] == 0
+
+
+def test_player_wall_rejection_hides_wall_ids(client):
+    """玩家侧的拦截文案不带墙体 id/坐标（迷雾下不能靠逐格试走枚举暗墙）。"""
+    _manager, app = client
+    player = app.test_client()
+    _wall_state(
+        app,
+        tokens=[
+            {"id": "member-u2", "name": "Bob", "cell_x": 0, "cell_y": 0, "owner_user_id": "u2"}
+        ],
+        walls=[
+            {"id": "wall-secret", "kind": "wall", "points": [{"x": 64, "y": -64}, {"x": 64, "y": 64}]}
+        ],
+    )
+    _login(player, "u2")
+    _map(player)
+
+    blocked = _move(player, "member-u2", {"cell_x": 1, "cell_y": 0})
+    body = blocked.get_json()
+    assert blocked.status_code == 403
+    assert body["code"] == "map.wall_blocked"
+    assert "wall-secret" not in body["message"]
+    assert "blocked_by" not in body["data"]
+    assert body["data"]["blocked_by_count"] == 1
+    assert body["data"]["can_manage"] is False
+    bob = _token(_map(player), "member-u2")
+    assert (bob["cell_x"], bob["cell_y"]) == (0, 0)
 
 
 def _png(width: int, height: int) -> bytes:

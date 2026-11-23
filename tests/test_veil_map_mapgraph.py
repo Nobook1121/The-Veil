@@ -396,11 +396,14 @@ def test_preview_move_rejects_wall(tmp_path) -> None:
     with app.app_context():
         veil_map._activate_area_scene(room, info, "area_map")
         state, _source = veil_map.scene_store.load(room)
+        # 网格 64 + 格线偏移 (32, 40)：格 3 的像素范围是 x 224–288，格 4 是
+        # 288–352。墙放在 320（格 4 中间）才是"挡在东边"，而不是切在 Bob 自己
+        # 站的格子里（那样他本来就踩在墙上）。
         state["walls"] = [
             {
                 "id": "wall-east",
                 "kind": "wall",
-                "points": [{"x": 256, "y": 128}, {"x": 256, "y": 384}],
+                "points": [{"x": 320, "y": 128}, {"x": 320, "y": 384}],
             }
         ]
         veil_map._save_map(room, state)

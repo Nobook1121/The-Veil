@@ -15,7 +15,8 @@
 第一阶段（已实现）：格/尺换算、格距、圆形 / 锥形 / 线形范围取格。
 第二阶段（已实现）：墙体数据结构、视线与移动阻挡判定。墙体是折线 + 属性，
 ``blocks_sight`` / ``blocks_movement`` / ``blocks_light`` / ``opacity`` 为后续
-迷雾与光照预留，不需要再改结构。
+迷雾与光照预留，不需要再改结构。高频的移动判定走 :class:`WallIndex`（按格分桶，
+只比较路径附近的墙段）；一次性查询仍可用 :func:`segment_blockers`。
 第三阶段（暂不实现，仅设计）：格子图上的 A* 寻路。
 
 第三阶段设计
@@ -269,7 +270,11 @@ def segment_blockers(
     *,
     mode: str = "sight",
 ) -> list[str]:
-    """返回与线段相交且会阻挡该模式的墙体 id 列表（去重保序）。"""
+    """返回与线段相交且会阻挡该模式的墙体 id 列表（去重保序）。
+
+    每次调用都会扫一遍全量墙，适合一次性查询（``/spatial/line``、行动守卫）。
+    高频的移动判定用 :class:`WallIndex`，只比较路径附近的桶。
+    """
     blockers: list[str] = []
     seen: set[str] = set()
     for wall in walls or []:
@@ -286,3 +291,178 @@ def segment_blockers(
                     blockers.append(wall_id)
                 break
     return blockers
+
+
+def _point_in_rect(
+    point: Any, left: float, top: float, right: float, bottom: float
+) -> bool:
+    x, y = _xy(point)
+    return (
+        left - _EPSILON <= x <= right + _EPSILON
+        and top - _EPSILON <= y <= bottom + _EPSILON
+    )
+
+
+_BUCKET_MIN_PX = 32.0
+
+WallSegment = tuple[str, str, tuple[float, float], tuple[float, float]]
+
+
+class WallIndex:
+    """按格分桶的墙段索引，供移动判定复用。
+
+    ``mode`` 在建索引时过滤一遍墙：``movement`` 模式下开着的门直接不进索引，
+    窗户按 ``blocks_movement`` 判定（见 :func:`wall_blocks`）。之后每条线段登记
+    到它经过的格桶，查询只比较路径/矩形附近的桶，不遍历全量墙。
+
+    几何一律复用本模块的 ``segments_intersect``；这里只负责"少算"，不另写判定。
+    """
+
+    __slots__ = ("mode", "grid", "offset", "segments", "buckets")
+
+    def __init__(
+        self,
+        walls: Iterable[Mapping[str, Any]],
+        grid_size: int = 64,
+        offset: Sequence[int] = (0, 0),
+        mode: str = "movement",
+    ) -> None:
+        self.mode = str(mode or "movement").strip().lower()
+        try:
+            grid = float(grid_size)
+        except (TypeError, ValueError):
+            grid = 64.0
+        self.grid = max(_BUCKET_MIN_PX, grid if math.isfinite(grid) and grid > 0 else 64.0)
+        try:
+            self.offset = (int(offset[0]), int(offset[1]))
+        except (TypeError, ValueError, IndexError):
+            self.offset = (0, 0)
+        self.segments: list[WallSegment] = []
+        self.buckets: dict[tuple[int, int], list[int]] = {}
+        for wall in walls or []:
+            if not isinstance(wall, Mapping) or not wall_blocks(wall, self.mode):
+                continue
+            wall_id = str(wall.get("id") or "").strip()
+            kind = str(wall.get("kind") or "wall").strip().lower()
+            points: list[tuple[float, float]] = []
+            for item in wall.get("points") or []:
+                try:
+                    points.append(_xy(item))
+                except (TypeError, ValueError, IndexError, KeyError):
+                    continue
+            for index in range(len(points) - 1):
+                start, end = points[index], points[index + 1]
+                slot = len(self.segments)
+                self.segments.append((wall_id, kind, start, end))
+                for cell in self._cells_along(start, end):
+                    self.buckets.setdefault(cell, []).append(slot)
+
+    def __len__(self) -> int:
+        return len(self.segments)
+
+    def __bool__(self) -> bool:
+        return bool(self.segments)
+
+    def _cell(self, x: float, y: float) -> tuple[int, int]:
+        return (
+            int(math.floor((x - self.offset[0]) / self.grid)),
+            int(math.floor((y - self.offset[1]) / self.grid)),
+        )
+
+    def _cells_along(
+        self, start: Sequence[float], end: Sequence[float]
+    ) -> list[tuple[int, int]]:
+        ax, ay = _xy(start)
+        bx, by = _xy(end)
+        length = math.hypot(bx - ax, by - ay)
+        # 步长不超过半桶：线段经过的每个桶都会被登记，也不会漏掉查询桶。
+        steps = max(1, int(math.ceil(length / max(1.0, self.grid * 0.5))))
+        cells: list[tuple[int, int]] = []
+        seen: set[tuple[int, int]] = set()
+        for step in range(steps + 1):
+            ratio = step / steps
+            cell = self._cell(ax + (bx - ax) * ratio, ay + (by - ay) * ratio)
+            if cell in seen:
+                continue
+            seen.add(cell)
+            cells.append(cell)
+        return cells
+
+    def _near_cells(
+        self, cells: Iterable[tuple[int, int]]
+    ) -> list[tuple[int, int]]:
+        """把桶扩一圈，消除线段正好压在桶边界上的漏检。"""
+        out: list[tuple[int, int]] = []
+        seen: set[tuple[int, int]] = set()
+        for cell_x, cell_y in cells:
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    cell = (cell_x + dx, cell_y + dy)
+                    if cell in seen:
+                        continue
+                    seen.add(cell)
+                    out.append(cell)
+        return out
+
+    def _candidates(self, cells: Iterable[tuple[int, int]]) -> list[int]:
+        slots: list[int] = []
+        seen: set[int] = set()
+        for cell in cells:
+            for slot in self.buckets.get(cell) or ():
+                if slot in seen:
+                    continue
+                seen.add(slot)
+                slots.append(slot)
+        slots.sort()
+        return slots
+
+    def hits(
+        self, start: Sequence[float], end: Sequence[float]
+    ) -> list[WallSegment]:
+        """与线段相交的墙段（``(墙 id, kind, 起点, 终点)``，去重保序）。"""
+        out: list[WallSegment] = []
+        cells = self._near_cells(self._cells_along(start, end))
+        for slot in self._candidates(cells):
+            wall_id, kind, p0, p1 = self.segments[slot]
+            if segments_intersect(start, end, p0, p1):
+                out.append(self.segments[slot])
+        return out
+
+    def blockers(self, start: Sequence[float], end: Sequence[float]) -> list[str]:
+        """与线段相交的墙体 id（去重保序）。"""
+        ids: list[str] = []
+        for wall_id, _kind, _p0, _p1 in self.hits(start, end):
+            if wall_id and wall_id not in ids:
+                ids.append(wall_id)
+        return ids
+
+    def rect_hits(
+        self, left: float, top: float, right: float, bottom: float
+    ) -> list[WallSegment]:
+        """与矩形相交、或整段落在矩形内部的墙段。
+
+        用于"落点压墙"与"起点已经在墙里"两种判定：既查矩形四条边与线段求交，
+        也查线段端点是否落在矩形内（短墙段可能整段藏在矩形里，不穿过任何边）。
+        """
+        corners = [(left, top), (right, top), (right, bottom), (left, bottom)]
+        cells = self._near_cells(self._cells_along((left, top), (right, bottom)))
+        out: list[WallSegment] = []
+        seen: set[int] = set()
+        for slot in self._candidates(cells):
+            if slot in seen:
+                continue
+            _wall_id, _kind, p0, p1 = self.segments[slot]
+            inside = _point_in_rect(p0, left, top, right, bottom) or _point_in_rect(
+                p1, left, top, right, bottom
+            )
+            if not inside:
+                for index in range(4):
+                    if segments_intersect(
+                        corners[index], corners[(index + 1) % 4], p0, p1
+                    ):
+                        inside = True
+                        break
+            if inside:
+                seen.add(slot)
+                out.append(self.segments[slot])
+        return out
