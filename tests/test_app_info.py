@@ -222,3 +222,34 @@ def test_update_download_requires_permission(tmp_path):
     _login(user_client, "USER")
     response = user_client.post("/api/app/update/download", headers={"X-CSRF-Token": "csrf"})
     assert response.status_code == 403
+
+
+def test_update_state_reports_owner_flag(tmp_path):
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client, "ADMIN")
+    body = client.get("/api/app/update").get_json()["data"]
+    assert body["owner"] is False
+
+    owner_app = _app(tmp_path / "owner", role="OWNER")
+    owner_client = owner_app.test_client()
+    _login(owner_client, "OWNER")
+    assert owner_client.get("/api/app/update").get_json()["data"]["owner"] is True
+
+
+def test_apply_update_is_owner_only(tmp_path):
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client, "ADMIN")
+    denied = client.post("/api/app/update/apply", headers={"X-CSRF-Token": "csrf"})
+    assert denied.status_code == 403
+    body = denied.get_json()
+    assert "只有 OWNER" in str(body.get("message") or body.get("error") or "")
+
+    owner_app = _app(tmp_path / "owner", role="OWNER")
+    owner_client = owner_app.test_client()
+    _login(owner_client, "OWNER")
+    # 没有已下载的更新包时，OWNER 调用也是「没东西可应用」，不会重启。
+    body = owner_client.post("/api/app/update/apply", headers={"X-CSRF-Token": "csrf"})
+    assert body.status_code == 200
+    assert "还没有可用的更新包" in body.get_json()["data"]["message"]

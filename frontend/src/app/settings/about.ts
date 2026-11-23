@@ -1,7 +1,8 @@
 /**
  * 关于页：应用信息、更新检查、仓库入口、赞助与致谢、许可与声明。
  *
- * 只做「检查版本 + 下载发布包」，安装仍需用户手动替换目录后重启。
+ * 负责检查版本、下载发布包，以及 OWNER 的「立即更新并重启」（服务端负责
+ * 暂存/替换/重启，前端只轮询状态并在版本变化后刷新页面）。
  * 数据全部来自 `GET /api/app/info` 与 `GET /api/app/update`，权限相关的
  * 开关由 `syncAdminOnly()` 在每次渲染后统一处理。
  */
@@ -414,7 +415,14 @@
         const downloadButton = byId<HTMLButtonElement>("updateDownloadButton");
         if (downloadButton) {
             downloadButton.hidden = state.state !== "available" || !canManage();
-            downloadButton.disabled = downloading;
+            downloadButton.disabled = downloading || state.state === "applying";
+        }
+
+        const applyButton = byId<HTMLButtonElement>("updateApplyButton");
+        if (applyButton) {
+            // 应用更新只给 OWNER（服务端同样会校验）；ADMIN 可以下载但不能替换程序。
+            applyButton.hidden = state.state !== "ready" || state.owner !== true;
+            applyButton.disabled = state.state === "applying";
         }
 
         const releaseLink = byId<HTMLAnchorElement>("updateReleaseLink");
@@ -529,6 +537,39 @@
         }
     }
 
+    /** 应用已下载的更新：服务端暂存后重启，这里轮询版本号并在变化后刷新。 */
+    async function applyUpdate(): Promise<void> {
+        const button = byId<HTMLButtonElement>("updateApplyButton");
+        if (button) button.disabled = true;
+        try {
+            const response = await TrpgApi.post<ApiResponse<AboutUpdateState>>("/api/app/update/apply");
+            if (!response?.success) {
+                global.showNotification?.(response?.message || response?.error || t("settings.about.update.apply_failed", "应用更新失败"), "error");
+                return;
+            }
+            global.showNotification?.(t("settings.about.update.applying", "正在应用更新并重启服务，页面稍后会自动刷新"), "info");
+            const before = response.data?.current || "";
+            for (let attempt = 0; attempt < 120; attempt += 1) {
+                await new Promise((resolve) => global.setTimeout(resolve, 1500));
+                try {
+                    const info = await TrpgApi.get<ApiResponse<{ version?: string }>>("/api/app/info");
+                    const version = info?.data?.version || "";
+                    if (info?.success && version && version !== before) {
+                        global.location.reload();
+                        return;
+                    }
+                } catch {
+                    /* 重启期间请求失败，继续等 */
+                }
+            }
+            global.showNotification?.(t("settings.about.update.applied", "更新已应用，请手动刷新页面"), "warning");
+        } catch (exc) {
+            global.showNotification?.(`${t("settings.about.update.apply_failed", "应用更新失败")}：${(exc as Error).message}`, "error");
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
     // ---------- 交互 ----------
 
     function copyRepoUrl(): void {
@@ -575,6 +616,7 @@
     function bindEvents(): void {
         byId<HTMLButtonElement>("updateCheckButton")?.addEventListener("click", () => void checkForUpdate());
         byId<HTMLButtonElement>("updateDownloadButton")?.addEventListener("click", () => void downloadUpdate());
+        byId<HTMLButtonElement>("updateApplyButton")?.addEventListener("click", () => void applyUpdate());
         byId<HTMLButtonElement>("aboutInfoRetry")?.addEventListener("click", () => void loadInfo(true));
         byId<HTMLButtonElement>("copyRepoUrlButton")?.addEventListener("click", copyRepoUrl);
         byId<HTMLButtonElement>("updateNotesToggle")?.addEventListener("click", toggleNotes);

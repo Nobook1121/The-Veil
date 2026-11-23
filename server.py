@@ -22,6 +22,17 @@ BACKEND_DIR = Path(__file__).resolve().parent / "backend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+# 启动兜底：上一次一键更新若只写进了 pending（助手被系统杀掉等），在加载
+# 任何业务模块之前先把程序文件替换掉，保证这次跑的就是新版本。
+_UPDATE_PENDING = Path(__file__).resolve().parent / "data/runtime/update/pending.json"
+if _UPDATE_PENDING.exists():
+    try:
+        from trpg_server.update_apply import apply_pending  # noqa: PLC0415
+
+        apply_pending(_UPDATE_PENDING, root=Path(__file__).resolve().parent)
+    except Exception:  # noqa: BLE001 - 更新失败不能阻止服务启动
+        pass
+
 # Configure logging and print the startup marker before importing app_factory:
 # create_app() loads the embedding model, which takes seconds, so emitting a
 # line first lets the user see output immediately instead of waiting in silence.

@@ -1547,3 +1547,52 @@ a.sponsor-item:hover {
         margin-left: 19px;
     }
 }
+
+
+/* 应用内更新提示（OWNER）*/
+.veil-update-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1080;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(8, 10, 16, 0.62);
+    backdrop-filter: blur(2px);
+}
+.veil-update-overlay[hidden] {
+    display: none;
+}
+.veil-update-card {
+    width: min(520px, 100%);
+    padding: 22px 24px 18px;
+    border-radius: 14px;
+    background: var(--bs-body-bg, #fff);
+    color: var(--bs-body-color, #212529);
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--bs-border-color, rgba(0, 0, 0, 0.12));
+}
+.veil-update-card h3 {
+    margin: 0 0 10px;
+    font-size: 1.15rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.veil-update-body {
+    margin: 0 0 10px;
+    line-height: 1.65;
+    font-size: 0.95rem;
+}
+.veil-update-status {
+    margin: 0 0 12px;
+    font-size: 0.88rem;
+    opacity: 0.8;
+}
+.veil-update-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}

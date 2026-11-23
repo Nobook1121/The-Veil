@@ -1,7 +1,8 @@
 """应用更新检查与下载服务。
 
-只做「检查版本 + 下载发布包」，不做自动替换：Windows 下运行中的进程会锁定
-自身文件，静默覆盖安装目录风险过高（详见设计文档 §8.3.3）。
+负责「检查版本 + 下载发布包 + 暂存并应用更新」：替换动作不在请求线程里做，
+而是解压校验后写 pending，交给进程退出后的助手（scripts/apply_update.py）
+执行；助手失败时下次启动的早鸟钩子会重试。
 """
 
 from __future__ import annotations
@@ -11,6 +12,8 @@ import json
 import logging
 import os
 import re
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -424,6 +427,107 @@ def download_update(app: Flask | None = None) -> dict[str, Any]:
         _write_state(app, state)
         _download_lock.release()
     return _public_state(state, True)
+
+
+def apply_update(app: Flask | None = None, *, restart: bool = True) -> dict[str, Any]:
+    """把已下载的更新包暂存并安排应用；返回最新公开状态。
+
+    真正的文件替换由独立助手在进程退出后执行（Windows 下运行中的程序可能
+    锁定自身文件），因此这里只做：解压 → 校验版本/结构 → 写 pending →
+    启动助手 → 短暂延迟后退出主进程，让助手替换并重新拉起 server.py。
+    """
+    if app is None:
+        return get_state(None)
+
+    state = _resolve_current(app)
+    download = state.get("download") if isinstance(state.get("download"), dict) else {}
+    if state.get("state") != "ready" or not download.get("file"):
+        state["message"] = "还没有可用的更新包，请先检查并下载更新"
+        _write_state(app, state)
+        return _public_state(state, not is_disabled(app, _update_config(app)["repo"]))
+
+    from trpg_server import update_apply  # noqa: PLC0415 - 与应用层解耦
+
+    latest = str(state.get("latest") or "")
+    update_dir = _update_dir(app)
+    zip_path = _downloads_dir(app) / str(download.get("file"))
+    try:
+        staged = update_apply.stage_zip(zip_path, update_dir, latest)
+        pending = update_apply.write_pending(
+            update_dir,
+            staged,
+            latest or update_apply.read_version(staged / "backend/trpg_server/version.py"),
+            notes=str(download.get("sha256") or ""),
+        )
+    except (OSError, ValueError, KeyError) as exc:
+        logger.warning("update apply staging failed: %s", exc)
+        state["state"] = "error"
+        state["message"] = f"更新包无法应用：{exc}"
+        _write_state(app, state)
+        return _public_state(state, True)
+
+    state["state"] = "applying"
+    state["message"] = "更新已就绪，正在重启并替换程序文件"
+    state["apply"] = {"pending": str(pending), "staged_at": _now_iso()}
+    _write_state(app, state)
+
+    root = Path(__file__).resolve().parents[2]
+    helper = root / "scripts" / "apply_update.py"
+    if not helper.exists():
+        state["state"] = "ready"
+        state["message"] = "更新已暂存，但缺少应用脚本；重启应用后会自动完成更新"
+        _write_state(app, state)
+        return _public_state(state, True)
+
+    flags = 0
+    if os.name == "nt":
+        flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    log_path = update_dir / "apply.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with log_path.open("a", encoding="utf-8") as output:
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    str(helper),
+                    "--pending",
+                    str(pending),
+                    "--parent-pid",
+                    str(os.getpid()),
+                    "--launch",
+                ],
+                cwd=str(root),
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                creationflags=flags,
+                close_fds=True,
+            )
+    except OSError as exc:
+        logger.warning("update helper failed to start: %s", exc)
+        state["state"] = "ready"
+        state["message"] = "更新已暂存，重启应用后会自动完成更新"
+        _write_state(app, state)
+        return _public_state(state, True)
+
+    if restart and not app.config.get("TESTING"):
+        # 留出时间把响应写回浏览器，再结束进程；助手会在进程退出后替换文件。
+        threading.Timer(1.5, lambda: os._exit(0)).start()
+    return _public_state(state, True)
+
+
+def apply_pending_on_startup(root: Path | None = None) -> dict[str, Any] | None:
+    """服务启动前检查 pending（助手意外失败时的兜底）。"""
+    from trpg_server import update_apply  # noqa: PLC0415
+
+    base = Path(root) if root is not None else Path(__file__).resolve().parents[2]
+    pending = update_apply.pending_path(base / "data" / "runtime" / "update")
+    if not pending.exists():
+        return None
+    try:
+        return update_apply.apply_pending(pending, root=base)
+    except Exception as exc:  # noqa: BLE001 - 启动兜底不能挡住服务
+        logger.warning("startup update apply failed: %s", exc)
+        return None
 
 
 def start_startup_checker(app: Flask) -> None:

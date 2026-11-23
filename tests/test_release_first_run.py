@@ -113,7 +113,7 @@ def test_package_script_bundles_official_plugins_enabled():
     """官方 5e / SRD / 地图插件随包并默认启用，且只复制白名单。"""
     script = PACKAGE_SCRIPT.read_text(encoding="utf-8")
 
-    assert "$officialPlugins = @('dnd5e-srd', 'dnd5e', 'veil-map')" in script
+    assert "$officialPlugins = @('dnd5e-srd', 'dnd5e', 'dnd5e-vtt', 'veil-map', 'fvtt-world-import')" in script
     assert 'Copy-Relative "data/plugins/$plugin"' in script
     assert "data/plugins/enabled.json" in script
     assert "Assert-OfficialPlugins" in script

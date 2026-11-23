@@ -104,6 +104,8 @@ interface AboutUpdateState {
     message: string;
     progress: number;
     enabled: boolean;
+    /** 当前登录用户是否 OWNER（服务端判定，前端只用来控制入口可见性）。 */
+    owner?: boolean;
 }
 
 interface TrpgAboutApi {
