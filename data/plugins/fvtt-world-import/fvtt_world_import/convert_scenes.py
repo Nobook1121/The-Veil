@@ -13,6 +13,11 @@
 校验由 veil-map 的导入服务（``map_service.import_scene``）统一完成——
 这里不另写一套几何换算。
 
+地图边界（``bounds_cells``）也在这一层按**底图尺寸**推导：veil-map 的
+``bounds_cells`` 是正方形边长（格），世界坐标以原点为中心；沿用它的
+``BOUNDS_DEFAULT``(50) 会把 2100×1500/150 = 14×10 的酒馆也撑成 50 格
+（7500 单位），底图只占中心一小块、标尺画到 39 列。
+
 跳过策略：六边形网格（grid.type≠1）、网格像素出窗、缺背景图、背景图超
 40MB、非英尺网格——返回带稳定 code 的跳过记录，进报告警告，不猜测。
 """
@@ -38,6 +43,11 @@ MAX_TOKENS = 200
 # 背景图单张上限（沿用 veil-map media.MAX_IMAGE_BYTES）。
 MAX_BACKGROUND_BYTES = 40 * 1024 * 1024
 FEET_PER_CELL = 5
+# veil-map 的 bounds_cells 语义：**正方形边长（格）**，世界坐标以原点为中心，
+# 可玩格 = [-half, bounds_cells - half)。一张图只能取「横/竖格数的较大值」，
+# 不能分别存宽高；与 veil-map 的 MIN_BOUNDS/MAX_BOUNDS 同口径（改这里要同步）。
+BOUNDS_MIN = 5
+BOUNDS_MAX = 200
 
 # disposition(-1 敌 / 0 中立 / 1 友) → 阵营色环（敌红 / 中立金 / 友青，
 # 取 veil-map TOKEN_COLORS 现有色）。
@@ -119,6 +129,68 @@ def scene_grid_origin(scene: dict[str, Any], companion: dict[str, Any] | None = 
     shift_x = _number(scene.get("shiftX"))
     shift_y = _number(scene.get("shiftY"))
     return shift_x + _number(background.get("offsetX")), shift_y + _number(background.get("offsetY"))
+
+
+def scene_bounds_cells(width: Any, height: Any, grid_size: Any) -> int:
+    """底图像素尺寸 + 格大小 → veil-map ``bounds_cells``（正方形边长，格）。
+
+    取横/竖格数的**较大值**并向上取整：宁可多出一格，也不让底图边缘落在
+    可玩区之外。尺寸或格大小非法时回落 :data:`BOUNDS_MIN`（veil-map 的下限
+    ``MIN_BOUNDS``），超过上限截到 :data:`BOUNDS_MAX`（``MAX_BOUNDS``）。
+    """
+    grid = int(round(_number(grid_size, 0.0)))
+    width_px = _number(width, 0.0)
+    height_px = _number(height, 0.0)
+    if grid <= 0 or width_px <= 0 or height_px <= 0:
+        return BOUNDS_MIN
+    cells = max(math.ceil(width_px / grid), math.ceil(height_px / grid))
+    return max(BOUNDS_MIN, min(BOUNDS_MAX, cells))
+
+
+def verify_wall_extent(
+    walls: list[dict[str, Any]],
+    *,
+    width: Any,
+    height: Any,
+    grid_size: Any,
+    tolerance_cells: float = 1.0,
+) -> list[str]:
+    """墙折线是否落在背景图范围之内（图片像素口径）→ 可读警告。
+
+    墙 ``c`` 与背景图必须同一个像素坐标系；若某个包把「格」当像素、或整体
+    错位/缩放，症状就是墙线飘到地形之外。这里按「1 格容差」核对一次（源包
+    贴边的墙常在 0–40px 之外一点，属正常），异常进警告而不是静默导入。
+    """
+    if not walls:
+        return []
+    grid = int(round(_number(grid_size, 0.0)))
+    width_px = _number(width, 0.0)
+    height_px = _number(height, 0.0)
+    if grid <= 0 or width_px <= 0 or height_px <= 0:
+        return []
+    margin = grid * max(0.0, float(tolerance_cells))
+    outside = 0
+    for wall in walls:
+        for point in wall.get("points") or []:
+            x = _number(point.get("x"), math.nan)
+            y = _number(point.get("y"), math.nan)
+            if not (math.isfinite(x) and math.isfinite(y)):
+                continue
+            if (
+                x < -margin
+                or x > width_px + margin
+                or y < -margin
+                or y > height_px + margin
+            ):
+                outside += 1
+                break
+    if not outside:
+        return []
+    return [
+        f"{outside}/{len(walls)} 段墙体落在背景图（{int(width_px)}×{int(height_px)}）"
+        f"之外超过 {tolerance_cells:g} 格容差；墙与底图可能不是同一套像素坐标，"
+        "已按原样导入，请核对。"
+    ]
 
 
 def scene_background_src(scene: dict[str, Any]) -> str:
@@ -395,6 +467,25 @@ def convert_scene(
     out_lights, light_warnings = convert_lights(light_docs, grid["distance"])
     out_tokens, token_warnings = convert_tokens(tokens or [])
     origin_x, origin_y = scene_grid_origin(scene, companion)
+    warnings = wall_warnings + light_warnings + token_warnings
+
+    # 地图边界按底图尺寸推导；背景尺寸由调用方解析资产时带上（取不到时留
+    # ``None``，由 veil-map 的 import_scene 用真实图片尺寸兜底推导，口径一致）。
+    width = _number(background.get("width"))
+    height = _number(background.get("height"))
+    bounds_cells: int | None = None
+    if width > 0 and height > 0:
+        bounds_cells = scene_bounds_cells(width, height, grid_size)
+        raw_cells = max(math.ceil(width / grid_size), math.ceil(height / grid_size))
+        if raw_cells > BOUNDS_MAX:
+            warnings.append(
+                f"底图需要 {raw_cells} 格边界，超过上限 {BOUNDS_MAX} 格，已按上限导入。"
+            )
+        warnings.extend(
+            verify_wall_extent(
+                out_walls, width=width, height=height, grid_size=grid_size
+            )
+        )
 
     return {
         "scene_id": safe_scene_id(scene_id),
@@ -407,11 +498,12 @@ def convert_scene(
             "origin_y": origin_y,
         },
         "background": dict(background),
+        "bounds_cells": bounds_cells,
         "walls": out_walls,
         "lights": out_lights,
         "tokens": out_tokens,
         "ambient": convert_ambient(scene, companion),
-        "warnings": wall_warnings + light_warnings + token_warnings,
+        "warnings": warnings,
         "source_counts": {
             "walls": len(wall_docs),
             "lights": len(light_docs),
@@ -480,6 +572,8 @@ def convert_world_scenes(
 
 
 __all__ = [
+    "BOUNDS_MAX",
+    "BOUNDS_MIN",
     "DISPOSITION_COLORS",
     "GRID_MAX",
     "GRID_MIN",
@@ -497,6 +591,8 @@ __all__ = [
     "convert_world_scenes",
     "safe_scene_id",
     "scene_background_src",
+    "scene_bounds_cells",
     "scene_grid",
     "scene_grid_origin",
+    "verify_wall_extent",
 ]

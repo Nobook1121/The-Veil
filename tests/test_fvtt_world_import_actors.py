@@ -306,8 +306,12 @@ def test_sixian_run_imports_npc_modules(tmp_path, plugins):
     # ac.formula 这类），如实计数 + 出 2 条告警（不是导入失败）。
     assert totals["effects"]["documents"] == 14
     assert totals["effects"]["changes"] == 16
-    assert totals["effects"]["unsupported"] == 11
-    assert totals["warnings"] == 4
+    # 三档：3 条真正进数值、13 条已记录暂无消费方（模块 flags/ATL/物品活动等）、
+    # 0 条在镜像模型之外——原来的「unsupported 11」语义已由引擎镜像替代。
+    assert totals["effects"]["full"] == 3
+    assert totals["effects"]["stored"] == 13
+    assert totals["effects"]["unsupported"] == 0
+    assert len(data["warnings"]) == 2  # 两条 NPC 法术位「剩余值视为上限」提示
 
     modules = {m.get("title"): m for m in _scenario_modules(scenarios)}
     assert len(modules) == 14

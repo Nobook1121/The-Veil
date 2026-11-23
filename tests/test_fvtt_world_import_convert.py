@@ -94,10 +94,15 @@ def _convert_package(zip_path: Path, tmp_path_factory: pytest.TempPathFactory):
         index = wp.read_scenes(pkg)
 
         def resolve_background(scene_doc: dict[str, Any]):
+            # 与生产同口径：宽高随背景一起带出（convert_scenes 据此推导 bounds）。
             rel = pkg.resolve_background(cs.scene_background_src(scene_doc))
             if rel is None:
                 return None
-            return {"path": rel, "name": Path(rel).name, "bytes": pkg.asset_size(rel)}
+            resolved = {"path": rel, "name": Path(rel).name, "bytes": pkg.asset_size(rel)}
+            size = pkg.asset_image_size(rel)
+            if size is not None:
+                resolved["width"], resolved["height"] = size
+            return resolved
 
         def companion_for(scene_doc: dict[str, Any]):
             base = Path(cs.scene_background_src(scene_doc)).name
@@ -271,6 +276,107 @@ def test_sixian_counts_match_source(sixian_convert):
     assert per_scene["assets/scenes/manor-floor-2.jpg"] == 111
     assert per_scene["assets/scenes/valhalla-tavern.jpg"] == 51
     assert per_scene["assets/scenes/wedding-day-mansion.jpg"] == 18
+
+
+#: 六个场景的实测事实（源包 assets/scenes 的底图尺寸 + 150px/格）：
+#: ``bounds_cells = ceil(max(宽,高) / 150)``。用户实测房间「丝线测试」里六个
+#: 场景的边界曾被撑成 50 格（veil-map 的 BOUNDS_DEFAULT），标尺画到 39 列。
+SIXIAN_SCENE_FACTS = {
+    "assets/scenes/elegant-chess-chamber.jpg": {"size": (3900, 3900), "bounds": 26, "walls": 56},
+    "assets/scenes/crypt-valhalla.jpg": {"size": (4650, 3450), "bounds": 31, "walls": 128},
+    "assets/scenes/manor-floor-1.jpg": {"size": (6300, 6300), "bounds": 42, "walls": 118},
+    "assets/scenes/manor-floor-2.jpg": {"size": (6300, 6300), "bounds": 42, "walls": 111},
+    "assets/scenes/valhalla-tavern.jpg": {"size": (2100, 1500), "bounds": 14, "walls": 51},
+    "assets/scenes/wedding-day-mansion.jpg": {"size": (6750, 4800), "bounds": 45, "walls": 18},
+}
+
+
+def test_sixian_bounds_derived_from_background_size(sixian_convert):
+    """边界按底图尺寸推导（正方形边长取横竖较大值），不再落回默认 50。"""
+    converted, _skipped, warnings, _index = sixian_convert
+    facts = {item["background"]["path"]: item for item in converted}
+    assert set(facts) == set(SIXIAN_SCENE_FACTS)
+    for path, expected in SIXIAN_SCENE_FACTS.items():
+        item = facts[path]
+        assert (item["background"]["width"], item["background"]["height"]) == expected["size"]
+        assert item["bounds_cells"] == expected["bounds"]
+        assert len(item["walls"]) == expected["walls"]
+        # 正方形边界必须盖住底图（世界 = bounds × grid，底图居中）。
+        assert item["bounds_cells"] * item["grid"]["size"] >= max(expected["size"])
+    # 底图直径 14 格而不是 50 格：世界 2100 单位，底图正好铺满。
+    assert facts["assets/scenes/valhalla-tavern.jpg"]["bounds_cells"] == 14
+    # 墙与底图同一套像素坐标：不该出现「墙落在底图之外」的对账警告。
+    assert not any("之外" in text for text in warnings)
+
+
+@pytest.mark.parametrize(
+    "width,height,grid,expected",
+    [
+        (2100, 1500, 150, 14),  # 瓦尔哈拉酒馆：14×10 → 14（不是 50）
+        (4650, 3450, 150, 31),
+        (6750, 4800, 150, 45),  # 横竖不同：取较大值（正方形边长语义）
+        (2101, 1500, 150, 15),  # 向上取整：多出的 1px 也要占一格
+        (64, 64, 64, 5),  # 低于下限截到 5（veil-map MIN_BOUNDS）
+        (200_000, 200_000, 16, 200),  # 超上限截到 200（veil-map MAX_BOUNDS）
+        (0, 1500, 150, 5),  # 尺寸缺失回落下限
+        (2100, 1500, 0, 5),  # 格大小非法回落下限
+    ],
+)
+def test_scene_bounds_cells_rules(width, height, grid, expected):
+    assert cs.scene_bounds_cells(width, height, grid) == expected
+
+
+def test_sixian_walls_reconcile_with_source_pixels(sixian_convert):
+    """逐场景对账墙坐标（不是只对数量）：生成墙 = 源 LevelDB ``c`` 原样。"""
+    converted, _skipped, _warnings, index = sixian_convert
+    for item in converted:
+        scene_id = item["source_scene_id"]
+        source = {str(w.get("_id")): w for w in index.walls.get(scene_id) or []}
+        assert len(source) == len(item["walls"])
+        width, height = item["background"]["width"], item["background"]["height"]
+        grid = item["grid"]["size"]
+        for wall in item["walls"]:
+            raw = source[wall["id"]]
+            assert [
+                wall["points"][0]["x"],
+                wall["points"][0]["y"],
+                wall["points"][1]["x"],
+                wall["points"][1]["y"],
+            ] == [int(value) for value in raw["c"]]
+            # 墙坐标落在底图范围内（1 格容差）：贴边墙常有 0–40px 溢出。
+            for point in wall["points"]:
+                assert -grid <= point["x"] <= width + grid
+                assert -grid <= point["y"] <= height + grid
+
+
+def test_sixian_tavern_walls_use_source_pixel_space(sixian_convert):
+    """墙在转换层保持源图片像素空间；居中换算发生在 veil-map ``import_scene`` 落库层。
+
+    回归口径：转换层 x∈[46,2054]、y∈[80,1418]（2100×1500 图内像素），
+    若此处再减半尺寸就是「二次换算」，墙会整体偏移半张图。
+    """
+    converted, _skipped, _warnings, _index = sixian_convert
+    tavern = next(item for item in converted if "valhalla-tavern" in item["background"]["path"])
+    width, height = tavern["background"]["width"], tavern["background"]["height"]
+    assert (width, height) == (2100, 1500)
+    xs = [point["x"] for wall in tavern["walls"] for point in wall["points"]]
+    ys = [point["y"] for wall in tavern["walls"] for point in wall["points"]]
+    assert (min(xs), max(xs)) == (46, 2054)
+    assert (min(ys), max(ys)) == (80, 1418)
+
+
+def test_sixian_active_scene_matches_source(sixian_convert):
+    """源世界 active 场景（瓦尔哈拉酒馆）必须被标记，且排在最后（落库时最后激活）。"""
+    converted, _skipped, _warnings, index = sixian_convert
+    source_active = [scene_id for scene_id, doc in index.documents.items() if doc.get("active")]
+    assert source_active == ["LipwTXc3M2P0MJTr"]
+    active = [item for item in converted if item["active"]]
+    assert len(active) == 1
+    assert active[0]["source_scene_id"] == source_active[0]
+    assert active[0]["background"]["path"].endswith("valhalla-tavern.jpg")
+    # 转换排序把 active 场景排在最前（`(not active, name)`），落库端按 active 标记
+    # 决定谁最终激活，不依赖顺序。
+    assert converted[0] is active[0]
 
 
 def test_sixian_lights_radius_reconciles(sixian_convert):
@@ -544,14 +650,18 @@ def test_inspect_reports_sixian_plan(app_env):
     # change 路径没有消费方——**信息级 notes**，不混进 warnings（正常降级不该
     # 长得像错误）；journal 第四刀：sixian 的 journal 是空库，仍如实警告。
     assert data["warnings"] == ["journal 集合为空库，没有可转换的 journal 条目。"]
+    # 三档如实计数：真正进数值的 / 已记录暂无消费方的 / 镜像之外的。
     assert data["notes"] == [
-        "已导入 14 条条目级效果（transfer buff）：装备/专长上的路径式加值由 dnd5e "
-        "效果引擎按路径结算（AC/先攻/豁免/攻击/抗性等），"
-        "其中 11 条改动路径没有消费方，已忽略。"
+        "已导入 14 条条目级效果（transfer buff），共 16 条改动（change）："
+        "3 条接入数值（AC/先攻/豁免/攻击/抗性/速度…）、"
+        "13 条已记录但当前没有消费方（模块 flags / ATL / 物品活动 / 分速等，卡面效果页签可查）、"
+        "0 条在镜像模型之外（原文保留）。"
     ]
     assert data["actor_item_effects"] == 14
     assert data["actor_item_effects_imported"] == 14
-    assert data["actor_item_effects_unsupported"] == 11
+    assert data["actor_item_effects_full"] == 3
+    assert data["actor_item_effects_stored"] == 13
+    assert data["actor_item_effects_unsupported"] == 0
 
 
 @pytest.mark.parametrize(

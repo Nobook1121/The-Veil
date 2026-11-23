@@ -1448,11 +1448,18 @@ def _scene_resolution_callbacks(
         rel = pkg.resolve_background(convert_scenes.scene_background_src(scene_doc))
         if rel is None:
             return None
-        return {
+        # 宽高随背景图一起带出：``convert_scenes`` 用它推导地图边界
+        # （bounds_cells = ceil(max(w,h)/grid)），没有尺寸时该字段留空、由
+        # veil-map 的 import_scene 按真实图片尺寸兜底推导。
+        size = pkg.asset_image_size(rel)
+        resolved: dict[str, Any] = {
             "path": rel,
             "name": os.path.basename(rel),
             "bytes": pkg.asset_size(rel),
         }
+        if size is not None:
+            resolved["width"], resolved["height"] = int(size[0]), int(size[1])
+        return resolved
 
     def companion_for(scene_doc: dict[str, Any]) -> dict[str, Any] | None:
         """sixianyuchanmian 形态的伴生 JSON（``assets/scenes/<名>.json``）。"""
@@ -1543,12 +1550,18 @@ def _write_stash_scene_assets(
             continue
         total_bytes += len(data)
         row = dict(scene)
-        row["background"] = {
+        stored_background = {
             "asset": asset_rel,
             "name": str(background.get("name") or os.path.basename(asset_rel)),
             "bytes": int(background.get("bytes") or len(data)),
             "source_path": rel_path,
         }
+        # 宽高随行暂存：装配时 ``import_scene`` 才能复核边界推导（缺了也不影响
+        # 结果——服务端按真实图片尺寸兜底）。
+        for key in ("width", "height"):
+            if background.get(key):
+                stored_background[key] = int(background[key])
+        row["background"] = stored_background
         rows.append(row)
     return rows, warnings, total_bytes
 

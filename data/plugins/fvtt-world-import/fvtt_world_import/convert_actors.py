@@ -290,48 +290,32 @@ MAX_NOTES_CHARS = 6000
 # ``changes``（``[{key, mode, value}]`` 路径式数值修正）。这里只做形态转写，
 # **不改写语义**；真正的路径结算在 ``dnd5e_plugin.effect_changes``。
 #
-# 支持范围的镜像表：dnd5e 插件是运行期才装配的，导入器不能硬依赖它，因此
-# 维护一份同口径的键清单用于出告警。tests/test_fvtt_world_import_effects.py
-# 会拿真包对账「导入器判为支持 = 引擎真能结算」，两边不许漂移。
-EFFECT_NUMBER_KEYS = frozenset(
-    {
-        "system.attributes.ac.bonus",
-        "system.attributes.init.bonus",
-        "system.bonuses.abilities.save",
-        "system.bonuses.abilities.check",
-        "system.bonuses.abilities.ability_check",
-        "system.bonuses.abilities.saving_throw",
-        "system.bonuses.mwak.attack",
-        "system.bonuses.mwak.damage",
-        "system.bonuses.rwak.attack",
-        "system.bonuses.rwak.damage",
-        "system.bonuses.msak.attack",
-        "system.bonuses.rsak.attack",
-        "system.bonuses.spell.dc",
-    }
-)
-_ABILITY = r"(str|dex|con|int|wis|cha)"
-EFFECT_NUMBER_PATTERNS = (
-    re.compile(rf"^system\.abilities\.{_ABILITY}\.(check|save)\.roll\.mode$"),
-    re.compile(rf"^system\.bonuses\.abilities\.(save|saving_throw)\.{_ABILITY}$"),
-    re.compile(rf"^system\.bonuses\.abilities\.(check|ability_check)\.{_ABILITY}$"),
-    re.compile(r"^system\.bonuses\.skills\.[a-z-]+\.check$"),
-)
-EFFECT_LIST_KEYS = frozenset(
-    {
-        "system.traits.dr.value",
-        "system.traits.dv.value",
-        "system.traits.di.value",
-        "system.traits.ci.value",
-        "system.traits.languages.value",
-    }
-)
-EFFECT_TEXT_KEYS = frozenset({"system.attributes.ac.calc", "name"})
+# 路径分级口径只有一份：``dnd5e_plugin.effect_changes`` 的镜像 schema。
+# dnd5e 插件是运行期才装配的，导入器不硬依赖它——拿不到就一律按「已记录」
+# 处理（绝不丢数据），拿到就用引擎的三档结论（full / stored / unsupported）。
+# tests/test_fvtt_world_import_effects.py 会拿真包对账「导入器的分级 = 引擎
+# 的分级」，两边不许漂移。
+_ENGINE_MODULE: Any = None
+_ENGINE_LOOKED_UP = False
+
+
+def _effect_engine() -> Any:
+    """惰性取 dnd5e 效果引擎模块；插件缺席时返回 ``None``（不抛异常）。"""
+    global _ENGINE_MODULE, _ENGINE_LOOKED_UP
+    if not _ENGINE_LOOKED_UP:
+        _ENGINE_LOOKED_UP = True
+        try:
+            from dnd5e_plugin import effect_changes as engine  # noqa: PLC0415 - 可选依赖
+        except Exception:  # noqa: BLE001 - 插件没装/装坏了都不该让导入失败
+            engine = None
+        _ENGINE_MODULE = engine
+    return _ENGINE_MODULE
+
 
 #: 引擎模式枚举（与 Foundry ActiveEffect.MODES 同号）。
 EFFECT_MODE_NAMES = {0: "custom", 1: "multiply", 2: "add", 3: "downgrade", 4: "upgrade", 5: "override"}
 
-#: 已知但引擎不结算的字段族 → 出处说明（告警文案用）。
+#: 已知但引擎不结算的字段族 → 出处说明（告警/文案用）。
 EFFECT_UNSUPPORTED_HINTS = {
     "flags.": "模块/系统标志（midi-qol、dnd5e flags）",
     "ATL.": "Token 外观（ATL）",
@@ -901,18 +885,29 @@ def _spellcasting(
     return profile, pact_notes
 
 
-def effect_key_supported(key: Any) -> bool:
-    """这个 change 的 key 是否有引擎消费方（镜像 ``effect_changes`` 的口径）。
+def effect_key_tier(key: Any) -> str:
+    """这个 change 的 key 落在哪一档：``full`` / ``stored`` / ``unsupported``。
 
-    公开给 :mod:`fvtt_world_import.world_package` 的审计报告用——「哪些路径
-    真能结算」的口径只许有一份，两边不许各写一个。
+    口径来自 dnd5e 插件镜像 schema（只有一份，两边不许漂移）：
+    ``full`` = 有数值消费方，``stored`` = 记下但没有消费方（模块 flags / ATL /
+    物品活动 / 分速…），``unsupported`` = 连镜像 schema 都没有的路径。
+    引擎不可用时一律 ``stored``（宁可「已记录」也不丢数据）。
     """
     text = str(key or "").strip()
     if not text:
-        return False
-    if text in EFFECT_NUMBER_KEYS or text in EFFECT_LIST_KEYS or text in EFFECT_TEXT_KEYS:
-        return True
-    return any(pattern.match(text) for pattern in EFFECT_NUMBER_PATTERNS)
+        return "unsupported"
+    engine = _effect_engine()
+    if engine is None:
+        return "stored"
+    try:
+        return str(engine.classify_path(text)[2])
+    except Exception:  # noqa: BLE001 - 引擎内部异常不该让导入失败
+        return "stored"
+
+
+def effect_key_supported(key: Any) -> bool:
+    """这个 change 的 key 是否被镜像 schema 接住（不等于「已生效」）。"""
+    return effect_key_tier(key) != "unsupported"
 
 
 def _effect_unsupported_hint(key: Any) -> str:
@@ -1025,29 +1020,32 @@ def _flatten_effects(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _effects_summary(entries: Iterable[dict[str, Any]]) -> dict[str, Any]:
-    """效果小结：文档数 / change 数 / 生效候选 / 不支持键（前 5 个）。"""
+    """效果小结：文档数 / change 数 / 三档分级 / 各样例 key（前 5 个）。"""
     rows = [entry for entry in entries if isinstance(entry, Mapping)]
     changes = [change for entry in rows for change in entry.get("changes") or []]
-    unsupported = [
-        str(change.get("key") or "") for change in changes if not effect_key_supported(change.get("key"))
-    ]
-    top: list[str] = []
-    for key in unsupported:
-        if key and key not in top:
-            top.append(key)
-        if len(top) >= 5:
-            break
+    tiers = {"full": 0, "stored": 0, "unsupported": 0}
+    keys: dict[str, list[str]] = {"stored": [], "unsupported": []}
+    for change in changes:
+        key = str(change.get("key") or "")
+        tier = effect_key_tier(key)
+        tiers[tier] = tiers.get(tier, 0) + 1
+        bucket = keys.get(tier)
+        if bucket is not None and key and key not in bucket and len(bucket) < 5:
+            bucket.append(key)
     return {
         "documents": len(rows),
         "changes": len(changes),
         "transfer": sum(1 for entry in rows if entry.get("transfer")),
-        "unsupported": len(unsupported),
-        "unsupported_keys": top,
+        "full": tiers["full"],
+        "stored": tiers["stored"],
+        "unsupported": tiers["unsupported"],
+        "stored_keys": keys["stored"],
+        "unsupported_keys": keys["unsupported"],
     }
 
 
 def _warn_effects(warn: _Warn, summary: Mapping[str, Any], where: str) -> None:
-    """不支持的 key 出 ``effects.unsupported`` 告警（列前 5 个 + 出处）。"""
+    """只有「连镜像 schema 都没命中」的路径才告警；``stored`` 进 notes。"""
     count = _as_int(summary.get("unsupported"), 0)
     if count <= 0:
         return
@@ -1057,7 +1055,7 @@ def _warn_effects(warn: _Warn, summary: Mapping[str, Any], where: str) -> None:
         hint = _effect_unsupported_hint(key)
         if hint and hint not in hints:
             hints.append(hint)
-    text = f"{where} {count} 条效果改动（change）没有引擎消费方，已忽略：{'、'.join(keys)}"
+    text = f"{where} {count} 条效果改动（change）落在镜像模型之外，已按原文保留：{'、'.join(keys)}"
     if hints:
         text += f"（{'；'.join(hints)}）"
     warn.add("effects.unsupported", text)
@@ -2390,8 +2388,8 @@ def convert_world_actors(
         "vehicles": len(vehicles),
         "warnings": len(warnings),
     }
-    # 物品效果汇总：挂上了多少条 effect 文档、其中多少条能真生效、kiwee 补强命中。
-    effect_totals = {"documents": 0, "changes": 0, "transfer": 0, "unsupported": 0}
+    # 物品效果汇总：挂上了多少条 effect 文档、change 的三档分级、kiwee 补强命中。
+    effect_totals = {"documents": 0, "changes": 0, "transfer": 0, "full": 0, "stored": 0, "unsupported": 0}
     kiwee_total = {"lookups": 0, "enriched": 0}
     for row in [*characters, *npcs]:
         summary = row.get("effects") if isinstance(row.get("effects"), dict) else {}
@@ -2419,11 +2417,8 @@ def convert_world_actors(
 
 __all__ = [
     "ABILITY_KEYS",
-    "EFFECT_LIST_KEYS",
     "EFFECT_MODE_NAMES",
-    "EFFECT_NUMBER_KEYS",
-    "EFFECT_NUMBER_PATTERNS",
-    "EFFECT_TEXT_KEYS",
+    "EFFECT_UNSUPPORTED_HINTS",
     "KIWEE_CONDITIONS_ZH",
     "KIWEE_DAMAGE_TYPES_ZH",
     "KIWEE_ITEM_CHANGE_FIELDS",
@@ -2432,6 +2427,7 @@ __all__ = [
     "convert_world_actors",
     "default_kiwee_item_lookup",
     "effect_key_supported",
+    "effect_key_tier",
     "proficiency_for_cr",
     "xp_for_cr",
 ]

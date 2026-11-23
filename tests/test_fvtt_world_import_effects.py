@@ -7,11 +7,14 @@
 
 - heroes 包 41 条条目级效果全部收进 ``ActorIndex.item_effects``（三层复合键
   ``<actorId>.<itemId>.<effectId>``，``_id`` 写回，与 items 同款做法）；
-- 41 条全部挂到对应物品/角色卡，汇总计数如实（57 条 change / 24 条 unsupported）；
-- unsupported 全是真没有消费方的字段族（flags/ATL/activities/…），并且
-  **导入器的「支持」口径 = 引擎真能结算的口径**（两边不许漂移）；
+- 41 条全部挂到对应物品/角色卡，汇总计数如实（57 条 change：31 条接入数值 /
+  26 条已记录但没有消费方 / 0 条在镜像模型之外）；
+- flags/ATL/activities 这类模块/前端字段**不再丢弃**：引擎镜像模型照样
+  记下，只是分级为 stored（「已记录·暂无消费方」）；真正的外来命名空间才
+  算 unsupported，并且**导入器的分级口径 = 引擎镜像 schema 的口径**
+  （两边不许漂移）；
 - 「战斗风格：防御」这类真能生效的 transfer buff 真的改派生值（AC 12 → 13）；
-- sixian 包 14 条同样全挂载（11 条 unsupported）；
+- sixian 包 14 条同样全挂载（16 条 change：3 条接入数值 / 13 条已记录）；
 - kiwee 深库补强只在**同名**物品上生效（防护戒指 → AC+1/豁免+1），
   模糊命中的魔法物品不会把加值算到凡品身上。
 
@@ -38,9 +41,25 @@ from fvtt_world_import import world_package as wp  # noqa: E402
 HEROES_ZIP = REPO_ROOT / "docs" / "样本" / "heroes-to-yuanshan-0.1.6.zip"
 SIXIAN_ZIP = REPO_ROOT / "docs" / "样本" / "sixianyuchanmian-1.0.1.zip"
 
-#: 两包实测的条目级效果账目（发现数 / 挂载数 / change 数 / unsupported 数）。
-HEROES_EFFECTS = {"documents": 41, "changes": 57, "unsupported": 24, "transfer": 8}
-SIXIAN_EFFECTS = {"documents": 14, "changes": 16, "unsupported": 11, "transfer": 0}
+#: 两包实测的条目级效果账目（发现数 / change 数 / 三档分级 / transfer 数）。
+#: 三档相加 == changes：``full`` 真进数值、``stored`` 已记录但没消费方、
+#: ``unsupported`` 连镜像模型都没有（heroes / sixian 实测都是 0）。
+HEROES_EFFECTS = {
+    "documents": 41,
+    "changes": 57,
+    "full": 31,
+    "stored": 26,
+    "unsupported": 0,
+    "transfer": 8,
+}
+SIXIAN_EFFECTS = {
+    "documents": 14,
+    "changes": 16,
+    "full": 3,
+    "stored": 13,
+    "unsupported": 0,
+    "transfer": 0,
+}
 
 
 def _require_zip(path: Path) -> Path:
@@ -144,11 +163,16 @@ def test_heroes_all_item_effects_are_mounted(heroes) -> None:
         assert any(effect_id.startswith(f"{item_id}.") for effect_id in by_actor[actor_id])
 
 
-def test_heroes_unsupported_count_is_honest(heroes) -> None:
+def test_heroes_three_tier_counts_are_honest(heroes) -> None:
+    """41 条效果 / 57 条 change 的三档分级必须逐条对得上账。"""
     converted = heroes.converted
-    assert converted["totals"]["effects"]["unsupported"] == HEROES_EFFECTS["unsupported"]
-    # 少部分 change 没有消费方是**如实行为**（模块/前端字段），但一条支持路径
-    # 都不许被误判成 unsupported。
+    totals = converted["totals"]["effects"]
+    assert totals["changes"] == HEROES_EFFECTS["changes"]
+    assert totals["full"] == HEROES_EFFECTS["full"]
+    assert totals["stored"] == HEROES_EFFECTS["stored"]
+    assert totals["unsupported"] == HEROES_EFFECTS["unsupported"]
+    assert totals["full"] + totals["stored"] + totals["unsupported"] == totals["changes"]
+    # 导入器的分级口径 == 引擎镜像 schema 的口径（两边不许漂移）。
     from dnd5e_plugin.effect_changes import classify_path
 
     changes = [
@@ -160,18 +184,31 @@ def test_heroes_unsupported_count_is_honest(heroes) -> None:
     drifted = [
         change["key"]
         for change in changes
-        if (classify_path(change["key"])[0] != "unsupported")
-        != ca.effect_key_supported(change["key"])
+        if classify_path(change["key"])[2] != ca.effect_key_tier(change["key"])
     ]
     assert drifted == []
 
 
-def test_heroes_effect_degrades_are_reported_not_silent(heroes) -> None:
-    # unsupported 出告警（前 5 个 key + 出处），但不是错误。
+def test_heroes_stored_effects_are_kept_not_dropped(heroes) -> None:
+    """flags / ATL / activities / 分速 … 这些没有消费方的路径照样在卡面上。"""
+    from dnd5e_plugin.effect_changes import TIER_STORED, effective_sheet
+
+    sheet = _character(heroes.converted, "半身人诗人")["card"]["sheet"]
+    view = effective_sheet(sheet)
+    stored_keys = {record["key"] for record in view.stored}
+    assert "flags.dnd5e.halflingLucky" in stored_keys
+    assert "flags.midi-qol.ActivityOverTime" in stored_keys
+    assert "ATL.light.bright" in stored_keys
+    assert all(record["tier"] == TIER_STORED for record in view.stored)
+    # 值真的写进了镜像（「已记录」有内容），只是没有数值消费方。
+    assert view.value("flags.dnd5e.halflingLucky") is not None
+
+
+def test_heroes_effect_warnings_only_for_alien_paths(heroes) -> None:
+    """没有「镜像模型之外」的路径就不该出效果告警（stored 进 notes）。"""
     converted = heroes.converted
-    texts = [text for text in converted["warnings"] if "效果" in text]
-    assert texts
-    assert converted["degradations"]["effects.unsupported"] >= 1
+    assert not [text for text in converted["warnings"] if "效果" in text]
+    assert converted["degradations"].get("effects.unsupported", 0) == 0
 
 
 # -- 真生效的那几条 --------------------------------------------------------
@@ -246,29 +283,37 @@ def test_sixian_item_effects_are_mounted_too(sixian) -> None:
     converted = sixian.converted
     assert converted["totals"]["effects"]["documents"] == SIXIAN_EFFECTS["documents"]
     assert converted["totals"]["effects"]["changes"] == SIXIAN_EFFECTS["changes"]
-    assert converted["totals"]["effects"]["unsupported"] == SIXIAN_EFFECTS["unsupported"]
+    totals = converted["totals"]["effects"]
+    assert totals["full"] == SIXIAN_EFFECTS["full"]
+    assert totals["stored"] == SIXIAN_EFFECTS["stored"]
+    assert totals["unsupported"] == SIXIAN_EFFECTS["unsupported"]
     assert len(sixian.effects_of()) == SIXIAN_EFFECTS["documents"]
 
 
 # -- 审计报告：双计数 ------------------------------------------------------
 
 
-def test_audit_reports_imported_and_unsupported_counts(heroes) -> None:
+def test_audit_reports_imported_and_three_tier_counts(heroes) -> None:
     report = wp.audit(heroes.pkg)
     assert report["actor_item_effects"] == HEROES_EFFECTS["documents"]
     assert report["actor_item_effects_imported"] == HEROES_EFFECTS["documents"]
+    assert report["actor_item_effects_full"] == HEROES_EFFECTS["full"]
+    assert report["actor_item_effects_stored"] == HEROES_EFFECTS["stored"]
     assert report["actor_item_effects_unsupported"] == HEROES_EFFECTS["unsupported"]
     notes = [text for text in report["notes"] if "条目级效果" in text]
     assert notes and f"已导入 {HEROES_EFFECTS['documents']} 条" in notes[0]
-    assert f"{HEROES_EFFECTS['unsupported']} 条改动路径没有消费方" in notes[0]
+    assert f"{HEROES_EFFECTS['full']} 条接入数值" in notes[0]
+    assert f"{HEROES_EFFECTS['stored']} 条已记录但当前没有消费方" in notes[0]
     # 这类字段本来就不进数值：不该长得像错误。
     assert not [text for text in report["warnings"] if "条目级效果" in text]
 
 
-def test_audit_keeps_legacy_key_for_discovered_count(sixian) -> None:
+def test_audit_keeps_legacy_keys_for_discovered_and_unsupported(sixian) -> None:
     report = wp.audit(sixian.pkg)
     assert report["actor_item_effects"] == SIXIAN_EFFECTS["documents"]
     assert report["actor_item_effects_imported"] == SIXIAN_EFFECTS["documents"]
+    assert report["actor_item_effects_full"] == SIXIAN_EFFECTS["full"]
+    assert report["actor_item_effects_stored"] == SIXIAN_EFFECTS["stored"]
     assert report["actor_item_effects_unsupported"] == SIXIAN_EFFECTS["unsupported"]
 
 

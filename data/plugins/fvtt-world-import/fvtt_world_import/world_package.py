@@ -21,7 +21,7 @@ from typing import Any
 
 # 审计报告要知道「哪些 change 路径引擎真能结算」——口径只有一份，放在
 # convert_actors（它不 import world_package，无循环依赖），这里只读不写。
-from fvtt_world_import.convert_actors import effect_key_supported
+from fvtt_world_import.convert_actors import effect_key_tier
 from fvtt_world_import.convert_journal import page_plain_text
 from fvtt_world_import.convert_scenes import (
     GRID_MAX,
@@ -101,6 +101,90 @@ def _core_major(world: dict[str, Any]) -> int:
     return 0
 
 
+#: 单次读取资产头部字节数：只用来解析图片头（PNG IHDR / JPEG SOFn / WEBP / BMP），
+#: 不解码整张图。世界包里的底图常见 2–8 MB，读全量只为拿宽高太浪费。
+IMAGE_HEAD_BYTES = 256 * 1024
+
+
+def _png_size(raw: bytes) -> tuple[int, int] | None:
+    if raw[:8] != b"\x89PNG\r\n\x1a\n" or len(raw) < 24:
+        return None
+    return int.from_bytes(raw[16:20], "big"), int.from_bytes(raw[20:24], "big")
+
+
+def _jpeg_size(raw: bytes) -> tuple[int, int] | None:
+    if not raw.startswith(b"\xff\xd8"):
+        return None
+    index, total = 2, len(raw)
+    while index + 9 < total:
+        if raw[index] != 0xFF:
+            index += 1
+            continue
+        marker = raw[index + 1]
+        if marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7:
+            index += 2
+            continue
+        length = int.from_bytes(raw[index + 2 : index + 4], "big")
+        if length < 2:
+            return None
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            height = int.from_bytes(raw[index + 5 : index + 7], "big")
+            width = int.from_bytes(raw[index + 7 : index + 9], "big")
+            return width, height
+        index += 2 + length
+    return None
+
+
+def _webp_size(raw: bytes) -> tuple[int, int] | None:
+    if raw[:4] != b"RIFF" or raw[8:12] != b"WEBP" or len(raw) < 30:
+        return None
+    chunk = raw[12:16]
+    if chunk == b"VP8X":
+        return (
+            int.from_bytes(raw[24:27], "little") + 1,
+            int.from_bytes(raw[27:30], "little") + 1,
+        )
+    if chunk == b"VP8L" and len(raw) >= 25:
+        bits = int.from_bytes(raw[21:25], "little")
+        return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+    if chunk == b"VP8 " and raw[23:26] == b"\x9d\x01\x2a":
+        width = int.from_bytes(raw[26:28], "little") & 0x3FFF
+        height = int.from_bytes(raw[28:30], "little") & 0x3FFF
+        return width, height
+    return None
+
+
+def _bmp_size(raw: bytes) -> tuple[int, int] | None:
+    if raw[:2] != b"BM" or len(raw) < 30:
+        return None
+    header = int.from_bytes(raw[14:18], "little")
+    if header == 12:
+        width = int.from_bytes(raw[18:20], "little")
+        height = int.from_bytes(raw[20:22], "little")
+        return width, height
+    if header not in (40, 52, 56, 108, 124):
+        return None
+    width = int.from_bytes(raw[18:22], "little", signed=True)
+    height = int.from_bytes(raw[22:26], "little", signed=True)
+    return abs(width), abs(height)
+
+
+def read_image_size(raw: bytes) -> tuple[int, int] | None:
+    """按文件头读图片宽高（PNG / JPEG / WEBP / BMP）；认不出返回 ``None``。
+
+    与 veil-map ``media.sniff_image`` 同一套头部规则（这里不跨插件 import），
+    只用于给 ``convert_scenes`` 推导地图边界；认不出就让 veil-map 的服务按
+    真实图片尺寸兜底，结果一致。
+    """
+    if not raw:
+        return None
+    for reader in (_png_size, _jpeg_size, _webp_size, _bmp_size):
+        size = reader(raw)
+        if size and size[0] > 0 and size[1] > 0:
+            return size
+    return None
+
+
 class WorldPackage:
     """解包后的世界只读视图：``root`` 是 world.json 所在目录，资产留在 zip 里按需读。"""
 
@@ -129,6 +213,19 @@ class WorldPackage:
 
     def read_asset(self, rel_path: str) -> bytes:
         return self._archive.read(str(rel_path).strip().lstrip("/"))
+
+    def read_asset_head(self, rel_path: str, limit: int = IMAGE_HEAD_BYTES) -> bytes:
+        """只读资产前 ``limit`` 字节（解析图片头用，不解压整张底图）。"""
+        name = str(rel_path or "").strip().lstrip("/")
+        with self._archive.open(name) as handle:
+            return handle.read(int(limit))
+
+    def asset_image_size(self, rel_path: str) -> tuple[int, int] | None:
+        """资产图片的 (宽, 高)；非图片/读失败返回 ``None``。"""
+        try:
+            return read_image_size(self.read_asset_head(rel_path))
+        except (KeyError, OSError, RuntimeError):
+            return None
 
     def resolve_background(self, src: Any) -> str | None:
         """把 ``background.src`` 解析回 zip 内资产路径。
@@ -698,7 +795,7 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
     actor_items = 0
     item_effects = 0  # 发现的条目级效果文档数
     item_effects_imported = 0  # 真能挂到物品上的条数
-    item_effects_unsupported = 0  # 其中引擎没有消费方的 change 数
+    item_effect_tiers = {"full": 0, "stored": 0, "unsupported": 0}  # change 三档分级
     try:
         actor_index = read_actors(pkg, limits=limits)
     except LevelDbError as exc:
@@ -711,13 +808,11 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
         actor_items = sum(len(rows) for rows in actor_index.items.values())
         item_effects = actor_index.item_effects_total
         item_effects_imported = sum(len(rows) for rows in actor_index.item_effects.values())
-        item_effects_unsupported = sum(
-            1
-            for rows in actor_index.item_effects.values()
-            for doc in rows
-            for change in doc.get("changes") or []
-            if not effect_key_supported(change.get("key"))
-        )
+        for rows in actor_index.item_effects.values():
+            for doc in rows:
+                for change in doc.get("changes") or []:
+                    tier = effect_key_tier(change.get("key"))
+                    item_effect_tiers[tier] = item_effect_tiers.get(tier, 0) + 1
         if actor_index.orphan_items or actor_index.orphan_effects:
             warnings.append(
                 f"{actor_index.orphan_items} 个条目 / {actor_index.orphan_effects} 个效果"
@@ -726,14 +821,16 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
         if not actor_index.documents:
             warnings.append("包里没有任何角色。")
         if item_effects_imported:
-            # 双计数：导入了几条 + 其中多少条路径没人消费。后者是如实行为
-            # （flags/ATL/activities 这类模块与前端字段本来就不进数值），
+            # 三档如实计数：真正进数值的 / 已记录但没有消费方的 / 连镜像模型
+            # 都没有的。中间那档是常态（模块 flags、ATL、物品活动、分速…），
             # 不该长得像错误，所以进 notes 不进 warnings。
             notes.append(
-                f"已导入 {item_effects_imported} 条条目级效果（transfer buff）："
-                "装备/专长上的路径式加值由 dnd5e 效果引擎按路径结算（AC/先攻/豁免/"
-                "攻击/抗性等），"
-                f"其中 {item_effects_unsupported} 条改动路径没有消费方，已忽略。"
+                f"已导入 {item_effects_imported} 条条目级效果（transfer buff），"
+                f"共 {sum(item_effect_tiers.values())} 条改动（change）："
+                f"{item_effect_tiers.get('full', 0)} 条接入数值（AC/先攻/豁免/攻击/抗性/速度…）、"
+                f"{item_effect_tiers.get('stored', 0)} 条已记录但当前没有消费方"
+                "（模块 flags / ATL / 物品活动 / 分速等，卡面效果页签可查）、"
+                f"{item_effect_tiers.get('unsupported', 0)} 条在镜像模型之外（原文保留）。"
             )
         elif item_effects:
             notes.append(
@@ -793,11 +890,15 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
         "npcs": actor_counts["npc"],
         "vehicles": actor_counts["vehicle"],
         "actor_items": actor_items,
-        # 条目级效果三段计数（heroes 实测：发现 41 条 / 挂上 41 条 / 其中 24 条
-        # change 路径没有消费方——如实行为，不是导入失败）。
+        # 条目级效果计数：发现 / 挂上 / change 三档分级（heroes 实测：发现 41
+        # 条、挂上 41 条、57 条 change 里 29 条接入数值、28 条已记录但没有消费
+        # 方——如实行为，不是导入失败）。``unsupported`` 键为兼容保留，语义
+        # 收紧成「连镜像模型都没有的路径」。
         "actor_item_effects": item_effects,
         "actor_item_effects_imported": item_effects_imported,
-        "actor_item_effects_unsupported": item_effects_unsupported,
+        "actor_item_effects_full": item_effect_tiers.get("full", 0),
+        "actor_item_effects_stored": item_effect_tiers.get("stored", 0),
+        "actor_item_effects_unsupported": item_effect_tiers.get("unsupported", 0),
         "actor_folders": actor_folders,
         "journals": len(journals_detail),
         "journal_pages": sum(row["pages"] for row in journals_detail),
