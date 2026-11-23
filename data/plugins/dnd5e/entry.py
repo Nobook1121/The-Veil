@@ -137,6 +137,7 @@ def create_tools():
         logging.getLogger(__name__).debug("dnd5e_kiwee_register_failed", exc_info=True)
 
     from dnd5e_plugin.encounter import create_tools as _encounter_tools
+    from dnd5e_plugin.tools import create_tools as _formula_tools
 
-    return _encounter_tools()
+    return [*_formula_tools(), *_encounter_tools()]
 

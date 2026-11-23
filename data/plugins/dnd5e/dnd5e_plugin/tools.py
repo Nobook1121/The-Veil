@@ -1,10 +1,16 @@
 """D&D 5e 专属 AI 工具声明与提示词片段。
 
-工具实现仍在核心工具表里；本模块只声明「哪些专属工具属于 5e」以及 KP 必须知道
-的规则口径。核心只负责把这些片段拼进提示词，不解释任何 5e 语义。
+既有检定工具的实现仍在核心工具表里，本模块只声明「哪些专属工具属于 5e」以及
+KP 必须知道的规则口径；插件自有工具（遭遇开战、公式求值）分别由
+``encounter.py`` 与本模块的 ``create_tools()`` 提供给插件注册表。核心只负责把
+这些片段拼进提示词，不解释任何 5e 语义。
 """
 
 from __future__ import annotations
+
+from typing import Any, Mapping
+
+from trpg_server.agents.tools.base import AgentTool
 
 # 5e 的检定工具复用核心实现，但以独立工具名下发，避免 KP 被 COC7 的百分制口径误导。
 DND5E_TOOL_NAMES: tuple[str, ...] = ("dnd5e.roll_check", "dnd5e.start_encounter")
@@ -121,4 +127,184 @@ class Dnd5eTools:
         from dnd5e_plugin.site_agent import site_agent_profile
 
         return site_agent_profile()
+
+
+# ---------------------------------------------------------------- 公式求值工具
+
+#: 允许从工具参数直接注入的上下文键（其余的过滤掉，避免把任意 JSON 灌进求值器）。
+FORMULA_CONTEXT_KEYS: tuple[str, ...] = ("level", "abilities", "attributes", "bonuses", "prof")
+
+FORMULA_EVAL_DESCRIPTION = (
+    "安全求值 D&D 5e 公式字符串（FVTT 公式字段、骰式与 @ 引用），只做算术与投骰，不能执行任意代码。"
+    "适用场景："
+    "① 导入的 FVTT 数据里出现 max(30, 30 + @bonuses.speed)、1d6 + @abilities.str.mod 这类公式字段，"
+    "需要算出当前角色上的实际数值；"
+    "② 玩家问「这个加值/伤害/AC 是怎么算出来的」，需要逐项代入角色卡数据并给出投骰明细；"
+    "③ 需要临时结算一条骰式（2d6+3、1d8 + @abilities.dex.mod）而不想建战斗。"
+    "用法：formula 填公式原文；character_id 填房间内绑定的角色卡 id，"
+    "工具会从该卡 sheet 取 level/prof/abilities/attributes 等 roll data；"
+    "也可以直接给 context（键限 level/abilities/attributes/bonuses/prof）覆盖个别数值。"
+    "支持：数字/字符串/布尔、+ - * / // %、比较、and or not、括号、一元负号、"
+    "骰式 NdM（如 1d6、2d6、d20）、@path.to.value 引用、"
+    "函数 max/min/floor/ceil/round/abs/clamp/sign/if(cond,a,b)。"
+    "不支持属性访问代码、下标、lambda、推导式、f-string、__import__/open 等任何 Python 能力；"
+    "越界或未知引用会返回可读错误。骰点由工具真实投出，不要自己编造点数。"
+)
+
+FORMULA_EVAL_PARAMETERS: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "formula": {
+            "type": "string",
+            "description": (
+                "公式原文，例如 \"1d6 + @abilities.str.mod\"、\"max(30, 30 + 10)\"、"
+                "\"2 * @level\"、\"clamp(@abilities.dex.mod, 0, 5)\"。"
+            ),
+        },
+        "character_id": {
+            "type": "string",
+            "description": (
+                "可选。房间成员绑定的角色卡 id；给了就从该卡 sheet 生成 roll data"
+                "（level/prof/abilities/attributes），不必手工传数值。"
+            ),
+        },
+        "context": {
+            "type": "object",
+            "description": (
+                "可选。直接给定 roll data，只接受 level/abilities/attributes/bonuses/prof 五个键；"
+                "与 character_id 同时给时，标量键覆盖角色卡算出的值。"
+            ),
+            "properties": {
+                "level": {"type": "integer", "description": "角色等级。"},
+                "prof": {"type": "integer", "description": "熟练加值。"},
+                "abilities": {
+                    "type": "object",
+                    "description": "属性分值，如 {\"str\": 16, \"dex\": 14}；@abilities.dex.mod 会自动按 (值-10)//2 补。",
+                },
+                "attributes": {
+                    "type": "object",
+                    "description": "派生数值，如 {\"prof\": 2, \"hp\": {\"value\": 20, \"max\": 24}}。",
+                },
+                "bonuses": {
+                    "type": "object",
+                    "description": "效果/物品加值，如 {\"speed\": 10, \"abilities\": {\"save\": 1}}。",
+                },
+            },
+        },
+    },
+    "required": ["formula"],
+}
+
+
+def _text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _character_card(context: Any, character_id: str) -> dict[str, Any] | None:
+    """按 id 在房间成员绑定的角色卡里找卡；找不到返回 None（不读盘外数据）。"""
+    if not character_id:
+        return None
+    room_info = getattr(context, "room_info", None)
+    info = room_info() if callable(room_info) else room_info
+    members = (info or {}).get("members") if isinstance(info, Mapping) else None
+    for member in members if isinstance(members, list) else []:
+        if not isinstance(member, Mapping):
+            continue
+        card = member.get("character_card")
+        if not isinstance(card, Mapping):
+            continue
+        known = {
+            _text(card.get("id")),
+            _text(member.get("character_id")),
+            _text(member.get("characterCardId")),
+        }
+        if character_id in known:
+            return dict(card)
+    return None
+
+
+def _explicit_context(arguments: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
+    """取参数里的 context，只保留白名单键；第二项表示是否给了非法类型。"""
+    raw = arguments.get("context")
+    if raw is None:
+        return {}, True
+    if not isinstance(raw, Mapping):
+        return {}, False
+    return {key: raw[key] for key in FORMULA_CONTEXT_KEYS if key in raw}, True
+
+
+def _evaluate_formula(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+    """``dnd5e.formula_eval`` 的处理函数：装配 roll data 后交给 ``formula.evaluate``。"""
+    from dnd5e_plugin import formula as formula_module
+
+    formula_text = arguments.get("formula")
+    if not isinstance(formula_text, str) or not formula_text.strip():
+        return {
+            "ok": False,
+            "code": "dnd5e.formula_required",
+            "error": "请提供要计算的公式（formula），例如 1d6 + @abilities.str.mod。",
+        }
+    explicit, context_ok = _explicit_context(arguments)
+    if not context_ok:
+        return {
+            "ok": False,
+            "code": "dnd5e.context_invalid",
+            "error": "context 必须是对象，只接受 level/abilities/attributes/bonuses/prof 五个键。",
+        }
+
+    roll_data: dict[str, Any] = {}
+    source = "context" if explicit else "none"
+    character_id = _text(arguments.get("character_id"))
+    if character_id:
+        card = _character_card(context, character_id)
+        if card is None:
+            return {
+                "ok": False,
+                "code": "dnd5e.character_not_found",
+                "error": (
+                    f"房间成员里找不到角色卡「{character_id}」；"
+                    "请确认 id 属于本房间绑定的卡，或改用 context 直接给数值。"
+                ),
+            }
+        from dnd5e_plugin.rules import sheet_of
+
+        roll_data.update(formula_module.roll_data_from_sheet(sheet_of(card)))
+        source = "character"
+    if explicit:
+        roll_data.update(explicit)
+        source = "character+context" if source == "character" else "context"
+
+    result = formula_module.evaluate(formula_text, roll_data)
+    if result.get("ok"):
+        result["context_source"] = source
+        if character_id:
+            result["character_id"] = character_id
+    return result
+
+
+FORMULA_EVAL_TOOL = AgentTool(
+    name="dnd5e.formula_eval",
+    description=FORMULA_EVAL_DESCRIPTION,
+    parameters=FORMULA_EVAL_PARAMETERS,
+    handler=_evaluate_formula,
+    # 与既有插件工具同一口径：只在 dnd5e 房间下发（KP 与 AI 玩家共用规则集门闸）。
+    rulesets=("dnd5e",),
+)
+
+
+def create_tools() -> list[AgentTool]:
+    """本模块提供的插件工具（``dnd5e.formula_eval``）。"""
+    return [FORMULA_EVAL_TOOL]
+
+
+__all__ = [
+    "DND5E_KP_PROMPT",
+    "DND5E_KP_TOOL_ALLOW",
+    "DND5E_KP_TOOL_DENY",
+    "DND5E_TOOL_NAMES",
+    "Dnd5eTools",
+    "FORMULA_CONTEXT_KEYS",
+    "FORMULA_EVAL_TOOL",
+    "create_tools",
+]
 
