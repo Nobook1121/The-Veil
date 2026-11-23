@@ -342,8 +342,42 @@ def _carry_fraction(cell: int, fraction: float) -> tuple[int, float]:
     return int(cell) + int(carry), fraction - carry
 
 
+def _normalize_light_animation(raw: Any) -> dict[str, Any] | None:
+    """光照动画描述（FVTT ``config.animation``）：只存参数，不改观感。
+
+    前端目前不做逐帧闪烁，纯粹是把源数据带到场景文档里，避免二次导入丢字段。
+    """
+    if not isinstance(raw, dict):
+        return None
+    kind = str(raw.get("type") or "").strip().lower()[:24]
+    if not kind or kind in {"none", "null"}:
+        return None
+    animation = {"type": kind}
+    try:
+        speed = float(raw.get("speed", 1.0))
+    except (TypeError, ValueError):
+        speed = 1.0
+    animation["speed"] = round(max(0.0, min(10.0, speed if math.isfinite(speed) else 1.0)), 3)
+    try:
+        intensity = float(raw.get("intensity", 1.0))
+    except (TypeError, ValueError):
+        intensity = 1.0
+    animation["intensity"] = round(
+        max(0.0, min(10.0, intensity if math.isfinite(intensity) else 1.0)), 3
+    )
+    animation["reverse"] = bool(raw.get("reverse", False))
+    color = str(raw.get("color") or "").strip().lower()
+    if _HEX_COLOR.match(color):
+        animation["color"] = color
+    return animation
+
+
 def _normalize_token_light(raw: Any) -> dict[str, Any] | None:
-    """棋子自带光源（火把、法术光）；与场景光源走同一套明暗半径描述。"""
+    """棋子自带光源（火把、法术光）；与场景光源走同一套明暗半径描述。
+
+    ``angle`` / ``rotation`` 是锥形光朝向（0° = 正东、顺时针增大），
+    ``animation`` 只作数据透传。半径单位统一是「格」。
+    """
     if not isinstance(raw, dict) or raw.get("remove") is True:
         return None
     bright = _clamp(_as_int(raw.get("bright_cells"), 4), 0, MAX_VISION_CELLS)
@@ -369,7 +403,43 @@ def _normalize_token_light(raw: Any) -> dict[str, Any] | None:
         "intensity": max(0.0, min(10.0, intensity)),
         "enabled": bool(raw.get("enabled", True)),
         "shadows": bool(raw.get("shadows", True)),
+        "angle": _clamp(_as_int(raw.get("angle"), 360), 0, 360),
+        "rotation": _as_int(raw.get("rotation"), 0) % 360,
+        "animation": _normalize_light_animation(raw.get("animation")),
     }
+
+
+def _normalize_token_sight(raw: Any) -> dict[str, Any] | None:
+    """棋子的视线文档里只保留「暗视/夜视」相关字段。
+
+    FVTT 的 ``sight`` 是 ``{enabled, range, visionMode, ...}``；``range`` 与
+    场景距离同单位（英尺），这里换算成格，前端不需要再猜单位。没有
+    ``visionMode`` 也没有半径时返回 ``None``（不写字段，避免伪造暗视）。
+    """
+    if not isinstance(raw, dict):
+        return None
+    mode = str(raw.get("visionMode") or raw.get("vision_mode") or "").strip().lower()[:24]
+    range_cells = _clamp(_as_int(raw.get("range_cells"), 0), 0, MAX_VISION_CELLS)
+    if range_cells <= 0:
+        range_cells = _clamp(
+            spatial.feet_to_cells(raw.get("range"), FEET_PER_CELL), 0, MAX_VISION_CELLS
+        )
+    if not mode and range_cells <= 0:
+        return None
+    return {
+        "visionMode": mode,
+        "range_cells": range_cells,
+        "enabled": bool(raw.get("enabled", True)),
+    }
+
+
+def _normalize_token_flags(raw: Any) -> dict[str, Any] | None:
+    """棋子 flags 的极窄白名单：目前只有「暗视」一个开关。"""
+    if not isinstance(raw, dict):
+        return None
+    if not raw.get("darkvision"):
+        return None
+    return {"darkvision": True}
 
 
 def _normalize_token_combat(raw: Any) -> dict[str, Any] | None:
@@ -460,6 +530,9 @@ def _normalize_token(raw: Any, grid: int, offset_x: int, offset_y: int) -> dict[
         # 0 表示跟随场景迷雾的默认视野；>0 时为该棋子的视野半径（格）。
         "vision_cells": _clamp(_as_int(raw.get("vision_cells"), 0), 0, MAX_VISION_CELLS),
         "light": _normalize_token_light(raw.get("light")),
+        # 暗视/夜视：只透传明确写了的来源（visionMode / flags.darkvision）。
+        "sight": _normalize_token_sight(raw.get("sight")),
+        "flags": _normalize_token_flags(raw.get("flags")),
     }
 
 
@@ -615,7 +688,9 @@ def _normalize_light(raw: Any, index: int) -> dict[str, Any] | None:
         "color": color,
         "intensity": max(0.0, min(10.0, intensity)),
         "shadows": bool(raw.get("shadows", True)),
+        # 锥形光：angle 是张角（360 = 全向），rotation 是朝向（0° = 正东、顺时针）。
         "angle": _clamp(_as_int(raw.get("angle"), 360), 0, 360),
+        "rotation": _as_int(raw.get("rotation"), 0) % 360,
         # 场景光源可被 KP 开关；UVTT 导入的光源默认点亮、可直接使用。
         "enabled": bool(raw.get("enabled", True)),
     }
@@ -5401,6 +5476,7 @@ def _import_external_scene(
             "color": item.get("color"),
             "intensity": item.get("intensity"),
             "angle": item.get("angle"),
+            "rotation": item.get("rotation"),
             "enabled": item.get("enabled"),
         }
         for item in scene.get("lights") or []
@@ -5416,6 +5492,9 @@ def _import_external_scene(
             "h": item.get("h"),
             "kind": item.get("kind") or "npc",
             "color": item.get("color"),
+            # 棋子自带光源 / 视线（暗视）：转换器给了就透传，没给就不写。
+            "light": item.get("light"),
+            "sight": item.get("sight"),
         }
         for item in scene.get("tokens") or []
         if isinstance(item, dict)

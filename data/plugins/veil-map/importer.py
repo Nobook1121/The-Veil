@@ -530,6 +530,10 @@ def _read_foundry(data: dict[str, Any], media: Any) -> dict[str, Any]:
                 "intensity": _clamp(_number(config.get("alpha", 1.0), 1.0), 0.0, 10.0),
                 "shadows": bool(config.get("shadows", True)),
                 "angle": int(_clamp(_number(config.get("angle"), 360.0), 0.0, 360.0)),
+                # 锥形光朝向：v10+ 在 light 文档上，早期版本在 config 上。
+                "rotation": int(
+                    round(_number(item.get("rotation", config.get("rotation")), 0.0)) % 360
+                ),
             }
         )
     if len(lights) > MAX_IMPORT_LIGHTS:

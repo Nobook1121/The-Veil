@@ -53,6 +53,10 @@
     },
     "frontend_assets": [
       {
+        "path": "ui/lighting.js",
+        "type": "script"
+      },
+      {
         "path": "ui/map.js",
         "type": "script"
       },

@@ -289,6 +289,10 @@ def convert_lights(
                 "color": str(config.get("color") or "#ffaa00"),
                 "intensity": max(0.0, min(10.0, _number(config.get("alpha"), 1.0))),
                 "angle": max(0, min(360, int(round(_number(config.get("angle"), 360.0))))),
+                # 锥形光朝向：v10+ 在 light 文档上，早期版本在 config 上。
+                "rotation": int(
+                    round(_number(doc.get("rotation", config.get("rotation")), 0.0)) % 360
+                ),
                 "enabled": not bool(doc.get("hidden")),
             }
         )
@@ -298,12 +302,62 @@ def convert_lights(
     return lights, warnings
 
 
-def convert_tokens(token_docs: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+def convert_token_light(
+    raw: Any, distance: float
+) -> dict[str, Any] | None:
+    """棋子自带光源：``light: {dim, bright, color, alpha, angle, rotation, animation}``。
+
+    源文档字段原样带过来（不认识的键也保留，二次导入不丢信息），另外补一份
+    已格化的 ``bright_cells`` / ``dim_cells`` / ``intensity``，veil-map 侧不用
+    再猜单位。没有光源（或半径都是 0）时返回 ``None``，不写字段。
+    """
+    if not isinstance(raw, dict) or not raw:
+        return None
+    bright = _number(raw.get("bright"))
+    dim = _number(raw.get("dim"), raw.get("range"))
+    bright_cells = max(0, int(round(bright / distance))) if bright > 0 else 0
+    dim_cells = max(0, int(round(dim / distance))) if dim > 0 else 0
+    if dim_cells <= 0:
+        dim_cells = max(0, int(round(_number(raw.get("bright")) / distance))) if bright > 0 else 0
+        if dim_cells <= 0:
+            return None
+    light: dict[str, Any] = dict(raw)
+    light["bright_cells"] = min(bright_cells, dim_cells)
+    light["dim_cells"] = dim_cells
+    if "alpha" in raw:
+        light["intensity"] = max(0.0, min(10.0, _number(raw.get("alpha"), 1.0)))
+    elif "intensity" not in raw:
+        light["intensity"] = 1.0
+    light["enabled"] = bool(raw.get("enabled", True))
+    return light
+
+
+def convert_token_sight(raw: Any, distance: float) -> dict[str, Any] | None:
+    """视线文档：只带暗视/夜视需要的字段（``visionMode`` + 格化半径）。"""
+    if not isinstance(raw, dict) or not raw:
+        return None
+    mode = str(raw.get("visionMode") or raw.get("vision_mode") or "").strip().lower()[:24]
+    range_cells = 0
+    if _number(raw.get("range")) > 0:
+        range_cells = max(0, int(round(_number(raw.get("range")) / distance)))
+    if not mode and range_cells <= 0:
+        return None
+    return {
+        "visionMode": mode,
+        "range_cells": range_cells,
+        "enabled": bool(raw.get("enabled", True)),
+    }
+
+
+def convert_tokens(
+    token_docs: list[dict[str, Any]], distance: float = 5.0
+) -> tuple[list[dict[str, Any]], list[str]]:
     """棋子 ``x/y``（图片像素）+ ``width/height``（格）+ disposition → veil-map 棋子。
 
     格坐标由 veil-map 服务按图片中心换算；这里只直供像素位置与阵营。
     disposition → ``color``（阵营色环）；``kind`` 一律 npc（玩家棋子由房间
     成员入座逻辑管理，不与导入棋子混绑）。``hidden`` 棋子照常导入（计数对账）。
+    棋子自带光源（``light``）与视线（``sight``）原样透传，没有就不写。
     """
     tokens: list[dict[str, Any]] = []
     hidden = 0
@@ -313,19 +367,24 @@ def convert_tokens(token_docs: list[dict[str, Any]]) -> tuple[list[dict[str, Any
             continue
         disposition = _clamp_int(doc.get("disposition"), 0, -1, 1)
         hidden += 1 if doc.get("hidden") else 0
-        tokens.append(
-            {
-                "id": (_SCENE_ID_SAFE.sub("", _sub_id(doc.get("_id") or "")) or f"token-{index + 1}")[:64],
-                "name": str(doc.get("name") or "棋子")[:40],
-                "x": int(round(x)),
-                "y": int(round(y)),
-                "w": _clamp_int(doc.get("width"), 1, 1, 4),
-                "h": _clamp_int(doc.get("height"), 1, 1, 4),
-                "kind": "npc",
-                "color": DISPOSITION_COLORS.get(disposition, DISPOSITION_COLORS[0]),
-                "disposition": disposition,
-            }
-        )
+        token = {
+            "id": (_SCENE_ID_SAFE.sub("", _sub_id(doc.get("_id") or "")) or f"token-{index + 1}")[:64],
+            "name": str(doc.get("name") or "棋子")[:40],
+            "x": int(round(x)),
+            "y": int(round(y)),
+            "w": _clamp_int(doc.get("width"), 1, 1, 4),
+            "h": _clamp_int(doc.get("height"), 1, 1, 4),
+            "kind": "npc",
+            "color": DISPOSITION_COLORS.get(disposition, DISPOSITION_COLORS[0]),
+            "disposition": disposition,
+        }
+        light = convert_token_light(doc.get("light"), distance)
+        if light is not None:
+            token["light"] = light
+        sight = convert_token_sight(doc.get("sight"), distance)
+        if sight is not None:
+            token["sight"] = sight
+        tokens.append(token)
     warnings: list[str] = []
     if hidden:
         warnings.append(
@@ -465,7 +524,7 @@ def convert_scene(
     light_docs = lights if lights is not None else companion_lights(companion or {})
     out_walls, wall_warnings = convert_walls(wall_docs)
     out_lights, light_warnings = convert_lights(light_docs, grid["distance"])
-    out_tokens, token_warnings = convert_tokens(tokens or [])
+    out_tokens, token_warnings = convert_tokens(tokens or [], grid["distance"])
     origin_x, origin_y = scene_grid_origin(scene, companion)
     warnings = wall_warnings + light_warnings + token_warnings
 
@@ -586,6 +645,8 @@ __all__ = [
     "convert_ambient",
     "convert_lights",
     "convert_scene",
+    "convert_token_light",
+    "convert_token_sight",
     "convert_tokens",
     "convert_walls",
     "convert_world_scenes",

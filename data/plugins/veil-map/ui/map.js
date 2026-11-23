@@ -141,6 +141,11 @@
         var fogBackgroundProbe = null;
         // 剧本场景地图的标定与标记（服务端已按观察者过滤 DM 版内容）。
         var sceneBinding = null;
+        // 光照引擎（ui/lighting.js）：离屏合成 + 墙体可见多边形 + 暗视。
+        // 资源加载失败时退回旧式逐光源渐变，避免直接黑屏。
+        var lightingEngine = window.VeilLighting && typeof window.VeilLighting.createEngine === "function"
+            ? window.VeilLighting.createEngine()
+            : null;
 
         host.classList.add("ws-plugin-map");
 
@@ -901,56 +906,140 @@
             });
         }
 
-        function drawSceneLayers(camera) {
-            if (!mapState) return;
-            var grid = gridSize();
+        /** 光源强度：缺失时按 1 处理（服务端总会下发，旧数据可能没有）。 */
+        function lightIntensity(value) {
+            var number = Number(value);
+            return Number.isFinite(number) ? number : 1;
+        }
 
-            function paintLight(x, y, dimCells, brightCells, color, intensity) {
-                var point = ctx.worldToScreen(Number(x) || 0, Number(y) || 0);
-                var radius = Math.max(1, Number(dimCells) || 0) * grid * camera.zoom;
+        /**
+         * 光照层数据：场景光源固定位置，棋子自带光源挂在 footprint 中心并随
+         * 棋子移动（拖拽时每吸附一格就会重画，光跟着走）。锥形光用
+         * ``angle``/``rotation``（0° = 正东，顺时针增大）。
+         */
+        function lightSources() {
+            var grid = gridSize();
+            var list = [];
+            var lights = Array.isArray(mapState.lights) ? mapState.lights : [];
+            lights.forEach(function (light) {
+                if (light.enabled === false) return;
+                list.push({
+                    id: "scene:" + String(light.id || ""),
+                    x: Number(light.x) || 0,
+                    y: Number(light.y) || 0,
+                    bright_cells: asInt(light.bright_cells, 0),
+                    dim_cells: asInt(light.range_cells, asInt(light.dim_cells, 0)),
+                    color: String(light.color || "#ffaa00"),
+                    intensity: lightIntensity(light.intensity),
+                    angle: asInt(light.angle, 360),
+                    rotation: Number(light.rotation) || 0,
+                    shadows: light.shadows !== false,
+                });
+            });
+            activeTokens().forEach(function (token) {
+                var light = token.light;
+                if (!light || typeof light !== "object" || light.enabled === false) return;
+                var anchor = tokenWorld(token);
+                var width = Math.max(1, asInt(token.w, 1));
+                var height = Math.max(1, asInt(token.h, 1));
+                list.push({
+                    id: "token:" + String(token.id || ""),
+                    x: anchor.x + width * grid / 2,
+                    y: anchor.y + height * grid / 2,
+                    bright_cells: asInt(light.bright_cells, 0),
+                    dim_cells: asInt(light.dim_cells, asInt(light.bright_cells, 0)),
+                    color: String(light.color || "#ffaa00"),
+                    intensity: lightIntensity(light.intensity),
+                    angle: asInt(light.angle, 360),
+                    rotation: Number(light.rotation) || Number(token.rotation) || 0,
+                    shadows: light.shadows !== false,
+                });
+            });
+            return list;
+        }
+
+        /**
+         * 暗视（夜视）：只认 token 数据里明确写了的来源 —— ``sight.visionMode``
+         * 为 darkvision，或 ``flags.darkvision``。没有数据就不画，不猜。
+         */
+        function darkvisionCells(token) {
+            var sight = token && token.sight && typeof token.sight === "object" ? token.sight : null;
+            var flags = token && token.flags && typeof token.flags === "object" ? token.flags : null;
+            var mode = sight ? String(sight.visionMode || sight.vision_mode || "").toLowerCase() : "";
+            var flagged = Boolean(flags && flags.darkvision === true);
+            if (mode !== "darkvision" && !flagged) return 0;
+            var radius = asInt(sight && sight.range_cells, 0);
+            if (radius <= 0) radius = asInt(token.vision_cells, 0);
+            return radius > 0 ? radius : 0;
+        }
+
+        function darkvisionSources() {
+            var grid = gridSize();
+            var list = [];
+            activeTokens().forEach(function (token) {
+                var radius = darkvisionCells(token);
+                if (radius <= 0) return;
+                var anchor = tokenWorld(token);
+                list.push({
+                    id: String(token.id || ""),
+                    x: anchor.x + Math.max(1, asInt(token.w, 1)) * grid / 2,
+                    y: anchor.y + Math.max(1, asInt(token.h, 1)) * grid / 2,
+                    radius_cells: radius,
+                });
+            });
+            return list;
+        }
+
+        /** 光照引擎缺失时的退化路径：逐光源径向渐变（旧观感，聊胜于无）。 */
+        function paintLightFallback(camera, grid) {
+            var lights = lightSources();
+            context.save();
+            lights.forEach(function (light) {
+                var point = ctx.worldToScreen(light.x, light.y);
+                var radius = Math.max(1, light.dim_cells) * grid * camera.zoom;
                 if (radius <= 2) return;
-                var strength = clamp(Number(intensity) || 1, 0, 1.5);
-                var brightStop = brightCells > 0
-                    ? clamp(Number(brightCells) / Math.max(1, Number(dimCells)), 0.05, 1)
+                var strength = clamp(light.intensity, 0, 1.5);
+                var brightStop = light.bright_cells > 0
+                    ? clamp(light.bright_cells / Math.max(1, light.dim_cells), 0.05, 1)
                     : 1;
                 var gradient = context.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius);
-                gradient.addColorStop(0, hexToRgba(color, 0.24 * strength));
-                gradient.addColorStop(brightStop * 0.92, hexToRgba(color, 0.13 * strength));
-                gradient.addColorStop(1, hexToRgba(color, 0));
+                gradient.addColorStop(0, hexToRgba(light.color, 0.24 * strength));
+                gradient.addColorStop(brightStop * 0.92, hexToRgba(light.color, 0.13 * strength));
+                gradient.addColorStop(1, hexToRgba(light.color, 0));
                 context.fillStyle = gradient;
                 context.beginPath();
                 context.arc(point.x, point.y, radius, 0, Math.PI * 2);
                 context.fill();
-            }
-
-            var lights = Array.isArray(mapState.lights) ? mapState.lights : [];
-            context.save();
-            lights.forEach(function (light) {
-                if (light.enabled === false) return;
-                paintLight(
-                    light.x,
-                    light.y,
-                    light.range_cells,
-                    light.bright_cells,
-                    String(light.color || "#ffaa00"),
-                    light.intensity
-                );
-            });
-            // 棋子自带光源：跟随棋子 footprint 中心；几何遮挡以服务端掩码为准。
-            activeTokens().forEach(function (token) {
-                var light = token.light;
-                if (!light || light.enabled === false) return;
-                var anchor = tokenWorld(token);
-                paintLight(
-                    anchor.x + (Number(token.w) || 1) * grid / 2,
-                    anchor.y + (Number(token.h) || 1) * grid / 2,
-                    light.dim_cells,
-                    light.bright_cells,
-                    String(light.color || "#ffaa00"),
-                    light.intensity
-                );
             });
             context.restore();
+        }
+
+        function drawSceneLayers(camera) {
+            if (!mapState) return;
+            var grid = gridSize();
+
+            // 光照层：多光源在半分辨率离屏画布上 lighter 合成（墙体遮挡 +
+            // 锥形光 + 棋子光源 + 暗视），最后整层贴回一次。
+            if (lightingEngine) {
+                var viewport = ctx.getViewport();
+                var origin = ctx.worldToScreen(0, 0);
+                var lightStats = lightingEngine.render(context, {
+                    width: viewport.width,
+                    height: viewport.height,
+                    scale: Number(camera.zoom) || 1,
+                    tx: origin.x,
+                    ty: origin.y,
+                    grid: grid,
+                    lights: lightSources(),
+                    walls: Array.isArray(mapState.walls) ? mapState.walls : [],
+                    darkvision: darkvisionSources(),
+                });
+                // 性能打点：需要时（window.__veilLightDebug = true）留一份最近一帧
+                // 的光照统计，供控制台/截图脚本核对，正常游玩不付额外开销。
+                if (window.__veilLightDebug) window.__veilMapLightStats = lightStats;
+            } else {
+                paintLightFallback(camera, grid);
+            }
 
             var walls = Array.isArray(mapState.walls) ? mapState.walls : [];
             context.save();
@@ -1492,14 +1581,19 @@
         }
 
         function tokenLightCopy(light, enabled) {
-            return {
+            var copy = {
                 bright_cells: asInt(light.bright_cells, 4),
                 dim_cells: asInt(light.dim_cells, 8),
                 color: String(light.color || "#ffaa00"),
-                intensity: Number(light.intensity) || 1,
+                intensity: lightIntensity(light.intensity),
                 shadows: light.shadows !== false,
                 enabled: Boolean(enabled),
+                // 锥形光与动画描述原样带回去：开关火把不该把这些参数抹掉。
+                angle: asInt(light.angle, 360),
+                rotation: Number(light.rotation) || 0,
             };
+            if (light.animation && typeof light.animation === "object") copy.animation = light.animation;
+            return copy;
         }
 
         function renderSceneLights() {
@@ -1526,7 +1620,8 @@
                 var text = document.createElement("span");
                 text.textContent = "光源 " + (index + 1) + " · 明亮 " +
                     asInt(light.bright_cells, 0) + " / 昏暗 " +
-                    asInt(light.range_cells, 0) + " 格";
+                    asInt(light.range_cells, 0) + " 格" +
+                    (asInt(light.angle, 360) < 360 ? " · 锥形 " + asInt(light.angle, 360) + "°" : "");
                 row.appendChild(box);
                 row.appendChild(dot);
                 row.appendChild(text);

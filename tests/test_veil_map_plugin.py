@@ -2776,3 +2776,32 @@ def test_scene_store_keeps_fog_per_scene(tmp_path):
     assert restored["scene_id"] == "default"
     assert restored["fog"]["explored"] == "0101"
     assert store.activate(room, "missing") is False
+
+
+def test_token_light_keeps_cone_and_animation_fields(client):
+    """Token Lighting 兼容：棋子光源的 angle/rotation/animation 必须原样保留。"""
+    manager, _app = client
+    _login(manager, "u1")
+    state = _map(manager)
+    alice_id = next(token["id"] for token in state["map"]["tokens"] if token["name"] == "Alice")
+    rv = _write(
+        manager,
+        "put",
+        f"/api/plugins/veil-map/rooms/room1/tokens/{alice_id}/light",
+        {
+            "light": {
+                "bright_cells": 3,
+                "dim_cells": 6,
+                "color": "#ffad00",
+                "angle": 90,
+                "rotation": 45,
+                "animation": {"type": "torch", "speed": 2},
+            }
+        },
+    )
+    assert rv.status_code == 200
+    light = rv.get_json()["data"]["token"]["light"]
+    assert light["angle"] == 90
+    assert light["rotation"] == 45
+    assert light["animation"]["type"] == "torch"
+    assert light["bright_cells"] == 3 and light["dim_cells"] == 6
