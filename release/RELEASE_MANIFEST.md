@@ -1,6 +1,6 @@
 # 帷幕 The Veil · 发布说明
 
-**版本：1.0.7**
+**版本：1.1.0**
 
 帷幕是一个可以自己部署的 AI 跑团（TRPG）平台：AI 当守秘人，你和朋友用浏览器进入同一个房间，掷骰、聊天、推进剧情。账号、剧本、聊天记录都保存在你自己的电脑上。
 
@@ -11,19 +11,19 @@
 ## 一、获取发布包
 
 1. 打开 [GitHub Releases](https://github.com/Nobook1121/The-Veil/releases/latest)，选择最新版本。
-2. 下载 `the-veil-v1.0.7.zip` 与同名 `.sha256` 校验文件。
+2. 下载 `the-veil-v1.1.0.zip` 与同名 `.sha256` 校验文件。
 3. 可选：校验下载是否完整。
 
    Windows PowerShell：
 
    ```powershell
-   Get-FileHash .\the-veil-v1.0.7.zip -Algorithm SHA256
+   Get-FileHash .\the-veil-v1.1.0.zip -Algorithm SHA256
    ```
 
    macOS / Linux：
 
    ```bash
-   sha256sum the-veil-v1.0.7.zip
+   sha256sum the-veil-v1.1.0.zip
    ```
 
    输出应与 `.sha256` 文件中的值一致；不一致说明下载损坏，请重新下载。
@@ -273,16 +273,30 @@ icacls "D:\TheVeil" /setintegritylevel "(OI)(CI)Medium" /T
 
 ---
 
-## 九、版本与更新记录
+## 九、更新到新版本
 
-- 本发布包版本为 **1.0.7**。
-- 每个版本的改动记录在仓库的 `release/changelog/` 下；**最新一份 changelog 的版本号就是当前发布版本**，本版本对应 `release/changelog/v1.0.7.md`。
+- 解压目录里的 `更新.cmd`（或 `scripts/update-release.ps1`）会从 GitHub Releases 检查最新版本：比较版本号 → 下载 zip 与 `.sha256` → 校验 SHA-256 → 只替换程序文件 → 保留 `data/` 与 `.venv`。
+- 更新前会把 `data/` 备份到 `_backup/<版本>-<时间>/`；更新失败或新版本启动异常时，把备份目录里的内容覆盖回 `data/` 即可回到更新前的状态。
+- 只想检查是否有新版本：
+
+  ```powershell
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\update-release.ps1 -CheckOnly
+  ```
+
+- 手工更新：下载新版本 zip，解压到新目录，把旧目录的 `data/` 整个复制过去；不要直接删除旧目录里的 `data/`。
+
+---
+
+## 十、版本与更新记录
+
+- 本发布包版本为 **1.1.0**。
+- 每个版本的改动记录在仓库的 `release/changelog/` 下；**最新一份 changelog 的版本号就是当前发布版本**，本版本对应 `release/changelog/v1.1.0.md`。
 - changelog 与开发文档不随发布包分发，可在 GitHub 仓库查看。
 - 网页「设置 → 关于」可以检查新版本并下载更新包；下载后仍需按上面的「升级」步骤手动替换程序目录，不会自动覆盖你的 `data`。
 
 ---
 
-## 十、许可与安全提醒
+## 十一、许可与安全提醒
 
 - 本项目以 Apache License 2.0 发布；第三方依赖的许可证见发布包内的 `THIRD-PARTY-LICENSES.md`。
 - `data/config/` 内含 API Key，不要打包分享或上传公开网盘。

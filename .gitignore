@@ -160,3 +160,18 @@ tmp_doc_utf16.txt
 
 # aoci 运行时状态（索引卷与 baseline/config 已显式跟踪，其余为本地事务历史）
 /.aoci/
+
+# 开发文档与本地研究资料（不进仓库；发布包也不包含）
+/docs/
+/research/
+/2026-*/
+/AGENTS.md
+/aoci.txt
+/aoci.code.txt
+/aoci.meta.txt
+/full.log
+/.commit-build/
+
+# 本地测试剧本（仅本机使用，不随仓库/发布包分发）
+/data/scenarios/scenario-lmop-5e-001/
+/data/scenarios/scenario-demo-dnd5e-001/

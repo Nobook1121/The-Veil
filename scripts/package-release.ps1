@@ -175,9 +175,9 @@ function Assert-ZipFirstRunReady([string]$ZipPath) {
     Write-Step '压缩包首启校验通过'
 }
 
-# 官方插件策略：三个官方插件必须随包、必须在启用列表里，且不得混入本机安装的其他插件。
+# 官方插件策略：官方插件必须随包、必须在启用列表里，且不得混入本机安装的其他插件。
 function Assert-OfficialPlugins {
-    $official = @('dnd5e-srd', 'dnd5e', 'veil-map')
+    $official = @('dnd5e-srd', 'dnd5e', 'dnd5e-vtt', 'veil-map', 'fvtt-world-import')
     $problems = New-Object System.Collections.Generic.List[string]
 
     foreach ($id in $official) {
@@ -225,7 +225,7 @@ enabled.json 必须启用它们，且不得混入本机安装的其他插件。
 }
 
 function Assert-ZipOfficialPlugins([string]$ZipPath) {
-    $official = @('dnd5e-srd', 'dnd5e', 'veil-map')
+    $official = @('dnd5e-srd', 'dnd5e', 'dnd5e-vtt', 'veil-map', 'fvtt-world-import')
     $problems = New-Object System.Collections.Generic.List[string]
     $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
     try {
@@ -306,7 +306,8 @@ $rootFiles = @(
     'README.md',
     'AGENT-INSTALL.md',
     'DEPLOYMENT.md',
-    '使用指南.txt'
+    '使用指南.txt',
+    '更新.cmd'
 )
 foreach ($file in $rootFiles) {
     Copy-Relative $file
@@ -351,11 +352,13 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 Copy-Relative 'data/character_skills.json'
 Copy-Relative 'scripts/build-frontend.mjs'
 Copy-Relative 'scripts/relocate-tools.mjs'
+# 玩家侧更新脚本（随包分发，不依赖 git / Python）
+Copy-Relative 'scripts/update-release.ps1'
 
 # ---------------------------------------------------------------- 官方插件（白名单）
-# 只复制三个官方插件，避免把本机安装的第三方插件打进发布包；
+# 只复制官方插件，避免把本机安装的第三方插件打进发布包；
 # 启用列表重写为确定值，保证新用户解压启动后 5e 房间可用。
-$officialPlugins = @('dnd5e-srd', 'dnd5e', 'veil-map')
+$officialPlugins = @('dnd5e-srd', 'dnd5e', 'dnd5e-vtt', 'veil-map', 'fvtt-world-import')
 foreach ($plugin in $officialPlugins) {
     Copy-Relative "data/plugins/$plugin"
 }
@@ -455,7 +458,11 @@ $required = @(
     'data/assets/vendor/socket.io/socket.io.min.js',
     'data/assets/vendor/marked/marked.min.js',
     'data/assets/vendor/dompurify/purify.min.js',
-    'data/scenarios/scenario-1793438085450/scenario.json'
+    'data/scenarios/scenario-1793438085450/scenario.json',
+    '更新.cmd',
+    'scripts/update-release.ps1',
+    'data/plugins/dnd5e-vtt/plugin.json',
+    'data/plugins/fvtt-world-import/plugin.json'
 )
 foreach ($item in $required) {
     Assert-Present $item
