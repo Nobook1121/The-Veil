@@ -653,14 +653,14 @@ def test_inspect_reports_sixian_plan(app_env):
     # 三档如实计数：真正进数值的 / 已记录暂无消费方的 / 镜像之外的。
     assert data["notes"] == [
         "已导入 14 条条目级效果（transfer buff），共 16 条改动（change）："
-        "3 条接入数值（AC/先攻/豁免/攻击/抗性/速度…）、"
-        "13 条已记录但当前没有消费方（模块 flags / ATL / 物品活动 / 分速等，卡面效果页签可查）、"
+        "4 条接入数值（AC/先攻/豁免/攻击/抗性/速度…）、"
+        "12 条已记录但当前没有消费方（模块 flags / ATL / 物品活动 / 分速等，卡面效果页签可查）、"
         "0 条在镜像模型之外（原文保留）。"
     ]
     assert data["actor_item_effects"] == 14
     assert data["actor_item_effects_imported"] == 14
-    assert data["actor_item_effects_full"] == 3
-    assert data["actor_item_effects_stored"] == 13
+    assert data["actor_item_effects_full"] == 4
+    assert data["actor_item_effects_stored"] == 12
     assert data["actor_item_effects_unsupported"] == 0
 
 
@@ -1019,3 +1019,35 @@ def test_run_reimport_updates_scenes_in_place(app_env):
     scenes_root = rooms / "room1" / "plugins" / "veil-map" / "scenes"
     ids = {path.name for path in scenes_root.iterdir() if path.is_dir()}
     assert ids == {item["scene_id"] for item in second_data["scenes"]}
+
+
+def test_token_light_and_sight_are_preserved():
+    """棋子自带光源/视野：源字段原样保留 + 格化字段补齐（Token Lighting 口径）。"""
+    from fvtt_world_import.convert_scenes import convert_token_light, convert_token_sight
+
+    light = convert_token_light(
+        {
+            "dim": 60,
+            "bright": 20,
+            "color": "#ffad00",
+            "alpha": 0.55,
+            "angle": 90,
+            "rotation": 45,
+            "animation": {"type": "torch", "speed": 2},
+        },
+        10,  # 一格 10 尺：bright 2 格、dim 6 格
+    )
+    assert light is not None
+    assert light["bright_cells"] == 2 and light["dim_cells"] == 6
+    assert light["color"] == "#ffad00"
+    assert light["angle"] == 90 and light["rotation"] == 45
+    assert light["animation"]["type"] == "torch"
+    assert light["intensity"] == 0.55 and light["enabled"] is True
+
+    # 半径全 0 → 不写字段（不制造空光源）
+    assert convert_token_light({"dim": 0, "bright": 0}, 10) is None
+
+    sight = convert_token_sight({"range": 120, "visionMode": "darkvision", "enabled": True}, 10)
+    assert sight is not None
+    assert sight["range_cells"] == 12
+    assert sight["visionMode"] == "darkvision"

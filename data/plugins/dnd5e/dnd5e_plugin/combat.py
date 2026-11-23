@@ -14,7 +14,7 @@ import random
 import re
 from typing import Any, Callable, Mapping
 
-from dnd5e_plugin.effect_changes import effective_sheet
+from dnd5e_plugin.effect_changes import effective_sheet, weapon_row as merge_weapon_row
 from dnd5e_plugin.effects import (
     attack_modifiers,
     effective_speed,
@@ -309,6 +309,139 @@ def _proficient_with_weapon(sheet: Mapping[str, Any], row: Mapping[str, Any]) ->
     return bool(declared & {item for item in candidates if item})
 
 
+# ---------------------------------------------------------------------------
+# 声明式 workflow 钩子（effect_runtime DSL）：命中/未命中后执行白名单动作
+# ---------------------------------------------------------------------------
+
+def _combat_hooks(
+    attacker_card: Mapping[str, Any] | None,
+    attack: Mapping[str, Any],
+    attacker: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """收集可执行的钩子：卡级 + 武器行，只跑 ``converted`` 的 DSL。
+
+    ``attacker_card`` 缺席时（AI 直接使用已准备战斗者）回落到准备阶段
+    写进战斗者的 ``workflow_hooks``，两条入口同一口径。
+    """
+    hooks: list[dict[str, Any]] = []
+    sources: list[Any] = []
+    if isinstance(attacker_card, Mapping):
+        sources.append(sheet_of(attacker_card).get("workflow_hooks"))
+    if isinstance(attacker, Mapping):
+        sources.append(attacker.get("workflow_hooks"))
+    for bucket in sources:
+        for raw in bucket or []:
+            if isinstance(raw, Mapping) and raw.get("status") == "converted" and isinstance(raw.get("dsl"), Mapping):
+                hooks.append(dict(raw["dsl"]))
+    row_hooks = attack.get("workflow_hooks") if isinstance(attack.get("workflow_hooks"), list) else []
+    for raw in row_hooks:
+        if isinstance(raw, Mapping) and raw.get("status") == "converted" and isinstance(raw.get("dsl"), Mapping):
+            hooks.append(dict(raw["dsl"]))
+    return hooks
+
+
+def _apply_workflow_actions(
+    rules: Any,
+    attacker: dict[str, Any],
+    target: dict[str, Any],
+    attack: Mapping[str, Any],
+    actions: list[Mapping[str, Any]],
+    *,
+    rng: Any,
+    combat: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """执行 effect_runtime 产出的动作；只做战斗内安全变更，不改文档。"""
+    applied: list[dict[str, Any]] = []
+    for action in actions:
+        kind = _text(action.get("type")).lower()
+        if kind == "damage.add":
+            dice = _text(action.get("dice") or action.get("amount") or "1d4")
+            terms, fixed = _parse_damage(dice)
+            rolled, _detail = _roll_terms(terms, fixed, rng, critical=False)
+            amount = max(0, int(rolled))
+            damage_type = _text(action.get("damage_type") or attack.get("damage_type") or "untyped")
+            result = rules._apply_damage(target, amount, damage_type, combat=combat, rng=rng)
+            applied.append(
+                {
+                    "type": kind,
+                    "amount": amount,
+                    "damage_type": damage_type,
+                    "effective": result.get("effective"),
+                }
+            )
+        elif kind == "heal":
+            amount = max(0, _as_int(action.get("amount"), 0))
+            before = max(0, _as_int(attacker.get("hp"), 0))
+            max_hp = max(1, _as_int(attacker.get("max_hp"), 1))
+            attacker["hp"] = min(max_hp, before + amount)
+            applied.append({"type": kind, "amount": attacker["hp"] - before})
+        elif kind == "temp_hp":
+            amount = max(0, _as_int(action.get("amount"), 0))
+            attacker["temp_hp"] = max(_as_int(attacker.get("temp_hp"), 0), amount)
+            applied.append({"type": kind, "amount": amount})
+        elif kind == "condition.add":
+            condition = _text(action.get("condition"))
+            if condition:
+                bucket = target.setdefault("conditions", [])
+                if isinstance(bucket, list) and condition not in bucket:
+                    bucket.append(condition)
+                applied.append({"type": kind, "condition": condition, "target": "target"})
+        elif kind == "resource.spend":
+            uses = attack.get("uses") if isinstance(attack.get("uses"), Mapping) else None
+            if uses is not None:
+                uses = dict(uses)
+                uses["value"] = max(
+                    0, _as_int(uses.get("value"), 0) - max(0, _as_int(action.get("amount"), 1))
+                )
+                attack["uses"] = uses
+                applied.append({"type": kind, "value": uses["value"]})
+        else:
+            # attack.advantage / save.* 属于掷骰前决策，这里只记录不执行。
+            applied.append({"type": kind, "skipped": "pre-roll"})
+    return applied
+
+
+def _run_workflow_hooks(
+    rules: Any,
+    attacker: dict[str, Any],
+    target: dict[str, Any],
+    attack: Mapping[str, Any],
+    *,
+    attacker_card: Mapping[str, Any] | None,
+    hit: bool,
+    rng: Any,
+    combat: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    hooks = _combat_hooks(attacker_card, attack, attacker)
+    if not hooks:
+        return None
+    try:
+        from dnd5e_plugin import effect_runtime as runtime
+    except Exception:  # noqa: BLE001 - 模块缺席时静默跳过
+        return None
+    context = {"self": attacker, "target": target, "weapon": dict(attack), "hit": bool(hit)}
+
+    def hook_rng() -> float:
+        """运行时求值器要 ``[0,1)`` 均匀随机；战斗引擎的 rng 是 ``rng(sides)``。"""
+        try:
+            roll = int(rng(20))
+        except Exception:  # noqa: BLE001 - 不可用的 rng 退化为中值
+            return 0.5
+        return max(0.0, min(0.9999, (roll - 1) / 20.0))
+
+    outcome = runtime.run("onHit" if hit else "onMiss", context, hooks, rng=hook_rng)
+    actions = [item for item in outcome.get("actions") or [] if isinstance(item, Mapping)]
+    applied = _apply_workflow_actions(
+        rules, attacker, target, attack, actions, rng=rng, combat=combat
+    )
+    return {
+        "trigger": "onHit" if hit else "onMiss",
+        "hooks": len(hooks),
+        "actions": applied,
+        "notes": list(outcome.get("notes") or []),
+    }
+
+
 def _spellcasting_ability(sheet: Mapping[str, Any]) -> str:
     """卡面施法属性（``activities[attack].attack.ability = spellcasting`` 用）。"""
     casting = sheet.get("spellcasting")
@@ -325,8 +458,64 @@ def _effective_proficiency(sheet: Mapping[str, Any], level: Any) -> int:
     return proficiency_bonus(level)
 
 
+def _row_item_system(row: Mapping[str, Any]) -> dict[str, Any]:
+    """行上规范化物品文档的 ``system``（``row["item"]``）；没有给 ``{}``。"""
+    document = row.get("item")
+    if not isinstance(document, Mapping):
+        return {}
+    system = document.get("system")
+    return dict(system) if isinstance(system, Mapping) else {}
+
+
+def _document_dice(base: Mapping[str, Any]) -> str:
+    """``system.damage.base.{number,denomination}`` → ``"1d8"``（缺一半给空串）。"""
+    number = _as_int(base.get("number"), 0)
+    denomination = _as_int(base.get("denomination"), 0)
+    if number and denomination:
+        return f"{number}d{denomination}"
+    return ""
+
+
+def _document_damage_type(base: Mapping[str, Any]) -> str:
+    types = base.get("types")
+    if isinstance(types, (list, tuple)) and types:
+        return _text(types[0]).casefold()
+    return ""
+
+
+def _document_uses(row: Mapping[str, Any], system: Mapping[str, Any]) -> dict[str, Any] | None:
+    """行上 ``uses``（导入器写的）优先，其次读文档 ``system.uses`` / ``system.charges``。
+
+    只做透传展示，**不消耗**：战斗结算不扣次数，卡面「物品」页签读同一个字段。
+    """
+    row_uses = row.get("uses")
+    if isinstance(row_uses, Mapping) and row_uses:
+        return dict(row_uses)
+    for key in ("uses", "charges"):
+        raw = system.get(key)
+        if isinstance(raw, Mapping):
+            if not (_text(raw.get("max")) or _text(raw.get("value")) or _text(raw.get("spent"))):
+                continue
+            maximum = _as_int(raw.get("max"), 0)
+            current = raw.get("value")
+            value = _as_int(current, 0) if _text(current) else max(0, maximum - _as_int(raw.get("spent"), 0))
+            return {"value": max(0, value), "max": maximum, "recovery": [], "source": f"document.{key}"}
+        number = _as_int(raw, 0) if _text(raw) else 0
+        if _text(raw):
+            return {"value": max(0, number), "max": max(0, number), "recovery": [], "source": f"document.{key}"}
+    return None
+
+
 def _weapon_attack(row: Mapping[str, Any], sheet: Mapping[str, Any]) -> dict[str, Any]:
     properties = [_text(item).casefold() for item in row.get("properties") or []]
+    # 文档兜底：行上没投影到 ``properties`` 时（手工粘贴/旧导入的行），
+    # 按物品文档的 ``system.properties`` 补一遍（文档 > 扁平字段）。
+    system = _row_item_system(row)
+    raw_props = system.get("properties")
+    for prop in raw_props if isinstance(raw_props, (list, tuple)) else []:
+        text = _text(prop).casefold()
+        if text and text not in properties:
+            properties.append(text)
     kind = _text(row.get("kind")).casefold() or ("ranged" if "ammunition" in properties else "melee")
     # 物品活动可显式指定攻击属性（``activities[…].attack.ability``）：
     # ``spellcasting`` 解析成卡面施法属性，其余按属性键直取。
@@ -351,6 +540,15 @@ def _weapon_attack(row: Mapping[str, Any], sheet: Mapping[str, Any]) -> dict[str
     # 属性+熟练之上（FVTT 语义：进攻击骰公式的额外项）。
     bonus += _as_int(row.get("attack_bonus"), 0)
     damage = row.get("damage") if isinstance(row.get("damage"), Mapping) else {}
+    # 伤害骰 / 伤害类型 / 双手骰：行的扁平字段 → 物品文档 → 兜底（``1d4`` / 钝击）。
+    doc_damage = system.get("damage") if isinstance(system.get("damage"), Mapping) else {}
+    doc_base = doc_damage.get("base") if isinstance(doc_damage.get("base"), Mapping) else {}
+    doc_versatile = (
+        doc_damage.get("versatile") if isinstance(doc_damage.get("versatile"), Mapping) else {}
+    )
+    damage_dice = _text(damage.get("dice")) or _document_dice(doc_base) or "1d4"
+    damage_type = _text(damage.get("type")) or _document_damage_type(doc_base) or "bludgeoning"
+    versatile_dice = _text(row.get("versatile_damage")) or _document_dice(doc_versatile)
     attack = {
         "id": _text(row.get("id")),
         "name": _display_name(row) or _text(row.get("name")),
@@ -358,29 +556,86 @@ def _weapon_attack(row: Mapping[str, Any], sheet: Mapping[str, Any]) -> dict[str
         "ability": ability,
         "attack_bonus": bonus,
         "damage_bonus": modifier,
-        "damage_dice": _text(damage.get("dice") or "1d4"),
-        "damage_type": _text(damage.get("type") or "bludgeoning"),
-        "versatile_dice": _text(row.get("versatile_damage")),
+        "damage_dice": damage_dice,
+        "damage_type": damage_type,
+        "versatile_dice": versatile_dice,
         "properties": properties,
     }
+    uses = _document_uses(row, system)
+    if uses is not None:
+        # 消耗品/有限次数物品：只透传展示（不消耗），战斗 UI 与卡面读同一份。
+        attack["uses"] = uses
     range_override = row.get("range_override") or (
         row.get("range") if isinstance(row.get("range"), Mapping) else None
     )
     if isinstance(range_override, Mapping) and range_override:
         attack["range"] = dict(range_override)
+    elif isinstance(system.get("range"), Mapping) and system.get("range"):
+        # 文档射程（``system.range.{value,long,units}``）：行上没有射程时才用。
+        doc_range = system.get("range") or {}
+        normal = _as_int(doc_range.get("value"), 0)
+        long_range = _as_int(doc_range.get("long"), 0)
+        if normal or long_range:
+            attack["range"] = {
+                "normal_ft": max(0, normal),
+                "long_ft": max(0, long_range),
+                "units": _text(doc_range.get("units")) or "ft",
+            }
     return attack
+
+
+def _sheet_item_documents(sheet: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """``sheet.equipment[].item`` 按 id / item_id / 名字（大小写归一）索引。
+
+    战斗行来自 ``dnd5e-srd`` 库（按 id/名字查表），卡面自带的规范化文档要
+    按同一套键挂回去，``_weapon_attack`` 才能读到文档字段。
+    """
+    raw = sheet.get("equipment")
+    docs: dict[str, dict[str, Any]] = {}
+    for row in raw if isinstance(raw, list) else []:
+        if not isinstance(row, Mapping):
+            continue
+        document = row.get("item")
+        if not isinstance(document, Mapping) or not document:
+            continue
+        keys = [
+            _text(row.get("id")),
+            _text(row.get("item_id")),
+            _text(row.get("name")),
+            _text(document.get("id")),
+            _text(document.get("name")),
+        ]
+        for key in keys:
+            if key:
+                docs.setdefault(key.casefold(), dict(document))
+    return docs
 
 
 def _player_attacks(sheet: Mapping[str, Any], effects: Any = None) -> list[dict[str, Any]]:
     """装备行 → 攻击表。
 
-    ``effects`` 给了就先把物品作用域的效果（``system.properties`` /
-    ``system.damage.base.*``）并到装备行上，再按正常字段算攻击属性与伤害骰；
-    没有这类效果时逐字节同旧实现。
+    顺序：库行 → 挂上卡面物品文档（``equipment[].item``）→ 叠加物品作用域效果
+    （``weapon_row``）→ 按扁平字段算攻击属性与伤害骰。没有文档且没有效果时
+    逐字节同旧实现。
     """
     rows = [row for row in _equipment_rows(sheet, "weapon") if row.get("category") == "weapon"]
-    if effects is not None and not effects.empty and getattr(effects, "items", None):
-        rows = [effects.weapon_row(row) for row in rows]
+    documents = _sheet_item_documents(sheet)
+    if documents:
+        attached: list[dict[str, Any]] = []
+        for row in rows:
+            keys = [
+                _text(row.get("id")).casefold(),
+                _text(row.get("name")).casefold(),
+                _display_name(row).casefold(),
+            ]
+            document = next((documents[key] for key in keys if key and key in documents), None)
+            if document is not None:
+                row = {**row, "item": document}
+            attached.append(row)
+        rows = attached
+    has_effects = effects is not None and not effects.empty and getattr(effects, "items", None)
+    if has_effects or documents:
+        rows = [merge_weapon_row(row, effects if has_effects else None) for row in rows]
     attacks = [_weapon_attack(row, sheet) for row in rows]
     return attacks or [dict(DEFAULT_UNARMED)]
 
@@ -572,6 +827,9 @@ class Dnd5eCombatRules:
         combatant["level"] = max(1, min(20, _as_int(sheet.get("level"), 1)))
         profs = sheet.get("proficiencies")
         combatant["proficiencies"] = dict(profs) if isinstance(profs, Mapping) else {}
+        # 钩子随战斗者带上：AI/无卡的攻击路径也能跑同一批钩子（与效果是否为空无关）。
+        if isinstance(sheet.get("workflow_hooks"), list):
+            combatant["workflow_hooks"] = list(sheet["workflow_hooks"])
         combatant["dex"] = abilities["dex"]
         combatant["str"] = abilities["str"]
         combatant["con"] = abilities["con"]
@@ -862,6 +1120,18 @@ class Dnd5eCombatRules:
             damage_result["damage_detail"] = "，".join(
                 f"{item['count']}d{item['sides']}={item['rolls']}" for item in detail
             )
+        # 声明式 workflow 钩子（导入包里的 midi-qol 宏转成 DSL）：命中/未命中后
+        # 执行白名单动作（加骰伤害、条件、治疗、临时生命、资源消耗）。
+        workflow = _run_workflow_hooks(
+            self,
+            attacker,
+            target,
+            attack,
+            attacker_card=attacker_card,
+            hit=hit,
+            rng=rng,
+            combat=combat,
+        )
         summary = self._summary(
             attacker, target, attack, natural, rolls, attack_bonus, total, target_ac, hit, critical, damage_result
         )
@@ -880,6 +1150,7 @@ class Dnd5eCombatRules:
             advantage=advantage,
             disadvantage=disadvantage,
             ac_bonus=ac_bonus,
+            workflow=workflow,
         )
 
     def plan_attack_action(
@@ -1179,8 +1450,9 @@ class Dnd5eCombatRules:
         advantage: bool = False,
         disadvantage: bool = False,
         ac_bonus: int = 0,
+        workflow: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        result = {
             "attack_mode": "d20",
             "attacker": attacker.get("name"),
             "target": target.get("name"),
@@ -1201,6 +1473,10 @@ class Dnd5eCombatRules:
             "damage": dict(damage) if isinstance(damage, Mapping) else None,
             "summary": summary,
         }
+        # 钩子执行结果单独挂载：没有钩子时结果字典与旧版逐字节一致。
+        if workflow:
+            result["workflow"] = dict(workflow)
+        return result
 
     # -- 直接伤害 / 轮末 / 资源 ------------------------------------------
     def resolve_damage(

@@ -47,6 +47,27 @@ interface Dnd5eSpellcasting {
     slots?: Record<string, Dnd5eSlotRow>;
 }
 
+/** 规范化后的 FVTT 物品文档（导入时保留，引擎按文档读取）。 */
+interface Dnd5eItemDocument {
+    id?: string;
+    name?: string;
+    type?: string;
+    img?: string;
+    system?: Record<string, unknown>;
+    effects?: unknown[];
+    flags?: Record<string, unknown>;
+    activities?: Record<string, unknown>;
+    workflow_hooks?: Array<Record<string, unknown>>;
+    _truncated?: string[];
+}
+
+interface Dnd5eItemUses {
+    value?: number;
+    max?: number;
+    recovery?: string;
+    source?: string;
+}
+
 interface Dnd5eEquipmentItem {
     name?: string;
     quantity?: number;
@@ -56,6 +77,10 @@ interface Dnd5eEquipmentItem {
     equipped?: boolean;
     /** 该装备条目上的 FVTT Active Effect（引擎按路径结算）。 */
     effects?: Dnd5eEffect[];
+    /** 导入时保留的完整物品文档；手工添加的物品没有这个键。 */
+    item?: Dnd5eItemDocument;
+    /** 使用次数/充能（来自文档 uses/charges，只读展示）。 */
+    uses?: Dnd5eItemUses;
 }
 
 /**
@@ -115,6 +140,8 @@ interface Dnd5eSheet {
     hit_dice?: Dnd5eHitDice;
     spellcasting?: Dnd5eSpellcasting;
     equipment?: Dnd5eEquipmentItem[];
+    /** 非装备条目（职业/种族/子职/法术/专长）的完整文档，键为 item id。 */
+    item_documents?: Record<string, Dnd5eItemDocument>;
     features?: string[];
     notes?: string;
     bio?: string;
@@ -1060,6 +1087,55 @@ function spellcastingOf(sheet: Dnd5eSheet): { ability: Dnd5eAbility | ""; dc: nu
         `;
     }
 
+    /** 物品文档只读视图：展示导入时保留的 FVTT 字段（不参与编辑）。 */
+    function renderItemDocument(row: Dnd5eEquipmentItem): string {
+        const doc = row.item || {};
+        const system = (doc.system || {}) as Record<string, unknown>;
+        const lines: string[] = [];
+        const push = (label: string, value: unknown): void => {
+            if (value === null || value === undefined || value === "") return;
+            const text = typeof value === "string" ? value : JSON.stringify(value);
+            if (!text || text === "{}" || text === "[]") return;
+            lines.push(`<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(text.length > 220 ? `${text.slice(0, 220)}…` : text)}</dd>`);
+        };
+        push("类型", doc.type);
+        push("重量", system.weight);
+        push("价格", system.price);
+        const damage = system.damage as Record<string, unknown> | undefined;
+        const baseDamage = (damage?.base || {}) as Record<string, unknown>;
+        if (baseDamage.number || baseDamage.denomination) {
+            push("伤害", `${asInt(baseDamage.number, 0)}d${asInt(baseDamage.denomination, 0)}`);
+        }
+        push("伤害类型", baseDamage.types || damage?.type);
+        const range = (system.range || {}) as Record<string, unknown>;
+        if (range.value || range.long) push("射程", `${asInt(range.value, 0)} / ${asInt(range.long, 0)} 尺`);
+        push("护甲值", (system.armor as Record<string, unknown> | undefined)?.value);
+        push("属性", system.properties);
+        push("使用次数", row.uses);
+        const activities = doc.activities || (system.activities as Record<string, unknown> | undefined) || {};
+        const activityCount = Object.keys(activities).length;
+        if (activityCount) push("物品活动", `${activityCount} 个（攻击/伤害/射程覆盖按文档生效）`);
+        const hooks = Array.isArray(doc.workflow_hooks) ? doc.workflow_hooks : [];
+        if (hooks.length) {
+            const converted = hooks.filter((hook) => String(hook.status) === "converted").length;
+            push("工作流钩子", `${hooks.length} 条（可安全执行 ${converted} 条，其余保留原文待确认）`);
+        }
+        if (Array.isArray(doc.effects) && doc.effects.length) push("物品效果", `${doc.effects.length} 条`);
+        const flagCount = doc.flags ? Object.keys(doc.flags).length : 0;
+        if (flagCount) push("flags", `${flagCount} 个命名空间（原文保留）`);
+        if (Array.isArray(doc._truncated) && doc._truncated.length) push("截断", doc._truncated.join(" / "));
+        if (!lines.length) return `<p class="dnd5e-hint">这件物品没有可读取的文档字段。</p>`;
+        return `
+            <div class="dnd5e-item-doc">
+                <dl class="dnd5e-item-doc-grid">${lines.join("")}</dl>
+                <details class="dnd5e-item-doc-raw">
+                    <summary>原始文档（只读）</summary>
+                    <pre>${escapeHtml(JSON.stringify(doc, null, 2))}</pre>
+                </details>
+            </div>
+        `;
+    }
+
     function renderInventoryPanel(sheet: Dnd5eSheet, editable: boolean): string {
         const equipment = Array.isArray(sheet.equipment) ? sheet.equipment : [];
         const totalWeight = equipment.reduce((sum, item) => sum + Math.max(0, Number(item.weight) || 0) * Math.max(1, asInt(item.quantity, 1)), 0);
@@ -1082,10 +1158,15 @@ function spellcastingOf(sheet: Dnd5eSheet): { ability: Dnd5eAbility | ""; dc: nu
                     ? textInput(`equipment.${index}.notes`, item.notes, true, { label: "备注", placeholder: "备注" })
                     : escapeHtml(item.notes || "—")}</td>
                 <td class="dnd5e-row-actions">
+                    ${item.item ? `<button type="button" class="dnd5e-icon-btn" data-dnd5e-act="toggle-item-doc" data-index="${index}"
+                        aria-expanded="false" aria-label="查看物品文档"><i class="fa fa-chevron-down" aria-hidden="true"></i></button>` : ""}
                     ${editable ? `<button type="button" class="dnd5e-icon-btn" data-dnd5e-act="del-item" data-index="${index}" aria-label="删除装备">
                         <i class="fa fa-trash" aria-hidden="true"></i></button>` : ""}
                 </td>
             </tr>
+            ${item.item ? `<tr class="dnd5e-item-doc-row" data-item-doc="${index}" hidden>
+                <td colspan="6">${renderItemDocument(item)}</td>
+            </tr>` : ""}
         `).join("");
         const equippedCount = equipment.filter((item) => item.equipped).length;
         return `
@@ -2475,6 +2556,21 @@ function spellcastingOf(sheet: Dnd5eSheet): { ability: Dnd5eAbility | ""; dc: nu
                 draft.sheet.exhaustion = draft.sheet.exhaustion === level ? Math.max(0, level - 1) : level;
                 draftDirty = true;
                 renderDetailView();
+                return;
+            }
+            case "toggle-item-doc": {
+                const index = String(actionButton?.dataset.index ?? "");
+                const row = root.querySelector<HTMLElement>(`[data-item-doc="${index}"]`);
+                if (!row) return;
+                const opening = row.hasAttribute("hidden");
+                if (opening) row.removeAttribute("hidden");
+                else row.setAttribute("hidden", "");
+                actionButton?.setAttribute("aria-expanded", opening ? "true" : "false");
+                const icon = actionButton?.querySelector("i");
+                if (icon) {
+                    icon.classList.toggle("fa-chevron-down", !opening);
+                    icon.classList.toggle("fa-chevron-up", opening);
+                }
                 return;
             }
             case "add-item": {

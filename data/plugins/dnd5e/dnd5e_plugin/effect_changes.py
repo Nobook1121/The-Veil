@@ -370,8 +370,9 @@ def _movement_node() -> Node:
             "jump": _num(TIER_FULL, "分速模型：同上（跳跃距离按 speeds.jump 输出）"),
             "hover": _num(TIER_STORED, "悬停是标志位（有/无），房间移动不需要它"),
             "all": _num(
-                TIER_STORED,
-                "movement.all 是「所有速度」别名：展开成 6 个分速还需要逐键写回镜像，本刀未接",
+                TIER_FULL,
+                "所有速度别名：确定性公式（如 max(30, 30+@level)）作为分速基础值，"
+                "见 EffectsSheet.speed/speeds；带骰式的公式留待使用时机",
             ),
             "units": _txt(TIER_STORED, "单位换算（mi/km）：房间按英尺结算"),
             "special": _txt(TIER_STORED),
@@ -1138,6 +1139,103 @@ def _row_keys(row: Any) -> list[str]:
     return keys
 
 
+# --- 规范化物品文档（``row["item"]``） -------------------------------------
+#
+# 导入器把 FVTT 的物品文档规范化后随装备行保留：``{id, name, type, img,
+# system, effects, flags, activities}``（``system`` 原样、``activities`` 在
+# 规范位置）。引擎这一侧对它的读取优先级是
+# **文档 > 条目级效果 > 扁平字段**：文档缺的字段才回落到行上的扁平值，
+# 没有 ``item`` 的旧卡走到的是同一条「没有任何文档」分支，行为逐字节不变。
+
+
+def row_item_document(row: Any) -> dict[str, Any]:
+    """装备行上的规范化物品文档（``row["item"]``）；缺失/形态不对给 ``{}``。"""
+    if not isinstance(row, Mapping):
+        return {}
+    document = row.get("item")
+    return dict(document) if isinstance(document, Mapping) else {}
+
+
+def _deep_overlay(base: dict[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
+    """效果镜像文档深合并到物品文档上（dict 递归；列表/标量以镜像为准）。"""
+    for key, value in overlay.items():
+        current = base.get(key)
+        if isinstance(value, Mapping):
+            base[key] = _deep_overlay(dict(current) if isinstance(current, Mapping) else {}, value)
+        else:
+            base[key] = value
+    return base
+
+
+def _numeric_or_none(value: Any) -> int | None:
+    """``3`` / ``"3"`` / ``3.0`` → ``3``；公式串（``@scale…``）→ ``None``。"""
+    if isinstance(value, bool) or value is None:
+        return None
+    text = _text(value)
+    if not text:
+        return None
+    try:
+        return int(float(text))
+    except ValueError:
+        return None
+
+
+def _item_uses_from_document(system: Mapping[str, Any]) -> dict[str, Any] | None:
+    """``system.uses`` / ``system.charges`` → ``{value,max,recovery}``（只展示不消耗）。
+
+    与导入器 ``convert_actors._item_uses`` 同口径（那边直接写行；这里兜住
+    手工粘贴 / 旧导入没有 ``uses`` 健的卡）。``max`` 是公式串（``@scale…``）
+    时原样保留——公式由另一刀结算，这里不猜数值。
+    """
+    for key in ("uses", "charges"):
+        raw = system.get(key)
+        if isinstance(raw, Mapping):
+            max_value = raw.get("max")
+            spent = raw.get("spent")
+            current = raw.get("value")
+            if max_value in (None, "") and spent in (None, "") and current in (None, ""):
+                continue
+            max_int = _numeric_or_none(max_value)
+            value: int | None = None
+            if _numeric_or_none(current) is not None:
+                value = max(0, _numeric_or_none(current) or 0)
+            elif max_int is not None:
+                value = max(0, max_int - _as_int(spent, 0))
+            recovery = [
+                _text(item.get("period") or item.get("type"))
+                if isinstance(item, Mapping)
+                else _text(item)
+                for item in (raw.get("recovery") or [])
+                if isinstance(item, Mapping) or _text(item)
+            ]
+            return {
+                "value": value if value is not None else 0,
+                "max": max_int if max_int is not None else _text(max_value),
+                "recovery": [row for row in recovery if row],
+                "source": key,
+            }
+        number = _numeric_or_none(raw)
+        if number is not None:
+            return {"value": max(0, number), "max": max(0, number), "recovery": [], "source": key}
+    return None
+
+
+def _item_activity_kind(doc: Mapping[str, Any]) -> str:
+    """第一个活动的 ``attack.type.value``（``melee`` / ``ranged``）；没有给空串。"""
+    activity = _first_activity(doc.get("activities"))
+    if activity is None:
+        system = doc.get("system") if isinstance(doc.get("system"), Mapping) else {}
+        activity = _first_activity(system.get("activities"))
+    if activity is None:
+        return ""
+    attack = activity.get("attack") if isinstance(activity.get("attack"), Mapping) else {}
+    attack_type = attack.get("type")
+    kind = _text(
+        (attack_type.get("value") if isinstance(attack_type, Mapping) else attack_type)
+    ).casefold()
+    return kind if kind in {"melee", "ranged"} else ""
+
+
 def effect_entries(sheet: Mapping[str, Any] | None) -> list[tuple[dict[str, Any], bool | None]]:
     """收集卡面所有效果，返回 ``[(效果, 来源装备是否已装备)]``。
 
@@ -1248,6 +1346,9 @@ class EffectiveSheet:
         self.doc: dict[str, Any] = {}
         #: 物品作用域镜像：``{row_key: {system: {...}}}``
         self.items: dict[str, dict[str, Any]] = {}
+        # 公式求值用的 roll data（卡面摊平后的 ``@levels/@abilities…``）；
+        # 没有效果时为空字典，公式路径不参与。
+        self.roll_data: dict[str, Any] = {}
         #: 生效（``full``）的 change 记录。
         self.applied: list[dict[str, Any]] = []
         #: 已记录但没有数值消费方的 change 记录。
@@ -1428,11 +1529,16 @@ class EffectiveSheet:
         out: dict[str, int] = {"walk": self.speed(_as_int(base, default), default)}
         if self.empty:
             return out
+        has_all = resolve_path(self.doc, _norm("attributes.movement.all")) is not None
         for key in EXTRA_SPEED_KEYS:
             path = _norm(f"attributes.movement.{key}")
             if resolve_path(self.doc, path) is None:
+                if has_all:
+                    # 只有 ``movement.all`` 时，各分速以它为基线。
+                    out[key] = out["walk"]
                 continue
-            out[key] = self._apply_numeric(f"attributes.movement.{key}", _as_int(known.get(key), 0), floor=0)
+            base_value = _as_int(known.get(key), out["walk"] if has_all else 0)
+            out[key] = self._apply_numeric(path, base_value, floor=0)
         return out
 
     def speed(self, base: int, default: int = 30) -> int:
@@ -1449,6 +1555,14 @@ class EffectiveSheet:
         legacy = resolve_path(self.doc, _norm("attributes.speed.value"))
         if legacy is not None and walk is None:
             value = _as_int(legacy, value)
+        if walk is None:
+            # ``movement.all``：所有分速的别名（确定性公式已结算成数值）。
+            all_value = resolve_path(self.doc, _norm("attributes.movement.all"))
+            if all_value is not None:
+                computed, reason = formula_number(all_value, self.roll_data)
+                if computed is None:
+                    computed = _as_int(all_value, value)
+                value = max(0, int(computed))
         return max(0, value)
 
     # -- 减伤（``traits.dm``） ---------------------------------------------
@@ -1621,57 +1735,107 @@ class EffectiveSheet:
         return rows
 
     def weapon_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
-        """装备行 → 应用了物品作用域效果的副本。
+        """装备行 → 应用了物品作用域效果 + 规范化物品文档的副本。
 
-        物品作用域的路径改的是**该装备行自己的物品文档**；这里把它并回行上，
-        让 ``combat._weapon_attack`` 按正常字段算攻击属性与伤害骰。消费的字段：
+        读取优先级：**行上的物品文档（``row["item"]``）> 条目级效果 > 扁平字段**。
+
+        - 物品文档来自导入器（``convert_actors._item_document``）：``system``
+          原样、``activities`` 在规范位置；没有 ``item`` 的旧卡行为不变。
+        - 物品作用域的效果改的是**该装备行自己的物品文档**（Shillelagh 改棍子
+          就是这形态），所以效果先深合并到文档上（效果赢在有值的路径上），
+          再由文档统一投影到行的扁平字段。
+        - 文档/效果都没有的字段保留行上原值（扁平字段兜底）。
+
+        消费的字段：
 
         - ``system.properties`` → 行 ``properties``（灵巧/弹药/双手…）
-        - ``system.damage.base.{number,denomination}`` → 行 ``damage.dice``
-        - ``activities[…].attack.bonus`` → 行 ``attack_bonus``（整体覆盖攻击加值）
+        - ``system.damage.base.{number,denomination,types}`` → 行 ``damage.{dice,type}``
+        - ``system.damage.versatile.{number,denomination}`` → 行 ``versatile_damage``
+        - ``system.uses`` / ``system.charges`` → 行 ``uses``（``{value,max,recovery}``，
+          只展示不消耗；行上已有则保留行上的）
+        - ``activities[…].attack.bonus`` → 行 ``attack_bonus``（整体覆盖攻击加值）；
+          公式串（非纯数字）解析不出来时原样留在 ``attack_bonus_formula``
         - ``activities[…].attack.ability`` → 行 ``attack_ability``（``spellcasting`` = 施法属性）
         - ``activities[…].damage.parts`` → 行 ``damage.dice``（取第一条的骰式）
         - ``activities[…].range.{value,long}`` → 行 ``range`` + ``range_override``
         """
-        if not self.items or not isinstance(row, Mapping):
-            return dict(row) if isinstance(row, Mapping) else {}
-        doc: dict[str, Any] | None = None
+        if not isinstance(row, Mapping):
+            return {}
+        mirror: dict[str, Any] | None = None
         for key in _row_keys(row):
             found = self.items.get(key)
             if isinstance(found, Mapping):
-                doc = found
+                mirror = found
                 break
-        if not doc:
+        document = row_item_document(row)
+        if not mirror and not document:
+            # 旧卡（没有 item）且没有物品作用域效果：逐字节原样返回。
             return dict(row)
-        out = dict(row)
+        merged = _deep_overlay(dict(document), mirror) if mirror else dict(document)
+        return self._merge_item_document(dict(row), merged)
+
+    @staticmethod
+    def _merge_item_document(row: dict[str, Any], doc: Mapping[str, Any]) -> dict[str, Any]:
+        """物品文档 → 行扁平字段（文档优先，行上原值兜底）。"""
         system = doc.get("system") if isinstance(doc.get("system"), Mapping) else {}
         extra_props = _as_values(system.get("properties"))
         if extra_props:
-            current = [_text(item).casefold() for item in out.get("properties") or []]
-            merged = list(out.get("properties") or [])
+            current = [_text(item).casefold() for item in row.get("properties") or []]
+            merged = list(row.get("properties") or [])
             for prop in extra_props:
                 if prop.casefold() not in current:
                     merged.append(prop)
                     current.append(prop.casefold())
-            out["properties"] = merged
-        base = system.get("damage") if isinstance(system.get("damage"), Mapping) else {}
-        base = base.get("base") if isinstance(base.get("base"), Mapping) else {}
+            row["properties"] = merged
+        damage_doc = system.get("damage") if isinstance(system.get("damage"), Mapping) else {}
+        base = damage_doc.get("base") if isinstance(damage_doc.get("base"), Mapping) else {}
         number = base.get("number")
         denomination = base.get("denomination")
-        if number is not None or denomination is not None:
-            damage = dict(out.get("damage") or {}) if isinstance(out.get("damage"), Mapping) else {}
-            cur_number, cur_denom = _split_dice(damage.get("dice"))
-            new_number = _as_int(number, cur_number) if number is not None else cur_number
-            new_denom = _as_int(denomination, cur_denom) if denomination is not None else cur_denom
-            if new_number and new_denom:
-                damage["dice"] = f"{new_number}d{new_denom}"
-            out["damage"] = damage
+        types = _as_values(base.get("types"))
+        if number is not None or denomination is not None or types:
+            damage = dict(row.get("damage") or {}) if isinstance(row.get("damage"), Mapping) else {}
+            if number is not None or denomination is not None:
+                cur_number, cur_denom = _split_dice(damage.get("dice"))
+                new_number = _as_int(number, cur_number) if number is not None else cur_number
+                new_denom = _as_int(denomination, cur_denom) if denomination is not None else cur_denom
+                if new_number and new_denom:
+                    damage["dice"] = f"{new_number}d{new_denom}"
+            if types and not _text(damage.get("type")):
+                damage["type"] = types[0]
+            row["damage"] = damage
+        if not _text(row.get("versatile_damage")):
+            versatile = damage_doc.get("versatile") if isinstance(damage_doc.get("versatile"), Mapping) else {}
+            v_number = _as_int(versatile.get("number"), 0)
+            v_denom = _as_int(versatile.get("denomination"), 0)
+            if v_number and v_denom:
+                row["versatile_damage"] = f"{v_number}d{v_denom}"
+        if not isinstance(row.get("uses"), Mapping):
+            uses = _item_uses_from_document(system)
+            if uses is not None:
+                row["uses"] = uses
+        if not _text(row.get("kind")):
+            kind = _item_activity_kind(doc)
+            if kind:
+                row["kind"] = kind
+        # 物品级射程（``system.range.{value,long}``）先投影；活动若也给了射程，
+        # 由下面 ``_merge_activity`` 覆盖（活动优先于物品级）。
+        doc_range = system.get("range") if isinstance(system.get("range"), Mapping) else {}
+        doc_normal = doc_range.get("value")
+        doc_long = doc_range.get("long")
+        if doc_normal is not None or doc_long is not None:
+            current_range = dict(row.get("range") or {}) if isinstance(row.get("range"), Mapping) else {}
+            if doc_normal is not None:
+                current_range["normal_ft"] = max(0, _as_int(doc_normal, _as_int(current_range.get("normal_ft"), 0)))
+            if doc_long is not None:
+                current_range["long_ft"] = max(0, _as_int(doc_long, _as_int(current_range.get("long_ft"), 0)))
+            row["range"] = current_range
+            row["range_override"] = True
         # ``activities[attack].attack.bonus`` 去掉下标后是根路径（没有 ``system.``
         # 前缀），``system.activities[...]`` 的写法带前缀：两处都认。
         activity = _first_activity(system.get("activities")) or _first_activity(doc.get("activities"))
         if activity is not None:
-            out = self._merge_activity(out, activity)
-        return out
+            row = EffectiveSheet._merge_activity(row, activity)
+        return row
 
     @staticmethod
     def _merge_activity(row: dict[str, Any], activity: Mapping[str, Any]) -> dict[str, Any]:
@@ -1681,6 +1845,12 @@ class EffectiveSheet:
             number, reason = parse_number(attack.get("bonus"))
             if number is not None and not reason:
                 row["attack_bonus"] = int(round(number))
+            else:
+                # 公式串（``@prof + @abilities.dex.mod`` 之类）：公式由另一刀结算，
+                # 这里只把原文留下（不猜数值，也不覆盖行上的既有加值）。
+                raw = _text(attack.get("bonus"))
+                if raw:
+                    row["attack_bonus_formula"] = raw
         ability = _text(attack.get("ability")).casefold()
         if ability:
             row["attack_ability"] = ability
@@ -1702,7 +1872,7 @@ class EffectiveSheet:
             if long_range is not None:
                 current_range["long_ft"] = max(0, _as_int(long_range, existing_long))
             row["range"] = current_range
-            # 武器行的射程只有被效果改过才随攻击行输出（旧卡输出逐字节不变）。
+            # 武器行的射程只有被文档/效果给过才随攻击行输出（旧卡输出逐字节不变）。
             row["range_override"] = True
         return row
 
@@ -1751,6 +1921,18 @@ class EffectiveSheet:
         }
 
 
+def weapon_row(row: Mapping[str, Any], view: EffectiveSheet | None = None) -> dict[str, Any]:
+    """装备行 → 应用了物品文档（与可选效果视图）的副本（模块级入口）。
+
+    ``combat._player_attacks`` 用它：没有效果视图时也要把
+    ``row["item"]`` 的 ``activities`` / ``damage`` / ``range`` / ``uses``
+    投影到扁平字段上。``view`` 为空时等价于「只有文档、没有 effect」。
+    """
+    if view is not None:
+        return view.weapon_row(row)
+    return EffectiveSheet().weapon_row(row)
+
+
 def _first_activity(activities: Any) -> dict[str, Any] | None:
     """物品镜像里的第一个活动（``{activity_id: {attack/damage/range…}}``）。"""
     if not isinstance(activities, Mapping):
@@ -1783,9 +1965,48 @@ def _split_dice(value: Any) -> tuple[int, int]:
     return max(1, _as_int(match.group(1), 1)), max(1, _as_int(match.group(2), 4))
 
 
-def _apply_number(document: dict[str, Any], path: str, change: Mapping[str, Any]) -> str:
+_DICE_FORMULA = re.compile(r"\d*\s*d\s*\d+", re.IGNORECASE)
+
+
+def formula_number(
+    value: Any, roll_data: Mapping[str, Any] | None
+) -> tuple[int | None, str]:
+    """公式串 → 数值（只结算**确定性**公式）。
+
+    - 不含骰式的公式（``@abilities.dex.mod + 2``、``max(30, 30 + @level)``）：
+      用 :mod:`dnd5e_plugin.formula` 求值后返回数字（四舍五入）。
+    - 含骰式的公式（``+1d4``）：FVTT 是每次使用时掷，不在派生阶段掷——
+      返回 ``(None, "formula")`` 如实记成「使用时机结算」，避免把随机数
+      烘进卡面。
+    - 公式模块缺席/求值失败：``(None, "formula")``。
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None, "formula"
+    if _DICE_FORMULA.search(value):
+        return None, "formula"
+    try:
+        from dnd5e_plugin import formula as _formula
+    except Exception:  # noqa: BLE001 - 模块缺席按不可结算处理
+        return None, "formula"
+    if not _formula.is_formula(value):
+        return None, "formula"
+    result = _formula.evaluate(value, dict(roll_data or {}))
+    if not result.get("ok") or not isinstance(result.get("value"), (int, float)):
+        return None, "formula"
+    return int(round(float(result["value"]))), ""
+
+
+def _apply_number(
+    document: dict[str, Any],
+    path: str,
+    change: Mapping[str, Any],
+    roll_data: Mapping[str, Any] | None = None,
+) -> str:
     """数值路径结算；返回 ``""`` 表示已应用，否则是不能应用的原因。"""
     number, reason = parse_number(change.get("value"))
+    if number is None:
+        # 纯数字解析不了时再看是不是公式（确定性公式在这里结算）。
+        number, reason = formula_number(change.get("value"), roll_data)
     if number is None:
         return reason
     mode = _as_int(change.get("mode"), MODE_ADD)
@@ -1847,6 +2068,12 @@ def effective_sheet(sheet: Mapping[str, Any] | None) -> EffectiveSheet:
     """把卡面上的效果结算成一张计算视图（无 ``full`` 级 change 时 ``empty=True``）。"""
     view = EffectiveSheet()
     source = sheet if isinstance(sheet, Mapping) else {}
+    try:
+        from dnd5e_plugin.formula import roll_data_from_sheet
+
+        view.roll_data = roll_data_from_sheet(source)
+    except Exception:  # noqa: BLE001 - 公式模块缺席不影响效果结算
+        view.roll_data = {}
     entries = effect_entries(source)
     if not entries:
         return view
@@ -1948,7 +2175,7 @@ def _settle(
     document = view.item_doc(_text(effect.get("row_key"))) if path_scope == SCOPE_ITEM else view.doc
     node = _walk(_path_parts(change.get("key")))
     if kind == "number":
-        reason = _apply_number(document, path, change)
+        reason = _apply_number(document, path, change, getattr(view, "roll_data", None))
     elif kind == "list":
         reason = _apply_list(document, path, change)
     elif node is not None and node.kind == "any":

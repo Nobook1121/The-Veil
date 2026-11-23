@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -47,16 +48,16 @@ SIXIAN_ZIP = REPO_ROOT / "docs" / "样本" / "sixianyuchanmian-1.0.1.zip"
 HEROES_EFFECTS = {
     "documents": 41,
     "changes": 57,
-    "full": 35,
-    "stored": 22,
+    "full": 36,
+    "stored": 21,
     "unsupported": 0,
     "transfer": 8,
 }
 SIXIAN_EFFECTS = {
     "documents": 14,
     "changes": 16,
-    "full": 3,
-    "stored": 13,
+    "full": 4,
+    "stored": 12,
     "unsupported": 0,
     "transfer": 0,
 }
@@ -405,3 +406,96 @@ def test_kiwee_enrichment_skips_plain_gear() -> None:
     sheet = converted["characters"][0]["card"]["sheet"]
     assert not (sheet.get("equipment") or [{}])[0].get("effects")
     assert _derived(sheet)["armorClass"] == 10
+
+
+# ---------------------------------------------------------------------------
+# FVTT 物品文档（item document）保真
+# ---------------------------------------------------------------------------
+
+
+def test_equipment_rows_keep_full_item_documents(heroes):
+    """装备行带规范化文档：type/system/activities/flags 都在，不只扁平行。"""
+    sheet = _character(heroes.converted, "图伊勒")["card"]["sheet"]
+    weapons = [row for row in sheet["equipment"] if (row.get("item") or {}).get("type") == "weapon"]
+    assert weapons, "图伊勒应有武器行"
+    doc = weapons[0]["item"]
+    assert doc["id"] and doc["name"]
+    system = doc["system"]
+    assert isinstance(system, dict) and "damage" in system
+    assert doc["activities"], "武器文档应保留 activities（攻击/伤害参数）"
+    assert isinstance(doc.get("flags"), dict)
+    # 非装备条目（职业/种族/子职/法术/专长）进 item_documents。
+    documents = sheet.get("item_documents") or {}
+    assert isinstance(documents, dict) and documents
+    assert all(isinstance(value, dict) and value.get("type") for value in documents.values())
+
+
+def test_item_document_activities_drive_weapon_row():
+    """文档优先于扁平字段：activities 的攻击加值、伤害骰、属性、射程都生效。"""
+    from dnd5e_plugin.effect_changes import weapon_row
+
+    row = {
+        "id": "test-sword",
+        "name": "测试剑",
+        "properties": [],
+        "damage": {"dice": "1d4", "type": "slashing"},
+        "item": {
+            "id": "test-sword",
+            "type": "weapon",
+            "system": {
+                "properties": ["finesse"],
+                "damage": {"base": {"number": 2, "denomination": 6, "types": ["fire"]}},
+                "range": {"value": 20, "long": 60},
+                "activities": {
+                    "dnd5eactivity000": {
+                        "attack": {"bonus": 3, "ability": "finesse"},
+                        "damage": {"parts": [{"formula": "3d8"}]},
+                    }
+                },
+            },
+        },
+    }
+    merged = weapon_row(row)
+    assert merged["attack_bonus"] == 3
+    assert merged["attack_ability"] == "finesse"
+    assert "finesse" in merged["properties"]
+    assert merged["damage"]["dice"] == "3d8"  # activities 覆盖文档伤害
+    assert merged["range"]["normal_ft"] == 20
+    assert merged["range"]["long_ft"] == 60
+
+
+def test_legacy_card_without_item_document_is_unchanged():
+    """没有 item / 没有效果视图时，weapon_row 返回原行副本（逐字节一致）。"""
+    from dnd5e_plugin.effect_changes import weapon_row
+
+    row = {
+        "id": "old",
+        "name": "旧剑",
+        "properties": ["versatile"],
+        "damage": {"dice": "1d8", "type": "slashing"},
+    }
+    merged = weapon_row(dict(row))
+    assert merged == row
+    assert merged is not row
+
+
+def test_item_document_truncation_is_reported():
+    """超限文档按层截断并留下可读标记，不静默丢数据。"""
+    from fvtt_world_import import convert_actors as ca
+
+    item = {
+        "_id": "oversized",
+        "name": "超大物品",
+        "type": "loot",
+        "system": {
+            "description": {"value": "说" * 80000},
+            "weight": 1,
+            "price": {"value": 1},
+        },
+        "flags": {"huge": "x" * 40000},
+    }
+    doc = ca._item_document(item)
+    assert doc["name"] == "超大物品"
+    assert doc.get("_truncated"), "超限文档应标记截断层"
+    size = len(json.dumps(doc, ensure_ascii=False).encode("utf-8"))
+    assert size <= ca.ITEM_DOC_MAX_BYTES + 2048

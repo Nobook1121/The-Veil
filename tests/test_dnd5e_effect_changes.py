@@ -391,7 +391,7 @@ def test_supported_paths_have_consumers_and_unknown_ones_do_not() -> None:
     for key in (
         "flags.dnd5e.halflingLucky",
         "ATL.light.dim",
-        "system.attributes.movement.all",
+        "system.attributes.movement.hover",
         "system.damage.base.number",
         "system.properties",
     ):
@@ -851,7 +851,7 @@ def test_mirror_records_stored_paths_without_touching_derived_values() -> None:
             [
                 _effect(
                     [
-                        {"key": "system.attributes.movement.all", "mode": ec.MODE_ADD, "value": 60},
+                        {"key": "system.attributes.movement.hover", "mode": ec.MODE_OVERRIDE, "value": True},
                         {"key": "ATL.light.dim", "mode": ec.MODE_ADD, "value": 10},
                         {"key": "flags.midi-qol.x", "mode": ec.MODE_OVERRIDE, "value": 1},
                     ]
@@ -862,7 +862,8 @@ def test_mirror_records_stored_paths_without_touching_derived_values() -> None:
     assert view.empty  # 没有 full 级 change
     assert view.stats["stored"] == 3
     assert view.ac_bonus == 0 and view.initiative_bonus == 0
-    assert view.number("attributes.movement.all") == 60
+    # hover 是标志位：布尔文本/数字都可能，只断言被镜像收下且不是空视图。
+    assert view.value("attributes.movement.hover") in (True, 1, "true")
     assert view.value("ATL.light.dim") == 10
 
 

@@ -60,6 +60,10 @@ SHEET_FIELDS = (
     # 效果引擎载体（FVTT transfer buff）：声明进字段表，前端/校验侧与
     # ``pack()`` 的顶层回填都按同一份口径认这个键。
     "effect_changes",
+    # FVTT 物品文档（非装备类：职业/种族/子职/背景/法术/专长）。
+    # 键为 item id、值为规范化文档（``convert_actors._item_document``）；
+    # 打包时**原样透传**，不参与派生——二次打包不允许丢。
+    "item_documents",
 )
 
 DERIVED_KEYS = (
@@ -372,6 +376,21 @@ class Dnd5eCharacterSchema:
         sheet.setdefault("features", [])
         if not isinstance(sheet.get("equipment"), list):
             sheet["equipment"] = []
+        # 物品文档透传：``equipment[].item``（装备行的规范化文档）与
+        # ``sheet.item_documents``（非装备条目）都不参与派生，但要**原样**
+        # 活着走出二次打包——装备行本身已是 dict 副本，这里只兜住
+        # ``item_documents`` 的形态（非映射一律视为「没有文档」，不让脏数据
+        # 进卡面；条目内容不做任何裁剪，上限由导入器负责）。
+        documents = sheet.get("item_documents")
+        if documents is None:
+            sheet.pop("item_documents", None)
+        elif isinstance(documents, Mapping):
+            sheet["item_documents"] = {
+                str(key): dict(value) if isinstance(value, Mapping) else value
+                for key, value in documents.items()
+            }
+        else:
+            sheet.pop("item_documents", None)
         # 首次打包时按职业表补一份法术位，卡面无需等第一次施法才出现法术位。
         # 已存在的 slots（含 used）优先保留，避免覆盖房间内消耗。
         from dnd5e_plugin.spells import spell_slots_from_sheet

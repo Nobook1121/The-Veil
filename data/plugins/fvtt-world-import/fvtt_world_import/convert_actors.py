@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import html as _html
+import json
 import os
 import re
 from pathlib import Path
@@ -282,6 +283,54 @@ PRESET_PREFIX = "预设角色"
 
 MAX_NOTES_CHARS = 6000
 
+#: 单份物品文档的 JSON 体积护栏（字节）。真实两包里最大的 class 文档约 32KB，
+#: 64KB 留一倍余量；超出的（模组塞了整页 HTML 的怪物武器之类）按
+#: :func:`_guard_item_document` 的分级策略截断并写 ``_truncated`` 标记。
+ITEM_DOC_MAX_BYTES = 64 * 1024
+
+#: ``sheet.item_documents`` 的条目上限（每条 item id 一份文档）。
+ITEM_DOCUMENTS_MAX = 200
+
+#: 描述正文被截断时保留的字符数（HTML 正文是最没信息密度的一块）。
+ITEM_DOC_DESCRIPTION_CHARS = 2000
+
+#: 体积超限时 ``system`` 白名单：只留引擎/卡面真的会读的机制字段。
+ITEM_SYSTEM_KEEP = (
+    "activities",
+    "activation",
+    "armor",
+    "attunement",
+    "attuned",
+    "charges",
+    "components",
+    "container",
+    "cover",
+    "damage",
+    "duration",
+    "equipped",
+    "hp",
+    "identifier",
+    "identified",
+    "level",
+    "materials",
+    "preparation",
+    "price",
+    "proficient",
+    "properties",
+    "quantity",
+    "range",
+    "rarity",
+    "recharge",
+    "requirements",
+    "school",
+    "source",
+    "target",
+    "type",
+    "unidentified",
+    "uses",
+    "weight",
+)
+
 
 # --- 物品效果（FVTT Active Effect）转写 ------------------------------------
 #
@@ -302,7 +351,10 @@ _ENGINE_LOOKED_UP = False
 def _effect_engine() -> Any:
     """惰性取 dnd5e 效果引擎模块；插件缺席时返回 ``None``（不抛异常）。"""
     global _ENGINE_MODULE, _ENGINE_LOOKED_UP
-    if not _ENGINE_LOOKED_UP:
+    # 只在「成功找到」时停止重试：首次调用可能发生在插件路径尚未进 sys.path
+    # 的上下文（测试/启动早期），把 None 永久缓存会让之后所有导入都按
+    # stored 计数——这个跨用例污染曾经把三档数字整体打回 0。
+    if _ENGINE_MODULE is None:
         _ENGINE_LOOKED_UP = True
         try:
             from dnd5e_plugin import effect_changes as engine  # noqa: PLC0415 - 可选依赖
@@ -310,6 +362,111 @@ def _effect_engine() -> Any:
             engine = None
         _ENGINE_MODULE = engine
     return _ENGINE_MODULE
+
+
+# --- workflow 钩子（midi-qol / DAE / ItemMacro）→ 声明式 DSL ----------------
+#
+# FVTT 世界包把大量战斗行为塞进模块运行时钩子：``flags.midi-qol.onUseMacroName``
+# 指向 ItemMacro、``flags.dae.macro.command`` 里是整段 JS、``flags.itemacro`` 同理。
+# 照抄执行等于让第三方 zip 在本进程里跑任意代码，所以这里只做**分诊**：
+# 能安全等价的部分转成声明式 DSL（``dnd5e_plugin.effect_runtime``），转不了的如实
+# 标 ``needs_review`` 并**保留原文**，让用户拍板。分级口径只有一份（引擎的
+# ``parse_workflow``），导入器不复刻任何一条规则。
+_WORKFLOW_MODULE: Any = None
+_WORKFLOW_LOOKED_UP = False
+
+
+def _workflow_engine() -> Any:
+    """惰性取声明式钩子引擎（``dnd5e_plugin.effect_runtime``）；缺席返回 ``None``。"""
+    global _WORKFLOW_MODULE, _WORKFLOW_LOOKED_UP
+    # 与 ``_effect_engine`` 同一策略：失败不永久缓存，插件路径晚到时能重试。
+    if _WORKFLOW_MODULE is None:
+        _WORKFLOW_LOOKED_UP = True
+        try:
+            from dnd5e_plugin import effect_runtime as engine  # noqa: PLC0415 - 可选依赖
+        except Exception:  # noqa: BLE001 - 插件没装/装坏了都不该让导入失败
+            engine = None
+        _WORKFLOW_MODULE = engine
+    return _WORKFLOW_MODULE
+
+
+#: 钩子分诊计数（落卡 / 审计共用；键固定，缺项补 0）。
+_WORKFLOW_STAT_KEYS = ("items", "converted", "needs_review", "native", "ignored", "placement_item", "placement_row", "errors")
+
+
+def _empty_workflow_stats() -> dict[str, int]:
+    return {key: 0 for key in _WORKFLOW_STAT_KEYS}
+
+
+def _attach_workflow_hooks(row: dict[str, Any], hooks: list[dict[str, Any]]) -> str:
+    """把钩子挂到装备行，返回实际落点。
+
+    优先 ``row["item"]["workflow_hooks"]``（并行改动落地的规范化 item 文档），
+    该字段不在时退到行级 ``row["workflow_hooks"]``——两种形态都能落，审计里
+    如实上报用了哪一种，避免"写了但没人读"。
+    """
+    item_doc = row.get("item")
+    if isinstance(item_doc, dict):
+        item_doc["workflow_hooks"] = hooks
+        return "item"
+    row["workflow_hooks"] = hooks
+    return "row"
+
+
+def _scan_workflow_hooks(engine: Any, doc: Mapping[str, Any], stats: dict[str, int]) -> list[dict[str, Any]]:
+    """单个条目文档 → 要落卡的钩子（converted/needs_review），并累加计数。
+
+    引擎抛异常时只记 ``stats["errors"]``，绝不让分诊失败阻断整包导入——
+    钩子是加分项，不是导入的前置条件。
+    """
+    try:
+        entries = engine.parse_workflow(doc)
+    except Exception:  # noqa: BLE001 - 分诊失败 = 这一条不落卡，但导入继续
+        stats["errors"] += 1
+        return []
+    for key, value in engine.hook_stats(entries).items():
+        if key in stats:
+            stats[key] += _as_int(value, 0)
+    return list(engine.kept_hooks(entries))
+
+
+def _workflow_hook_report(
+    item_docs: Iterable[Mapping[str, Any]],
+    equipment_rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """整张卡的钩子分诊：装备行就地挂载，非装备条目汇总到卡级。
+
+    返回 ``(卡级钩子列表, 计数)``。装备行（weapon/equipment/consumable/…）的钩子
+    写进该行的 item 文档；专长/法术/种族这类不进装备清单的条目（真实样本里的
+    ``onUseMacroName`` 主要挂在这里）汇总到 ``sheet.workflow_hooks`` /
+    ``statblock.workflow_hooks``，否则会被悄悄丢掉。
+    """
+    engine = _workflow_engine()
+    stats = _empty_workflow_stats()
+    if engine is None:
+        return [], stats
+    for row in equipment_rows:
+        doc = row.get("item")
+        if not isinstance(doc, Mapping):
+            continue
+        hooks = _scan_workflow_hooks(engine, doc, stats)
+        if not hooks:
+            continue
+        placement = _attach_workflow_hooks(row, hooks)
+        stats[f"placement_{placement}"] += 1
+        stats["items"] += 1
+    leftover: list[dict[str, Any]] = []
+    for item in item_docs:
+        kind = str(item.get("type") or "").strip().lower()
+        if kind in EQUIPMENT_TYPES:
+            continue
+        hooks = _scan_workflow_hooks(engine, item, stats)
+        if not hooks:
+            continue
+        name = _main_name(item.get("name")) or str(item.get("name") or "").strip()
+        leftover.extend({**hook, "item": name, "item_type": kind} for hook in hooks)
+        stats["items"] += 1
+    return leftover, stats
 
 
 #: 引擎模式枚举（与 Foundry ActiveEffect.MODES 同号）。
@@ -1246,6 +1403,244 @@ def _enrich_effects_with_kiwee(
     return stats
 
 
+# --- 规范化 item document ---------------------------------------------------
+#
+# FVTT 的物品文档（``!actors.items!``）是 ``{_id, name, type, img, system,
+# effects, flags, sort, ownership}``。导入器此前只把装备类物品压成一行
+# ``{name, quantity, weight, notes}``，``activities`` / ``uses`` / 法术学派 /
+# 专长需求 / flags 全部丢掉，引擎只能拿扁平字段近似。
+#
+# 这里把文档**规范化**后随行保留（``equipment[].item``）或收进
+# ``sheet.item_documents``（非装备类：class/race/subclass/background/spell/
+# feat/…），供引擎与卡面按文档读取：
+#
+# - ``id``：条目 id（复合键 ``<actorId>.<itemId>`` 只留本地段）；
+# - ``name`` / ``type``：原样（type 归一成小写）；
+# - ``img``：调用方给了 ``asset_url`` 回调就换成站内 URL，否则保留 FVTT 原文；
+# - ``system``：原样（体积护栏见 :func:`_guard_item_document`）；
+# - ``effects``：条目级 Active Effect 原文（已由 ``_split_item_effects`` 挂好）；
+# - ``flags``：原样（体积护栏同上）；
+# - ``activities``：``system.activities`` 或根级 ``activities`` 的**规范位置**
+#   （统一搬到 ``item.activities``；``system`` 里的副本原样保留）。
+
+
+def _json_size(value: Any) -> int:
+    """值序列化成紧凑 JSON 后的 UTF-8 字节数（算不出来按超限处理）。"""
+    try:
+        return len(
+            json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
+        )
+    except (TypeError, ValueError):
+        return ITEM_DOC_MAX_BYTES + 1
+
+
+def _item_local_id(item: Mapping[str, Any]) -> str:
+    """条目 id 的本地段：``<actorId>.<itemId>`` → ``<itemId>``。"""
+    raw = str(item.get("_id") or "").strip()
+    return raw.split(".", 1)[-1] if raw else ""
+
+
+def _item_uses(system: Mapping[str, Any]) -> dict[str, Any] | None:
+    """``system.uses`` / ``system.charges`` → ``{value, max, recovery}``（只展示不消耗）。
+
+    真实两包形态：``uses = {max: "" | 3, spent: 0|null, recovery: [{period, type}]}``，
+    旧包 ``charges`` 是裸数字（价值：可用次数）。没有可用信息时返回 ``None``
+    ——避免给「本来就一无所有」的行多加一个空键（旧卡逐字节不变）。
+    """
+    for key in ("uses", "charges"):
+        raw = system.get(key)
+        if isinstance(raw, Mapping):
+            max_value = raw.get("max")
+            spent = raw.get("spent")
+            current = raw.get("value")
+            recovery = raw.get("recovery")
+            if max_value in (None, "") and spent in (None, "") and current in (None, ""):
+                continue
+            max_int = _as_int_or_none(max_value)
+            value: int | None = None
+            if current is not None and _as_int_or_none(current) is not None:
+                value = max(0, _as_int(current, 0))
+            elif max_int is not None:
+                value = max(0, max_int - _as_int(spent, 0))
+            result: dict[str, Any] = {
+                "value": value if value is not None else 0,
+                # 公式型上限（``@scale…``）原样保留成字符串，公式由另一刀结算。
+                "max": max_int if max_int is not None else max_value,
+                "recovery": _recovery_labels(recovery),
+                "source": key,
+            }
+            return result
+        number = _as_int_or_none(raw)
+        if number is not None:
+            return {"value": max(0, number), "max": max(0, number), "recovery": [], "source": key}
+    return None
+
+
+def _recovery_labels(recovery: Any) -> list[str]:
+    """``recovery`` 列表 → 扁平标签（``sr`` / ``lr`` / ``recoverAll`` 之类原样）。"""
+    rows = recovery if isinstance(recovery, (list, tuple)) else []
+    labels: list[str] = []
+    for row in rows:
+        if isinstance(row, Mapping):
+            parts = [str(row.get(key) or "").strip() for key in ("period", "type")]
+            text = "/".join(part for part in parts if part)
+        else:
+            text = str(row or "").strip()
+        if text and text not in labels:
+            labels.append(text[:40])
+    return labels
+
+
+def _guard_item_document(
+    doc: dict[str, Any],
+    *,
+    limit: int = ITEM_DOC_MAX_BYTES,
+    warn: _Warn | None = None,
+    label: str = "",
+) -> dict[str, Any]:
+    """体积护栏：单文档 JSON ≤ ``limit``，超出按分级策略截断并写 ``_truncated``。
+
+    截断顺序 = 信息密度从低到高（先砍描述正文，再砍模块 flags，再砍 ``system``
+    的杂项，再砍活动，最后砍效果条目）；每一步都记进 ``_truncated``（卡面据此
+    提示「已截断」）。最后一级兜底保证**一定**落在上限内——守卫不能只是个建议。
+    """
+    if _json_size(doc) <= limit:
+        return doc
+    steps: list[str] = []
+
+    def over() -> bool:
+        return _json_size(doc) > limit
+
+    system = doc.get("system") if isinstance(doc.get("system"), Mapping) else {}
+    description = _mapping(system.get("description"))
+    if description.get("value") and over():
+        text = str(description.get("value") or "")
+        if len(text) > ITEM_DOC_DESCRIPTION_CHARS:
+            system = dict(system)
+            system["description"] = {
+                **description,
+                "value": text[:ITEM_DOC_DESCRIPTION_CHARS],
+                "_truncated": True,
+            }
+            doc["system"] = system
+            steps.append("system.description")
+    if doc.get("flags") and over():
+        # flags 是模块元数据（midi-qol / arcanedesk 之流），引擎不读、卡面只计数。
+        doc["flags"] = {}
+        steps.append("flags")
+    if over() and isinstance(doc.get("system"), Mapping):
+        kept = {key: value for key, value in doc["system"].items() if key in ITEM_SYSTEM_KEEP}
+        if len(kept) != len(doc["system"]):
+            doc["system"] = kept
+            steps.append("system")
+    if over() and doc.get("activities"):
+        activities = doc.pop("activities")
+        doc["activities_count"] = len(activities) if isinstance(activities, (list, Mapping)) else 0
+        steps.append("activities")
+    if over() and doc.get("effects"):
+        doc["effects_count"] = len(doc.get("effects") or [])
+        doc["effects"] = []
+        steps.append("effects")
+    if over():
+        # 兜底：只留标识字段，保证守卫真的守住上限（此处已经没有任何「内容」了）。
+        doc = {
+            key: doc.get(key)
+            for key in ("id", "name", "type", "img", "_truncated")
+            if key in doc
+        }
+        doc["system"] = {}
+        doc["effects"] = []
+        doc["flags"] = {}
+        steps.append("payload")
+    if steps:
+        doc["_truncated"] = steps
+        if warn is not None:
+            warn.add(
+                "item.document_truncated",
+                f"物品文档「{label or doc.get('name') or '未命名'}」超过 {limit // 1024}KB，"
+                f"已按 {'→'.join(steps)} 截断（原文其余字段未保留）。",
+            )
+    return doc
+
+
+def _item_document(
+    item: Mapping[str, Any],
+    *,
+    effects: list[dict[str, Any]] | None = None,
+    asset_url: Callable[[str], str | None] | None = None,
+    warn: _Warn | None = None,
+) -> dict[str, Any]:
+    """一条 FVTT 物品文档 → 规范化 item document（见本节顶部说明）。"""
+    system = _mapping(item.get("system"))
+    kind = str(item.get("type") or "").strip().lower()
+    raw_img = str(item.get("img") or "").strip()
+    img = raw_img
+    if raw_img and asset_url is not None:
+        # 解析不出来就保留 FVTT 原文（``icons/…`` / ``systems/…`` 这类包外路径）。
+        img = asset_url(raw_img) or raw_img
+    doc: dict[str, Any] = {
+        "id": _item_local_id(item),
+        "name": _main_name(item.get("name")) or str(item.get("name") or "").strip(),
+        "type": kind,
+        "img": img,
+        "system": system,
+        "effects": [dict(entry) for entry in effects or [] if isinstance(entry, Mapping)],
+        "flags": _mapping(item.get("flags")),
+    }
+    # ``__originalName`` 之类顶层元数据不保留（FVTT 自己的迁移缓存），但
+    # 根级 activities（旧形态）要搬到规范位置。
+    activities = system.get("activities")
+    if not isinstance(activities, Mapping) or not activities:
+        activities = item.get("activities")
+    if isinstance(activities, Mapping) and activities:
+        doc["activities"] = {str(key): value for key, value in activities.items()}
+    return _guard_item_document(doc, warn=warn, label=str(doc.get("name") or ""))
+
+
+def _item_documents(
+    item_docs: Iterable[Mapping[str, Any]],
+    *,
+    effects_by_item: Mapping[str, list[dict[str, Any]]] | None = None,
+    asset_url: Callable[[str], str | None] | None = None,
+    warn: _Warn,
+) -> dict[str, dict[str, Any]]:
+    """非装备类物品（class/race/subclass/background/spell/feat/…）→ ``{item id: 文档}``。
+
+    这些条目**不进**装备清单行，但施法/特性/子职详情要读它们的
+    ``system.level`` / ``school`` / ``components`` / ``activities`` / ``requirements``。
+    上限 :data:`ITEM_DOCUMENTS_MAX` 条，每条 ≤ :data:`ITEM_DOC_MAX_BYTES`；
+    超出上限的条目如实记警告（顺序 = 源包顺序，不猜重要性）。
+    """
+    effects_index = effects_by_item or {}
+    documents: dict[str, dict[str, Any]] = {}
+    dropped = 0
+    for item in item_docs:
+        kind = str(item.get("type") or "").strip().lower()
+        if kind in EQUIPMENT_TYPES:
+            continue
+        item_id = _item_local_id(item)
+        if not item_id:
+            continue
+        if item_id in documents:
+            continue
+        if len(documents) >= ITEM_DOCUMENTS_MAX:
+            dropped += 1
+            continue
+        documents[item_id] = _item_document(
+            item,
+            effects=effects_index.get(str(item.get("_id") or "")),
+            asset_url=asset_url,
+            warn=warn,
+        )
+    if dropped:
+        warn.add(
+            "item_documents.overflow",
+            f"非装备条目超过 {ITEM_DOCUMENTS_MAX} 份上限，其余 {dropped} 份文档未收进 "
+            "sheet.item_documents（装备清单行不受影响）。",
+        )
+    return documents
+
+
 def _equipment_rows(
     system: Mapping[str, Any],
     item_docs: list[Mapping[str, Any]],
@@ -1254,8 +1649,14 @@ def _equipment_rows(
     effects_by_item: Mapping[str, list[dict[str, Any]]] | None = None,
     kiwee_lookup: Callable[[str], dict[str, Any] | None] | None = None,
     kiwee_stats: dict[str, int] | None = None,
+    asset_url: Callable[[str], str | None] | None = None,
 ) -> list[dict[str, Any]]:
-    """装备清单行 ``{name, quantity, weight, notes, effects}``（含货币行与容器归属标注）。"""
+    """装备清单行 ``{name, quantity, weight, notes, item, uses?, effects}``。
+
+    ``item`` 是规范化 item document（原样保留 ``system`` / ``activities`` /
+    ``flags`` / 条目级效果），引擎（``effect_changes.weapon_row``）与卡面
+    「物品」页签都从它读；扁平字段继续保留，供只认扁平形态的旧消费方兜底。
+    """
     container_names: dict[str, str] = {}
     for item in item_docs:
         if item.get("type") == "container":
@@ -1317,6 +1718,17 @@ def _equipment_rows(
         item_effects = effects_index.get(str(item.get("_id") or ""))
         if item_effects:
             row["effects"] = [dict(entry) for entry in item_effects]
+        # 规范化文档随行保留：引擎（weapon_row / _weapon_attack）与卡面「物品」
+        # 页签都从它读 activities / damage / range / armor / uses / flags。
+        row["item"] = _item_document(
+            item,
+            effects=item_effects,
+            asset_url=asset_url,
+            warn=warn,
+        )
+        uses = _item_uses(item_system)
+        if uses is not None:
+            row["uses"] = uses
         rows.append(row)
     if kiwee_lookup is not None:
         stats = _enrich_effects_with_kiwee(rows, items_by_name, kiwee_lookup, warn)
@@ -1362,6 +1774,7 @@ def _character(
     weapon_name: Callable[[str], str | None] | None,
     avatar_data_uri: Callable[[str], str | None] | None,
     kiwee_lookup: Callable[[str], dict[str, Any] | None] | None = None,
+    item_asset_url: Callable[[str], str | None] | None = None,
 ) -> dict[str, Any]:
     warn = _Warn()
     system = _mapping(actor.get("system"))
@@ -1495,6 +1908,15 @@ def _character(
         effects_by_item=effects_by_item,
         kiwee_lookup=kiwee_lookup,
         kiwee_stats=kiwee_stats,
+        asset_url=item_asset_url,
+    )
+    # 非装备条目（职业/种族/子职/背景/法术/专长）不进装备行，但文档要留住：
+    # 施法页、特性详情、子职特性都从 ``sheet.item_documents`` 读原文。
+    item_documents = _item_documents(
+        item_docs,
+        effects_by_item=effects_by_item,
+        asset_url=item_asset_url,
+        warn=warn,
     )
     # 非装备类物品（专长/种族特性/法术）的效果挂角色级；导入时不做激活判定，
     # 交给 dnd5e_plugin.effect_changes 按 transfer/disabled/applied 自己判。
@@ -1508,6 +1930,11 @@ def _character(
     effects_summary["kiwee"] = dict(kiwee_stats)
     if effects_summary["documents"]:
         _warn_effects(warn, effects_summary, "物品效果")
+    # workflow 钩子（midi-qol onUse/onHit、DAE、ItemMacro…）：能安全等价的转声明式
+    # DSL，转不了的留原文标 needs_review。装备行的钩子就地挂进该行的 item 文档，
+    # 非装备条目（专长/法术/种族）汇总到卡级，避免"只在装备行找"漏掉真实样本里
+    # 绝大多数挂点。
+    sheet_hooks, workflow_stats = _workflow_hook_report(item_docs, equipment_rows)
 
     stats = _stats(actor)
     sheet = {
@@ -1546,8 +1973,12 @@ def _character(
         "notes": _notes_text(actor, system, item_docs, effect_docs, notes_extra, warn),
         "xp": max(0, _as_int(_mapping(details.get("xp")).get("value"), 0)),
     }
+    if item_documents:
+        sheet["item_documents"] = item_documents
     if character_effects:
         sheet["effect_changes"] = character_effects
+    if sheet_hooks:
+        sheet["workflow_hooks"] = sheet_hooks
     name = str(actor.get("name") or "").strip() or "未命名角色"
     card: dict[str, Any] = {
         "id": "",
@@ -1571,6 +2002,7 @@ def _character(
         "has_avatar": bool(avatar_uri),
         "card": card,
         "effects": effects_summary,
+        "workflow_hooks": workflow_stats,
         "warnings": warn.texts(),
         "degradations": warn.counts(),
     }
@@ -1998,6 +2430,9 @@ def _npc(
     )
     if npc_effects_summary["documents"]:
         _warn_effects(warn, npc_effects_summary, "物品效果")
+    # workflow 钩子：怪物没有装备清单行，钩子统一挂 statblock.workflow_hooks
+    # （真实样本里唯一一条可转换的 midi-qol 钩子就在 NPC 的法术上）。
+    npc_hooks, npc_workflow_stats = _workflow_hook_report(item_docs, [])
     name = str(actor.get("name") or "").strip() or "未命名怪物"
     title = name if not folder_name else f"[{folder_name}] {name}"
 
@@ -2050,6 +2485,8 @@ def _npc(
         statblock["legendary_resistances_max"] = legres
     if npc_effects:
         statblock["effect_changes"] = npc_effects
+    if npc_hooks:
+        statblock["workflow_hooks"] = npc_hooks
 
     content = _render_statblock_text(
         name=name,
@@ -2103,6 +2540,7 @@ def _npc(
         "armor_class": ac_value,
         "max_hp": max(1, max_hp),
         "effects": npc_effects_summary,
+        "workflow_hooks": npc_workflow_stats,
         "warnings": warn.texts(),
         "degradations": warn.counts(),
     }
@@ -2296,6 +2734,7 @@ def convert_world_actors(
     avatar_data_uri: Callable[[str], str | None] | None = None,
     kiwee_enrich: bool = True,
     item_lookup: Callable[[str], dict[str, Any] | None] | None = None,
+    item_asset_url: Callable[[str], str | None] | None = None,
 ) -> dict[str, Any]:
     """整包 actors → {characters, npcs, vehicles, warnings, degradations, totals}。
 
@@ -2367,6 +2806,7 @@ def convert_world_actors(
                 weapon_name,
                 avatar_data_uri,
                 lookup,
+                item_asset_url,
             )
             characters.append(result)
             warnings.extend(f"角色卡「{result['name']}」：{text}" for text in result["warnings"])
@@ -2405,6 +2845,17 @@ def convert_world_actors(
         effect_totals["kiwee_enriched"] = kiwee_total["enriched"]
         effect_totals["kiwee_lookups"] = kiwee_total["lookups"]
     totals["effects"] = effect_totals
+    # workflow 钩子汇总：转成 DSL 的条数 / 需人工确认的条数 / 引擎已承担的（native）
+    # / 主动跳过的（ignored）/ 实际落点（装备行 item vs 卡级）。
+    hook_totals = _empty_workflow_stats()
+    for row in [*characters, *npcs]:
+        summary = row.get("workflow_hooks") if isinstance(row.get("workflow_hooks"), dict) else {}
+        for key in hook_totals:
+            hook_totals[key] += _as_int(summary.get(key), 0)
+    totals["workflow_hooks"] = hook_totals
+    # 扁平键：审计/报告脚本按名字直取，不必知道嵌套形状。
+    totals["workflow_hooks_converted"] = hook_totals["converted"]
+    totals["workflow_hooks_needs_review"] = hook_totals["needs_review"]
     return {
         "characters": characters,
         "npcs": npcs,
@@ -2417,6 +2868,8 @@ def convert_world_actors(
 
 __all__ = [
     "ABILITY_KEYS",
+    "ITEM_DOCUMENTS_MAX",
+    "ITEM_DOC_MAX_BYTES",
     "EFFECT_MODE_NAMES",
     "EFFECT_UNSUPPORTED_HINTS",
     "KIWEE_CONDITIONS_ZH",

@@ -357,3 +357,61 @@ def test_midi_qol_critical_threshold_expands_crit_range(plugins):
     )
     assert result["natural"] == 19
     assert result["critical"] is True
+
+
+# ---------------------------------------------------------------------------
+# 9) workflow 钩子（effect_runtime DSL）→ combat 执行
+# ---------------------------------------------------------------------------
+
+
+def test_workflow_hook_on_hit_adds_damage(plugins):
+    """converted 钩子在命中后真的加骰伤害，并挂进战斗结果。"""
+    card = _card(
+        [
+            _effect([]),
+        ]
+    )
+    card["sheet"]["workflow_hooks"] = [
+        {
+            "status": "converted",
+            "source": "midi-qol.onUseMacroName",
+            "dsl": {
+                "trigger": "onHit",
+                "actions": [
+                    {"type": "damage.add", "dice": "1d6", "damage_type": "fire"}
+                ],
+            },
+        }
+    ]
+    player = _combatant(card)
+    goblin = _monster("goblin")
+    result = _plugin().combat.resolve_attack_action(
+        player, goblin, {"weapon": "长剑", "attack_roll": 18}, rng=lambda sides: 3
+    )
+    assert result["success"] is True
+    workflow = result.get("workflow")
+    assert workflow and workflow["trigger"] == "onHit"
+    assert workflow["actions"] and workflow["actions"][0]["type"] == "damage.add"
+    assert 1 <= workflow["actions"][0]["amount"] <= 6
+
+
+def test_workflow_hook_condition_add_and_miss_trigger(plugins):
+    """onMiss 钩子只在未命中触发；condition.add 写进目标状态。"""
+    card = _card([_effect([])])
+    card["sheet"]["workflow_hooks"] = [
+        {
+            "status": "converted",
+            "dsl": {
+                "trigger": "onMiss",
+                "actions": [{"type": "condition.add", "condition": "off_balance"}],
+            },
+        }
+    ]
+    player = _combatant(card)
+    goblin = _monster("goblin")
+    result = _plugin().combat.resolve_attack_action(
+        player, goblin, {"weapon": "长剑", "attack_roll": 2}, rng=lambda sides: 3
+    )
+    assert result["success"] is False
+    assert result["workflow"]["trigger"] == "onMiss"
+    assert "off_balance" in goblin.get("conditions", [])
