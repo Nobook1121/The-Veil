@@ -354,6 +354,8 @@ Copy-Relative 'scripts/build-frontend.mjs'
 Copy-Relative 'scripts/relocate-tools.mjs'
 # 玩家侧更新脚本（随包分发，不依赖 git / Python）
 Copy-Relative 'scripts/update-release.ps1'
+# 应用内一键更新的收尾助手（进程退出后替换文件并重启）
+Copy-Relative 'scripts/apply_update.py'
 
 # ---------------------------------------------------------------- 官方插件（白名单）
 # 只复制官方插件，避免把本机安装的第三方插件打进发布包；
@@ -461,6 +463,7 @@ $required = @(
     'data/scenarios/scenario-1793438085450/scenario.json',
     '更新.cmd',
     'scripts/update-release.ps1',
+    'scripts/apply_update.py',
     'data/plugins/dnd5e-vtt/plugin.json',
     'data/plugins/fvtt-world-import/plugin.json'
 )
