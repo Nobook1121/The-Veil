@@ -1092,7 +1092,8 @@ function roomRulesetTagHtml(room: Room): string {
 }
 
 function roomCoverHtml(room: Room): string {
-    if (!room.cover) {
+    // 没有封面时整块不渲染：空 src 会让浏览器显示破图图标。
+    if (!room.cover || !String(room.cover).trim()) {
         return "";
     }
     const src = String(room.cover).replace(/[&<>"']/g, (ch) => {

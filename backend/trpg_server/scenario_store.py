@@ -124,7 +124,20 @@ def load_scenario_by_id(
 
 
 def scenario_public_asset_url(asset_path: str | Path) -> str:
-    relative = Path(asset_path).as_posix().lstrip("/")
+    """把剧本资源路径转成公开访问 URL；已是可访问地址时原样返回（幂等）。
+
+    入参有两种形态：相对剧本目录的资源路径（``scenario-1/assets/x.png``），
+    以及已经可访问的地址（根路径 ``/assets/scenarios/...`` 或绝对 ``http(s)://``；
+    fvtt 导入器写出的 ``cover`` 就是完整 URL）。后者原样返回，否则会拼出
+    ``/assets/scenarios/assets/scenarios/...`` 这种 404 地址，房间卡封面因此破图。
+    """
+    raw = str(asset_path or "").strip()
+    if not raw:
+        return ""
+    # 根路径（含协议相对地址 ``//cdn/...``）与绝对地址都不要再加前缀。
+    if raw.startswith("/") or raw.startswith(("http://", "https://", "data:")):
+        return raw
+    relative = Path(raw).as_posix().lstrip("/")
     return f"{SCENARIO_PUBLIC_ROUTE_PREFIX}/{relative}"
 
 
