@@ -1309,6 +1309,92 @@
     opacity: 0;
 }
 
+/* 场景面板（DM）：缩略图列表 + 切换按钮 */
+.vtt-scene-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.vtt-scene-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    background: rgba(12, 14, 18, 0.42);
+}
+
+.vtt-scene-row.is-active {
+    border-color: rgba(214, 178, 96, 0.55);
+    background: rgba(214, 178, 96, 0.08);
+}
+
+.vtt-scene-thumb {
+    width: 64px;
+    height: 40px;
+    flex: 0 0 auto;
+    border-radius: 4px;
+    object-fit: cover;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(236, 231, 219, 0.45);
+}
+
+.vtt-scene-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.vtt-scene-meta strong {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--color-text, #ece7db);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vtt-scene-meta span {
+    font-size: 0.72rem;
+    color: rgba(236, 231, 219, 0.55);
+}
+
+.vtt-scene-switch {
+    flex: 0 0 auto;
+    padding: 3px 10px;
+    border: 1px solid rgba(214, 178, 96, 0.5);
+    border-radius: 4px;
+    background: rgba(214, 178, 96, 0.12);
+    color: var(--color-text, #ece7db);
+    font-size: 0.76rem;
+    cursor: pointer;
+}
+
+.vtt-scene-switch:hover:not(:disabled) {
+    background: rgba(214, 178, 96, 0.24);
+}
+
+.vtt-scene-switch:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.vtt-scene-active {
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(214, 178, 96, 0.55);
+    color: #d6b260;
+}
+
 /* ==========================================================================
    规则速查浮层（kiwee 深库，玩家侧）
    入口在左上工具组尾部；浮层挂在 .vtt-stage-tools 内（该层 pointer-events:

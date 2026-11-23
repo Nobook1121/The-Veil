@@ -190,6 +190,8 @@ def list_scenes(room_dir) -> list[dict[str, Any]]:
                 "updated_at": str(state.get("updated_at") or ""),
                 "background": str(state.get("background") or ""),
                 "tokens": len(state.get("tokens") or []),
+                # 每格像素（场景标定结果）：概览里带上，场景面板不必再逐场景读盘。
+                "grid_size": int(state.get("grid_size") or 0),
                 "active": candidate == active,
             }
         )

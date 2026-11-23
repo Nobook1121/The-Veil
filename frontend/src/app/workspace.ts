@@ -86,6 +86,8 @@
     let stageContext: CanvasRenderingContext2D | null = null;
     let stageObserver: ResizeObserver | null = null;
     let backgroundImage: HTMLImageElement | null = null;
+    let backgroundPending: HTMLImageElement | null = null;
+    let backgroundGeneration = 0;
     let backgroundUrl = "";
     let dragging = false;
     let dragStartX = 0;
@@ -758,20 +760,32 @@
     }
 
     function loadBackground(url: string): void {
-        if (backgroundUrl === url) return;
-        backgroundUrl = url;
-        backgroundImage = null;
+        // 切场景/重导地图时的两个坑，这里一起堵：
+        // 1) 「先清后载」会在新图解码前留下一帧空底图（旧场景棋子 + 黑底）；
+        // 2) 连续切换场景时，先发出的旧 Image.onload 晚到会覆盖新背景。
+        // 用代际号判定 + 新图 onload 才替换旧图，旧图保留到新图就绪。
+        if (backgroundUrl === url && (backgroundImage || backgroundPending)) return;
         if (!url) {
+            backgroundGeneration += 1;
+            backgroundPending = null;
+            backgroundUrl = "";
             drawStage();
             return;
         }
+        const generation = ++backgroundGeneration;
+        backgroundUrl = url;
         const image = new Image();
+        backgroundPending = image;
         image.onload = () => {
+            if (generation !== backgroundGeneration) return; // 过期图：丢弃
             backgroundImage = image;
+            backgroundPending = null;
             drawStage();
         };
         image.onerror = () => {
-            backgroundImage = null;
+            if (generation !== backgroundGeneration) return;
+            backgroundPending = null;
+            // 失败也保留旧图，避免切场景失败时整块变黑（错误已由 URL 404 暴露）。
             drawStage();
         };
         image.src = url;
@@ -934,6 +948,8 @@
         canvas = null;
         stageContext = null;
         backgroundImage = null;
+        backgroundPending = null;
+        backgroundGeneration += 1;
         backgroundUrl = "";
     }
 

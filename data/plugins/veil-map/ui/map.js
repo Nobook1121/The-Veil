@@ -35,7 +35,10 @@
     var FOG_UNLIT = { r: 10, g: 14, b: 22, a: 132 };    // 视野内无光：冷暗 alpha 0.52
     var FOG_DIM = { r: 26, g: 36, b: 56, a: 40 };       // 昏暗光区：极轻冷调 alpha 0.16
     var FOG_BRIGHT = { r: 0, g: 0, b: 0, a: 0 };       // 明亮光区：不罩
-    var FOG_OVERFLOW_FILL = "rgba(4, 6, 10, 0.95)";     // 底图溢出地图边界的部分整体罩死黑
+    // 底图溢出地图边界的部分与「未探索」同色同透明度（此前写死 0.95，
+    // 与 FOG_UNSEEN.a=243/255 差 2/255，边界处能看出色带）。
+    var FOG_OVERFLOW_FILL =
+        "rgba(4, 6, 10, " + (243 / 255).toFixed(4) + ")";
 
     function clamp(value, minimum, maximum) {
         return Math.max(minimum, Math.min(maximum, value));

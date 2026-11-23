@@ -196,6 +196,19 @@ def _write_scenario(scenarios: Path, scenario_id: int = 101) -> None:
                         "statblock": {"senses": {"passive_perception": 11}},
                     },
                     {
+                        # 世界包导入写给 NPC 的分速表与语言（statblock.speed /
+                        # statblock.languages）：速览要按玩家侧同口径补出来。
+                        "id": "npc-wisp",
+                        "module_type": "npc",
+                        "title": "洞窟鬼火",
+                        "summary": "会飞的鬼火，说通用语与地精语。",
+                        "monster_id": "goblin",
+                        "statblock": {
+                            "speed": {"walk": 30, "fly": 60},
+                            "languages": ["Common", "Goblin"],
+                        },
+                    },
+                    {
                         # 模块没有任何可用数值：速览如实缺席（不塞占位值）。
                         "id": "npc-shell",
                         "module_type": "npc",
@@ -417,8 +430,24 @@ def test_dm_view_has_npc_quick_stats_from_statblock(tmp_path, plugins):
     assert bear["attack_bonus_source"] == "weapon"
     assert bear["passive_perception"] == 11
     assert bear["resources"] == []
+    # 只有 walk（数据包基线 30 尺）→ 分速不显示；模块没写语言 → null。
+    assert bear["speeds"] is None
+    assert bear["languages"] is None
     # 模块数值不全的 NPC：如实不给 quick_stats 键（不塞占位数字）。
     assert "quick_stats" not in _npc(data, "空壳 NPC")
+
+
+def test_npc_quick_stats_carry_speeds_and_languages(tmp_path, plugins):
+    """NPC 速览补分速与语言：与玩家侧同口径（walk 之外有值才给分速表）。"""
+    client, _rooms = _make_client(tmp_path)
+    _login(client, "1")
+    wisp = _npc(_panels(client).get_json()["data"], "洞窟鬼火")["quick_stats"]
+    # 模块写的 statblock.speed 分速表原样下发（世界包导入就是这个形状）。
+    assert wisp["speeds"] == {"walk": 30, "fly": 60}
+    assert wisp["languages"] == ["Common", "Goblin"]
+    # 其余速览不受影响（数据包基线 + 模块覆盖同一条 statblock 通路）。
+    assert wisp["ac"] == 15
+    assert wisp["attack_bonus"] == 4
 
 
 def test_characters_panel_documents_quick_stats_fields(tmp_path, plugins):
@@ -433,8 +462,12 @@ def test_characters_panel_documents_quick_stats_fields(tmp_path, plugins):
         "passive_perception",
         "hp",
         "resources",
+        "speeds",
+        "languages",
     }
     assert "命中加值" in fields["attack_bonus"]
+    assert "分速" in fields["speeds"]
+    assert "语言" in fields["languages"]
 
 
 # ---------------------------------------------------------------- 端点权限回归

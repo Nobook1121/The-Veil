@@ -640,10 +640,65 @@
                 el.innerHTML = panelHeader("场景") + emptyState("fa fa-map-o", "场景目录不可用", "场景面板仅对 DM 开放。");
                 return;
             }
+            var items = panel.items || [];
+            if (!items.length) {
+                el.innerHTML =
+                    panelHeader("场景") +
+                    emptyState("fa fa-map-o", "暂无地图场景", panel.hint || "导入世界包或手动导入地图后，这里会列出可切换的场景。");
+                return;
+            }
+            var rows = items
+                .map(function (scene, index) {
+                    var id = String(scene.scene_id || "");
+                    var title = String(scene.title || id || "未命名场景");
+                    var thumb = typeof scene.thumb === "string" && scene.thumb ? scene.thumb : "";
+                    var tokens = Number(scene.tokens || 0);
+                    var active = scene.active === true;
+                    var thumbHtml = thumb
+                        ? '<img class="vtt-scene-thumb" src="' + escapeHtml(thumb) + '" alt="" loading="lazy" />'
+                        : '<span class="vtt-scene-thumb is-empty"><i class="fa fa-map-o" aria-hidden="true"></i></span>';
+                    var action = active
+                        ? '<span class="vtt-scene-active">当前</span>'
+                        : '<button type="button" class="vtt-scene-switch" data-vtt-scene="' +
+                          escapeHtml(id) +
+                          '" data-vtt-index="' + index + '">切换</button>';
+                    return (
+                        '<div class="vtt-scene-row' + (active ? " is-active" : "") + '">' +
+                        thumbHtml +
+                        '<div class="vtt-scene-meta"><strong>' + escapeHtml(title) + "</strong>" +
+                        '<span>' + (tokens > 0 ? tokens + " 个棋子" : "无棋子") + "</span></div>" +
+                        action +
+                        "</div>"
+                    );
+                })
+                .join("");
             el.innerHTML =
                 panelHeader("场景") +
-                emptyState("fa fa-map-o", "场景列表待接入", panel.hint || "场景列表将在地图插件接入后列出。") +
-                noteBox("接线点：M3 从地图插件（veil-map）场景存储拉取列表，支持切换场景与把玩家拉入场景。");
+                '<div class="vtt-scene-list">' + rows + "</div>" +
+                noteBox("切换场景会把所有玩家拉到新地图并重算迷雾；玩家只能看到自己视野内的部分。");
+
+            var activatePath = String(panel.activate_path || "");
+            el.querySelectorAll(".vtt-scene-switch").forEach(function (button) {
+                button.addEventListener("click", function () {
+                    var sceneId = button.getAttribute("data-vtt-scene") || "";
+                    if (!sceneId || !activatePath) return;
+                    button.disabled = true;
+                    var url = activatePath.replace("{scene_id}", encodeURIComponent(sceneId));
+                    apiRequest("POST", url, {})
+                        .then(function (response) {
+                            if (response && response.success) {
+                                panelsSignature = ""; // 强制重拉面板，刷新高亮与棋子数
+                                return loadPanels();
+                            }
+                            button.disabled = false;
+                            notify((response && response.message) || "场景切换失败。", "error");
+                        })
+                        .catch(function () {
+                            button.disabled = false;
+                            notify("场景切换失败，请重试。", "error");
+                        });
+                });
+            });
         }
 
         function renderItems() {

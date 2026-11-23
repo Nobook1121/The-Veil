@@ -5,6 +5,14 @@ M2 骨架 + M3 第一段（地图交互）：
 - ``GET /api/plugins/dnd5e-vtt/panels?room=<room_id>``：按观察者（DM/玩家）
   裁剪的面板清单。**场景面板与角色面板的 NPC/怪物分组只对 DM 下发**，
   玩家的响应里整块不出现（不是前端隐藏）；前端只消费、不做本地权限判断。
+- 场景面板（本刀）：场景目录取自 veil-map 的公开地图服务 ``list_scenes``
+  （不读它的存储文件、不 import 它的模块），每项下发 ``scene_id`` /
+  ``title`` / ``active`` / ``tokens`` / ``grid_size`` / ``thumb``；缩略图就是
+  场景背景资产地址（房间内可访问 URL），服务端不做图片处理，前端
+  ``object-fit: cover`` 裁。切换走 ``POST
+  /api/plugins/dnd5e-vtt/rooms/<id>/scenes/<scene_id>/activate``（仅房主/
+  房管）：复用 ``activate_for_area`` + ``broadcast_state`` +
+  ``dnd5e_vtt_scene_switch``，与 AI 工具 ``switch_scene`` 同一条通路。
 - 角色速览 ``quick_stats``（本刀）：角色面板的每个玩家条目与（DM 视角的）
   NPC 条目都多一个 ``quick_stats`` 字段——四盒（AC / 命中 / 法术豁免 DC /
   被动感知）+ 当前 HP + 有限资源池（生命骰剩余、法术位合计，长休刷新）。
@@ -211,6 +219,8 @@ QUICK_RESET_LONG_REST = "long_rest"
 # 命中加值来源：主要武器攻击加值 → 法术命中加值。
 QUICK_ATTACK_WEAPON = "weapon"
 QUICK_ATTACK_SPELL = "spell"
+# 5e 分速键（``attributes.movement.*``）：``walk`` 是基础速度，其余只有有值才显示。
+SPEED_KEYS = ("walk", "fly", "swim", "climb", "burrow", "jump")
 
 
 def _dnd5e_plugin():
@@ -500,6 +510,75 @@ def _player_quick_stats(
     }
 
 
+def _speed_rows(value: Any) -> dict[str, int]:
+    """分速字段归一：``{walk: 30, fly: 60}`` / ``30`` → 合法分速键表。
+
+    只认 5e 的六个分速键（``attributes.movement.*``），未知名与非正数忽略；
+    裸数字按 ``walk`` 处理（旧模块/数据包只写单一速度）。
+    """
+    rows: dict[str, int] = {}
+    if isinstance(value, dict):
+        for key, raw in value.items():
+            name = str(key or "").strip().lower()
+            if name not in SPEED_KEYS:
+                continue
+            feet = _optional_int(raw)
+            if feet is None or feet <= 0:
+                continue
+            rows[name] = feet
+        return rows
+    feet = _optional_int(value)
+    if feet is not None and feet > 0:
+        rows["walk"] = feet
+    return rows
+
+
+def _npc_sources(module: dict[str, Any]) -> list[dict[str, Any]]:
+    """NPC 模块的覆盖来源，按优先级从高到低（与 dnd5e statblock 同口径）。"""
+    sources: list[dict[str, Any]] = []
+    for key in ("statblock", "battle"):
+        value = module.get(key)
+        if isinstance(value, dict):
+            sources.append(value)
+    sources.append(module)
+    return sources
+
+
+def _npc_speeds(module: dict[str, Any], spec: dict[str, Any]) -> dict[str, int] | None:
+    """NPC 分速表：``combatant_from_module`` 的结果为基线，模块字段按优先级覆盖。
+
+    ``walk`` 取 ``speed_ft``（数据包基线 + 效果引擎），其余分速来自
+    ``spec['speeds']``（效果引擎的 ``attributes.movement.*``）与世界包导入写的
+    ``statblock.speed`` 字典（``{"walk": 30, "fly": 60}``）。与玩家侧
+    ``_quick_speeds`` 同口径：``walk`` 之外没有值就返回 ``None``（面板不显示噪音）。
+    """
+    rows: dict[str, int] = {}
+    walk = _optional_int(spec.get("speed_ft"))
+    if walk is not None and walk > 0:
+        rows["walk"] = walk
+    rows.update(_speed_rows(spec.get("speeds")))
+    # 低优先级先写、高优先级后写；同一来源里显式的 ``speeds`` 表覆盖单值 ``speed``。
+    for source in reversed(_npc_sources(module)):
+        for key in ("speed", "speeds"):
+            rows.update(_speed_rows(source.get(key)))
+    extra = {key: value for key, value in rows.items() if key != "walk" and value}
+    return rows if extra else None
+
+
+def _npc_languages(module: dict[str, Any]) -> list[str]:
+    """NPC 语言清单：模块 ``languages``（世界包导入写入 statblock）按优先级取首个。"""
+    for source in _npc_sources(module):
+        raw = source.get("languages")
+        if isinstance(raw, str):
+            raw = [part for part in re.split(r"[,，、;；/]", raw)]
+        if not isinstance(raw, list):
+            continue
+        values = [str(item).strip()[:40] for item in raw if str(item or "").strip()]
+        if values:
+            return values
+    return []
+
+
 def _npc_passive_perception(module: dict[str, Any]) -> int | None:
     """NPC 被动察觉：世界包导入的 ``senses.passive_perception``（导入时算好）。"""
     sources: list[dict[str, Any]] = []
@@ -526,6 +605,10 @@ def _npc_quick_stats(module: dict[str, Any]) -> dict[str, Any] | None:
     ``combatant_from_module`` 是 c9e1358 那刀的产物：数据包怪物数值为基线、
     模块字段覆盖。它拿不到完整数值时会显式抛错——这里如实降级成「没有
     速览」（条目上不出现 ``quick_stats`` 键），不塞占位数字。
+
+    展示项按玩家侧同口径补齐：``speeds``（``walk`` 之外有值才下发）与
+    ``languages``（列表，无则 ``None``）；两者都直接复用 ``_quick_speeds`` /
+    ``_quick_languages``，避免 NPC 与角色两套口径漂移。
     """
     modules = _dnd5e_modules()
     if modules is None:
@@ -563,6 +646,12 @@ def _npc_quick_stats(module: dict[str, Any]) -> dict[str, Any] | None:
                 "reset": QUICK_RESET_LONG_REST,
             }
         )
+    # 分速与语言与玩家侧同口径：复用 _quick_speeds / _quick_languages，
+    # 把 NPC 来源（statblock 分速表、导入器写的 languages）拼成同一形状。
+    display = {
+        "speeds": _npc_speeds(module, spec) or {},
+        "proficiencies": {"languages": _npc_languages(module)},
+    }
     return {
         "ac": _optional_int(spec.get("armorClass")),
         "attack_bonus": attack_bonus,
@@ -575,6 +664,9 @@ def _npc_quick_stats(module: dict[str, Any]) -> dict[str, Any] | None:
             "temp": max(0, _as_int(spec.get("temp_hp"), 0)),
         },
         "resources": resources[:QUICK_RESOURCE_LIMIT],
+        # 分速（walk 之外有值才给）与语言清单（没有就不给，和玩家侧一致）。
+        "speeds": _quick_speeds(display),
+        "languages": _quick_languages(display),
     }
 
 
@@ -619,8 +711,9 @@ def _npc_roster(info: dict[str, Any]) -> dict[str, Any]:
 
     世界包导入（fvtt-world-import actors/run）的产物就是 ``module_type=npc``
     的剧本模块；没有绑定剧本或剧本为空时如实给空态，不造假数据。
-    每个条目额外带 ``quick_stats``（AC / 命中 / 法术 DC / 被动察觉 + HP），
-    数值来自 statblock 模块；模块数值不全时该键不出现（不塞占位值）。
+    每个条目额外带 ``quick_stats``（AC / 命中 / 法术 DC / 被动察觉 + HP +
+    分速 / 语言），数值来自 statblock 模块；模块数值不全时该键不出现
+    （不塞占位值）。
     """
     scenario_id = str(info.get("scenario_id") or "").strip()
     if not scenario_id:
@@ -667,6 +760,106 @@ def _npc_roster(info: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ------------------------------------------------------------ 场景面板（veil-map）
+# 场景目录的唯一数据源是 veil-map 的公开地图服务（``list_scenes`` /
+# ``activate_for_area`` / ``broadcast_state``）：本插件不读它的存储文件、
+# 也不 import 它的模块；插件缺席时场景面板如实降级为空清单。
+MAX_SCENE_ITEMS = 60
+SCENES_HINT_EMPTY = "房间里还没有地图场景；导入地图或让 AI DM 开图后会列在这里。"
+SCENES_HINT_NO_MAP = "地图插件（veil-map）未启用，场景目录不可用；启用后这里会列出房间里的地图场景。"
+SCENES_HINT_FAILED = "场景目录读取失败，可稍后重试。"
+
+
+def _map_service():
+    """veil-map 的公开地图服务；插件缺席/服务钩子故障时返回 ``None``。"""
+    try:
+        from trpg_server.plugins.runtime import get_service
+
+        return get_service("veil-map", "map_service")
+    except Exception:  # noqa: BLE001 - 服务钩子故障按缺席处理
+        return None
+
+
+def _scene_thumb(background: Any) -> str:
+    """场景缩略图地址 = 场景背景资产地址（房间内可访问 URL）。
+
+    veil-map 落盘的 ``background`` 就是资产路由
+    （``/api/plugins/veil-map/rooms/<id>/assets/maps/<name>``），所以这里**不做
+    任何图片处理**：前端用 ``object-fit: cover`` 裁成方块即可。只放行站内绝对
+    路径与 https 外部图（``javascript:`` / ``data:`` 之类一律不下发）。
+    """
+    url = str(background or "").strip()
+    if not url:
+        return ""
+    if url.startswith("/") and not url.startswith("//"):
+        return url[:512]
+    if url.lower().startswith("https://"):
+        return url[:512]
+    return ""
+
+
+def _scene_items(room_dir: Path | None) -> tuple[list[dict[str, Any]], str]:
+    """场景面板条目 + 空态提示；地图插件缺席或读取失败都降级为空清单。
+
+    条目字段（前端只消费这些，不在本地再算）：``scene_id`` / ``title`` /
+    ``active`` / ``tokens``（目录给了棋子数才下发）/ ``grid_size``（每格像素）/
+    ``thumb``（缩略图 URL = 背景资产地址）。
+    """
+    service = _map_service()
+    if service is None:
+        return [], SCENES_HINT_NO_MAP
+    if not hasattr(service, "list_scenes"):
+        return [], SCENES_HINT_FAILED
+    try:
+        listing = service.list_scenes(room_dir)
+    except Exception:  # noqa: BLE001 - 目录读取失败不能拖垮整个面板
+        logger.warning("dnd5e-vtt: veil-map 场景目录读取失败", exc_info=True)
+        return [], SCENES_HINT_FAILED
+    if not isinstance(listing, dict) or listing.get("ok") is not True:
+        return [], SCENES_HINT_FAILED
+    raw = listing.get("scenes") if isinstance(listing.get("scenes"), list) else []
+    active_id = str(listing.get("active_scene_id") or "").strip()
+    items: list[dict[str, Any]] = []
+    for scene in raw:
+        if not isinstance(scene, dict):
+            continue
+        scene_id = str(scene.get("scene_id") or "").strip()
+        if not scene_id:
+            continue
+        items.append(
+            {
+                "scene_id": scene_id[:64],
+                "title": str(scene.get("title") or scene_id)[:80],
+                "active": bool(scene.get("active")) or (bool(active_id) and scene_id == active_id),
+                "tokens": _optional_int(scene.get("tokens")),
+                "grid_size": _optional_int(scene.get("grid_size")),
+                "thumb": _scene_thumb(scene.get("background")),
+            }
+        )
+        if len(items) >= MAX_SCENE_ITEMS:
+            break
+    return items, ("" if items else SCENES_HINT_EMPTY)
+
+
+def _emit_scene_switch(room_id: str, scene_id: str, title: str) -> None:
+    """「场景切换」事件：前端拿它盖加载遮罩；广播失败不影响切换结果。
+
+    与 AI 工具 ``agent_tools._emit_scene_switch`` 同一个事件与载荷（by 区分
+    发起方），改动时两处必须同步。
+    """
+    socketio = current_app.extensions.get("socketio")
+    if socketio is None:
+        return
+    try:
+        socketio.emit(
+            "dnd5e_vtt_scene_switch",
+            {"room_id": str(room_id), "scene_id": str(scene_id), "title": str(title), "by": "dm"},
+            room=str(room_id),
+        )
+    except Exception:  # noqa: BLE001 - 广播失败不能影响切换结果
+        logger.debug("dnd5e_vtt_scene_switch_emit_failed room=%s", room_id, exc_info=True)
+
+
 def _journal_entries(state: dict[str, Any], *, manager: bool) -> list[dict[str, Any]]:
     """日志事件流：房间事件账本的尾部；玩家侧按公开类型过滤（过滤版日志）。"""
     entries: list[dict[str, Any]] = []
@@ -705,13 +898,16 @@ def _panels_payload(room_dir: Path | None, info: dict[str, Any], *, manager: boo
     ]
     if manager:
         # 场景面板只对 DM 下发；玩家响应里整个 tab 不出现（服务端裁剪）。
+        # 数据来自 veil-map 的公开地图服务（场景目录 + 背景资产地址当缩略图）。
+        scene_items, scene_hint = _scene_items(room_dir)
         panels.append(
             {
                 "id": "scenes",
                 "title": "场景",
-                "items": [],
-                # 接线点：场景列表来自 veil-map 场景存储（M3 接入），本刀占位。
-                "hint": "场景列表将在地图插件数据接入后列出，用于切换场景与把玩家拉入场景。",
+                "items": scene_items,
+                "hint": scene_hint,
+                # 切换入口固定为房间级端点（仅 DM），前端照着拼地址即可。
+                "activate_path": f"/api/plugins/dnd5e-vtt/rooms/{room_id}/scenes/{{scene_id}}/activate",
             }
         )
     # 角色速览用的派生值 / 资源池口径全部由 dnd5e 插件提供（本插件只搬数据）。
@@ -729,6 +925,8 @@ def _panels_payload(room_dir: Path | None, info: dict[str, Any], *, manager: boo
             "passive_perception": "被动感知（派生 passivePerception）",
             "hp": "当前生命值 / 上限（+临时值）",
             "resources": "长休刷新的有限资源池：生命骰剩余、法术位合计",
+            "speeds": "分速表（尺）：walk 之外有值才下发，如 {walk: 30, fly: 60}",
+            "languages": "语言清单（效果/特性带来的语言；没有就不下发，NPC 与角色同口径）",
         },
     }
     if manager:
@@ -768,6 +966,82 @@ def panels():
         return error_response("当前房间的规则集未启用战桌。", 400, "dnd5e_vtt.ruleset_disabled")
     manager = _is_manager(info)
     return success_response(_panels_payload(room_dir, info, manager=manager), "D&D 5e 战桌面板")
+
+
+@bp.route("/rooms/<room_id>/scenes/<scene_id>/activate", methods=["POST"])
+def activate_scene(room_id: str, scene_id: str):
+    """切换房间当前地图场景（仅 DM）：复用 veil-map 的激活原语与观察者广播。
+
+    与 AI 工具 ``dnd5e-vtt.switch_scene`` 走同一条通路——
+    ``service.activate_for_area`` 落盘/切换、``service.broadcast_state`` 按
+    观察者裁剪推送、``dnd5e_vtt_scene_switch`` 事件给前端盖遮罩；本端点只是
+    把入口从「AI 工具」换成「场景面板的切换按钮」，不复制任何裁剪逻辑。
+
+    错误码稳定：未知场景 404 ``dnd5e_vtt.scene_missing``、非 DM 403
+    ``dnd5e_vtt.dm_only``、veil-map 缺席或切换失败 503
+    ``dnd5e_vtt.scene_unavailable``。
+    """
+    # 门闸与 /panels、模板与棋子卡接口同口径：登录 → 房间 → 成员 → 规则集。
+    room_dir, info, denied = _templates_room_or_error(room_id)
+    if denied:
+        return denied
+    if not _is_manager(info):
+        return error_response(
+            "场景切换只能由 DM（房主/房管）执行。", 403, "dnd5e_vtt.dm_only"
+        )
+    target = str(scene_id or "").strip()
+    if not target:
+        return error_response("缺少场景 id。", 400, "dnd5e_vtt.scene_required")
+    service = _map_service()
+    if service is None or not hasattr(service, "activate_for_area"):
+        return error_response(
+            "地图插件（veil-map）未启用，无法切换场景。", 503, "dnd5e_vtt.scene_unavailable"
+        )
+    # 场景目录先过一遍：未知场景必须稳定回 404，而不是把 activate 的通用失败
+    # 报成 503。目录读失败时不拦（交给 activate_for_area 自己判定）。
+    listed_title = ""
+    try:
+        listing = service.list_scenes(room_dir)
+    except Exception:  # noqa: BLE001 - 目录读失败不阻断切换尝试
+        listing = None
+    if isinstance(listing, dict) and listing.get("ok") is True:
+        known = {
+            str(item.get("scene_id") or ""): str(item.get("title") or "")
+            for item in listing.get("scenes") or []
+            if isinstance(item, dict)
+        }
+        if target not in known:
+            return error_response(f"找不到场景「{target}」。", 404, "dnd5e_vtt.scene_missing")
+        listed_title = known.get(target, "")
+    result = service.activate_for_area(str(room_dir), info, target)
+    if not isinstance(result, dict) or not result.get("ok"):
+        logger.debug(
+            "dnd5e-vtt: 场景切换失败 room=%s scene=%s result=%s",
+            room_id,
+            target,
+            str((result or {}).get("code") or ""),
+        )
+        return error_response(
+            f"切换到「{listed_title or target}」失败：{str((result or {}).get('error') or '目标场景不可用。')}",
+            503,
+            "dnd5e_vtt.scene_unavailable",
+        )
+    state = result.get("state") if isinstance(result.get("state"), dict) else {}
+    scene = str(result.get("scene_id") or target)
+    title = str(state.get("title") or listed_title or scene)
+    changed = bool(result.get("changed"))
+    if changed:
+        broadcast = getattr(service, "broadcast_state", None)
+        if callable(broadcast):
+            try:
+                broadcast(room_id, state)
+            except Exception:  # noqa: BLE001 - 广播失败不影响切换结果
+                logger.debug("dnd5e-vtt: 场景广播失败 room=%s", room_id, exc_info=True)
+        _emit_scene_switch(room_id, scene, title)
+    return success_response(
+        {"ok": True, "scene_id": scene, "title": title, "changed": changed},
+        f"已切换到场景「{title}」" if changed else f"场景「{title}」已是当前场景",
+    )
 
 
 # ============================================================
