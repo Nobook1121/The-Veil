@@ -11,6 +11,10 @@
 - 两档口径：默认（房间内的旧入口）只算属性提升 / 熟练加值 / 法术；卡面手动
   升级入口传 ``class_advancement=True``，额外生成生命值、职业特性、子职槽位，
   并保持 XP 不变（手动升级不按等级表补经验）。
+- 子职候选：SRD 的 ``classes.json`` 每个职业只列一条子职，所以候选里再并入
+  kiwee 深库（``subclass`` 类目）中属于本职业的条目（见
+  :func:`_subclass_candidates`）。深库未建/未安装时静默只剩 SRD；候选只读，
+  来源（``srd`` / ``kiwee``）只做展示，落库仍只写 ``sheet.subclass`` 名称。
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ import time
 from typing import Any, Mapping
 from uuid import uuid4
 
+from dnd5e_plugin import kiwee
 from trpg_server.plugins import runtime
 
 ABILITY_KEYS = ("str", "dex", "con", "int", "wis", "cha")
@@ -39,6 +44,16 @@ ASI_LEVELS = {4, 8, 12, 16, 19}
 # SRD 5.1：属性提升不能把单项属性推过 20（史诗恩赐类能力不在本模块范围内）。
 ABILITY_CAP = 20
 MAX_SUBCLASS_NAME = 60
+# 子职候选上限：SRD 候选在最前，其后接 kiwee 扩展子职，够翻不刷屏。
+MAX_SUBCLASS_CANDIDATES = 30
+# kiwee 侧最多扫多少条 subclass 条目（真库 206 条，留足余量）。
+KIWEE_SUBCLASS_SCAN_LIMIT = 1000
+# 排序/去重时视为「核心书」的来源码：同名的 2024 重印版让位给 2014 原文。
+KIWEE_CORE_SOURCES = frozenset({"PHB", "XPHB"})
+SUBCLASS_SUMMARY_LIMIT = 80
+SUBCLASS_SOURCE_SRD = "srd"
+SUBCLASS_SOURCE_KIWEE = "kiwee"
+KIWEE_SERVICE_NAME = kiwee.SERVICE_NAME
 PLAN_TTL_SECONDS = 600
 _WIZARD_SPELLS_PER_LEVEL = 2
 _FEATS = (
@@ -176,7 +191,30 @@ def _feature_rows(class_entry: Mapping[str, Any], level: int) -> list[dict[str, 
 
 
 def _subclass_candidates(class_entry: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """子职候选：classes.json 的 subclasses 表（SRD 5.1 每个职业只列一条）。"""
+    """子职候选：SRD 优先，其后 kiwee 深库同名去重（上限 MAX_SUBCLASS_CANDIDATES）。
+
+    - SRD 5.1（classes.json 的 subclasses 表，每个职业只有一条）排在最前，来源标
+      ``srd``；
+    - 之后接 kiwee 深库（``subclass`` 类目）里 ``className`` 命中本职业的条目，
+      来源标 ``kiwee``；与已有候选同名（中文名或英文名，忽略大小写）的跳过，
+      2014 版（``edition=classic``）优先保留；
+    - 深库未建/未安装 → 静默只剩 SRD（零注入：升级计划不因缺库而失败）。
+    """
+    candidates = _srd_subclass_candidates(class_entry)
+    seen = {key for item in candidates for key in _subclass_keys(item)}
+    for item in _kiwee_subclass_candidates(class_entry):
+        keys = _subclass_keys(item)
+        if keys & seen:
+            continue
+        if len(candidates) >= MAX_SUBCLASS_CANDIDATES:
+            break
+        seen |= keys
+        candidates.append(item)
+    return candidates
+
+
+def _srd_subclass_candidates(class_entry: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """SRD 子职候选（classes.json 的 subclasses 表）。"""
     rows = class_entry.get("subclasses")
     candidates: list[dict[str, Any]] = []
     for row in rows if isinstance(rows, list) else []:
@@ -189,10 +227,161 @@ def _subclass_candidates(class_entry: Mapping[str, Any]) -> list[dict[str, Any]]
             {
                 "value": str(row.get("id") or base),
                 "label": label,
-                "detail": {"name": base, "label_zh": zh, "source": "SRD 5.1"},
+                "name": base,
+                "name_zh": zh,
+                "summary": "",
+                "source": SUBCLASS_SOURCE_SRD,
+                "detail": {
+                    "name": base,
+                    "label_zh": zh,
+                    "source": "SRD 5.1",
+                    "source_code": SUBCLASS_SOURCE_SRD,
+                },
             }
         )
     return candidates
+
+
+def _kiwee_service() -> Any | None:
+    """插件服务表里的 kiwee 深库服务；插件未加载/旧核心/未安装 → None。"""
+    try:
+        return runtime.get_service("dnd5e", KIWEE_SERVICE_NAME)
+    except Exception:  # noqa: BLE001 - 服务表缺席按无深库降级（零注入）
+        return None
+
+
+def _kiwee_subclass_candidates(class_entry: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """kiwee 深库中本职业的子职候选（已按「2014 优先 + 来源 + 名称」排序）。
+
+    归属判定：条目 ``raw.className``（中文职业名）命中本职业的 id / 英文名 /
+    本地化名；深库条目名与英文名都进去重键。
+    """
+    service = _kiwee_service()
+    if service is None:
+        return []
+    try:
+        rows = service.list_category("subclass", limit=KIWEE_SUBCLASS_SCAN_LIMIT)
+    except Exception:  # noqa: BLE001 - 深库异常一律降级为「没有扩展候选」
+        return []
+    if not rows:
+        return []
+    class_names = _entry_names(class_entry)
+    picked: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        raw = row.get("raw") if isinstance(row.get("raw"), Mapping) else {}
+        owner = str(raw.get("className") or "").strip()
+        if not owner or owner.casefold() not in class_names:
+            continue
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        eng = str(row.get("eng_name") or "").strip()
+        label = f"{name}（{eng}）" if eng and eng.casefold() != name.casefold() else name
+        page_hint = str(row.get("page_hint") or "").strip()
+        source_code = str(row.get("source") or "").strip()
+        picked.append(
+            (
+                # 排序＝2014 版优先 → 核心书（PHB/XPHB）优先 → 来源码 → 名称；
+                # 同名去重时因此会保住 2014 版 / 核心书那一版。
+                (
+                    0 if str(raw.get("edition") or "") == "classic" else 1,
+                    0 if source_code in KIWEE_CORE_SOURCES else 1,
+                    source_code,
+                    name,
+                ),
+                {
+                    # value 用中文名：落到 sheet.subclass 的就是这个名字，dv 与展示一致。
+                    "value": name,
+                    "label": label,
+                    "name": name,
+                    "name_zh": name,
+                    "summary": _kiwee_subclass_summary(raw),
+                    "source": SUBCLASS_SOURCE_KIWEE,
+                    "detail": {
+                        "name": name,
+                        "eng_name": eng,
+                        "label_zh": name,
+                        "source": f"{SUBCLASS_SOURCE_KIWEE} · {page_hint}" if page_hint else SUBCLASS_SOURCE_KIWEE,
+                        "source_code": source_code,
+                        "page_hint": page_hint,
+                        "uid": str(row.get("uid") or ""),
+                        "rules_era": str(row.get("rules_era") or ""),
+                        "deep_link": str(row.get("deep_link") or ""),
+                    },
+                },
+            )
+        )
+    picked.sort(key=lambda pair: pair[0])
+    return [item for _key, item in picked]
+
+
+def _kiwee_subclass_summary(raw: Mapping[str, Any], limit: int = SUBCLASS_SUMMARY_LIMIT) -> str:
+    """子职一行简介：优先正文首行，否则「等级 特性」清单（深库子职没有正文）。"""
+    text = ""
+    if raw.get("entries"):
+        try:
+            text = str(kiwee.render_entry_text("subclass", dict(raw))).strip()
+        except Exception:  # noqa: BLE001 - 解析失败不影响候选本身
+            text = ""
+    if text:
+        return text.splitlines()[0].strip()[:limit]
+    parts: list[str] = []
+    rows = raw.get("subclassFeatures")
+    for item in rows if isinstance(rows, list) else []:
+        bits = str(item or "").split("|")
+        name = bits[0].strip()
+        if not name:
+            continue
+        level = _as_int(bits[5], 0) if len(bits) > 5 else 0
+        parts.append(f"{level} 级 {name}" if level else name)
+        if len(parts) >= 3:
+            break
+    return " · ".join(parts)[:limit]
+
+
+def _subclass_keys(candidate: Mapping[str, Any]) -> set[str]:
+    """去重键：中文名 + 英文名（忽略大小写）；SRD 候选两者都取。"""
+    detail = candidate.get("detail") if isinstance(candidate.get("detail"), Mapping) else {}
+    keys = {
+        str(candidate.get("name") or ""),
+        str(candidate.get("name_zh") or ""),
+        str(detail.get("name") or ""),
+        str(detail.get("eng_name") or ""),
+    }
+    return {key.strip().casefold() for key in keys if key and key.strip()}
+
+
+def _subclass_names_in_srd() -> set[str]:
+    """SRD 全部子职名（任何职业），校验手填名字用。"""
+    names: set[str] = set()
+    try:
+        library = runtime.content_packs_for("dnd5e")
+    except Exception:  # noqa: BLE001 - 数据包缺席时按「没有 SRD 名单」处理
+        return names
+    for entry in library.entries("dnd5e", "class"):
+        rows = entry.get("subclasses") if isinstance(entry, Mapping) else None
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, Mapping):
+                names |= _entry_names(row)
+    return names
+
+
+def _subclass_name_known(name: str) -> bool:
+    """名字是否有出处：SRD 子职名单 或 kiwee 深库里的同名子职。"""
+    key = str(name or "").strip()
+    if not key:
+        return False
+    if key.casefold() in _subclass_names_in_srd():
+        return True
+    service = _kiwee_service()
+    if service is None:
+        return False
+    try:
+        return bool(service.has_name("subclass", key))
+    except Exception:  # noqa: BLE001 - 深库异常按「查不到」处理
+        return False
 
 
 def _hit_points_block(
@@ -459,12 +648,15 @@ def create_plan(
             )
         )
 
+    # 候选只算一次：槽位与 plan.subclass.options 共用同一份（深库查询不重复跑）。
+    subclass_options: list[dict[str, Any]] = []
     if subclass_level:
         label = str(
             class_entry.get("subclass_name_zh")
             or class_entry.get("subclass_name")
             or "子职"
         )
+        subclass_options = _subclass_candidates(class_entry)
         if not subclass_now and target == subclass_level:
             slots.append(
                 _slot(
@@ -472,14 +664,22 @@ def create_plan(
                     "subclass",
                     target,
                     f"{label}（子职）",
-                    candidates=_subclass_candidates(class_entry),
+                    candidates=subclass_options,
                     required=True,
                     min_picks=1,
                     max_picks=1,
                     detail={
                         "subclass_level": subclass_level,
                         "allow_custom": True,
-                        "source": "dnd5e-srd/classes",
+                        "source": "dnd5e-srd/classes+kiwee/subclass",
+                        "sources": {
+                            SUBCLASS_SOURCE_SRD: sum(
+                                1 for item in subclass_options if item.get("source") == SUBCLASS_SOURCE_SRD
+                            ),
+                            SUBCLASS_SOURCE_KIWEE: sum(
+                                1 for item in subclass_options if item.get("source") == SUBCLASS_SOURCE_KIWEE
+                            ),
+                        },
                     },
                     not_selected=f"本职业在 {subclass_level} 级必须选定{label}。",
                 )
@@ -608,7 +808,15 @@ def create_plan(
             "level": subclass_level,
             "current": subclass_now,
             "label": str(class_entry.get("subclass_name_zh") or class_entry.get("subclass_name") or ""),
-            "options": _subclass_candidates(class_entry),
+            "options": subclass_options,
+            "counts": {
+                SUBCLASS_SOURCE_SRD: sum(
+                    1 for item in subclass_options if item.get("source") == SUBCLASS_SOURCE_SRD
+                ),
+                SUBCLASS_SOURCE_KIWEE: sum(
+                    1 for item in subclass_options if item.get("source") == SUBCLASS_SOURCE_KIWEE
+                ),
+            },
             "level_due": bool(subclass_level and not subclass_now and target == subclass_level),
         },
         "slots": slots,
@@ -791,9 +999,17 @@ def _apply_hit_points(
 
 
 def _apply_subclass(
-    sheet: dict[str, Any], slot: Mapping[str, Any], values: list[str]
+    sheet: dict[str, Any],
+    slot: Mapping[str, Any],
+    values: list[str],
+    plan: Mapping[str, Any] | None = None,
 ) -> None:
-    """子职落地：命中职业表候选就用中文名，否则接受手填（深库/非 SRD 子职）。"""
+    """子职落地：命中候选就用候选名，否则接受手填——但手填名必须有出处。
+
+    出处口径（放宽后仍可读）：SRD 子职名单 或 kiwee 深库存在同名子职；两者都
+    没有就拒绝（提示从候选里选）。落库只写 ``sheet.subclass`` 名称，来源只做
+    展示，不新增持久字段。
+    """
     if len(values) != 1:
         raise ProgressionError("progression.invalid_option", "子职只能选择一项。")
     raw = values[0].strip()
@@ -815,6 +1031,14 @@ def _apply_subclass(
             raise ProgressionError(
                 "progression.invalid_option",
                 f"子职名称最多 {MAX_SUBCLASS_NAME} 个字符。",
+            )
+        if not _subclass_name_known(raw):
+            label_text = str((plan or {}).get("class_name") or (plan or {}).get("class") or "")
+            raise ProgressionError(
+                "progression.subclass_unknown",
+                f"子职「{raw}」不在 SRD 子职名单里，kiwee 深库也查不到"
+                + (f"{label_text}的这一子职" if label_text else "这个子职")
+                + "；请从候选列表里选，或确认名称拼写（深库未建时只能用 SRD 子职）。",
             )
         label = raw
     sheet["subclass"] = label
@@ -887,7 +1111,7 @@ def apply_plan(plan_id: str, choices: Any, card: Mapping[str, Any]) -> dict[str,
                 new_sheet, slot, values, _as_int(plan.get("target_level"), 1)
             )
         elif kind == "subclass":
-            _apply_subclass(new_sheet, slot, values)
+            _apply_subclass(new_sheet, slot, values, plan)
         elif kind == "proficiency_bonus":
             if values and values != ["apply"]:
                 raise ProgressionError("progression.invalid_option", "熟练加值槽位不接受其它选项。")

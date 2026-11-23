@@ -22,6 +22,12 @@ SQLite FTS 索引 + datatag 解析器并入 dnd5e 主插件；**消费面三方*
     service.entry(category, uid_or_name)
         # 单条：uid（"火球术|phb"）/名称都认；→ {...search 字段, text, structured}
         # 深库缺席或没这条 → None；**门控在调用方**（UI 详情端点自己判 DM）
+    service.list_category(category, *, limit=500)
+        # 整类目列举（不检索，按名排序）：→ [search 字段...] 每条含 raw
+        # 深库缺席 → None（消费方回落 dnd5e-srd）；空列表 → 该类目没条目
+    service.has_name(category, name)
+        # 精确名存在性（中文名/英文名，忽略大小写）：→ True/False
+        # 深库缺席 → False；**不做模糊匹配**（与 entry 的宽松兜底不同）
     service.spell_mechanics(uid_or_name)
         # → {name, eng_name, level, school, casting_time, range_ft, components,
         #    duration, save_ability, damage: [{dice, type}], scaling,
@@ -160,6 +166,51 @@ class KiweeDbService:
         except sqlite3.Error:
             logger.warning("dnd5e_kiwee_entry_failed", exc_info=True)
             return None
+        finally:
+            if db is not None:
+                db.close()
+
+    # -- 类目列举 / 精确名 ---------------------------------------------------
+
+    def list_category(
+        self, category: Any, *, limit: int = 500, with_text: bool = False
+    ) -> list[dict[str, Any]] | None:
+        """整类目列举（不检索）；**深库未建/打开失败 → None**（降级语义）。
+
+        用途：升级向导按「所属职业」筛子职候选——先整类目取出，再按 ``raw``
+        里的归属字段过滤，比逐职业检索稳（检索只认名/别名，不认归属）。
+        """
+        db: KiweeDb | None = None
+        try:
+            db = open_kiwee_db(self._db_path)
+            if db is None:
+                return None
+            rows = db.list_category(category, limit=limit)
+            if with_text:
+                for row in rows:
+                    row["text"] = str(render_entry_text(str(row.get("category") or ""), row.get("raw")))[:TEXT_LIMIT]
+            return rows
+        except (sqlite3.Error, ValueError):
+            logger.warning("dnd5e_kiwee_list_failed", exc_info=True)
+            return None
+        finally:
+            if db is not None:
+                db.close()
+
+    def has_name(self, category: Any, name: Any) -> bool:
+        """精确名存在性（中文名/英文名，忽略大小写）；深库缺席 → False。
+
+        校验口径用：用户提交的名字是否真是深库里的某个条目。**不做模糊匹配**。
+        """
+        db: KiweeDb | None = None
+        try:
+            db = open_kiwee_db(self._db_path)
+            if db is None:
+                return False
+            return db.has_name(category, name)
+        except (sqlite3.Error, ValueError):
+            logger.warning("dnd5e_kiwee_has_name_failed", exc_info=True)
+            return False
         finally:
             if db is not None:
                 db.close()

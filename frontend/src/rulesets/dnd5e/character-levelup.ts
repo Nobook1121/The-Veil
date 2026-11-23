@@ -24,6 +24,14 @@ type Dnd5eLevelUpAsiMode = "plus2" | "plus1";
 interface Dnd5eLevelUpCandidate {
     value: string;
     label: string;
+    /** 主名（SRD 为英文名，扩展库为中文名）。 */
+    name?: string;
+    /** 中文名（SRD 有 zh-CN 本地化时才给）。 */
+    name_zh?: string;
+    /** 一行简介（扩展库子职＝「等级 特性」清单；SRD 无描述时为空）。 */
+    summary?: string;
+    /** 来源标记：``srd``（dnd5e-srd 数据包）/ ``kiwee``（kiwee 深库）。 */
+    source?: string;
     detail?: Record<string, unknown>;
 }
 
@@ -65,6 +73,8 @@ interface Dnd5eLevelUpSubclass {
     current: string;
     label: string;
     options: Dnd5eLevelUpCandidate[];
+    /** 候选来源计数：``srd``（dnd5e-srd 数据包）/ ``kiwee``（扩展库）。 */
+    counts?: { srd?: number; kiwee?: number };
     level_due: boolean;
 }
 
@@ -161,6 +171,8 @@ interface Window {
         asiPicks: string[];
         subclassPick: string;
         subclassCustom: string;
+        /** 子职候选的客户端筛选关键字（>8 条候选时才出现输入框）。 */
+        subclassFilter: string;
         spellKnown: string[];
         spellPrepared: string[];
         saving: boolean;
@@ -233,6 +245,7 @@ interface Window {
             asiPicks: [],
             subclassPick: "",
             subclassCustom: "",
+            subclassFilter: "",
             spellKnown: [],
             spellPrepared: [],
             saving: false,
@@ -440,6 +453,90 @@ interface Window {
             </section>`;
     }
 
+    /** 候选来源：``srd``（dnd5e-srd 数据包）/ ``kiwee``（扩展库深库）。 */
+    function subclassSource(item: Dnd5eLevelUpCandidate): "srd" | "kiwee" {
+        const detail = item.detail || {};
+        const raw = String(item.source || detail.source_code || "").toLowerCase();
+        return raw === "kiwee" ? "kiwee" : "srd";
+    }
+
+    function subclassSourceLabel(item: Dnd5eLevelUpCandidate): string {
+        const detail = item.detail || {};
+        const label = String(detail.source || "");
+        return label || (subclassSource(item) === "kiwee" ? "扩展库" : "SRD 5.1");
+    }
+
+    function subclassSearchText(item: Dnd5eLevelUpCandidate): string {
+        const detail = item.detail || {};
+        return [
+            item.value,
+            item.label,
+            item.name,
+            item.name_zh,
+            item.summary,
+            detail.eng_name,
+            detail.source,
+            detail.page_hint,
+            detail.source_code,
+        ]
+            .map((part) => String(part ?? ""))
+            .join(" ")
+            .toLowerCase();
+    }
+
+    function subclassGroups(current: LevelUpState): {
+        srd: Dnd5eLevelUpCandidate[];
+        kiwee: Dnd5eLevelUpCandidate[];
+        total: number;
+    } {
+        const list = slotOf(current, "subclass")?.candidates || [];
+        return {
+            srd: list.filter((item) => subclassSource(item) === "srd"),
+            kiwee: list.filter((item) => subclassSource(item) === "kiwee"),
+            total: list.length,
+        };
+    }
+
+    function renderSubclassCard(current: LevelUpState, item: Dnd5eLevelUpCandidate): string {
+        const selected = current.subclassPick === item.value && !current.subclassCustom.trim();
+        const summary = String(item.summary || "").trim();
+        const fromKiwee = subclassSource(item) === "kiwee";
+        // 选中项额外挂来源小标签（其余项的来源在下方 small 行里）。
+        const badge = selected
+            ? `<span class="dnd5e-wiz-badge${fromKiwee ? " is-muted" : ""}">${fromKiwee ? "扩展库" : "SRD"}</span>`
+            : "";
+        const cardClass = selected ? "dnd5e-wiz-class is-selected" : "dnd5e-wiz-class";
+        return `
+            <button type="button" class="${cardClass}"
+                data-lvl-action="subclass-pick" data-value="${escapeHtml(item.value)}"
+                data-lvl-subclass-item data-search="${escapeHtml(subclassSearchText(item))}"
+                aria-pressed="${selected ? "true" : "false"}">
+                <strong>${escapeHtml(candidateLabel(item, item.value))}</strong>
+                ${badge}
+                <small>${escapeHtml(subclassSourceLabel(item))}</small>
+                ${summary ? `<small class="dnd5e-wiz-subclass-summary">${escapeHtml(summary)}</small>` : ""}
+            </button>`;
+    }
+
+    function renderSubclassGroup(
+        current: LevelUpState,
+        key: "srd" | "kiwee",
+        title: string,
+        items: Dnd5eLevelUpCandidate[]
+    ): string {
+        if (items.length === 0) return "";
+        return `
+            <div class="dnd5e-wiz-group" data-lvl-subclass-group="${key}">
+                <h5 class="dnd5e-wiz-group-title">
+                    ${escapeHtml(title)}
+                    <small data-lvl-subclass-count>${items.length}</small>
+                </h5>
+                <div class="dnd5e-wiz-class-grid">
+                    ${items.map((item) => renderSubclassCard(current, item)).join("")}
+                </div>
+            </div>`;
+    }
+
     function renderSubclass(current: LevelUpState): string {
         const plan = current.plan;
         const slot = slotOf(current, "subclass");
@@ -456,16 +553,16 @@ interface Window {
             }
             return "";
         }
-        const options = (slot.candidates || []).map((item) => `
-            <button type="button" class="dnd5e-wiz-class ${current.subclassPick === item.value ? "is-selected" : ""}"
-                data-lvl-action="subclass-pick" data-value="${escapeHtml(item.value)}"
-                aria-pressed="${current.subclassPick === item.value ? "true" : "false"}">
-                <strong>${escapeHtml(candidateLabel(item, item.value))}</strong>
-                <small>${escapeHtml(String((item.detail || {}).source || "SRD 5.1"))}</small>
-            </button>`).join("");
-        const deepBadge = current.deepAvailable === false
-            ? `<span class="dnd5e-wiz-badge is-muted">深库未建 · 使用 dnd5e-srd 子职表</span>`
-            : `<span class="dnd5e-wiz-badge">可检索深库子职</span>`;
+        const groups = subclassGroups(current);
+        const counts = plan.subclass?.counts || {};
+        const srdCount = asInt(counts.srd, groups.srd.length);
+        const kiweeCount = asInt(counts.kiwee, groups.kiwee.length);
+        const searchable = groups.total > 8;
+        const deepBadge = kiweeCount > 0
+            ? `<span class="dnd5e-wiz-badge">候选含扩展库子职</span>`
+            : `<span class="dnd5e-wiz-badge is-muted">${
+                current.deepAvailable === false ? "深库未建" : "暂无扩展子职"
+            } · 仅 SRD</span>`;
         const results = current.deepResults.length
             ? `<div class="dnd5e-wiz-deep-list">
                    ${current.deepResults.map((item) => `
@@ -479,11 +576,28 @@ interface Window {
         return `
             <section class="dnd5e-wiz-section">
                 <h4><i class="fa fa-sitemap" aria-hidden="true"></i> ${escapeHtml(slot.title)} ${deepBadge}</h4>
-                <div class="dnd5e-wiz-class-grid">${options}</div>
+                <p class="dnd5e-wiz-hint">
+                    候选来自 dnd5e-srd（${srdCount} 条）与 kiwee 扩展库（${kiweeCount} 条）；SRD 排在前面，
+                    同名的扩展库条目已去重。深库未建时只剩 SRD 子职。
+                </p>
+                ${searchable
+                    ? `<div class="dnd5e-wiz-field dnd5e-wiz-subclass-filter">
+                           <label for="dnd5eLvlSubclassFilter">筛选候选（${groups.total} 条）</label>
+                           <input id="dnd5eLvlSubclassFilter" type="search" data-lvl-field="subclass-filter"
+                               placeholder="名称 / 英文 / 来源，如 塑能 / Evocation / PHB"
+                               value="${escapeHtml(current.subclassFilter)}">
+                       </div>`
+                    : ""}
+                ${renderSubclassGroup(current, "srd", "SRD 基础规则", groups.srd)}
+                ${renderSubclassGroup(current, "kiwee", "扩展库（kiwee 深库）", groups.kiwee)}
+                ${groups.kiwee.length === 0
+                    ? `<p class="dnd5e-wiz-hint">扩展库里没有本职业的子职（深库未建，或该职业暂无扩展子职）。</p>`
+                    : ""}
+                <p class="dnd5e-wiz-hint" data-lvl-subclass-empty hidden>没有匹配的候选，换个关键字，或用下面的手填。</p>
                 <div class="dnd5e-wiz-deep">
                     <div class="dnd5e-wiz-deep-row">
-                        <input type="search" data-lvl-field="deep" placeholder="检索子职（如 塑能 / Evocation）"
-                            value="${escapeHtml(current.deepQuery)}" aria-label="检索子职">
+                        <input type="search" data-lvl-field="deep" placeholder="全库检索子职（含其他职业，如 塑能 / Evocation）"
+                            value="${escapeHtml(current.deepQuery)}" aria-label="全库检索子职">
                         <button type="button" class="dnd5e-wiz-link" data-lvl-action="deep-search">
                             ${current.deepLoading ? "检索中…" : "检索"}
                         </button>
@@ -492,12 +606,34 @@ interface Window {
                     ${results}
                 </div>
                 <div class="dnd5e-wiz-field">
-                    <label for="dnd5eLvlSubclass">或手填子职名（非 SRD 子职）</label>
+                    <label for="dnd5eLvlSubclass">或手填子职名（须是 SRD 或 kiwee 深库里有的子职）</label>
                     <input id="dnd5eLvlSubclass" type="text" data-lvl-field="subclass-custom"
-                        placeholder="例如 塑能学派" value="${escapeHtml(current.subclassCustom)}">
+                        placeholder="例如 战争魔法" value="${escapeHtml(current.subclassCustom)}">
                 </div>
                 <p class="dnd5e-wiz-hint">已选：<strong>${escapeHtml(currentLabel(current))}</strong>${escapeHtml(slot.not_selected || "")}</p>
             </section>`;
+    }
+
+    /** 客户端筛选：只切 DOM 显隐，不整块重渲染（不会丢输入框焦点）。 */
+    function applySubclassFilter(query: string): void {
+        if (!modal) return;
+        const needle = query.trim().toLowerCase();
+        let visibleTotal = 0;
+        modal.querySelectorAll<HTMLElement>("[data-lvl-subclass-group]").forEach((group) => {
+            let visible = 0;
+            group.querySelectorAll<HTMLElement>("[data-lvl-subclass-item]").forEach((item) => {
+                const haystack = String(item.dataset.search || "");
+                const hit = !needle || haystack.includes(needle);
+                item.style.display = hit ? "" : "none";
+                if (hit) visible += 1;
+            });
+            group.style.display = visible > 0 ? "" : "none";
+            const counter = group.querySelector<HTMLElement>("[data-lvl-subclass-count]");
+            if (counter) counter.textContent = String(visible);
+            visibleTotal += visible;
+        });
+        const empty = modal.querySelector<HTMLElement>("[data-lvl-subclass-empty]");
+        if (empty) empty.hidden = !needle || visibleTotal > 0;
     }
 
     function currentLabel(current: LevelUpState): string {
@@ -696,6 +832,8 @@ interface Window {
         if (steps) steps.innerHTML = renderStepper(current);
         if (body) body.innerHTML = renderStepBody(current);
         if (footer) footer.innerHTML = renderFooter(current);
+        // 重渲染后按已存的关键字恢复筛选（输入框内容与显隐同源）。
+        applySubclassFilter(current.subclassFilter);
     }
 
     // --- 后端 -----------------------------------------------------------------
@@ -948,6 +1086,11 @@ interface Window {
             current.subclassCustom = target.value;
             return;
         }
+        if (field === "subclass-filter") {
+            current.subclassFilter = target.value;
+            applySubclassFilter(current.subclassFilter);
+            return;
+        }
         if (field === "spell-known" || field === "spell-prepared") {
             const property: "spellKnown" | "spellPrepared" = field === "spell-known" ? "spellKnown" : "spellPrepared";
             const values = new Set(current[property]);
@@ -1054,6 +1197,11 @@ interface Window {
         if ((target as HTMLInputElement | null)?.dataset?.lvlField === "deep") {
             event.preventDefault();
             void runDeepSearch(current);
+            return;
+        }
+        if ((target as HTMLInputElement | null)?.dataset?.lvlField === "subclass-filter") {
+            // 筛选框里的回车只收键盘焦点，不当作「下一步」。
+            event.preventDefault();
             return;
         }
         event.preventDefault();

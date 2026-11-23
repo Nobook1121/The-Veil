@@ -114,6 +114,8 @@ CATEGORY_ALIASES: dict[str, str] = {
 _PER_RANK_LIMIT = 500
 _DEFAULT_LIMIT = 20
 _MAX_LIMIT = 200
+# 整类目列举的上限：subclass 类目实测 200+ 条，留足余量又不至于把整库读进内存。
+_LIST_LIMIT = 1000
 
 _SCHEMA_SQL = """
 CREATE TABLE meta (
@@ -243,6 +245,14 @@ def _aliases_text(entry: dict[str, Any]) -> str:
 
 def _like_escape(text: str) -> str:
     return text.replace("[", "[[]").replace("%", "[%]").replace("_", "[_]")
+
+
+def _as_limit(value: Any, *, default: int = _DEFAULT_LIMIT, cap: int = _MAX_LIMIT) -> int:
+    """limit 入参归一：非数字回落 default，越界夹在 1..cap。"""
+    try:
+        return max(1, min(int(value), cap))
+    except (TypeError, ValueError):
+        return default
 
 
 def _fts_match_string(query: str) -> str:
@@ -564,6 +574,43 @@ class KiweeDb:
             return None
         found = self.search(cat, name, limit=1, observer_is_dm=True)
         return found[0] if found else None
+
+    # -- 类目列举 ----------------------------------------------------------
+
+    def list_category(self, category: Any, *, limit: int = _LIST_LIMIT) -> list[dict[str, Any]]:
+        """整类目列举（**不检索**，按名称排序）；供「按所属职业挑子职」这类消费面用。
+
+        只读一次 SQL，不跑 FTS/LIKE 三档：调用方（如升级向导）拿到列表后自己按
+        ``raw`` 里的归属字段（子职的 ``className``）过滤。字段与 :meth:`search`
+        完全相同（含 ``raw``，供调用方读结构化归属信息）。
+        """
+        cat = category_id(category)
+        if not cat:
+            return []
+        cap = _as_limit(limit, cap=_LIST_LIMIT)
+        rows = self._conn.execute(
+            f"SELECT {_ENTRY_COLUMNS} FROM entries WHERE category = :cat ORDER BY name LIMIT {cap}",
+            {"cat": cat},
+        ).fetchall()
+        return [_row_to_result(row) for row in rows]
+
+    def has_name(self, category: Any, name: Any) -> bool:
+        """**精确名**存在性（中文名或英文名，忽略大小写）；不做模糊/前缀匹配。
+
+        与 :meth:`get` 的宽松口径不同：``get`` 找不到 uid 时会退化为检索首条，
+        用来校验「用户提交的名字是否真的是某个子职」会把前缀命中当成存在，
+        所以校验路径必须走这里。
+        """
+        cat = category_id(category)
+        key = str(name or "").strip()
+        if not cat or not key:
+            return False
+        row = self._conn.execute(
+            "SELECT 1 FROM entries WHERE category = :cat AND (name = :q COLLATE NOCASE "
+            "OR eng_name = :q COLLATE NOCASE) LIMIT 1",
+            {"cat": cat, "q": key},
+        ).fetchone()
+        return row is not None
 
     # -- 状态 --------------------------------------------------------------
 

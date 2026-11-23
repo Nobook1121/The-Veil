@@ -158,7 +158,9 @@ def test_wizard_subclass_at_level_2_and_never_again(plugins):
     )
     subclass_slot = _slot(plan, "subclass")
     assert subclass_slot["required"] is True
-    assert [item["value"] for item in subclass_slot["candidates"]] == ["evocation"]
+    # 候选第一位永远是 SRD（扩展库子职只排在后面，深库缺失时就只剩这一条）。
+    assert [item["value"] for item in subclass_slot["candidates"]][0] == "evocation"
+    assert subclass_slot["candidates"][0]["source"] == "srd"
     assert subclass_slot["detail"]["subclass_level"] == 2
     assert plan["subclass"]["level_due"] is True
 

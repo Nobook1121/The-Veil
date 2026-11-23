@@ -6218,6 +6218,44 @@ body.is-guest .guest-login-hint {
     box-shadow: inset 0 0 0 1px var(--color-primary);
 }
 
+/* 子职候选：SRD / 扩展库分组 + 客户端筛选 */
+.dnd5e-wiz-subclass-filter {
+    margin-bottom: 10px;
+}
+
+.dnd5e-wiz-group {
+    margin-bottom: 12px;
+}
+
+.dnd5e-wiz-group-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.dnd5e-wiz-group-title small {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--color-muted);
+}
+
+/* 选中项上的来源小标签：按钮是纵向 flex，别让它拉满一行 */
+.dnd5e-wiz-class > .dnd5e-wiz-badge {
+    align-self: flex-start;
+    margin-left: 0;
+}
+
+.dnd5e-wiz-subclass-summary {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
 /* 深库检索 */
 .dnd5e-wiz-deep-toggle {
     margin-top: 2px;
