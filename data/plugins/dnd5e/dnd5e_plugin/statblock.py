@@ -333,7 +333,13 @@ def combatant_from_module(module: Mapping[str, Any]) -> dict[str, Any]:
             explicit=True,
             dex_mod=ability_modifier(abilities.get("dex", 10)),
         )
+        spec["max_hp"] = effects.max_hp(_as_int(spec["max_hp"], 1))
+        spec["hp"] = min(_as_int(spec["hp"], spec["max_hp"]), spec["max_hp"])
+        spec["speed_ft"] = effects.speed(_as_int(spec["speed_ft"], 30))
         spec["attacks"] = effects.apply_attacks(spec["attacks"])
+        spec["condition_immunities"] = effects.extend_traits(
+            spec.get("condition_immunities"), "ci"
+        )
         spec["damage_resistances"] = effects.extend_traits(spec["damage_resistances"], "dr")
         spec["damage_vulnerabilities"] = effects.extend_traits(spec["damage_vulnerabilities"], "dv")
         spec["damage_immunities"] = effects.extend_traits(spec["damage_immunities"], "di")

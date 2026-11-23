@@ -5,8 +5,10 @@
 - 五种模式逐个：2 加 / 1 乘 / 3 取低 / 4 取高 / 5 覆盖，0（custom）只计数；
 - 同一个 key 上多条 change 的结算顺序（乘→加→取低→取高→覆盖最后），
   结果与效果挂载顺序无关；
-- 未知路径（``flags.*`` / ``ATL.*`` / ``activities[...]``）不崩、进
-  ``unsupported``；骰式值（``+1d4``）进 ``deferred`` 不猜数；
+- 镜像 schema 判定：命中 schema 的路径（含 ``flags.*`` / ``ATL.*`` /
+  ``activities[...]``）记进镜像并按三档分级（full / stored / unsupported），
+  真正的外来命名空间才进 ``unsupported``；骰式值（``+1d4``）进 ``deferred``
+  不猜数；
 - 列表型 key（``traits.dr`` / ``traits.ci``）的 add / override；
 - ``disabled`` 的效果、``transfer`` 但装备行未 ``equipped`` 的效果都不生效；
 - 非 transfer 的角色级效果只有 ``applied: true`` 才生效；
@@ -175,7 +177,8 @@ def test_separate_effects_keep_fixed_order_too() -> None:
 # --- 未知路径 / 骰式值 ------------------------------------------------------
 
 
-def test_unknown_paths_are_counted_and_never_raise() -> None:
+def test_module_namespaces_are_mirrored_not_thrown_away() -> None:
+    """模块/前端命名空间（flags / ATL / activities）也命中镜像：记下来、分级 stored。"""
     view = ec.effective_sheet(
         _sheet(
             [
@@ -191,13 +194,31 @@ def test_unknown_paths_are_counted_and_never_raise() -> None:
         )
     )
     assert view.ac_bonus == 1
-    assert view.stats["unsupported"] == 3
-    assert view.report()["unsupported"] == [
+    # 三条都在镜像模型里 → 没有一条是 unsupported。
+    assert view.stats["unsupported"] == 0
+    assert view.stats["stored"] == 3
+    keys = {record["key"] for record in view.stored}
+    assert keys == {
+        "flags.midi-qol.grants.advantage.attack.all",
         "ATL.light.bright",
         "activities[attack].attack.ability",
-        "flags.midi-qol.grants.advantage.attack.all",
-    ]
+    }
+    assert all(record["reason"] == "no-consumer" for record in view.stored)
+    # 值真的进了镜像（「记录」不是空话）。
+    assert ec.resolve_path(view.doc, "flags.midi-qol.grants.advantage.attack.all") == 1
+    assert ec.resolve_path(view.doc, "ATL.light.bright") == 30
     assert ec.unsupported_hint("flags.midi-qol.x").startswith("模块/系统标志")
+
+
+def test_truly_alien_namespace_is_unsupported() -> None:
+    """镜像 schema 都没有的路径才归 unsupported（外来系统/拼写错误）。"""
+    view = ec.effective_sheet(
+        _sheet([_effect([{"key": "system.dwarvish.forge.temperature", "mode": 2, "value": 1}])])
+    )
+    assert view.stats["unsupported"] == 1
+    assert view.stats["stored"] == 0
+    assert view.report()["unsupported"] == ["system.dwarvish.forge.temperature"]
+    assert ec.classify_path("system.dwarvish.forge.temperature")[2] == ec.TIER_UNSUPPORTED
 
 
 @pytest.mark.parametrize(
@@ -266,7 +287,10 @@ def test_list_path_ignores_unsupported_modes() -> None:
         )
     )
     assert view.traits("dr") == []
-    assert view.stats["deferred"] == 1
+    # 列表 key 只认 add / override：别的模式如实记进 stored（原因写明模式）。
+    assert view.stats["deferred"] == 0
+    assert view.stats["stored"] == 1
+    assert view.stored[0]["reason"] == "mode-1"
 
 
 # --- 激活判定 --------------------------------------------------------------
@@ -351,16 +375,25 @@ def test_supported_paths_have_consumers_and_unknown_ones_do_not() -> None:
         "system.traits.ci.value",
         "system.attributes.ac.calc",
     ]
-    assert all(ec.classify_path(key)[0] != "unsupported" for key in supported)
-    # 没有读值点的一律 unsupported：写入也不改任何派生值。
+    assert all(ec.classify_path(key)[2] == ec.TIER_FULL for key in supported)
+    # 命中镜像但没有数值消费方的路径：照实记成 stored（不是 unsupported，
+    # 也不是假装生效）。
     for key in (
         "flags.dnd5e.halflingLucky",
         "ATL.light.dim",
         "system.attributes.movement.all",
+        "system.attributes.movement.fly",
+        "system.traits.languages.value",
         "system.damage.base.number",
         "system.properties",
     ):
-        assert ec.classify_path(key)[0] == "unsupported"
+        kind, path, tier, _note, _scope = ec.classify_path(key)
+        assert kind != "unsupported", key
+        assert tier == ec.TIER_STORED, key
+        assert path, key
+    # 只有镜像 schema 里根本没有的路径才是 unsupported。
+    for key in ("system.dwarvish.forge", "system.traits.nonsense", "system.attributes.nonsense.value"):
+        assert ec.classify_path(key)[2] == ec.TIER_UNSUPPORTED, key
 
 
 # --- 回归铁律：无效果时与旧实现逐字节一致 ---------------------------------
@@ -461,6 +494,7 @@ def test_effective_sheet_is_empty_without_any_effect() -> None:
         "active": 0,
         "changes": 0,
         "applied": 0,
+        "stored": 0,
         "unsupported": 0,
         "deferred": 0,
         "custom": 0,
@@ -720,3 +754,306 @@ def test_statblock_without_effects_keeps_pack_values(plugins) -> None:
     spec = combatant_from_module(module)
     assert spec["armorClass"] == 16
     assert spec["attacks"]
+
+
+# --- 镜像 schema：路径 → 镜像值 --------------------------------------------
+#
+# 「完整镜像 + 通用路径求值」的账本：每条路径写进镜像的哪一格、什么类型、
+# 落在哪一档。表里没有的路径族（真正的外来命名空间）才归 unsupported。
+
+MIRROR_PATH_TABLE = [
+    # (key, mode, value, 镜像路径, 期望镜像值, 分级)
+    ("system.attributes.ac.bonus", ec.MODE_ADD, "+1", "system.attributes.ac.bonus", 1, ec.TIER_FULL),
+    ("system.attributes.init.bonus", ec.MODE_ADD, 2, "system.attributes.init.bonus", 2, ec.TIER_FULL),
+    ("system.attributes.ac.calc", ec.MODE_OVERRIDE, "mage", "system.attributes.ac.calc", "mage", ec.TIER_FULL),
+    ("system.attributes.hp.bonus", ec.MODE_ADD, 5, "system.attributes.hp.bonus", 5, ec.TIER_FULL),
+    ("system.attributes.movement.walk", ec.MODE_ADD, 10, "system.attributes.movement.walk", 10, ec.TIER_FULL),
+    ("system.attributes.movement.fly", ec.MODE_ADD, 60, "system.attributes.movement.fly", 60, ec.TIER_STORED),
+    ("system.attributes.movement.units", ec.MODE_OVERRIDE, "ft", "system.attributes.movement.units", "ft", ec.TIER_STORED),
+    ("system.bonuses.mwak.attack", ec.MODE_ADD, 1, "system.bonuses.mwak.attack", 1, ec.TIER_FULL),
+    ("system.bonuses.spell.dc", ec.MODE_ADD, 1, "system.bonuses.spell.dc", 1, ec.TIER_FULL),
+    ("system.bonuses.abilities.save.dex", ec.MODE_ADD, 1, "system.bonuses.abilities.save.dex", 1, ec.TIER_FULL),
+    ("system.bonuses.skills.stealth.check", ec.MODE_ADD, 2, "system.bonuses.skills.stealth.check", 2, ec.TIER_FULL),
+    ("system.abilities.dex.check.roll.mode", ec.MODE_ADD, 1, "system.abilities.dex.check.roll.mode", 1, ec.TIER_FULL),
+    ("system.abilities.wis.save.roll.mode", ec.MODE_ADD, -1, "system.abilities.wis.save.roll.mode", -1, ec.TIER_FULL),
+    ("system.abilities.str.value", ec.MODE_ADD, 2, "system.abilities.str.value", 2, ec.TIER_STORED),
+    ("system.attributes.prof", ec.MODE_ADD, 1, "system.attributes.prof", 1, ec.TIER_STORED),
+    ("system.attributes.exhaustion", ec.MODE_ADD, 1, "system.attributes.exhaustion", 1, ec.TIER_STORED),
+    ("system.traits.dr.value", ec.MODE_ADD, "fire", "system.traits.dr.value", ["fire"], ec.TIER_FULL),
+    ("system.traits.ci.value", ec.MODE_ADD, "charmed", "system.traits.ci.value", ["charmed"], ec.TIER_FULL),
+    ("system.traits.languages.value", ec.MODE_ADD, "druidic", "system.traits.languages.value", ["druidic"], ec.TIER_STORED),
+    ("system.traits.size", ec.MODE_OVERRIDE, "lg", "system.traits.size", "lg", ec.TIER_STORED),
+    ("system.details.biography.value", ec.MODE_OVERRIDE, "无名", "system.details.biography.value", "无名", ec.TIER_STORED),
+    ("system.currency.gp", ec.MODE_ADD, 5, "system.currency.gp", 5, ec.TIER_STORED),
+    ("system.resources.legact.max", ec.MODE_ADD, 1, "system.resources.legact.max", 1, ec.TIER_STORED),
+    ("flags.midi-qol.someFlag", ec.MODE_OVERRIDE, True, "flags.midi-qol.someFlag", True, ec.TIER_STORED),
+    ("flags.dnd5e.halflingLucky", ec.MODE_OVERRIDE, "true", "flags.dnd5e.halflingLucky", "true", ec.TIER_STORED),
+    ("ATL.light.bright", ec.MODE_UPGRADE, 0, "ATL.light.bright", 0, ec.TIER_STORED),
+    ("name", ec.MODE_OVERRIDE, "改过的名字", "name", "改过的名字", ec.TIER_STORED),
+]
+
+
+@pytest.mark.parametrize(("key", "mode", "value", "path", "expected", "tier"), MIRROR_PATH_TABLE)
+def test_mirror_schema_writes_each_path(key, mode, value, path, expected, tier) -> None:
+    view = ec.effective_sheet(_sheet([_effect([{"key": key, "mode": mode, "value": value}])]))
+    reachable = [record for record in [*view.applied, *view.stored] if record["key"] == key]
+    assert reachable, f"{key} 没有被镜像接住"
+    assert reachable[0]["tier"] == tier, key
+    assert reachable[0]["path"] == path, key
+    assert ec.resolve_path(view.doc, path) == expected, key
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "system.dwarvish.forge.temperature",
+        "system.attributes.nonsense",
+        "system.traits.not-a-trait.value",
+        "system.bonuses.mwak.not-a-bonus",
+        "activities",
+    ],
+)
+def test_paths_outside_the_mirror_are_unsupported(key) -> None:
+    view = ec.effective_sheet(_sheet([_effect([{"key": key, "mode": ec.MODE_ADD, "value": 1}])]))
+    assert view.stats["unsupported"] == 1
+    assert view.stats["applied"] == 0 and view.stats["stored"] == 0
+    assert ec.classify_path(key)[2] == ec.TIER_UNSUPPORTED
+
+
+def test_five_modes_settle_on_the_mirror_in_fixed_order() -> None:
+    """乘 → 加 → 取低 → 取高 → 覆盖：结果与挂载顺序无关。"""
+    changes = [
+        {"key": "system.attributes.hp.bonus", "mode": ec.MODE_MULTIPLY, "value": 2},
+        {"key": "system.attributes.hp.bonus", "mode": ec.MODE_ADD, "value": 3},
+        {"key": "system.attributes.hp.bonus", "mode": ec.MODE_DOWNGRADE, "value": 7},
+        {"key": "system.attributes.hp.bonus", "mode": ec.MODE_UPGRADE, "value": 9},
+        {"key": "system.attributes.hp.bonus", "mode": ec.MODE_OVERRIDE, "value": 11},
+    ]
+    forward = ec.effective_sheet(_sheet([_effect(list(changes))]))
+    backward = ec.effective_sheet(_sheet([_effect(list(reversed(changes)))]))
+    # override 最后应用 → 两条路径都是 11。
+    assert forward.number("attributes.hp.bonus") == 11
+    assert backward.number("attributes.hp.bonus") == 11
+
+
+def test_mirror_records_stored_paths_without_touching_derived_values() -> None:
+    """stored 只写镜像，不进任何派生值（empty 仍为真）。"""
+    view = ec.effective_sheet(
+        _sheet(
+            [
+                _effect(
+                    [
+                        {"key": "system.attributes.movement.fly", "mode": ec.MODE_ADD, "value": 60},
+                        {"key": "system.traits.languages.value", "mode": ec.MODE_ADD, "value": "druidic"},
+                        {"key": "flags.midi-qol.x", "mode": ec.MODE_OVERRIDE, "value": 1},
+                    ]
+                )
+            ]
+        )
+    )
+    assert view.empty  # 没有 full 级 change
+    assert view.stats["stored"] == 3
+    assert view.ac_bonus == 0 and view.initiative_bonus == 0
+    assert view.number("attributes.movement.fly") == 60
+    assert view.traits("languages") == ["druidic"]
+
+
+# --- 新接的消费方：速度 / 生命上限 / 武器属性 / 条件免疫 --------------------
+
+
+def test_movement_walk_feeds_the_single_speed_model(plugins) -> None:
+    plugin = builtin_registry().resolve("dnd5e")
+    fast = _effect(
+        [{"key": "system.attributes.movement.walk", "mode": ec.MODE_ADD, "value": 10}],
+        name="脚程护符",
+        origin={"source": "equipment"},
+    )
+    flying = _effect(
+        [{"key": "system.attributes.movement.fly", "mode": ec.MODE_ADD, "value": 60}],
+        name="飞行药水",
+        origin={"source": "equipment"},
+    )
+    card = _card_with(plugin, [])
+    card["sheet"]["speed"] = 30
+    card["sheet"]["equipment"] = [
+        _gear([fast], equipped=True),
+        {"name": "飞行药水", "quantity": 1, "weight": 0.0, "notes": "药水", "equipped": True, "effects": [flying]},
+    ]
+    combatant = {"is_player": True, "name": "皮普"}
+    plugin.combat.prepare_combatant(combatant, card=card)
+    # walk 进了单一速度模型；fly 只记录，不改 speed_ft（分速模型未建）。
+    assert combatant["speed_ft"] == 40
+    view = ec.effective_sheet(card["sheet"])
+    assert view.number("attributes.movement.fly") == 60
+    assert all(record["tier"] == ec.TIER_STORED for record in view.stored if "fly" in record["key"])
+
+
+def test_speed_override_replaces_instead_of_adding(plugins) -> None:
+    plugin = builtin_registry().resolve("dnd5e")
+    card = _card_with(
+        plugin,
+        [
+            _effect(
+                [{"key": "system.attributes.movement.walk", "mode": ec.MODE_OVERRIDE, "value": 15}],
+                name="缓慢诅咒",
+            )
+        ],
+    )
+    card["sheet"]["speed"] = 30
+    combatant = {"is_player": True, "name": "皮普"}
+    plugin.combat.prepare_combatant(combatant, card=card)
+    assert combatant["speed_ft"] == 15
+
+
+def test_hp_bonus_raises_max_hp_everywhere(plugins) -> None:
+    plugin = builtin_registry().resolve("dnd5e")
+    card = _card_with(
+        plugin,
+        [_effect([{"key": "system.attributes.hp.bonus", "mode": ec.MODE_ADD, "value": 5}], name="坚韧")],
+    )
+    sheet = card["sheet"]
+    base = dict(sheet)
+    base.pop("effect_changes", None)
+    # 卡面 hp.max 是基础值（不会被效果写脏），派生与战斗各自叠加。
+    assert sheet["hp"]["max"] == 30
+    assert plugin.schema.derive(sheet)["maxHp"] == 35
+    assert plugin.schema.derive(base)["maxHp"] == 30
+    combatant = {"is_player": True, "name": "皮普"}
+    plugin.combat.prepare_combatant(combatant, card=card)
+    assert combatant["max_hp"] == 35
+
+
+def test_item_scope_properties_and_damage_reach_the_weapon(plugins) -> None:
+    """Shillelagh 形态：非 transfer 的物品效果改的是那件武器本身。"""
+    plugin = builtin_registry().resolve("dnd5e")
+    shillelagh = {
+        "id": "shillelagh",
+        "name": "Shillelagh",
+        "transfer": False,
+        "changes": [
+            {"key": "system.properties", "mode": ec.MODE_ADD, "value": "finesse"},
+            {"key": "system.damage.base.number", "mode": ec.MODE_OVERRIDE, "value": "1"},
+            {"key": "system.damage.base.denomination", "mode": ec.MODE_OVERRIDE, "value": "8"},
+        ],
+        "origin": {"source": "spell", "equipped": True},
+    }
+    card = _card_with(plugin, [], abilities={"str": 14, "dex": 12, "con": 12, "int": 10, "wis": 10, "cha": 10})
+    card["sheet"]["equipment"] = [
+        {"name": "Mace", "quantity": 1, "weight": 4.0, "notes": "", "equipped": True, "effects": [shillelagh]}
+    ]
+    view = ec.effective_sheet(card["sheet"])
+    assert view.stats["applied"] == 3 and view.stats["stored"] == 0
+    weapon = view.weapon_row({"name": "Mace", "category": "weapon"})
+    assert "finesse" in weapon["properties"]
+    assert weapon["damage"]["dice"] == "1d8"
+
+    combatant = {"is_player": True, "name": "皮普"}
+    plugin.combat.prepare_combatant(combatant, card=card)
+    row = combatant["attacks"][0]
+    # 灵巧 → 用敏捷（+1）而不是力量（+2）；伤害骰被改成 1d8。
+    assert row["ability"] == "dex"
+    assert row["damage_dice"] == "1d8"
+
+
+def test_item_scope_paths_on_an_actor_effect_are_stored_not_faked() -> None:
+    """角色级（法术）效果带物品路径时没有目标武器：如实 stored。"""
+    view = ec.effective_sheet(
+        _sheet(
+            [
+                _effect(
+                    [
+                        {"key": "system.properties", "mode": ec.MODE_ADD, "value": "mgc"},
+                        {"key": "system.damage.base.denomination", "mode": ec.MODE_OVERRIDE, "value": 8},
+                    ],
+                    name="Shillelagh",
+                    transfer=True,
+                )
+            ]
+        )
+    )
+    assert view.empty
+    assert view.stats["stored"] == 2
+    assert all(record["reason"] == "no-consumer" for record in view.stored)
+
+
+def test_condition_immunity_blocks_the_condition(plugins) -> None:
+    plugin = builtin_registry().resolve("dnd5e")
+    card = _card_with(
+        plugin,
+        [
+            _effect(
+                [{"key": "system.traits.ci.value", "mode": ec.MODE_ADD, "value": ["charmed", "frightened"]}],
+                name="防护善恶",
+            )
+        ],
+    )
+    combatant = {"is_player": True, "name": "皮普"}
+    plugin.combat.prepare_combatant(combatant, card=card)
+    assert set(combatant["condition_immunities"]) == {"charmed", "frightened"}
+    blocked = plugin.effects.apply(combatant, {"condition": "charmed"})
+    assert blocked.get("immune") is True
+    assert blocked.get("effect") is None
+    assert "免疫" in blocked["notes"][0]
+    # 没有免疫的条件照常施加。
+    allowed = plugin.effects.apply(combatant, {"condition": "poisoned"})
+    assert allowed.get("error") is None and allowed.get("effect")
+
+
+def test_condition_immunity_is_inert_without_effects(plugins) -> None:
+    plugin = builtin_registry().resolve("dnd5e")
+    card = _card_with(plugin, [])
+    combatant = {"is_player": True, "name": "皮普"}
+    plugin.combat.prepare_combatant(combatant, card=card)
+    assert "condition_immunities" not in combatant
+    assert plugin.effects.apply(combatant, {"condition": "charmed"}).get("effect")
+
+
+# --- 卡面分组数据形状（效果页签） ------------------------------------------
+
+
+def test_annotate_sheet_marks_every_change_for_the_ui(plugins) -> None:
+    plugin = builtin_registry().resolve("dnd5e")
+    card = _card_with(
+        plugin,
+        [
+            _effect([_ac_change(ec.MODE_ADD, 1)], name="战斗风格：防御"),
+            _effect(
+                [
+                    {"key": "flags.midi-qol.someFlag", "mode": ec.MODE_OVERRIDE, "value": True},
+                    {"key": "system.dwarvish.forge", "mode": ec.MODE_ADD, "value": 1},
+                ],
+                name="模块残留",
+            ),
+        ],
+    )
+    changes = [change for entry in card["sheet"]["effect_changes"] for change in entry["changes"]]
+    by_key = {change["key"]: change for change in changes}
+    assert by_key["system.attributes.ac.bonus"]["applied"] == ec.TIER_FULL
+    assert by_key["system.attributes.ac.bonus"]["active"] is True
+    assert by_key["flags.midi-qol.someFlag"]["applied"] == ec.TIER_STORED
+    assert by_key["flags.midi-qol.someFlag"]["reason"] == "no-consumer"
+    assert by_key["system.dwarvish.forge"]["applied"] == ec.TIER_UNSUPPORTED
+    # 装备行上的效果同样带分级（未装备 → active=False）。
+    gear = _gear([_effect([_ac_change(ec.MODE_ADD, 1)], name="戒指")], equipped=False)
+    packed = plugin.schema.pack(
+        {
+            "sheet": {
+                "level": 1,
+                "abilities": {"str": 10, "dex": 10, "con": 10, "int": 10, "wis": 10, "cha": 10},
+                "hp": {"current": 5, "max": 5},
+                "equipment": [gear],
+            }
+        }
+    )["sheet"]
+    change = packed["equipment"][0]["effects"][0]["changes"][0]
+    # 没装备 → 记录在案（stored），active=False，原因写明「未激活」。
+    assert change["applied"] == ec.TIER_STORED and change["active"] is False
+    assert change["reason"] == "inactive"
+
+
+def test_annotate_sheet_leaves_effect_free_sheets_byte_identical() -> None:
+    sheet = {"level": 5, "class": "游荡者", "hp": {"current": 10, "max": 10}, "equipment": []}
+    before = repr(sheet)
+    annotated = ec.annotate_sheet(sheet)
+    assert "effect_changes" not in annotated
+    assert repr(sheet) == before  # 不就地改写调用方的 dict

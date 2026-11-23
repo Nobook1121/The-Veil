@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from dnd5e_plugin.effect_changes import EffectiveSheet, effective_sheet
+from dnd5e_plugin.effect_changes import (
+    EffectiveSheet,
+    annotate_sheet,
+    effective_sheet,
+)
 from dnd5e_plugin.rules import (
     ABILITY_KEYS,
     ability_key,
@@ -314,6 +318,9 @@ class Dnd5eCharacterSchema:
         # 存的始终是**基础值**（含护甲），效果加值只进顶层派生镜像，
         # 否则下次 pack 会把加值当基础值再叠一次。
         effects = effective_sheet(sheet)
+        # 卡面效果页签按分级分组：每条 change 带 ``applied``（full/stored/
+        # unsupported）+ ``active`` + ``reason``。没有效果的卡不做任何改写。
+        sheet = annotate_sheet(sheet, effects)
         sheet["armorClass"] = _armor_class(sheet)
         sheet.setdefault("equipment", [])
         sheet.setdefault("features", [])
@@ -340,7 +347,7 @@ class Dnd5eCharacterSchema:
         data["level"] = sheet["level"]
         data["class"] = str(sheet.get("class") or "")
         data["race"] = str(sheet.get("race") or "")
-        data["maxHp"] = hp["max"]
+        data["maxHp"] = effects.max_hp(hp["max"])
         data["currentHp"] = hp["current"]
         data["tempHp"] = hp["temp"]
         data["armorClass"] = _effective_armor_class(sheet, effects)
@@ -378,7 +385,7 @@ class Dnd5eCharacterSchema:
         level = _bounded(source.get("level"), 1, 20, 1)
         result = dict(data)
         effects = effective_sheet(source)
-        result["maxHp"] = _normalize_hp(source.get("hp"), source)["max"]
+        result["maxHp"] = effects.max_hp(_normalize_hp(source.get("hp"), source)["max"])
         result["armorClass"] = _effective_armor_class(source, effects)
         result["proficiencyBonus"] = proficiency_bonus(level)
         result["initiative"] = ability_modifier(ability_score(source, "dex")) + effects.initiative_bonus

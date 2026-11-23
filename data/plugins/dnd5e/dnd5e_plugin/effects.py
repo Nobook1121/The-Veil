@@ -209,6 +209,21 @@ def build_condition(
     }
 
 
+def _condition_immunities(holder: Mapping[str, Any] | None) -> set[str]:
+    """战斗者身上的条件免疫集合（小写 id）。
+
+    来源是 :mod:`dnd5e_plugin.effect_changes` 的 ``traits.ci.value``，
+    由 ``combat._prepare_player`` 写进 ``condition_immunities``；没有效果时
+    集合为空，判定不改变任何行为。
+    """
+    if not isinstance(holder, Mapping):
+        return set()
+    raw = holder.get("condition_immunities")
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        return set()
+    return {_text(item).casefold() for item in raw if _text(item)}
+
+
 def card_of(combatant: Mapping[str, Any]) -> dict[str, Any]:
     """把战斗者上的数值整理成检定壳可读的最小卡面。"""
     return {
@@ -261,6 +276,16 @@ class Dnd5eEffects:
                 )
             if effect is None:
                 return {"error": f"数据包中没有条件“{condition}”"}
+            # 条件免疫（``system.traits.ci.value``）：引擎把效果路径算进
+            # ``combatant["condition_immunities"]``，免疫的条件根本不会施加。
+            immune = _condition_immunities(combatant)
+            if condition.casefold() in immune:
+                label = _text(effect.get("label")) or condition
+                return {
+                    "effect": None,
+                    "immune": True,
+                    "notes": [f"{combatant.get('name')} 免疫“{label}”，该条件未施加。"],
+                }
         raw = data.get("effect")
         if effect is None and isinstance(raw, Mapping):
             effect = dict(raw)

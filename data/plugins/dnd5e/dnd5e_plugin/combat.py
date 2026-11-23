@@ -331,12 +331,17 @@ def _weapon_attack(row: Mapping[str, Any], sheet: Mapping[str, Any]) -> dict[str
     }
 
 
-def _player_attacks(sheet: Mapping[str, Any]) -> list[dict[str, Any]]:
-    attacks = [
-        _weapon_attack(row, sheet)
-        for row in _equipment_rows(sheet, "weapon")
-        if row.get("category") == "weapon"
-    ]
+def _player_attacks(sheet: Mapping[str, Any], effects: Any = None) -> list[dict[str, Any]]:
+    """装备行 → 攻击表。
+
+    ``effects`` 给了就先把物品作用域的效果（``system.properties`` /
+    ``system.damage.base.*``）并到装备行上，再按正常字段算攻击属性与伤害骰；
+    没有这类效果时逐字节同旧实现。
+    """
+    rows = [row for row in _equipment_rows(sheet, "weapon") if row.get("category") == "weapon"]
+    if effects is not None and not effects.empty and getattr(effects, "items", None):
+        rows = [effects.weapon_row(row) for row in rows]
+    attacks = [_weapon_attack(row, sheet) for row in rows]
     return attacks or [dict(DEFAULT_UNARMED)]
 
 
@@ -533,8 +538,11 @@ class Dnd5eCombatRules:
             _as_int(hp.get("max"), _as_int(sheet.get("maxHp"), _as_int(combatant.get("max_hp"), 1))),
         )
         current = max(0, min(max_hp, _as_int(hp.get("current"), _as_int(combatant.get("hp"), max_hp))))
+        if not effects.empty:
+            # ``system.attributes.hp.bonus``：效果级生命上限加值/覆盖。
+            max_hp = effects.max_hp(max_hp)
         combatant["max_hp"] = max_hp
-        combatant["hp"] = current
+        combatant["hp"] = min(current, max_hp)
         combatant["temp_hp"] = max(0, _as_int(hp.get("temp"), 0))
         combatant["armorClass"] = armor_class_from_equipment(sheet)
         if not effects.empty:
@@ -543,13 +551,16 @@ class Dnd5eCombatRules:
                 explicit=sheet.get("armorClass") not in (None, ""),
                 dex_mod=ability_modifier(abilities.get("dex", 10)),
             )
-        combatant["speed_ft"] = max(0, _as_int(sheet.get("speed"), 30))
+        base_speed = max(0, _as_int(sheet.get("speed"), 30))
+        # ``system.attributes.movement.walk`` → 我们的单一速度模型；fly/swim/…
+        # 没有分速消费方，留在镜像里（卡面「已记录未生效」可见）。
+        combatant["speed_ft"] = base_speed if effects.empty else effects.speed(base_speed)
         requirement = armor_strength_requirement(sheet)
         if requirement and abilities.get("str", 10) < requirement:
             # 力量不满足护甲需求：速度 -10 英尺（SRD 护甲表）。
             combatant["armor_strength_penalty"] = requirement
             combatant["speed_ft"] = max(0, combatant["speed_ft"] - 10)
-        attacks = _player_attacks(sheet)
+        attacks = _player_attacks(sheet, effects)
         combatant["attacks"] = attacks if effects.empty else effects.apply_attacks(attacks)
         combatant["carried_weight_lb"] = _carried_weight_lb(sheet)
         # 变体负重是房间开关；关闭时不写任何标记，行动经济按原速度结算。
@@ -576,6 +587,10 @@ class Dnd5eCombatRules:
             )
             combatant["damage_immunities"] = effects.extend_traits(
                 combatant["damage_immunities"], "di"
+            )
+            # traits.ci.value：免疫的条件不会被 effects.apply 施加。
+            combatant["condition_immunities"] = effects.extend_traits(
+                combatant.get("condition_immunities"), "ci"
             )
         from dnd5e_plugin.spells import prepare_spellcasting
 
@@ -788,8 +803,8 @@ class Dnd5eCombatRules:
         attacks = attacker.get("attacks") if isinstance(attacker.get("attacks"), list) else []
         if not attacks and attacker.get("is_player") and isinstance(card, Mapping):
             sheet = sheet_of(card)
-            attacks = _player_attacks(sheet)
             effects = effective_sheet(sheet)
+            attacks = _player_attacks(sheet, effects)
             if not effects.empty:
                 # 卡面没预置攻击时现算：同样要带上效果引擎的攻击/伤害加值。
                 attacks = effects.apply_attacks(attacks)

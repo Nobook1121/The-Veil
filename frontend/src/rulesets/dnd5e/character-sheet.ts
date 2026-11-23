@@ -54,6 +54,34 @@ interface Dnd5eEquipmentItem {
     notes?: string;
     /** 是否装备；后端 pack 不理解这个键，会原样保留（见页签说明）。 */
     equipped?: boolean;
+    /** 该装备条目上的 FVTT Active Effect（引擎按路径结算）。 */
+    effects?: Dnd5eEffect[];
+}
+
+/**
+ * 引擎对单条 change 的分级结论（``sheet.effect_changes[].changes[].applied``）：
+ * ``full`` = 真的进了派生值；``stored`` = 已记录、当前没有数值消费方；
+ * ``unsupported`` = 连镜像模型都没有的路径（原文保留）。
+ */
+type Dnd5eEffectTier = "full" | "stored" | "unsupported";
+
+interface Dnd5eEffectChange {
+    key?: string;
+    mode?: number;
+    value?: unknown;
+    applied?: Dnd5eEffectTier | string;
+    active?: boolean;
+    reason?: string;
+    note?: string;
+}
+
+interface Dnd5eEffect {
+    id?: string;
+    name?: string;
+    transfer?: boolean;
+    disabled?: boolean;
+    origin?: { item_id?: string; source?: string; equipped?: boolean };
+    changes?: Dnd5eEffectChange[];
 }
 
 interface Dnd5eDeathSaves {
@@ -91,6 +119,8 @@ interface Dnd5eSheet {
     appearance?: string;
     token?: string;
     status?: string[] | string;
+    /** FVTT 效果（数值改写引擎的载体）；``changes[].applied`` 是分级结论。 */
+    effect_changes?: Dnd5eEffect[];
     deathSaves?: Dnd5eDeathSaves;
     exhaustion?: number;
     inspiration?: boolean;
@@ -1180,6 +1210,81 @@ interface Dnd5eRoomInfo {
         `;
     }
 
+    /** 效果清单一行：来自哪件效果 / 哪条路径 / 值 / 为什么（没）生效。 */
+    interface EffectRow {
+        effect: string;
+        key: string;
+        mode: number;
+        value: string;
+        tier: Dnd5eEffectTier;
+        note: string;
+        source: string;
+    }
+
+    const EFFECT_MODE_LABELS: Record<number, string> = {
+        0: "custom",
+        1: "×",
+        2: "+",
+        3: "取低",
+        4: "取高",
+        5: "覆盖",
+    };
+
+    /**
+     * 卡面效果清单：按引擎的三档分级分组。
+     *
+     * 后端 ``pack`` 会把每条 change 标上 ``applied``（full / stored /
+     * unsupported）+ ``active`` + ``reason``；没有分级的旧卡按 stored 处理，
+     * 保存一次就会刷新（不猜、不假装生效）。
+     */
+    function effectRows(sheet: Dnd5eSheet): EffectRow[] {
+        const rows: EffectRow[] = [];
+        const collect = (effects: Dnd5eEffect[] | undefined, source: string): void => {
+            (effects || []).forEach((effect) => {
+                (effect.changes || []).forEach((change) => {
+                    const tier: Dnd5eEffectTier =
+                        change.applied === "full" && change.active !== false
+                            ? "full"
+                            : change.applied === "unsupported"
+                                ? "unsupported"
+                                : "stored";
+                    rows.push({
+                        effect: String(effect.name || "未命名效果"),
+                        key: String(change.key || ""),
+                        mode: Number(change.mode ?? 2),
+                        value: String(change.value ?? ""),
+                        tier,
+                        note: String(change.note || change.reason || ""),
+                        source,
+                    });
+                });
+            });
+        };
+        collect(sheet.effect_changes, "角色");
+        (sheet.equipment || []).forEach((item) => {
+            if (item.effects && item.effects.length) {
+                collect(item.effects, String(item.name || "装备"));
+            }
+        });
+        return rows;
+    }
+
+    function renderEffectTable(rows: EffectRow[]): string {
+        return `
+            <div class="dnd5e-table-shell">
+                <table class="dnd5e-table">
+                    <thead><tr><th scope="col">效果</th><th scope="col">路径</th><th scope="col">值</th><th scope="col">说明</th></tr></thead>
+                    <tbody>${rows.map((row) => `
+                        <tr>
+                            <td>${escapeHtml(row.effect)}<span class="dnd5e-hint">（${escapeHtml(row.source)}）</span></td>
+                            <td><code>${escapeHtml(row.key)}</code></td>
+                            <td>${escapeHtml(`${EFFECT_MODE_LABELS[row.mode] || row.mode} ${row.value}`)}</td>
+                            <td>${escapeHtml(row.note || "—")}</td>
+                        </tr>`).join("") || '<tr><td colspan="4" class="dnd5e-empty-cell">没有效果改动。</td></tr>'}</tbody>
+                </table>
+            </div>`;
+    }
+
     function renderEffectsPanel(sheet: Dnd5eSheet, editable: boolean): string {
         const status = statusList(sheet.status);
         const rows = status.map((item, index) => `
@@ -1192,6 +1297,9 @@ interface Dnd5eRoomInfo {
                     <i class="fa fa-trash" aria-hidden="true"></i></button>` : ""}
             </li>
         `).join("");
+        const allEffectRows = effectRows(sheet);
+        const activeEffects = allEffectRows.filter((row) => row.tier === "full");
+        const inactiveEffects = allEffectRows.filter((row) => row.tier !== "full");
         const quickAdd = CONDITIONS.map((item) => {
             const present = status.some((entry) => sameCondition(entry, item.id));
             return `<button type="button" class="dnd5e-chip ${present ? "is-on" : ""}" data-dnd5e-act="quick-condition"
@@ -1209,6 +1317,16 @@ interface Dnd5eRoomInfo {
                 <ul class="dnd5e-list">${rows || '<li class="dnd5e-empty-cell">当前没有状态 / 条件。</li>'}</ul>
                 ${editable ? `<button type="button" class="dnd5e-btn" data-dnd5e-act="add-condition">
                     <i class="fa fa-plus" aria-hidden="true"></i> 添加自定义状态</button>` : ""}
+            </div>
+            <div class="dnd5e-panel-section">
+                <h4 class="dnd5e-section-title"><i class="fa fa-flask" aria-hidden="true"></i> 效果清单（已生效）</h4>
+                <p class="dnd5e-hint">FVTT 效果按路径改写数值：这里的每一条都真的进了 AC / 先攻 / 豁免 / 检定 / 攻击 / 抗性 / 速度等派生值。</p>
+                ${renderEffectTable(activeEffects)}
+            </div>
+            <div class="dnd5e-panel-section">
+                <h4 class="dnd5e-section-title"><i class="fa fa-archive" aria-hidden="true"></i> 已记录·暂未生效</h4>
+                <p class="dnd5e-hint">路径已按 FVTT 数据模型记下（含模块 flags、Token 外观、物品活动、分速等），但当前没有对应的数值消费方，或效果本身未激活；数值不受影响，清单如实保留。</p>
+                ${renderEffectTable(inactiveEffects)}
             </div>
         `;
     }
