@@ -1,0 +1,6 @@
+# 全量安装（开发/完整功能验证用）：把基础依赖与三组可选依赖一起装上。
+# 普通玩家不需要这个文件：start.cmd 只装 requirements.txt，可选能力按需再加。
+-r requirements.txt
+-r requirements-vector.txt
+-r requirements-vector-qdrant.txt
+-r requirements-ocr.txt

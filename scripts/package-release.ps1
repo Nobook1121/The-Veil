@@ -296,6 +296,7 @@ $rootFiles = @(
     'requirements-vector.txt',
     'requirements-vector-qdrant.txt',
     'requirements-ocr.txt',
+    'requirements-all.txt',
     'package.json',
     'package-lock.json',
     'tsconfig.json',

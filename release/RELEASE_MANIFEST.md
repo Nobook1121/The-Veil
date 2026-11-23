@@ -275,7 +275,8 @@ icacls "D:\TheVeil" /setintegritylevel "(OI)(CI)Medium" /T
 
 ## 九、更新到新版本
 
-- 解压目录里的 `更新.cmd`（或 `scripts/update-release.ps1`）会从 GitHub Releases 检查最新版本：比较版本号 → 下载 zip 与 `.sha256` → 校验 SHA-256 → 只替换程序文件 → 保留 `data/` 与 `.venv`。
+- **推荐：应用内更新**。「设置 → 关于 → 立即更新并重启」由 OWNER 一键完成下载、校验、替换与重启；有新版本时 OWNER 登录后会自动收到提示（可「立即更新 / 稍后 / 忽略此版本」）。更新只替换程序文件，`data/` 与 `.venv/` 保留，并在 `_backup/` 留一份数据备份。
+- 命令行/离线兜底：解压目录里的 `更新.cmd`（或 `scripts/update-release.ps1`）会从 GitHub Releases 检查最新版本：比较版本号 → 下载 zip 与 `.sha256` → 校验 SHA-256 → 只替换程序文件 → 保留 `data/` 与 `.venv`。
 - 更新前会把 `data/` 备份到 `_backup/<版本>-<时间>/`；更新失败或新版本启动异常时，把备份目录里的内容覆盖回 `data/` 即可回到更新前的状态。
 - 只想检查是否有新版本：
 
