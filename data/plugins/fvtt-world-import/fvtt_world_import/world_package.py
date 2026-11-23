@@ -598,6 +598,9 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
         raise PackageError("fvtt.leveldb_invalid", f"场景集合（LevelDB）解析失败：{exc}") from exc
 
     warnings: list[str] = []
+    # 信息级说明（notes）：**设计内降级**不占 warnings——旧版把条目级效果
+    # 计数塞进警告，41 条一屏红色噪音，让人误以为导入出错。
+    notes: list[str] = []
     if index.orphans:
         warnings.append(
             f"{len(index.orphans)} 个棋子/墙/光源条目引用了不存在的场景 id，将跳过。"
@@ -683,7 +686,11 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
         if not actor_index.documents:
             warnings.append("包里没有任何角色。")
         if item_effects:
-            warnings.append(f"{item_effects} 个条目级效果（transfer buff）按降级策略丢弃，仅计数。")
+            notes.append(
+                f"已忽略 {item_effects} 个条目级效果（transfer buff）——新版本此为正常降级："
+                "条目自身字段（AC/伤害/重量等）已按文档折算进角色卡，"
+                "这类「装备后自动加值」的附加效果不进产物、不在本系统运行时生效。"
+            )
 
     # journal 段：目录缺席或空库都只降级为警告 + 0 计数（journal 是可选集合，
     # sixianyuchanmian 就是空库形态），LevelDB 损坏仍转可读错误。
@@ -746,6 +753,8 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
         "journal_folders": journal_folders,
         "journals_detail": journals_detail,
         "warnings": warnings,
+        # 设计内降级的说明（信息级）：与 warnings 分开展示，不当错误。
+        "notes": notes,
     }
 
 

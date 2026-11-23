@@ -23,6 +23,7 @@ import io
 import json
 import sys
 import tempfile
+import time
 import types
 import zipfile
 from pathlib import Path
@@ -164,12 +165,17 @@ def _login(client, user_id: int, username: str) -> None:
         session_data.update(user_id=user_id, username=username, role="USER")
 
 
-def _upload(client, zip_path: Path, *, user_id: int = 1, username: str = "alice"):
+def _upload(client, zip_path: Path, *, user_id: int = 1, username: str = "alice", ai: bool | None = None):
+    """上传世界包；``ai`` 显式传值才带 ``ai`` 字段（默认不带 = 确定性路径）。"""
     _login(client, user_id, username)
+    data: dict[str, Any] = {}
+    if ai is not None:
+        data["ai"] = "1" if ai else "0"
     with open(zip_path, "rb") as handle:
+        data["file"] = (handle, zip_path.name)
         return client.post(
             "/api/plugins/fvtt-world-import/rooms/room1/journal/run",
-            data={"file": (handle, zip_path.name)},
+            data=data,
             content_type="multipart/form-data",
         )
 
@@ -498,8 +504,10 @@ def test_heroes_run_imports_modules_and_narrative_graph(tmp_path, plugins):
     assert rv.status_code == 200
     data = rv.get_json()["data"]
 
-    # 测试应用没有 AI 平台配置 → 语义增强降级为确定性路径（告警如实上报）。
-    assert any("AI 语义增强不可用" in text for text in data["warnings"])
+    # AI 语义增强默认关闭 → 纯确定性切块（不读 AI 配置、零网络）；状态进 notes。
+    assert data["ai"]["enabled"] is False
+    assert any("确定性" in text for text in data["notes"])
+    assert not any("AI 语义增强" in text for text in data["warnings"])
     assert data["totals"]["modules"] == 7
     assert len(data["journals"]) == 7
     assert data["scenario"]["scenario_version"] == "1.0.1"
@@ -606,9 +614,12 @@ def test_heroes_run_with_injected_ai_callbacks(tmp_path, plugins, monkeypatch):
             "summarize": summarize,
             "infer_edges": lambda rows: [],
             "warning": None,
+            "enabled": True,
+            "state": {"calls": 7, "pages": 7, "elapsed": 0.0, "tripped": ""},
         },
     )
-    rv = _upload(client, _require_zip(HEROES_ZIP))
+    # AI 增强是显式开关：不带 ai=1 时端点根本不会构造 AI 回调。
+    rv = _upload(client, _require_zip(HEROES_ZIP), ai=True)
     assert rv.status_code == 200
     data = rv.get_json()["data"]
     # 假回调整页单块（逐字子串校验通过）→ 7 页 7 块。
@@ -701,3 +712,121 @@ def test_page_plain_text_converts_html_structure():
     assert "<" not in text
     # 非文本页（image/pdf）正文按空处理。
     assert page_plain_text({"type": "image", "src": "a.png", "text": {"content": "x"}}) == ""
+
+
+# -- 不阻塞导入：AI 默认关闭 + 显式开启后的硬预算/首败熔断 -------------------
+
+
+def test_run_never_touches_ai_callbacks_by_default(tmp_path, plugins, monkeypatch):
+    """默认路径不构造 AI 回调：确定性切块，耗时与页数无关、零外部依赖。
+
+    回归「导入卡在正在导入剧本」：历史实现在端点上无条件
+    ``make_journal_ai_callbacks()``，AI 平台配了但不可达时 7 页 × 30s 超时。
+    """
+    client, _rooms, scenarios, _config = _make_app(tmp_path)
+
+    def boom():  # 被调用即失败：默认路径绝不该走到这里
+        raise AssertionError("默认导入不应构造 AI 回调")
+
+    monkeypatch.setattr(fvtt, "make_journal_ai_callbacks", boom)
+    started = time.monotonic()
+    rv = _upload(client, _require_zip(HEROES_ZIP))
+    elapsed = time.monotonic() - started
+
+    assert rv.status_code == 200
+    data = rv.get_json()["data"]
+    assert data["ai"]["enabled"] is False
+    assert data["totals"]["modules"] == 7        # 产物与确定性切块一致
+    assert data["totals"]["chunks"] == 7         # 每页一块（确定性整页切块）
+    assert data["degradations"] == {}            # 也没有「AI 失败」降级噪音
+    # 7 页真实 zip 的确定性导入是秒级（旧行为 ≥ 7×30s = 210s+）。
+    assert elapsed < 30
+    narrative = _narrative(scenarios)
+    assert narrative["meta"]["journal"]["ai_chunked"] is False
+    assert narrative["meta"]["journal"]["ai_summarized"] is False
+
+
+def test_run_ai_opt_in_flag_is_read_from_form(tmp_path, plugins, monkeypatch):
+    """``ai=1`` 才注入回调；``ai=0`` 仍是确定性路径（显式关闭优先于默认）。"""
+    client, _rooms, _scenarios, _config = _make_app(tmp_path)
+    calls = {"count": 0}
+
+    def fake_callbacks():
+        calls["count"] += 1
+        return {
+            "chunk_page": lambda page: [],
+            "summarize": lambda title, text: "",
+            "infer_edges": lambda rows: [],
+            "warning": None,
+            "enabled": True,
+            "state": {"calls": 0, "pages": 0, "elapsed": 0.0, "tripped": ""},
+        }
+
+    monkeypatch.setattr(fvtt, "make_journal_ai_callbacks", fake_callbacks)
+    _upload(client, _require_zip(HEROES_ZIP), ai=False)
+    assert calls["count"] == 0
+    _upload(client, _require_zip(HEROES_ZIP), ai=True)
+    assert calls["count"] == 1
+
+
+def test_make_journal_ai_callbacks_abandons_batch_after_first_failure(monkeypatch):
+    """首败熔断：一页超时后剩余页立即返回确定性缺省，总耗时不再线性叠加。"""
+    import time as _time
+
+    calls: list[float] = []
+
+    def slow_timeout(system_prompt, user_prompt, *, timeout=None):
+        calls.append(float(timeout or 0))
+        _time.sleep(0.3)  # 模拟「等 AI 回话」
+        raise RuntimeError("AI 平台请求超时（等待 0 秒未响应）")
+
+    monkeypatch.setattr(fvtt, "_build_journal_request", lambda: slow_timeout)
+    callbacks = fvtt.make_journal_ai_callbacks()
+    assert callbacks["enabled"] is True
+
+    page = {"id": "p1", "name": "第一页", "entry": "条目", "text": "正文"}
+    started = _time.monotonic()
+    # 第 1 页失败：抛出（转换层据此记一条降级）。
+    try:
+        callbacks["chunk_page"](page)
+    except RuntimeError:
+        pass
+    else:  # pragma: no cover - 失败必须抛出
+        raise AssertionError("首败必须抛出")
+    # 后续 6 页：立即返回 []（静默走确定性整页切块），不再发请求。
+    for index in range(6):
+        assert callbacks["chunk_page"]({**page, "id": f"p{index + 2}"}) == []
+    assert callbacks["summarize"]("标题", "正文") == ""
+    assert callbacks["infer_edges"]([{"id": "n1"}]) == []
+    elapsed = _time.monotonic() - started
+
+    assert len(calls) == 1, "熔断后不应再有网络调用"
+    assert elapsed < 1.0, f"总耗时不应随页数叠加：{elapsed:.2f}s"
+    # 单次超时被硬预算收紧（≤ 8s），不落入平台默认 30s 窗口。
+    assert calls[0] <= fvtt.JOURNAL_AI_CALL_TIMEOUT_SECONDS
+    assert callbacks["state"]["tripped"]
+    assert "放弃" in fvtt.journal_ai_note(callbacks)
+
+
+def test_make_journal_ai_callbacks_respects_total_budget(monkeypatch):
+    """整批预算耗尽 → 静默降级（不抛错、不告警噪音）。"""
+    import time as _time
+
+    calls = {"count": 0}
+
+    def slow_ok(system_prompt, user_prompt, *, timeout=None):
+        calls["count"] += 1
+        _time.sleep(0.2)
+        return '{"chunks": []}' if "切块" in system_prompt else '{"summary": "摘要"}'
+
+    monkeypatch.setattr(fvtt, "_build_journal_request", lambda: slow_ok)
+    monkeypatch.setattr(fvtt, "JOURNAL_AI_TOTAL_BUDGET_SECONDS", 0.3)
+    callbacks = fvtt.make_journal_ai_callbacks()
+    page = {"id": "p1", "name": "第一页", "entry": "条目", "text": "正文"}
+
+    results = [callbacks["chunk_page"]({**page, "id": f"p{i}"}) for i in range(1, 7)]
+    # 前几次在预算内调用（返回空块 → 转换层确定性降级），预算耗尽后直接停。
+    assert calls["count"] < 6
+    assert all(row == [] for row in results)
+    assert callbacks["state"]["tripped"]
+    assert "预算" in callbacks["state"]["tripped"]

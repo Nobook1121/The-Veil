@@ -33,6 +33,8 @@ interface FvttWorldAudit {
     journal_pages?: number;
     journal_convertible?: number;
     warnings?: string[];
+    /** 信息级说明：设计内降级（如条目级 buff 计数），不是错误。 */
+    notes?: string[];
 }
 
 interface FvttScenarioImportResult {
@@ -44,6 +46,10 @@ interface FvttScenarioImportResult {
     counts?: Record<string, number>;
     narrative?: { written?: boolean; nodes?: number; edges?: number };
     warnings?: string[];
+    /** 信息级说明：设计内降级与 AI 增强状态，与 warnings 分开展示。 */
+    notes?: string[];
+    /** AI 语义增强：默认 false（确定性切块），可选增强成功后为 true。 */
+    ai?: { enabled?: boolean; enable_hint?: string };
     world?: { scenes?: number; characters?: number; npcs?: number };
 }
 
@@ -138,6 +144,7 @@ function openFvttWorldImportModal(mode: "scenario" | "room", room?: FvttRoomImpo
                     <span data-fvtt-busy-text>正在审计世界包…</span>
                 </div>
                 <ul class="list-unstyled small text-muted mb-0" data-fvtt-busy-log></ul>
+                <p class="form-text mb-0" data-fvtt-busy-hint></p>
             </div>
             <div data-fvtt-stage="preview" hidden></div>
             <div data-fvtt-stage="result" hidden></div>
@@ -156,6 +163,7 @@ function openFvttWorldImportModal(mode: "scenario" | "room", room?: FvttRoomImpo
     const stages = Array.from(modal.querySelectorAll<HTMLElement>("[data-fvtt-stage]"));
     const busyText = modal.querySelector<HTMLElement>("[data-fvtt-busy-text]");
     const busyLog = modal.querySelector<HTMLElement>("[data-fvtt-busy-log]");
+    const busyHint = modal.querySelector<HTMLElement>("[data-fvtt-busy-hint]");
     const previewStage = stages.find((stage) => stage.dataset.fvttStage === "preview");
     const resultStage = stages.find((stage) => stage.dataset.fvttStage === "result");
     const fileInput = modal.querySelector<HTMLInputElement>("[data-fvtt-file]");
@@ -183,6 +191,46 @@ function openFvttWorldImportModal(mode: "scenario" | "room", room?: FvttRoomImpo
             host.hidden = false;
             host.textContent = message;
         }
+    };
+
+    /**
+     * 单次请求的阶段看板：阶段清单 + 实时耗时。
+     *
+     * 后端 `/scenario/import` 是**一次** HTTP 请求（审计 → 转换场景/journal
+     * → 写剧本 → 图谱），没有逐阶段回传，所以阶段按耗时估值推进；关键是让
+     * 用户看到「时间在走、卡在哪一段」，而不是对着一个不动的转圈猜卡死。
+     * AI 增强路径的文案会写明硬预算（整批 20s / 单页 8s）：最坏情况有界。
+     */
+    let stopBusyWatch: (() => void) | null = null;
+    const startBusyWatch = (phases: string[], hint: string): void => {
+        stopBusyWatch?.();
+        const startedAt = Date.now();
+        const stepMs = 2000;
+        if (busyHint) busyHint.textContent = hint;
+        const paint = (): void => {
+            const elapsed = (Date.now() - startedAt) / 1000;
+            const index = Math.min(phases.length - 1, Math.floor((elapsed * 1000) / stepMs));
+            if (busyText) busyText.textContent = `${phases[index]}… 已用时 ${elapsed.toFixed(1)}s`;
+            if (busyLog) {
+                busyLog.innerHTML = phases
+                    .map((label, i) => {
+                        const mark = i < index ? "✓" : i === index ? "›" : "·";
+                        return `<li>${mark} ${fvttEscape(label)}</li>`;
+                    })
+                    .join("");
+            }
+        };
+        paint();
+        const timer = window.setInterval(paint, 200);
+        stopBusyWatch = () => {
+            window.clearInterval(timer);
+            stopBusyWatch = null;
+        };
+    };
+    const resetBusyHint = (): void => {
+        stopBusyWatch?.();
+        if (busyHint) busyHint.textContent = "";
+        if (busyLog) busyLog.innerHTML = "";
     };
 
     let zipFile: File | null = null;
@@ -215,6 +263,7 @@ function openFvttWorldImportModal(mode: "scenario" | "room", room?: FvttRoomImpo
             </div>`
             : "";
         const warnings = (report.warnings || []).map((item) => String(item)).filter(Boolean);
+        const notes = (report.notes || []).map((item) => String(item)).filter(Boolean);
         previewStage.innerHTML = `
             <div class="card mb-3">
                 <div class="card-body py-3">
@@ -225,6 +274,7 @@ function openFvttWorldImportModal(mode: "scenario" | "room", room?: FvttRoomImpo
                 </div>
             </div>
             ${stepsHtml}
+            ${notes.length ? `<details class="mb-2"><summary class="small text-muted">说明（${notes.length} 条，属正常降级）</summary>${fvttWarningList(notes)}</details>` : ""}
             ${warnings.length ? `<details class="mb-3"><summary class="small text-muted">警告（${warnings.length} 条，不阻断导入）</summary>${fvttWarningList(warnings)}</details>` : ""}
             <div class="alert alert-danger small mb-0" data-fvtt-error hidden></div>`;
         if (isRoom) {
@@ -250,8 +300,9 @@ function openFvttWorldImportModal(mode: "scenario" | "room", room?: FvttRoomImpo
         if (!zipFile) return;
         showStage("busy");
         setFooter("busy");
+        resetBusyHint();
         if (busyText) busyText.textContent = `正在审计世界包「${zipFile.name}」…`;
-        if (busyLog) busyLog.innerHTML = "";
+        if (busyHint) busyHint.textContent = "只读审计：读取 world.json、场景/角色/journal 计数，不写入任何数据。";
         try {
             audit = await fvttPostForm<FvttWorldAudit>("/inspect", zipFile);
             renderPreview();
@@ -264,34 +315,54 @@ function openFvttWorldImportModal(mode: "scenario" | "room", room?: FvttRoomImpo
         }
     };
 
+    /** 确定性导入的阶段文案（后端一次请求完成，阶段按耗时估值推进）。 */
+    const SCENARIO_PHASES = ["审计世界包", "转换场景与 journal 文本", "写入剧本记录", "生成世界树图谱"];
+
+    /** 结果卡：成功摘要 + 信息级说明 + （未用 AI 时）可选的 AI 增强入口。 */
+    const renderScenarioResult = (result: FvttScenarioImportResult): void => {
+        const warnings = (result.warnings || []).map((item) => String(item)).filter(Boolean);
+        const notes = (result.notes || []).map((item) => String(item)).filter(Boolean);
+        const counts = result.counts || {};
+        const narrative = result.narrative || {};
+        const narrativeLine = narrative.written !== false
+            ? `场景文本 ${fvttCount(counts.modules)} 条 · 世界树图谱 ${fvttCount(narrative.nodes)} 节点 / ${fvttCount(narrative.edges)} 边`
+            : "journal 为空库或集合缺席，未产出场景文本（剧本条目已生成，可正常开团）";
+        const aiEnabled = Boolean(result.ai?.enabled);
+        if (resultStage) {
+            resultStage.innerHTML = `
+                <div class="alert ${result.created === false ? "alert-warning" : "alert-success"} py-2 small mb-2">
+                    <div class="mb-1"><strong>${result.created === false ? "已更新剧本（同源世界包，原位升版）" : "已创建剧本"}</strong>「${fvttEscape(result.title)}」v${fvttEscape(result.version)}</div>
+                    <div class="mb-1">${narrativeLine}</div>
+                    ${result.created === false ? `<div class="mb-0 text-muted">幂等：同一世界包重复导入会定位既有剧本升版覆盖，不会产生重复剧本。</div>` : ""}
+                </div>
+                <p class="small text-muted mb-2">包内还有 ${fvttCount(result.world?.scenes)} 个场景、${fvttCount(result.world?.characters)} 张角色卡、${fvttCount(result.world?.npcs)} 个 NPC——这些是房间运行时数据，开团后在房间页点「导入世界包」即可挂进房间。</p>
+                ${notes.length ? `<details class="mb-1"><summary class="small text-muted">说明（${notes.length} 条，属正常行为）</summary>${fvttWarningList(notes)}</details>` : ""}
+                ${warnings.length ? `<details class="mb-1"><summary class="small text-muted">警告（${warnings.length} 条）</summary>${fvttWarningList(warnings)}</details>` : ""}
+                ${aiEnabled
+                    ? `<p class="small text-success mb-0">AI 语义增强已应用到本次产物。</p>`
+                    : `<div class="border-top pt-2 mt-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-fvtt-enhance>AI 语义增强世界树（可选）</button>
+                        <p class="form-text mb-0">导入已用确定性规则完成（毫秒级、零 AI 依赖）。点此可选地重跑 journal 切块/摘要/边推断：整批上限 20s、单页上限 8s，任一步失败立即整批放弃并保留现在的确定性结果，不影响已建好的剧本。</p>
+                    </div>`}`;
+        }
+        showStage("result");
+        setFooter("result");
+    };
+
     const runScenarioImport = async (): Promise<void> => {
         if (!zipFile) return;
         showStage("busy");
         setFooter("busy");
-        if (busyText) busyText.textContent = "正在导入为剧本…";
+        startBusyWatch(
+            SCENARIO_PHASES,
+            "确定性导入：审计 → 转换场景与 journal → 写剧本 → 图谱，全程不调用 AI（无网络等待），通常几秒内完成。",
+        );
         try {
             const result = await fvttPostForm<FvttScenarioImportResult>("/scenario/import", zipFile);
             scenarioId = fvttCount(result.scenario_id);
             // 剧本库可能新增/升版条目，先重载列表再展示结果卡。
             window.refreshScenarioManagement?.();
-            const warnings = (result.warnings || []).map((item) => String(item)).filter(Boolean);
-            const counts = result.counts || {};
-            const narrative = result.narrative || {};
-            const narrativeLine = narrative.written !== false
-                ? `场景文本 ${fvttCount(counts.modules)} 条 · 世界树图谱 ${fvttCount(narrative.nodes)} 节点 / ${fvttCount(narrative.edges)} 边`
-                : "journal 为空库或集合缺席，未产出场景文本（剧本条目已生成，可正常开团）";
-            if (resultStage) {
-                resultStage.innerHTML = `
-                    <div class="alert ${result.created === false ? "alert-warning" : "alert-success"} py-2 small mb-2">
-                        <div class="mb-1"><strong>${result.created === false ? "已更新剧本（同源世界包，原位升版）" : "已创建剧本"}</strong>「${fvttEscape(result.title)}」v${fvttEscape(result.version)}</div>
-                        <div class="mb-1">${narrativeLine}</div>
-                        ${result.created === false ? `<div class="mb-0 text-muted">幂等：同一世界包重复导入会定位既有剧本升版覆盖，不会产生重复剧本。</div>` : ""}
-                    </div>
-                    <p class="small text-muted mb-2">包内还有 ${fvttCount(result.world?.scenes)} 个场景、${fvttCount(result.world?.characters)} 张角色卡、${fvttCount(result.world?.npcs)} 个 NPC——这些是房间运行时数据，开团后在房间页点「导入世界包」即可挂进房间。</p>
-                    ${warnings.length ? `<details class="mb-1"><summary class="small text-muted">警告（${warnings.length} 条）</summary>${fvttWarningList(warnings)}</details>` : ""}`;
-            }
-            showStage("result");
-            setFooter("result");
+            renderScenarioResult(result);
             showNotification(result.created === false
                 ? `剧本已原位升版：${result.title}（v${result.version}）`
                 : `剧本已创建：${result.title}（v${result.version}）`, "success");
@@ -300,6 +371,39 @@ function openFvttWorldImportModal(mode: "scenario" | "room", room?: FvttRoomImpo
             setFooter("preview");
             inlineError(`导入失败：${fvttErrorMessage(error)}`);
             showNotification(`世界包导入失败：${fvttErrorMessage(error)}`, "error");
+        } finally {
+            resetBusyHint();
+        }
+    };
+
+    /**
+     * 可选增强：同一世界包带 ``ai=1`` 重导 → 幂等原位升版覆盖 journal 产物。
+     * 硬预算有界（整批 20s / 单页 8s）+ 后端首败熔断，所以这里敢同步等；
+     * 失败时结果卡保持原样（确定性产物不受影响），只弹一条提示。
+     */
+    const runScenarioEnhance = async (): Promise<void> => {
+        if (!zipFile || scenarioId <= 0) return;
+        showStage("busy");
+        setFooter("busy");
+        startBusyWatch(
+            ["审计世界包", "AI 逐页语义切块（单页上限 8s）", "AI 摘要与边推断", "原位升版回写剧本"],
+            "AI 增强：整批硬预算 20s、单页 8s；任一页失败立即整批放弃、保留确定性结果（不会越等越久）。完成后可直接关闭弹窗。",
+        );
+        try {
+            const result = await fvttPostForm<FvttScenarioImportResult>("/scenario/import", zipFile, { ai: "1" });
+            scenarioId = fvttCount(result.scenario_id);
+            window.refreshScenarioManagement?.();
+            renderScenarioResult(result);
+            showNotification(
+                result.ai?.enabled ? "AI 语义增强完成" : "AI 增强未能生效，已保留确定性结果",
+                result.ai?.enabled ? "success" : "warning",
+            );
+        } catch (error) {
+            showStage("result");
+            setFooter("result");
+            showNotification(`AI 增强失败（已保留确定性结果）：${fvttErrorMessage(error)}`, "error");
+        } finally {
+            resetBusyHint();
         }
     };
 
@@ -391,6 +495,14 @@ function openFvttWorldImportModal(mode: "scenario" | "room", room?: FvttRoomImpo
         if (!zipFile) return;
         if (isRoom) void runRoomImport();
         else void runScenarioImport();
+    });
+
+    // 结果卡里的「AI 语义增强」是可选的二次动作（同一 zip 带 ai=1 重导，
+    // 幂等原位升版）——委托监听，因为结果卡 HTML 是每次渲染重写的。
+    resultStage?.addEventListener("click", (event) => {
+        const target = event.target as HTMLElement | null;
+        if (!target || !target.closest("[data-fvtt-enhance]")) return;
+        void runScenarioEnhance();
     });
 
     restartButton?.addEventListener("click", () => {
