@@ -427,3 +427,53 @@ def test_rollback_unknown_ai_change_returns_400(tmp_path):
 
     assert response.status_code == 400
 
+
+
+def test_get_log_filters_dm_audience_for_member(tmp_path):
+    _write_room(tmp_path)
+    room_log.append_room_log(tmp_path / "rooms" / "r-1", "公开事件", room_id="r-1", max_entries=50)
+    room_log.append_room_log(
+        tmp_path / "rooms" / "r-1", "投掷 1d100：57",
+        source="dice", actor="tester", room_id="r-1", max_entries=50,
+        details={"暗投": "是", "audience": "dm"},
+    )
+    app = _app(tmp_path)
+
+    # 普通成员看不到 audience=dm 的暗投条目。
+    member = app.test_client()
+    _login(member, role="USER", user_id=2, username="player")
+    resp = member.get("/api/rooms/r-1/console/log", headers={"X-CSRF-Token": "csrf"})
+    assert resp.status_code == 200
+    messages = [item["message"] for item in resp.get_json()["data"]["entries"]]
+    assert messages == ["公开事件"]
+
+    # 房主能看到全部条目。
+    owner = app.test_client()
+    _login(owner, role="ADMIN", user_id=1, username="tester")
+    resp = owner.get("/api/rooms/r-1/console/log", headers={"X-CSRF-Token": "csrf"})
+    assert resp.status_code == 200
+    messages = [item["message"] for item in resp.get_json()["data"]["entries"]]
+    assert "投掷 1d100：57" in messages and "公开事件" in messages
+
+
+def test_secret_roll_resolves_and_logs_dm_only(tmp_path):
+    _write_room(tmp_path)
+    app = _app(tmp_path)
+    client = app.test_client()
+    _login(client, role="ADMIN", user_id=1, username="tester")
+
+    resp = client.post(
+        "/api/rooms/r-1/secret-roll",
+        json={"expression": "1d6"},
+        headers={"X-CSRF-Token": "csrf"},
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()["data"]
+    assert 1 <= body["total"] <= 6
+
+    # 暗投日志落在 DM 受众，普通成员读不到。
+    member = app.test_client()
+    _login(member, role="USER", user_id=2, username="player")
+    resp = member.get("/api/rooms/r-1/console/log", headers={"X-CSRF-Token": "csrf"})
+    messages = [item["message"] for item in resp.get_json()["data"]["entries"]]
+    assert messages == []

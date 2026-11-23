@@ -106,13 +106,30 @@ def register_socket_events(socketio):
     # 每次 create_app 都会通过 init_app 重建底层 server，因此事件必须重新绑定；
     # 已注册标记会让第二个 app（测试/多实例）丢失全部 Socket 处理器。
     # 房间日志实时广播：新增条目推送给房间内在线用户，驱动内嵌 Web 控制台。
-    set_room_log_broadcaster(
-        lambda room_id, entry: socketio.emit(
-            "room_console_log",
-            {"room_id": room_id, "type": "append", "entry": entry},
-            room=room_id,
-        )
-    )
+    # audience="dm" 的条目（暗投/秘密骰）只推给房主与房管，不广播给普通玩家。
+    def _broadcast_room_log(room_id, entry):
+        payload = {"room_id": room_id, "type": "append", "entry": entry}
+        if str(entry.get("audience") or "all") == "dm":
+            _, info = find_room(room_id)
+            dm_ids = []
+            if info:
+                creator_id = str(info.get("creator_id") or "")
+                for member in info.get("members") or []:
+                    if not isinstance(member, dict):
+                        continue
+                    if member.get("is_active", True) is False or member.get("status") == ROOM_MEMBER_REMOVED:
+                        continue
+                    uid = member.get("user_id")
+                    if uid is None:
+                        continue
+                    if str(uid) == creator_id or member.get("room_role") in ("owner", "admin"):
+                        dm_ids.append(uid)
+            for uid in dm_ids:
+                socketio.emit("room_console_log", payload, room=f"user:{uid}")
+            return
+        socketio.emit("room_console_log", payload, room=room_id)
+
+    set_room_log_broadcaster(_broadcast_room_log)
 
     # 玩家投掷：广播待投掷请求、结果、取消与强制结算。
     from trpg_server.agents import player_roll

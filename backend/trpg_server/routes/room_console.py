@@ -20,6 +20,7 @@ from trpg_server.room_console_commands import (
 from trpg_server.room_log import (
     append_room_log,
     clear_room_log,
+    filter_room_log_for_viewer,
     read_room_log,
     room_console_settings,
 )
@@ -84,6 +85,19 @@ def _required_rank(role_name, default):
     return _ROLE_BY_NAME.get(str(role_name or default), _ROLE_BY_NAME[default])
 
 
+def _is_dm(info):
+    """房间级 DM 判定（房主 / 房间管理员），与暗投日志 audience=dm 的可见性对齐。
+
+    刻意不用站点级 ``_is_elevated()``：暗投结果只属于「本房间」的 DM 视角，
+    站级管理员仍需是房主/房管才看得到，避免权限口径混乱。
+    """
+    user_id = session.get("user_id")
+    if str(user_id) == str(info.get("creator_id")):
+        return True
+    member = _find_member(info, user_id=user_id, active_only=True)
+    return bool(member) and member.get("room_role") in (ROOM_ROLE_OWNER, ROOM_ROLE_ADMIN)
+
+
 def _parse_command(command):
     parts = str(command or "").split()
     domain = parts[0].lower() if parts else ""
@@ -137,6 +151,8 @@ def get_room_console_log(room_id):
         level=request.args.get("level"),
         search=request.args.get("search") or "",
     )
+    # 暗投/秘密骰的条目（audience=dm）只对房主/房管可见，普通成员看不到结果。
+    data["entries"] = filter_room_log_for_viewer(data.get("entries", []), is_dm=_is_dm(info))
     return success_response(data, "Room console log loaded successfully")
 
 

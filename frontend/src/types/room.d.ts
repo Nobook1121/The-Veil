@@ -97,6 +97,8 @@ interface Room {
     scenario_id?: number;
     scenario_title?: string;
     scenario_version?: string;
+    // 房间列表卡封面（绑定剧本封面的公开 URL，无剧本/无封面时为空串）。
+    cover?: string;
     // 房间级唯一规则集；旧房间由后端按剧本推断，推断不到回退 coc7。
     ruleset_id?: string;
     // 可选的房间主布局标记；缺省时由房间规则集的 workspace 声明决定。

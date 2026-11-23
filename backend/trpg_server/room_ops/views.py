@@ -237,6 +237,31 @@ def _room_ruleset_id(info):
         scenarios_dir=_get_scenarios_dir(),
     )
 
+def _room_cover(info):
+    """房间卡封面的惰性解析：取绑定剧本的封面公开 URL，拿不到就返回空串。
+
+    封面属于剧本领域，这里延迟导入 scenario_service 以避免 room_ops 与
+    scenario 模块的加载期环依赖；解析失败一律降级为空串，绝不让封面拖垮
+    房间列表接口。
+    """
+    scenario_id = str(info.get("scenario_id") or "").strip()
+    if not scenario_id:
+        return ""
+    try:
+        from trpg_server import scenario_service
+        from trpg_server.scenario_store import scenario_public_asset_url
+
+        _, scenario = scenario_service._find(scenario_id)
+        if not scenario:
+            return ""
+        cover = scenario.get("cover")
+        if not cover:
+            return ""
+        return scenario_public_asset_url(str(cover))
+    except Exception:  # pragma: no cover - 封面解析绝不允许抛出
+        return ""
+
+
 def _room_summary(info):
     _normalize_members(info)
     mode = normalize_room_mode(info)
@@ -275,6 +300,8 @@ def _room_summary(info):
         "scenario_id": info.get("scenario_id"),
         "scenario_version": info.get("scenario_version"),
         "scenario_title": info.get("scenario_title"),
+        # 房间列表卡封面：取绑定剧本的封面，缺剧本/缺封面时给空串，前端渲染占位。
+        "cover": _room_cover(info),
         # 房间级唯一规则集：剧本侧已持久化，旧房间在读取时按剧本推断。
         "ruleset_id": _room_ruleset_id(info),
         # 房间模式的两个正交能力位：AI KP 是否参与、剧本绑定强度。

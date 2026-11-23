@@ -47,6 +47,49 @@ def _pending_state(room_id: str, request_id: str | None = None) -> dict[str, Any
     return state
 
 
+@bp.route("/api/rooms/<room_id>/secret-roll", methods=["POST"])
+def secret_roll(room_id):
+    """秘密骰/私骰：任何房间成员都能发起，结果只回给调用者，日志只进 DM 受众。
+
+    与 AI 工具的 ``dice.roll dark=true`` 走同一套 audience="dm" 可见性（见
+    room_log 的 filter_room_log_for_viewer 与 socket_events 的定向广播）：
+    - 不生成骰卡、不广播骰桌动画；
+    - 结果文本写入房间日志但标 ``audience="dm"``，普通玩家读取日志时看不到；
+    - 调用者通过本次 HTTP 响应拿到结果（GM 用，玩家私骰同样适用）。
+    """
+    login_error = _require_login()
+    if login_error:
+        return login_error
+    room_dir, info = _find_room(room_id)
+    if not room_dir:
+        return error_response("Room not found", 404, "Room not found")
+    if not _can_access(info):
+        return _denied(room_id)
+
+    data = request.get_json(silent=True) or {}
+    expression = str(data.get("expression") or "").strip()
+    if not expression:
+        return error_response("dice expression is required", 400, "dice expression is required")
+
+    from trpg_server.agents.tools.dice import roll_dice
+
+    result = roll_dice({"expression": expression})
+    if result.get("error"):
+        return error_response(result["error"], 400, "invalid dice expression")
+
+    log_room_event(
+        room_dir,
+        result["summary"],
+        source="dice",
+        actor=session.get("username"),
+        room_id=room_id,
+        logger_=logger,
+        暗投="是",
+        audience="dm",
+    )
+    return success_response(result, "Secret roll resolved")
+
+
 @bp.route("/api/rooms/<room_id>/dice-requests", methods=["GET"])
 def list_dice_requests(room_id):
     login_error = _require_login()

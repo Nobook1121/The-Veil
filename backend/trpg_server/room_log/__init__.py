@@ -130,6 +130,9 @@ def append_room_log(
         return None
 
     resolved_room_id = str(room_id) if room_id else _room_id_for(target_dir)
+    redacted_details = redact_sensitive(details) if isinstance(details, dict) else {}
+    # audience 是逐条可见性标记：默认 "all"；暗投/秘密骰等写入 "dm"，只有房主/房管可见。
+    audience = str((redacted_details or {}).get("audience") or "all").strip().lower() or "all"
     entry = {
         "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
         "level": str(level or "info").lower(),
@@ -137,7 +140,8 @@ def append_room_log(
         "actor": str(actor) if actor else None,
         "room_id": resolved_room_id,
         "message": str(message or ""),
-        "details": redact_sensitive(details) if isinstance(details, dict) else {},
+        "details": redacted_details,
+        "audience": audience,
     }
     limit = max_entries if max_entries is not None else room_console_settings()["max_entries"]
     path = room_log_path(target_dir)
@@ -184,6 +188,18 @@ def read_room_log(
     if limit and limit > 0:
         entries = entries[-limit:]
     return {"entries": entries, "truncated": total > len(entries)}
+
+
+def filter_room_log_for_viewer(entries: list[dict[str, Any]], *, is_dm: bool) -> list[dict[str, Any]]:
+    """按 audience 过滤房间日志条目：``audience="dm"`` 的条目只对 DM 可见。
+
+    暗投/秘密骰的结果在写入时标 ``audience="dm"``（见 dice 工具的暗投路径），
+    普通玩家读取日志、以及 socket 实时广播时都调用这里做一次受众裁剪，避免
+    把 KP 隐藏的骰点结果漏给玩家。
+    """
+    if is_dm:
+        return entries
+    return [entry for entry in entries if str(entry.get("audience") or "all") != "dm"]
 
 
 def load_room_log(room_dir: Any, *, limit: int | None = None) -> list[dict[str, Any]]:

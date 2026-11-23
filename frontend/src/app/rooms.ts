@@ -1091,6 +1091,22 @@ function roomRulesetTagHtml(room: Room): string {
     return `<span class="character-card-tag" data-ruleset="${escape(rulesetId)}">${escape(tag)}</span>`;
 }
 
+function roomCoverHtml(room: Room): string {
+    if (!room.cover) {
+        return "";
+    }
+    const src = String(room.cover).replace(/[&<>"']/g, (ch) => {
+        switch (ch) {
+            case "&": return "&amp;";
+            case "<": return "&lt;";
+            case ">": return "&gt;";
+            case '"': return "&quot;";
+            default: return "&#39;";
+        }
+    });
+    return `<img class="room-card-cover" src="${src}" alt="" loading="lazy" decoding="async" style="width:100%;height:120px;object-fit:cover;border-radius:0.25rem 0.25rem 0 0">`;
+}
+
 function renderRoomCard(room: Room): string {
     const isActive = currentRoom?.id === room.id;
     const members = activeRoomMembers(room).map((member) => member.username).join(", ") || "-";
@@ -1098,6 +1114,7 @@ function renderRoomCard(room: Room): string {
         roomId: room.id,
         activeClass: isActive ? "border-primary border-2 shadow-lg" : "",
         activeHeaderHtml: isActive ? window.TrpgTemplates.render("room-active-header") : "",
+        coverHtml: roomCoverHtml(room),
         archivedBadgeHtml: room.archived || room.archived_at ? window.TrpgTemplates.render("room-archived-badge", { archivedAt: room.archived_at || "" }) : "",
         name: room.name,
         rulesetTagHtml: roomRulesetTagHtml(room),

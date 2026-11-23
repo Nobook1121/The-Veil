@@ -860,6 +860,8 @@ def _log_roll_result(
     details: dict[str, Any] = {"工具": tool_name}
     if dark:
         details["暗投"] = "是"
+        # 暗投结果只进 DM 可见的日志受众，广播与读取时都会被过滤给普通玩家。
+        details["audience"] = "dm"
     try:
         from trpg_server.room_log import log_room_event
 
