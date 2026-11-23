@@ -502,6 +502,8 @@ def test_import_item_effect_notes_are_not_warnings(tmp_path, plugins):
     assert not any("条目级效果" in text for text in data["warnings"])
     assert not any("transfer buff" in text for text in data["warnings"])
     notes = [text for text in data["notes"] if "条目级效果" in text]
-    assert notes and "14 个" in notes[0]
-    assert "正常降级" in notes[0]
+    # 效果引擎上线后文案从「已忽略 N 个」变为「已导入 N 条 + M 条路径无消费方」，
+    # 条目级效果不再是丢弃项。
+    assert notes and "14 条" in notes[0]
+    assert "已导入" in notes[0]
     assert data["counts"]["notes"] == len(data["notes"])

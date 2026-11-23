@@ -17,13 +17,20 @@
 本模块不落任何数据、不 import 任何规则集插件——法术位 slot 表经
 ``slot_table(class_identifier, level)`` 回调注入（dnd5e-srd classes.json），
 武器代码中文名经 ``weapon_name(code)`` 回调注入（dnd5e-srd equipment.json）。
+
+唯一例外：物品效果的 kiwee 深库补强（``default_kiwee_item_lookup``）会在函数
+内部**惰性**打开 ``dnd5e_plugin.kiwee`` 的 sqlite（不 import 时零开销），并且
+任何失败都返回 ``None`` 静默跳过——补强是加分项，不能阻断导入。调用方也可以
+直接传 ``item_lookup`` 回调覆盖它（测试走这条）。
 """
 
 from __future__ import annotations
 
 import html as _html
+import os
 import re
-from typing import Any, Callable, Mapping
+from pathlib import Path
+from typing import Any, Callable, Iterable, Mapping
 
 from fvtt_world_import.armor_calc import ability_modifier, armor_class
 
@@ -274,6 +281,139 @@ EQUIPMENT_TYPE_ZH: dict[str, str] = {
 PRESET_PREFIX = "预设角色"
 
 MAX_NOTES_CHARS = 6000
+
+
+# --- 物品效果（FVTT Active Effect）转写 ------------------------------------
+#
+# 世界包里的 ``!actors.items.effects!`` 文档是 Foundry 的 Active Effect：
+# ``transfer``（是否随物品生效）、``disabled``（物品效果自身开关）、
+# ``changes``（``[{key, mode, value}]`` 路径式数值修正）。这里只做形态转写，
+# **不改写语义**；真正的路径结算在 ``dnd5e_plugin.effect_changes``。
+#
+# 支持范围的镜像表：dnd5e 插件是运行期才装配的，导入器不能硬依赖它，因此
+# 维护一份同口径的键清单用于出告警。tests/test_fvtt_world_import_effects.py
+# 会拿真包对账「导入器判为支持 = 引擎真能结算」，两边不许漂移。
+EFFECT_NUMBER_KEYS = frozenset(
+    {
+        "system.attributes.ac.bonus",
+        "system.attributes.init.bonus",
+        "system.bonuses.abilities.save",
+        "system.bonuses.abilities.check",
+        "system.bonuses.abilities.ability_check",
+        "system.bonuses.abilities.saving_throw",
+        "system.bonuses.mwak.attack",
+        "system.bonuses.mwak.damage",
+        "system.bonuses.rwak.attack",
+        "system.bonuses.rwak.damage",
+        "system.bonuses.msak.attack",
+        "system.bonuses.rsak.attack",
+        "system.bonuses.spell.dc",
+    }
+)
+_ABILITY = r"(str|dex|con|int|wis|cha)"
+EFFECT_NUMBER_PATTERNS = (
+    re.compile(rf"^system\.abilities\.{_ABILITY}\.(check|save)\.roll\.mode$"),
+    re.compile(rf"^system\.bonuses\.abilities\.(save|saving_throw)\.{_ABILITY}$"),
+    re.compile(rf"^system\.bonuses\.abilities\.(check|ability_check)\.{_ABILITY}$"),
+    re.compile(r"^system\.bonuses\.skills\.[a-z-]+\.check$"),
+)
+EFFECT_LIST_KEYS = frozenset(
+    {
+        "system.traits.dr.value",
+        "system.traits.dv.value",
+        "system.traits.di.value",
+        "system.traits.ci.value",
+        "system.traits.languages.value",
+    }
+)
+EFFECT_TEXT_KEYS = frozenset({"system.attributes.ac.calc", "name"})
+
+#: 引擎模式枚举（与 Foundry ActiveEffect.MODES 同号）。
+EFFECT_MODE_NAMES = {0: "custom", 1: "multiply", 2: "add", 3: "downgrade", 4: "upgrade", 5: "override"}
+
+#: 已知但引擎不结算的字段族 → 出处说明（告警文案用）。
+EFFECT_UNSUPPORTED_HINTS = {
+    "flags.": "模块/系统标志（midi-qol、dnd5e flags）",
+    "ATL.": "Token 外观（ATL）",
+    "activities[": "物品活动（dnd5e v6 Activities）",
+    "items[": "物品数组",
+    "effects[": "嵌套效果",
+}
+
+# --- kiwee 深库补强：5etools item 结构化字段 → 引擎 changes ----------------
+#
+# 映射口径（左侧是 5etools item 字段，右侧是引擎能结算的路径）：
+#
+#   bonusAc            → system.attributes.ac.bonus         （add）
+#   bonusSavingThrow   → system.bonuses.abilities.save      （add）
+#   bonusWeapon        → mwak/rwak 的 attack + damage       （add，武器类物品）
+#   bonusWeaponAttack  → mwak/rwak.attack                   （add）
+#   bonusWeaponDamage  → mwak/rwak.damage                   （add）
+#   bonusSpellAttack   → msak/rsak.attack                   （add）
+#   resist             → system.traits.dr.value             （列表 add）
+#   vulnerable         → system.traits.dv.value             （列表 add）
+#   immune             → system.traits.di.value             （列表 add）
+#   conditionImmune    → system.traits.ci.value             （列表 add）
+#
+# 值形如 ``"+1"``（字符串，可能带符号）；列表是中文伤害/条件名，按下表翻回
+# 英文键（战斗层的伤害类型与条件是英文小写）。查不到、字段为空或该 key 已被
+# 世界包 effect 覆盖时跳过——补强只填空缺，不叠加。
+KIWEE_ITEM_CHANGE_FIELDS: dict[str, tuple[str, ...]] = {
+    "bonusAc": ("system.attributes.ac.bonus",),
+    "bonusSavingThrow": ("system.bonuses.abilities.save",),
+    "bonusWeapon": (
+        "system.bonuses.mwak.attack",
+        "system.bonuses.mwak.damage",
+        "system.bonuses.rwak.attack",
+        "system.bonuses.rwak.damage",
+    ),
+    "bonusWeaponAttack": ("system.bonuses.mwak.attack", "system.bonuses.rwak.attack"),
+    "bonusWeaponDamage": ("system.bonuses.mwak.damage", "system.bonuses.rwak.damage"),
+    "bonusSpellAttack": ("system.bonuses.msak.attack", "system.bonuses.rsak.attack"),
+}
+KIWEE_LIST_CHANGE_FIELDS: dict[str, str] = {
+    "resist": "system.traits.dr.value",
+    "vulnerable": "system.traits.dv.value",
+    "immune": "system.traits.di.value",
+    "conditionImmune": "system.traits.ci.value",
+}
+#: kiwee 中文伤害类型 → 战斗层使用的英文键（srd equipment/damage 口径）。
+KIWEE_DAMAGE_TYPES_ZH = {
+    "强酸": "acid",
+    "钝击": "bludgeoning",
+    "寒冷": "cold",
+    "冷冻": "cold",
+    "火焰": "fire",
+    "力场": "force",
+    "闪电": "lightning",
+    "黯蚀": "necrotic",
+    "穿刺": "piercing",
+    "毒素": "poison",
+    "毒": "poison",
+    "心灵": "psychic",
+    "光耀": "radiant",
+    "挥砍": "slashing",
+    "雷鸣": "thunder",
+    "非魔法武器攻击": "bludgeoning,piercing,slashing",
+}
+#: kiwee 中文状态 → 5e 条件键。
+KIWEE_CONDITIONS_ZH = {
+    "目盲": "blinded",
+    "魅惑": "charmed",
+    "耳聋": "deafened",
+    "力竭": "exhaustion",
+    "恐慌": "frightened",
+    "受擒": "grappled",
+    "失能": "incapacitated",
+    "隐形": "invisible",
+    "麻痹": "paralyzed",
+    "石化": "petrified",
+    "中毒": "poisoned",
+    "倒地": "prone",
+    "束缚": "restrained",
+    "震慑": "stunned",
+    "昏迷": "unconscious",
+}
 
 
 class _Warn:
@@ -761,16 +901,374 @@ def _spellcasting(
     return profile, pact_notes
 
 
+def effect_key_supported(key: Any) -> bool:
+    """这个 change 的 key 是否有引擎消费方（镜像 ``effect_changes`` 的口径）。
+
+    公开给 :mod:`fvtt_world_import.world_package` 的审计报告用——「哪些路径
+    真能结算」的口径只许有一份，两边不许各写一个。
+    """
+    text = str(key or "").strip()
+    if not text:
+        return False
+    if text in EFFECT_NUMBER_KEYS or text in EFFECT_LIST_KEYS or text in EFFECT_TEXT_KEYS:
+        return True
+    return any(pattern.match(text) for pattern in EFFECT_NUMBER_PATTERNS)
+
+
+def _effect_unsupported_hint(key: Any) -> str:
+    text = str(key or "").strip()
+    for prefix, hint in EFFECT_UNSUPPORTED_HINTS.items():
+        if text.startswith(prefix):
+            return hint
+    return ""
+
+
+def _effect_changes_of(doc: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """``changes`` 原样转写：key/mode/value 三件套，mode 归一成整数。"""
+    rows: list[dict[str, Any]] = []
+    for raw in doc.get("changes") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        key = str(raw.get("key") or "").strip()
+        if not key:
+            continue
+        rows.append(
+            {
+                "key": key,
+                "mode": _as_int(raw.get("mode"), 2),
+                "value": raw.get("value"),
+            }
+        )
+    return rows
+
+
+def _effect_entry(
+    doc: Mapping[str, Any],
+    *,
+    item_id: str,
+    source: str,
+    equipped: bool,
+) -> dict[str, Any]:
+    """单个 FVTT effect 文档 → 引擎数据形态（``dnd5e_plugin.effect_changes``）。"""
+    entry: dict[str, Any] = {
+        "id": str(doc.get("_id") or "").split(".")[-1],
+        "name": _clean_text(doc.get("name")),
+        "transfer": bool(doc.get("transfer")),
+        "disabled": bool(doc.get("disabled")),
+        "changes": _effect_changes_of(doc),
+        "origin": {"item_id": item_id, "source": source, "equipped": bool(equipped)},
+    }
+    duration = _mapping(doc.get("duration"))
+    kept = {
+        key: _as_int(duration.get(key))
+        for key in ("seconds", "rounds", "turns")
+        if _as_int_or_none(duration.get(key)) is not None
+    }
+    if kept:
+        entry["duration"] = kept
+    return entry
+
+
+def _split_item_effects(
+    item_docs: list[Mapping[str, Any]],
+    effect_docs: list[Mapping[str, Any]],
+) -> tuple[dict[str, list[dict[str, Any]]], list[Mapping[str, Any]]]:
+    """把 effect 文档按父物品分组。
+
+    复合 ``_id`` 形如 ``<actorId>.<itemId>.<effectId>``；两段的
+    （``<actorId>.<effectId>``）是 actor 级效果（statuses 等），交给现有
+    条件语义，不在这里重建。
+    """
+    by_item_id = {str(doc.get("_id") or ""): doc for doc in item_docs}
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    actor_level: list[Mapping[str, Any]] = []
+    for doc in effect_docs or []:
+        if not isinstance(doc, Mapping):
+            continue
+        parts = str(doc.get("_id") or "").split(".")
+        if len(parts) < 3:
+            actor_level.append(doc)
+            continue
+        item_key = ".".join(parts[:2])
+        item = by_item_id.get(item_key)
+        if item is None:
+            actor_level.append(doc)
+            continue
+        item_system = _mapping(item.get("system"))
+        entry = _effect_entry(
+            doc,
+            item_id=str(item.get("_id") or parts[-2]),
+            source=str(item.get("type") or ""),
+            equipped=_item_effects_equipped(item),
+        )
+        grouped.setdefault(item_key, []).append(entry)
+    return grouped, actor_level
+
+
+def _item_effects_equipped(item: Mapping[str, Any]) -> bool:
+    """物品效果是否随物品生效：装备/武器看 ``system.equipped``，其余按被动。
+
+    专长、种族特性、法术这类条目在 FVTT 里没有「装备」概念，挂在角色上即
+    被动生效；只有 weapon/equipment/consumable/loot/tool/container 这些
+    装备类才要求 ``system.equipped``。
+    """
+    if str(item.get("type") or "") not in EQUIPMENT_TYPES:
+        return True
+    return bool(_mapping(item.get("system")).get("equipped"))
+
+
+def _flatten_effects(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        result.extend(row.get("effects") or [])
+    return result
+
+
+def _effects_summary(entries: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    """效果小结：文档数 / change 数 / 生效候选 / 不支持键（前 5 个）。"""
+    rows = [entry for entry in entries if isinstance(entry, Mapping)]
+    changes = [change for entry in rows for change in entry.get("changes") or []]
+    unsupported = [
+        str(change.get("key") or "") for change in changes if not effect_key_supported(change.get("key"))
+    ]
+    top: list[str] = []
+    for key in unsupported:
+        if key and key not in top:
+            top.append(key)
+        if len(top) >= 5:
+            break
+    return {
+        "documents": len(rows),
+        "changes": len(changes),
+        "transfer": sum(1 for entry in rows if entry.get("transfer")),
+        "unsupported": len(unsupported),
+        "unsupported_keys": top,
+    }
+
+
+def _warn_effects(warn: _Warn, summary: Mapping[str, Any], where: str) -> None:
+    """不支持的 key 出 ``effects.unsupported`` 告警（列前 5 个 + 出处）。"""
+    count = _as_int(summary.get("unsupported"), 0)
+    if count <= 0:
+        return
+    keys = [str(key) for key in summary.get("unsupported_keys") or [] if str(key)]
+    hints = []
+    for key in keys:
+        hint = _effect_unsupported_hint(key)
+        if hint and hint not in hints:
+            hints.append(hint)
+    text = f"{where} {count} 条效果改动（change）没有引擎消费方，已忽略：{'、'.join(keys)}"
+    if hints:
+        text += f"（{'；'.join(hints)}）"
+    warn.add("effects.unsupported", text)
+
+
+# --- kiwee 深库补强 --------------------------------------------------------
+
+
+def default_kiwee_item_lookup() -> Callable[[str], dict[str, Any] | None] | None:
+    """惰性打开 dnd5e 的 kiwee 深库，返回「按名字取 item」的回调。
+
+    深库未建、插件未装配或任何异常都返回 ``None``（静默降级）：补强是加分项，
+    不该让整包导入失败。
+    """
+    try:
+        from dnd5e_plugin.kiwee import kiwee_db_path
+
+        db_path = kiwee_db_path()
+        if not Path(db_path).is_file():
+            return None
+        from dnd5e_plugin.kiwee.db import open_kiwee_db
+
+        db = open_kiwee_db(db_path)
+    except Exception:  # noqa: BLE001 - 深库缺席/版本不符/导入失败一律降级
+        return None
+    if db is None:
+        return None
+
+    def lookup(name: str) -> dict[str, Any] | None:
+        try:
+            found = db.get("item", name)
+        except Exception:  # noqa: BLE001 - 单条查询失败不影响导入
+            return None
+        if not isinstance(found, Mapping):
+            return None
+        raw = found.get("raw")
+        if not isinstance(raw, Mapping):
+            return None
+        if not _kiwee_same_item(name, found, raw):
+            # 词表补强**必须同名**。``db.get`` 拿不到 uid 时会退化成全文检索的
+            # 首条：普通「匕首」会命中「真冰碎片（匕首）」，「皮甲」会命中
+            # 「魔像皮甲」——把魔法物品的加值算到角色的凡品上是凭空改数
+            # （实测卓尔法师的普通匕首会多出 +3 AC）。对不上名就当作查不到。
+            return None
+        return dict(raw)
+
+    return lookup
+
+
+_KIWEE_NAME_NOISE = re.compile(r"[\s·.,，。、:：;；'\"‘’“”()（）\[\]【】<>《》\-—_/+＋]+")
+
+
+def _kiwee_name_key(value: Any) -> str:
+    """名字归一：去空白/标点/括号 + 大小写折叠（「防护戒指 (DMG)」→「防护戒指dmg」）。"""
+    return _KIWEE_NAME_NOISE.sub("", str(value or "")).casefold()
+
+
+def _kiwee_same_item(name: str, found: Mapping[str, Any], raw: Mapping[str, Any]) -> bool:
+    """kiwee 命中的条目是不是**同一件**物品（名字/别名/英文名逐字相等）。"""
+    target = _kiwee_name_key(name)
+    if not target:
+        return False
+    candidates: list[Any] = [
+        raw.get("name"),
+        found.get("name"),
+        found.get("eng_name"),
+        found.get("engName"),
+    ]
+    aliases = found.get("aliases")
+    if isinstance(aliases, str):
+        candidates.extend(aliases.split(","))
+    elif isinstance(aliases, (list, tuple)):
+        candidates.extend(aliases)
+    return any(_kiwee_name_key(item) == target for item in candidates if item)
+
+
+def _kiwee_bonus_value(value: Any) -> int | None:
+    """``"+1"`` / ``"1"`` / ``1`` → 整数；公式或空值返回 ``None``。"""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.startswith("+"):
+        text = text[1:]
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _kiwee_name_list(value: Any, table: Mapping[str, str]) -> list[str]:
+    """kiwee 的中文列表字段 → 英文键列表（查不到就保留原文并转小写）。"""
+    raw = value if isinstance(value, (list, tuple)) else ([value] if value else [])
+    result: list[str] = []
+    for item in raw:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        resolved = table.get(text) or text.casefold()
+        for part in str(resolved).split(","):
+            part = part.strip()
+            if part and part not in result:
+                result.append(part)
+    return result
+
+
+def _kiwee_changes(item: Mapping[str, Any], covered: set[str]) -> list[dict[str, Any]]:
+    """kiwee item 的结构化加值 → 引擎 changes（跳过世界包已覆盖的 key）。"""
+    changes: list[dict[str, Any]] = []
+    for field, keys in KIWEE_ITEM_CHANGE_FIELDS.items():
+        value = _kiwee_bonus_value(item.get(field))
+        if value is None or value == 0:
+            continue
+        for key in keys:
+            if key in covered:
+                continue
+            covered.add(key)
+            changes.append({"key": key, "mode": 2, "value": value})
+    for field, key in KIWEE_LIST_CHANGE_FIELDS.items():
+        table = KIWEE_CONDITIONS_ZH if key.endswith("ci.value") else KIWEE_DAMAGE_TYPES_ZH
+        values = _kiwee_name_list(item.get(field), table)
+        if not values or key in covered:
+            continue
+        for value in values:
+            changes.append({"key": key, "mode": 2, "value": value})
+    return changes
+
+
+def _kiwee_effect_entry(
+    *,
+    name: str,
+    item_id: str,
+    source: str,
+    equipped: bool,
+    changes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """补强出来的效果条目：与包内 effect 同形，``origin.source`` 标明来路。"""
+    return {
+        "id": f"kiwee:{item_id or name}"[:120],
+        "name": f"kiwee：{name}"[:120],
+        "transfer": True,
+        "disabled": False,
+        "changes": changes,
+        "origin": {"item_id": item_id, "source": f"kiwee:{source}", "equipped": bool(equipped)},
+    }
+
+
+def _enrich_effects_with_kiwee(
+    rows: list[dict[str, Any]],
+    items_by_name: Mapping[str, dict[str, Any]],
+    lookup: Callable[[str], dict[str, Any] | None],
+    warn: _Warn,
+) -> dict[str, int]:
+    """给装备行补 kiwee 结构化加值；返回 ``{lookups, enriched}`` 计数。"""
+    stats = {"lookups": 0, "enriched": 0}
+    for row in rows:
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        item = items_by_name.get(name) or {}
+        if str(item.get("type") or "") not in EQUIPMENT_TYPES:
+            continue
+        stats["lookups"] += 1
+        found = lookup(name)
+        if not isinstance(found, Mapping):
+            continue
+        covered = {
+            str(change.get("key") or "")
+            for entry in row.get("effects") or []
+            for change in entry.get("changes") or []
+        }
+        changes = _kiwee_changes(found, covered)
+        if not changes:
+            continue
+        row.setdefault("effects", []).append(
+            _kiwee_effect_entry(
+                name=name,
+                item_id=str(item.get("_id") or ""),
+                source=str(item.get("type") or ""),
+                equipped=bool(row.get("equipped")),
+                changes=changes,
+            )
+        )
+        stats["enriched"] += 1
+    return stats
+
+
 def _equipment_rows(
     system: Mapping[str, Any],
     item_docs: list[Mapping[str, Any]],
     warn: _Warn,
+    *,
+    effects_by_item: Mapping[str, list[dict[str, Any]]] | None = None,
+    kiwee_lookup: Callable[[str], dict[str, Any] | None] | None = None,
+    kiwee_stats: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
-    """装备清单行 ``{name, quantity, weight, notes}``（含货币行与容器归属标注）。"""
+    """装备清单行 ``{name, quantity, weight, notes, effects}``（含货币行与容器归属标注）。"""
     container_names: dict[str, str] = {}
     for item in item_docs:
         if item.get("type") == "container":
             container_names[str(item.get("_id") or "")] = _main_name(item.get("name")) or str(item.get("name") or "容器")
+    effects_index = effects_by_item or {}
+    # 名称 → 物品文档（kiwee 补强按名字查结构化字段）。
+    items_by_name: dict[str, dict[str, Any]] = {}
+    for item in item_docs:
+        item_name = _main_name(item.get("name")) or str(item.get("name") or "").strip()
+        if item_name:
+            items_by_name.setdefault(item_name, dict(item))
     rows: list[dict[str, Any]] = []
     for item in item_docs:
         kind = str(item.get("type") or "")
@@ -808,14 +1306,24 @@ def _equipment_rows(
         if parent and parent in container_names:
             notes.append(f"在「{container_names[parent]}」内")
         weight = _mapping(item_system.get("weight"))
-        rows.append(
-            {
-                "name": name,
-                "quantity": max(1, _as_int(item_system.get("quantity"), 1)),
-                "weight": _as_float(weight.get("value"), 0.0),
-                "notes": "；".join(notes),
-            }
-        )
+        row: dict[str, Any] = {
+            "name": name,
+            "quantity": max(1, _as_int(item_system.get("quantity"), 1)),
+            "weight": _as_float(weight.get("value"), 0.0),
+            "notes": "；".join(notes),
+        }
+        # 只写 True：未装备的行走「缺键」分支，战斗层的
+        # ``_equipment_items`` 默认按已装备处理，写 False 会悄悄改变攻击/负重口径。
+        if item_system.get("equipped"):
+            row["equipped"] = True
+        item_effects = effects_index.get(str(item.get("_id") or ""))
+        if item_effects:
+            row["effects"] = [dict(entry) for entry in item_effects]
+        rows.append(row)
+    if kiwee_lookup is not None:
+        stats = _enrich_effects_with_kiwee(rows, items_by_name, kiwee_lookup, warn)
+        if kiwee_stats is not None:
+            kiwee_stats.update(stats)
     currency = _currency_row(system)
     if currency is not None:
         rows.append(currency)
@@ -855,6 +1363,7 @@ def _character(
     slot_table: Callable[[str, int], list[int] | None] | None,
     weapon_name: Callable[[str], str | None] | None,
     avatar_data_uri: Callable[[str], str | None] | None,
+    kiwee_lookup: Callable[[str], dict[str, Any] | None] | None = None,
 ) -> dict[str, Any]:
     warn = _Warn()
     system = _mapping(actor.get("system"))
@@ -863,6 +1372,10 @@ def _character(
     abilities = _abilities(system)
     con_mod = ability_modifier(abilities["con"])
     classes = _class_rows(item_docs)
+    # 物品级效果（``!actors.items.effects!``）：装备类的挂到 equipment 行，
+    # 其余（专长/种族特性/法术）挂到角色级 effect_changes。
+    effects_by_item, _actor_level_effects = _split_item_effects(item_docs, effect_docs)
+    kiwee_stats: dict[str, int] = {"lookups": 0, "enriched": 0}
 
     level = sum(row["levels"] for row in classes)
     if not classes:
@@ -977,6 +1490,27 @@ def _character(
             else:
                 warn.add("img.missing", "头像资源在包内找不到，已留空。")
 
+    equipment_rows = _equipment_rows(
+        system,
+        item_docs,
+        warn,
+        effects_by_item=effects_by_item,
+        kiwee_lookup=kiwee_lookup,
+        kiwee_stats=kiwee_stats,
+    )
+    # 非装备类物品（专长/种族特性/法术）的效果挂角色级；导入时不做激活判定，
+    # 交给 dnd5e_plugin.effect_changes 按 transfer/disabled/applied 自己判。
+    character_effects = [
+        entry
+        for entries in effects_by_item.values()
+        for entry in entries
+        if str(_mapping(entry.get("origin")).get("source") or "") not in EQUIPMENT_TYPES
+    ]
+    effects_summary = _effects_summary([*character_effects, *_flatten_effects(equipment_rows)])
+    effects_summary["kiwee"] = dict(kiwee_stats)
+    if effects_summary["documents"]:
+        _warn_effects(warn, effects_summary, "物品效果")
+
     stats = _stats(actor)
     sheet = {
         "level": max(1, min(20, level or 1)),
@@ -1004,7 +1538,7 @@ def _character(
         "armorClass": ac_value,
         "speed": speed,
         "hitDice": hit_dice,
-        "equipment": _equipment_rows(system, item_docs, warn),
+        "equipment": equipment_rows,
         "features": [
             str(item.get("name") or "").strip()
             for item in item_docs
@@ -1014,6 +1548,8 @@ def _character(
         "notes": _notes_text(actor, system, item_docs, effect_docs, notes_extra, warn),
         "xp": max(0, _as_int(_mapping(details.get("xp")).get("value"), 0)),
     }
+    if character_effects:
+        sheet["effect_changes"] = character_effects
     name = str(actor.get("name") or "").strip() or "未命名角色"
     card: dict[str, Any] = {
         "id": "",
@@ -1036,6 +1572,7 @@ def _character(
         "race": race,
         "has_avatar": bool(avatar_uri),
         "card": card,
+        "effects": effects_summary,
         "warnings": warn.texts(),
         "degradations": warn.counts(),
     }
@@ -1449,6 +1986,20 @@ def _npc(
         )
 
     statuses = _statuses_note(effect_docs)
+    # 物品效果：NPC 的战斗数值全部走 statblock，所以效果也挂 statblock.
+    # effect_changes（引擎在 combatant_from_module 里读同一份视图）。
+    npc_effects_by_item, _npc_actor_level = _split_item_effects(item_docs, effect_docs)
+    npc_effects = [
+        entry
+        for entries in npc_effects_by_item.values()
+        for entry in entries
+        if _mapping(entry.get("origin")).get("equipped")
+    ]
+    npc_effects_summary = _effects_summary(
+        [entry for entries in npc_effects_by_item.values() for entry in entries]
+    )
+    if npc_effects_summary["documents"]:
+        _warn_effects(warn, npc_effects_summary, "物品效果")
     name = str(actor.get("name") or "").strip() or "未命名怪物"
     title = name if not folder_name else f"[{folder_name}] {name}"
 
@@ -1499,6 +2050,8 @@ def _npc(
         statblock["legendary_actions_max"] = legact
     if legres:
         statblock["legendary_resistances_max"] = legres
+    if npc_effects:
+        statblock["effect_changes"] = npc_effects
 
     content = _render_statblock_text(
         name=name,
@@ -1551,6 +2104,7 @@ def _npc(
         "cr": cr,
         "armor_class": ac_value,
         "max_hp": max(1, max_hp),
+        "effects": npc_effects_summary,
         "warnings": warn.texts(),
         "degradations": warn.counts(),
     }
@@ -1742,11 +2296,18 @@ def convert_world_actors(
     slot_table: Callable[[str, int], list[int] | None] | None = None,
     weapon_name: Callable[[str], str | None] | None = None,
     avatar_data_uri: Callable[[str], str | None] | None = None,
+    kiwee_enrich: bool = True,
+    item_lookup: Callable[[str], dict[str, Any] | None] | None = None,
 ) -> dict[str, Any]:
     """整包 actors → {characters, npcs, vehicles, warnings, degradations, totals}。
 
     ``index`` 是 :class:`fvtt_world_import.world_package.ActorIndex`
     （actor 主文档 + 复合键聚合的 items/effects + folder 名）。
+
+    ``item_lookup`` / ``kiwee_enrich`` 控制 kiwee 深库补强（默认开）：传入回调
+    则按回调取 item，否则惰性打开 ``dnd5e_plugin.kiwee`` 的 sqlite；深库缺席、
+    版本不符或任何异常都静默跳过。环境变量 ``TRPG_FVTT_KIWEE_ENRICH=0`` 也能
+    整体关掉（站点/CI 用）。
     """
     documents: dict[str, dict[str, Any]] = dict(getattr(index, "documents") or {})
     items_by_actor: dict[str, list[dict[str, Any]]] = {
@@ -1755,6 +2316,11 @@ def convert_world_actors(
     effects_by_actor: dict[str, list[dict[str, Any]]] = {
         str(key): list(value) for key, value in (getattr(index, "effects") or {}).items()
     }
+    # 条目级效果（``!actors.items.effects!``）与 actor 级效果走同一条通路：
+    # 三层复合键 ``<actorId>.<itemId>.<effectId>``，由 ``_split_item_effects``
+    # 按段数分流到物品行（两段的仍按 actor 级 / 条件语义处理）。
+    for owner, rows in (getattr(index, "item_effects") or {}).items():
+        effects_by_actor.setdefault(str(owner), []).extend(rows)
     folder_names: dict[str, str] = dict(getattr(index, "folders") or {})
 
     characters: list[dict[str, Any]] = []
@@ -1762,6 +2328,16 @@ def convert_world_actors(
     vehicles: list[dict[str, Any]] = []
     degradations: dict[str, int] = {}
     warnings: list[str] = []
+
+    # kiwee 补强开关：显式回调 > 环境变量 > 默认开。深库缺席时 lookup 为 None。
+    enrich_enabled = kiwee_enrich and os.environ.get("TRPG_FVTT_KIWEE_ENRICH", "1") not in {
+        "0",
+        "false",
+        "False",
+    }
+    lookup = item_lookup
+    if lookup is None and enrich_enabled:
+        lookup = default_kiwee_item_lookup()
 
     def count_degradations(rows: list[dict[str, Any]]) -> None:
         for row in rows:
@@ -1792,6 +2368,7 @@ def convert_world_actors(
                 slot_table,
                 weapon_name,
                 avatar_data_uri,
+                lookup,
             )
             characters.append(result)
             warnings.extend(f"角色卡「{result['name']}」：{text}" for text in result["warnings"])
@@ -1807,25 +2384,54 @@ def convert_world_actors(
 
     count_degradations(characters)
     count_degradations(npcs)
+    totals = {
+        "characters": len(characters),
+        "npcs": len(npcs),
+        "vehicles": len(vehicles),
+        "warnings": len(warnings),
+    }
+    # 物品效果汇总：挂上了多少条 effect 文档、其中多少条能真生效、kiwee 补强命中。
+    effect_totals = {"documents": 0, "changes": 0, "transfer": 0, "unsupported": 0}
+    kiwee_total = {"lookups": 0, "enriched": 0}
+    for row in [*characters, *npcs]:
+        summary = row.get("effects") if isinstance(row.get("effects"), dict) else {}
+        for key in effect_totals:
+            effect_totals[key] += _as_int(summary.get(key), 0)
+        if not lookup:
+            # 深库未开/缺席时不要报「命中 0」误导调用方。
+            continue
+        kiwee = summary.get("kiwee") if isinstance(summary.get("kiwee"), dict) else {}
+        for key in kiwee_total:
+            kiwee_total[key] += _as_int(kiwee.get(key), 0)
+    if lookup:
+        effect_totals["kiwee_enriched"] = kiwee_total["enriched"]
+        effect_totals["kiwee_lookups"] = kiwee_total["lookups"]
+    totals["effects"] = effect_totals
     return {
         "characters": characters,
         "npcs": npcs,
         "vehicles": vehicles,
         "warnings": warnings,
         "degradations": degradations,
-        "totals": {
-            "characters": len(characters),
-            "npcs": len(npcs),
-            "vehicles": len(vehicles),
-            "warnings": len(warnings),
-        },
+        "totals": totals,
     }
 
 
 __all__ = [
     "ABILITY_KEYS",
+    "EFFECT_LIST_KEYS",
+    "EFFECT_MODE_NAMES",
+    "EFFECT_NUMBER_KEYS",
+    "EFFECT_NUMBER_PATTERNS",
+    "EFFECT_TEXT_KEYS",
+    "KIWEE_CONDITIONS_ZH",
+    "KIWEE_DAMAGE_TYPES_ZH",
+    "KIWEE_ITEM_CHANGE_FIELDS",
+    "KIWEE_LIST_CHANGE_FIELDS",
     "SKILL_IDS",
     "convert_world_actors",
+    "default_kiwee_item_lookup",
+    "effect_key_supported",
     "proficiency_for_cr",
     "xp_for_cr",
 ]

@@ -19,6 +19,9 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+# 审计报告要知道「哪些 change 路径引擎真能结算」——口径只有一份，放在
+# convert_actors（它不 import world_package，无循环依赖），这里只读不写。
+from fvtt_world_import.convert_actors import effect_key_supported
 from fvtt_world_import.convert_journal import page_plain_text
 from fvtt_world_import.convert_scenes import (
     GRID_MAX,
@@ -356,8 +359,13 @@ class ActorIndex:
     - ``items``：``!actors.items!`` 内嵌条目，键 ``<actorId>.<itemId>``；
       聚合时把**复合键写回条目 ``_id``**（原文档 ``_id`` 只是裸 itemId）；
     - ``effects``：``!actors.effects!`` actor 级效果（如梦梦的中毒）；
-    - ``item_effects``：``!actors.items.effects!`` 条目级 buff——按降级清单
-      #13 直接丢弃，只保留计数；
+    - ``item_effects``：``!actors.items.effects!`` **条目级效果（transfer buff）**，
+      键为 actor id；``_id`` 写回**三层复合键** ``<actorId>.<itemId>.<effectId>``
+      （与 items 同款做法），转换层据此挂到对应物品/装备行，数值改写由
+      ``dnd5e_plugin.effect_changes`` 按路径结算；
+    - ``item_effects_total`` / ``item_effects_dropped``：条目级效果的原始文档数
+      与「挂不上物品」（段数不足或父 actor 缺失）的丢弃数——审计报告要如实
+      双计数，不能把「导入了几条」和「丢了几条」混成一个数；
     - ``folders``：``!folders!`` 里 ``type=Actor`` 的文件夹（actor id 分组名，
       NPC 模块 title 前缀用）。
     """
@@ -366,8 +374,10 @@ class ActorIndex:
         self.documents: dict[str, dict[str, Any]] = {}
         self.items: dict[str, list[dict[str, Any]]] = {}
         self.effects: dict[str, list[dict[str, Any]]] = {}
+        self.item_effects: dict[str, list[dict[str, Any]]] = {}
         self.folders: dict[str, str] = {}
-        self.item_effects = 0
+        self.item_effects_total = 0
+        self.item_effects_dropped = 0
         self.orphan_items = 0
         self.orphan_effects = 0
 
@@ -399,7 +409,9 @@ class ActorIndex:
 def read_actors(pkg: WorldPackage, *, limits: DbLimits | None = None) -> ActorIndex:
     """遍历 actor 库一次：actor 主文档 + 复合键聚合的 items/effects + 文件夹名。
 
-    - ``!actors.items.effects!`` 条目级效果按降级清单 #13 丢弃只计数；
+    - ``!actors.items.effects!`` 条目级效果收进 ``item_effects``（键 actor id，
+      ``_id`` 写回三层复合键 ``<actorId>.<itemId>.<effectId>``）；段数不足的
+      文档挂不上物品，计入 ``item_effects_dropped``；
     - 父 actor 找不到的孤儿条目如实计数（``orphan_items`` / ``orphan_effects``），
       转换层按文档驱动、孤儿天然不进产物，审计报告里给警告；
     - ``!folders!`` 库缺席时文件夹映射为空（folders 只是分组装饰，不拒收）。
@@ -411,14 +423,23 @@ def read_actors(pkg: WorldPackage, *, limits: DbLimits | None = None) -> ActorIn
         if parts is None:
             continue
         collection, doc_id = parts
-        if collection == ACTOR_ITEM_EFFECT_COLLECTION:
-            index.item_effects += 1
-            continue
         try:
             doc = json.loads(value.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
         if not isinstance(doc, dict):
+            continue
+        if collection == ACTOR_ITEM_EFFECT_COLLECTION:
+            index.item_effects_total += 1
+            # 三层复合键：actor/item/effect。两段的是 actor 级效果（旧包形态），
+            # 挂不到具体物品，如实计入丢弃数而不是猜一个父条目。
+            owner, sep, remainder = doc_id.partition(".")
+            if not sep or "." not in remainder:
+                index.item_effects_dropped += 1
+                continue
+            doc = dict(doc)
+            doc["_id"] = doc_id
+            index.item_effects.setdefault(owner, []).append(doc)
             continue
         if collection == ACTOR_COLLECTION:
             doc = dict(doc)
@@ -454,6 +475,15 @@ def read_actors(pkg: WorldPackage, *, limits: DbLimits | None = None) -> ActorIn
     index.effects = {
         parent: rows for parent, rows in index.effects.items() if parent in known
     }
+    # 条目级效果：父 actor 不存在的同样计入孤儿（审计报告里如实警告）。
+    kept_item_effects: dict[str, list[dict[str, Any]]] = {}
+    for owner, rows in index.item_effects.items():
+        if owner in known:
+            kept_item_effects[owner] = rows
+        else:
+            index.item_effects_dropped += len(rows)
+            index.orphan_effects += len(rows)
+    index.item_effects = kept_item_effects
 
     if pkg.folders_db_dir().is_dir():
         folders_reader = pkg.folders_reader(limits)
@@ -666,7 +696,9 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
     actor_counts = {"character": 0, "npc": 0, "vehicle": 0}
     actor_folders: list[dict[str, Any]] = []
     actor_items = 0
-    item_effects = 0
+    item_effects = 0  # 发现的条目级效果文档数
+    item_effects_imported = 0  # 真能挂到物品上的条数
+    item_effects_unsupported = 0  # 其中引擎没有消费方的 change 数
     try:
         actor_index = read_actors(pkg, limits=limits)
     except LevelDbError as exc:
@@ -677,7 +709,15 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
         actor_counts = actor_index.actor_type_counts()
         actor_folders = actor_index.folder_groups()
         actor_items = sum(len(rows) for rows in actor_index.items.values())
-        item_effects = actor_index.item_effects
+        item_effects = actor_index.item_effects_total
+        item_effects_imported = sum(len(rows) for rows in actor_index.item_effects.values())
+        item_effects_unsupported = sum(
+            1
+            for rows in actor_index.item_effects.values()
+            for doc in rows
+            for change in doc.get("changes") or []
+            if not effect_key_supported(change.get("key"))
+        )
         if actor_index.orphan_items or actor_index.orphan_effects:
             warnings.append(
                 f"{actor_index.orphan_items} 个条目 / {actor_index.orphan_effects} 个效果"
@@ -685,11 +725,19 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
             )
         if not actor_index.documents:
             warnings.append("包里没有任何角色。")
-        if item_effects:
+        if item_effects_imported:
+            # 双计数：导入了几条 + 其中多少条路径没人消费。后者是如实行为
+            # （flags/ATL/activities 这类模块与前端字段本来就不进数值），
+            # 不该长得像错误，所以进 notes 不进 warnings。
             notes.append(
-                f"已忽略 {item_effects} 个条目级效果（transfer buff）——新版本此为正常降级："
-                "条目自身字段（AC/伤害/重量等）已按文档折算进角色卡，"
-                "这类「装备后自动加值」的附加效果不进产物、不在本系统运行时生效。"
+                f"已导入 {item_effects_imported} 条条目级效果（transfer buff）："
+                "装备/专长上的路径式加值由 dnd5e 效果引擎按路径结算（AC/先攻/豁免/"
+                "攻击/抗性等），"
+                f"其中 {item_effects_unsupported} 条改动路径没有消费方，已忽略。"
+            )
+        elif item_effects:
+            notes.append(
+                f"{item_effects} 条条目级效果都挂不到具体物品（父条目/父角色缺失），已跳过。"
             )
 
     # journal 段：目录缺席或空库都只降级为警告 + 0 计数（journal 是可选集合，
@@ -745,7 +793,11 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
         "npcs": actor_counts["npc"],
         "vehicles": actor_counts["vehicle"],
         "actor_items": actor_items,
+        # 条目级效果三段计数（heroes 实测：发现 41 条 / 挂上 41 条 / 其中 24 条
+        # change 路径没有消费方——如实行为，不是导入失败）。
         "actor_item_effects": item_effects,
+        "actor_item_effects_imported": item_effects_imported,
+        "actor_item_effects_unsupported": item_effects_unsupported,
         "actor_folders": actor_folders,
         "journals": len(journals_detail),
         "journal_pages": sum(row["pages"] for row in journals_detail),

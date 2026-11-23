@@ -30,6 +30,8 @@ from dnd5e_plugin.combat import (
     _pack_entry,
     _text,
 )
+from dnd5e_plugin.effect_changes import effective_sheet
+from dnd5e_plugin.rules import ability_modifier
 
 _ABILITY_KEYS = ("str", "dex", "con", "int", "wis", "cha")
 _TITLE_PREFIX = re.compile(r"^\s*(?:npc|monster|怪物|角色)\s*[:：]\s*", re.IGNORECASE)
@@ -315,6 +317,31 @@ def combatant_from_module(module: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "source": "dnd5e-srd" if monster is not None else "scenario",
     }
+    # 效果引擎：NPC 与角色走同一套视图。模块可以带 ``effect_changes`` 或
+    # ``equipment[].effects``（例如「石肤护符」给的 AC/抗性），空视图时
+    # 下面的分支一个数都不改。
+    effects = effective_sheet(
+        {
+            "effect_changes": _first(sources, "effect_changes") or [],
+            "equipment": _first(sources, "equipment") or [],
+            "abilities": abilities,
+        }
+    )
+    if not effects.empty:
+        spec["armorClass"] = effects.armor_class(
+            _as_int(spec["armorClass"], 10),
+            explicit=True,
+            dex_mod=ability_modifier(abilities.get("dex", 10)),
+        )
+        spec["attacks"] = effects.apply_attacks(spec["attacks"])
+        spec["damage_resistances"] = effects.extend_traits(spec["damage_resistances"], "dr")
+        spec["damage_vulnerabilities"] = effects.extend_traits(spec["damage_vulnerabilities"], "dv")
+        spec["damage_immunities"] = effects.extend_traits(spec["damage_immunities"], "di")
+        if "spellcasting" in spec and effects.spell_attack_bonus():
+            spec["spellcasting"]["spellAttackBonus"] = (
+                _as_int(spec["spellcasting"].get("spellAttackBonus"), 0)
+                + effects.spell_attack_bonus()
+            )
     # 施法档案 / 法术位 / 已知与已准备法术清单：剧本 NPC 模块自带时透传，
     # 由 prepare_combatant_from_module 落到战斗者上（核心 spells 管线消费
     # ``spellcasting.spellSaveDC``、``spell_slots``、``spells_known/prepared``）。

@@ -299,7 +299,15 @@ def test_sixian_run_imports_npc_modules(tmp_path, plugins):
     rv = _upload(client, _require_zip(SIXIAN_ZIP))
     assert rv.status_code == 200
     data = rv.get_json()["data"]
-    assert data["totals"] == {"characters": 0, "npcs": 14, "vehicles": 0, "warnings": 2}
+    totals = data["totals"]
+    assert (totals["characters"], totals["npcs"], totals["vehicles"]) == (0, 14, 0)
+    # 条目级效果（transfer buff）现在真的进产物：14 条全部挂到对应物品，
+    # 其中 11 条 change 路径没有引擎消费方（flags.midi-qol / damage.base /
+    # ac.formula 这类），如实计数 + 出 2 条告警（不是导入失败）。
+    assert totals["effects"]["documents"] == 14
+    assert totals["effects"]["changes"] == 16
+    assert totals["effects"]["unsupported"] == 11
+    assert totals["warnings"] == 4
 
     modules = {m.get("title"): m for m in _scenario_modules(scenarios)}
     assert len(modules) == 14

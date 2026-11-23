@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from dnd5e_plugin.effect_changes import EffectiveSheet, effective_sheet
 from dnd5e_plugin.rules import (
     ABILITY_KEYS,
     ability_key,
@@ -52,6 +53,9 @@ SHEET_FIELDS = (
     "spellcasting",
     "notes",
     "xp",
+    # 效果引擎载体（FVTT transfer buff）：声明进字段表，前端/校验侧与
+    # ``pack()`` 的顶层回填都按同一份口径认这个键。
+    "effect_changes",
 )
 
 DERIVED_KEYS = (
@@ -223,16 +227,33 @@ def _armor_class(sheet: Mapping[str, Any]) -> int:
     return 10 + ability_modifier(ability_score(sheet, "dex"))
 
 
-def _spellcasting(sheet: Mapping[str, Any]) -> dict[str, Any]:
+def _dex_modifier(sheet: Mapping[str, Any]) -> int:
+    return ability_modifier(ability_score(sheet, "dex"))
+
+
+def _effective_armor_class(sheet: Mapping[str, Any], effects: EffectiveSheet | None = None) -> int:
+    """基础 AC → 效果引擎处理后的 AC（无效果时与原实现完全一致）。"""
+    view = effects if effects is not None else effective_sheet(sheet)
+    base = _armor_class(sheet)
+    if view.empty:
+        return base
+    return view.armor_class(base, explicit=sheet.get("armorClass") is not None, dex_mod=_dex_modifier(sheet))
+
+
+def _spellcasting(sheet: Mapping[str, Any], effects: EffectiveSheet | None = None) -> dict[str, Any]:
     profile = sheet.get("spellcasting")
     profile = dict(profile) if isinstance(profile, Mapping) else {}
     ability = ability_key(profile.get("ability"))
     if not ability:
         return {}
     bonus = proficiency_bonus(sheet.get("level", 1)) + ability_modifier(ability_score(sheet, ability))
+    dc_bonus = 0
+    if effects is not None and not effects.empty:
+        bonus += effects.spell_attack_bonus()
+        dc_bonus = effects.spell_save_dc_bonus()
     return {
         "ability": ability,
-        "spellSaveDC": 8 + bonus,
+        "spellSaveDC": 8 + bonus + dc_bonus,
         "spellAttackBonus": bonus,
     }
 
@@ -276,6 +297,11 @@ class Dnd5eCharacterSchema:
         for key in SHEET_FIELDS:
             if key not in sheet and key in data:
                 sheet[key] = data[key]
+        # 效果引擎的载体：``effect_changes`` 已在 SHEET_FIELDS 里，写在顶层
+        # （导入卡/手工补丁）时上面那轮回填已并进 sheet；这里只做形态归一，
+        # 非列表一律视为「没有效果」，不让脏数据进派生计算。
+        if "effect_changes" in sheet and not isinstance(sheet["effect_changes"], list):
+            sheet.pop("effect_changes")
         sheet["level"] = _bounded(sheet.get("level", data.get("level")), 1, 20, 1)
         sheet["abilities"] = _normalize_abilities(
             sheet.get("abilities") or sheet.get("attributes") or data.get("abilities")
@@ -284,6 +310,10 @@ class Dnd5eCharacterSchema:
         sheet["hp"] = _normalize_hp(sheet.get("hp"), {**data, **sheet})
         sheet["speed"] = max(0, _as_int(sheet.get("speed"), 30))
         sheet["xp"] = max(0, _as_int(sheet.get("xp"), 0))
+        # 效果引擎的计算视图：先取视图，再写 ``sheet.armorClass``——镜像里
+        # 存的始终是**基础值**（含护甲），效果加值只进顶层派生镜像，
+        # 否则下次 pack 会把加值当基础值再叠一次。
+        effects = effective_sheet(sheet)
         sheet["armorClass"] = _armor_class(sheet)
         sheet.setdefault("equipment", [])
         sheet.setdefault("features", [])
@@ -313,11 +343,11 @@ class Dnd5eCharacterSchema:
         data["maxHp"] = hp["max"]
         data["currentHp"] = hp["current"]
         data["tempHp"] = hp["temp"]
-        data["armorClass"] = sheet["armorClass"]
+        data["armorClass"] = _effective_armor_class(sheet, effects)
         data["proficiencyBonus"] = proficiency_bonus(sheet["level"])
-        data["initiative"] = ability_modifier(ability_score(sheet, "dex"))
-        data["passivePerception"] = self._passive_perception(sheet)
-        spell = _spellcasting(sheet)
+        data["initiative"] = ability_modifier(ability_score(sheet, "dex")) + effects.initiative_bonus
+        data["passivePerception"] = self._passive_perception(sheet, effects)
+        spell = _spellcasting(sheet, effects)
         if spell:
             data["spellSaveDC"] = spell["spellSaveDC"]
             data["spellAttackBonus"] = spell["spellAttackBonus"]
@@ -347,20 +377,23 @@ class Dnd5eCharacterSchema:
         source = sheet_of(data)
         level = _bounded(source.get("level"), 1, 20, 1)
         result = dict(data)
+        effects = effective_sheet(source)
         result["maxHp"] = _normalize_hp(source.get("hp"), source)["max"]
-        result["armorClass"] = _armor_class(source)
+        result["armorClass"] = _effective_armor_class(source, effects)
         result["proficiencyBonus"] = proficiency_bonus(level)
-        result["initiative"] = ability_modifier(ability_score(source, "dex"))
-        result["passivePerception"] = self._passive_perception(source)
+        result["initiative"] = ability_modifier(ability_score(source, "dex")) + effects.initiative_bonus
+        result["passivePerception"] = self._passive_perception(source, effects)
         result["attributeCap"] = 30
-        spell = _spellcasting(source)
+        spell = _spellcasting(source, effects)
         if spell:
             result["spellSaveDC"] = spell["spellSaveDC"]
             result["spellAttackBonus"] = spell["spellAttackBonus"]
         return result
 
     @staticmethod
-    def _passive_perception(sheet: Mapping[str, Any]) -> int:
+    def _passive_perception(sheet: Mapping[str, Any], effects: EffectiveSheet | None = None) -> int:
         parsed = parse_check("perception") or {"kind": "skill", "skill": "perception", "ability": "wis"}
         bonus, _detail = check_bonus(sheet, parsed)
+        if effects is not None and not effects.empty:
+            bonus += effects.check_bonus(parsed.get("ability"), parsed.get("skill"))
         return 10 + bonus

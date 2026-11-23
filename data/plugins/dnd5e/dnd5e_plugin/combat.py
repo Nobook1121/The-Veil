@@ -14,6 +14,7 @@ import random
 import re
 from typing import Any, Callable, Mapping
 
+from dnd5e_plugin.effect_changes import effective_sheet
 from dnd5e_plugin.effects import (
     attack_modifiers,
     effective_speed,
@@ -515,6 +516,8 @@ class Dnd5eCombatRules:
         settings: Any = None,
     ) -> None:
         sheet = sheet_of(card) if isinstance(card, Mapping) else {}
+        # 效果引擎统一视图：空视图时下面所有分支都不改一个数（回归铁律）。
+        effects = effective_sheet(sheet)
         abilities = self._normalize_abilities(sheet.get("abilities") or sheet.get("attributes"))
         combatant["abilities"] = abilities
         combatant["level"] = max(1, min(20, _as_int(sheet.get("level"), 1)))
@@ -534,13 +537,20 @@ class Dnd5eCombatRules:
         combatant["hp"] = current
         combatant["temp_hp"] = max(0, _as_int(hp.get("temp"), 0))
         combatant["armorClass"] = armor_class_from_equipment(sheet)
+        if not effects.empty:
+            combatant["armorClass"] = effects.armor_class(
+                _as_int(combatant["armorClass"], 10),
+                explicit=sheet.get("armorClass") not in (None, ""),
+                dex_mod=ability_modifier(abilities.get("dex", 10)),
+            )
         combatant["speed_ft"] = max(0, _as_int(sheet.get("speed"), 30))
         requirement = armor_strength_requirement(sheet)
         if requirement and abilities.get("str", 10) < requirement:
             # 力量不满足护甲需求：速度 -10 英尺（SRD 护甲表）。
             combatant["armor_strength_penalty"] = requirement
             combatant["speed_ft"] = max(0, combatant["speed_ft"] - 10)
-        combatant["attacks"] = _player_attacks(sheet)
+        attacks = _player_attacks(sheet)
+        combatant["attacks"] = attacks if effects.empty else effects.apply_attacks(attacks)
         combatant["carried_weight_lb"] = _carried_weight_lb(sheet)
         # 变体负重是房间开关；关闭时不写任何标记，行动经济按原速度结算。
         level = ""
@@ -556,9 +566,25 @@ class Dnd5eCombatRules:
         combatant["damage_resistances"] = list(sheet.get("damage_resistances") or [])
         combatant["damage_vulnerabilities"] = list(sheet.get("damage_vulnerabilities") or [])
         combatant["damage_immunities"] = list(sheet.get("damage_immunities") or [])
+        if not effects.empty:
+            # 抗性/免疫/易伤：工程里 traits.dr/dv/di 走同一份战斗者字段。
+            combatant["damage_resistances"] = effects.extend_traits(
+                combatant["damage_resistances"], "dr"
+            )
+            combatant["damage_vulnerabilities"] = effects.extend_traits(
+                combatant["damage_vulnerabilities"], "dv"
+            )
+            combatant["damage_immunities"] = effects.extend_traits(
+                combatant["damage_immunities"], "di"
+            )
         from dnd5e_plugin.spells import prepare_spellcasting
 
         prepare_spellcasting(combatant, sheet)
+        if not effects.empty:
+            profile = combatant.get("spellcasting")
+            delta = effects.spell_attack_bonus()
+            if isinstance(profile, dict) and delta:
+                profile["spellAttackBonus"] = _as_int(profile.get("spellAttackBonus"), 0) + delta
         if current <= 0:
             combatant["dying"] = True
             combatant["unconscious"] = True
@@ -761,7 +787,12 @@ class Dnd5eCombatRules:
     ) -> dict[str, Any] | None:
         attacks = attacker.get("attacks") if isinstance(attacker.get("attacks"), list) else []
         if not attacks and attacker.get("is_player") and isinstance(card, Mapping):
-            attacks = _player_attacks(sheet_of(card))
+            sheet = sheet_of(card)
+            attacks = _player_attacks(sheet)
+            effects = effective_sheet(sheet)
+            if not effects.empty:
+                # 卡面没预置攻击时现算：同样要带上效果引擎的攻击/伤害加值。
+                attacks = effects.apply_attacks(attacks)
         if not attacks:
             return None
         key = _text(weapon).casefold()

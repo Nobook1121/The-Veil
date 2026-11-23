@@ -540,16 +540,18 @@ def test_inspect_reports_sixian_plan(app_env):
     data = rv.get_json()["data"]
     assert data["scenes"] == 6 and data["convertible_scenes"] == 6
     assert data["tokens"] == 0 and data["walls"] == 482 and data["lights"] == 200
-    # actors 审计如实上报：14 个条目级效果按降级策略丢弃（仅计数）——**信息级
-    # notes**，不再混进 warnings（正常降级不该长得像错误）；
-    # journal 第四刀：sixian 的 journal 是空库，仍如实警告（0 条可转换）。
+    # actors 审计如实上报：14 条条目级效果（transfer buff）挂进产物，其中 11 条
+    # change 路径没有消费方——**信息级 notes**，不混进 warnings（正常降级不该
+    # 长得像错误）；journal 第四刀：sixian 的 journal 是空库，仍如实警告。
     assert data["warnings"] == ["journal 集合为空库，没有可转换的 journal 条目。"]
     assert data["notes"] == [
-        "已忽略 14 个条目级效果（transfer buff）——新版本此为正常降级："
-        "条目自身字段（AC/伤害/重量等）已按文档折算进角色卡，"
-        "这类「装备后自动加值」的附加效果不进产物、不在本系统运行时生效。"
+        "已导入 14 条条目级效果（transfer buff）：装备/专长上的路径式加值由 dnd5e "
+        "效果引擎按路径结算（AC/先攻/豁免/攻击/抗性等），"
+        "其中 11 条改动路径没有消费方，已忽略。"
     ]
     assert data["actor_item_effects"] == 14
+    assert data["actor_item_effects_imported"] == 14
+    assert data["actor_item_effects_unsupported"] == 11
 
 
 @pytest.mark.parametrize(

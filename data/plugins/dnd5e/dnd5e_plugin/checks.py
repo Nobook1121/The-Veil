@@ -9,6 +9,7 @@ from __future__ import annotations
 import random
 from typing import Any, Callable, Mapping
 
+from dnd5e_plugin.effect_changes import effective_sheet
 from dnd5e_plugin.rules import (
     ABILITY_KEYS,
     ABILITY_LABELS,
@@ -83,8 +84,18 @@ class Dnd5eChecks:
         sheet = sheet_of(card)
         extra = dict(request.extra or {})
         dc = _as_int(request.target if request.target is not None else extra.get("dc"), 10)
-        advantage = bool(extra.get("advantage") or extra.get("adv"))
-        disadvantage = bool(extra.get("disadvantage") or extra.get("dis"))
+        # 效果引擎：路径式加值与 d20 模式（无效果时 view 为空，下面两行不产生任何变化）。
+        effects = effective_sheet(sheet)
+        effect_modifier = 0
+        effect_mode = 0
+        if not effects.empty:
+            effect_modifier = effects.check_bonus(parsed.get("ability"), parsed.get("skill"))
+            kind_of_check = "save" if str(parsed.get("kind")) == "save" else "check"
+            effect_mode = effects.roll_mode(parsed.get("ability"), "save" if kind_of_check == "save" else "check")
+            if kind_of_check == "save":
+                effect_modifier += effects.save_bonus(parsed.get("ability"))
+        advantage = bool(extra.get("advantage") or extra.get("adv")) or effect_mode > 0
+        disadvantage = bool(extra.get("disadvantage") or extra.get("dis")) or effect_mode < 0
         if advantage and disadvantage:
             advantage = disadvantage = False
 
@@ -94,7 +105,14 @@ class Dnd5eChecks:
             dice.append(int(roller(20)))
         natural = max(dice) if advantage else min(dice) if disadvantage else dice[0]
 
-        modifier, detail = check_bonus(sheet, parsed, extra_modifier=_as_int(request.modifier, 0))
+        modifier, detail = check_bonus(
+            sheet,
+            parsed,
+            extra_modifier=effect_modifier + _as_int(request.modifier, 0),
+        )
+        if effect_modifier:
+            # 只在真有时附加键：无效果时 detail 与旧实现逐字节一致。
+            detail["effect_modifier"] = effect_modifier
         total = natural + modifier
         auto_fail = bool(extra.get("auto_fail"))
         if auto_fail:
