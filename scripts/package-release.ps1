@@ -322,8 +322,7 @@ $runtimeDirs = @(
     'frontend/src',
     'data/assets/theme',
     'data/assets/vendor',
-    'data/occupations',
-    'data/weapons'
+    'data/occupations'
 )
 foreach ($dir in $runtimeDirs) {
     Copy-Relative $dir
