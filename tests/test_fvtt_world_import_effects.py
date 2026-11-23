@@ -47,8 +47,8 @@ SIXIAN_ZIP = REPO_ROOT / "docs" / "样本" / "sixianyuchanmian-1.0.1.zip"
 HEROES_EFFECTS = {
     "documents": 41,
     "changes": 57,
-    "full": 31,
-    "stored": 26,
+    "full": 35,
+    "stored": 22,
     "unsupported": 0,
     "transfer": 8,
 }

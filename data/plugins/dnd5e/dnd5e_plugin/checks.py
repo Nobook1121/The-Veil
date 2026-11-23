@@ -88,9 +88,14 @@ class Dnd5eChecks:
         effects = effective_sheet(sheet)
         effect_modifier = 0
         effect_mode = 0
+        proficiency = None
         if not effects.empty:
+            # 属性值合并（abilities.*.value）：检定/豁免的调整值从合并后的值算。
+            sheet = effects.merged_sheet(sheet)
+            proficiency = effects.proficiency_bonus(sheet.get("level", 1))
             effect_modifier = effects.check_bonus(parsed.get("ability"), parsed.get("skill"))
             kind_of_check = "save" if str(parsed.get("kind")) == "save" else "check"
+            # midi-qol 的 advantage/disadvantage.ability.* 也在这里并进 d20 模式。
             effect_mode = effects.roll_mode(parsed.get("ability"), "save" if kind_of_check == "save" else "check")
             if kind_of_check == "save":
                 effect_modifier += effects.save_bonus(parsed.get("ability"))

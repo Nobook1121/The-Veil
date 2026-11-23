@@ -309,15 +309,49 @@ def _proficient_with_weapon(sheet: Mapping[str, Any], row: Mapping[str, Any]) ->
     return bool(declared & {item for item in candidates if item})
 
 
+def _spellcasting_ability(sheet: Mapping[str, Any]) -> str:
+    """卡面施法属性（``activities[attack].attack.ability = spellcasting`` 用）。"""
+    casting = sheet.get("spellcasting")
+    casting = casting if isinstance(casting, Mapping) else {}
+    ability = _text(casting.get("ability")).casefold()
+    return ability if ability in {"str", "dex", "con", "int", "wis", "cha"} else "int"
+
+
+def _effective_proficiency(sheet: Mapping[str, Any], level: Any) -> int:
+    """熟练加值：卡面派生值（效果引擎 ``attributes.prof`` 已并入）优先。"""
+    explicit = sheet.get("proficiency_bonus")
+    if explicit not in (None, ""):
+        return _as_int(explicit, proficiency_bonus(level))
+    return proficiency_bonus(level)
+
+
 def _weapon_attack(row: Mapping[str, Any], sheet: Mapping[str, Any]) -> dict[str, Any]:
     properties = [_text(item).casefold() for item in row.get("properties") or []]
     kind = _text(row.get("kind")).casefold() or ("ranged" if "ammunition" in properties else "melee")
-    ability = "dex" if ("finesse" in properties or kind == "ranged") else "str"
+    # 物品活动可显式指定攻击属性（``activities[…].attack.ability``）：
+    # ``spellcasting`` 解析成卡面施法属性，其余按属性键直取。
+    override = _text(row.get("attack_ability")).casefold()
+    if override == "spellcasting":
+        ability = _spellcasting_ability(sheet)
+    elif override in {"finesse", "best"}:
+        # FVTT ``attack.ability = finesse``：力/敏取高。
+        ability = (
+            "dex"
+            if ability_score(sheet, "dex") >= ability_score(sheet, "str")
+            else "str"
+        )
+    elif override in {"str", "dex", "con", "int", "wis", "cha"}:
+        ability = override
+    else:
+        ability = "dex" if ("finesse" in properties or kind == "ranged") else "str"
     modifier = ability_modifier(ability_score(sheet, ability))
     level = sheet.get("level", 1)
-    bonus = modifier + (proficiency_bonus(level) if _proficient_with_weapon(sheet, row) else 0)
+    bonus = modifier + (_effective_proficiency(sheet, level) if _proficient_with_weapon(sheet, row) else 0)
+    # ``activities[…].attack.bonus`` 这类物品活动覆盖值是「攻击检定加值」，叠加在
+    # 属性+熟练之上（FVTT 语义：进攻击骰公式的额外项）。
+    bonus += _as_int(row.get("attack_bonus"), 0)
     damage = row.get("damage") if isinstance(row.get("damage"), Mapping) else {}
-    return {
+    attack = {
         "id": _text(row.get("id")),
         "name": _display_name(row) or _text(row.get("name")),
         "kind": kind,
@@ -329,6 +363,12 @@ def _weapon_attack(row: Mapping[str, Any], sheet: Mapping[str, Any]) -> dict[str
         "versatile_dice": _text(row.get("versatile_damage")),
         "properties": properties,
     }
+    range_override = row.get("range_override") or (
+        row.get("range") if isinstance(row.get("range"), Mapping) else None
+    )
+    if isinstance(range_override, Mapping) and range_override:
+        attack["range"] = dict(range_override)
+    return attack
 
 
 def _player_attacks(sheet: Mapping[str, Any], effects: Any = None) -> list[dict[str, Any]]:
@@ -523,7 +563,11 @@ class Dnd5eCombatRules:
         sheet = sheet_of(card) if isinstance(card, Mapping) else {}
         # 效果引擎统一视图：空视图时下面所有分支都不改一个数（回归铁律）。
         effects = effective_sheet(sheet)
-        abilities = self._normalize_abilities(sheet.get("abilities") or sheet.get("attributes"))
+        ability_source = sheet.get("abilities") or sheet.get("attributes")
+        if not effects.empty:
+            # ``system.abilities.*.value``：先合并底层属性值，再走派生。
+            ability_source = effects.merged_abilities(ability_source)
+        abilities = self._normalize_abilities(ability_source)
         combatant["abilities"] = abilities
         combatant["level"] = max(1, min(20, _as_int(sheet.get("level"), 1)))
         profs = sheet.get("proficiencies")
@@ -537,12 +581,16 @@ class Dnd5eCombatRules:
             1,
             _as_int(hp.get("max"), _as_int(sheet.get("maxHp"), _as_int(combatant.get("max_hp"), 1))),
         )
-        current = max(0, min(max_hp, _as_int(hp.get("current"), _as_int(combatant.get("hp"), max_hp))))
         if not effects.empty:
-            # ``system.attributes.hp.bonus``：效果级生命上限加值/覆盖。
+            # ``system.attributes.hp.bonus`` / ``hp.max``：效果级生命上限。
             max_hp = effects.max_hp(max_hp)
+        card_current = card.get("currentHp") if isinstance(card, Mapping) else None
+        if card_current in (None, ""):
+            card_current = hp.get("current")
+        # 先算效果后的上限，再夹当前 HP（顺序反了会把 30/24 的组合提前压到 24）。
+        current = max(0, min(max_hp, _as_int(card_current, _as_int(combatant.get("hp"), max_hp))))
         combatant["max_hp"] = max_hp
-        combatant["hp"] = min(current, max_hp)
+        combatant["hp"] = current
         combatant["temp_hp"] = max(0, _as_int(hp.get("temp"), 0))
         combatant["armorClass"] = armor_class_from_equipment(sheet)
         if not effects.empty:
@@ -551,16 +599,41 @@ class Dnd5eCombatRules:
                 explicit=sheet.get("armorClass") not in (None, ""),
                 dex_mod=ability_modifier(abilities.get("dex", 10)),
             )
-        base_speed = max(0, _as_int(sheet.get("speed"), 30))
-        # ``system.attributes.movement.walk`` → 我们的单一速度模型；fly/swim/…
-        # 没有分速消费方，留在镜像里（卡面「已记录未生效」可见）。
-        combatant["speed_ft"] = base_speed if effects.empty else effects.speed(base_speed)
+        # 卡面 ``base_speed`` 是效果前原始速度（pack 写入）；没有时用 speed。
+        base_speed = max(0, _as_int(sheet.get("base_speed"), _as_int(sheet.get("speed"), 30)))
+        # ``system.attributes.movement.*`` → 分速模型；walk 继续落 ``speed_ft``，
+        # fly/swim/climb/burrow/jump 只在有值时写进 ``speeds``（卡面只显示有值的）。
+        if effects.empty:
+            combatant["speed_ft"] = base_speed
+        else:
+            speeds = effects.speeds(base_speed, 30, sheet.get("base_speeds"))
+            combatant["speed_ft"] = int(speeds.get("walk", base_speed))
+            extra = {key: value for key, value in speeds.items() if key != "walk" and value}
+            if extra:
+                combatant["speeds"] = speeds
+        if not effects.empty:
+            # ``attributes.prof``：熟练加值覆盖/加值，战斗者带一份供攻击与豁免读取。
+            combatant["proficiency_bonus"] = effects.proficiency_bonus(
+                max(1, min(20, _as_int(sheet.get("level"), 1)))
+            )
+            dm_row = effects.damage_reduction_row()
+            if dm_row:
+                # ``traits.dm``：减伤在抗性/易伤之后、吸收临时生命之前结算。
+                combatant["damage_reduction"] = dm_row
+            combatant["effect_attack_roll_mode"] = {
+                "mwak": effects.attack_roll_mode("mwak"),
+                "rwak": effects.attack_roll_mode("rwak"),
+            }
+            combatant["effect_critical_threshold"] = {
+                "mwak": effects.critical_threshold("mwak"),
+                "rwak": effects.critical_threshold("rwak"),
+            }
         requirement = armor_strength_requirement(sheet)
         if requirement and abilities.get("str", 10) < requirement:
             # 力量不满足护甲需求：速度 -10 英尺（SRD 护甲表）。
             combatant["armor_strength_penalty"] = requirement
             combatant["speed_ft"] = max(0, combatant["speed_ft"] - 10)
-        attacks = _player_attacks(sheet, effects)
+        attacks = _player_attacks(effects.merged_sheet(sheet) if not effects.empty else sheet, effects)
         combatant["attacks"] = attacks if effects.empty else effects.apply_attacks(attacks)
         combatant["carried_weight_lb"] = _carried_weight_lb(sheet)
         # 变体负重是房间开关；关闭时不写任何标记，行动经济按原速度结算。
@@ -653,6 +726,26 @@ class Dnd5eCombatRules:
         if attack is None:
             return {"error": f"{attacker.get('name')} 没有可用的攻击"}
 
+        # 效果引擎（midi-qol 子集）：攻击 d20 模式与暴击阈值。卡面没效果时零影响。
+        effect_roll_mode = 0
+        crit_threshold = 20
+        card_effects = None
+        attack_kind = "rwak" if _text(attack.get("kind")).casefold() == "ranged" else "mwak"
+        if isinstance(attacker_card, Mapping):
+            card_effects = effective_sheet(sheet_of(attacker_card))
+            if not card_effects.empty:
+                effect_roll_mode = card_effects.attack_roll_mode(attack_kind)
+                crit_threshold = card_effects.critical_threshold(attack_kind)
+        if card_effects is None or card_effects.empty:
+            # 卡面没传（例如已准备的好战斗者直接被 AI 工具使用）时，用
+            # 准备阶段写进战斗者的效果值，口径一致。
+            modes = attacker.get("effect_attack_roll_mode")
+            if isinstance(modes, Mapping):
+                effect_roll_mode = _as_int(modes.get(attack_kind), 0)
+            thresholds = attacker.get("effect_critical_threshold")
+            if isinstance(thresholds, Mapping):
+                crit_threshold = max(2, min(20, _as_int(thresholds.get(attack_kind), 20)))
+
         condition_mods = attack_modifiers(
             attacker,
             target,
@@ -676,6 +769,10 @@ class Dnd5eCombatRules:
         disadvantage = (
             bool(action.get("disadvantage") or action.get("dis")) or condition_mods["disadvantage"]
         )
+        if effect_roll_mode > 0:
+            advantage = True
+        elif effect_roll_mode < 0:
+            disadvantage = True
         # 夹击：房间开启且本次近战攻击被标记为夹击时给优势。
         if (
             _rule_flag(settings, "dnd5e_flanking")
@@ -722,8 +819,11 @@ class Dnd5eCombatRules:
 
         attack_bonus = _as_int(attack.get("attack_bonus"), 0)
         total = natural + attack_bonus
-        critical = natural == 20
-        hit = critical or (natural != 1 and total >= target_ac)
+        # 暴击阈值：midi-qol ``critical.*`` 可给到 19/18（默认 20）。阈值只扩大
+        # 「暴击候选」范围，仍要先命中才算暴击（20 依旧必中，19 不保证命中）。
+        critical_candidate = natural >= crit_threshold
+        hit = natural >= 20 or (natural != 1 and total >= target_ac)
+        critical = bool(hit and critical_candidate)
         if hit and condition_mods["auto_crit"]:
             critical = True
         critical_mode = "double_dice"
@@ -804,7 +904,7 @@ class Dnd5eCombatRules:
         if not attacks and attacker.get("is_player") and isinstance(card, Mapping):
             sheet = sheet_of(card)
             effects = effective_sheet(sheet)
-            attacks = _player_attacks(sheet, effects)
+            attacks = _player_attacks(effects.merged_sheet(sheet) if not effects.empty else sheet, effects)
             if not effects.empty:
                 # 卡面没预置攻击时现算：同样要带上效果引擎的攻击/伤害加值。
                 attacks = effects.apply_attacks(attacks)
@@ -848,6 +948,16 @@ class Dnd5eCombatRules:
         else:
             effective = amount
 
+        # ``system.traits.dm``：伤害减免。顺序 = 免疫 → 易伤/抗性 → 减伤，
+        # 减伤不会把伤害压到负数（SRD：先算抗性倍率再扣固定减免）。
+        reduction_row = target.get("damage_reduction")
+        reduction = 0
+        if isinstance(reduction_row, Mapping):
+            declared = _text(reduction_row.get("type")).casefold()
+            if not declared or declared in {"all", "any", "所有"} or declared == dtype:
+                reduction = max(0, min(effective, _as_int(reduction_row.get("amount"), 0)))
+                effective -= reduction
+
         before = max(0, _as_int(target.get("hp"), 0))
         max_hp = max(1, _as_int(target.get("max_hp"), 1))
         temp = max(0, _as_int(target.get("temp_hp"), 0))
@@ -874,6 +984,7 @@ class Dnd5eCombatRules:
             "resistance": resistant,
             "vulnerability": vulnerable,
             "immunity": immune,
+            "damage_reduction": reduction,
             "damage_type": dtype,
             "dead": False,
             "dying": bool(target.get("dying")),

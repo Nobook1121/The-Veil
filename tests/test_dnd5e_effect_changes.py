@@ -374,6 +374,16 @@ def test_supported_paths_have_consumers_and_unknown_ones_do_not() -> None:
         "system.traits.dr.value",
         "system.traits.ci.value",
         "system.attributes.ac.calc",
+        # 第二刀补全的消费方：属性值合并 / 熟练 / 分速 / 语言 / 减伤 / HP。
+        "system.abilities.str.value",
+        "system.attributes.prof",
+        "system.attributes.movement.fly",
+        "system.traits.languages.value",
+        "system.traits.dm.amount",
+        "system.attributes.hp.max",
+        # midi-qol 子集（优势/暴击阈值）有真实消费方。
+        "flags.midi-qol.advantage.attack.all",
+        "flags.midi-qol.critical.all",
     ]
     assert all(ec.classify_path(key)[2] == ec.TIER_FULL for key in supported)
     # 命中镜像但没有数值消费方的路径：照实记成 stored（不是 unsupported，
@@ -382,8 +392,6 @@ def test_supported_paths_have_consumers_and_unknown_ones_do_not() -> None:
         "flags.dnd5e.halflingLucky",
         "ATL.light.dim",
         "system.attributes.movement.all",
-        "system.attributes.movement.fly",
-        "system.traits.languages.value",
         "system.damage.base.number",
         "system.properties",
     ):
@@ -768,7 +776,7 @@ MIRROR_PATH_TABLE = [
     ("system.attributes.ac.calc", ec.MODE_OVERRIDE, "mage", "system.attributes.ac.calc", "mage", ec.TIER_FULL),
     ("system.attributes.hp.bonus", ec.MODE_ADD, 5, "system.attributes.hp.bonus", 5, ec.TIER_FULL),
     ("system.attributes.movement.walk", ec.MODE_ADD, 10, "system.attributes.movement.walk", 10, ec.TIER_FULL),
-    ("system.attributes.movement.fly", ec.MODE_ADD, 60, "system.attributes.movement.fly", 60, ec.TIER_STORED),
+    ("system.attributes.movement.fly", ec.MODE_ADD, 60, "system.attributes.movement.fly", 60, ec.TIER_FULL),
     ("system.attributes.movement.units", ec.MODE_OVERRIDE, "ft", "system.attributes.movement.units", "ft", ec.TIER_STORED),
     ("system.bonuses.mwak.attack", ec.MODE_ADD, 1, "system.bonuses.mwak.attack", 1, ec.TIER_FULL),
     ("system.bonuses.spell.dc", ec.MODE_ADD, 1, "system.bonuses.spell.dc", 1, ec.TIER_FULL),
@@ -776,12 +784,12 @@ MIRROR_PATH_TABLE = [
     ("system.bonuses.skills.stealth.check", ec.MODE_ADD, 2, "system.bonuses.skills.stealth.check", 2, ec.TIER_FULL),
     ("system.abilities.dex.check.roll.mode", ec.MODE_ADD, 1, "system.abilities.dex.check.roll.mode", 1, ec.TIER_FULL),
     ("system.abilities.wis.save.roll.mode", ec.MODE_ADD, -1, "system.abilities.wis.save.roll.mode", -1, ec.TIER_FULL),
-    ("system.abilities.str.value", ec.MODE_ADD, 2, "system.abilities.str.value", 2, ec.TIER_STORED),
-    ("system.attributes.prof", ec.MODE_ADD, 1, "system.attributes.prof", 1, ec.TIER_STORED),
+    ("system.abilities.str.value", ec.MODE_ADD, 2, "system.abilities.str.value", 2, ec.TIER_FULL),
+    ("system.attributes.prof", ec.MODE_ADD, 1, "system.attributes.prof", 1, ec.TIER_FULL),
     ("system.attributes.exhaustion", ec.MODE_ADD, 1, "system.attributes.exhaustion", 1, ec.TIER_STORED),
     ("system.traits.dr.value", ec.MODE_ADD, "fire", "system.traits.dr.value", ["fire"], ec.TIER_FULL),
     ("system.traits.ci.value", ec.MODE_ADD, "charmed", "system.traits.ci.value", ["charmed"], ec.TIER_FULL),
-    ("system.traits.languages.value", ec.MODE_ADD, "druidic", "system.traits.languages.value", ["druidic"], ec.TIER_STORED),
+    ("system.traits.languages.value", ec.MODE_ADD, "druidic", "system.traits.languages.value", ["druidic"], ec.TIER_FULL),
     ("system.traits.size", ec.MODE_OVERRIDE, "lg", "system.traits.size", "lg", ec.TIER_STORED),
     ("system.details.biography.value", ec.MODE_OVERRIDE, "无名", "system.details.biography.value", "无名", ec.TIER_STORED),
     ("system.currency.gp", ec.MODE_ADD, 5, "system.currency.gp", 5, ec.TIER_STORED),
@@ -843,8 +851,8 @@ def test_mirror_records_stored_paths_without_touching_derived_values() -> None:
             [
                 _effect(
                     [
-                        {"key": "system.attributes.movement.fly", "mode": ec.MODE_ADD, "value": 60},
-                        {"key": "system.traits.languages.value", "mode": ec.MODE_ADD, "value": "druidic"},
+                        {"key": "system.attributes.movement.all", "mode": ec.MODE_ADD, "value": 60},
+                        {"key": "ATL.light.dim", "mode": ec.MODE_ADD, "value": 10},
                         {"key": "flags.midi-qol.x", "mode": ec.MODE_OVERRIDE, "value": 1},
                     ]
                 )
@@ -854,8 +862,8 @@ def test_mirror_records_stored_paths_without_touching_derived_values() -> None:
     assert view.empty  # 没有 full 级 change
     assert view.stats["stored"] == 3
     assert view.ac_bonus == 0 and view.initiative_bonus == 0
-    assert view.number("attributes.movement.fly") == 60
-    assert view.traits("languages") == ["druidic"]
+    assert view.number("attributes.movement.all") == 60
+    assert view.value("ATL.light.dim") == 10
 
 
 # --- 新接的消费方：速度 / 生命上限 / 武器属性 / 条件免疫 --------------------

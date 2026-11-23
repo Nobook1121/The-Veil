@@ -28,12 +28,13 @@
 tier         含义
 ===========  ============================================================
 ``full``     计算结果真的进了我们的派生值（AC / 先攻 / HP / 豁免 / 检定 /
-             攻击 / 伤害 / 抗性 / 速度 / 武器属性…），由 schema 节点的
-             ``note`` 标注消费方。
+             攻击 / 伤害 / 抗性 / **属性值 / 熟练加值 / 分速 / 减伤 /
+             语言 / 物品活动覆盖 / midi-qol 优势与暴击阈值** / 速度 /
+             武器属性…），由 schema 节点的 ``note`` 标注消费方。
 ``stored``   镜像里记下了（名字 / 来源 / 路径 / 值都在），**当前没有数值
-             消费方**：模块 ``flags.*``、``ATL.*`` 前端字段、物品
-             ``activities[...]``、骰式（``1d4``）加值、custom 模式、
-             ``movement.fly`` 这类还没有分速模型的字段…
+             消费方**：模块 ``flags.*`` 的非 midi-qol 子集、``ATL.*``
+             前端字段、``activities[...]`` 未识别的子路径、骰式（``1d4``）
+             加值、custom 模式、``movement.all`` 别名与 ``units`` 单位…
 ``unsupported`` 连镜像 schema 都没有的路径（外来命名空间）。
 ===========  ============================================================
 
@@ -132,6 +133,65 @@ SYSTEM_PREFIX = "system."
 
 #: 属性键（与 ``rules.ABILITY_KEYS`` 同口径，单列一份避免循环导入）。
 ABILITY_KEYS = ("str", "dex", "con", "int", "wis", "cha")
+
+#: 分速模型的速度键（``walk`` 继续映射到旧的单一速度字段，其余只在新模型里）。
+SPEED_KEYS = ("walk", "fly", "swim", "climb", "burrow", "jump")
+
+#: 分速里除 ``walk`` 之外的键（``walk`` 走 :meth:`EffectiveSheet.speed`）。
+EXTRA_SPEED_KEYS = SPEED_KEYS[1:]
+
+#: 只在 ``OVERRIDE``（mode 5）语义下才有消费方的数值路径。
+#:
+#: ``system.attributes.hp.value`` 是「当前生命值」：ADD/UPGRADE 这类增量在
+#: 当前值上算不出稳定的绝对值（房间结算自己会写 HP），所以只有效果显式
+#: **覆盖**时才当作当前 HP 使用，其余模式如实落 ``stored``。
+OVERRIDE_ONLY_PATHS = ("system.attributes.hp.value",)
+
+#: 攻击类别（与 dnd5e ``bonuses.*`` 同口径）。
+ATTACK_KINDS = ("all", "mwak", "rwak", "msak", "rsak")
+
+# --- midi-qol 条件语义子集（模块级唯一映射表，勿在别处再抄一份） ------------
+
+_MIDI_PREFIX = "flags.midi-qol."
+
+#: ``flags.midi-qol.{advantage|disadvantage}.*`` → ``(作用点, 子类, d20 模式)``。
+#:
+#: 作用点：``attack``（攻击掷骰）/ ``check``（属性检定）/ ``save``（豁免）；
+#: 子类：攻击类别（``all``/``mwak``/``rwak``/``msak``/``rsak``）或属性键；
+#: 模式：``1`` 优势 / ``-1`` 劣势。值按 FVTT 习惯是布尔（``true``/``false``）。
+MIDI_QOL_ROLL_MODES: dict[str, tuple[str, str, int]] = {}
+for _side, _side_mode in (("advantage", 1), ("disadvantage", -1)):
+    for _attack_kind in ATTACK_KINDS:
+        MIDI_QOL_ROLL_MODES[f"{_MIDI_PREFIX}{_side}.attack.{_attack_kind}"] = (
+            "attack",
+            _attack_kind,
+            _side_mode,
+        )
+    for _where in ("check", "save"):
+        MIDI_QOL_ROLL_MODES[f"{_MIDI_PREFIX}{_side}.ability.{_where}.all"] = (
+            _where,
+            "all",
+            _side_mode,
+        )
+        for _ability in ABILITY_KEYS:
+            MIDI_QOL_ROLL_MODES[f"{_MIDI_PREFIX}{_side}.ability.{_where}.{_ability}"] = (
+                _where,
+                _ability,
+                _side_mode,
+            )
+del _side, _side_mode, _attack_kind, _where, _ability
+
+#: ``flags.midi-qol.critical.*`` → ``(攻击类别, 暴击阈值)``：置真即 19+ 暴击。
+MIDI_QOL_CRITICAL_KEYS: dict[str, tuple[str, int]] = {
+    f"{_MIDI_PREFIX}critical.{kind}": (kind, 19) for kind in ATTACK_KINDS
+}
+
+#: 显式暴击阈值（``flags.midi-qol.criticalThreshold``，数字）。
+MIDI_QOL_CRITICAL_THRESHOLD_KEY = f"{_MIDI_PREFIX}criticalThreshold"
+
+#: 阈值夹取范围：2 以下没有意义（不可能），20 就是原版口径。
+MIDI_QOL_CRITICAL_MIN = 2
+MIDI_QOL_CRITICAL_MAX = 20
 
 #: 镜像文档的顶层键：这些开头的路径已经是「文档根路径」，不再补 ``system.``。
 _ROOT_KEYS = (
@@ -232,10 +292,15 @@ def _ability_node() -> Node:
     return _obj(
         {
             "value": _num(
-                TIER_STORED,
-                "能力值调整：需要把效果并进 ability_score（AC/先攻/HP/攻击/豁免全从它派生），本次未接",
+                TIER_FULL,
+                "属性值合并：EffectiveSheet.merged_abilities 并进派生口径"
+                "（豁免/检定/攻击/法术 DC/AC(DEX)/HP(CON)/先攻/被动感知），"
+                "卡面显示合并值、原始值留 base_abilities",
             ),
-            "mod": _num(TIER_STORED, "同上（派生调整值覆盖）"),
+            "mod": _num(
+                TIER_STORED,
+                "调整值叠加：与 value（底层属性值）不能混写，需要在每个取值点分别接，本刀只接 value",
+            ),
             "min": _num(TIER_STORED),
             "max": _num(TIER_STORED),
             "prof": _num(TIER_STORED, "熟练标记：派生只看卡面 proficiencies"),
@@ -297,16 +362,36 @@ def _skill_node() -> Node:
 def _movement_node() -> Node:
     return _obj(
         {
-            "walk": _num(TIER_FULL, "单一速度模型：combat.speed_ft（EffectsSheet.speed）"),
-            "fly": _num(TIER_STORED, "分速模型未建：镜像里记下，卡面「已记录未生效」列出"),
-            "swim": _num(TIER_STORED, "同上（分速模型未建）"),
-            "climb": _num(TIER_STORED, "同上（分速模型未建）"),
-            "burrow": _num(TIER_STORED, "同上（分速模型未建）"),
-            "jump": _num(TIER_STORED, "跳跃距离不是房间的移动值，未接"),
-            "hover": _num(TIER_STORED),
-            "all": _num(TIER_STORED, "movement.all 是「所有速度」别名，展开需要分速模型"),
+            "walk": _num(TIER_FULL, "单一速度模型：combat.speed_ft / speeds.walk（EffectsSheet.speed）"),
+            "fly": _num(TIER_FULL, "分速模型：EffectsSheet.speeds → combat.speeds / 卡面详情速度行 / KP 摘要"),
+            "swim": _num(TIER_FULL, "分速模型：同上（combat.speeds / 卡面 / KP 摘要）"),
+            "climb": _num(TIER_FULL, "分速模型：同上"),
+            "burrow": _num(TIER_FULL, "分速模型：同上"),
+            "jump": _num(TIER_FULL, "分速模型：同上（跳跃距离按 speeds.jump 输出）"),
+            "hover": _num(TIER_STORED, "悬停是标志位（有/无），房间移动不需要它"),
+            "all": _num(
+                TIER_STORED,
+                "movement.all 是「所有速度」别名：展开成 6 个分速还需要逐键写回镜像，本刀未接",
+            ),
             "units": _txt(TIER_STORED, "单位换算（mi/km）：房间按英尺结算"),
             "special": _txt(TIER_STORED),
+        }
+    )
+
+
+def _damage_reduction_node() -> Node:
+    """``system.traits.dm``（``{amount, type}`` 伤害减免）。"""
+    return _obj(
+        {
+            "amount": _num(
+                TIER_FULL,
+                "减伤阶段：combat._apply_damage 在抗性/易伤之后扣减（不扣成负数）",
+            ),
+            "type": _txt(
+                TIER_FULL,
+                "减伤适用的伤害类型（空 = 所有类型）：combat._apply_damage 按伤害类型匹配",
+            ),
+            "bypasses": _lst(TIER_STORED, "伤害穿透（magical/silver）：伤害管线没有材质模型"),
         }
     )
 
@@ -323,12 +408,7 @@ def _traits_node() -> Node:
             ),
             "dv": _obj({"value": _lst(TIER_FULL, "combat._apply_damage 伤害易伤")}),
             "di": _obj({"value": _lst(TIER_FULL, "combat._apply_damage 伤害免疫")}),
-            "dm": _obj(
-                {
-                    "amount": _num(TIER_STORED, "伤害减免数值：伤害管线还没有减伤阶段"),
-                    "bypasses": _lst(TIER_STORED),
-                }
-            ),
+            "dm": _damage_reduction_node(),
             "ci": _obj(
                 {
                     "value": _lst(TIER_FULL, "conditions：免疫的条件不会被施加（effects.apply）"),
@@ -337,8 +417,14 @@ def _traits_node() -> Node:
             ),
             "languages": _obj(
                 {
-                    "value": _lst(TIER_STORED, "语言只做卡面展示，不进任何数值"),
-                    "custom": _txt(TIER_STORED),
+                    "value": _lst(
+                        TIER_FULL,
+                        "语言清单：schema.pack 并进卡面 proficiencies.languages（详情页签）+ KP 摘要行",
+                    ),
+                    "custom": _txt(
+                        TIER_FULL,
+                        "自定义语言文本：同上（按逗号/顿号拆成条目）",
+                    ),
                     "communication": _txt(TIER_STORED),
                 }
             ),
@@ -386,10 +472,144 @@ def _damage_node() -> Node:
 
 
 def _activity_node() -> Node:
+    """dnd5e v6 物品活动（``activities[...]``）。
+
+    注意路径归一：``activities[attack].attack.bonus`` 去掉下标后是
+    ``activities.attack.bonus``——活动 id 与字段名在点分路径上重合，所以
+    ``activities`` 下的第一段一律按「某个活动」处理（:data:`_ACTIVITY_WILDCARD`），
+    多活动同名字段会互相覆盖（记录内容仍在，只是镜像只有一格）。
+
+    认得的子路径并进武器行（:meth:`EffectiveSheet.weapon_row`）；
+    其余子路径如实 ``stored``（活动运行时我们不模拟：消耗、靶向、触发条件…）。
+    """
     return _obj(
-        {"*": _any(TIER_STORED, "dnd5e v6 物品活动（attack/save/damage…）：运行时不模拟，整条记录")},
+        {
+            "*": _obj(
+                {
+                    "attack": _obj(
+                        {
+                            "bonus": _num(
+                                TIER_FULL,
+                                "物品活动攻击加值：weapon_row → 武器行 attack_bonus（整体覆盖）",
+                                scope=SCOPE_ITEM,
+                            ),
+                            "ability": _txt(
+                                TIER_FULL,
+                                "物品活动攻击属性：weapon_row → 武器行 attack_ability（spellcasting 表示施法属性）",
+                                scope=SCOPE_ITEM,
+                            ),
+                            "critical": _obj({"threshold": _num(TIER_STORED, scope=SCOPE_ITEM)}, scope=SCOPE_ITEM),
+                        },
+                        scope=SCOPE_ITEM,
+                    ),
+                    "damage": _obj(
+                        {
+                            "parts": _lst(
+                                TIER_FULL,
+                                "物品活动伤害骰：weapon_row → 武器行 damage.dice（取第一条的骰式）",
+                                scope=SCOPE_ITEM,
+                            ),
+                            "types": _lst(TIER_STORED, "伤害类型改写：武器行的伤害类型由数据包决定", scope=SCOPE_ITEM),
+                        },
+                        scope=SCOPE_ITEM,
+                    ),
+                    "range": _obj(
+                        {
+                            "value": _num(
+                                TIER_FULL,
+                                "物品活动射程：weapon_row → 武器行 range.normal_ft（战斗摘要/AI 读取）",
+                                scope=SCOPE_ITEM,
+                            ),
+                            "long": _num(
+                                TIER_FULL,
+                                "物品活动远程射程：weapon_row → 武器行 range.long_ft",
+                                scope=SCOPE_ITEM,
+                            ),
+                            "units": _txt(TIER_STORED, "射程单位：房间按英尺结算", scope=SCOPE_ITEM),
+                        },
+                        scope=SCOPE_ITEM,
+                    ),
+                    "*": _any(
+                        TIER_STORED,
+                        "其余物品活动字段（save/consumption/target/activation…）：运行时不模拟，整条记录",
+                        scope=SCOPE_ITEM,
+                    ),
+                },
+                scope=SCOPE_ITEM,
+            )
+        },
         scope=SCOPE_ITEM,
     )
+
+
+def _flags_node() -> Node:
+    """``flags.*``：midi-qol 的优势/暴击子集有消费方，其余只记录。
+
+    映射表就是 :data:`MIDI_QOL_ROLL_MODES` / :data:`MIDI_QOL_CRITICAL_KEYS`
+    （模块级唯一一份，schema 节点由它们生成，避免两处漂移）。
+    """
+    def midi_parts(key: str) -> list[str]:
+        """``flags.midi-qol.advantage.attack.all`` → ``["advantage","attack","all"]``。"""
+        return key[len(_MIDI_PREFIX) :].split(".")
+
+    roll_nodes: list[tuple[list[str], Node]] = []
+    for key, (_where, _sub, mode) in MIDI_QOL_ROLL_MODES.items():
+        side = "优势" if mode > 0 else "劣势"
+        roll_nodes.append(
+            (
+                midi_parts(key),
+                _num(TIER_FULL, f"midi-qol {side}：checks.roll_mode / combat 掷骰 d20 模式"),
+            )
+        )
+    critical_nodes = [
+        (
+            midi_parts(key),
+            _num(TIER_FULL, "midi-qol 暴击：combat/checks 的暴击阈值（19+）"),
+        )
+        for key in MIDI_QOL_CRITICAL_KEYS
+    ]
+    threshold_nodes = [
+        (
+            midi_parts(MIDI_QOL_CRITICAL_THRESHOLD_KEY),
+            _num(TIER_FULL, "midi-qol 暴击阈值：combat/checks 的暴击阈值（夹在 2..20）"),
+        )
+    ]
+    midi = _node_of_tree(
+        _path_tree([*roll_nodes, *critical_nodes, *threshold_nodes])
+    )
+    midi.children["*"] = _any(
+        TIER_STORED,
+        "其余 midi-qol 标志（grants/optional/ActivityOverTime…）：只记录，不模拟模块运行时",
+    )
+    return _obj(
+        {
+            "midi-qol": midi,
+            "*": _any(TIER_STORED, "模块/系统标志（dnd5e flags）：只记录，不模拟模块运行时"),
+        }
+    )
+
+
+def _path_tree(entries: Iterable[tuple[list[str], Node]]) -> dict[str, Any]:
+    """``[(["flags","midi-qol",…], node), …]`` → 嵌套 dict（叶子是 :class:`Node`）。"""
+    tree: dict[str, Any] = {}
+    for parts, node in entries:
+        cursor = tree
+        for part in parts[:-1]:
+            nxt = cursor.get(part)
+            if not isinstance(nxt, dict):
+                nxt = {}
+                cursor[part] = nxt
+            cursor = nxt
+        cursor[parts[-1]] = node
+    return tree
+
+
+def _node_of_tree(tree: Mapping[str, Any]) -> Node:
+    """把 :func:`_path_tree` 的嵌套 dict 递建成 schema 节点树。"""
+    children: dict[str, Node] = {}
+    for key, value in tree.items():
+        children[key] = _node_of_tree(value) if isinstance(value, dict) else value
+    return _obj(children)
 
 
 #: FVTT actor（``system.`` 下）+ 物品（``system.`` 下）的完整镜像模型。
@@ -427,8 +647,16 @@ MIRROR_SCHEMA: Node = Node(
                                     TIER_FULL,
                                     "最大生命加值：schema.pack/derive 的 maxHp、combat.max_hp",
                                 ),
-                                "max": _num(TIER_STORED, "生命上限由卡面 hp.max 决定（覆盖会让治疗/掉落难对齐）"),
-                                "value": _num(TIER_STORED, "当前生命由房间结算写，不参与派生"),
+                                "max": _num(
+                                    TIER_FULL,
+                                    "最大生命：EffectiveSheet.max_hp 先取它（override 覆盖），再叠 hp.bonus；"
+                                    "卡面 hp.max 仍存基础值（不重复叠加）",
+                                ),
+                                "value": _num(
+                                    TIER_FULL,
+                                    "当前生命：只有 override（mode 5）才直接写 pack.currentHp / combat.hp，"
+                                    "其余模式落 stored；结果夹在 [0, maxHp]",
+                                ),
                                 "temp": _num(TIER_STORED),
                                 "tempmax": _num(TIER_STORED),
                                 "tempMax": _num(TIER_STORED),
@@ -457,8 +685,9 @@ MIRROR_SCHEMA: Node = Node(
                             }
                         ),
                         "prof": _num(
-                            TIER_STORED,
-                            "熟练加值覆盖：checks/combat 直接用 proficiency_bonus(level)，未接",
+                            TIER_FULL,
+                            "熟练加值：EffectiveSheet.proficiency_bonus → schema 派生 proficiencyBonus/"
+                            "法术 DC、checks 豁免与检定、combat 武器攻击加值",
                         ),
                         "spellcasting": _num(TIER_STORED, "施法属性调整值覆盖：施法档案读卡面 spellcasting.ability"),
                         "death": _obj(
@@ -611,7 +840,7 @@ MIRROR_SCHEMA: Node = Node(
         "folder": _txt(TIER_STORED),
         "sort": _num(TIER_STORED),
         "delta": _any(TIER_STORED, "增量数据（delta）：不展开"),
-        "flags": _any(TIER_STORED, "模块/系统标志（midi-qol、dnd5e flags）：只记录，不模拟模块运行时"),
+        "flags": _flags_node(),
         "ATL": _any(TIER_STORED, "Token 外观（Tokenizer/ATL）：本引擎不渲染 Token"),
         "prototypeToken": _any(TIER_STORED, "原型 Token 数据：房间用地图棋子，不读"),
         "ownership": _any(TIER_STORED, "权限表：房间权限走核心 ACL"),
@@ -631,7 +860,9 @@ KNOWN_UNSUPPORTED_PREFIXES: dict[str, str] = {
 }
 
 _DICE_RE = re.compile(r"\d*\s*d\s*\d", re.IGNORECASE)
-_INDEX_RE = re.compile(r"\[[^\]]*\]$")
+#: ``activities[attack]`` → ``activities`` + ``attack``：下标单独成段，活动 id
+#: 才不会被字段名吃掉（``activities[attack].attack.bonus`` 是四段而不是三段）。
+_INDEX_RE = re.compile(r"^(.*?)\[([^\]]*)\]$")
 
 
 def _text(value: Any) -> str:
@@ -658,6 +889,10 @@ def parse_number(value: Any) -> tuple[float | None, str]:
     raw = _text(value)
     if not raw:
         return None, "empty"
+    # FVTT 的布尔标志（midi-qol 的 ``advantage.*`` / ``critical.*``）常以字符串
+    # 形式落盘（``"true"``）；真/假按 1/0 结算，其余文本仍走 ``text`` 原因。
+    if raw.casefold() in {"true", "false"}:
+        return (1.0 if raw.casefold() == "true" else 0.0), ""
     if "@" in raw or _DICE_RE.search(raw):
         return None, "formula"
     try:
@@ -707,9 +942,17 @@ def _path_parts(path: Any) -> list[str]:
         part = part.strip()
         if not part:
             continue
-        # ``activities[attack].attack.ability`` → ``activities.attack.ability``
-        base = _INDEX_RE.sub("", part).strip()
-        parts.append(base or part)
+        # ``activities[attack].attack.ability`` → ``activities.attack.attack.ability``
+        match = _INDEX_RE.match(part)
+        if match:
+            base = match.group(1).strip()
+            index = match.group(2).strip()
+            if base:
+                parts.append(base)
+            if index:
+                parts.append(index)
+            continue
+        parts.append(part)
     return parts
 
 
@@ -985,6 +1228,7 @@ _TIER_REASONS = {
     "empty": "值为空，没有可结算的内容",
     "text": "值不是数字（原文保留）",
     "mode-not-override": "文本字段只接受 override 模式（其余模式原文保留）",
+    "override-only": "该路径只在 override（mode 5）下才有消费方，其余模式如实记录不生效",
 }
 
 
@@ -1071,14 +1315,125 @@ class EffectiveSheet:
         return self.number("attributes.hp.bonus")
 
     def max_hp(self, base: int) -> int:
-        """基础生命上限 → 效果处理后的上限（``hp.bonus`` 加值或覆盖）。"""
+        """基础生命上限 → 效果处理后的上限。
+
+        顺序：``attributes.hp.max``（override 直接覆盖，其余模式当增量/上下限）
+        → ``attributes.hp.bonus``（加值或覆盖）。两条路径都只在有 ``full``
+        级 change 时参与（空视图原样返回 ``base``）。
+        """
         value = max(1, _as_int(base, 1))
         if not self.empty:
+            value = self._apply_numeric("attributes.hp.max", value, floor=1)
             bonus = self.max_hp_bonus
             if self.modes.get(_norm("attributes.hp.bonus")) == MODE_OVERRIDE and bonus:
                 return max(1, bonus)
             value += max(0, bonus)
         return max(1, value)
+
+    def hp_value(self) -> int | None:
+        """``attributes.hp.value`` 覆盖后的当前生命；没有 override 时为 ``None``。"""
+        path = _norm("attributes.hp.value")
+        found = resolve_path(self.doc, path)
+        if found is None or self.modes.get(path) != MODE_OVERRIDE:
+            return None
+        return max(0, _as_int(found, 0))
+
+    def _apply_numeric(self, path: str, base: int, *, floor: int = 0) -> int:
+        """把镜像里某条数值 change 按它自己的模式解释到 ``base`` 上。
+
+        override → 绝对值；upgrade/downgrade → 取高/取低；multiply → 乘；
+        其余（add）→ 增量。镜像里没有这条路径时原样返回 ``base``。
+        """
+        normalized = _norm(path)
+        found = resolve_path(self.doc, normalized)
+        if found is None:
+            return base
+        value = _as_int(found, 0)
+        mode = self.modes.get(normalized)
+        if mode == MODE_OVERRIDE:
+            result = value
+        elif mode == MODE_DOWNGRADE:
+            result = min(base, value)
+        elif mode == MODE_UPGRADE:
+            result = max(base, value)
+        elif mode == MODE_MULTIPLY:
+            result = int(round(base * value)) if value else base
+        else:
+            result = base + value
+        return max(floor, result)
+
+    # -- 属性值合并（``abilities.*.value``） -------------------------------
+    def merged_abilities(self, base: Mapping[str, Any] | None) -> dict[str, int]:
+        """基础属性值 → 合并了 ``abilities.*.value`` 的属性值。
+
+        ``value`` 是**底层属性值**（0-30），``mod`` 是加值叠加——两者不混写。
+        没有属性值 change 时返回基础值的整数副本（空视图时逐字节等价）。
+        """
+        source = base if isinstance(base, Mapping) else {}
+        result: dict[str, int] = {}
+        for key in ABILITY_KEYS:
+            raw = source.get(key)
+            if raw is None:
+                for alt, alt_value in source.items():
+                    if _text(alt).casefold() == key:
+                        raw = alt_value
+                        break
+            result[key] = _as_int(raw, 10)
+        if self.empty:
+            return result
+        for key in ABILITY_KEYS:
+            path = _norm(f"abilities.{key}.value")
+            if resolve_path(self.doc, path) is None:
+                continue
+            result[key] = min(30, self._apply_numeric(f"abilities.{key}.value", result[key], floor=0))
+        return result
+
+    def merged_sheet(self, sheet: Mapping[str, Any] | None) -> dict[str, Any]:
+        """卡面副本：``abilities`` 换成合并后的值（供 checks/派生统一口径）。"""
+        source = dict(sheet) if isinstance(sheet, Mapping) else {}
+        if self.empty:
+            return source
+        abilities = self.merged_abilities(source.get("abilities") or source.get("attributes"))
+        if isinstance(source.get("abilities"), Mapping):
+            source["abilities"] = abilities
+        elif abilities:
+            source["abilities"] = abilities
+        return source
+
+    # -- 熟练加值（``attributes.prof``） -----------------------------------
+    def proficiency_bonus(self, level: Any) -> int:
+        """等级 → 熟练加值（``attributes.prof`` 的覆盖/加值参与结算）。"""
+        from dnd5e_plugin.rules import proficiency_bonus as _base_proficiency
+
+        base = _base_proficiency(level)
+        if self.empty:
+            return base
+        return self._apply_numeric("attributes.prof", base, floor=0)
+
+    # -- 分速模型（``attributes.movement.*``） -----------------------------
+    def speeds(self, base: int, default: int = 30, base_speeds: Mapping[str, Any] | None = None) -> dict[str, int]:
+        """基础速度 → 分速表 ``{walk, fly, swim, climb, burrow, jump}``。
+
+        ``walk`` 继续走单一速度模型（:meth:`speed`，含旧 ``attributes.speed.value``
+        别名），其余键只在新模型里出现：没有 change 的键不写进结果（卡面据此
+        只显示有值的分速）。
+        """
+        known: dict[str, int] = {}
+        for key, value in (base_speeds or {}).items():
+            name = _text(key).casefold()
+            if name in SPEED_KEYS:
+                known[name] = max(0, _as_int(value, 0))
+        # walk 只从调用方给的**基础**速度算；``base_speeds`` 必须是效果前的
+        # 原始值（卡面 ``base_speeds``），否则二次派生会把加值叠两次。
+        out: dict[str, int] = {"walk": self.speed(_as_int(base, default), default)}
+        if self.empty:
+            return out
+        for key in EXTRA_SPEED_KEYS:
+            path = _norm(f"attributes.movement.{key}")
+            if resolve_path(self.doc, path) is None:
+                continue
+            out[key] = self._apply_numeric(f"attributes.movement.{key}", _as_int(known.get(key), 0), floor=0)
+        return out
 
     def speed(self, base: int, default: int = 30) -> int:
         """基础速度 → 效果处理后的速度（``movement.walk`` / 旧 ``speed.value``）。"""
@@ -1095,6 +1450,31 @@ class EffectiveSheet:
         if legacy is not None and walk is None:
             value = _as_int(legacy, value)
         return max(0, value)
+
+    # -- 减伤（``traits.dm``） ---------------------------------------------
+    def damage_reduction(self, damage_type: Any = "") -> int:
+        """``traits.dm`` → 本次伤害的减伤数值（类型不匹配时 0）。
+
+        ``type`` 为空 = 所有伤害类型；否则只对该类型（大小写不敏感）生效。
+        """
+        amount = self.number("traits.dm.amount")
+        if amount <= 0:
+            return 0
+        declared = _text(self.value("traits.dm.type", "")).casefold()
+        dtype = _text(damage_type).casefold()
+        if declared and declared not in {"all", "any", "所有"} and declared != dtype:
+            return 0
+        return max(0, int(amount))
+
+    def damage_reduction_row(self, base: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+        """战斗者字段 ``damage_reduction = {amount, type}``；没有减伤时 ``None``。"""
+        amount = max(0, _as_int((base or {}).get("amount"), 0))
+        declared = _text(self.value("traits.dm.type", "")).casefold()
+        if not self.empty:
+            amount = self.number("traits.dm.amount") or amount
+        if amount <= 0:
+            return None
+        return {"amount": int(amount), "type": declared}
 
     def save_bonus(self, ability: Any = "") -> int:
         total = self.number("bonuses.abilities.save") + self.number("bonuses.abilities.saving_throw")
@@ -1136,11 +1516,53 @@ class EffectiveSheet:
         return self.number("bonuses.spell.dc")
 
     def roll_mode(self, ability: Any, kind: str = "check") -> int:
-        """d20 模式：1 优势 / -1 劣势 / 0 普通（FVTT dnd5e 口径）。"""
+        """d20 模式：1 优势 / -1 劣势 / 0 普通（FVTT dnd5e 口径）。
+
+        ``abilities.*.{check,save}.roll.mode`` 与 midi-qol 的
+        ``flags.midi-qol.{advantage,disadvantage}.ability.*`` 相加：两边同时
+        给相反方向时互相抵消（和为 0），与「优势劣势抵消」的规则一致。
+        """
         key = _text(ability).casefold()
-        if not key:
+        where = "save" if _text(kind).casefold() == "save" else "check"
+        mode = _as_int(self.number(f"abilities.{key}.{where}.roll.mode"), 0) if key else 0
+        return mode + self.midi_roll_mode(where, key or "all")
+
+    def midi_roll_mode(self, where: str, sub: Any = "all") -> int:
+        """midi-qol 子集 → d20 模式（``where`` = attack/check/save）。"""
+        scope = _text(where).casefold()
+        if not scope:
             return 0
-        return _as_int(self.number(f"abilities.{key}.{kind}.roll.mode"), 0)
+        target = _text(sub).casefold() or "all"
+        total = 0
+        for key, (node_where, node_sub, mode) in MIDI_QOL_ROLL_MODES.items():
+            if node_where != scope:
+                continue
+            if node_sub != "all" and node_sub != target:
+                continue
+            if _as_int(resolve_path(self.doc, _norm(key)), 0) <= 0:
+                continue
+            total += mode
+        return total
+
+    def attack_roll_mode(self, kind: Any = "mwak") -> int:
+        """攻击掷骰的 d20 模式（``kind`` = mwak/rwak/msak/rsak/all）。"""
+        return self.midi_roll_mode("attack", _text(kind).casefold() or "all")
+
+    def critical_threshold(self, kind: Any = "mwak") -> int:
+        """暴击阈值（默认 20）：midi-qol ``critical.*`` 给 19、``criticalThreshold`` 覆盖。"""
+        target = _text(kind).casefold() or "all"
+        threshold = MIDI_QOL_CRITICAL_MAX
+        for key, (node_kind, value) in MIDI_QOL_CRITICAL_KEYS.items():
+            if node_kind != "all" and node_kind != target:
+                continue
+            if _as_int(resolve_path(self.doc, _norm(key)), 0) > 0:
+                threshold = min(threshold, value)
+        raw = resolve_path(self.doc, _norm(MIDI_QOL_CRITICAL_THRESHOLD_KEY))
+        if raw is not None:
+            number = _as_int(raw, threshold)
+            if number > 0:
+                threshold = min(threshold, max(MIDI_QOL_CRITICAL_MIN, min(MIDI_QOL_CRITICAL_MAX, number)))
+        return threshold
 
     def traits(self, kind: Any) -> list[str]:
         raw = resolve_path(self.doc, _norm(f"traits.{_text(kind)}.value"))
@@ -1149,6 +1571,20 @@ class EffectiveSheet:
     def condition_immunities(self) -> set[str]:
         """``traits.ci.value`` → 归一的条件 id 集合（小写）。"""
         return {_text(item).casefold() for item in self.traits("ci") if _text(item)}
+
+    def languages(self) -> list[str]:
+        """``traits.languages.value`` + ``traits.languages.custom`` → 语言清单。"""
+        merged: list[str] = []
+        for item in self.traits("languages"):
+            text = _text(item)
+            if text and text not in merged:
+                merged.append(text)
+        custom = _text(self.value("traits.languages.custom", ""))
+        for part in re.split(r"[,，、;；/]", custom):
+            text = part.strip()
+            if text and text not in merged:
+                merged.append(text)
+        return merged
 
     # -- 派生接入 ---------------------------------------------------------
     def armor_class(self, base: int, *, explicit: bool, dex_mod: int = 0) -> int:
@@ -1185,10 +1621,17 @@ class EffectiveSheet:
         return rows
 
     def weapon_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
-        """装备行 → 应用了物品作用域效果（属性/伤害骰）的副本。
+        """装备行 → 应用了物品作用域效果的副本。
 
         物品作用域的路径改的是**该装备行自己的物品文档**；这里把它并回行上，
-        让 ``combat._weapon_attack`` 按正常字段算攻击属性与伤害骰。
+        让 ``combat._weapon_attack`` 按正常字段算攻击属性与伤害骰。消费的字段：
+
+        - ``system.properties`` → 行 ``properties``（灵巧/弹药/双手…）
+        - ``system.damage.base.{number,denomination}`` → 行 ``damage.dice``
+        - ``activities[…].attack.bonus`` → 行 ``attack_bonus``（整体覆盖攻击加值）
+        - ``activities[…].attack.ability`` → 行 ``attack_ability``（``spellcasting`` = 施法属性）
+        - ``activities[…].damage.parts`` → 行 ``damage.dice``（取第一条的骰式）
+        - ``activities[…].range.{value,long}`` → 行 ``range`` + ``range_override``
         """
         if not self.items or not isinstance(row, Mapping):
             return dict(row) if isinstance(row, Mapping) else {}
@@ -1223,7 +1666,58 @@ class EffectiveSheet:
             if new_number and new_denom:
                 damage["dice"] = f"{new_number}d{new_denom}"
             out["damage"] = damage
+        # ``activities[attack].attack.bonus`` 去掉下标后是根路径（没有 ``system.``
+        # 前缀），``system.activities[...]`` 的写法带前缀：两处都认。
+        activity = _first_activity(system.get("activities")) or _first_activity(doc.get("activities"))
+        if activity is not None:
+            out = self._merge_activity(out, activity)
         return out
+
+    @staticmethod
+    def _merge_activity(row: dict[str, Any], activity: Mapping[str, Any]) -> dict[str, Any]:
+        """把一件物品活动的 ``attack`` / ``damage`` / ``range`` 覆盖并进武器行。"""
+        attack = activity.get("attack") if isinstance(activity.get("attack"), Mapping) else {}
+        if attack.get("bonus") is not None:
+            number, reason = parse_number(attack.get("bonus"))
+            if number is not None and not reason:
+                row["attack_bonus"] = int(round(number))
+        ability = _text(attack.get("ability")).casefold()
+        if ability:
+            row["attack_ability"] = ability
+        damage = activity.get("damage") if isinstance(activity.get("damage"), Mapping) else {}
+        dice = _first_dice(damage.get("parts"))
+        if dice:
+            current = dict(row.get("damage") or {}) if isinstance(row.get("damage"), Mapping) else {}
+            current["dice"] = dice
+            row["damage"] = current
+        attack_range = activity.get("range") if isinstance(activity.get("range"), Mapping) else {}
+        normal = attack_range.get("value")
+        long_range = attack_range.get("long")
+        if normal is not None or long_range is not None:
+            current_range = dict(row.get("range") or {}) if isinstance(row.get("range"), Mapping) else {}
+            existing_normal = _as_int(current_range.get("normal_ft"), 0)
+            existing_long = _as_int(current_range.get("long_ft"), 0)
+            if normal is not None:
+                current_range["normal_ft"] = max(0, _as_int(normal, existing_normal))
+            if long_range is not None:
+                current_range["long_ft"] = max(0, _as_int(long_range, existing_long))
+            row["range"] = current_range
+            # 武器行的射程只有被效果改过才随攻击行输出（旧卡输出逐字节不变）。
+            row["range_override"] = True
+        return row
+
+    def merged_languages(self, values: Any) -> list[str]:
+        """卡面语言清单 + ``traits.languages.value/custom``（保序去重）。
+
+        列表型加法天然幂等：重复打包不会把同一门语言记两遍。
+        """
+        merged: list[str] = []
+        for source in (values, self.languages()):
+            for item in source if isinstance(source, (list, tuple, set)) else []:
+                text = _text(item)
+                if text and text not in merged:
+                    merged.append(text)
+        return merged
 
     def extend_traits(self, values: Any, kind: Any) -> list[str]:
         """合并列表型修正（抗性/免疫/易伤/条件免疫/语言），保序去重。"""
@@ -1255,6 +1749,29 @@ class EffectiveSheet:
             "custom": sorted(set(self.custom))[:20],
             "applied": [dict(item) for item in self.applied[:40]],
         }
+
+
+def _first_activity(activities: Any) -> dict[str, Any] | None:
+    """物品镜像里的第一个活动（``{activity_id: {attack/damage/range…}}``）。"""
+    if not isinstance(activities, Mapping):
+        return None
+    for value in activities.values():
+        if isinstance(value, Mapping):
+            return dict(value)
+    return None
+
+
+def _first_dice(parts: Any) -> str:
+    """``["2d6 + @mod", …]`` → ``"2d6"``（取第一条里的骰式，公式部分不猜）。"""
+    rows = parts if isinstance(parts, (list, tuple)) else [parts]
+    for row in rows:
+        text = _text(row)
+        if not text:
+            continue
+        match = re.search(r"\d*\s*d\s*\d+", text, re.IGNORECASE)
+        if match:
+            return re.sub(r"\s+", "", match.group(0)).casefold()
+    return ""
 
 
 def _split_dice(value: Any) -> tuple[int, int]:
@@ -1450,6 +1967,13 @@ def _settle(
         record["reason"] = "no-consumer"
         record["note"] = note or _TIER_REASONS["no-consumer"]
         return record
+    if _norm(change.get("key")) in OVERRIDE_ONLY_PATHS and mode != MODE_OVERRIDE:
+        # 当前生命值这类路径只在 override 下是「绝对值」；增量模式算不出稳定的
+        # 当前值（房间结算自己会写 HP），如实落 stored 而不是假装生效。
+        record["tier"] = TIER_STORED
+        record["reason"] = "override-only"
+        record["note"] = _TIER_REASONS["override-only"]
+        return record
     record["tier"] = TIER_FULL
     record["reason"] = ""
     return record
@@ -1528,8 +2052,15 @@ def effect_dice_bonus(view: EffectiveSheet, path: Any) -> str:
 
 __all__ = [
     "ABILITY_KEYS",
+    "ATTACK_KINDS",
+    "EXTRA_SPEED_KEYS",
     "EffectiveSheet",
     "KNOWN_UNSUPPORTED_PREFIXES",
+    "MIDI_QOL_CRITICAL_KEYS",
+    "MIDI_QOL_CRITICAL_MAX",
+    "MIDI_QOL_CRITICAL_MIN",
+    "MIDI_QOL_CRITICAL_THRESHOLD_KEY",
+    "MIDI_QOL_ROLL_MODES",
     "MIRROR_SCHEMA",
     "MODE_ADD",
     "MODE_CUSTOM",
@@ -1540,6 +2071,8 @@ __all__ = [
     "MODE_OVERRIDE",
     "MODE_UPGRADE",
     "Node",
+    "OVERRIDE_ONLY_PATHS",
+    "SPEED_KEYS",
     "SCOPE_ACTOR",
     "SCOPE_ITEM",
     "SYSTEM_PREFIX",

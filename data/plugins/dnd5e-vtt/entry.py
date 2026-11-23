@@ -450,6 +450,22 @@ def _quick_attack(card: dict[str, Any], plugin: Any) -> tuple[int | None, str]:
     return None, ""
 
 
+def _quick_speeds(derived: dict[str, Any]) -> dict[str, int] | None:
+    """分速模型：walk 之外没有值时返回 None（面板不显示噪音）。"""
+    speeds = derived.get("speeds")
+    if not isinstance(speeds, dict):
+        return None
+    extra = {key: int(value) for key, value in speeds.items() if key != "walk" and value}
+    return {str(key): int(value) for key, value in speeds.items()} if extra else None
+
+
+def _quick_languages(derived: dict[str, Any]) -> list[str] | None:
+    profs = derived.get("proficiencies")
+    profs = profs if isinstance(profs, dict) else {}
+    values = [str(item) for item in profs.get("languages") or [] if str(item).strip()]
+    return values or None
+
+
 def _player_quick_stats(
     member: dict[str, Any],
     plugin: Any,
@@ -478,6 +494,9 @@ def _player_quick_stats(
         "passive_perception": _optional_int(derived.get("passivePerception")),
         "hp": _quick_hp(card, state),
         "resources": _quick_resources(card, state, modules),
+        # 效果引擎补全的展示项：分速与语言（AI 读角色速览时也要用得上）。
+        "speeds": _quick_speeds(derived),
+        "languages": _quick_languages(derived),
     }
 
 

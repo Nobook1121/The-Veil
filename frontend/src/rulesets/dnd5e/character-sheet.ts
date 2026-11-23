@@ -109,6 +109,8 @@ interface Dnd5eSheet {
     hp?: { current?: number; max?: number; temp?: number };
     armorClass?: number;
     speed?: number;
+    /** 分速模型（效果引擎 ``attributes.movement.*``）：walk 之外有值时出现。 */
+    speeds?: Partial<Record<"walk" | "fly" | "swim" | "climb" | "burrow" | "jump", number>>;
     hitDice?: string;
     hit_dice?: Dnd5eHitDice;
     spellcasting?: Dnd5eSpellcasting;
@@ -598,7 +600,29 @@ interface Dnd5eRoomInfo {
         return abilityModifier(abilityScore(sheet, "dex"));
     }
 
-    function spellcastingOf(sheet: Dnd5eSheet): { ability: Dnd5eAbility | ""; dc: number; attack: number } | null {
+    const SPEED_MODE_KEYS = ["fly", "swim", "climb", "burrow", "jump"] as const;
+const SPEED_MODE_LABELS: Record<(typeof SPEED_MODE_KEYS)[number], string> = {
+    fly: "飞行",
+    swim: "游泳",
+    climb: "攀爬",
+    burrow: "挖掘",
+    jump: "跳跃",
+};
+
+/** 分速模型（效果引擎 movement.*）：只在 walk 之外有值时显示，避免噪音。 */
+function speedModesText(sheet: Dnd5eSheet): string {
+    const speeds = sheet.speeds || {};
+    const parts = SPEED_MODE_KEYS.map(
+        (key) => [SPEED_MODE_LABELS[key], asInt(speeds[key], 0)] as const,
+    )
+        .filter(([, value]) => value > 0)
+        .map(([label, value]) => `${label} ${value} 尺`);
+    if (!parts.length) return "";
+    return `<em class="dnd5e-speed-modes">（${parts.join(" / ")}）</em>`;
+}
+
+
+function spellcastingOf(sheet: Dnd5eSheet): { ability: Dnd5eAbility | ""; dc: number; attack: number } | null {
         const key = canonicalAbility(sheet.spellcasting?.ability);
         if (!key) return null;
         const bonus = proficiencyBonusOf(sheet) + abilityModifier(abilityScore(sheet, key));
@@ -1000,6 +1024,7 @@ interface Dnd5eRoomInfo {
                         ${editable
                             ? numberInput("speed", sheet.speed, true, { min: 0, label: "速度", cls: "dnd5e-derived-input" })
                             : `<strong data-dnd5e-live="speed">${asInt(sheet.speed, 0)}</strong>`}
+                        ${speedModesText(sheet)}
                     </div>
                     <div class="dnd5e-derived"><span>法术豁免 DC</span><strong data-dnd5e-live="spell-dc">${spellcastingOf(sheet)?.dc ?? "—"}</strong></div>
                     <div class="dnd5e-derived"><span>法术攻击</span><strong data-dnd5e-live="spell-attack">${spellcastingOf(sheet) ? signed(spellcastingOf(sheet)!.attack) : "—"}</strong></div>

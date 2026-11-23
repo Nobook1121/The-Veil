@@ -244,13 +244,20 @@ def _effective_armor_class(sheet: Mapping[str, Any], effects: EffectiveSheet | N
     return view.armor_class(base, explicit=sheet.get("armorClass") is not None, dex_mod=_dex_modifier(sheet))
 
 
+def _proficiency(sheet: Mapping[str, Any], effects: EffectiveSheet | None) -> int:
+    """等级 → 熟练加值（效果引擎的 ``system.attributes.prof`` 参与）。"""
+    return effects.proficiency_bonus(sheet.get("level", 1)) if effects is not None else proficiency_bonus(
+        sheet.get("level", 1)
+    )
+
+
 def _spellcasting(sheet: Mapping[str, Any], effects: EffectiveSheet | None = None) -> dict[str, Any]:
     profile = sheet.get("spellcasting")
     profile = dict(profile) if isinstance(profile, Mapping) else {}
     ability = ability_key(profile.get("ability"))
     if not ability:
         return {}
-    bonus = proficiency_bonus(sheet.get("level", 1)) + ability_modifier(ability_score(sheet, ability))
+    bonus = _proficiency(sheet, effects) + ability_modifier(ability_score(sheet, ability))
     dc_bonus = 0
     if effects is not None and not effects.empty:
         bonus += effects.spell_attack_bonus()
@@ -311,6 +318,8 @@ class Dnd5eCharacterSchema:
             sheet.get("abilities") or sheet.get("attributes") or data.get("abilities")
         )
         sheet["proficiencies"] = _normalize_proficiencies(sheet.get("proficiencies"))
+        raw_hp = sheet.get("hp") if isinstance(sheet.get("hp"), Mapping) else {}
+        raw_current_hp = raw_hp.get("current")
         sheet["hp"] = _normalize_hp(sheet.get("hp"), {**data, **sheet})
         sheet["speed"] = max(0, _as_int(sheet.get("speed"), 30))
         sheet["xp"] = max(0, _as_int(sheet.get("xp"), 0))
@@ -321,6 +330,43 @@ class Dnd5eCharacterSchema:
         # 卡面效果页签按分级分组：每条 change 带 ``applied``（full/stored/
         # unsupported）+ ``active`` + ``reason``。没有效果的卡不做任何改写。
         sheet = annotate_sheet(sheet, effects)
+        sheet = self._apply_ability_values(sheet, effects)
+        sheet["proficiencies"]["languages"] = effects.merged_languages(
+            sheet["proficiencies"]["languages"]
+        )
+        base_speed = _as_int(sheet.get("base_speed"), _as_int(sheet.get("speed"), 30))
+        base_speeds = sheet.get("base_speeds") if isinstance(sheet.get("base_speeds"), Mapping) else {}
+        speeds = (
+            effects.speeds(base_speed, 30, base_speeds)
+            if not effects.empty
+            else {"walk": base_speed}
+        )
+        # walk 继续落单一速度字段（卡面/战斗者读 speed_ft），分速另存；
+        # 原始速度记 ``base_speed``，二次打包从它重算（否则效果会叠两次）。
+        sheet["speed"] = int(speeds.get("walk", base_speed))
+        if sheet["speed"] != base_speed:
+            sheet["base_speed"] = base_speed
+        else:
+            sheet.pop("base_speed", None)
+        raw_speeds = {
+            key: value
+            for key, value in (sheet.get("speeds") or {}).items()
+            if key != "walk" and isinstance(value, (int, float))
+        } if isinstance(sheet.get("speeds"), Mapping) else {}
+        if not effects.empty and raw_speeds:
+            # 效果前的原始分速，供二次打包从它重算。
+            sheet["base_speeds"] = dict(base_speeds or raw_speeds)
+        if len(speeds) > 1:
+            # 分速（fly/swim/climb/burrow/jump）：只列有值的模式，卡面按此渲染。
+            sheet["speeds"] = speeds
+        else:
+            sheet.pop("speeds", None)
+        prof = effects.proficiency_bonus(sheet["level"])
+        if prof != proficiency_bonus(sheet["level"]):
+            # 熟练加值被效果改过才写进卡面（前端据此显示，不再按等级反推）。
+            sheet["proficiency_bonus"] = prof
+        else:
+            sheet.pop("proficiency_bonus", None)
         sheet["armorClass"] = _armor_class(sheet)
         sheet.setdefault("equipment", [])
         sheet.setdefault("features", [])
@@ -344,14 +390,27 @@ class Dnd5eCharacterSchema:
         data["sheet"] = sheet
 
         hp = sheet["hp"]
+        max_hp = effects.max_hp(hp["max"])
+        # 效果把上限抬高/压低后，当前 HP 以**原始值**为准再夹取（
+        # ``_normalize_hp`` 只按基础上限夹过一次，不能让 30/24 这种组合被
+        # 提前压到 24）。
+        current_hp = _as_int(raw_current_hp, hp["current"])
+        # ``system.attributes.hp.value``（override）直接当当前生命值；结果夹在
+        # [0, maxHp]，房间/角色卡读顶层镜像时不会读到越界值。
+        override_hp = effects.hp_value() if not effects.empty else None
+        if override_hp is not None:
+            current_hp = override_hp
+        current_hp = max(0, min(max_hp, current_hp))
         data["level"] = sheet["level"]
         data["class"] = str(sheet.get("class") or "")
         data["race"] = str(sheet.get("race") or "")
-        data["maxHp"] = effects.max_hp(hp["max"])
-        data["currentHp"] = hp["current"]
+        data["maxHp"] = max_hp
+        data["currentHp"] = current_hp
         data["tempHp"] = hp["temp"]
         data["armorClass"] = _effective_armor_class(sheet, effects)
-        data["proficiencyBonus"] = proficiency_bonus(sheet["level"])
+        data["proficiencyBonus"] = effects.proficiency_bonus(sheet["level"]) if not effects.empty else proficiency_bonus(
+            sheet["level"]
+        )
         data["initiative"] = ability_modifier(ability_score(sheet, "dex")) + effects.initiative_bonus
         data["passivePerception"] = self._passive_perception(sheet, effects)
         spell = _spellcasting(sheet, effects)
@@ -359,6 +418,30 @@ class Dnd5eCharacterSchema:
             data["spellSaveDC"] = spell["spellSaveDC"]
             data["spellAttackBonus"] = spell["spellAttackBonus"]
         return data
+
+    @staticmethod
+    def _apply_ability_values(sheet: Mapping[str, Any], effects: EffectiveSheet) -> dict[str, Any]:
+        """把 ``system.abilities.*.value`` 并进卡面属性值，原始值留 ``base_abilities``。
+
+        卡面显示合并后的值（AC/先攻/HP/豁免/攻击/DC 全从它派生）；原始值放在
+        ``base_abilities``，二次打包时以它为基准重算——否则效果会被当成基础值
+        再叠一遍。效果撤掉后回退到原始值并清掉这个键。
+        """
+        stored_base = sheet.get("base_abilities")
+        stored_base = (
+            _normalize_abilities(stored_base) if isinstance(stored_base, Mapping) and stored_base else None
+        )
+        current = _normalize_abilities(sheet.get("abilities"))
+        base = stored_base if stored_base is not None else current
+        merged = effects.merged_abilities(base)
+        result = dict(sheet)
+        if merged != base:
+            result["base_abilities"] = dict(base)
+            result["abilities"] = dict(merged)
+        elif stored_base is not None:
+            result["abilities"] = dict(base)
+            result.pop("base_abilities", None)
+        return result
 
     def validate(self, sheet: Mapping[str, Any]) -> list[str]:
         data = sheet if isinstance(sheet, Mapping) else {}
@@ -385,9 +468,19 @@ class Dnd5eCharacterSchema:
         level = _bounded(source.get("level"), 1, 20, 1)
         result = dict(data)
         effects = effective_sheet(source)
+        # 属性值合并：派生（AC/先攻/被动/DC/HP）一律用合并后的属性值；
+        # 卡面同步写出合并值 + ``base_abilities``（没有属性值效果时不动）。
+        merged = self._apply_ability_values(source, effects)
+        if merged.get("abilities") != source.get("abilities") or "base_abilities" in merged:
+            source = merged
+            result["abilities"] = merged["abilities"]
+            if "base_abilities" in merged:
+                result["base_abilities"] = merged["base_abilities"]
+            else:
+                result.pop("base_abilities", None)
         result["maxHp"] = effects.max_hp(_normalize_hp(source.get("hp"), source)["max"])
         result["armorClass"] = _effective_armor_class(source, effects)
-        result["proficiencyBonus"] = proficiency_bonus(level)
+        result["proficiencyBonus"] = _proficiency(source, effects)
         result["initiative"] = ability_modifier(ability_score(source, "dex")) + effects.initiative_bonus
         result["passivePerception"] = self._passive_perception(source, effects)
         result["attributeCap"] = 30
@@ -400,7 +493,8 @@ class Dnd5eCharacterSchema:
     @staticmethod
     def _passive_perception(sheet: Mapping[str, Any], effects: EffectiveSheet | None = None) -> int:
         parsed = parse_check("perception") or {"kind": "skill", "skill": "perception", "ability": "wis"}
-        bonus, _detail = check_bonus(sheet, parsed)
+        proficiency = None if effects is None or effects.empty else effects.proficiency_bonus(sheet.get("level", 1))
+        bonus, _detail = check_bonus(sheet, parsed, proficiency=proficiency)
         if effects is not None and not effects.empty:
             bonus += effects.check_bonus(parsed.get("ability"), parsed.get("skill"))
         return 10 + bonus

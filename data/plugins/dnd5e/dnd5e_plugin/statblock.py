@@ -336,6 +336,15 @@ def combatant_from_module(module: Mapping[str, Any]) -> dict[str, Any]:
         spec["max_hp"] = effects.max_hp(_as_int(spec["max_hp"], 1))
         spec["hp"] = min(_as_int(spec["hp"], spec["max_hp"]), spec["max_hp"])
         spec["speed_ft"] = effects.speed(_as_int(spec["speed_ft"], 30))
+        speeds = effects.speeds(_as_int(spec["speed_ft"], 30), 30, spec.get("speeds"))
+        extra_speeds = {key: value for key, value in speeds.items() if key != "walk" and value}
+        if extra_speeds:
+            # ``attributes.movement.{fly,swim,…}``：NPC 同样有分速模型。
+            spec["speeds"] = speeds
+        dm_row = effects.damage_reduction_row()
+        if dm_row:
+            spec["damage_reduction"] = dm_row
+        spec["abilities"] = effects.merged_abilities(abilities)
         spec["attacks"] = effects.apply_attacks(spec["attacks"])
         spec["condition_immunities"] = effects.extend_traits(
             spec.get("condition_immunities"), "ci"

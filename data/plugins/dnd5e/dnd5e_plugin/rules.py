@@ -219,11 +219,16 @@ def check_bonus(
     parsed: Mapping[str, str],
     *,
     extra_modifier: int = 0,
+    proficiency: int | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """计算一次检定/豁免的总加值，并返回展示所需的拆解。"""
+    """计算一次检定/豁免的总加值，并返回展示所需的拆解。
+
+    ``proficiency`` 给了就用它当熟练加值（效果引擎的 ``system.attributes.prof``
+    覆盖/加值），否则按等级查表——空效果时与原实现逐字节一致。
+    """
     ability = str(parsed.get("ability") or "")
     level = sheet.get("level", 1)
-    prof_bonus = proficiency_bonus(level)
+    prof_bonus = proficiency_bonus(level) if proficiency is None else max(0, int(proficiency))
     proficient, expertise = proficiency_flags(sheet, parsed)
     applied_prof = prof_bonus * (2 if expertise else 1) if proficient else 0
     ability_mod = ability_modifier(ability_score(sheet, ability)) if ability else 0
