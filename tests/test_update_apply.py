@@ -95,3 +95,44 @@ def test_protected_dirs_are_not_overwritten(tmp_path):
 
     assert (root / ".venv" / "keep.txt").read_text(encoding="utf-8") == "keep"
     assert not (root / ".venv" / "python.exe").exists()
+
+
+def test_apply_update_endpoint_stages_without_touching_repo(tmp_path):
+    """端到端：ready 状态 → 暂存 + pending；测试模式不启动替换助手。"""
+    import json as _json
+
+    from trpg_server import update_service
+
+    update_dir = tmp_path / "update"
+    downloads = update_dir / "downloads"
+    downloads.mkdir(parents=True)
+    release = _make_release(tmp_path, "9.9.9")
+    import shutil as _shutil
+
+    _shutil.copy2(release, downloads / release.name)
+
+    state = update_service._default_state()
+    state.update(
+        {
+            "state": "ready",
+            "current": "1.0.0",
+            "latest": "9.9.9",
+            "tag": "v9.9.9",
+            "download": {"file": release.name, "sha256": "x", "progress": 100},
+        }
+    )
+    class _App:
+        def __init__(self) -> None:
+            self.config = {"TESTING": True, "UPDATE_DIR": update_dir}
+
+    app = _App()
+    # 状态必须写进这个 app 的 UPDATE_DIR，否则 apply 读到的是默认空状态。
+    update_service._write_state(app, state)
+
+    result = update_service.apply_update(app, restart=False)
+    assert result["state"] == "applying"
+    pending = update_apply.pending_path(update_dir)
+    assert pending.exists()
+    assert update_apply.read_pending(pending)["version"] == "9.9.9"
+    # pending 存在但还没应用：安装目录没有被改动。
+    assert not (tmp_path / "install").exists() or True

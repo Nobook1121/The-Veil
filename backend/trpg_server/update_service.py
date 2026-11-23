@@ -473,6 +473,11 @@ def apply_update(app: Flask | None = None, *, restart: bool = True) -> dict[str,
 
     root = Path(__file__).resolve().parents[2]
     helper = root / "scripts" / "apply_update.py"
+    if app.config.get("TESTING"):
+        # 测试里只验证「暂存 + pending」，绝不启动会替换真实仓库文件的助手。
+        state["message"] = "更新已暂存（测试模式不会替换文件）"
+        _write_state(app, state)
+        return _public_state(state, True)
     if not helper.exists():
         state["state"] = "ready"
         state["message"] = "更新已暂存，但缺少应用脚本；重启应用后会自动完成更新"
