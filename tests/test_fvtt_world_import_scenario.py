@@ -507,3 +507,42 @@ def test_import_item_effect_notes_are_not_warnings(tmp_path, plugins):
     assert notes and "14 条" in notes[0]
     assert "已导入" in notes[0]
     assert data["counts"]["notes"] == len(data["notes"])
+
+
+def test_import_skips_archived_scenario_when_matching_world_id(tmp_path, plugins):
+    """归档（已删除）的旧剧本不能被幂等升版命中。
+
+    回归：用户删除剧本（archived=True）后重导同一世界包，旧实现会把升版
+    写进归档记录，列表接口过滤归档 → 表现为「导入成功但剧本页面看不到」。
+    """
+    client, scenarios = _make_app(tmp_path)
+    first = _import(client, _require_zip(HEROES_ZIP))
+    assert first.status_code == 200
+    scenario_id = int(first.get_json()["data"]["scenario_id"])
+
+    path = scenarios / f"scenario-{scenario_id}" / "scenario.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["archived"] = True
+    path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+
+    second = _import(client, _require_zip(HEROES_ZIP))
+    assert second.status_code == 200
+    new_id = int(second.get_json()["data"]["scenario_id"])
+    assert new_id != scenario_id, "归档记录不应被升版命中"
+    assert not _record(scenarios, new_id).get("archived")
+    # 归档记录保持原样（用户删掉的东西不该被悄悄复活）
+    assert _record(scenarios, scenario_id).get("archived") is True
+
+
+def test_import_world_id_idempotency_is_per_user(tmp_path, plugins):
+    """同 world id 的其他用户剧本不参与匹配——各自幂等，不互相升级。"""
+    client, scenarios = _make_app(tmp_path)
+    first = _import(client, _require_zip(HEROES_ZIP), user_id=1, username="alice")
+    second = _import(client, _require_zip(HEROES_ZIP), user_id=2, username="bob")
+    id_alice = int(first.get_json()["data"]["scenario_id"])
+    id_bob = int(second.get_json()["data"]["scenario_id"])
+    assert id_alice != id_bob
+    assert int(_record(scenarios, id_bob).get("owner_id")) == 2
+
+    again = _import(client, _require_zip(HEROES_ZIP), user_id=2, username="bob")
+    assert int(again.get_json()["data"]["scenario_id"]) == id_bob

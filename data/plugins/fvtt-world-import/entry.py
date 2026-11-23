@@ -1324,20 +1324,35 @@ def _existing_public_ids(scenarios_dir: Path) -> set[str]:
     return values
 
 
-def _find_scenario_by_world_id(scenarios_dir: Path, world_id: str) -> int | None:
+def _find_scenario_by_world_id(
+    scenarios_dir: Path, world_id: str, *, owner_id: Any = None
+) -> int | None:
     """按 ``fvtt_world_import.world_id`` 溯源标记定位既有剧本（幂等键）。
 
     只读原始 JSON 不做完整归一（扫描轻量）；命中后由调用方
     ``load_scenario_by_id`` 取正式记录。返回剧本 id 或 None。
+
+    幂等键是「world_id + 归属用户 + 未归档」：
+
+    - **归档记录不参与匹配**。剧本被删除（归档）后，列表接口会过滤它，
+      若升版写到归档记录上，用户会看到「导入成功但剧本列表里没有」——
+      这类记录一律跳过，重新导入时新建一份可见的剧本。
+    - **其他用户的同名世界不参与匹配**。同 world id 的剧本按用户各自
+      幂等，避免把别人（或历史冒烟账号）的剧本升级成自己的。
     """
     from trpg_server.json_store import read_json
     from trpg_server.scenario_store import scenario_descriptor_paths
 
     if not str(world_id or "").strip() or not Path(scenarios_dir).exists():
         return None
+    owner_key = str(owner_id) if owner_id is not None else ""
     for path in scenario_descriptor_paths(Path(scenarios_dir)):
         data = read_json(path, default=None)
         if not isinstance(data, dict):
+            continue
+        if data.get("archived"):
+            continue
+        if owner_key and str(data.get("owner_id") if data.get("owner_id") is not None else "") != owner_key:
             continue
         marker = data.get(SCENARIO_WORLD_MARKER_KEY)
         if isinstance(marker, dict) and str(marker.get("world_id") or "") == str(world_id):
@@ -1689,7 +1704,9 @@ def run_scenario_import():
 
         # -- 幂等定位提前到关包前：stash 资产要写进剧本 storage 目录 ----------
         # 与 ``save_scenario_record`` 同一套 storage 目录规则（legacy 文件迁移）。
-        existing_id = _find_scenario_by_world_id(scenarios_dir, pkg.id)
+        existing_id = _find_scenario_by_world_id(
+            scenarios_dir, pkg.id, owner_id=session.get("user_id")
+        )
         descriptor: Path | None = None
         previous_record: dict[str, Any] | None = None
         if existing_id is not None:
