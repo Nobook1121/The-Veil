@@ -766,10 +766,15 @@
         // 用代际号判定 + 新图 onload 才替换旧图，旧图保留到新图就绪。
         if (backgroundUrl === url && (backgroundImage || backgroundPending)) return;
         if (!url) {
+            // 没有底图（空场景/纯网格场景）时，只有「原本有图」才需要重画一次。
+            // 无条件 drawStage() 会让 drawStage → loadBackground("") → drawStage
+            // 无限递归，栈溢出后整块画布与插件挂载都会被掐死。
+            const hadBackground = Boolean(backgroundUrl || backgroundImage || backgroundPending);
             backgroundGeneration += 1;
             backgroundPending = null;
+            backgroundImage = null;
             backgroundUrl = "";
-            drawStage();
+            if (hadBackground) drawStage();
             return;
         }
         const generation = ++backgroundGeneration;

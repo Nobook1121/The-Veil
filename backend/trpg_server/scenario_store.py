@@ -888,7 +888,23 @@ def save_scenario_record(
         from trpg_server.agents.knowledge_base import knowledge_index_path, persist_knowledge_index
         if not knowledge_index_path(descriptor_path, normalized.get("scenario_version") or "1").exists():
             persist_knowledge_index(descriptor_path, normalized)
+    _invalidate_scenario_list_cache()
     return descriptor_path
+
+
+def _invalidate_scenario_list_cache() -> None:
+    """剧本写盘后立刻让列表缓存失效。
+
+    ``/api/scenarios`` 有 60 秒缓存（避免每次扫目录）；导入器直接写文件时
+    如果不失效缓存，新剧本要等缓存过期才出现在剧本页（用户感知为「导入后
+    要等一会」）。路由层懒导入避免循环依赖。
+    """
+    try:
+        from trpg_server.routes.scenarios import clear_scenarios_cache
+
+        clear_scenarios_cache()
+    except Exception:  # noqa: BLE001 - 缓存失效失败不影响写入
+        pass
 
 
 def delete_scenario_record(descriptor_path: Path) -> None:
@@ -902,6 +918,7 @@ def delete_scenario_record(descriptor_path: Path) -> None:
         remove_tree(descriptor_path)
     if storage_dir.name.startswith("scenario-") and storage_dir.exists():
         remove_tree(storage_dir)
+    _invalidate_scenario_list_cache()
 
 
 def _iter_scene_sources(scenario: dict[str, Any]) -> list[dict[str, Any]]:
