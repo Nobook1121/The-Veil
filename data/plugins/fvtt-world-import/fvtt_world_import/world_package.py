@@ -811,7 +811,9 @@ def audit(pkg: WorldPackage, *, limits: DbLimits | None = None) -> dict[str, Any
         for rows in actor_index.item_effects.values():
             for doc in rows:
                 for change in doc.get("changes") or []:
-                    tier = effect_key_tier(change.get("key"))
+                    # 条目级效果挂在物品上：分类必须按 item 作用域，
+                    # 否则 system.properties / damage.base / activities 会被误记 stored。
+                    tier = effect_key_tier(change.get("key"), "item")
                     item_effect_tiers[tier] = item_effect_tiers.get(tier, 0) + 1
         if actor_index.orphan_items or actor_index.orphan_effects:
             warnings.append(

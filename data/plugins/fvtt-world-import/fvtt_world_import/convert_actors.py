@@ -1042,13 +1042,17 @@ def _spellcasting(
     return profile, pact_notes
 
 
-def effect_key_tier(key: Any) -> str:
+def effect_key_tier(key: Any, mount: str = "actor") -> str:
     """这个 change 的 key 落在哪一档：``full`` / ``stored`` / ``unsupported``。
 
     口径来自 dnd5e 插件镜像 schema（只有一份，两边不许漂移）：
     ``full`` = 有数值消费方，``stored`` = 记下但没有消费方（模块 flags / ATL /
     物品活动 / 分速…），``unsupported`` = 连镜像 schema 都没有的路径。
     引擎不可用时一律 ``stored``（宁可「已记录」也不丢数据）。
+
+    ``mount`` 必须如实传：``system.properties`` / ``system.damage.base.*`` /
+    ``activities[…]`` 这些路径**只有挂在物品上**才有消费方（``weapon_row``
+    真读），按角色作用域分类会把它们误记成「没有消费方」。
     """
     text = str(key or "").strip()
     if not text:
@@ -1057,7 +1061,7 @@ def effect_key_tier(key: Any) -> str:
     if engine is None:
         return "stored"
     try:
-        return str(engine.classify_path(text)[2])
+        return str(engine.classify_path(text, mount)[2])
     except Exception:  # noqa: BLE001 - 引擎内部异常不该让导入失败
         return "stored"
 
@@ -1109,6 +1113,9 @@ def _effect_entry(
         "disabled": bool(doc.get("disabled")),
         "changes": _effect_changes_of(doc),
         "origin": {"item_id": item_id, "source": source, "equipped": bool(equipped)},
+        # 分类口径标记：条目级效果挂在物品上（哪怕宿主是法术/专长条目），
+        # 路径是否可消费按 item 作用域判断；真正的激活还要看宿主行类型。
+        "_mount": "item",
     }
     duration = _mapping(doc.get("duration"))
     kept = {
@@ -1170,9 +1177,14 @@ def _item_effects_equipped(item: Mapping[str, Any]) -> bool:
 
 
 def _flatten_effects(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """装备行上的条目级效果摊平，并标记 ``_mount="item"``（分类口径要用）。"""
     result: list[dict[str, Any]] = []
     for row in rows:
-        result.extend(row.get("effects") or [])
+        for effect in row.get("effects") or []:
+            if isinstance(effect, Mapping):
+                marked = dict(effect)
+                marked.setdefault("_mount", "item")
+                result.append(marked)
     return result
 
 
@@ -1182,13 +1194,15 @@ def _effects_summary(entries: Iterable[dict[str, Any]]) -> dict[str, Any]:
     changes = [change for entry in rows for change in entry.get("changes") or []]
     tiers = {"full": 0, "stored": 0, "unsupported": 0}
     keys: dict[str, list[str]] = {"stored": [], "unsupported": []}
-    for change in changes:
-        key = str(change.get("key") or "")
-        tier = effect_key_tier(key)
-        tiers[tier] = tiers.get(tier, 0) + 1
-        bucket = keys.get(tier)
-        if bucket is not None and key and key not in bucket and len(bucket) < 5:
-            bucket.append(key)
+    for entry in rows:
+        mount = "item" if entry.get("_mount") == "item" else "actor"
+        for change in entry.get("changes") or []:
+            key = str(change.get("key") or "")
+            tier = effect_key_tier(key, mount)
+            tiers[tier] = tiers.get(tier, 0) + 1
+            bucket = keys.get(tier)
+            if bucket is not None and key and key not in bucket and len(bucket) < 5:
+                bucket.append(key)
     return {
         "documents": len(rows),
         "changes": len(changes),

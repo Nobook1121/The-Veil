@@ -178,7 +178,10 @@ def test_separate_effects_keep_fixed_order_too() -> None:
 
 
 def test_module_namespaces_are_mirrored_not_thrown_away() -> None:
-    """模块/前端命名空间（flags / ATL / activities）也命中镜像：记下来、分级 stored。"""
+    """模块/前端命名空间（flags / ATL / activities）也命中镜像：
+
+    ``grants.*`` 已有战斗消费方（full），ATL/activities 仍是 stored。
+    """
     view = ec.effective_sheet(
         _sheet(
             [
@@ -194,12 +197,13 @@ def test_module_namespaces_are_mirrored_not_thrown_away() -> None:
         )
     )
     assert view.ac_bonus == 1
-    # 三条都在镜像模型里 → 没有一条是 unsupported。
+    # 全部在镜像模型里 → 没有一条是 unsupported；grants 已有战斗消费方（full），
+    # 角色级的 activities 与 ATL 仍是 stored。
     assert view.stats["unsupported"] == 0
-    assert view.stats["stored"] == 3
+    assert view.stats["applied"] == 2  # ac.bonus + grants
+    assert view.stats["stored"] == 2
     keys = {record["key"] for record in view.stored}
     assert keys == {
-        "flags.midi-qol.grants.advantage.attack.all",
         "ATL.light.bright",
         "activities[attack].attack.ability",
     }
@@ -389,7 +393,7 @@ def test_supported_paths_have_consumers_and_unknown_ones_do_not() -> None:
     # 命中镜像但没有数值消费方的路径：照实记成 stored（不是 unsupported，
     # 也不是假装生效）。
     for key in (
-        "flags.dnd5e.halflingLucky",
+        "flags.dnd5e.halflingNimbleness",
         "ATL.light.dim",
         "system.attributes.movement.hover",
         "system.damage.base.number",
@@ -795,9 +799,8 @@ MIRROR_PATH_TABLE = [
     ("system.currency.gp", ec.MODE_ADD, 5, "system.currency.gp", 5, ec.TIER_STORED),
     ("system.resources.legact.max", ec.MODE_ADD, 1, "system.resources.legact.max", 1, ec.TIER_STORED),
     ("flags.midi-qol.someFlag", ec.MODE_OVERRIDE, True, "flags.midi-qol.someFlag", True, ec.TIER_STORED),
-    ("flags.dnd5e.halflingLucky", ec.MODE_OVERRIDE, "true", "flags.dnd5e.halflingLucky", "true", ec.TIER_STORED),
+    ("flags.dnd5e.halflingLucky", ec.MODE_OVERRIDE, "true", "flags.dnd5e.halflingLucky", 1, ec.TIER_FULL),
     ("ATL.light.bright", ec.MODE_UPGRADE, 0, "ATL.light.bright", 0, ec.TIER_STORED),
-    ("name", ec.MODE_OVERRIDE, "改过的名字", "name", "改过的名字", ec.TIER_STORED),
 ]
 
 

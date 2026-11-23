@@ -575,16 +575,41 @@ def _flags_node() -> Node:
             _num(TIER_FULL, "midi-qol 暴击阈值：combat/checks 的暴击阈值（夹在 2..20）"),
         )
     ]
+    # midi_parts 返回的是去掉 "flags.midi-qol." 前缀的段。
+    grant_nodes = [
+        (
+            midi_parts("flags.midi-qol.grants.advantage.attack.all"),
+            _num(TIER_FULL, "目标侧：所有攻击者对持有者的攻击有优势（combat 结算时读）"),
+        ),
+        (
+            midi_parts("flags.midi-qol.grants.disadvantage.attack.all"),
+            _num(TIER_FULL, "目标侧：指定类型攻击者对持有者的攻击有劣势（值是类型列表）"),
+        ),
+    ]
     midi = _node_of_tree(
-        _path_tree([*roll_nodes, *critical_nodes, *threshold_nodes])
+        _path_tree([*roll_nodes, *critical_nodes, *threshold_nodes, *grant_nodes])
     )
     midi.children["*"] = _any(
         TIER_STORED,
         "其余 midi-qol 标志（grants/optional/ActivityOverTime…）：只记录，不模拟模块运行时",
     )
+    dnd5e_flags = _obj(
+        {
+            "halflingLucky": _num(
+                TIER_FULL,
+                "半身人幸运：攻击 d20 掷出 1 时重掷一次（combat.resolve_attack_action）",
+            ),
+            "halflingNimbleness": _num(
+                TIER_STORED,
+                "半身人灵巧：可穿过大生物空间——本作没有按生物体积做占位阻挡，无所可改",
+            ),
+            "*": _any(TIER_STORED, "其余 dnd5e flags：只记录"),
+        }
+    )
     return _obj(
         {
             "midi-qol": midi,
+            "dnd5e": dnd5e_flags,
             "*": _any(TIER_STORED, "模块/系统标志（dnd5e flags）：只记录，不模拟模块运行时"),
         }
     )
@@ -833,7 +858,11 @@ MIRROR_SCHEMA: Node = Node(
                 "attunement": _num(TIER_STORED, scope=SCOPE_ITEM),
             }
         ),
-        "name": _txt(TIER_STORED, "改名：'{0}, 法术名' 这类模板不套用，原文保留"),
+        "name": _txt(
+            TIER_FULL,
+            "物品改名（如 Shillelagh）：weapon_row 把模板里的 {} 换成原名后用于攻击行名",
+            scope=SCOPE_ITEM,
+        ),
         "activities": _activity_node(),
         "_id": _txt(TIER_STORED),
         "img": _txt(TIER_STORED),
@@ -1777,6 +1806,14 @@ class EffectiveSheet:
     @staticmethod
     def _merge_item_document(row: dict[str, Any], doc: Mapping[str, Any]) -> dict[str, Any]:
         """物品文档 → 行扁平字段（文档优先，行上原值兜底）。"""
+        # 物品改名（Shillelagh 之类）：``name`` 路径写进物品镜像后与原名不同，
+        # 模板里的 ``{}`` / ``{0}`` 换成原名，供攻击行展示。
+        doc_name = _text(doc.get("name"))
+        row_name = _text(row.get("name")) or doc_name
+        if doc_name and row_name and doc_name != row_name:
+            display = doc_name.replace("{}", row_name).replace("{0}", row_name).strip()
+            if display:
+                row["name"] = display
         system = doc.get("system") if isinstance(doc.get("system"), Mapping) else {}
         extra_props = _as_values(system.get("properties"))
         if extra_props:

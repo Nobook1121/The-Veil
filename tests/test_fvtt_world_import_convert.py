@@ -653,14 +653,14 @@ def test_inspect_reports_sixian_plan(app_env):
     # 三档如实计数：真正进数值的 / 已记录暂无消费方的 / 镜像之外的。
     assert data["notes"] == [
         "已导入 14 条条目级效果（transfer buff），共 16 条改动（change）："
-        "4 条接入数值（AC/先攻/豁免/攻击/抗性/速度…）、"
-        "12 条已记录但当前没有消费方（模块 flags / ATL / 物品活动 / 分速等，卡面效果页签可查）、"
+        "12 条接入数值（AC/先攻/豁免/攻击/抗性/速度…）、"
+        "4 条已记录但当前没有消费方（模块 flags / ATL / 物品活动 / 分速等，卡面效果页签可查）、"
         "0 条在镜像模型之外（原文保留）。"
     ]
     assert data["actor_item_effects"] == 14
     assert data["actor_item_effects_imported"] == 14
-    assert data["actor_item_effects_full"] == 4
-    assert data["actor_item_effects_stored"] == 12
+    assert data["actor_item_effects_full"] == 12
+    assert data["actor_item_effects_stored"] == 4
     assert data["actor_item_effects_unsupported"] == 0
 
 

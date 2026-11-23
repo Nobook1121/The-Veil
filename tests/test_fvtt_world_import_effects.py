@@ -48,16 +48,16 @@ SIXIAN_ZIP = REPO_ROOT / "docs" / "样本" / "sixianyuchanmian-1.0.1.zip"
 HEROES_EFFECTS = {
     "documents": 41,
     "changes": 57,
-    "full": 36,
-    "stored": 21,
+    "full": 46,
+    "stored": 11,
     "unsupported": 0,
     "transfer": 8,
 }
 SIXIAN_EFFECTS = {
     "documents": 14,
     "changes": 16,
-    "full": 4,
-    "stored": 12,
+    "full": 12,
+    "stored": 4,
     "unsupported": 0,
     "transfer": 0,
 }
@@ -197,12 +197,13 @@ def test_heroes_stored_effects_are_kept_not_dropped(heroes) -> None:
     sheet = _character(heroes.converted, "半身人诗人")["card"]["sheet"]
     view = effective_sheet(sheet)
     stored_keys = {record["key"] for record in view.stored}
-    assert "flags.dnd5e.halflingLucky" in stored_keys
+    # 半身人幸运已接进战斗（full）；没有消费方的是灵巧/持续效果/ATL/可选加值。
+    assert "flags.dnd5e.halflingNimbleness" in stored_keys
     assert "flags.midi-qol.ActivityOverTime" in stored_keys
     assert "ATL.light.bright" in stored_keys
     assert all(record["tier"] == TIER_STORED for record in view.stored)
     # 值真的写进了镜像（「已记录」有内容），只是没有数值消费方。
-    assert view.value("flags.dnd5e.halflingLucky") is not None
+    assert view.value("flags.dnd5e.halflingNimbleness") is not None
 
 
 def test_heroes_effect_warnings_only_for_alien_paths(heroes) -> None:

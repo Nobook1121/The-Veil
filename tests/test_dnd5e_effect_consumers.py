@@ -415,3 +415,109 @@ def test_workflow_hook_condition_add_and_miss_trigger(plugins):
     assert result["success"] is False
     assert result["workflow"]["trigger"] == "onMiss"
     assert "off_balance" in goblin.get("conditions", [])
+
+
+# ---------------------------------------------------------------------------
+# 10) 目标侧 grants / 半身人幸运 / 物品改名
+# ---------------------------------------------------------------------------
+
+
+def _target_with_grants(grants: dict) -> dict:
+    goblin = _monster("goblin")
+    goblin["grants_attack"] = grants
+    goblin["creature_type"] = "fiend"
+    return goblin
+
+
+def test_grants_advantage_from_target_gives_attacker_advantage(plugins):
+    """Faerie Fire 形态：目标给「所有攻击者」优势 → 攻击掷两骰取高。"""
+    card = _card()
+    player = _combatant(card)
+    target = _target_with_grants({"advantage": True})
+    dice = iter([4, 17])
+
+    def rng(sides: int) -> int:
+        return next(dice) if sides == 20 else 3
+
+    result = _plugin().combat.resolve_attack_action(
+        player, target, {"weapon": "长剑"}, rng=rng
+    )
+    assert result["advantage"] is True
+    assert result["natural"] == 17
+
+
+def test_grants_disadvantage_filters_by_attacker_type(plugins):
+    """Protection from Evil：只有名单里的攻击者类型吃劣势。"""
+    card = _card()
+    player = _combatant(card)
+    player["creature_type"] = "undead"
+    target = _target_with_grants(
+        {"disadvantage": ["aberration", "celestial", "elemental", "fey", "fiend", "undead"]}
+    )
+    dice = iter([12, 3])
+
+    def rng(sides: int) -> int:
+        return next(dice) if sides == 20 else 3
+
+    result = _plugin().combat.resolve_attack_action(
+        player, target, {"weapon": "长剑"}, rng=rng
+    )
+    assert result["disadvantage"] is True
+    assert result["natural"] == 3
+
+    # 非名单类型（humanoid）不吃劣势。
+    human = _combatant(_card())
+    human["creature_type"] = "humanoid"
+    plain = _plugin().combat.resolve_attack_action(
+        human, _target_with_grants({"disadvantage": ["undead"]}), {"weapon": "长剑", "attack_roll": 12},
+        rng=lambda sides: 3,
+    )
+    assert plain["disadvantage"] is False
+
+
+def test_halfling_lucky_rerolls_natural_one(plugins):
+    """半身人幸运：d20 掷出 1 自动重掷一次。"""
+    card = _card([_effect([_change("flags.dnd5e.halflingLucky", 5, True)])])
+    player = _combatant(card)
+    assert player.get("halfling_lucky") is True
+    dice = iter([1, 15])
+
+    def rng(sides: int) -> int:
+        return next(dice) if sides == 20 else 4
+
+    result = _plugin().combat.resolve_attack_action(
+        player, _monster("goblin"), {"weapon": "长剑"}, rng=rng
+    )
+    assert result["natural"] == 15
+    assert result["rolls"] == [1, 15]
+
+
+def test_item_rename_change_reaches_weapon_row(plugins):
+    """``name`` 效果（Shillelagh）把物品改名带到攻击行，模板 {} 换成原名。"""
+    from dnd5e_plugin.effect_changes import weapon_row
+
+    sheet = _base_sheet(
+        equipment=[
+            {
+                "id": "club",
+                "name": "木棒",
+                "category": "weapon",
+                "equipped": True,
+                "damage": {"dice": "1d4", "type": "bludgeoning"},
+                "effects": [
+                    _effect(
+                        [
+                            _change("name", 5, "{}, Shillelagh"),
+                            _change("system.damage.base.denomination", 5, 8),
+                        ]
+                    )
+                ],
+            }
+        ]
+    )
+    from dnd5e_plugin.effect_changes import effective_sheet
+
+    merged = weapon_row(sheet["equipment"][0], effective_sheet(sheet))
+    assert merged["name"].startswith("木棒")
+    assert "Shillelagh" in merged["name"]
+    assert merged["damage"]["dice"] == "1d8"

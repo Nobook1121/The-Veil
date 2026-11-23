@@ -401,6 +401,37 @@ def _apply_workflow_actions(
     return applied
 
 
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().casefold() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _grants_attack_modes(effects: Any) -> dict[str, Any]:
+    """``flags.midi-qol.grants.{advantage,disadvantage}.attack.all`` → 战斗者字段。
+
+    值可以是 ``true``（所有攻击者）或类型列表（Protection from Evil and Good
+    只对异怪/天界/元素/妖精/邪魔/亡灵生效）。
+    """
+    modes: dict[str, Any] = {}
+    for kind, key in (
+        ("advantage", "flags.midi-qol.grants.advantage.attack.all"),
+        ("disadvantage", "flags.midi-qol.grants.disadvantage.attack.all"),
+    ):
+        value = effects.value(key)
+        if isinstance(value, (list, tuple, set)):
+            types = [str(item).casefold() for item in value if str(item).strip()]
+            if types:
+                modes[kind] = types
+        elif value is not None and _truthy(value):
+            modes[kind] = True
+    return modes
+
 def _run_workflow_hooks(
     rules: Any,
     attacker: dict[str, Any],
@@ -878,6 +909,12 @@ class Dnd5eCombatRules:
             if dm_row:
                 # ``traits.dm``：减伤在抗性/易伤之后、吸收临时生命之前结算。
                 combatant["damage_reduction"] = dm_row
+            grants = _grants_attack_modes(effects)
+            if grants:
+                # 目标侧：攻击者对「我」的掷骰优势/劣势（combat 结算时读）。
+                combatant["grants_attack"] = grants
+            if _truthy(effects.value("flags.dnd5e.halflingLucky")):
+                combatant["halfling_lucky"] = True
             combatant["effect_attack_roll_mode"] = {
                 "mwak": effects.attack_roll_mode("mwak"),
                 "rwak": effects.attack_roll_mode("rwak"),
@@ -1041,6 +1078,20 @@ class Dnd5eCombatRules:
         # 变体负重达到重载时，攻击检定带劣势（分级在开战准备时算好）。
         if _text(attacker.get("encumbrance")).lower() == "heavy":
             disadvantage = True
+        # 目标侧 grants：持有者让「攻击者对其攻击」获得优势/劣势（可按类型过滤）。
+        granted = target.get("grants_attack") if isinstance(target, Mapping) else None
+        if isinstance(granted, Mapping):
+            attacker_type = _text(attacker.get("creature_type")).casefold()
+            for kind, value in granted.items():
+                matched = (
+                    attacker_type in {str(item).casefold() for item in value}
+                    if isinstance(value, (list, tuple, set))
+                    else bool(value)
+                )
+                if matched and kind == "advantage":
+                    advantage = True
+                elif matched and kind == "disadvantage":
+                    disadvantage = True
         if advantage and disadvantage:
             advantage = disadvantage = False
         if not isinstance(preset_rolls, list) or not preset_rolls:
@@ -1048,6 +1099,12 @@ class Dnd5eCombatRules:
                 second = _roll_die(rng, 20)
                 rolls.append(second)
                 natural = max(rolls) if advantage else min(rolls)
+
+        # 半身人幸运：d20 掷出 1 时重掷一次（本作按「每次攻击一次」实现）。
+        if natural == 1 and attacker.get("halfling_lucky"):
+            rerolled = _roll_die(rng, 20)
+            rolls.append(rerolled)
+            natural = rerolled
 
         target_ac = _as_int(target.get("armorClass") or target.get("ac"), 10)
         cover = _text(action.get("cover")).lower()
