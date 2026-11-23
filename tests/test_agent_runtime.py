@@ -977,3 +977,115 @@ def test_runtime_reports_error_when_first_request_fails():
 
     assert result.error and "超时" in result.error
     assert result.notice is None
+
+
+def test_runtime_executes_bare_tool_call_pasted_in_content():
+    """线上实测：KP 把「{name: dice_roll_coc_check, parameters: {...}}」直接当正文贴出来，
+    旧逻辑只认 {"tool_calls": [...]} 包装，于是这次投骰从未执行——玩家只看到一段假动作，
+    状态不推进、同一句输入还会命中缓存，表现为「卡在同一个回合」。
+    """
+
+    class BareCallRequester:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, payload):
+            self.calls.append(payload)
+            if len(self.calls) == 1:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": (
+                                    "[进行杨修文的攻击检定]\n\n"
+                                    '{\n  "name": "test_echo",\n  "parameters": {"value": "hello"}\n}'
+                                ),
+                            }
+                        }
+                    ]
+                }
+            return {"choices": [{"message": {"role": "assistant", "content": "你打空了。"}}]}
+
+    tool = AgentTool(
+        name="test.echo",
+        description="Echo value",
+        parameters={"type": "object", "properties": {"value": {"type": "string"}}},
+        handler=lambda arguments, context: {"echo": arguments["value"]},
+    )
+    requester = BareCallRequester()
+
+    result = run_agent_completion(
+        requester=requester,
+        base_payload={"model": "fake-model", "messages": [{"role": "user", "content": "@KP 攻击"}]},
+        profile=AgentProfile(id="kp", name="KP", prompt="prompt", tool_names=["test.echo"]),
+        registry=ToolRegistry([tool]),
+        context=AgentRequestContext(room_id="room-1"),
+    )
+
+    assert len(requester.calls) == 2
+    tool_message = requester.calls[1]["messages"][-1]
+    assert tool_message["role"] == "tool"
+    assert tool_message["name"] == "test_echo"
+    assert '"hello"' in tool_message["content"]
+    # 裸 JSON 不能被当叙事重复展示给玩家
+    assert "parameters" not in result.content
+    assert result.content == "你打空了。"
+
+
+def test_runtime_asks_again_when_pasted_tool_name_is_unknown():
+    """名字对不上任何已下发工具时，不能把裸 JSON 当回复展示，也不能静默丢弃。"""
+
+    class UnknownCallRequester:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, payload):
+            self.calls.append(payload)
+            if len(self.calls) <= 2:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": (
+                                    "[进行攻击检定]\n"
+                                    '{"name": "dice_roll_something_else", "parameters": {"target": 50}}'
+                                ),
+                            }
+                        }
+                    ]
+                }
+            return {"choices": [{"message": {"role": "assistant", "content": "系统的骰子没有响应。"}}]}
+
+    tool = AgentTool(
+        name="test.echo",
+        description="Echo value",
+        parameters={"type": "object", "properties": {"value": {"type": "string"}}},
+        handler=lambda arguments, context: {"echo": arguments["value"]},
+    )
+    requester = UnknownCallRequester()
+
+    result = run_agent_completion(
+        requester=requester,
+        base_payload={"model": "fake-model", "messages": [{"role": "user", "content": "@KP 攻击"}]},
+        profile=AgentProfile(id="kp", name="KP", prompt="prompt", tool_names=["test.echo"]),
+        registry=ToolRegistry([tool]),
+        context=AgentRequestContext(room_id="room-1"),
+    )
+
+    # 收到了纠正提示，而不是把假调用当正文
+    correction = [m for m in requester.calls[1]["messages"] if m.get("role") == "system"]
+    assert any("工具调用写成了正文 JSON" in str(m.get("content")) for m in correction)
+    assert "parameters" not in result.content
+    assert result.content == "系统的骰子没有响应。"
+
+
+def test_contains_tool_call_blob_only_flags_call_shaped_json():
+    from trpg_server.agents.runtime import contains_tool_call_blob
+
+    assert contains_tool_call_blob('{"name": "dice_roll_coc_check", "parameters": {"target": 50}}')
+    assert contains_tool_call_blob('[{"name": "test.echo", "arguments": {"value": "x"}}]')
+    assert not contains_tool_call_blob('{"name": "杨修文", "action": "attack"}')
+    assert not contains_tool_call_blob("杨修文挥起钥匙，砸向怪物。")
+    assert not contains_tool_call_blob("")

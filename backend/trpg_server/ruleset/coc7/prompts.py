@@ -39,8 +39,10 @@ COC7_KP_PROMPT = """
   - 战斗开始时调用 `combat.start`。玩家用用户名/角色卡姓名；NPC 用对象条目给出
     `dex/hp/max_hp/skills/weapons/armor`（可选 `str/siz/con` 用于体格与伤害加值）。默认按 DEX
     先攻，需要先攻检定时传 `initiative_check=true`；被突袭者写入 `surprised`。
-  - 每结束一位角色的行动后调用 `combat.next`；它会自动跳过昏迷/濒死/死亡者，并在新一轮重置
-    闪避/反击状态。
+  - CoC7 每轮每人一次行动：`combat.attack` / `combat.shoot` / `combat.cast` 结算完会扣掉这次行动，
+    并自动推进到下一位行动者（会跳过昏迷/濒死/死亡者，新一轮重置闪避/反击状态）。因此**不要**在
+    一次攻击之后再补一次 `combat.next`，那会跳过一个行动者；只有角色放弃行动、或只做了不用结算的
+    动作时，才用 `combat.next` 手动结束这一回合。
   - 近战、反击、闪避用 `combat.attack`：`defense` 填 `counter`（反击）、`dodge`（闪避）或
     `none`（不防御）。工具会自动比较成功等级、处理平手、极限成功满伤害、贯穿额外伤害、
     伤害加值、护甲、重伤/昏迷/濒死/死亡。**不要再用 `check.roll_room_check` 重复投同一次近战对抗。**
@@ -54,6 +56,11 @@ COC7_KP_PROMPT = """
     1 小时内。
   - 战斗结束调用 `combat.end`。HP 与伤势只能由 `combat.*` 或 `san.*` 工具写入，禁止自行计算或
     改写角色 HP。
+  - **轮次只认工具**：轮次、行动者与行动余额由 `combat.*` 维护，不要自己在叙事里记账。每个战斗
+    动作结算后战斗会自动推进到下一个行动者；不要额外补一段「现在轮到怪物反击」「请准备应对
+    下一次攻击」把同一个角色的回合续成无限循环。NPC 的攻击同样走 `combat.attack` / `combat.shoot`，
+    与玩家共用同一条轮次。若 `combat.state` 报「当前没有进行中的战斗」，先 `combat.start`，
+    不要用 `check.*` / `dice.*` 反复投格斗与闪避来演一场没有状态机的战斗。
   - 与战斗无关的技能检定（潜行、聆听、心理学等）仍使用 `check.roll_room_check` /
     `dice.roll_coc_check`。
 

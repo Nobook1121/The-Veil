@@ -960,3 +960,63 @@ def test_madness_permanent_when_sanity_reaches_zero(tmp_path):
 
     assert result["permanent"] is True
     assert result["madness"]["type"] == "permanent"
+
+
+def _room_with_active_combat(tmp_path, combat: dict):
+    room_dir = tmp_path / "rooms" / "room-combat"
+    room_dir.mkdir(parents=True)
+    (room_dir / "info.json").write_text(
+        json.dumps({"id": "room-combat", "members": []}, ensure_ascii=False), encoding="utf-8"
+    )
+    (room_dir / "state.json").write_text(
+        json.dumps({"combat": combat}, ensure_ascii=False), encoding="utf-8"
+    )
+    return AgentRequestContext(room_id="room-combat", room_dir=room_dir, agent_id="kp")
+
+
+def test_attack_check_during_combat_points_kp_at_combat_tool(tmp_path):
+    """战斗进行中 KP 用普通检定拼攻击：结果里要带回「请用 combat.attack」的提醒。
+
+    线上实测的卡死就是这条链路断了：检定一投一个来回，战斗状态没人推进，
+    于是「打完不换手、怪物打完不进下一轮」。
+    """
+    context = _room_with_active_combat(
+        tmp_path,
+        {
+            "active": True,
+            "round": 3,
+            "turn": 1,
+            "order": ["杨修文", "怪物"],
+            "combatants": {},
+        },
+    )
+
+    result = execute_roll_coc_check({"skill": "格斗", "target": 50}, context)
+
+    hint = str(result.get("combat_turn_hint") or "")
+    assert "combat.attack" in hint
+    assert "第 3 轮" in hint and "怪物" in hint
+
+
+def test_non_combat_check_while_combat_active_has_no_hint(tmp_path):
+    context = _room_with_active_combat(
+        tmp_path,
+        {"active": True, "round": 1, "turn": 0, "order": ["杨修文"], "combatants": {}},
+    )
+
+    result = execute_roll_coc_check({"skill": "聆听", "target": 50}, context)
+
+    assert "combat_turn_hint" not in result
+
+
+def test_attack_check_outside_combat_has_no_hint(tmp_path):
+    room_dir = tmp_path / "rooms" / "room-calm"
+    room_dir.mkdir(parents=True)
+    (room_dir / "info.json").write_text(
+        json.dumps({"id": "room-calm", "members": []}, ensure_ascii=False), encoding="utf-8"
+    )
+    context = AgentRequestContext(room_id="room-calm", room_dir=room_dir, agent_id="kp")
+
+    result = execute_roll_coc_check({"skill": "格斗", "target": 50}, context)
+
+    assert "combat_turn_hint" not in result

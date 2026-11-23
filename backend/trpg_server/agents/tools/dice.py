@@ -820,6 +820,44 @@ def _finalize_dice_metadata(
     return result
 
 
+# 战斗轮里的攻击/闪避属于对抗检定，必须由 combat.* 结算（它同时推进轮次与行动者）。
+# KP 若用普通检定拼战斗，骰子会成功失败地来回演，但战斗状态一动不动——玩家看到的就是
+# 「打完不换手、怪物打完不进下一轮」的死循环。这里在检定结果里塞一条结构化提醒。
+_COMBAT_CHECK_HINTS = ("格斗", "斗殴", "近战", "射击", "闪避", "回避", "反击", "缴械", "推倒", "压制")
+
+
+def _attach_combat_turn_hint(
+    result: dict[str, Any], context: Any, check_name: str | None = None
+) -> dict[str, Any]:
+    """战斗进行中却用普通检定拼战斗时，把正确的工具名与当前轮次回给模型。"""
+    if not isinstance(result, dict) or result.get("error") or result.get("pending"):
+        return result
+    label = str(check_name or result.get("skill") or "")
+    if not any(key in label for key in _COMBAT_CHECK_HINTS):
+        return result
+    room_dir = getattr(context, "room_dir", None)
+    if not room_dir:
+        return result
+    try:
+        from trpg_server.agents.room_state import load_room_state
+
+        combat = load_room_state(room_dir).get("combat")
+    except Exception:  # noqa: BLE001 - 附件信息失败不能影响检定本身
+        return result
+    if not (isinstance(combat, dict) and combat.get("active")):
+        return result
+    order = combat.get("order") or []
+    turn = int(combat.get("turn") or 0)
+    current = order[turn] if 0 <= turn < len(order) else ""
+    round_no = int(combat.get("round") or 1)
+    result["combat_turn_hint"] = (
+        f"当前房间有进行中的战斗（第 {round_no} 轮，行动者 {current or '未知'}）。"
+        "攻击、闪避、反击这些对抗必须用 combat.attack（远程用 combat.shoot）结算，"
+        "它才会推进到下一个行动者；用普通检定拼战斗不会改变战斗状态，回合会一直卡住。"
+    )
+    return result
+
+
 def _attach_trigger_reveal(result: dict[str, Any], arguments: dict[str, Any], context: Any) -> dict[str, Any]:
     """检定工具的可选能力：同一轮内揭示与该检定绑定的触发器。
 
@@ -961,6 +999,7 @@ def execute_roll_coc_check(arguments: dict[str, Any], context: Any) -> dict[str,
         result = roll_coc_check(merged)
         result = _finalize_dice_metadata(result, context)
     result = _attach_trigger_reveal(result, arguments, context)
+    result = _attach_combat_turn_hint(result, context, arguments.get("skill"))
     _log_roll_result(result, context, tool_name="dice.roll_coc_check", actor=_context_username(context))
     return result
 
@@ -1064,6 +1103,7 @@ def _execute_room_check(arguments: dict[str, Any], context: Any, *, tool_name: s
         result = roll_room_check(arguments, context)
         result = _finalize_dice_metadata(result, context)
     result = _attach_trigger_reveal(result, arguments, context)
+    result = _attach_combat_turn_hint(result, context, _resolve_check_name(arguments))
     _record_growth_mark(result, context, member)
     _log_roll_result(result, context, tool_name=tool_name, actor=player_name)
     return result

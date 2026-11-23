@@ -248,26 +248,125 @@ def _coerce_tool_call(raw: Any, index: int) -> dict[str, Any] | None:
     }
 
 
-def _embedded_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
+def _extract_json_list(content: str) -> list[Any] | None:
+    """从正文里取出一个 JSON 数组（顶层是 ``[{...}, {...}]`` 的调用列表）。"""
+    text = str(content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+    candidates = [text]
+    start, end = text.find("["), text.rfind("]")
+    if start >= 0 and end > start:
+        candidates.append(text[start : end + 1])
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            value = json.loads(candidate)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(value, list):
+            return value
+    return None
+
+
+def _is_call_blob(raw: Any) -> bool:
+    """正文里的一个对象是否「长得像一次工具调用」。
+
+    需要「工具名 + 参数」同时到位才算：``{"name": "dice_roll_coc_check",
+    "parameters": {...}}`` 是调用；``{"name": "杨修文", "action": "attack"}``
+    只是叙事数据。缺参数键的一律不当调用，避免把正常 JSON 正文误执行成工具。
+    """
+    if not isinstance(raw, dict):
+        return False
+    if isinstance(raw.get("function"), dict):
+        function = raw["function"]
+        return bool(str(function.get("name") or "").strip())
+    name = raw.get("name") or raw.get("tool") or raw.get("tool_name")
+    if not isinstance(name, str) or not name.strip():
+        return False
+    return any(key in raw for key in ("arguments", "parameters", "args"))
+
+
+def _embedded_tool_calls(
+    message: dict[str, Any], enabled_by_name: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
     """回收被写进正文 JSON 的工具调用（部分厂商在强制 JSON 输出时会这样）。
 
     期望形状（无 ``function`` 包装）::
 
         {"reply": "...", "tool_calls": [{"name": "room.x", "arguments": {...}}]}
 
-    也兼容标准 ``{"id":..., "type":"function", "function": {...}}`` 形状。正文里的
-    叙事文本会被丢弃（它早于工具结果生成、已过期），并与原生工具调用语义保持一致。
+    也兼容标准 ``{"id":..., "type":"function", "function": {...}}`` 形状，以及模型
+    最常写出的「裸调用」：正文里直接贴一个 ``{"name": "...", "parameters": {...}}``
+    （之前只认 ``tool_calls`` 包装，这种裸调用会被当成 KP 正文展示，工具从未执行，
+    骰子不真投、战斗回合也不推进）。
+
+    ``enabled_by_name`` 给出时只回收能解析到本轮已下发工具的调用，避免把叙事里
+    恰好同形的 JSON 误当成工具。
     """
     content = message.get("content")
-    if not isinstance(content, str) or "{" not in content:
+    if not isinstance(content, str) or ("{" not in content and "[" not in content):
         return []
+    raw_calls: list[Any] = []
     data = _extract_json_dict(content)
-    if not isinstance(data, dict):
+    if isinstance(data, dict):
+        listed = data.get("tool_calls") or data.get("toolCalls")
+        if isinstance(listed, list) and listed:
+            raw_calls = listed
+        elif _is_call_blob(data):
+            raw_calls = [data]
+    if not raw_calls:
+        listed_root = _extract_json_list(content)
+        if listed_root and all(_is_call_blob(item) for item in listed_root):
+            raw_calls = listed_root
+    if not raw_calls:
         return []
-    raw_calls = data.get("tool_calls") or data.get("toolCalls")
-    if not isinstance(raw_calls, list) or not raw_calls:
-        return []
-    return [call for call in (_coerce_tool_call(raw, index) for index, raw in enumerate(raw_calls)) if call]
+    calls = [
+        call
+        for call in (_coerce_tool_call(raw, index) for index, raw in enumerate(raw_calls))
+        if call
+    ]
+    if enabled_by_name:
+        calls = [
+            call
+            for call in calls
+            if _resolve_tool(str((call.get("function") or {}).get("name") or ""), enabled_by_name)[1]
+            is not None
+        ]
+    return calls
+
+
+def _embeds_unexecuted_tool_call(message: dict[str, Any]) -> bool:
+    """正文里贴了调用 JSON，但没有任何一次能对应到已下发工具。"""
+    content = message.get("content")
+    if not isinstance(content, str) or "{" not in content:
+        return False
+    data = _extract_json_dict(content)
+    if isinstance(data, dict):
+        listed = data.get("tool_calls") or data.get("toolCalls")
+        if isinstance(listed, list) and any(_is_call_blob(item) for item in listed):
+            return True
+        return _is_call_blob(data)
+    listed_root = _extract_json_list(content) or []
+    return bool(listed_root) and any(_is_call_blob(item) for item in listed_root)
+
+
+def _strip_tool_call_blob(content: str) -> str:
+    """把正文里那段没能执行的调用 JSON 剪掉，只保留叙述文字。"""
+    text = str(content or "")
+    if "{" not in text:
+        return text
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        return text
+    span = text[start : end + 1]
+    try:
+        parsed = json.loads(span)
+    except (TypeError, ValueError):
+        return text
+    if not (_is_call_blob(parsed) or isinstance(parsed.get("tool_calls"), list)):
+        return text
+    return (text[:start] + text[end + 1 :]).strip()
 
 
 def _resolve_tool(tool_name: str, enabled_by_name: dict[str, Any]) -> tuple[str, Any] | tuple[None, None]:
@@ -393,6 +492,8 @@ def run_agent_completion(
     tool_messages: list[dict[str, Any]] = []
     direct_messages: list[dict[str, Any]] = []
     empty_completion_retries = 0
+    # 正文里贴了不可执行调用 JSON 的退让次数：只纠正两轮，避免把工具轮次耗光。
+    blob_retries = 0
     total_token_count = 0
     has_token_count = False
     prompt_token_count = 0
@@ -476,14 +577,32 @@ def run_agent_completion(
         message = _extract_message(response_data)
         calls = _tool_calls(message)
         if not calls:
-            embedded_calls = _embedded_tool_calls(message)
+            embedded_calls = _embedded_tool_calls(message, enabled_by_name)
             if embedded_calls:
                 # 部分厂商在强制 JSON 输出时会把工具调用写进正文 JSON。这里把它还原成
                 # 原生调用继续执行，避免工具被静默丢弃、原始 JSON 被当成 KP 回复展示。
                 calls = embedded_calls
                 message = {**message, "tool_calls": embedded_calls}
+        if not calls and _embeds_unexecuted_tool_call(message) and blob_retries < 2:
+            # 正文里贴了调用 JSON，但一次都没能落到已下发工具上（名字拼错/工具本轮被禁用）。
+            # 这种回复一旦当成正文展示，玩家就只看到一段假动作：骰子没投、状态没推进，
+            # 而且同一句输入会命中缓存反复复用同一段回复（表现为「卡在同一个回合」）。
+            # 这里退回一轮明确纠正，而不是把裸 JSON 展示给玩家。
+            blob_retries += 1
+            logger.info("Agent pasted an unexecutable tool call in content; asking it to retry natively")
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "你上一条回复把工具调用写成了正文 JSON，系统没有执行它（工具名必须与下发的一致，"
+                        "且要用接口原生的 function call 字段发送）。请重新发起这次调用，"
+                        "不要描述「即将调用」，也不要把调用 JSON 粘在正文里；拿到工具结果后再叙事。"
+                    ),
+                }
+            )
+            continue
         if not calls:
-            content = str(message.get("content") or "")
+            content = _strip_tool_call_blob(str(message.get("content") or ""))
             # Some providers occasionally return an empty assistant message
             # after a tool call (or transiently on a normal completion). Give
             # the model one chance to continue before reporting no response.
@@ -654,3 +773,12 @@ def run_agent_completion(
             "如需继续，请再发送一条消息。）"
         ),
     )
+
+
+def contains_tool_call_blob(content: Any) -> bool:
+    """回复正文里是否残留「没能执行」的调用 JSON。
+
+    这类回复一旦写入回复缓存，玩家用同一句话重试就会拿到同一段假动作（工具没执行、
+    状态没变化），表现成「卡在同一个回合」。缓存层用这个判断拒绝缓存。
+    """
+    return bool(str(content or "").strip()) and _embeds_unexecuted_tool_call({"content": str(content or "")})

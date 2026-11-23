@@ -25,7 +25,7 @@ from trpg_server.agents.ai_request import merge_request_template
 from trpg_server.agents.config import load_ai_runtime_config
 from trpg_server.agents.context import build_agent_context
 from trpg_server.agents.profiles import resolve_agent_profile, with_graph_tools
-from trpg_server.agents.runtime import run_agent_completion
+from trpg_server.agents.runtime import contains_tool_call_blob, run_agent_completion
 from trpg_server.agents.hint_guard import strip_action_hints
 from trpg_server.agents.structured_output import apply_state_updates, parse_kp_response, validate_state_updates, validate_structured_response
 from trpg_server.agents.telemetry import build_provider_cache_key, calculate_cache_hit_rate, record_ai_usage
@@ -1879,7 +1879,17 @@ def run_turn(message_data, *, prefix_cache, exact_cache, semantic_cache):
         if speaker:
             user_history_item["speaker"] = speaker
         history.extend([user_history_item, {"role": "assistant", "content": ai_response}])
-        if not result.tool_messages and not direct_messages and not validated_updates and structured is None and not suggestions and not world_override:
+        if (
+            not result.tool_messages
+            and not direct_messages
+            and not validated_updates
+            and structured is None
+            and not suggestions
+            and not world_override
+            # 正文里残留未执行的调用 JSON：这次工具没真跑，缓存它只会让玩家重试时
+            # 反复拿到同一段假动作（「卡在同一个回合」）。
+            and not contains_tool_call_blob(ai_response)
+        ):
             # 有副作用的输入（检定/触发/转场）即使本次没有工具产出，也不写缓存：
             # 下一次相同输入很可能是新的裁定，复用旧叙事会削弱剧本遵守度。
             cache_value = {"content": ai_response, "token_count": token_count, "structured_output": None, "knowledge_usage": knowledge_usage}
