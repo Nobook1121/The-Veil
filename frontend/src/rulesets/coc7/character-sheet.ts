@@ -1011,7 +1011,11 @@ interface Window {
             const skillKey = resolveSkillKey(skill);
             const specialtyKey = String(skill.specialtyKey || "").trim();
             // 已存在 / 导入的角色卡以卡片自身存的基础值为准；新建或空技能使用有效基础值。
-            const base = hasSource && Object.prototype.hasOwnProperty.call(skill, "base")
+            // 例外：闪避=敏捷/2、母语=教育是派生基础值，不能信任卡上缓存的旧值（否则 AI 写卡 /
+            // 旧目录生成的「闪避 25」会一直留到房间检定里），必须每次按当前属性重算（仍尊重
+            // 职业 / 房规 / 用户 / 管理员对这两项技能的覆盖）。
+            const dynamicBase = skillKey === "dodge" || skillKey === "languageOwn";
+            const base = hasSource && !dynamicBase && Object.prototype.hasOwnProperty.call(skill, "base")
                 ? clampNumber(skill.base, 0, 99, resolveEffectiveBase(skillKey, specialtyKey, attributes, occupation))
                 : resolveEffectiveBase(skillKey, specialtyKey, attributes, occupation);
             const occupationPoints = clampNumber(skill.occupationPoints, 0, 99, 0);

@@ -155,6 +155,43 @@ def mov_value(sheet: Mapping[str, Any] | None) -> int:
     return max(1, mov)
 
 
+# 旧技能目录里「闪避」被误写成固定基础值 25；CoC7 规则里闪避没有固定基础值，
+# 恒等于 DEX/2。派生时只修复这个已知错误值（或缺失），其它数值视为房规/职业覆盖，
+# 原样保留——避免把玩家或房规显式设的闪避基础值覆盖掉。
+DODGE_LEGACY_BASE = 25
+
+
+def _derive_dynamic_skill_bases(data: dict[str, Any]) -> None:
+    """把动态基础技能对齐到当前属性：闪避 = DEX/2。
+
+    前端 ``resolveEffectiveBase`` 对新建卡已经这样算；这里补后端权威口径，
+    让经由 AI 写卡 / 导入 / 旧目录生成的、闪避被写成 25 的卡在房间快照里也能纠正。
+    """
+    attributes = data.get("attributes") if isinstance(data.get("attributes"), dict) else {}
+    dex = max(0, attribute_value(attributes, "DEX", 0))
+    skills = data.get("skills")
+    if not isinstance(skills, list) or not dex:
+        return
+    dodge_base = max(0, dex // 2)
+    for skill in skills:
+        if not isinstance(skill, dict):
+            continue
+        key = str(skill.get("skillKey") or skill.get("id") or "").strip().casefold()
+        name = str(skill.get("name") or "").strip().casefold()
+        is_dodge = key == "dodge" or key.startswith("dodge__") or name in ("闪避", "dodge")
+        if not is_dodge:
+            continue
+        current = _as_int(skill.get("base"), -1)
+        if current not in (-1, DODGE_LEGACY_BASE):
+            continue
+        points = sum(
+            _as_int(skill.get(key_name), 0)
+            for key_name in ("occupationPoints", "interestPoints", "growthPoints")
+        )
+        skill["base"] = dodge_base
+        skill["value"] = dodge_base + points
+
+
 def derive_sheet(sheet: Mapping[str, Any] | None) -> dict[str, Any]:
     """按当前属性 / 克苏鲁神话值重算派生值，并夹紧现有资源。
 
@@ -172,6 +209,8 @@ def derive_sheet(sheet: Mapping[str, Any] | None) -> dict[str, Any]:
         if legacy in (None, ""):
             legacy = data.get("maxSan", data.get("max_san"))
         init = _clamp(legacy, 0, cap, cap)
+    # 初始理智值 = POW，但不能超过上限（99 − 克苏鲁神话值）。
+    init = min(init, cap)
     hp_max = max_hp(data)
     if not (attribute_value(attributes, "CON", 0) or attribute_value(attributes, "SIZ", 0)):
         # 兼容没有属性明细的旧卡 / 测试卡：保留原有上限，避免被算成 1。
@@ -208,6 +247,7 @@ def derive_sheet(sheet: Mapping[str, Any] | None) -> dict[str, Any]:
     data["build"] = build
     data["damageBonus"] = damage_bonus
     data["armor"] = _clamp(data.get("armor"), 0, 99, 0)
+    _derive_dynamic_skill_bases(data)
     # 技能封顶（7 版：任何技能不得超过 99%）。
     data["skillCap"] = SKILL_MAX
     # 属性封顶由插件声明，核心写路径只读这个键，不再写死具体数值。

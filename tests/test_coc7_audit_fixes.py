@@ -428,3 +428,42 @@ def test_fumble_threshold_derived_rule_only_when_not_customized():
     assert dice._success_level(96, 60) == "failure"  # 所需值 ≥50：默认只有 100 大失败
     assert dice._success_level(96, 60, 1, 90) == "fumble"  # 房规显式阈值优先
     assert dice._success_level(96, 40) == "fumble"  # 低于 50 沿用默认 96
+
+
+def test_derive_sheet_repairs_legacy_dodge_base_to_half_dex():
+    """旧目录把闪避基础值写成固定 25；7 版规则里闪避恒等于 DEX/2。"""
+    sheet = {
+        "attributes": _attributes(DEX=60),
+        "skills": [{"skillKey": "dodge", "name": "闪避", "base": 25, "value": 25}],
+    }
+
+    derived = get_plugin("coc7").schema.derive(sheet)
+
+    dodge = derived["skills"][0]
+    assert dodge["base"] == 30  # DEX 60 / 2
+    assert dodge["value"] == 30
+
+
+def test_derive_sheet_preserves_dodge_base_override():
+    """房规 / 职业显式覆盖的闪避基础值不能被当成旧目录错误值覆盖。"""
+    sheet = {
+        "attributes": _attributes(DEX=60),
+        "skills": [{"skillKey": "dodge", "name": "闪避", "base": 40, "value": 45, "occupationPoints": 5}],
+    }
+
+    derived = get_plugin("coc7").schema.derive(sheet)
+
+    dodge = derived["skills"][0]
+    assert dodge["base"] == 40
+    assert dodge["value"] == 45
+
+
+def test_initial_san_is_clamped_to_mythos_cap():
+    """初始理智值 = POW，但不能超过 99 − 克苏鲁神话值。"""
+    sheet = {"attributes": _attributes(POW=99), "skills": [{"name": "克苏鲁神话", "value": 20}]}
+
+    derived = get_plugin("coc7").schema.derive(sheet)
+
+    assert derived["maxSan"] == 79
+    assert derived["initialSan"] == 79  # min(POW 99, cap 79)，而不是 99
+    assert derived["currentSan"] == 79

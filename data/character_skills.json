@@ -372,7 +372,7 @@
       "labelKey": "skills.dodge",
       "repeatable": 1,
       "category": "战斗",
-      "base": 25,
+      "base": 0,
       "specialties": []
     },
     {
