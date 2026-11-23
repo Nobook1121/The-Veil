@@ -1384,7 +1384,11 @@ STASH_FILE_NAME = "stash.json"
 #: stash 只带 NPC 相关的告警摘要）。
 STASH_NPC_WARNING_CAP = 50
 #: 装配标记：``<room>/plugins/fvtt-world-import/provision.json``。
-PROVISION_MARKER_SCHEMA = 1
+#:
+#: schema 2：场景几何口径升级（bounds 由图片尺寸推导、墙 extent 校验）。
+#: 旧标记（schema 1）视为过期：下次房主进房自动按新口径重刷场景，
+#: 否则旧房间会一直保留 bounds=50 的世界（标尺 50 格、底图只占中间一小块）。
+PROVISION_MARKER_SCHEMA = 2
 
 
 def stash_path(storage_dir: Path | str) -> Path:
@@ -2054,12 +2058,27 @@ def auto_provision_room(room_id: str):
         )
 
     marker = _load_provision_marker(room_dir)
-    if marker is not None and str(marker.get("scenario_id") or "") == scenario_id:
+    # 幂等标记 + 口径升级：同剧本、但标记 schema 低于当前版本（或房主显式
+    # refresh=1）时，视为「已装配但数据口径过期」→ 重刷场景（不重并入 NPC）。
+    refresh_requested = str(
+        request.args.get("refresh")
+        or (request.get_json(silent=True) or {}).get("refresh")
+        or ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    same_scenario = (
+        marker is not None and str(marker.get("scenario_id") or "") == scenario_id
+    )
+    marker_schema = int(marker.get("schema") or 0) if isinstance(marker, dict) else 0
+    stale_marker = same_scenario and (
+        refresh_requested or marker_schema < PROVISION_MARKER_SCHEMA
+    )
+    if same_scenario and not stale_marker:
         return _provision_skipped(
             "already_provisioned",
             "本房间的世界包数据已装配过，不重复装配。",
             scenario_id=scenario_id,
         )
+    refresh_mode = same_scenario and stale_marker
 
     service = _map_service()
     if service is None:
@@ -2076,7 +2095,7 @@ def auto_provision_room(room_id: str):
             500,
             str(listing.get("code") or "map.scene_unavailable"),
         )
-    if listing.get("scenes"):
+    if listing.get("scenes") and not refresh_mode:
         return _provision_skipped(
             "room_has_scenes",
             "房间已有地图场景，跳过世界包自动装配。",
@@ -2188,7 +2207,11 @@ def auto_provision_room(room_id: str):
     scenario_repin = None
     npc_merged = 0
     npc_error = None
-    if npcs:
+    if refresh_mode:
+        # 重刷只处理地图场景：NPC 模块上一轮已并入绑定剧本，再并会无谓地
+        # 升一次剧本版本（并触发图谱重建）。
+        npc_merged = int(marker.get("npcs") or 0) if isinstance(marker, dict) else 0
+    if npcs and not refresh_mode:
         scenario_repin, npc_error = _npc_scenario_repin(room_dir, info, [dict(row) for row in npcs])
         if scenario_repin is not None:
             npc_merged = len(npcs)
@@ -2225,7 +2248,8 @@ def auto_provision_room(room_id: str):
         warnings.append("装配标记写入失败；再次进房可能重复探测，重复装配是幂等的。")
 
     world_title = str((stash.get("world") or {}).get("title") or "")
-    message = f"已自动装配世界包「{world_title}」：{len(results)} 个场景"
+    verb = "已按新口径重刷" if refresh_mode else "已自动装配"
+    message = f"{verb}世界包「{world_title}」：{len(results)} 个场景"
     if npc_merged:
         message += f"、{npc_merged} 个 NPC 模块"
     message += "。"
@@ -2234,6 +2258,7 @@ def auto_provision_room(room_id: str):
     return success_response(
         {
             "status": "provisioned",
+            "refreshed": refresh_mode,
             "scenario_id": scenario_id,
             "world": dict(stash.get("world") or {}),
             "scenes": results,

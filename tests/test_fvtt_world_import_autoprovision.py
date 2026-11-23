@@ -396,7 +396,7 @@ def test_auto_provision_hydrates_room_end_to_end(tmp_path, plugins):
 
     # 装配标记落盘（防重复）。
     marker = _marker(rooms)
-    assert marker["schema"] == 1
+    assert marker["schema"] == fvtt.PROVISION_MARKER_SCHEMA
     assert str(marker["scenario_id"]) == str(scenario_id)
     assert marker["scenes"] == 4 and marker["npcs"] == 12
     assert marker["npc_failed"] is False
@@ -520,3 +520,47 @@ def test_auto_provision_rejects_non_dnd5e_room(tmp_path, plugins):
     body = rv.get_json()
     assert body["error"] == "fvtt.ruleset_unsupported"
     assert "只有 dnd5e 房间" in body["message"]
+
+
+def test_stale_marker_triggers_scene_refresh(tmp_path, plugins):
+    """旧 schema 标记（bounds 口径升级前装配的房间）→ 重进房自动重刷场景。
+
+    回归：房间已装配过、标记存在时旧实现一律 already_provisioned，
+    bounds=50 的旧世界永远不会被新口径替换。
+    """
+    client, rooms, scenarios, _socket = _make_app(tmp_path)
+    scenario = _import_scenario(client, _require_zip(HEROES_ZIP))
+    _write_room(rooms, "room1", scenario_id=scenario["scenario_id"], scenario_version="0.1.6")
+    first = _provision(client)
+    body = first.get_json()
+    assert body["data"]["status"] == "provisioned" and body["data"]["refreshed"] is False
+
+    # 模拟旧版本装配标记：schema 1、场景已存在。
+    marker_path = rooms / "room1" / "plugins" / "fvtt-world-import" / "provision.json"
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    marker["schema"] = 1
+    marker_path.write_text(json.dumps(marker, ensure_ascii=False), encoding="utf-8")
+
+    second = _provision(client)
+    payload = second.get_json()["data"]
+    assert payload["status"] == "provisioned"
+    assert payload["refreshed"] is True, "旧 schema 标记应触发重刷而不是跳过"
+    assert "重刷" in second.get_json()["message"]
+    assert _marker(rooms)["schema"] == fvtt.PROVISION_MARKER_SCHEMA
+    # 重刷不重复并入 NPC（不无谓升剧本版本）。
+    assert payload["npcs"]["merged"] == marker.get("npcs")
+
+
+def test_explicit_refresh_flag_reruns_scenes(tmp_path, plugins):
+    """显式 refresh=1：即使标记是最新 schema 也重刷场景（房主手动触发）。"""
+    client, rooms, _scenarios, _socket = _make_app(tmp_path)
+    scenario = _import_scenario(client, _require_zip(HEROES_ZIP))
+    _write_room(rooms, "room1", scenario_id=scenario["scenario_id"], scenario_version="0.1.6")
+    _provision(client)
+
+    _login(client, 1, "alice")
+    rv = client.post("/api/plugins/fvtt-world-import/rooms/room1/auto-provision?refresh=1")
+    payload = rv.get_json()["data"]
+    assert rv.status_code == 200
+    assert payload["refreshed"] is True
+    assert len(payload["scenes"]) >= 1
