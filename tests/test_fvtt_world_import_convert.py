@@ -136,21 +136,29 @@ def sixian_convert(tmp_path_factory: pytest.TempPathFactory):
 def test_heroes_scene_grid_sizes_and_offsets(heroes_convert):
     converted, _skipped, _warnings, _index = heroes_convert
     by_bg = {item["background"]["path"]: item for item in converted}
-    # 4 个场景：150×2、192、282；282 超出 veil-map 16–256 单格窗口被跳过。
-    assert sorted(item["grid"]["size"] for item in converted) == [150, 150, 192]
+    # 4 个场景：150×2、192、282。282（宅邸二层）落在 16–512 窗口内，全部转换。
+    assert sorted(item["grid"]["size"] for item in converted) == [150, 150, 192, 282]
     mansion_1f = by_bg["assets/mansion-1f.jpg"]
     assert mansion_1f["grid"] == {"size": 192, "origin_x": 24.0, "origin_y": 92.0}
+    mansion_2f = by_bg["assets/mansion-2f.jpg"]
+    # 282 场景的原点直供：background.offsetX/offsetY = (-58, -50)。
+    assert mansion_2f["grid"] == {"size": 282, "origin_x": -58.0, "origin_y": -50.0}
     orphanage = by_bg["assets/orphanage-v1.jpg"]
     assert orphanage["grid"]["origin_x"] == 0.0 and orphanage["grid"]["origin_y"] == 0.0
     rain = by_bg["assets/rain-ambush-v1.jpg"]
     assert rain["grid"]["size"] == 150
 
 
-def test_heroes_skips_out_of_window_grid(heroes_convert):
+def test_heroes_accepts_282px_scene_without_skipping(heroes_convert):
+    """282px/格的大格场景不再被 grid_range 跳过（旧上限 256 会整场丢弃）。"""
     converted, skipped, warnings, _index = heroes_convert
-    assert len(converted) == 3
-    assert [item["code"] for item in skipped] == ["fvtt.grid_range"]
-    assert any("282" in text for text in warnings)
+    assert len(converted) == 4
+    assert skipped == []
+    assert not any("grid_range" in str(item) for item in skipped)
+    assert not any("不在" in text and "范围内" in text for text in warnings)
+    large = next(item for item in converted if item["grid"]["size"] == 282)
+    assert large["background"]["path"] == "assets/mansion-2f.jpg"
+    assert len(large["tokens"]) == 3  # 宅邸二层的 3 个棋子一并带入
 
 
 def test_heroes_counts_match_source(heroes_convert):
@@ -158,7 +166,7 @@ def test_heroes_counts_match_source(heroes_convert):
     assert len(converted) + len(skipped) == len(index.documents)
     assert sum(len(item["walls"]) for item in converted) == 23  # 全部属于孤儿院场景
     assert sum(len(item["lights"]) for item in converted) == 2
-    assert sum(len(item["tokens"]) for item in converted) == 14  # 17 - 3（随 282 场景跳过）
+    assert sum(len(item["tokens"]) for item in converted) == 17  # 4 场景全量
     for item in converted:
         source_id = item["source_scene_id"]
         assert item["source_counts"] == {
@@ -303,10 +311,22 @@ def test_convert_scene_rejects_hex_grid():
     assert excinfo.value.code == "fvtt.grid_hex"
 
 
-def test_convert_scene_rejects_grid_out_of_window():
+@pytest.mark.parametrize("grid_size", [16, 256, 257, 282, 512])
+def test_convert_scene_accepts_grid_within_window(grid_size):
+    """16–512 全部放行：256 是旧上限，282 是 heroes「宅邸（二层）」的实际值。"""
+    scene = cs.convert_scene(
+        _scene_doc(grid={"size": grid_size, "type": 1, "distance": 5, "units": "ft"}),
+        scene_id=f"grid{grid_size}",
+        background={"path": "assets/map.jpg", "name": "map.jpg", "bytes": 10},
+    )
+    assert scene["grid"]["size"] == grid_size
+
+
+@pytest.mark.parametrize("grid_size", [0, 15, 513, 1024])
+def test_convert_scene_rejects_grid_out_of_window(grid_size):
     with pytest.raises(cs.SceneSkip) as excinfo:
         cs.convert_scene(
-            _scene_doc(grid={"size": 300, "type": 1, "distance": 5, "units": "ft"}),
+            _scene_doc(grid={"size": grid_size, "type": 1, "distance": 5, "units": "ft"}),
             scene_id="big",
             background={"path": "assets/map.jpg", "name": "map.jpg", "bytes": 10},
         )
@@ -503,11 +523,12 @@ def test_inspect_reports_heroes_plan(app_env):
     data = rv.get_json()["data"]
     assert data["system"] == "dnd5e" and data["core_version"] == "13.351"
     assert data["version"] == "0.1.6"
-    assert data["scenes"] == 4 and data["convertible_scenes"] == 3
+    assert data["scenes"] == 4 and data["convertible_scenes"] == 4
     assert data["tokens"] == 17 and data["walls"] == 23 and data["lights"] == 2
     assert data["collections"]["actors"] is True and data["collections"]["journal"] is True
-    # 282 网格场景进警告，不进 convertible。
-    assert any("282" in text for text in data["warnings"])
+    # 282 网格场景（宅邸二层）现在可转换，不再进「网格像素不在范围内」警告。
+    assert not any("网格像素" in text for text in data["warnings"])
+    assert not any("282" in text for text in data["warnings"])
     active = [item for item in data["scenes_detail"] if item["active"]]
     assert len(active) == 1 and active[0]["convertible"] is True
 
@@ -519,12 +540,16 @@ def test_inspect_reports_sixian_plan(app_env):
     data = rv.get_json()["data"]
     assert data["scenes"] == 6 and data["convertible_scenes"] == 6
     assert data["tokens"] == 0 and data["walls"] == 482 and data["lights"] == 200
-    # actors 审计如实上报：14 个条目级效果按降级策略丢弃（仅计数）；
-    # journal 第四刀：sixian 的 journal 是空库，同样如实警告（0 条可转换）。
-    assert data["warnings"] == [
-        "14 个条目级效果（transfer buff）按降级策略丢弃，仅计数。",
-        "journal 集合为空库，没有可转换的 journal 条目。",
+    # actors 审计如实上报：14 个条目级效果按降级策略丢弃（仅计数）——**信息级
+    # notes**，不再混进 warnings（正常降级不该长得像错误）；
+    # journal 第四刀：sixian 的 journal 是空库，仍如实警告（0 条可转换）。
+    assert data["warnings"] == ["journal 集合为空库，没有可转换的 journal 条目。"]
+    assert data["notes"] == [
+        "已忽略 14 个条目级效果（transfer buff）——新版本此为正常降级："
+        "条目自身字段（AC/伤害/重量等）已按文档折算进角色卡，"
+        "这类「装备后自动加值」的附加效果不进产物、不在本系统运行时生效。"
     ]
+    assert data["actor_item_effects"] == 14
 
 
 @pytest.mark.parametrize(
@@ -616,9 +641,13 @@ def test_run_imports_heroes_scenes_into_room(app_env):
     assert rv.status_code == 200, rv.get_data(as_text=True)
     data = rv.get_json()["data"]
     assert data["world"]["version"] == "0.1.6"
-    assert len(data["scenes"]) == 3
-    assert [item["code"] for item in data["skipped"]] == ["fvtt.grid_range"]
-    assert data["totals"] == {"scenes": 3, "skipped": 1, "walls": 23, "lights": 2, "tokens": 14}
+    # 4 个场景全部入库：282px/格的「宅邸（二层）」不再被网格窗口跳过。
+    assert len(data["scenes"]) == 4
+    assert data["skipped"] == []
+    assert data["totals"] == {"scenes": 4, "skipped": 0, "walls": 23, "lights": 2, "tokens": 17}
+    large = next(item for item in data["scenes"] if item["grid_size"] == 282)
+    assert large["background"]["width"] == 7500
+    assert large["background"]["height"] == 2570
 
     room_dir = rooms / "room1"
     scene_ids = {item["scene_id"] for item in data["scenes"]}
@@ -718,6 +747,20 @@ def test_run_reconciles_grid_offset_calibration_and_token_cells(app_env, heroes_
         assert saved["y"] == int(round((saved["cell_y"] + saved["offset_y"]) * 192)) + offset_y
         assert saved["cell_x"] == math.floor((saved["x"] - offset_x) / 192)
         assert saved["cell_y"] == math.floor((saved["y"] - offset_y) / 192)
+
+    # 282 网格（宅邸二层）：格坐标换算仍是「像素 ÷ grid 向下取整」，无 256 假设。
+    big = next(item for item in converted if "mansion-2f" in item["background"]["path"])
+    state = veil_map._normalize_map(veil_map.scene_store.load_scene(room_dir, big["scene_id"]))
+    assert state["grid_size"] == 282
+    offset_x, offset_y = state["grid_offset"]["x"], state["grid_offset"]["y"]
+    saved_tokens = {t["id"]: t for t in state["tokens"]}
+    assert len(saved_tokens) == 3
+    for token in big["tokens"]:
+        saved = saved_tokens[token["id"]]
+        assert saved["cell_x"] == math.floor((saved["x"] - offset_x) / 282)
+        assert saved["cell_y"] == math.floor((saved["y"] - offset_y) / 282)
+        assert saved["x"] == int(round((saved["cell_x"] + saved["offset_x"]) * 282)) + offset_x
+        assert saved["y"] == int(round((saved["cell_y"] + saved["offset_y"]) * 282)) + offset_y
 
 
 def _png_bytes(size: int) -> bytes:

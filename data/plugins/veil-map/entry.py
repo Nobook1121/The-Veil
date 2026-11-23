@@ -41,7 +41,13 @@ logger = logging.getLogger(__name__)
 MAP_VERSION = 3
 DEFAULT_GRID = 64
 MIN_GRID = 16
-MAX_GRID = 256
+# 每格像素上限：初版随手取的 256 窗口并不对应任何性能上限（真正的资源闸门是
+# media.MAX_IMAGE_DIMENSION / MAX_IMAGE_PIXELS、fog 掩码按「格」生成且边长受
+# 前端 FOG_MAX_DIM 约束，都与格大小无关），但真实世界包会用更大的格子——
+# FVTT 世界包 heroes-to-yuanshan 的「宅邸（二层）」就是 282px/格。放宽到 512
+# 覆盖这类高清导出，同时挡住明显误标（把图片尺寸当格大小）。改动需同步：
+# importer.GRID_MAX、ui/map.js MAX_GRID、fvtt-world-import convert_scenes.GRID_MAX。
+MAX_GRID = 512
 MAX_TOKENS = 200
 MAX_NAME = 40
 MAX_REASON = 120

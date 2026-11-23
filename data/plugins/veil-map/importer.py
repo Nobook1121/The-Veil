@@ -29,7 +29,9 @@ MAX_IMPORT_WALLS = 200
 MAX_IMPORT_LIGHTS = 100
 FEET_PER_CELL = 5
 GRID_MIN = 16
-GRID_MAX = 256
+# 与 entry.py 的 MIN_GRID/MAX_GRID 保持一致：真实世界包有 282px/格的高清导出
+# （FVTT heroes-to-yuanshan「宅邸（二层）」），256 的旧窗口会误拒这类地图。
+GRID_MAX = 512
 
 FORMAT_IMAGE = "image"
 FORMAT_UVTT = "uvtt"

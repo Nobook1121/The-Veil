@@ -3,11 +3,12 @@
 覆盖（两包真实 zip 对账 + 端到端 + 幂等矩阵 + 门闸）：
 
 - ``POST /scenario/import`` 的暂存产物：heroes → ``fvtt-world/stash.json``
-  3 个可转换场景 + 1 个跳过记录（282 网格），active 场景带墙/光/棋子，
+  4 个可转换场景（含 282px/格的「宅邸（二层）」，旧 256 上限会整场跳过），
+  active 场景带墙/光/棋子，
   背景图内容寻址落剧本 ``assets/``（stash 只引用相对路径）；12 个 NPC
   statblock（fvtt_actor_id 幂等键）；sixian → 6 场景 + 14 NPC；
 - ``POST /rooms/<id>/auto-provision`` 端到端（真实 veil-map ``map_service``）：
-  房间出现 3 个场景 + active 场景含棋子、NPC 模块幂等并入剧本并升版重钉
+  房间出现 4 个场景 + active 场景含棋子、NPC 模块幂等并入剧本并升版重钉
   （0.1.6 → 0.1.7）、装配标记落盘、socket 广播 ``room_map_changed``；
 - 幂等矩阵：二调 ``already_provisioned`` 零写入、房间已有场景
   ``room_has_scenes``、无 stash 剧本 ``scenario_not_world``（可读文案）、
@@ -256,8 +257,8 @@ def test_import_heroes_stashes_scenes_and_npcs(tmp_path, plugins):
     # 响应带 stash 摘要；开团指引改为「进房自动装配」+ 手动兜底。
     assert data["stash"] == {
         "written": True,
-        "scenes": 3,
-        "skipped": 1,
+        "scenes": 4,
+        "skipped": 0,
         "npcs": 12,
         "assets_bytes": data["stash"]["assets_bytes"],
         "warnings": data["stash"]["warnings"],
@@ -271,9 +272,10 @@ def test_import_heroes_stashes_scenes_and_npcs(tmp_path, plugins):
     assert stash["schema"] == 1
     assert stash["world"]["id"] == "heroes-to-yuanshan"
     assert stash["world"]["version"] == "0.1.6"
-    # heroes 4 场景：3 个可转换进 stash + 1 个 282 网格跳过记录。
-    assert len(stash["scenes"]) == 3
-    assert [row["code"] for row in stash["skipped"]] == ["fvtt.grid_range"]
+    # heroes 4 场景全部进 stash：282px/格的「宅邸（二层）」不再因网格窗口被跳过。
+    assert len(stash["scenes"]) == 4
+    assert stash["skipped"] == []
+    assert any(row["grid"]["size"] == 282 for row in stash["scenes"])
 
     active_rows = [row for row in stash["scenes"] if row["active"]]
     assert len(active_rows) == 1
@@ -339,7 +341,7 @@ def test_import_upgrade_refreshes_stash_in_place(tmp_path, plugins):
     second = _import_scenario(client, HEROES_ZIP)
     assert second["scenario_id"] == scenario_id and second["created"] is False
     stash = _stash(scenarios, scenario_id)
-    assert len(stash["scenes"]) == 3 and len(stash["npcs"]) == 12
+    assert len(stash["scenes"]) == 4 and len(stash["npcs"]) == 12
     # 内容寻址：同图重导资产集合零增长。
     assets_after = {
         path.name for path in (scenarios / f"scenario-{scenario_id}" / "assets").iterdir()
@@ -363,7 +365,7 @@ def test_auto_provision_hydrates_room_end_to_end(tmp_path, plugins):
 
     # 房间出现全部场景，FVTT active 场景被激活。
     assert payload["status"] == "provisioned"
-    assert len(payload["scenes"]) == 3
+    assert len(payload["scenes"]) == 4
     assert payload["scene_failures"] == []
     active_id = payload["active_scene_id"]
     assert active_id == next(row["scene_id"] for row in payload["scenes"] if row["active"])
@@ -376,7 +378,7 @@ def test_auto_provision_hydrates_room_end_to_end(tmp_path, plugins):
     # active 场景（雨中伏击）本身 0 段墙——墙在孤儿院场景，只对账计数相等。
     assert len(active_state["walls"]) == active_summary["walls"]
 
-    # stash 逐场景与 veil-map 落库对账（全部 3 个场景都在房间场景库）。
+    # stash 逐场景与 veil-map 落库对账（全部 4 个场景都在房间场景库，含 282px 大格）。
     on_disk = {
         path.name
         for path in (room_dir / "plugins" / "veil-map" / "scenes").iterdir()
@@ -396,7 +398,7 @@ def test_auto_provision_hydrates_room_end_to_end(tmp_path, plugins):
     marker = _marker(rooms)
     assert marker["schema"] == 1
     assert str(marker["scenario_id"]) == str(scenario_id)
-    assert marker["scenes"] == 3 and marker["npcs"] == 12
+    assert marker["scenes"] == 4 and marker["npcs"] == 12
     assert marker["npc_failed"] is False
     assert marker["active_scene_id"] == active_id
 

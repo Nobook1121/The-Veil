@@ -26,7 +26,11 @@ from typing import Any
 
 GRID_TYPE_SQUARE = 1
 GRID_MIN = 16
-GRID_MAX = 256
+# 与 veil-map entry.py 的 MIN_GRID/MAX_GRID、importer.GRID_MAX 同步。真实世界包
+# 会用更大的格（heroes-to-yuanshan「宅邸（二层）」= 282px），旧窗口 256 会让
+# 这类场景被整场跳过；512 覆盖现有样例，同时仍能挡住「把图片尺寸当格大小」的
+# 明显误标。放宽后下游无需再改：格坐标 = 像素 ÷ grid、迷雾按「格」生成。
+GRID_MAX = 512
 # 与 veil-map 的上限对齐（超限截断并写警告，不静默丢）。
 MAX_WALLS = 200
 MAX_LIGHTS = 100

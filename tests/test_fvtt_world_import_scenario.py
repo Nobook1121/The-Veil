@@ -158,10 +158,13 @@ def test_import_heroes_creates_openable_scenario(tmp_path, plugins):
     assert counts["modules"] == 7 and counts["journals"] == 2 and counts["pages"] == 7
     assert counts["nodes"] == 14 and counts["edges"] > 0
     assert counts["scenes"] == 4 and counts["characters"] == 10
-    # heroes 有一张网格像素超限的场景被审计如实判为不可转换（convert 刀同口径）。
-    assert counts["npcs"] == 12 and counts["convertible_scenes"] == 3
-    # 测试应用没有 AI 平台配置 → 语义增强确定性降级（告警如实上报）。
-    assert any("AI 语义增强不可用" in text for text in data["warnings"])
+    # heroes 的 4 个场景全部可转换（282px/格的宅邸二层在 16–512 窗口内）。
+    assert counts["npcs"] == 12 and counts["convertible_scenes"] == 4
+    # AI 语义增强**默认关闭** → 纯确定性切块（不读 AI 配置、不发网络请求）；
+    # 「用没用 AI」是信息级说明（notes），不进 warnings。
+    assert data["ai"]["enabled"] is False
+    assert not any("AI 语义增强" in text for text in data["warnings"])
+    assert any("确定性" in text for text in data["notes"])
     # 开团指引：剧本 id + 现有开房流程（POST /api/rooms scenario_id 直选）。
     open_room = data["open_room"]
     assert open_room["scenario_id"] == scenario_id
@@ -230,8 +233,8 @@ def test_import_heroes_is_idempotent_upgrades_in_place(tmp_path, plugins):
     assets_before = {
         path.name for path in (scenarios / f"scenario-{scenario_id}" / "assets").iterdir()
     }
-    # 第六刀后 assets/ 除封面外还有 stash 场景背景（heroes 3 个可转换场景）。
-    assert len(assets_before) == 4
+    # 第六刀后 assets/ 除封面外还有 stash 场景背景（heroes 4 个可转换场景）。
+    assert len(assets_before) == 5
 
     second = _import(client, HEROES_ZIP)
     assert second.status_code == 200
@@ -448,3 +451,57 @@ def _record_from_dirs(scenarios: Path) -> dict[str, Any]:
     dirs = _scenario_dirs(scenarios)
     assert len(dirs) == 1
     return json.loads((dirs[0] / "scenario.json").read_text(encoding="utf-8"))
+
+
+# -- 不阻塞导入 + 降噪（journal AI 默认确定性 / transfer buff 降为说明） ------
+
+
+def _deterministic_journal_counts(zip_path: Path) -> dict[str, int]:
+    """同一份包在「无 AI 回调」下的确定性转换结果（纯转换层，零端点）。"""
+    from fvtt_world_import.convert_journal import convert_world_journal
+    from fvtt_world_import.world_package import extract_package, read_journal
+
+    import tempfile as _tempfile
+
+    with open(zip_path, "rb") as handle:
+        raw = handle.read()
+    with _tempfile.TemporaryDirectory(prefix="fvtt-parity-") as workdir:
+        pkg = extract_package(raw, workdir)
+        index = read_journal(pkg)
+        converted = convert_world_journal(index, world_title=str(pkg.summary().get("title") or ""))
+    return dict(converted["totals"])
+
+
+def test_import_quick_path_matches_deterministic_conversion(tmp_path, plugins):
+    """快速导入（默认无 AI）= 确定性切块，产物与纯转换层逐项一致。"""
+    client, _scenarios = _make_app(tmp_path)
+    rv = _import(client, _require_zip(HEROES_ZIP))
+    assert rv.status_code == 200
+    data = rv.get_json()["data"]
+    expected = _deterministic_journal_counts(_require_zip(HEROES_ZIP))
+
+    counts = data["counts"]
+    assert data["ai"]["enabled"] is False
+    assert counts["modules"] == expected["modules"] == 7
+    assert counts["chunks"] == expected["chunks"]  # 确定性整页切块：每页一块
+    assert counts["nodes"] == expected["nodes"]
+    assert counts["edges"] == expected["edges"]
+    assert data["degradations"] == {}
+    # 「用没用 AI」是说明，不是警告。
+    assert not any("AI 语义增强" in text for text in data["warnings"])
+    assert any("确定性" in text for text in data["notes"])
+
+
+def test_import_item_effect_notes_are_not_warnings(tmp_path, plugins):
+    """条目级 transfer buff 计数进 notes（正常降级），不出现在 warnings。"""
+    client, _scenarios = _make_app(tmp_path)
+    rv = _import(client, _require_zip(SIXIAN_ZIP))
+    assert rv.status_code == 200
+    data = rv.get_json()["data"]
+
+    assert not any("条目级效果" in text for text in data["warnings"])
+    assert not any("transfer buff" in text for text in data["warnings"])
+    notes = [text for text in data["notes"] if "条目级效果" in text]
+    assert notes and "14 个" in notes[0]
+    assert "正常降级" in notes[0]
+    assert data["counts"]["notes"] == len(data["notes"])

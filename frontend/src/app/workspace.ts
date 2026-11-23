@@ -118,6 +118,11 @@
         return Math.max(minimum, Math.min(maximum, value));
     }
 
+    // 画布网格的每格像素窗口，与 veil-map 服务端 MIN_GRID/MAX_GRID 同步：
+    // 真实世界包有 282px/格的高清地图，钳到 256 会把它们悄悄改小。
+    const STAGE_GRID_MIN = 16;
+    const STAGE_GRID_MAX = 512;
+
     function normalize(value: unknown): string {
         return String(value ?? "").trim().toLowerCase();
     }
@@ -716,7 +721,7 @@
         const view: StageView = {
             background: backgroundSpec.src,
             backgroundGeometry: backgroundSpec.geometry,
-            gridSize: Math.max(16, Math.min(256, Number(declared?.grid_size || stored?.grid_size || 64))),
+            gridSize: clamp(Number(declared?.grid_size || stored?.grid_size || 64), STAGE_GRID_MIN, STAGE_GRID_MAX),
             gridOffset: normalizeGridOffset(declared?.grid_offset || stored?.grid_offset),
             markers,
         };
@@ -1058,7 +1063,7 @@
             }
         }
         if (Number.isFinite(view.gridSize)) {
-            const grid = clamp(Number(view.gridSize), 16, 256);
+            const grid = clamp(Number(view.gridSize), STAGE_GRID_MIN, STAGE_GRID_MAX);
             if (grid !== current.gridSize) {
                 current.gridSize = grid;
                 changed = true;

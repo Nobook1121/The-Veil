@@ -1514,6 +1514,70 @@ def test_import_foundry_scene_with_embedded_image(client):
     assert state["ambient_light"]["darkness"] == 0.4
 
 
+def test_grid_size_window_accepts_large_grids(client):
+    """每格像素窗口 16–512：257 / 282 / 512 放行（旧上限 256 会误拒世界包），513 拒绝。"""
+    manager, _app = client
+    _login(manager, "u1")
+    for grid in (256, 257, 282, 512):
+        response = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map", {"grid_size": grid})
+        assert response.status_code == 200, f"grid={grid}: {response.get_data(as_text=True)}"
+        assert _map(manager)["map"]["grid_size"] == grid
+
+    rejected = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map", {"grid_size": 513})
+    assert rejected.status_code == 400
+    assert rejected.get_json()["code"] == "map.invalid_grid"
+    assert "16–512" in rejected.get_json()["message"]
+    # 拒绝的写请求不改状态。
+    assert _map(manager)["map"]["grid_size"] == 512
+
+    too_small = _write(manager, "put", "/api/plugins/veil-map/rooms/room1/map", {"grid_size": 15})
+    assert too_small.status_code == 400
+    assert too_small.get_json()["code"] == "map.invalid_grid"
+
+
+def test_import_foundry_scene_with_282px_grid_keeps_cells_and_fog_in_sync(client):
+    """282px/格的真机场景：图片 1128×564 = 4×2 格，木格坐标/迷雾掩码都按「格」走。"""
+    manager, _app = client
+    _login(manager, "u1")
+    scene = {
+        "name": "宅邸（二层）",
+        "width": 1128,
+        "height": 564,
+        "background": {"src": "data:image/png;base64," + base64.b64encode(_png(1128, 564)).decode()},
+        "grid": {"size": 282, "distance": 5, "units": "ft", "offsetX": 0, "offsetY": 0},
+        "walls": [{"c": [0, 0, 282, 0], "sight": 1, "move": 1, "light": 1, "door": 0}],
+        "lights": [{"x": 141, "y": 141, "config": {"dim": 30, "bright": 10, "color": "#ffaa00", "alpha": 0.8}}],
+        "environment": {"darkness": 0.4},
+    }
+
+    response = _import_map(manager, json.dumps(scene).encode(), "scene.json", "foundry-282")
+    assert response.status_code == 200, response.get_data(as_text=True)
+    data = response.get_json()["data"]
+    assert data["import"]["format"] == "foundry"
+    state = data["map"]
+    assert state["grid_size"] == 282
+    # 「格 = 图片像素 ÷ 282」仍然成立：1128/282 = 4 格、564/282 = 2 格。
+    assert state["calibration"]["cells_across"] == 4
+    assert state["calibration"]["cells_down"] == 2
+    assert len(state["walls"]) == 1 and len(state["lights"]) == 1
+    # 迷雾掩码按「格」生成，分辨率只看 bounds_cells，与每格像素无关。
+    assert state["fog"]["grid_size"] == 282
+    assert state["fog"]["bounds_cells"] == state["bounds_cells"]
+    assert state["bounds_cells"] >= max(4, 2)
+
+
+def test_import_uvtt_with_282px_grid_is_accepted(client):
+    """UVTT 的 pixels_per_grid 走同一窗口，282 不再被拒。"""
+    manager, _app = client
+    _login(manager, "u1")
+    payload = _uvtt_payload(width=1128, height=564, grid=282)
+    response = _import_map(manager, json.dumps(payload).encode(), "map.dd2vtt", "uvtt-282")
+    assert response.status_code == 200, response.get_data(as_text=True)
+    state = response.get_json()["data"]["map"]
+    assert state["grid_size"] == 282
+    assert state["calibration"]["cells_across"] == 4
+
+
 def test_import_foundry_external_image_is_rejected_with_scope(client):
     manager, _app = client
     _login(manager, "u1")
