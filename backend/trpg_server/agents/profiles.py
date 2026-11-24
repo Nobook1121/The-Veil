@@ -183,19 +183,21 @@ def build_kp_tool_names(ruleset_id: str | None = None) -> list[str]:
     """按规则集组装 KP 工具：核心工具 + 插件声明 + 规则的 allow/deny 裁剪。"""
     names = list(CORE_KP_TOOL_NAMES)
     index = names.index("room.remember_fact") + 1
-    extra = [
-        name
-        for name in (
-            *ruleset_tool_names(ruleset_id),
-            *combat_budget_tool_names(ruleset_id),
-            *spell_tool_names(ruleset_id),
-            *effect_tool_names(ruleset_id),
-            *rest_tool_names(ruleset_id),
-            *workflow_tool_names(ruleset_id),
-            *plugin_tool_names(ruleset_id),
-        )
-        if name not in names
-    ]
+    # 逐个去重：规则集插件与插件 agent_tools 可能声明同一个工具
+    # （例如 dnd5e.start_encounter 同时在两侧），一起收进列表会让
+    # OpenAI 兼容平台直接 400「Tool names must be unique」。
+    extra: list[str] = []
+    for name in (
+        *ruleset_tool_names(ruleset_id),
+        *combat_budget_tool_names(ruleset_id),
+        *spell_tool_names(ruleset_id),
+        *effect_tool_names(ruleset_id),
+        *rest_tool_names(ruleset_id),
+        *workflow_tool_names(ruleset_id),
+        *plugin_tool_names(ruleset_id),
+    ):
+        if name and name not in names and name not in extra:
+            extra.append(name)
     names[index:index] = extra
     deny, allow = ruleset_kp_tool_policy(ruleset_id)
     if deny:

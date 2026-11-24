@@ -105,3 +105,27 @@ def test_ai_runtime_config_reads_max_tokens_constraint(tmp_path):
     assert config.constrain_max_tokens is True
     assert config.max_tokens == 2048
     assert load_ai_runtime_config(tmp_path / "missing").constrain_max_tokens is True
+
+
+def test_build_kp_tool_names_dedupes_overlapping_ruleset_and_plugin_tools(monkeypatch):
+    """规则集与插件 agent_tools 声明同名工具时只能下发一次。
+
+    线上表现是平台直接 400「Tool names must be unique」（dnd5e.start_encounter
+    同时出现在 DND5E_TOOL_NAMES 与 plugin.json 的 agent_tools 列表）。
+    """
+    from trpg_server.agents import profiles
+
+    monkeypatch.setattr(profiles, "ruleset_tool_names", lambda _: ["dnd5e.start_encounter", "dnd5e.roll_check"])
+    monkeypatch.setattr(profiles, "plugin_tool_names", lambda _: ["dnd5e.start_encounter", "dnd5e.formula_eval"])
+    monkeypatch.setattr(profiles, "combat_budget_tool_names", lambda _: [])
+    monkeypatch.setattr(profiles, "spell_tool_names", lambda _: [])
+    monkeypatch.setattr(profiles, "effect_tool_names", lambda _: [])
+    monkeypatch.setattr(profiles, "rest_tool_names", lambda _: [])
+    monkeypatch.setattr(profiles, "workflow_tool_names", lambda _: [])
+    monkeypatch.setattr(profiles, "ruleset_kp_tool_policy", lambda _: (frozenset(), ()))
+
+    names = profiles.build_kp_tool_names("dnd5e")
+
+    assert names.count("dnd5e.start_encounter") == 1
+    assert len(names) == len(set(names))
+    assert "dnd5e.formula_eval" in names

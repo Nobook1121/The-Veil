@@ -454,6 +454,69 @@ def _canonical_call_signature(tool_name: str, arguments: Any) -> str:
     return f"{tool_name}:{normalized}"
 
 
+_CHECK_TOOL_NAMES = frozenset({"check.roll_room_check", "dice.roll_coc_check"})
+
+
+def _check_label(arguments: Any) -> str:
+    """从检定参数里提取归一化技能名（去掉「检定」后缀与空白）。"""
+    if not isinstance(arguments, dict):
+        return ""
+    for key in ("skill", "name", "check", "check_name"):
+        value = str(arguments.get(key) or "").strip()
+        if value:
+            if value.endswith("检定"):
+                value = value[:-2].strip()
+            # 常见同义写法归一：AI 会把「侦察」写成「侦查」。
+            if value == "侦查":
+                value = "侦察"
+            return value.casefold()
+    return ""
+
+
+def _check_roller(arguments: Any) -> str:
+    if not isinstance(arguments, dict):
+        return ""
+    return str(
+        arguments.get("player_name")
+        or arguments.get("character_name")
+        or arguments.get("playerName")
+        or ""
+    ).strip().casefold()
+
+
+def _check_already_rolled(tool_state: dict[str, Any], label: str, roller: str) -> dict[str, Any] | None:
+    """同一回合内同一技能是否已经掷过（房间检定与 dice 检定视为同一件事）。"""
+    if not label:
+        return None
+    rolled = tool_state.get("rolled_checks")
+    if not isinstance(rolled, list):
+        return None
+    for entry in rolled:
+        if not isinstance(entry, dict) or entry.get("label") != label:
+            continue
+        other = str(entry.get("roller") or "")
+        # 任意一侧没有指定玩家时按技能名视为同一检定；两边都指定则必须同一人。
+        if not roller or not other or roller == other:
+            return entry
+    return None
+
+
+def _duplicate_check_notice(label: str, entry: dict[str, Any]) -> str:
+    summary = str(entry.get("summary") or "").strip()
+    detail = f"结果：{summary}" if summary else "请直接使用上一条检定结果"
+    return json.dumps(
+        {
+            "reused": True,
+            "duplicate_check": True,
+            "note": (
+                f"本次行动已经完成「{label}」的检定，{detail}；"
+                "不要为同一次行动重复投掷（房间检定与 dice 检定只算一次），继续叙事即可。"
+            ),
+        },
+        ensure_ascii=False,
+    )
+
+
 def _dedupe_reuse_notice(tool_name: str) -> str:
     """重复调用被短路时回传给模型的说明，避免它以为"没调用成功"而反复重试。"""
     return (
@@ -481,6 +544,11 @@ def run_agent_completion(
     payload = {**base_payload}
     messages = list(payload.get("messages", []))
     payload["messages"] = messages
+    # 每个 AI 回合重置一次「本回合已掷检定」，避免上一回合的检定把这一回合
+    # 同名技能误判成重复投掷。
+    _state = getattr(context, "tool_state", None)
+    if isinstance(_state, dict):
+        _state["rolled_checks"] = []
     excluded = {str(name) for name in (excluded_tools or set())}
     enabled_tools = [tool for tool in registry.select(profile.tool_names) if tool.name not in excluded]
     if enabled_tools:
@@ -656,6 +724,34 @@ def run_agent_completion(
             )
             related = tool_state.get("no_dedupe_tools") if isinstance(tool_state, dict) else None
             no_dedupe = {str(name) for name in related} if isinstance(related, (list, tuple, set)) else set()
+
+            # 检定去重按「技能 + 玩家」算，而不是按参数逐字比对：KP 经常先调
+            # check.roll_room_check（从卡上取目标值），再补一次 dice.roll_coc_check
+            # （显式传 target），同一次行动就会掷两次。这里直接短路第二次。
+            try:
+                preview_arguments = _parse_arguments(function.get("arguments"))
+            except Exception:  # noqa: BLE001 - 参数坏掉交给下面的执行路径报错
+                preview_arguments = None
+            if (
+                dedupe_tool_calls
+                and isinstance(tool_state, dict)
+                and resolved_name in _CHECK_TOOL_NAMES
+                and resolved_name not in no_dedupe
+            ):
+                label = _check_label(preview_arguments)
+                previous = _check_already_rolled(tool_state, label, _check_roller(preview_arguments))
+                if previous is not None:
+                    logger.info("Agent check %s already rolled this turn; reused", label)
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.get("id") or tool_name,
+                            "name": to_api_tool_name(resolved_name),
+                            "content": _duplicate_check_notice(label, previous),
+                        }
+                    )
+                    continue
+
             if dedupe_tool_calls and already_called and resolved_name not in no_dedupe:
                 logger.info("Agent tool %s called again with identical arguments; reused", resolved_name)
                 messages.append(
@@ -690,8 +786,32 @@ def run_agent_completion(
 
             if isinstance(tool_state, dict) and isinstance(result, dict):
                 tool_state["last_tool"] = resolved_name
-                if resolved_name in {"check.roll_room_check", "dice.roll_coc_check"}:
+                if resolved_name in _CHECK_TOOL_NAMES:
                     tool_state["last_check"] = result
+                    # 只登记真正掷出的结果；pending 状态还没掷，留给后续完成。
+                    if not result.get("error") and not result.get("pending"):
+                        label = _check_label(arguments)
+                        if label:
+                            rolled = tool_state.setdefault("rolled_checks", [])
+                            if isinstance(rolled, list) and _check_already_rolled(
+                                tool_state, label, _check_roller(arguments)
+                            ) is None:
+                                rolled.append(
+                                    {
+                                        "label": label,
+                                        "roller": _check_roller(arguments),
+                                        "tool": resolved_name,
+                                        "summary": str(
+                                            result.get("summary")
+                                            or (
+                                                result["visible_message"].get("content")
+                                                if isinstance(result.get("visible_message"), dict)
+                                                else ""
+                                            )
+                                            or ""
+                                        )[:300],
+                                    }
+                                )
 
             if isinstance(result, dict) and result.get("direct_message"):
                 direct_message = result["direct_message"]

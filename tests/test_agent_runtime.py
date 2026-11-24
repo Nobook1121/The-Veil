@@ -133,6 +133,82 @@ def test_runtime_short_circuits_repeated_identical_tool_calls():
     assert executions["count"] == 2
 
 
+def test_runtime_short_circuits_same_check_across_room_and_dice_tools():
+    """同一次行动里「房间检定 + dice 检定」只真正掷一次。
+
+    线上复现：KP 先 check.roll_room_check（从角色卡取目标值），又调
+    dice.roll_coc_check（显式传 target），玩家看到两张「侦察」骰桌。
+    """
+    executions = {"room": 0, "dice": 0}
+
+    def room_handler(arguments, context):
+        executions["room"] += 1
+        return {"skill": "侦察", "summary": "侦察检定：1d100=51，目标45"}
+
+    def dice_handler(arguments, context):
+        executions["dice"] += 1
+        return {"skill": "侦察", "summary": "侦察检定：1d100=86，目标25"}
+
+    tools = [
+        AgentTool(
+            name="check.roll_room_check",
+            description="room check",
+            parameters={"type": "object", "properties": {"skill": {"type": "string"}}},
+            handler=room_handler,
+        ),
+        AgentTool(
+            name="dice.roll_coc_check",
+            description="dice check",
+            parameters={"type": "object", "properties": {"skill": {"type": "string"}, "target": {"type": "integer"}}},
+            handler=dice_handler,
+        ),
+    ]
+
+    class TwoCheckToolsRequester:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, payload):
+            self.calls.append(payload)
+            if len(self.calls) == 1:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [
+                                    {"id": "call-1", "type": "function", "function": {"name": "check.roll_room_check", "arguments": "{\"skill\":\"侦察\",\"player_name\":\"Nobook1121\"}"}},
+                                    {"id": "call-2", "type": "function", "function": {"name": "dice.roll_coc_check", "arguments": "{\"skill\":\"侦查\",\"target\":25}"}},
+                                ],
+                            }
+                        }
+                    ]
+                }
+            return {"choices": [{"message": {"role": "assistant", "content": "done"}}]}
+
+    requester = TwoCheckToolsRequester()
+    result = run_agent_completion(
+        requester=requester,
+        base_payload={"model": "fake-model", "messages": [{"role": "user", "content": "侦察"}]},
+        profile=AgentProfile(
+            id="kp",
+            name="KP",
+            prompt="prompt",
+            tool_names=["check.roll_room_check", "dice.roll_coc_check"],
+        ),
+        registry=ToolRegistry(tools),
+        context=AgentRequestContext(room_id="room-1"),
+    )
+
+    assert executions["room"] == 1
+    assert executions["dice"] == 0
+    assert result.content == "done"
+    tool_messages = [m for m in requester.calls[-1]["messages"] if m.get("role") == "tool"]
+    assert len(tool_messages) == 2
+    assert "duplicate_check" in tool_messages[1]["content"]
+
+
 def test_runtime_allows_refetching_stateful_tools_across_rounds():
     """随状态变化的读取类工具（房间/剧本快照）跨轮允许重新调用，拿到最新数据。
 
@@ -1089,3 +1165,21 @@ def test_contains_tool_call_blob_only_flags_call_shaped_json():
     assert not contains_tool_call_blob('{"name": "杨修文", "action": "attack"}')
     assert not contains_tool_call_blob("杨修文挥起钥匙，砸向怪物。")
     assert not contains_tool_call_blob("")
+
+
+def test_check_dedupe_treats_room_check_and_dice_check_as_same_action():
+    """同一回合「房间检定 + dice 检定」只算一次，第二次被短路。"""
+    from trpg_server.agents import runtime
+
+    state = {
+        "rolled_checks": [
+            {"label": "侦察", "roller": "nobook1121", "summary": "侦察检定：1d100=51"}
+        ]
+    }
+    assert runtime._check_already_rolled(state, "侦察", "nobook1121") is not None
+    # dice 工具通常不传 player_name：仍应命中同一次检定。
+    assert runtime._check_already_rolled(state, "侦察", "") is not None
+    # 归一化：侦查 → 侦察。
+    assert runtime._check_label({"skill": "侦查检定"}) == "侦察"
+    # 别的技能不受影响。
+    assert runtime._check_already_rolled(state, "聆听", "") is None

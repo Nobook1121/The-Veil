@@ -358,14 +358,31 @@ class Coc7Checks:
         attrs = data.get("attributes")
         if isinstance(attrs, dict) and key and attrs.get(key) is not None:
             return _as_int(attrs.get(key), -1)
-        # 技能匹配同时接受原始名称、英文键与其本地化中文名（例如 stealth / 潜行）。
-        localized = SKILL_KEY_LABELS.get(normalized_name.casefold(), normalized_name)
-        expected = {normalized_name.casefold(), localized.casefold()}
+        # 技能匹配同时接受原始名称、英文键、本地化中文名与常见别名
+        # （例如 stealth / 潜行、侦查 → 侦察）。CHECK_NAME_ALIASES 原本只用于
+        # is_known_check_name，导致 AI 用「侦查」时卡上明明有「侦察」却报
+        # 「角色卡上没有找到这项技能」。
+        # 先去掉「检定」后缀，再做别名与本地化，保证「侦查检定」也能命中。
+        bare_name = normalized_name[:-2].strip() if normalized_name.endswith("检定") else normalized_name
+        canonical = CHECK_NAME_ALIASES.get(bare_name, bare_name)
+        key_text = canonical.casefold().replace(" ", "")
+        localized = SKILL_KEY_LABELS.get(key_text, canonical)
+
+        def _variants(text: str) -> set[str]:
+            folded = str(text or "").strip().casefold()
+            return {folded, folded.replace(" ", "")} if folded else set()
+
+        expected: set[str] = set()
+        for value in (normalized_name, bare_name, canonical, localized):
+            expected |= _variants(value)
+        expected |= _variants(SKILL_KEY_LABELS.get(normalized_name.casefold(), normalized_name))
+        expected.discard("")
+
         skills = data.get("skills")
         for skill in skills if isinstance(skills, list) else []:
             if not isinstance(skill, dict):
                 continue
-            if any(str(skill.get(k) or "").casefold() in expected for k in ("name", "skillKey", "id")):
+            if any(_variants(str(skill.get(k) or "")) & expected for k in ("name", "skillKey", "id")):
                 return _as_int(skill.get("value"), -1)
         return None
 
